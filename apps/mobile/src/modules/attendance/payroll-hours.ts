@@ -491,7 +491,7 @@ function normalizeEmployee(raw: RawRecord): PayrollHoursEmployee | undefined {
 function normalizeAlert(raw: RawRecord): PayrollHoursAlert | undefined {
   const rawType = asOptionalString(pick(raw, "type", "Type"));
   if (!rawType) return undefined;
-  // 后端只给 Birthday + isMinor；界面把未成年生日单独成句（提示核对时薪）。
+  // 后端只给 Birthday + isMinor（21 岁以下）；界面把这类生日单独成句（提示核对时薪）。
   const type = rawType === "Birthday" && asBoolean(pick(raw, "isMinor", "IsMinor")) ? "MinorBirthday" : rawType;
   return {
     type,

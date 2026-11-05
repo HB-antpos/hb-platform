@@ -85,6 +85,7 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     ['sales-detail-v2', [P.SalesDashboard.SalesDetailView]],
     ['compact-sales-board', [P.SalesDashboard.CompactBoardView]],
     ['monthly-daily-sales-download', [P.SalesDashboard.MonthlyDailySalesDownloadView]],
+    ['holiday-sales-report', [P.SalesDashboard.HolidaySalesReportView]],
     ['product-movement-report', [P.SalesDashboard.ProductMovementView]],
     [
       'purchase-sales-analysis',
@@ -181,6 +182,16 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     targetPrefixes: ['/pos-admin/payslips', '/pos-admin/payroll'],
     canAccess: (access) =>
       access.hasPermission(P.Myob.PayslipViewManagedStore) || access.hasPermission(P.Myob.PayslipViewAllStores),
+  },
+  {
+    // 商品陈列图（「商品与价格」合并页的页签）：只有 Planogram.* 之一的账号也要能进入后台；放在 MYOB / 工资单入口之后，组合权限用户沿用原默认入口。
+    // 后端 Permissions 的 Manage ⊇ Edit ⊇ View 在登录时已展开，这里三个码都判一次，只拿到精确码时也不漏。
+    defaultPath: '/pos-admin/planograms',
+    targetPrefixes: ['/pos-admin/planograms', '/pos-admin/products-pricing'],
+    canAccess: (access) =>
+      access.hasPermission(P.Planogram.View) ||
+      access.hasPermission(P.Planogram.Edit) ||
+      access.hasPermission(P.Planogram.Manage),
   },
   {
     // 人脸比对：只有五个 FaceMatch.* 权限之一的账号也要能进入后台；放在摄像机管理之后，组合权限用户沿用原默认入口。

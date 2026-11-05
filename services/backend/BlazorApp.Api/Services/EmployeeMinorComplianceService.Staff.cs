@@ -27,7 +27,7 @@ public sealed partial class EmployeeMinorComplianceService
 
     private bool SmsAvailable => _smsSender is { IsAvailable: true };
 
-    /// <summary>可管理门店里未满 18 岁的在职员工及其合规概况；管理员不传门店时看全部门店。</summary>
+    /// <summary>可管理门店里未满 16 岁的在职员工及其合规概况；管理员不传门店时看全部门店。</summary>
     public async Task<ApiResponse<EmployeeMinorStaffComplianceListDto>> GetStaffComplianceListAsync(string? storeCode, string? stateCode, string? keyword, bool needsActionOnly)
     {
         var scope = await _storeScope.GetScopeAsync();
@@ -72,7 +72,7 @@ public sealed partial class EmployeeMinorComplianceService
         if (!await CanAccessStaffAsync(scope, userGuid)) return Fail("该员工不在你管理的门店", "FORBIDDEN");
         var profile = await _context.Db.Queryable<EmployeeProfile>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).FirstAsync();
         if (profile?.Birthday is null) return Fail("员工资料缺少出生日期，请先补充", "DOB_REQUIRED");
-        if (AgeOn(profile.Birthday.Value.Date, SydneyToday()) >= 18) return Fail("该员工已满 18 岁，无需家长签字", "NOT_MINOR");
+        if (AgeOn(profile.Birthday.Value.Date, SydneyToday()) >= MinorEmploymentComplianceCalculator.MinorAgeLimit) return Fail("该员工已满 16 岁，无需家长签字", "NOT_MINOR");
         var user = await _context.Db.Queryable<User>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).FirstAsync();
         if (user is null) return Fail("员工不存在", "NOT_FOUND");
 
@@ -255,12 +255,12 @@ public sealed partial class EmployeeMinorComplianceService
         _ => StageNotSent,
     };
 
-    /// <summary>按员工主门店与出生日期列出未满 18 岁的在职员工；onlyUserGuid 不为空时只取这一位。</summary>
+    /// <summary>按员工主门店与出生日期列出未满 16 岁的在职员工；onlyUserGuid 不为空时只取这一位。</summary>
     private async Task<List<EmployeeMinorStaffComplianceDto>> LoadStaffItemsAsync(CurrentUserManageableStoreScope scope, string? storeCode, string? onlyUserGuid)
     {
-        // 生日晚于此日期的才未满 18 岁；以悉尼当天为准，避免 UTC 跨日把生日当天算错。
+        // 生日晚于此日期的才未满 16 岁（MinorAgeLimit）；以悉尼当天为准，避免 UTC 跨日把生日当天算错。
         var today = SydneyToday();
-        var adultCutoff = today.AddYears(-18);
+        var adultCutoff = today.AddYears(-MinorEmploymentComplianceCalculator.MinorAgeLimit);
         var allowedCodes = scope.IsAdmin ? null : scope.StoreCodes.ToList();
         if (allowedCodes is { Count: 0 }) return new();
         var links = await _context.Db.Queryable<UserStore>()
@@ -396,7 +396,7 @@ public sealed partial class EmployeeMinorComplianceService
     }
 
     /// <summary>
-    /// 新建员工（未满 18 岁）时，在建号的同一个事务里预建未成年合规草稿并带上监护人，状态「未发送」；
+    /// 新建员工（未满 16 岁）时，在建号的同一个事务里预建未成年合规草稿并带上监护人，状态「未发送」；
     /// 之后在员工详情 / Web 页签里直接发送签字链接，不用再录一遍监护人。
     /// </summary>
     internal static async Task InsertDraftForNewStaffAsync(ISqlSugarClient db, User user, string? childPhone, DateTime birthday, Store? store, NewStaffGuardianDto guardian, string? actorGuid, string actorLabel)

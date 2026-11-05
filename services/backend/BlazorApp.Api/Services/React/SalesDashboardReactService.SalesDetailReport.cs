@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using BlazorApp.Api.Services.LocalSupplierCategories;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using Microsoft.Data.SqlClient;
 using DbType = System.Data.DbType;
@@ -134,7 +135,7 @@ public partial class SalesDashboardReactService
         var searchTokenCount = search?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0;
         var estimatedParameterCount = 20 + suppliers.Count + expandedCategoryCount
-            + (branches?.Count ?? 0) * 2 + searchTokenCount;
+            + (branches?.Count ?? 0) * 2 + searchTokenCount * 3; // 每个关键词 3 个参数：通用、国内供应商名称、事实行供应商名称
         if (estimatedParameterCount > MaxSqlParameterBudget)
             throw new ArgumentException("筛选条件过多，请减少供应商、分类、分店或关键词后重试");
         // 当前 tab 传入了分类但全部无效/已删除时必须返回空结果，不能退化成无分类的全量查询。
@@ -346,6 +347,17 @@ public partial class SalesDashboardReactService
             if (!string.IsNullOrWhiteSpace(selectedProductCode)) Add("@sdrSelectedProduct", selectedProductCode.Trim(), DbType.String);
             var tokens = search?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? Array.Empty<string>();
             for (var i = 0; i < tokens.Length; i++) Add($"@sdrSearch{i}", $"%{tokens[i]}%", DbType.String);
+            // 供应商名称的匹配用独立参数：没有「查看国内供应商名称」权限的账号，国内供应商名称这一支换成
+            // 匹配不到的占位关键词，不能拿关键词试探被遮掉的名称。SQL 文本不随权限变化。
+            // - @sdrChinaNameSearch：直接比对 ChinaSupplier.SupplierName 的分支。
+            // - @sdrFactNameSearch：比对事实行 [SupplierName] 的分支；该列在国内范围是国内供应商名称（受限），
+            //   在澳洲范围是澳洲供应商名称（不受限，仍用原关键词）。
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                var chinaNameToken = DomesticSupplierInfoMasking.GuardNameKeyword(tokens[i]);
+                Add($"@sdrChinaNameSearch{i}", $"%{chinaNameToken}%", DbType.String);
+                Add($"@sdrFactNameSearch{i}", $"%{(kind == SalesDetailKind.China ? chinaNameToken : tokens[i])}%", DbType.String);
+            }
             for (var i = 0; i < (branches?.Count ?? 0); i++) Add($"@sdrBranch{i}", branches![i], DbType.String);
             for (var i = 0; i < (branches?.Count ?? 0); i++) Add($"@sdrSelectedBranch{i}", branches![i], DbType.String);
 
@@ -761,14 +773,14 @@ SELECT DISTINCT [ProductCode],[TokenIndex] FROM (
         var supplierSearchMatches = needsProductSearch
             ? "SELECT DISTINCT [SupplierCode], [TokenIndex] INTO #SalesDetailSupplierSearchMatches FROM ("
                 + string.Join(" UNION ALL ", tokens.Select((_, i) =>
-                    $"SELECT cSearch.[SupplierCode], {i} [TokenIndex] FROM [ChinaSupplier] cSearch WHERE cSearch.[SupplierCode] IS NOT NULL AND (cSearch.[SupplierCode] LIKE @sdrSearch{i} OR cSearch.[SupplierName] LIKE @sdrSearch{i})"))
+                    $"SELECT cSearch.[SupplierCode], {i} [TokenIndex] FROM [ChinaSupplier] cSearch WHERE cSearch.[SupplierCode] IS NOT NULL AND (cSearch.[SupplierCode] LIKE @sdrSearch{i} OR cSearch.[SupplierName] LIKE @sdrChinaNameSearch{i})"))
                 + ") matches;"
             : string.Empty;
         // 唯一命中键用连接复用，避免 OR 内的相关 EXISTS 被逐条执行，也避免重复资料放大销售数值。
         var searchJoins = string.Join("\n", tokens.Select((_, i) =>
             $"LEFT JOIN #SalesDetailProductSearchMatches pMatch{i} ON pMatch{i}.[ProductCode]=f.[ProductCode] AND pMatch{i}.[TokenIndex]={i}\nLEFT JOIN #SalesDetailSupplierSearchMatches cMatch{i} ON cMatch{i}.[SupplierCode]=f.[ChinaSupplierCode] AND cMatch{i}.[TokenIndex]={i}"));
         var searchFilter = string.Join(" AND ", tokens.Select((_, i) =>
-            $"(f.[ProductCode] LIKE @sdrSearch{i} OR f.[StatisticBarcode] LIKE @sdrSearch{i} OR f.[ProductName] LIKE @sdrSearch{i} OR f.[RawSupplierCode] LIKE @sdrSearch{i} OR f.[SupplierCode] LIKE @sdrSearch{i} OR f.[SupplierName] LIKE @sdrSearch{i} OR pMatch{i}.[ProductCode] IS NOT NULL OR cMatch{i}.[SupplierCode] IS NOT NULL)"));
+            $"(f.[ProductCode] LIKE @sdrSearch{i} OR f.[StatisticBarcode] LIKE @sdrSearch{i} OR f.[ProductName] LIKE @sdrSearch{i} OR f.[RawSupplierCode] LIKE @sdrSearch{i} OR f.[SupplierCode] LIKE @sdrSearch{i} OR f.[SupplierName] LIKE @sdrFactNameSearch{i} OR pMatch{i}.[ProductCode] IS NOT NULL OR cMatch{i}.[SupplierCode] IS NOT NULL)"));
         // 汇总、商品分页和商品总数共用同一份筛选事实，搜索与目录连接只执行一次。
         var searchFacts = needsProductSearch
             ? $"SELECT f.* INTO #SalesDetailSearchFacts FROM ({factRows}) f {searchJoins} WHERE {searchFilter}{projectionQueryHint};"
@@ -1014,7 +1026,7 @@ ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC;
             : " AND [BranchCode] = @sdrSelectedBranch";
         var authorizedBranchFilter = branches is { Count: > 0 } ? $" AND [BranchCode] IN ({string.Join(",", branches.Select((_, i) => $"@sdrBranch{i}"))})" : "";
         var tokens = search?.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray() ?? Array.Empty<string>();
-        var searchFilter = string.Join(" AND ", tokens.Select((_, i) => $"([ProductCode] LIKE @sdrSearch{i} OR [Barcode] LIKE @sdrSearch{i} OR [ProductName] LIKE @sdrSearch{i} OR [EnglishName] LIKE @sdrSearch{i} OR [RawSupplierCode] LIKE @sdrSearch{i} OR [SupplierCode] LIKE @sdrSearch{i} OR [SupplierName] LIKE @sdrSearch{i} OR [ItemNumber] LIKE @sdrSearch{i} OR EXISTS (SELECT 1 FROM [Product] pSearch WHERE pSearch.[ProductCode]=f.[ProductCode] AND pSearch.[LocalSupplierCode] LIKE @sdrSearch{i}) OR EXISTS (SELECT 1 FROM [ChinaSupplier] cSearch WHERE cSearch.[SupplierCode]=f.[ChinaSupplierCode] AND (cSearch.[SupplierCode] LIKE @sdrSearch{i} OR cSearch.[SupplierName] LIKE @sdrSearch{i})))"));
+        var searchFilter = string.Join(" AND ", tokens.Select((_, i) => $"([ProductCode] LIKE @sdrSearch{i} OR [Barcode] LIKE @sdrSearch{i} OR [ProductName] LIKE @sdrSearch{i} OR [EnglishName] LIKE @sdrSearch{i} OR [RawSupplierCode] LIKE @sdrSearch{i} OR [SupplierCode] LIKE @sdrSearch{i} OR [SupplierName] LIKE @sdrFactNameSearch{i} OR [ItemNumber] LIKE @sdrSearch{i} OR EXISTS (SELECT 1 FROM [Product] pSearch WHERE pSearch.[ProductCode]=f.[ProductCode] AND pSearch.[LocalSupplierCode] LIKE @sdrSearch{i}) OR EXISTS (SELECT 1 FROM [ChinaSupplier] cSearch WHERE cSearch.[SupplierCode]=f.[ChinaSupplierCode] AND (cSearch.[SupplierCode] LIKE @sdrSearch{i} OR cSearch.[SupplierName] LIKE @sdrChinaNameSearch{i})))"));
         if (searchFilter.Length > 0) searchFilter = " AND " + searchFilter;
         var table = sqlServer ? "[#SalesDetailFacts]" : "[SalesDetailFacts]";
         // SQL Server 支持 CTE 后接 SELECT INTO；SQLite 要求 CREATE TEMP TABLE AS 放在 WITH 之前。

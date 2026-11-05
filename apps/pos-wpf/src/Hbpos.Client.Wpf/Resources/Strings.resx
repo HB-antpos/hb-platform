@@ -332,6 +332,31 @@
   <data name="success.newTransaction" xml:space="preserve"><value>New Transaction</value></data>
   <data name="success.card.scanToContinue" xml:space="preserve"><value>Scan the next item to start a new sale</value></data>
   <data name="success.card.close" xml:space="preserve"><value>Close</value></data>
+  <data name="success.card.refundComplete" xml:space="preserve"><value>Refund complete</value></data>
+  <data name="success.card.change" xml:space="preserve"><value>Change</value></data>
+  <data name="success.card.giveToCustomer" xml:space="preserve"><value>Give to customer</value></data>
+  <data name="success.card.noChange" xml:space="preserve"><value>No change</value></data>
+  <data name="success.card.exactCash" xml:space="preserve"><value>Paid exactly. Give no change.</value></data>
+  <data name="success.card.paid" xml:space="preserve"><value>Paid</value></data>
+  <data name="success.card.paidByCard" xml:space="preserve"><value>Paid by card</value></data>
+  <data name="success.card.paidByVoucher" xml:space="preserve"><value>Paid by voucher</value></data>
+  <data name="success.card.cashRefund" xml:space="preserve"><value>Cash refund</value></data>
+  <data name="success.card.giveCashToCustomer" xml:space="preserve"><value>Give the cash to the customer</value></data>
+  <data name="success.card.cardRefund" xml:space="preserve"><value>Refunded to card</value></data>
+  <data name="success.card.refunded" xml:space="preserve"><value>Refunded</value></data>
+  <data name="success.card.noCashBack" xml:space="preserve"><value>No cash to give back</value></data>
+  <data name="success.card.voucherRefund" xml:space="preserve"><value>Refund voucher</value></data>
+  <data name="success.card.giveVoucherToCustomer" xml:space="preserve"><value>Give the printed voucher to the customer</value></data>
+  <data name="success.card.amountDue" xml:space="preserve"><value>Amount due</value></data>
+  <data name="success.card.cashReceived" xml:space="preserve"><value>Cash received</value></data>
+  <data name="success.card.refundTotal" xml:space="preserve"><value>Refund total</value></data>
+  <data name="success.card.returnedItems" xml:space="preserve"><value>Items returned</value></data>
+  <data name="success.card.voucherCode" xml:space="preserve"><value>Code</value></data>
+  <data name="success.card.method.cash" xml:space="preserve"><value>Cash</value></data>
+  <data name="success.card.method.card" xml:space="preserve"><value>Card</value></data>
+  <data name="success.card.method.voucher" xml:space="preserve"><value>Voucher</value></data>
+  <data name="success.card.changeFromCashOnly" xml:space="preserve"><value>Change is from the cash part only.</value></data>
+  <data name="success.card.printRefundReceipt" xml:space="preserve"><value>Print refund receipt</value></data>
   <data name="success.receiptPreview" xml:space="preserve"><value>Receipt Preview</value></data>
 
   <data name="history.advancedFilters" xml:space="preserve"><value>Advanced Filters</value></data>

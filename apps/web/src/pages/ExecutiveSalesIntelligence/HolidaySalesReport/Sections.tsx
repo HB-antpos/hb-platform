@@ -1,0 +1,691 @@
+import { Drawer } from 'antd'
+import { useEffect, useMemo, useRef, useState, type FC, type MouseEvent } from 'react'
+import type {
+  HolidayBenchmark,
+  HolidayCategory,
+  HolidayCategoryKey,
+  HolidayCategoryMap,
+  HolidayProduct,
+  HolidaySalesReport,
+  HolidayStore,
+} from '../../../services/holidaySalesReportService'
+import {
+  BENCHMARK_LABEL_KEY,
+  benchmarkMetrics,
+  BOARD_INITIAL_COUNT,
+  BOARD_LIMIT,
+  BOARD_STEP,
+  buildChart,
+  buildInsights,
+  CATEGORY_COLOR,
+  CATEGORY_LABEL_KEY,
+  categoryPointDiff,
+  compareToAverage,
+  formatCount,
+  formatMetric,
+  formatMoney,
+  formatMoneyCompact,
+  formatMonthDay,
+  formatPercent,
+  formatWeekday,
+  formatSellThrough,
+  hasNoPurchase,
+  heaviestWeekSum,
+  INSIGHT_KEY,
+  nearestPoint,
+  nextVisibleCount,
+  sellThroughTone,
+  supplierShares,
+  weekOf,
+  TONE_COLOR,
+  VERDICT_KEY,
+} from './logic'
+import { ProductImage, supplierTag, type Tr } from './shared'
+import styles from './styles.module.css'
+
+export type { Tr } from './shared'
+
+// ---------- 顶部 6 个指标 ----------
+
+export const KpiRow: FC<{ report: HolidaySalesReport; single: boolean; tr: Tr; allStoresSellThrough: number | null }> = ({
+  report,
+  single,
+  tr,
+  allStoresSellThrough,
+}) => {
+  const t = report.totals
+  const benchmark = report.benchmark
+  const amountSub = single && benchmark
+    ? tr('kpi.amountStore', { rank: benchmark.rank, total: benchmark.storeCount })
+    : tr('kpi.amountAll', { count: report.stores.length })
+  const sellThroughSub = single
+    ? tr('kpi.sellThroughStore', { value: formatSellThrough(allStoresSellThrough) })
+    : tr('kpi.sellThroughAll', { qty: formatCount(t.purchaseQuantity), cost: formatMoney(t.purchaseCost) })
+  const earlySub = single ? tr('kpi.earlyStore') : tr('kpi.earlyAll', { count: formatCount(t.earlySoldOutCount) })
+  return (
+    <section className={styles.kpis} aria-label={tr('title')}>
+      <div className={styles.kpi}>
+        <span className={styles.kpiLabel}>{tr('kpi.amount')}</span>
+        <strong className={styles.kpiValue}>{formatMoney(t.amount)}</strong>
+        <span className={styles.kpiSub}>{amountSub}</span>
+      </div>
+      <div className={styles.kpi}>
+        <span className={styles.kpiLabel}>{tr('kpi.quantity')}</span>
+        <strong className={styles.kpiValue}>{formatCount(t.quantity)}</strong>
+        <span className={styles.kpiSub}>{tr('kpi.quantitySub', { count: formatCount(t.skuCount) })}</span>
+      </div>
+      <div className={styles.kpi}>
+        <span className={styles.kpiLabel}>{tr('kpi.sellThrough')}</span>
+        <strong className={styles.kpiValue} style={{ color: TONE_COLOR[sellThroughTone(t.sellThrough)] }}>
+          {formatSellThrough(t.sellThrough)}
+        </strong>
+        <span className={styles.kpiSub}>{sellThroughSub}</span>
+      </div>
+      <div className={`${styles.kpi} ${styles.kpiAlert}`}>
+        <span className={styles.kpiLabel}>{tr('kpi.early')}</span>
+        <strong className={styles.kpiValue}>{formatCount(single ? t.earlySoldOutCount : t.earlySoldOutProductCount)}</strong>
+        <span className={styles.kpiSub}>{earlySub}</span>
+      </div>
+      <div className={`${styles.kpi} ${styles.kpiAlert}`}>
+        <span className={styles.kpiLabel}>{tr('kpi.lost')}</span>
+        <strong className={styles.kpiValue}>{formatMoney(t.estimatedLostAmount)}</strong>
+        <span className={styles.kpiSub}>{tr('kpi.lostSub')}</span>
+      </div>
+      <div className={`${styles.kpi} ${styles.kpiWarn}`}>
+        <span className={styles.kpiLabel}>{tr('kpi.left')}</span>
+        <strong className={styles.kpiValue}>{tr('kpi.leftValue', { qty: formatCount(t.leftoverQuantity) })}</strong>
+        <span className={styles.kpiSub}>{tr('kpi.leftSub', { cost: formatMoney(t.leftoverCost) })}</span>
+      </div>
+    </section>
+  )
+}
+
+// ---------- 每日销售曲线 ----------
+
+export const DailyChart: FC<{ report: HolidaySalesReport; tr: Tr; language: string }> = ({ report, tr, language }) => {
+  const chart = useMemo(() => buildChart(report.daily, report.holidayDate), [report.daily, report.holidayDate])
+  const [hover, setHover] = useState<{ x: number; y: number; date: string; amount: number } | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const heaviest = useMemo(() => heaviestWeekSum(chart.weeks), [chart.weeks])
+
+  // 窄屏下曲线可横向滚动，节日在最右端，默认停在右端而不是 8 月初的空白段。
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (wrap) wrap.scrollLeft = wrap.scrollWidth
+  }, [chart])
+
+  const onMove = (event: MouseEvent<SVGSVGElement>) => {
+    const box = event.currentTarget.getBoundingClientRect()
+    if (box.width <= 0) return
+    setHover(nearestPoint(chart, ((event.clientX - box.left) * chart.width) / box.width))
+  }
+  const week = hover ? weekOf(chart, hover.date) : null
+
+  return (
+    <section className={styles.card}>
+      <h2 className={styles.cardTitle}>
+        {tr('chart.title')}
+        <span className={styles.hint}>{tr('chart.hint')}</span>
+      </h2>
+      <div className={styles.chartWrap} ref={wrapRef}>
+        <svg
+          className={styles.chart}
+          viewBox={`0 0 ${chart.width} ${chart.height}`}
+          role="img"
+          aria-label={tr('chart.aria', { from: formatMonthDay(report.salesFrom), through: formatMonthDay(report.salesThrough) })}
+          onMouseMove={onMove}
+          onMouseLeave={() => setHover(null)}
+        >
+          {chart.yTicks.map((tick) => (
+            <g key={tick.value}>
+              <line x1={52} x2={chart.width - 12} y1={tick.y} y2={tick.y} className={styles.gridLine} />
+              <text x={46} y={tick.y + 4} textAnchor="end" className={styles.axisText}>
+                {tick.value >= 1000 ? `$${tick.value / 1000}k` : `$${tick.value}`}
+              </text>
+            </g>
+          ))}
+          {chart.weekBand && <rect x={chart.weekBand.x} y={chart.top} width={chart.weekBand.width} height={chart.height - chart.top - 26} className={styles.weekBand} />}
+          {chart.weekLines.map((line) => (
+            <line key={line.date} x1={line.x} x2={line.x} y1={chart.top} y2={chart.height - 26} className={styles.weekLine} />
+          ))}
+          {/* 不足约 3 天宽的残周（首周、末周）放不下小字，不标；悬停读数里仍有本周合计 */}
+          {chart.weeks.filter((w) => w.x1 - w.x0 >= 28).map((w) => (
+            <text key={w.startDate} x={(w.x0 + w.x1) / 2} y={14} textAnchor="middle" className={heaviest > 0 && w.sum >= heaviest * 0.15 ? styles.weekTotalStrong : styles.weekTotal}>
+              {formatMoneyCompact(w.sum)}
+            </text>
+          ))}
+          {chart.area && <polygon points={chart.area} className={styles.chartArea} />}
+          {chart.line && <polyline points={chart.line} className={styles.chartLine} />}
+          {chart.holiday && (
+            <g>
+              <line x1={chart.holiday.x} x2={chart.holiday.x} y1={chart.top} y2={chart.height - 26} className={styles.holidayLine} />
+              <circle cx={chart.holiday.x} cy={chart.holiday.y} r={4} className={styles.holidayDot} />
+              <text x={(chart.weekBand?.x ?? chart.holiday.x) - 8} y={Math.max(chart.holiday.y + 10, chart.top + 22)} textAnchor="end" className={styles.holidayText}>
+                {tr('chart.holiday', { date: formatMonthDay(report.holidayDate), amount: formatMoney(chart.holiday.amount) })}
+              </text>
+            </g>
+          )}
+          {chart.xTicks.map((tick) => (
+            <text key={tick.label + tick.x} x={tick.x} y={chart.height - 8} textAnchor="middle" className={styles.axisText}>
+              {tick.label}
+            </text>
+          ))}
+          {hover && (
+            <g pointerEvents="none">
+              <line x1={hover.x} x2={hover.x} y1={chart.top} y2={chart.height - 26} className={styles.hoverLine} />
+              <circle cx={hover.x} cy={hover.y} r={3.5} className={styles.hoverDot} />
+            </g>
+          )}
+        </svg>
+      </div>
+      <div className={styles.chartReadout} aria-live="polite">
+        {hover && week
+          ? tr('chart.hoverWeek', {
+              date: formatMonthDay(hover.date),
+              weekday: formatWeekday(hover.date, language),
+              amount: formatMoney(hover.amount),
+              from: formatMonthDay(week.startDate),
+              to: formatMonthDay(week.endDate),
+              week: formatMoney(week.sum),
+            })
+          : ' '}
+      </div>
+    </section>
+  )
+}
+
+// ---------- 供应商构成 + 关键结论 ----------
+
+export const InsightCard: FC<{ report: HolidaySalesReport; tr: Tr }> = ({ report, tr }) => {
+  const shares = supplierShares(report)
+  const insights = useMemo(
+    () => buildInsights(report, (key) => tr(CATEGORY_LABEL_KEY[key])),
+    // tr 随语言变化重建，report 随查询变化
+    [report, tr],
+  )
+  return (
+    <section className={styles.card}>
+      <h2 className={styles.cardTitle}>{tr('supplier.title')}</h2>
+      <div className={styles.shareBar} aria-hidden="true">
+        {shares.map((share) => (
+          <b key={share.code} style={{ width: `${share.share * 100}%` }} className={share.code === '243' ? styles.shareSecond : styles.shareFirst} />
+        ))}
+      </div>
+      <div className={styles.shareLegend}>
+        {shares.map((share) => {
+          const tag = supplierTag(share.code)
+          return (
+            <span key={share.code}>
+              <i className={`${styles.tag} ${tag.className}`}>{tag.label}</i> {formatMoney(share.amount)} · {formatPercent(share.share)}
+            </span>
+          )
+        })}
+      </div>
+      <h2 className={styles.cardTitle}>
+        {tr('insights.title')}
+        <span className={styles.hint}>{tr('insights.auto')}</span>
+      </h2>
+      <ul className={styles.insights}>
+        {insights.map((insight) => (
+          <li key={insight.id}>
+            <i style={{ background: insight.color }} aria-hidden="true" />
+            <span>{tr(INSIGHT_KEY[insight.id], insight.params)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+// ---------- 大类表 ----------
+
+export const CategoryTable: FC<{
+  report: HolidaySalesReport
+  single: boolean
+  tr: Tr
+  benchmark: HolidayBenchmark | null
+  onOpenMap: () => void
+  onOpenCategory: (key: HolidayCategoryKey) => void
+}> = ({ report, single, tr, benchmark, onOpenMap, onOpenCategory }) => {
+  const max = report.categories.reduce((current, category) => Math.max(current, category.amount), 0)
+  return (
+    <section className={styles.card}>
+      <h2 className={styles.cardTitle}>
+        {tr('cat.title')}
+        <span className={styles.hint}>{tr('cat.hint')}</span>
+        <span className={styles.hintAction}>{tr('cat.drillHint')}</span>
+        <button type="button" className={styles.linkButton} onClick={onOpenMap}>
+          {tr('actions.categoryMap')} ›
+        </button>
+      </h2>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>{tr('cat.colName')}</th>
+              <th className={styles.wide}>{tr('cat.colAmount')}</th>
+              <th className={styles.num}>{tr('cat.colShare')}</th>
+              <th className={styles.num}>{tr('cat.colQuantity')}</th>
+              <th className={styles.num}>{tr('cat.colSkus')}</th>
+              <th className={styles.wide}>{tr('cat.colSellThrough')}</th>
+              <th className={styles.num}>{tr('cat.colLost')}</th>
+              <th className={styles.num}>{tr('cat.colLeft')}</th>
+              {single && <th className={styles.num}>{tr('cat.colVsAll')}</th>}
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {report.categories.map((category) => (
+              <CategoryRow key={category.key} category={category} report={report} max={max} single={single} tr={tr} benchmark={benchmark} onOpen={onOpenCategory} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+const CategoryRow: FC<{
+  category: HolidayCategory
+  report: HolidaySalesReport
+  max: number
+  single: boolean
+  tr: Tr
+  benchmark: HolidayBenchmark | null
+  onOpen: (key: HolidayCategoryKey) => void
+}> = ({ category, report, max, single, tr, benchmark, onOpen }) => {
+  const tone = sellThroughTone(category.sellThrough)
+  const diff = single ? categoryPointDiff(category, benchmark) : null
+  const open = () => onOpen(category.key)
+  return (
+    <tr
+      className={styles.clickRow}
+      tabIndex={0}
+      aria-label={tr('cat.open', { name: tr(CATEGORY_LABEL_KEY[category.key]) })}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          open()
+        }
+      }}
+    >
+      <td>
+        <i className={styles.swatch} style={{ background: CATEGORY_COLOR[category.key] }} aria-hidden="true" />
+        {tr(CATEGORY_LABEL_KEY[category.key])}
+      </td>
+      <td>
+        <div className={styles.barCell}>
+          <div className={styles.bar}>
+            <b style={{ width: `${max > 0 ? (category.amount / max) * 100 : 0}%`, background: CATEGORY_COLOR[category.key] }} />
+          </div>
+          <span className={styles.barValue}>{formatMoney(category.amount)}</span>
+        </div>
+      </td>
+      <td className={styles.num}>{report.totals.amount > 0 ? formatPercent(category.amount / report.totals.amount) : '—'}</td>
+      <td className={styles.num}>{formatCount(category.quantity)}</td>
+      <td className={styles.num}>{formatCount(category.skuCount)}</td>
+      <td>
+        <div className={styles.barCell}>
+          <div className={styles.bar}>
+            <b style={{ width: `${Math.min(category.sellThrough ?? 0, 1) * 100}%`, background: TONE_COLOR[tone] }} />
+          </div>
+          <span className={styles.barValueSm}>{formatSellThrough(category.sellThrough)}</span>
+        </div>
+      </td>
+      <td className={`${styles.num} ${category.estimatedLostAmount > 500 ? styles.bad : ''}`}>{formatMoney(category.estimatedLostAmount)}</td>
+      <td className={`${styles.num} ${category.leftoverCost > 3000 ? styles.warnText : ''}`}>{formatMoney(category.leftoverCost)}</td>
+      {single && (
+        <td className={styles.num}>
+          {diff === null ? '—' : diff >= 0 ? <span className={`${styles.pill} ${styles.pillGood}`}>{tr('cat.higher', { points: diff })}</span> : <span className={`${styles.pill} ${styles.pillBad}`}>{tr('cat.lower', { points: -diff })}</span>}
+        </td>
+      )}
+      <td className={styles.openText}>{single ? tr('cat.openProducts') : tr('cat.openBoth')} ›</td>
+    </tr>
+  )
+}
+
+// ---------- 商品四张榜 ----------
+
+type BoardKind = 'best' | 'early' | 'slow' | 'over'
+
+const ProductLine: FC<{ product: HolidayProduct; index: number; kind: BoardKind; single: boolean; tr: Tr; onOpen: (product: HolidayProduct) => void }> = ({
+  product,
+  index,
+  kind,
+  single,
+  tr,
+  onOpen,
+}) => {
+  const tag = supplierTag(product.supplierCode)
+  const rate = formatSellThrough(product.sellThrough)
+  let head: string
+  let lines: string[]
+  let headClass = styles.valueHead
+  if (kind === 'best') {
+    head = formatMoney(product.amount)
+    lines = [
+      tr('product.soldRate', { qty: formatCount(product.quantity), rate }),
+      [single ? '' : tr('product.stores', { count: product.storeCount }), product.soldOutStoreCount > 0 ? (single ? tr('product.soldOutSelf') : tr('product.soldOutStores', { count: product.soldOutStoreCount })) : '']
+        .filter(Boolean)
+        .join(' · '),
+    ]
+  } else if (kind === 'early') {
+    head = tr('product.earlyDays', { days: product.daysEarly ?? 0 })
+    headClass = `${styles.valueHead} ${styles.bad}`
+    lines = [
+      single && product.soldOutDate
+        ? tr('product.earlyStore', { date: formatMonthDay(product.soldOutDate), qty: formatCount(product.purchaseQuantity) })
+        : tr('product.earlyAll', { out: product.soldOutStoreCount, stocked: product.storeCount }),
+      tr('product.lost', { amount: formatMoney(product.estimatedLostAmount) }),
+    ]
+  } else if (kind === 'slow') {
+    head = tr('product.slowHead', { rate })
+    headClass = `${styles.valueHead} ${styles.bad}`
+    lines = [
+      tr('product.slowBought', { bought: formatCount(product.purchaseQuantity), sold: formatCount(product.quantity) }),
+      tr('product.slowLeft', { qty: formatCount(product.leftoverQuantity), cost: formatMoney(product.leftoverCost) }),
+    ]
+  } else {
+    head = tr('product.overHead', { qty: formatCount(product.leftoverQuantity) })
+    headClass = `${styles.valueHead} ${styles.warnText}`
+    lines = [
+      tr('product.overCost', { cost: formatMoney(product.leftoverCost), rate }),
+      tr('product.overSold', { qty: formatCount(product.quantity), amount: formatMoney(product.amount) }),
+    ]
+  }
+  const open = () => onOpen(product)
+  return (
+    <li
+      className={`${styles.product} ${styles.productClickable}`}
+      tabIndex={0}
+      aria-label={tr('drill.open', { name: product.productName })}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          open()
+        }
+      }}
+    >
+      <span className={styles.rank}>{index + 1}</span>
+      <ProductImage src={product.imageUrl} label={tr('product.noImage')} />
+      <div className={styles.productMain}>
+        <div className={styles.productName} title={product.productName}>{product.productName}</div>
+        <div className={styles.productMeta}>
+          <span className={styles.catTag} style={{ color: CATEGORY_COLOR[product.categoryKey], borderColor: `${CATEGORY_COLOR[product.categoryKey]}66` }}>
+            {tr(CATEGORY_LABEL_KEY[product.categoryKey])}
+          </span>
+          <i className={`${styles.tag} ${tag.className}`}>{tag.label}</i>
+          <span>{product.itemNumber}</span>
+        </div>
+      </div>
+      <div className={styles.productValue}>
+        <div className={headClass}>{head}</div>
+        {lines.filter(Boolean).map((line) => (
+          <div key={line} className={styles.valueSub}>{line}</div>
+        ))}
+      </div>
+      <span className={styles.chev} aria-hidden="true">›</span>
+    </li>
+  )
+}
+
+const Board: FC<{
+  kind: BoardKind
+  icon: string
+  iconClass: string
+  title: string
+  desc: string
+  products: HolidayProduct[]
+  single: boolean
+  tr: Tr
+  onOpen: (product: HolidayProduct) => void
+}> = ({ kind, icon, iconClass, title, desc, products, single, tr, onOpen }) => {
+  // 先显示 10 个，每点一次再多 10 个；收起回到 10 个
+  const [visible, setVisible] = useState(BOARD_INITIAL_COUNT)
+  const shown = products.slice(0, visible)
+  const left = products.length - shown.length
+  return (
+    <section className={styles.card}>
+      <div className={styles.boardHead}>
+        <span className={`${styles.boardIcon} ${iconClass}`} aria-hidden="true">{icon}</span>
+        <span className={styles.boardTitle}>{title}</span>
+        <span className={styles.hint}>{desc}</span>
+        <span className={`${styles.hint} ${styles.boardCount}`}>
+          {tr('board.count', { count: products.length })}
+          {products.length >= BOARD_LIMIT && ` · ${tr('board.capped', { limit: BOARD_LIMIT })}`}
+        </span>
+      </div>
+      {shown.length === 0 ? (
+        <div className={styles.empty}>{tr('board.empty')}</div>
+      ) : (
+        <ol className={styles.productList}>
+          {shown.map((product, index) => (
+            <ProductLine key={product.productCode} product={product} index={index} kind={kind} single={single} tr={tr} onOpen={onOpen} />
+          ))}
+        </ol>
+      )}
+      {left > 0 && (
+        <button type="button" className={styles.moreButton} onClick={() => setVisible((current) => nextVisibleCount(current, products.length))}>
+          {tr('board.more', { count: Math.min(left, BOARD_STEP), left })}
+        </button>
+      )}
+      {left <= 0 && products.length > BOARD_INITIAL_COUNT && (
+        <button type="button" className={styles.moreButton} onClick={() => setVisible(BOARD_INITIAL_COUNT)}>
+          {tr('board.less')}
+        </button>
+      )}
+    </section>
+  )
+}
+
+export const ProductBoards: FC<{ report: HolidaySalesReport; single: boolean; tr: Tr; onOpen: (product: HolidayProduct) => void }> = ({ report, single, tr, onOpen }) => (
+  <div className={styles.quad}>
+    <Board kind="best" icon="↑" iconClass={styles.iconGood} title={tr('board.best.title')} desc={tr('board.best.desc')} products={report.bestSellers} single={single} tr={tr} onOpen={onOpen} />
+    <Board
+      kind="early"
+      icon="!"
+      iconClass={styles.iconBad}
+      title={tr('board.early.title')}
+      desc={single ? tr('board.early.descStore') : tr('board.early.descAll')}
+      products={report.earlySoldOut}
+      single={single}
+      tr={tr}
+      onOpen={onOpen}
+    />
+    <Board kind="slow" icon="↓" iconClass={styles.iconGray} title={tr('board.slow.title')} desc={tr('board.slow.desc')} products={report.slowSellers} single={single} tr={tr} onOpen={onOpen} />
+    <Board kind="over" icon="▣" iconClass={styles.iconWarn} title={tr('board.over.title')} desc={tr('board.over.desc')} products={report.overstock} single={single} tr={tr} onOpen={onOpen} />
+  </div>
+)
+
+// ---------- 分店排行（合计视图） ----------
+
+export const StoreTable: FC<{ report: HolidaySalesReport; tr: Tr; onOpen: (branchCode: string) => void }> = ({ report, tr, onOpen }) => {
+  const max = report.stores.reduce((current, store) => Math.max(current, store.amount), 0)
+  const withoutSales = report.storesWithoutSales
+  return (
+    <section className={styles.card}>
+      <h2 className={styles.cardTitle}>
+        {tr('stores.title')}
+        <span className={styles.hint}>{tr('stores.hint')}</span>
+      </h2>
+      <div className={styles.tableScroll}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>{tr('stores.colStore')}</th>
+              <th className={styles.wide}>{tr('stores.colAmount')}</th>
+              <th className={styles.num}>{tr('stores.colQuantity')}</th>
+              <th className={styles.num}>{tr('stores.colPurchase')}</th>
+              <th className={styles.wide}>{tr('stores.colSellThrough')}</th>
+              <th className={styles.num}>{tr('stores.colEarly')}</th>
+              <th className={styles.num}>{tr('stores.colLost')}</th>
+              <th className={styles.num}>{tr('stores.colLeft')}</th>
+              <th className={styles.num}>{tr('stores.colAfter')}</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {report.stores.map((store, index) => (
+              <StoreRow key={store.branchCode} store={store} index={index} max={max} tr={tr} onOpen={onOpen} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className={styles.note}>
+        {tr('stores.noPurchaseNote')}
+        {withoutSales.length > 0 && (
+          <>
+            {' '}
+            {tr('stores.withoutSales', {
+              names: withoutSales.map((store) => `${store.branchCode} ${store.branchName} (${formatCount(store.purchaseQuantity)})`).join(', '),
+            })}
+          </>
+        )}
+      </p>
+    </section>
+  )
+}
+
+const StoreRow: FC<{ store: HolidayStore; index: number; max: number; tr: Tr; onOpen: (branchCode: string) => void }> = ({ store, index, max, tr, onOpen }) => {
+  const tone = sellThroughTone(store.sellThrough)
+  const open = () => onOpen(store.branchCode)
+  return (
+    <tr
+      className={styles.clickRow}
+      tabIndex={0}
+      onClick={open}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          open()
+        }
+      }}
+    >
+      <td className={styles.rank}>{index + 1}</td>
+      <td>
+        {store.branchCode} {store.branchName} {hasNoPurchase(store) && <span className={styles.pill}>{tr('stores.noPurchase')}</span>}
+      </td>
+      <td>
+        <div className={styles.barCell}>
+          <div className={styles.bar}>
+            <b style={{ width: `${max > 0 ? (store.amount / max) * 100 : 0}%`, background: '#1677ff' }} />
+          </div>
+          <span className={styles.barValue}>{formatMoney(store.amount)}</span>
+        </div>
+      </td>
+      <td className={styles.num}>{formatCount(store.quantity)}</td>
+      <td className={styles.num}>{formatCount(store.purchaseQuantity)}</td>
+      <td>
+        <div className={styles.barCell}>
+          <div className={styles.bar}>
+            <b style={{ width: `${Math.min(store.sellThrough ?? 0, 1) * 100}%`, background: TONE_COLOR[tone] }} />
+          </div>
+          <span className={styles.barValueSm}>{formatSellThrough(store.sellThrough)}</span>
+        </div>
+      </td>
+      <td className={`${styles.num} ${store.earlySoldOutCount > 0 ? styles.bad : ''}`}>{formatCount(store.earlySoldOutCount)}</td>
+      <td className={styles.num}>{formatMoney(store.estimatedLostAmount)}</td>
+      <td className={`${styles.num} ${store.leftoverCost > 4000 ? styles.warnText : ''}`}>{formatMoney(store.leftoverCost)}</td>
+      <td className={styles.num}>{formatMoney(store.afterHolidayAmount)}</td>
+      <td className={styles.openText}>{tr('stores.open')} ›</td>
+    </tr>
+  )
+}
+
+// ---------- 单店基准 ----------
+
+export const BenchmarkCard: FC<{ report: HolidaySalesReport; benchmark: HolidayBenchmark; tr: Tr }> = ({ report, benchmark, tr }) => {
+  const metrics = benchmarkMetrics(report.totals, benchmark)
+  return (
+    <section className={styles.card}>
+      <h2 className={styles.cardTitle}>
+        {tr('benchmark.title')}
+        <span className={styles.hint}>{tr('benchmark.hint', { count: benchmark.storeCount })}</span>
+      </h2>
+      <div className={styles.benchGrid}>
+        {metrics.map((metric) => {
+          const verdict = metric.value !== null && metric.average !== null ? compareToAverage(metric.value, metric.average, metric.higherIsBetter) : null
+          return (
+            <div key={metric.id} className={styles.benchItem}>
+              <span className={styles.kpiLabel}>{tr(BENCHMARK_LABEL_KEY[metric.id])}</span>
+              <strong className={styles.benchValue}>{formatMetric(metric.kind, metric.value)}</strong>
+              <span className={styles.kpiSub}>
+                {tr('benchmark.average', { value: formatMetric(metric.kind, metric.average) })}{' '}
+                {verdict && (
+                  <span className={`${styles.pill} ${verdict === 'better' ? styles.pillGood : verdict === 'worse' ? styles.pillWarn : ''}`}>
+                    {tr(VERDICT_KEY[verdict])}
+                  </span>
+                )}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+// ---------- 分类对照抽屉 ----------
+
+export const CategoryMapDrawer: FC<{ open: boolean; onClose: () => void; map: HolidayCategoryMap | undefined; loading: boolean; error?: string; tr: Tr }> = ({
+  open,
+  onClose,
+  map,
+  loading,
+  error,
+  tr,
+}) => (
+  <Drawer open={open} onClose={onClose} width="min(1040px, 100vw)" title={tr('map.title')} destroyOnHidden>
+    <div className={styles.drawerScope}>
+    <p className={styles.note}>{tr('map.desc')}</p>
+    {loading && <div className={styles.empty}>{tr('state.loading')}</div>}
+    {error && !loading && <div className={styles.errorBox}>{tr('state.error', { message: error })}</div>}
+    {map && (
+      <div className={styles.mapGrid}>
+        {map.groups.map((group) => (
+          <section key={group.key} className={styles.card}>
+            <h3 className={styles.mapTitle}>
+              <i className={styles.swatch} style={{ background: CATEGORY_COLOR[group.key] }} aria-hidden="true" />
+              {tr(CATEGORY_LABEL_KEY[group.key])}
+              <span className={styles.hint}>{formatMoney(group.amount)}</span>
+            </h3>
+            {group.entries.slice(0, 12).map((entry) => {
+              const tag = supplierTag(entry.supplierCode)
+              return (
+                <div key={`${entry.supplierCode}|${entry.supplierCategory ?? ''}`} className={styles.mapItem}>
+                  <span className={styles.mapName}>
+                    <i className={`${styles.tag} ${tag.className}`}>{tag.label}</i> {entry.supplierCategory ?? tr('map.noCategory')}
+                  </span>
+                  <span className={styles.mapValue}>
+                    {entry.skuCount} · {formatMoney(entry.amount)}
+                  </span>
+                </div>
+              )
+            })}
+            {group.entries.length > 12 && <div className={styles.note}>{tr('map.more', { count: group.entries.length - 12 })}</div>}
+          </section>
+        ))}
+        <section className={`${styles.card} ${styles.note}`}>
+          <strong>{tr('map.rulesTitle')}</strong>
+          <p>{tr('map.rules')}</p>
+        </section>
+      </div>
+    )}
+    </div>
+  </Drawer>
+)
+
+// ---------- 口径说明 ----------
+
+export const Footer: FC<{ report: HolidaySalesReport; tr: Tr }> = ({ report, tr }) => (
+  <section className={`${styles.card} ${styles.note}`}>
+    <strong>{tr('footer.title')}</strong>
+    <p>{tr('footer.scope', { count: formatCount(report.productCount) })}</p>
+    <p>{tr('footer.purchase')}</p>
+    <p>{tr('footer.sellThrough')}</p>
+    <p>{tr('footer.soldOut')}</p>
+  </section>
+)

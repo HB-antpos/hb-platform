@@ -320,6 +320,7 @@ export function normalizeInvoiceItem(raw: unknown): LocalSupplierInvoiceItem {
     newAutoRetailPrice: asNullableNumber(pick(item, "newAutoRetailPrice", "NewAutoRetailPrice")),
     isSpecialProduct: asBool(pick(item, "isSpecialProduct", "IsSpecialProduct")),
     storeIsAutoPricing: asNullableBool(pick(item, "storeIsAutoPricing", "StoreIsAutoPricing")),
+    storeRetailPrice: asNullableNumber(pick(item, "storeRetailPrice", "StoreRetailPrice")),
   };
 }
 
@@ -521,6 +522,7 @@ function buildCheckSummaryFromResults(results: unknown): CheckProductsSummary | 
     productNotExists: rows.filter((row) => row.productStatus === 2).length,
     barcodeNormal: rows.filter((row) => row.barcodeStatus === 1).length,
     barcodeAbnormal: rows.filter((row) => row.barcodeStatus === 2).length,
+    autoPricingUnavailable: 0,
   };
 }
 
@@ -535,6 +537,7 @@ export function normalizeCheckProductsSummary(payload: unknown): CheckProductsSu
       productNotExists: asNumber(pick(summary, "productNotExists", "ProductNotExists"), 0),
       barcodeNormal: asNumber(pick(summary, "barcodeNormal", "BarcodeNormal"), 0),
       barcodeAbnormal: asNumber(pick(summary, "barcodeAbnormal", "BarcodeAbnormal"), 0),
+      autoPricingUnavailable: asNumber(pick(summary, "autoPricingUnavailable", "AutoPricingUnavailable"), 0),
     };
   }
   return buildCheckSummaryFromResults(pick(root, "results", "Results"));

@@ -862,6 +862,7 @@ type StoreOrderSupplyNoticeTarget =
 
 function ProductPickerModal({ open, orderGUID, loading, onCancel, onConfirm }: ProductPickerModalProps) {
   const { t } = useTranslation()
+  const canViewDomesticSupplierName = useAuthStore((state) => state.access.canViewDomesticSupplierName)
   const productRequestControllerRef = useRef<AbortController | null>(null)
   const supplierRequestControllerRef = useRef<AbortController | null>(null)
   const supplierOptionsLoadedRef = useRef(false)
@@ -1176,7 +1177,11 @@ function ProductPickerModal({ open, orderGUID, loading, onCancel, onConfirm }: P
       ),
     },
     {
-      title: t('column.supplierName', '供应商名称'),
+      // 没有「查看国内供应商名称」权限时后端不返回名称，这一列改叫「供应商代码」并显示代码；
+      // 列保留下来，列头的供应商筛选仍可用（无权限时后端只按代码匹配）。
+      title: canViewDomesticSupplierName
+        ? t('column.supplierName', '供应商名称')
+        : t('column.supplierCode', '供应商代码'),
       dataIndex: 'domesticSupplierName',
       width: 108,
       ...productTextFilterProps('supplierKeyword', t('storeOrders.detail.filterSupplierKeyword', '过滤供应商')),

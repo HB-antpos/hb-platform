@@ -4573,6 +4573,89 @@ public sealed class CashPaymentWorkflowServiceTests
         Assert.Equal(firstProcessor == CardProcessorKind.Square ? 1 : 0, squareAttempts.Attempts.Count);
     }
 
+    [Theory]
+    [InlineData("ANZ:PROCESSOR-SALE")]
+    [InlineData("ANZCLOUD:PROCESSOR-SALE:RFN001")]
+    public async Task Square_register_refunds_linkly_sale_through_linkly(string originalReference)
+    {
+        // 中文注释：Square 只能按 SQ:{paymentId} 退原付款；ANZ 系列原付款在 Square 收银机上必须改走 Linkly，
+        // 且退款 attempt 与终端调用都要使用改道后的同一份设置快照。
+        var cart = CreateReturnCart(4m);
+        var linklyAttempts = new RecordingCardPaymentAttemptRepository();
+        var squareAttempts = new RecordingSquarePaymentAttemptRepository();
+        var linklyContext = new LinklyPaymentAttemptContextAccessor();
+        var squareContext = new SquarePaymentAttemptContextAccessor();
+        var settingsProvider = new TxnRefSequencedCardTerminalSettingsProvider(
+            CreateSquareSettings(),
+            CreateSquareSettings());
+        var terminal = new SettingsBoundRecordingCardTerminalClient(linklyContext, squareContext);
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardPaymentAttemptRepository: linklyAttempts,
+            cardTerminalSettingsProvider: settingsProvider,
+            squarePaymentAttemptRepository: squareAttempts,
+            linklyPaymentAttemptContextAccessor: linklyContext,
+            squarePaymentAttemptContextAccessor: squareContext);
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            actualAmount: -4m,
+            currentTenders: [],
+            amountText: "4",
+            referenceText: originalReference,
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded, result.StatusMessage);
+        Assert.Equal(1, terminal.BoundRefundCallCount);
+        Assert.Equal(CardProcessorKind.Linkly, terminal.LastSettings?.Processor);
+        Assert.Single(linklyAttempts.Attempts);
+        Assert.Empty(squareAttempts.Attempts);
+    }
+
+    [Fact]
+    public async Task Linkly_register_keeps_card_present_refund_for_square_sale()
+    {
+        // 中文注释：Linkly 退款是顾客当场刷卡，不依赖原交易引用；Linkly 收银机退 Square 原付款保持现状，不改走 Square。
+        var cart = CreateReturnCart(4m);
+        var linklyAttempts = new RecordingCardPaymentAttemptRepository();
+        var squareAttempts = new RecordingSquarePaymentAttemptRepository();
+        var linklyContext = new LinklyPaymentAttemptContextAccessor();
+        var squareContext = new SquarePaymentAttemptContextAccessor();
+        var terminal = new SettingsBoundRecordingCardTerminalClient(linklyContext, squareContext);
+        var workflow = new CashPaymentWorkflowService(
+            new CashCheckoutService(),
+            new RecordingOrderRepository(),
+            new StubSyncQueueRepository(pendingCount: 1),
+            cardTerminalClient: terminal,
+            cardPaymentAttemptRepository: linklyAttempts,
+            cardTerminalSettingsProvider: new TxnRefSequencedCardTerminalSettingsProvider(
+                CreateLocalLinklySettings(),
+                CreateLocalLinklySettings()),
+            squarePaymentAttemptRepository: squareAttempts,
+            linklyPaymentAttemptContextAccessor: linklyContext,
+            squarePaymentAttemptContextAccessor: squareContext);
+        var session = new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);
+
+        var result = await workflow.AddTenderAsync(
+            PaymentMethodKind.Card,
+            session,
+            actualAmount: -4m,
+            currentTenders: [],
+            amountText: "4",
+            referenceText: "SQ:processor-sale",
+            cartSnapshot: cart.CreateSnapshot());
+
+        Assert.True(result.Succeeded, result.StatusMessage);
+        Assert.Equal(CardProcessorKind.Linkly, terminal.LastSettings?.Processor);
+        Assert.Single(linklyAttempts.Attempts);
+        Assert.Empty(squareAttempts.Attempts);
+    }
+
     [Fact]
     public async Task Card_refund_persists_new_linkly_txn_ref_and_passes_it_as_idempotency_key()
     {

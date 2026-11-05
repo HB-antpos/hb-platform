@@ -28,8 +28,9 @@ assert.equal(calculateAge('2011/03/02', today), null)
 assert.equal(calculateAge('2008-02-29', '2026-02-28'), 17)
 assert.equal(calculateAge('2008-02-29', '2026-03-01'), 18)
 
-assert.equal(isMinorAge(17), true)
-assert.equal(isMinorAge(18), false)
+assert.equal(isMinorAge(15), true)
+assert.equal(isMinorAge(16), false, '门槛 16 岁：满 16 不再要监护人')
+assert.equal(isMinorAge(17), false)
 assert.equal(isMinorAge(0), true)
 assert.equal(isMinorAge(null), false)
 

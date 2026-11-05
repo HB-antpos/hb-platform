@@ -3,7 +3,13 @@ set -euo pipefail
 
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 component="${1:?缺少 Android 组件名}"
+profile="${CI_PROFILE:-weekly}"
 cd "$repository_root"
+
+if [[ "$profile" != "pr" && "$profile" != "weekly" ]]; then
+  echo "未知 CI profile: $profile" >&2
+  exit 2
+fi
 
 case "$component" in
   noop)
@@ -31,12 +37,20 @@ case "$component" in
       cd apps/pos-handheld/android
       node --print "require.resolve('@sentry/react-native/package.json')" >/dev/null
     )
+    gradle_tasks=(
+      :hb-app-installer:testDebugUnitTest
+      :hb-attendance-security:testDebugUnitTest
+      :app:assembleDebug
+    )
+    # Android lint 约占 2 分钟且不影响编译与单元测试结果；PR 只做编译与测试，lint 留给 weekly 全量。
+    if [[ "$profile" == "weekly" ]]; then
+      gradle_tasks+=(:app:lintDebug)
+    else
+      echo "PR profile 跳过 :app:lintDebug；Android lint 由 weekly 执行。"
+    fi
     bash apps/pos-handheld/android/gradlew \
       -p apps/pos-handheld/android \
-      :hb-app-installer:testDebugUnitTest \
-      :hb-attendance-security:testDebugUnitTest \
-      :app:assembleDebug \
-      :app:lintDebug \
+      "${gradle_tasks[@]}" \
       -PreactNativeArchitectures=arm64-v8a \
       --no-daemon
     ;;

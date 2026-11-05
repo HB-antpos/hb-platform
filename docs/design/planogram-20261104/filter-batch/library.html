@@ -1,0 +1,70 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>设计器商品库筛选</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css"><link rel="stylesheet" href="extra.css">
+<style>
+body{background:#f0f2f5}
+.wrap{width:1440px;height:900px;display:flex;gap:18px;padding:18px;box-sizing:border-box}
+.col{flex:1;display:flex;flex-direction:column;gap:10px;min-width:0}
+.cap{font-weight:700;font-size:15px}.cap span{color:#1677ff}
+.sub{font-size:12px;color:rgba(0,0,0,.55);line-height:1.5;min-height:36px}
+.frame{flex:1;display:flex;border-radius:12px;overflow:hidden;border:1px solid #e5e5e5;background:#fff;position:relative}
+.panel{width:300px;flex:none;border-right:1px solid #f0f0f0;display:flex;flex-direction:column;background:#fff;position:relative}
+.canvasbg{flex:1;background:repeating-linear-gradient(0deg,#fff 0 9px,#f0f0f0 9px 10px),repeating-linear-gradient(90deg,#fff 0 9px,#f0f0f0 9px 10px);background-blend-mode:multiply;opacity:.6}
+.ptabs{display:flex;gap:22px;padding:0 14px;border-bottom:1px solid #f0f0f0;font-size:14px}
+.ptabs span{padding:10px 0}.ptabs .on{color:#1677ff;border-bottom:2px solid #1677ff;font-weight:500}
+.pi{display:flex;gap:8px;align-items:center;padding:7px 10px;border-radius:8px}
+.pi .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi .mt{font-size:11px;color:rgba(0,0,0,.45);white-space:nowrap}
+.small-sel{height:28px;border:1px solid #d9d9d9;border-radius:8px;display:flex;align-items:center;padding:0 8px;font-size:12.5px;gap:6px;background:#fff}
+.small-sel .lbl{color:rgba(0,0,0,.45)}
+.mchip{height:24px;padding:0 8px;border-radius:999px;border:1px solid #d9d9d9;display:inline-flex;align-items:center;gap:4px;font-size:12px;background:#fff}
+.mchip.on{border-color:#1677ff;background:#e6f4ff;color:#0958d9}
+.mchip .dot{width:7px;height:7px;border-radius:50%}
+.pop{position:absolute;left:14px;top:126px;width:330px;background:#fff;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);border:1px solid #f0f0f0;padding:14px;z-index:5}
+.lab{font-size:12px;color:rgba(0,0,0,.65);margin:10px 0 4px}
+</style>
+<script src="data.js"></script></head><body><div class="wrap" id="w"></div>
+<script>
+const items = ROWS.filter(r=>r.spec);
+const list = (rows) => rows.map(r=>`<div class="pi">${thumb(r,34)}<div style="min-width:0;flex:1"><div class="nm">${r.name}</div><div class="mt mono">${r.item}</div><div class="mt">${r.spec} · 每钩 ${r.q} ${gradeTag(r.grade,true)}</div></div><i class="ti ti-plus" style="color:#1677ff"></i></div>`).join('');
+const grades = (on) => ['A','B','C','D'].map(g=>`<span class="mchip ${on.includes(g)?'on':''}"><span class="dot" style="background:${GRADE[g][0]}"></span>${g}</span>`).join('') + `<span class="mchip">未分级</span>`;
+const searchRow = (btn) => `<div style="padding:10px 12px 6px;display:flex;gap:6px"><div class="input" style="height:30px;flex:1"><i class="ti ti-search muted"></i><span class="ph" style="font-size:13px">货号 / 条码 / 名称</span></div>${btn||''}</div>`;
+const statusRow = `<div style="padding:0 12px 8px;display:flex;justify-content:space-between;align-items:center"><span class="seg"><span class="on" style="height:24px;font-size:12px">已设参数</span><span style="height:24px;font-size:12px">全部</span></span></div>`;
+const hookBar = `<div style="margin-top:auto;border-top:1px solid #f0f0f0;padding:10px 12px;font-size:12px;display:flex;gap:6px;align-items:center"><span class="muted">当前挂钩</span><span class="small-sel" style="flex:1">双钩带价签 200<span class="muted" style="margin-left:auto;font-size:10px">▼</span></span></div>`;
+
+const a = `<div class="col"><div class="cap"><span>方案 a</span> · 「筛选」按钮 + 弹层</div><div class="sub">搜索框旁一个「筛选」按钮，有条件时变蓝并显示条数；点开在弹层里选分类和等级。最省地方，和陈列参数页方案 C 一致。</div>
+ <div class="frame"><div class="panel"><div class="ptabs"><span class="on">商品</span><span>挂钩</span></div>
+  ${searchRow('<span class="btn sm" style="height:30px;border-color:#1677ff;color:#1677ff;background:#e6f4ff"><i class="ti ti-adjustments-horizontal"></i>3</span>')}
+  ${statusRow}
+  <div style="padding:0 12px 6px;display:flex;flex-wrap:wrap;gap:4px"><span class="tag blue" style="height:20px;font-size:11px">手工 ×</span><span class="tag blue" style="height:20px;font-size:11px">A、B ×</span><span class="tag blue" style="height:20px;font-size:11px">未归类 ×</span></div>
+  <div style="padding:0 6px;overflow:hidden">${list(items)}</div>${hookBar}
+  <div class="pop"><div style="font-weight:600;font-size:13px">筛选商品</div>
+   <div class="lab">仓库分类（含子类）</div><div class="small-sel">手工<span class="muted" style="margin-left:auto;font-size:10px">▼</span></div>
+   <div class="lab">本地供应商分类</div><div class="small-sel">Kmart Supplier / 未归类<span class="muted" style="margin-left:auto;font-size:10px">▼</span></div>
+   <div class="lab">商品等级</div><div style="display:flex;gap:4px;flex-wrap:wrap">${grades(['A','B'])}</div>
+   <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><span class="muted tiny">符合 23 个</span><span><span class="btn sm">清除</span> <span class="btn sm primary">完成</span></span></div></div>
+ </div><div class="canvasbg"></div></div></div>`;
+
+const b = `<div class="col"><div class="cap"><span>方案 b</span> · 可折叠的筛选区</div><div class="sub">搜索框下面直接放三个筛选控件，可整块收起。不用点开就能改条件，但列表区域少了约三行。</div>
+ <div class="frame"><div class="panel"><div class="ptabs"><span class="on">商品</span><span>挂钩</span></div>
+  ${searchRow()}
+  <div style="margin:0 12px 8px;border:1px solid #f0f0f0;border-radius:8px;padding:8px;background:#fafafa">
+   <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin-bottom:6px"><span>分类与等级 <span class="tag blue" style="height:18px;font-size:10px">3</span></span><span class="muted" style="font-weight:400">清除 · 收起 ▲</span></div>
+   <div class="small-sel" style="margin-bottom:6px"><span class="lbl">仓库</span>手工<span class="muted" style="margin-left:auto;font-size:10px">▼</span></div>
+   <div class="small-sel" style="margin-bottom:6px"><span class="lbl">供应商</span>Kmart / 未归类<span class="muted" style="margin-left:auto;font-size:10px">▼</span></div>
+   <div style="display:flex;gap:4px;flex-wrap:wrap">${grades(['A','B'])}</div></div>
+  ${statusRow}
+  <div style="padding:0 6px;overflow:hidden">${list(items)}</div>${hookBar}
+ </div><div class="canvasbg"></div></div></div>`;
+
+const tree = (rows) => rows.map(([lvl,name,n,sel,open])=>`<div style="display:flex;align-items:center;gap:4px;height:26px;padding-left:${6+lvl*14}px;border-radius:6px;font-size:12.5px;${sel?'background:#e6f4ff;color:#0958d9;font-weight:500':''}"><i class="ti ti-chevron-${open?'down':'right'} muted" style="font-size:11px;visibility:${open===null?'hidden':'visible'}"></i><span style="flex:1">${name}</span><span class="muted" style="font-size:11px;margin-right:4px">${n}</span></div>`).join('');
+const c = `<div class="col"><div class="cap"><span>方案 c</span> · 上面分类树、下面商品</div><div class="sub">左栏上半部是可切换的分类树（带已设参数的数量），点节点即过滤下半部商品；等级用一排小标签。最适合按类别逐区排版，和陈列参数页方案 B 一致。</div>
+ <div class="frame"><div class="panel"><div class="ptabs"><span class="on">商品</span><span>挂钩</span></div>
+  <div style="padding:8px 12px 4px"><span class="seg" style="width:100%"><span class="on" style="flex:1;justify-content:center;height:24px;font-size:12px">仓库分类</span><span style="flex:1;justify-content:center;height:24px;font-size:12px">供应商分类</span></span></div>
+  <div style="padding:0 8px;height:200px;overflow:hidden;border-bottom:1px solid #f0f0f0">${tree([[0,'全部','128',false,null],[0,'手工','23',true,true],[1,'纸品','6',false,null],[1,'布艺','2',false,null],[1,'线材','5',false,null],[1,'胶水','4',false,null],[0,'圣诞','41',false,false],[0,'文具','30',false,false]])}</div>
+  ${searchRow()}
+  <div style="padding:0 12px 6px;display:flex;gap:4px;flex-wrap:wrap">${grades(['A','B'])}</div>
+  <div style="padding:0 6px;overflow:hidden">${list(items.slice(0,3))}</div>${hookBar}
+ </div><div class="canvasbg"></div></div></div>`;
+document.getElementById('w').innerHTML = a + b + c;
+</script></body></html>

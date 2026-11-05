@@ -5,6 +5,13 @@ public static class MinorEmploymentComplianceCalculator
 {
     public const string QueenslandChildEmploymentUrl = "https://www.legislation.qld.gov.au/view/whole/html/inforce/current/sl-2016-0137";
 
+    /// <summary>
+    /// 未成年用工合规的年龄门槛：未满 16 岁才建档、才要监护人签字（新建员工必填监护人、店长发家长签字链接、未成年员工列表、排班合规提醒共用）。
+    /// 2026-11-03 业务决定由 18 岁改为 16 岁：QLD 法定必须 CE1 同意书的只有未满 16 岁的学龄儿童，16–17 岁不再建档。
+    /// 排班表 / 工时表显示年龄的门槛是另一个数（AttendanceReactService.JuniorAgeLimit = 21，青少年时薪按年龄计），不要混用。
+    /// </summary>
+    public const int MinorAgeLimit = 16;
+
     public static MinorEmploymentComplianceEvaluation Evaluate(MinorEmploymentComplianceInput input)
     {
         var findings = new List<MinorEmploymentComplianceFinding>();
@@ -140,7 +147,7 @@ public static class MinorEmploymentComplianceCalculator
     }
     private static bool TouchesNightPeriod(DateTime start, DateTime end) => start.TimeOfDay < TimeSpan.FromHours(6) || end.TimeOfDay > TimeSpan.FromHours(22) || end.Date > start.Date;
     private static bool IsAdult(MinorEmploymentProfile profile, DateTime assessmentDate)
-        => profile.DateOfBirth.HasValue && profile.DateOfBirth.Value.Date.AddYears(18) <= assessmentDate.Date;
+        => profile.DateOfBirth.HasValue && profile.DateOfBirth.Value.Date.AddYears(MinorAgeLimit) <= assessmentDate.Date;
     private static int EffectiveMinutes(MinorEmploymentWorkItem item) => item.ActualWorkedMinutes ?? (int)Math.Round((item.EndLocal - item.StartLocal).TotalMinutes, MidpointRounding.AwayFromZero);
     private static void AddProfileFindings(MinorEmploymentProfile profile, List<MinorEmploymentComplianceFinding> findings)
     {

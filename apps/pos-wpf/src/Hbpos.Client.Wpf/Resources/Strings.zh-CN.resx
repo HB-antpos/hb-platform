@@ -912,6 +912,81 @@
   <data name="success.card.close" xml:space="preserve">
     <value>关闭</value>
   </data>
+  <data name="success.card.refundComplete" xml:space="preserve">
+    <value>退货完成</value>
+  </data>
+  <data name="success.card.change" xml:space="preserve">
+    <value>找零</value>
+  </data>
+  <data name="success.card.giveToCustomer" xml:space="preserve">
+    <value>请交给顾客</value>
+  </data>
+  <data name="success.card.noChange" xml:space="preserve">
+    <value>无需找零</value>
+  </data>
+  <data name="success.card.exactCash" xml:space="preserve">
+    <value>顾客刚好付清，不要找钱</value>
+  </data>
+  <data name="success.card.paid" xml:space="preserve">
+    <value>已收款</value>
+  </data>
+  <data name="success.card.paidByCard" xml:space="preserve">
+    <value>刷卡已收款</value>
+  </data>
+  <data name="success.card.paidByVoucher" xml:space="preserve">
+    <value>代金券已收款</value>
+  </data>
+  <data name="success.card.cashRefund" xml:space="preserve">
+    <value>退还现金</value>
+  </data>
+  <data name="success.card.giveCashToCustomer" xml:space="preserve">
+    <value>请把现金交给顾客</value>
+  </data>
+  <data name="success.card.cardRefund" xml:space="preserve">
+    <value>已退回银行卡</value>
+  </data>
+  <data name="success.card.refunded" xml:space="preserve">
+    <value>已退款</value>
+  </data>
+  <data name="success.card.noCashBack" xml:space="preserve">
+    <value>无需给顾客现金</value>
+  </data>
+  <data name="success.card.voucherRefund" xml:space="preserve">
+    <value>退款代金券</value>
+  </data>
+  <data name="success.card.giveVoucherToCustomer" xml:space="preserve">
+    <value>请把打印的代金券交给顾客</value>
+  </data>
+  <data name="success.card.amountDue" xml:space="preserve">
+    <value>应收</value>
+  </data>
+  <data name="success.card.cashReceived" xml:space="preserve">
+    <value>实收现金</value>
+  </data>
+  <data name="success.card.refundTotal" xml:space="preserve">
+    <value>退货金额</value>
+  </data>
+  <data name="success.card.returnedItems" xml:space="preserve">
+    <value>退货件数</value>
+  </data>
+  <data name="success.card.voucherCode" xml:space="preserve">
+    <value>券码</value>
+  </data>
+  <data name="success.card.method.cash" xml:space="preserve">
+    <value>现金</value>
+  </data>
+  <data name="success.card.method.card" xml:space="preserve">
+    <value>刷卡</value>
+  </data>
+  <data name="success.card.method.voucher" xml:space="preserve">
+    <value>代金券</value>
+  </data>
+  <data name="success.card.changeFromCashOnly" xml:space="preserve">
+    <value>找零只按现金部分计算</value>
+  </data>
+  <data name="success.card.printRefundReceipt" xml:space="preserve">
+    <value>打印退货小票</value>
+  </data>
   <data name="success.receiptPreview" xml:space="preserve">
     <value>小票预览</value>
   </data>

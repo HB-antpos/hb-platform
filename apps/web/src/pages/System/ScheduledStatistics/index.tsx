@@ -66,6 +66,7 @@ import { getActiveChinaSuppliers } from '../../../services/chinaSupplierService'
 import { useAuthStore } from '../../../store/auth'
 import type { ScheduledTaskRuntimeControlStatus } from '../../../types/scheduledTaskRuntimeControl'
 import type { ScheduledTaskListQuery, ScheduledTaskLogItem } from '../../../types/scheduledTaskRetry'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import {
   createLatestRequestGuard,
   runLatestGuardedRequest,
@@ -634,7 +635,8 @@ export default function ScheduledStatisticsPage() {
         value: item.localSupplierCode,
       }))
       const chinaOptions = chinaSuppliers.map((item) => ({
-        label: `${item.supplierCode} - ${item.supplierName}`,
+        // 无「查看国内供应商名称」权限时名称为空，只显示代码（澳洲供应商选项不变）。
+        label: formatDomesticSupplierLabel(item.supplierCode, item.supplierName),
         value: item.supplierCode,
       }))
       const supplierMap = new Map([...localOptions, ...chinaOptions].map((item) => [item.value, item]))

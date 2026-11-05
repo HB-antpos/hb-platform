@@ -230,10 +230,10 @@ namespace BlazorApp.Shared.DTOs
         [StringLength(50, ErrorMessage = "电话长度不能超过50个字符")]
         public string? Phone { get; set; }
 
-        /// <summary>生日。新建入口必填，写入员工资料；未满 18 岁时须同时提供 <see cref="Guardian"/>。</summary>
+        /// <summary>生日。新建入口必填，写入员工资料；未满 16 岁时须同时提供 <see cref="Guardian"/>。</summary>
         public DateTime? Birthday { get; set; }
 
-        /// <summary>监护人；只在生日未满 18 岁时使用，会预填进未成年用工合规草稿。</summary>
+        /// <summary>监护人；只在生日未满 16 岁时使用，会预填进未成年用工合规草稿。</summary>
         public NewStaffGuardianDto? Guardian { get; set; }
 
         /// <summary>

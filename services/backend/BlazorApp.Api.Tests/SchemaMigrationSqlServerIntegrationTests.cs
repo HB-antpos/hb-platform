@@ -3294,12 +3294,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             runtime.VerifyHelpFaqAsync(CancellationToken.None));
         Assert.NotNull(missing);
 
-        // 首次：建表 + 灌入 11 组 / 47 问（收银端 28 + 移动端 19），全部已发布。
+        // 首次：建表 + 灌入 11 组 / 48 问（收银端 28 + 移动端 20），全部已发布。
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
         await runtime.VerifyHelpFaqAsync(CancellationToken.None);
         Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
-        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
-        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString,
+        Assert.Equal(48, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(48, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Status = N'Published' AND Version = 1 AND PublishedAt IS NOT NULL AND DraftJson IS NULL AND IsDeleted = 0 AND CreatedBy = N'system-seed' AND UpdatedBy = N'system-seed'"));
         Assert.Equal(28, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion q JOIN dbo.HelpFaqGroup g ON g.GroupGUID = q.GroupGUID WHERE g.Tab = N'pos'"));
@@ -3307,13 +3307,13 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         // 重复执行：表非空直接跳过，行数不变（不重复灌入）。
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
         Assert.Equal(11, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqGroup"));
-        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(48, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
 
         // 管理员删掉某题后再次执行迁移也不会补回（只要两表任一非空就跳过，绝不覆盖线上编辑）。
         await ExecuteNonQueryAsync(databases.MainConnectionString,
             "UPDATE dbo.HelpFaqQuestion SET IsDeleted = 1 WHERE Code = N'remove'");
         await runtime.ApplyHelpFaqAsync(CancellationToken.None);
-        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(48, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
         Assert.Equal(1, await ScalarIntAsync(databases.MainConnectionString,
             "SELECT COUNT(*) FROM dbo.HelpFaqQuestion WHERE Code = N'remove' AND IsDeleted = 1"));
         await ExecuteNonQueryAsync(databases.MainConnectionString,
@@ -3329,7 +3329,7 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             NullLogger<HelpFaqPublicService>.Instance);
         var snapshot = await service.GetPublishedAsync();
         Assert.Equal(28, snapshot.Data.Tabs.Pos.Sum(g => g.Questions.Count));
-        Assert.Equal(19, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
+        Assert.Equal(20, snapshot.Data.Tabs.Mobile.Sum(g => g.Questions.Count));
         Assert.DoesNotContain("secret", System.Text.Json.JsonSerializer.Serialize(snapshot.Data), StringComparison.Ordinal);
 
         // Code 全局唯一：重复锚点必须被数据库拒绝。
@@ -3375,12 +3375,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.MainHistoryTable,
             SchemaMigrationCoordinator.HelpFaqMigrationId
         );
-        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(48, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
         Assert.True((await coordinator.CheckAsync(CancellationToken.None)).Success);
 
         // 再次迁移：账本已登记，整步跳过，不重复灌入。
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
-        Assert.Equal(47, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
+        Assert.Equal(48, await ScalarIntAsync(databases.MainConnectionString, "SELECT COUNT(*) FROM dbo.HelpFaqQuestion"));
 
         // 实体不在 tableTypes：全新库基线不会抢先用 CodeFirst 建出签名不符的 FAQ 表（迁移成功即证明）。
     }
@@ -4271,6 +4271,123 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.ApplySql);
         await ExecuteNonQueryAsync(main, PosReceiptShareLinkSchema.VerifySql);
         Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PosReceiptShareLink"));
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 商品陈列图六张表与权限码_新表_权限入库不授权_型号编码唯一_可重复执行_识别漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54440。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54440, missing.Number);
+
+        // 权限表存在时：三个权限码幂等写入，重复执行不重复插入；不创建也不触碰任何角色权限表。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(450) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NOT NULL,
+                Category nvarchar(100) NULL, Description nvarchar(500) NULL,
+                CreatedAt datetime2 NOT NULL, CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL,
+                IsDeleted bit NOT NULL);
+            INSERT dbo.HbwebSysPermissions (Id, Code, Name, Category, CreatedAt, IsDeleted)
+            VALUES (N'p-1', N'Orders.View', N'查看订单', N'分店订货', SYSUTCDATETIME(), 0);
+            """);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        Assert.Equal(3, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code IN (N'Planogram.View', N'Planogram.Edit', N'Planogram.Manage') AND Category = N'商品陈列图' AND IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Orders.View' AND Category = N'分店订货'"));
+
+        // 既有数据不被重复执行改动；货架型号编码唯一：同编码第二次插入必须被拒绝。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramShelfModel
+                (Guid, Code, Name, BayWidthMm, TotalHeightMm, BaseDepthMm, BaseTopHeightMm, UprightWidthMm,
+                 HolePitchXMm, HolePitchYMm, HoleDiameterMm, FirstHoleLeftMm, FirstHoleTopMm, HoleCols, HoleRows, CreatedAt)
+            VALUES (N'shelf-1', N'G-S-PEG-90x30x120', N'单面洞洞板', 900, 1200, 300, 150, 30, 25.4, 25, 6, 25, 25, 33, 41, SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.PlanogramShelfModel WHERE Guid = N'shelf-1' AND HolePitchXMm = 25.4 AND SideType = 1 AND IsActive = 1 AND RowNumberingFrom = 1"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramShelfModel
+                (Guid, Code, Name, BayWidthMm, TotalHeightMm, BaseDepthMm, BaseTopHeightMm, UprightWidthMm,
+                 HolePitchXMm, HolePitchYMm, HoleDiameterMm, FirstHoleLeftMm, FirstHoleTopMm, HoleCols, HoleRows, CreatedAt)
+            VALUES (N'shelf-2', N'G-S-PEG-90x30x120', N'重复编码', 900, 1200, 300, 150, 30, 25, 25, 6, 25, 25, 33, 41, SYSUTCDATETIME());
+            """));
+
+        // 挂钩型号：价签底边高度默认 10；编码同样唯一。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramHookModel (Guid, Code, Name, ArmLengthMm, DropMm, WireDiameterMm, CreatedAt)
+            VALUES (N'hook-1', N'HK-D-PT-200', N'双钩带价签 200', 200, 50, 5, SYSUTCDATETIME());
+            """);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.PlanogramHookModel WHERE Guid = N'hook-1' AND TagBottomAboveArmMm = 10 AND ProngCount = 2 AND HoleSpanX = 2 AND HoleSpanY = 1"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramHookModel (Guid, Code, Name, ArmLengthMm, DropMm, WireDiameterMm, CreatedAt)
+            VALUES (N'hook-2', N'HK-D-PT-200', N'重复编码', 200, 50, 5, SYSUTCDATETIME());
+            """));
+
+        // 方案头：间距默认 10 / 10，没有 StoreCode；同一方案同一版本号只能有一份快照。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.Planogram (Guid, Name, ShelfModelGuid, CreatedAt) VALUES (N'plan-1', N'试验方案', N'shelf-1', SYSUTCDATETIME());
+            INSERT dbo.PlanogramVersion (Guid, PlanogramGuid, Version, LayoutJson, PublishedAt)
+            VALUES (N'ver-1', N'plan-1', 1, N'{}', SYSUTCDATETIME());
+            """);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.Planogram WHERE Guid = N'plan-1' AND GapXMm = 10 AND GapYMm = 10 AND Status = 0 AND Version = 1"));
+        Assert.Equal(0, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.Planogram') AND name = N'StoreCode'"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PlanogramVersion (Guid, PlanogramGuid, Version, LayoutJson, PublishedAt)
+            VALUES (N'ver-2', N'plan-1', 1, N'{}', SYSUTCDATETIME());
+            """));
+
+        // 列宽漂移 → 54441（选没有索引依赖的 Color 列：SQL Server 不允许修改索引依赖列的宽度）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN Color nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54441, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN Color nvarchar(50) NULL;");
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+
+        // decimal 精度漂移 → 54441。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN HoleDiameterMm decimal(8,3) NOT NULL;");
+        var precision = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54441, precision.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PlanogramShelfModel ALTER COLUMN HoleDiameterMm decimal(6,2) NOT NULL;");
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+
+        // 货架型号编码唯一索引缺失 → 54443；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_PlanogramShelfModel_Code ON dbo.PlanogramShelfModel;");
+        var noUnique = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54443, noUnique.Number);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+
+        // 明细方案索引缺失 → 54444；重新执行迁移补回，行仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_PlanogramItem_Plan ON dbo.PlanogramItem;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54444, noIndex.Number);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PlanogramShelfModel"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.PlanogramHookModel"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.Planogram"));
+
+        // 主键缺失 → 54442（商品陈列参数表以 ProductCode 为主键）。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.ProductDisplaySpec DROP CONSTRAINT PK_ProductDisplaySpec;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PlanogramSchema.VerifySql));
+        Assert.Equal(54442, noPrimaryKey.Number);
     }
 
     [SchemaMigrationSqlServerFact]

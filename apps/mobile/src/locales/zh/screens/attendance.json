@@ -86,7 +86,7 @@
       "alertHoliday": "今日标记为 {{holidayName}}，请按门店安排确认是否需要打卡。",
       "alertVerificationCaptured": "本次打卡将携带当前采集到的校验信息提交。",
       "alertVerificationSentForReview": "打卡前必须完成定位采集和网络校验。",
-      "alertNoSchedule": "当前日期没有排班，若需上班请先联系店长安排。"
+      "alertNoSchedule": "未排班"
     },
     "timeline": {
       "relatedStoreAlert": "跨店关联提醒",

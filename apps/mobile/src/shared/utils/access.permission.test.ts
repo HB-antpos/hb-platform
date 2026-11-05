@@ -559,3 +559,35 @@ assertEqual(
   true,
   "Container.Delete enables container deletion"
 );
+
+// 查看国内供应商名称：专用权限码、管理国内供应商、管理员三种来源都算有；其余账号与未登录都没有。
+assertEqual(
+  PERMISSIONS.DomesticPurchase.ViewSupplierName,
+  "DomesticPurchase.ViewSupplierName",
+  "ViewSupplierName code must match the backend permission constant"
+);
+assertEqual(
+  buildAccess(createUser([PERMISSIONS.DomesticPurchase.ViewSupplierName])).canViewDomesticSupplierName,
+  true,
+  "DomesticPurchase.ViewSupplierName enables viewing China supplier names"
+);
+assertEqual(
+  buildAccess(createUser(["DomesticPurchase.ManageSuppliers"])).canViewDomesticSupplierName,
+  true,
+  "DomesticPurchase.ManageSuppliers also counts as viewing China supplier names"
+);
+assertEqual(
+  buildAccess(createUser([], ["Admin"])).canViewDomesticSupplierName,
+  true,
+  "admins can always view China supplier names"
+);
+assertEqual(
+  buildAccess(createUser(["DomesticPurchase.ManageProducts", "Warehouse.Manage"])).canViewDomesticSupplierName,
+  false,
+  "other China purchasing or warehouse permissions do not reveal China supplier names"
+);
+assertEqual(
+  buildAccess(null).canViewDomesticSupplierName,
+  false,
+  "signed-out sessions cannot view China supplier names"
+);

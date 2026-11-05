@@ -32,6 +32,7 @@ public sealed class RoleServicePermissionTests : IDisposable
         "SalesDashboard.SalesDetail.View",
         "SalesDashboard.CompactBoard.View",
         "SalesDashboard.MonthlyDailySalesDownload.View",
+        "SalesDashboard.HolidaySalesReport.View",
         "SalesDashboard.ProductMovement.View",
         "SalesDashboard.BatchProductSales.View",
         "SalesDashboard.WarehouseFlow.View",

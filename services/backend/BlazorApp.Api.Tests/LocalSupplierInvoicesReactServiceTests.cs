@@ -1439,6 +1439,111 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task CheckProductsAsync_进货价低于自动定价下限_不拖垮整单只清空该行预览并计入汇总()
+        {
+            // 真实案例（2026-11-03 V0008121-12）：一行粘贴成 0.023 的单价让整单 71 行检测报「检测失败」。
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-check-low-cost", "INV-CHECK-LOW-COST", new DateTime(2026, 11, 3));
+            await _db.Insertable(new List<StoreLocalSupplierInvoiceDetails>
+            {
+                new()
+                {
+                    DetailGUID = "detail-low-cost",
+                    InvoiceGUID = "invoice-check-low-cost",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "XD0001397",
+                    Barcode = "9333527856678",
+                    ProductName = "Velvet Jewel Stocking",
+                    Quantity = 24,
+                    PurchasePrice = 0.023m,
+                    Amount = 0.552m,
+                    AutoPricing = true,
+                    PricingFloatRate = 300m,
+                    NewAutoRetailPrice = 8.88m,
+                    ExistingProductCount = 0,
+                    IsDeleted = false,
+                },
+                new()
+                {
+                    DetailGUID = "detail-normal-cost",
+                    InvoiceGUID = "invoice-check-low-cost",
+                    StoreCode = "S01",
+                    SupplierCode = "SUP01",
+                    ItemNumber = "NEW-AUTO-002",
+                    Barcode = "9300000000029",
+                    ProductName = "Normal Cost Product",
+                    Quantity = 1,
+                    PurchasePrice = 4.00m,
+                    Amount = 4.00m,
+                    AutoPricing = true,
+                    ExistingProductCount = 0,
+                    IsDeleted = false,
+                },
+            }).ExecuteCommandAsync();
+
+            // 模拟真实定价服务：低于 0.10 直接抛异常；守卫要保证这一行根本不会调到它。
+            var service = CreateService(configureAutoPricing: autoPricing =>
+                autoPricing.Setup(x => x.CalculateRate(It.Is<decimal>(price => price < 0.1m), It.IsAny<BlazorApp.Shared.Models.HBweb.PricingStrategy?>()))
+                    .Throws(new ArgumentException("进货价必须至少为 0.10，才能满足尾数及 1.5～5 成率限制")));
+
+            var result = await service.CheckProductsAsync(new CheckProductsRequest
+            {
+                InvoiceGuid = "invoice-check-low-cost",
+            });
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(2, result.Data!.Summary.Total);
+            Assert.Equal(1, result.Data.Summary.AutoPricingUnavailable);
+            var lowCost = Assert.Single(result.Data.Results, item => item.DetailGuid == "detail-low-cost");
+            Assert.Null(lowCost.PricingFloatRate);
+            Assert.Null(lowCost.NewAutoRetailPrice);
+            Assert.Contains("进货价低于 0.10", lowCost.AutoPricingUnavailableReason);
+            var normalCost = Assert.Single(result.Data.Results, item => item.DetailGuid == "detail-normal-cost");
+            Assert.Equal(250m, normalCost.PricingFloatRate);
+            Assert.Equal(10.00m, normalCost.NewAutoRetailPrice);
+            Assert.Null(normalCost.AutoPricingUnavailableReason);
+
+            // 落库也要把这一行过期的预览清掉，不能留着旧倍率误导执行。
+            var lowCostDetail = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .SingleAsync(x => x.DetailGUID == "detail-low-cost");
+            Assert.Null(lowCostDetail.PricingFloatRate);
+            Assert.Null(lowCostDetail.NewAutoRetailPrice);
+        }
+
+        [Fact]
+        public async Task CheckProductsAsync_定价服务抛出规则异常_把原因透传给前端而不是只说检测失败()
+        {
+            await SeedStoreAndSupplierAsync();
+            await InsertInvoiceAsync("invoice-check-rule-error", "INV-CHECK-RULE-ERROR", new DateTime(2026, 11, 3));
+            await _db.Insertable(new StoreLocalSupplierInvoiceDetails
+            {
+                DetailGUID = "detail-rule-error",
+                InvoiceGUID = "invoice-check-rule-error",
+                StoreCode = "S01",
+                SupplierCode = "SUP01",
+                ItemNumber = "RULE-ERR-001",
+                Barcode = "9300000000036",
+                ProductName = "Rule Error Product",
+                Quantity = 1,
+                PurchasePrice = 4.00m,
+                Amount = 4.00m,
+                AutoPricing = true,
+                ExistingProductCount = 0,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            var service = CreateService(configureAutoPricing: autoPricing =>
+                autoPricing.Setup(x => x.CalculateRate(It.IsAny<decimal>(), It.IsAny<BlazorApp.Shared.Models.HBweb.PricingStrategy?>()))
+                    .Throws(new ArgumentException("当前成本不在此定价策略范围内")));
+
+            var result = await service.CheckProductsAsync(new CheckProductsRequest { InvoiceGuid = "invoice-check-rule-error" });
+
+            Assert.False(result.Success);
+            Assert.Equal("CHECK_ERROR", result.ErrorCode);
+            Assert.Equal("检测失败：当前成本不在此定价策略范围内", result.Message);
+        }
+
+        [Fact]
         public async Task CheckProductsAsync_新商品明细自动定价为空_检测后默认自动()
         {
             await SeedStoreAndSupplierAsync();
@@ -5635,7 +5740,8 @@ namespace BlazorApp.Api.Tests
 
         private LocalSupplierInvoicesReactService CreateService(
             ILocalSupplierInvoiceHqProductSyncService? hqProductSyncService = null,
-            IWarehouseProductChangeHistoryService? changeHistoryService = null
+            IWarehouseProductChangeHistoryService? changeHistoryService = null,
+            Action<Mock<IAutoPricingService>>? configureAutoPricing = null
         )
         {
             var autoPricing = new Mock<IAutoPricingService>();
@@ -5647,6 +5753,8 @@ namespace BlazorApp.Api.Tests
                 .Returns(250m);
             autoPricing.Setup(x => x.CalculateRetailPrice(It.IsAny<decimal>(), It.IsAny<BlazorApp.Shared.Models.HBweb.PricingStrategy?>()))
                 .Returns<decimal, BlazorApp.Shared.Models.HBweb.PricingStrategy?>((price, _) => price * 2.5m);
+            // 个别用例要让定价服务像真实实现那样抛异常（例如进货价低于 0.10），在默认设置之后追加即可覆盖。
+            configureAutoPricing?.Invoke(autoPricing);
 
             return new LocalSupplierInvoicesReactService(
                 CreateSqlSugarContext(_db),

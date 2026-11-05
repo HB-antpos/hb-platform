@@ -1,0 +1,225 @@
+/* 节日销售报告：沿用独立销售看板的令牌与紧凑密度（12px 表格、8px 间距、8px 圆角卡片）。
+   宽表格只在自己的容器里横向滚动，整页不出现横向滚动条；大类色只用在小色块、条形与标签上。 */
+.page, .drawerScope {
+  --ink: #172033; --ink-2: #344054; --muted: #667085;
+  --line: #e8edf4; --line-2: #dde4ef; --line-3: #eef1f6; --head: #f8fafc; --control-line: #d0d7e2;
+  --primary: #1677ff; --primary-bg: #edf4ff;
+  --good: #389e0d; --good-bg: #f6ffed; --good-line: #b7eb8f;
+  --warn: #d46b08; --warn-bg: #fff7e6; --warn-line: #ffd591;
+  --bad: #cf1322; --bad-bg: #fff1f0; --bad-line: #ffa39e;
+  --kfc: #1677ff; --brazco: #722ed1; --holiday: #fa8c16;
+  font-variant-numeric: tabular-nums; font-size: 13px; color: var(--ink);
+}
+.page {
+  box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; min-height: 100%; padding: 12px;
+  background: #f5f7fb; color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.page button, .drawerScope button, .drawerScope input, .drawerScope select { font: inherit; }
+.page button:focus-visible, .page select:focus-visible, .drawerScope button:focus-visible, .drawerScope select:focus-visible, .drawerScope input:focus-visible, .clickRow:focus-visible, .productClickable:focus-visible, .dProductRow:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.hint { color: var(--muted); font-size: 12px; font-weight: 400; }
+.hintAction { color: var(--primary); font-size: 12px; font-weight: 500; }
+.bad { color: var(--bad); }
+.warnText { color: var(--warn); }
+.empty { padding: 28px 16px; border: 1px dashed var(--line-2); border-radius: 8px; background: #fff; color: var(--muted); text-align: center; }
+.errorBox { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border: 1px solid var(--bad-line); border-radius: 8px; background: var(--bad-bg); color: var(--bad); }
+
+/* ---------- 头部与筛选 ---------- */
+.head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px 16px; padding: 10px 16px; border: 1px solid var(--line-2); border-radius: 8px; background: #fff; }
+.titleBlock { min-width: 0; }
+.titleBlock h1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: 19px; font-weight: 700; line-height: 1.3; }
+.phase { padding: 1px 8px; border: 1px solid var(--warn-line); border-radius: 4px; background: var(--warn-bg); color: var(--warn); font-size: 12px; font-weight: 500; }
+.subtitle { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.headActions { display: flex; align-items: center; gap: 8px; }
+.button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 14px; border: 1px solid var(--control-line); border-radius: 6px; background: #fff; color: var(--ink-2); cursor: pointer; }
+.button:hover:not(:disabled) { background: #f1f4f9; }
+.button:disabled { color: #b8c0cc; cursor: default; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 14px; border: 1px solid var(--line-2); border-radius: 8px; background: #fff; }
+.filterLabel { color: var(--muted); font-size: 12px; }
+.segment { display: inline-flex; padding: 2px; border-radius: 6px; background: #eef1f6; }
+.segment button { min-height: 28px; padding: 0 14px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+.segment .segmentOn { background: #fff; color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px #0000001a; }
+.storePicker { display: inline-flex; align-items: center; gap: 4px; }
+.stepButton { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--control-line); border-radius: 6px; background: #fff; color: #475467; cursor: pointer; }
+.stepButton:disabled { color: #b8c0cc; cursor: default; }
+.select { min-height: 32px; padding: 0 8px; border: 1px solid var(--control-line); border-radius: 6px; background: #fff; color: var(--ink); max-width: 220px; }
+.chips { display: inline-flex; gap: 6px; }
+.chip, .chipOn { min-height: 26px; padding: 0 12px; border: 1px solid var(--control-line); border-radius: 13px; background: #fff; color: var(--ink-2); font-size: 12px; cursor: pointer; }
+.chipOn { border-color: var(--primary); background: var(--primary-bg); color: var(--primary); }
+
+/* ---------- 指标 ---------- */
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.kpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.kpiLabel { color: var(--muted); font-size: 12px; }
+.kpiValue { font-size: 24px; font-weight: 600; line-height: 1.25; }
+.kpiSub { color: var(--ink-2); font-size: 12px; }
+.kpiAlert { border-color: var(--bad-line); background: linear-gradient(#fff, #fff7f6); }
+.kpiAlert .kpiValue { color: var(--bad); }
+.kpiWarn .kpiValue { color: var(--warn); }
+
+/* ---------- 卡片 ---------- */
+.card { min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.cardTitle { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+.linkButton { margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--primary); font-size: 12px; font-weight: 400; cursor: pointer; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 12px; }
+.note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.note p { margin: 4px 0 0; }
+.note strong { color: var(--ink-2); font-weight: 600; }
+
+/* ---------- 曲线 ---------- */
+.chartWrap { overflow-x: auto; }
+.chart { display: block; width: 100%; min-width: 560px; height: auto; }
+.gridLine { stroke: var(--line-3); }
+.axisText { fill: var(--muted); font-size: 11px; }
+.weekBand { fill: var(--warn-bg); }
+.weekLine { stroke: #98a2b3; stroke-width: 1; stroke-dasharray: 2 4; }
+.weekTotal { fill: #98a2b3; font-size: 11px; }
+.weekTotalStrong { fill: var(--warn); font-size: 11px; font-weight: 600; }
+.chartArea { fill: #1677ff22; }
+.chartLine { fill: none; stroke: var(--primary); stroke-width: 1.8; }
+.holidayLine { stroke: var(--holiday); stroke-dasharray: 3 3; }
+.holidayDot { fill: var(--holiday); }
+.holidayText { fill: var(--warn); font-size: 12px; font-weight: 600; }
+.weekText { fill: var(--warn); font-size: 11px; }
+.hoverLine { stroke: #98a2b3; }
+.hoverDot { fill: var(--primary); }
+.chartReadout { min-height: 18px; color: var(--ink-2); font-size: 12px; text-align: right; }
+
+/* ---------- 供应商构成与结论 ---------- */
+.shareBar { display: flex; height: 12px; overflow: hidden; border-radius: 6px; background: #eef1f6; }
+.shareFirst { background: var(--kfc); }
+.shareSecond { background: var(--brazco); }
+.shareLegend { display: flex; justify-content: space-between; gap: 8px; margin: 8px 0 16px; font-size: 13px; }
+.tag { display: inline-block; padding: 0 6px; border: 1px solid; border-radius: 4px; font-size: 11px; font-style: normal; line-height: 18px; }
+.tagKfc { border-color: #91caff; background: var(--primary-bg); color: var(--kfc); }
+.tagBrazco { border-color: #d3adf7; background: #f9f0ff; color: var(--brazco); }
+.insights { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.insights li { display: flex; gap: 8px; line-height: 1.45; }
+.insights i { flex: none; width: 6px; height: 6px; margin-top: 7px; border-radius: 50%; }
+
+/* ---------- 表格 ---------- */
+.tableScroll { overflow-x: auto; }
+.table { width: 100%; min-width: 760px; border-collapse: collapse; }
+.table th { padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--head); color: var(--muted); font-weight: 500; text-align: left; white-space: nowrap; }
+.table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.table td:first-child, .table td:nth-child(2) { white-space: nowrap; }
+.table .num { text-align: right; white-space: nowrap; }
+.table .wide { min-width: 190px; }
+.swatch { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 2px; }
+.barCell { display: flex; align-items: center; gap: 8px; }
+.bar { flex: 1; height: 8px; overflow: hidden; border-radius: 4px; background: #f0f0f0; }
+.bar b { display: block; height: 100%; border-radius: 4px; }
+.barValue { width: 64px; text-align: right; }
+.barValueSm { width: 40px; text-align: right; }
+.pill { display: inline-block; padding: 0 6px; border: 1px solid var(--control-line); border-radius: 4px; background: #fafafa; color: var(--ink-2); font-size: 11px; line-height: 18px; }
+.pillGood { border-color: var(--good-line); background: var(--good-bg); color: var(--good); }
+.pillBad { border-color: var(--bad-line); background: var(--bad-bg); color: var(--bad); }
+.pillWarn { border-color: var(--warn-line); background: var(--warn-bg); color: var(--warn); }
+.clickRow { cursor: pointer; }
+.clickRow:hover { background: #f5f9ff; }
+.openText { color: var(--primary); font-size: 12px; white-space: nowrap; }
+
+/* ---------- 商品四张榜 ---------- */
+.quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.boardHead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 8px; }
+.boardIcon { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; color: #fff; font-weight: 700; }
+.iconGood { background: #52c41a; }
+.iconBad { background: #ff4d4f; }
+.iconGray { background: #8c8c8c; }
+.iconWarn { background: #fa8c16; }
+.boardTitle { font-size: 15px; font-weight: 600; }
+.productList { margin: 0; padding: 0; list-style: none; }
+.product { display: grid; grid-template-columns: 22px 56px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.product:first-child { border-top: 0; }
+.product { grid-template-columns: 22px 56px minmax(0, 1fr) auto 14px; }
+.productClickable { cursor: pointer; border-radius: 6px; }
+.productClickable:hover { background: #f5f9ff; }
+.chev { color: #98a2b3; text-align: center; }
+.boardCount { margin-left: auto; }
+.rank { color: var(--muted); font-weight: 600; text-align: center; }
+.thumb { width: 56px; height: 56px; border: 1px solid var(--line); border-radius: 6px; background: #fafafa; object-fit: contain; }
+.thumbEmpty { display: grid; place-items: center; color: #b8c0cc; font-size: 11px; }
+.productMain { min-width: 0; }
+.productName { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.productMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; color: var(--muted); font-size: 12px; }
+.catTag { padding: 0 6px; border: 1px solid; border-radius: 4px; font-size: 11px; line-height: 18px; }
+.productValue { min-width: 140px; text-align: right; }
+.valueHead { font-size: 14px; font-weight: 600; }
+.valueSub { color: var(--ink-2); font-size: 12px; }
+.moreButton { display: block; margin: 6px auto 0; padding: 4px 12px; border: 0; background: transparent; color: var(--primary); cursor: pointer; }
+
+/* ---------- 单店对比 ---------- */
+.benchGrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+.benchItem { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 6px; background: #fafafa; }
+.benchValue { font-size: 20px; font-weight: 600; }
+
+/* ---------- 分类对照抽屉 ---------- */
+.mapGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+.mapTitle { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.mapTitle .hint { margin-left: auto; }
+.mapItem { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-top: 1px dashed var(--line); font-size: 12px; }
+.mapName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mapValue { flex: none; color: var(--muted); }
+
+/* ---------- 钻取抽屉 ---------- */
+.dHeader { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.dThumb { flex: none; width: 64px; height: 64px; }
+.dSwatch { flex: none; width: 14px; height: 14px; border-radius: 3px; }
+.dIdentity { min-width: 0; flex: 1; }
+.dTitle { font-size: 17px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.dMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.dClose { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid var(--control-line); border-radius: 6px; background: #fff; color: #475467; cursor: pointer; }
+.dClose:hover { background: #f1f4f9; }
+.dKpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; padding: 14px 20px; }
+.dKpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.dKpiLabel { color: var(--muted); font-size: 12px; }
+.dKpiValue { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.dKpiSub { color: var(--ink-2); font-size: 12px; }
+.dKpiBad { border-color: var(--bad-line); background: #fff7f6; }
+.dKpiBad .dKpiValue { color: var(--bad); }
+.dKpiWarn .dKpiValue { color: var(--warn); }
+.dBody { padding: 0 20px 20px; }
+.dTable { width: 100%; min-width: 820px; border-collapse: collapse; }
+.dTable th { padding: 8px 6px; border-bottom: 1px solid var(--line); background: var(--head); color: var(--muted); font-weight: 500; text-align: left; white-space: nowrap; }
+.dTable td { padding: 7px 6px; border-bottom: 1px solid var(--line-3); vertical-align: middle; white-space: nowrap; }
+.dTable .num { text-align: right; }
+.dTable .wide { min-width: 120px; }
+.dTable .barValue { width: 56px; }
+.dTable .barValueSm { width: 36px; }
+.dTotalRow td { border-bottom: 2px solid #d6e4ff; background: #f5f9ff; font-weight: 600; }
+.dCurrentRow td { background: #fffbe6; }
+.chipTag { display: inline-block; padding: 0 7px; border: 1px solid; border-radius: 4px; font-size: 11px; line-height: 18px; }
+.chipBad { border-color: var(--bad-line); background: var(--bad-bg); color: var(--bad); }
+.chipWarn { border-color: var(--warn-line); background: var(--warn-bg); color: var(--warn); }
+.dTabs { display: flex; gap: 4px; margin: 0 20px; border-bottom: 1px solid var(--line); }
+.dTab, .dTabOn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 16px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: transparent; color: var(--muted); font-size: 14px; cursor: pointer; }
+.dTabOn { border-bottom-color: var(--primary); color: var(--primary); font-weight: 600; }
+.dTab em, .dTabOn em { padding: 0 6px; border-radius: 9px; background: #eef1f6; color: var(--muted); font-size: 12px; font-style: normal; font-weight: 400; }
+.dTabOn em { background: var(--primary-bg); color: var(--primary); }
+.dToolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 12px 20px; }
+.dSearch { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 180px; max-width: 280px; height: 32px; padding: 0 10px; border: 1px solid var(--control-line); border-radius: 6px; background: #fff; color: #98a2b3; }
+.dSearch input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); }
+.dSort { margin-left: auto; }
+.storeChip { padding: 3px 12px; border: 1px solid var(--warn-line); border-radius: 14px; background: var(--warn-bg); color: var(--warn); font-size: 12px; cursor: pointer; }
+.dProducts { margin: 0; padding: 0; list-style: none; }
+.dProductRow { display: grid; grid-template-columns: 22px 52px minmax(0, 1fr) 150px 150px 120px 14px; gap: 12px; align-items: center; padding: 8px 6px; border-top: 1px solid var(--line-3); border-radius: 6px; cursor: pointer; }
+.dProductRow:first-child { border-top: 0; }
+.dProductRow:hover { background: #f5f9ff; }
+.alignRight { text-align: right; }
+
+@media (max-width: 1100px) {
+  .kpis, .benchGrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .dKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dProductRow { grid-template-columns: 22px 48px minmax(0, 1fr) 14px; }
+  .dProductRow > :nth-child(n+4):nth-child(-n+6) { grid-column: 3; text-align: left; }
+  .kpis, .benchGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .quad { grid-template-columns: minmax(0, 1fr); }
+  .product { grid-template-columns: 22px 48px minmax(0, 1fr) 14px; }
+  .productValue { grid-column: 3; min-width: 0; text-align: left; }
+  .thumb { width: 48px; height: 48px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .page * { animation: none !important; transition: none !important; }
+}

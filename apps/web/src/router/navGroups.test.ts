@@ -11,6 +11,7 @@ const { buildAccess } = await import('../utils/access')
 const {
   buildMenus,
   getBreadcrumbItems,
+  getCurrentElement,
   getSelectedMenuKeys,
   NAV_GROUPS,
   normalizePersistedTabs,
@@ -179,6 +180,54 @@ assert(reviewRedirect?.meta.hidden === true && reviewRedirect.meta.accessKey ===
 assert(reviewRedirect?.meta.activeMenu === '/pos-admin/attendance', '旧考勤审核地址侧栏高亮排班考勤')
 assert(toTabItem('/pos-admin/attendance-review', admin) === null, '旧考勤审核地址只跳转，不生成页签')
 assert(getSelectedMenuKeys('/pos-admin/myob', admin).join(',') === '/pos-admin/payroll', 'MYOB 对接侧栏高亮工时与工资')
+
+// 商品陈列图：「商品与价格」合并页的第 5 个标签（排在促销之后），保活；只有陈列图权限的账号只看到这一个标签，
+// 且不连带出现商品维护 / 价格类标签；商品价格类权限也看不到它。
+const productsGroup = NAV_GROUPS.find((group) => group.path === '/pos-admin/products-pricing')!
+assert(
+  productsGroup.tabs.map((tab) => tab.path).join(',') ===
+    '/pos-admin/products,/pos-admin/store-product-price,/pos-admin/pricing-strategies,/pos-admin/promotions,/pos-admin/planograms',
+  '商品与价格合并页含商品陈列图标签（排在促销之后）',
+)
+assert(productsGroup.tabs.find((tab) => tab.path === '/pos-admin/planograms')?.keepAlive === true, '商品陈列图保活')
+assert(productsGroup.tabs.find((tab) => tab.path === '/pos-admin/planograms')?.accessKey === 'canViewPlanogram', '商品陈列图独立访问键')
+assert(!adminMenuKeys.includes('/pos-admin/planograms'), '商品陈列图不单独出现在侧栏')
+const planogramOnly = buildAccess(createUser([P.Planogram.View]))
+assert(collectMenuKeys(buildMenus(planogramOnly)).includes('/pos-admin/products-pricing'), '陈列图权限显示商品与价格合并页')
+assert(
+  getVisibleNavGroupTabs(productsGroup, planogramOnly).map((tab) => tab.path).join(',') === '/pos-admin/planograms',
+  '陈列图权限只看到商品陈列图标签',
+)
+const pricingOnly = buildAccess(createUser([P.PricingStrategy.View]))
+assert(
+  getVisibleNavGroupTabs(productsGroup, pricingOnly).every((tab) => tab.path !== '/pos-admin/planograms'),
+  '价格策略权限不连带商品陈列图标签',
+)
+assert(resolveRoute('/pos-admin/planograms')?.meta.hidden === true, '商品陈列图是合并页内的隐藏路由')
+assert(getBreadcrumbItems('/pos-admin/planograms', admin).length === 3, '商品陈列图面包屑含父菜单、合并页与标签')
+assert(getSelectedMenuKeys('/pos-admin/planograms', admin).join(',') === '/pos-admin/products-pricing', '商品陈列图侧栏高亮商品与价格')
+assert(toTabItem('/pos-admin/planograms', admin)?.key === '/pos-admin/products-pricing', '与同组标签共用一个顶部页签')
+
+// 陈列方案设计器（批 2）：带参数的隐藏子页面，每个方案一个独立保活页签；不并进合并页的页签、不出现在侧栏，侧栏高亮「商品与价格」
+const designerPath = '/pos-admin/planograms/0190f3c2-aaaa-7000-8000-0123456789ab/design'
+const designerRoute = resolveRoute(designerPath)
+assert(designerRoute?.path === '/pos-admin/planograms/:guid/design', '设计器路由按带参数的模式解析')
+assert(designerRoute?.params.guid === '0190f3c2-aaaa-7000-8000-0123456789ab', '路由参数 guid 被解析出来')
+assert(designerRoute?.meta.hidden === true && designerRoute?.meta.keepAlive === true, '设计器隐藏且保活')
+assert(designerRoute?.meta.accessKey === 'canViewPlanogram', '设计器按查看权限进入')
+assert(designerRoute?.meta.navGroup === undefined, '设计器不是合并页标签（有自己的页签）')
+assert(!adminMenuKeys.includes('/pos-admin/planograms/:guid/design'), '设计器不出现在侧栏')
+assert(getSelectedMenuKeys(designerPath, admin).join(',') === '/pos-admin/products-pricing', '设计器侧栏高亮商品与价格')
+const designerTab = toTabItem(designerPath, admin)
+assert(designerTab?.key === designerPath && designerTab.keepAlive === true, '每个方案一个独立保活页签（缓存键 = 路径）')
+assert(designerTab?.routePath === '/pos-admin/planograms/:guid/design', '页签记录路由模式')
+assert(
+  toTabItem('/pos-admin/planograms/other-plan/design', admin)?.key !== designerTab?.key,
+  '不同方案的设计器是不同页签',
+)
+assert(getCurrentElement(designerPath, planogramOnly) === designerRoute?.element, '只有查看权限的账号能打开设计器（页内按编辑权限只读）')
+assert(getCurrentElement(designerPath, admin) === designerRoute?.element, '管理员能打开设计器')
+assert(getCurrentElement(designerPath, pricingOnly) !== designerRoute?.element, '价格策略权限不能打开设计器（落到无权限页）')
 
 // 本地存储里的旧页签归到合并页，同组只留一个
 const persisted: TabItem[] = [

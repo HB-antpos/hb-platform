@@ -64,10 +64,10 @@ jobs:
       macos_matrix: ${{ steps.plan.outputs.macos_matrix }}
       android_matrix: ${{ steps.plan.outputs.android_matrix }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
       - name: 验证 CI 编排器
@@ -110,12 +110,12 @@ jobs:
       # 现有 Node 测试把“本地日”定义为 Brisbane；限制在 Node lane，避免改变原生/.NET runner。
       TZ: Australia/Brisbane
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           # 共享迁移门禁直接复核固定基线的归属与语义；双端 lane 必须取得完整历史。
           fetch-depth: ${{ (matrix.component == 'pos-ipad' || matrix.component == 'pos-handheld') && '0' || '1' }}
       - if: matrix.component != 'noop'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           # 每个组件按自己实际安装的锁文件分 key，与 quality-baseline.yml 同一公式以复用 main 上已有缓存。
@@ -156,7 +156,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
       - name: 上传组件质量结果
         if: always() && contains(fromJSON(needs.plan.outputs.quality_lanes), matrix.component)
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-lane-${{ github.run_id }}-${{ matrix.component }}
           path: .artifacts/quality-baseline/${{ matrix.component }}.json
@@ -165,7 +165,7 @@ jobs:
           retention-days: 7
       - name: 上传 Web 包体明细
         if: always() && matrix.component == 'web' && steps.verify.outcome == 'success'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-web-bundle-${{ github.run_id }}
           path: .artifacts/quality-baseline/web-bundle.json
@@ -182,13 +182,13 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - if: matrix.component != 'noop'
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - if: matrix.component == 'pos-contract'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: npm
@@ -215,7 +215,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
       - name: 上传 Backend 质量结果
         if: always() && matrix.component == 'backend'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-lane-${{ github.run_id }}-${{ matrix.component }}
           path: .artifacts/quality-baseline/backend.json
@@ -224,7 +224,7 @@ jobs:
           retention-days: 7
       - name: 上传 .NET 测试结果
         if: always() && matrix.component != 'noop'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: dotnet-${{ matrix.component }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/${{ matrix.component }}
@@ -240,19 +240,62 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - if: matrix.component != 'noop'
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: 检测预装 .NET SDK 与 .NET 8 运行时
+        id: sdk
+        if: matrix.component != 'noop'
+        shell: pwsh
+        run: |
+          # global.json 允许 9.0.314 按 latestPatch 前滚；windows-2025 镜像预装的 9.0.3xx SDK 与 .NET 8 运行时
+          # 齐全时直接复用，省掉每个分片约 1 分钟的两套 SDK 下载；缺任一项才交给 setup-dotnet 安装。
+          $install = 'true'
+          try {
+            $sdk = & dotnet --version 2>$null
+            $sdkExit = $LASTEXITCODE
+            $runtimes = @(& dotnet --list-runtimes 2>$null)
+            $missing = @('Microsoft.NETCore.App', 'Microsoft.WindowsDesktop.App', 'Microsoft.AspNetCore.App') |
+              Where-Object { $name = $_; -not ($runtimes | Where-Object { $_ -like "$name 8.*" }) }
+            if ($sdkExit -eq 0 -and "$sdk" -match '^9\.0\.3\d\d$' -and -not $missing) {
+              $install = 'false'
+            }
+          } catch {
+            $install = 'true'
+          }
+          "install=$install" >> $env:GITHUB_OUTPUT
+          Write-Host "预装 SDK=$sdk 缺失的 .NET 8 运行时=[$($missing -join ', ')] 需要安装=$install"
+      - if: matrix.component != 'noop' && steps.sdk.outputs.install == 'true'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: |
             8.0.x
             9.0.314
+      - name: 恢复 NuGet 包缓存
+        id: nuget_cache
+        if: matrix.component != 'noop'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.nuget/packages
+          # 任一 csproj 或 SDK 固定版本变化就换 key；前缀兜底命中旧缓存时 restore 只补差量。
+          key: nuget-pos-wpf-${{ runner.os }}-${{ hashFiles('apps/pos-wpf/**/*.csproj', 'services/backend/BlazorApp.Shared/BlazorApp.Shared.csproj', 'global.json') }}
+          restore-keys: |
+            nuget-pos-wpf-${{ runner.os }}-
       - name: 构建并测试 WPF
         shell: pwsh
         run: ./scripts/ci/run-windows-component.ps1 -Component '${{ matrix.component }}' -Profile '${{ needs.plan.outputs.profile }}' -Shard '${{ matrix.shard || 'noop' }}'
+      - name: 保存 NuGet 包缓存
+        # 只由 ui 分片回存，避免未命中时 11 个分片各自上传同一份包；前缀命中（cache-hit 为 false）也回存以刷新 key。
+        # 只在 main（weekly 定时与 workflow_dispatch）回存：Actions 缓存按 ref 隔离，PR 与合并队列分支回存的约 357 MB
+        # 只有该分支自己能读，白占仓库 10 GB 配额（11-03 实测 main 上一条都没有，PR 和队列 ref 各存一份）；
+        # 它们只读 main 的缓存。csproj / global.json 变化合入 main 后，用
+        # `gh workflow run pr-ci.yml --ref main -f profile=pr -f component=pos-wpf` 预热。
+        if: ${{ !cancelled() && github.ref_name == 'main' && matrix.shard == 'ui' && steps.nuget_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.nuget/packages
+          key: ${{ steps.nuget_cache.outputs.cache-primary-key }}
       - name: 上传 WPF 测试结果
         if: always() && matrix.component != 'noop'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: windows-${{ matrix.component }}-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pos-wpf
@@ -270,9 +313,9 @@ jobs:
     env:
       CI_PROFILE: ${{ needs.plan.outputs.profile }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - if: matrix.component != 'noop'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: npm
@@ -307,10 +350,12 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.android_matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ matrix.timeout }}
+    env:
+      CI_PROFILE: ${{ needs.plan.outputs.profile }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - if: matrix.component != 'noop'
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
           cache: npm
@@ -318,11 +363,20 @@ jobs:
             package-lock.json
             apps/mobile/package-lock.json
       - if: matrix.component != 'noop'
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
         with:
           distribution: temurin
           java-version: 17
-          cache: gradle
+      # setup-java 的 gradle 缓存 key 在 expo prebuild 之前按 **/*.gradle* 哈希，此时 android 目录还不存在：
+      # key 恒定、命中后不再回存，内容冻结在首次保存（实测 1001 个 Gradle 任务 839 个重新执行）。
+      # setup-gradle 按 Gradle User Home 的实际内容分条目缓存（依赖 + transforms + build cache 约 1.9 GB）。
+      # 只在 main（weekly 定时与 workflow_dispatch）回存：PR 分支各自回存时两个分支加 main 就把仓库 10 GB
+      # 缓存配额撑满（11-03 实测 10.15 GB），会挤掉 WPF NuGet 与 npm 缓存；PR 与合并队列分支只读 main 的缓存。
+      # pos-handheld 原生依赖变化合入 main 后，用 `gh workflow run pr-ci.yml --ref main -f profile=pr -f component=pos-handheld` 预热。
+      - if: matrix.component != 'noop'
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c
+        with:
+          cache-read-only: ${{ github.ref_name != 'main' }}
       - name: 构建并测试 Android 原生模块
         shell: bash
         run: |
@@ -339,21 +393,29 @@ jobs:
           ./scripts/ci/run-android-component.sh '${{ matrix.component }}'
 
   schema_sql:
-    name: PR CI / Backend schema SQL
+    name: PR CI / Backend schema SQL / ${{ matrix.shard }}
     needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        # 80 个真实 SQL Server 迁移用例里 10 个要跑完整迁移协调器、各约 25 秒；按方法名前缀切成两片各自起隔离容器
+        # 并行执行，分片定义与完整性校验见 scripts/ci/schema-sql-shards.mjs。required 通过 needs 取矩阵整体结果。
+        shard:
+          - a
+          - b
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     env:
       CI_SQL_PASSWORD: HbCi_2026!Safe_Only
-      CI_SCHEMA_SQL_CONTAINER_NAME: hbweb-schema-sql-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_SCHEMA_SQL_CONTAINER_NAME: hbweb-schema-sql-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard }}
       HBWEB_SCHEMA_SQLSERVER_TEST_CONNECTION: Server=localhost,1433;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: 非 Backend PR 无需运行真实 Schema SQL
         if: ${{ !(github.event_name == 'pull_request' || github.event_name == 'merge_group') || !contains(fromJSON(needs.plan.outputs.components), 'backend') }}
         run: echo 'schema_sql=noop'
       - if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - name: 启动隔离 SQL Server
@@ -367,12 +429,12 @@ jobs:
           mcr.microsoft.com/mssql/server@sha256:7c29dfbac885ad7519e219c7fe4aee0e67283e21a10e9c252d13b0fbde1866f8
       - name: 运行真实 Schema SQL 门禁
         if: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
-        run: ./scripts/ci/run-schema-sql.sh
+        run: ./scripts/ci/run-schema-sql.sh '${{ matrix.shard }}'
       - name: 上传 Schema SQL 结果
         if: ${{ always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group') && contains(fromJSON(needs.plan.outputs.components), 'backend') }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: schema-sql-${{ github.run_attempt }}
+          name: schema-sql-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/schema-sql
           if-no-files-found: ignore
           retention-days: 7
@@ -394,18 +456,18 @@ jobs:
       - name: 无质量组件时跳过采集
         if: needs.plan.result != 'success' || needs.plan.outputs.quality_lanes == '[]'
         run: echo 'quality_report=noop'
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         if: needs.plan.result == 'success' && needs.plan.outputs.quality_lanes != '[]'
       - name: 下载组件质量结果
         if: needs.plan.result == 'success' && needs.plan.outputs.quality_lanes != '[]'
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: quality-lane-${{ github.run_id }}-*
           path: .artifacts/quality-baseline/lanes
           merge-multiple: true
       - name: 下载 Web 包体明细
         if: needs.plan.result == 'success' && contains(fromJSON(needs.plan.outputs.quality_lanes), 'web')
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: quality-web-bundle-${{ github.run_id }}
           path: .artifacts/quality-baseline/web-bundle
@@ -430,7 +492,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
       - name: 保存质量报告
         if: always() && needs.plan.result == 'success' && needs.plan.outputs.quality_lanes != '[]'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: quality-baseline-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
@@ -461,8 +523,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
       - name: 汇总必需检查
@@ -515,15 +577,15 @@ jobs:
       LSPA_SQLSERVER_TEST_CONNECTION: Server=localhost,1433;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
       SALES_STATISTICS_RECOVERY_SQLSERVER_TEST_CONNECTION: Server=127.0.0.1,15438;User Id=sa;Password=HbCi_2026!Safe_Only;Encrypt=False;TrustServerCertificate=True;Connect Timeout=30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - name: 运行独立 SQL Server 集成测试
         run: ./scripts/ci/run-weekly-sql.sh
       - name: 上传 Weekly SQL 结果
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: weekly-sql-${{ github.run_attempt }}
           path: ${{ runner.temp }}/weekly-sql
@@ -537,15 +599,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73
         with:
           dotnet-version: 9.0.314
       - name: 采集性能测试结果
         run: ./scripts/ci/run-weekly-performance.sh
       - name: 上传 Weekly 性能结果
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: weekly-performance-${{ github.run_attempt }}
           path: ${{ runner.temp }}/weekly-performance
@@ -563,8 +625,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 24
       - name: 汇总每周全量检查

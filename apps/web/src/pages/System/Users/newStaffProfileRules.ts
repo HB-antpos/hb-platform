@@ -1,13 +1,14 @@
 /**
  * 「创建用户」新建员工的必填规则（与后端 NewStaffProfileRules.cs 同一套口径，前端只负责提前提示）：
  * - 电话、生日必填；生日不能晚于悉尼今天，也不能早于 1940-01-01；
- * - 生日未满 18 岁时，监护人姓名、关系、手机（04 开头澳洲手机）、邮箱四项必填，
+ * - 生日未满 16 岁时，监护人姓名、关系、手机（04 开头澳洲手机）、邮箱四项必填，
  *   且监护人手机 / 邮箱不能和员工本人的电话 / 邮箱相同。
  * 这里只放纯函数，不依赖 React / antd / dayjs，便于在 node 下单测。
  */
 
 export const EARLIEST_BIRTHDAY = '1940-01-01'
-export const ADULT_AGE = 18
+/** 未满这个年龄要填监护人并预建未成年合规草稿；与后端 MinorEmploymentComplianceCalculator.MinorAgeLimit 一致（2026-11-03 由 18 改 16）。 */
+export const GUARDIAN_AGE_LIMIT = 16
 
 /** 关系选项：提交英文值（会印在英文同意书上），界面显示中文 / 英文文案。 */
 export const GUARDIAN_RELATIONSHIP_OPTIONS = [
@@ -78,10 +79,10 @@ export function calculateAge(birthday: string | null | undefined, todayIso: stri
 }
 
 export function isMinorAge(age: number | null | undefined): boolean {
-  return typeof age === 'number' && age >= 0 && age < ADULT_AGE
+  return typeof age === 'number' && age >= 0 && age < GUARDIAN_AGE_LIMIT
 }
 
-/** 生日在范围内且未满 18 岁。 */
+/** 生日在范围内且未满 16 岁。 */
 export function isMinorBirthday(birthday: string | null | undefined, todayIso: string) {
   return isBirthdayInRange(birthday, todayIso) && isMinorAge(calculateAge(birthday, todayIso))
 }

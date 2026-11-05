@@ -128,6 +128,7 @@
       "sortBy": "Sort by",
       "sortDirection": "Sort direction",
       "supplierTitle": "Select China supplier",
+      "supplierSearchPlaceholder": "Search supplier code or name",
       "allSuppliers": "All suppliers",
       "clear": "Clear"
     },

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using System.ComponentModel.DataAnnotations;
 
 namespace BlazorApp.Shared.DTOs
@@ -8,6 +10,7 @@ namespace BlazorApp.Shared.DTOs
         public string ProductCode { get; set; } = string.Empty;
         public string Grade { get; set; } = string.Empty;
         public string? SupplierCode { get; set; }
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
         public string? HbProductNo { get; set; }
         public string? ProductName { get; set; }

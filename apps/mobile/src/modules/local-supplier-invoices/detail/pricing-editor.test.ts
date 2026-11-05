@@ -6,6 +6,7 @@ import {
   formatDiscountRate,
   formatPricingFloatRate,
   getPricingSummary,
+  getRetailPriceDisplay,
   normalizeDiscountRate,
   type PricingEditorDraft,
 } from "./pricing-editor";
@@ -125,11 +126,30 @@ assertDeepEqual(
     isSpecial: true,
     discount: { percent: 12.5, text: "12.5%" },
     newAutoRetailPrice: 4.5,
+    belowMinimum: false,
     storeStatus: "auto",
   },
   "自动定价摘要"
 );
 assertEqual(getPricingSummary(makeItem({ autoPricing: true, pricingFloatRate: null })).mode, "autoNoRate", "自动但无倍率");
+assertEqual(getPricingSummary(makeItem({ autoPricing: true, pricingFloatRate: null, purchasePrice: 0.023 })).belowMinimum, true, "自动定价且进货价低于 0.10 要提示原因");
+assertEqual(getPricingSummary(makeItem({ autoPricing: true, purchasePrice: 0.1 })).belowMinimum, false, "正好 0.10 可以自动定价");
+assertEqual(getPricingSummary(makeItem({ autoPricing: true, purchasePrice: 0 })).belowMinimum, false, "进货价为 0 走无进货价提示，不算低价");
+assertEqual(getPricingSummary(makeItem({ autoPricing: false, purchasePrice: 0.05 })).belowMinimum, false, "手动定价不受下限约束");
+
+// ---- 零售价：没填指定价时显示本店现价（只读），并给出与本次进货价的倍率 ----
+// 真实案例（11-03 Waratah 0002080736-D01）：本店现价 2.50，本次进货价 1.57。
+assertDeepEqual(
+  getRetailPriceDisplay(makeItem({ retailPrice: null, storeRetailPrice: 2.5, purchasePrice: 1.57 })),
+  { value: 2.5, source: "store", storeRetailPrice: 2.5, storeMarkupText: "1.59", storeMarkupLow: false },
+  "没填指定零售价时显示本店现价与倍率"
+);
+assertEqual(getRetailPriceDisplay(makeItem({ retailPrice: 3.99, storeRetailPrice: 2.5, purchasePrice: 1.57 })).source, "designated", "填了指定价时主值是指定价");
+assertEqual(getRetailPriceDisplay(makeItem({ retailPrice: 0, storeRetailPrice: 2.5, purchasePrice: 1.57 })).source, "store", "指定价为 0 按没填处理");
+assertEqual(getRetailPriceDisplay(makeItem({ retailPrice: null, storeRetailPrice: 2.0, purchasePrice: 1.57 })).storeMarkupLow, true, "不到 1.5 倍标红");
+assertEqual(getRetailPriceDisplay(makeItem({ retailPrice: null, storeRetailPrice: 2.5, purchasePrice: null })).storeMarkupText, null, "没有进货价不算倍率");
+assertEqual(getRetailPriceDisplay(makeItem({ productCode: "", retailPrice: null, storeRetailPrice: 2.5 })).source, "none", "没匹配商品不挂本店现价");
+assertEqual(getRetailPriceDisplay(makeItem({ retailPrice: null, storeRetailPrice: null })).value, null, "本店未建价格时照旧为空");
 assertEqual(getPricingSummary(makeItem({ autoPricing: false })).mode, "manual", "手动");
 assertEqual(getPricingSummary(makeItem({ autoPricing: null })).mode, "unset", "未设置显示 --");
 assertEqual(getPricingSummary(makeItem({ autoPricing: false, pricingFloatRate: 2 })).floatRate, null, "非自动模式不带倍率");

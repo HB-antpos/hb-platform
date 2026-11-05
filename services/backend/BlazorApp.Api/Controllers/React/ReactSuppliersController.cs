@@ -1,6 +1,8 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -41,6 +43,9 @@ namespace BlazorApp.Api.Controllers.React
             try
             {
                 var suppliers = await _supplierReactService.GetActiveSupplierListAsync();
+                // 这里返回的是匿名对象，全局遮罩转换器挂不上，必须按权限手工处理：
+                // 没有「查看国内供应商名称」权限时只返回供应商代码，名称、店铺号、联系人、电话都为空。
+                var canViewName = await HttpContext.CanViewDomesticSupplierNameAsync();
 
                 return Ok(
                     new
@@ -49,10 +54,10 @@ namespace BlazorApp.Api.Controllers.React
                         data = suppliers.Select(s => new
                         {
                             code = s.SupplierCode,
-                            name = s.SupplierName,
-                            shopNumber = s.ShopNumber,
-                            contactPerson = s.ContactPerson,
-                            phone = s.Phone,
+                            name = DomesticSupplierInfoMasking.Apply(s.SupplierName, canViewName),
+                            shopNumber = DomesticSupplierInfoMasking.Apply(s.ShopNumber, canViewName),
+                            contactPerson = DomesticSupplierInfoMasking.Apply(s.ContactPerson, canViewName),
+                            phone = DomesticSupplierInfoMasking.Apply(s.Phone, canViewName),
                         }),
                         message = "获取供应商列表成功",
                     }

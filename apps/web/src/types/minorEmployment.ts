@@ -145,7 +145,7 @@ export type MinorStaffStage =
   | 'returned'
   | 'approved'
 
-/** 店长 / HR 视角的未满 18 岁员工一行：没有任何合规记录的员工也会列出（stage=not_sent）。 */
+/** 店长 / HR 视角的未满 16 岁员工一行：没有任何合规记录的员工也会列出（stage=not_sent）。 */
 export interface MinorStaffComplianceItem {
   userGUID: string
   employeeName: string

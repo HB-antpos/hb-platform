@@ -101,7 +101,7 @@ export function MinorRemindersScreen() {
             { value: "reminders", label: label("排班提醒", "Roster reminders") },
             {
               value: "employees",
-              label: label("未成年员工资料", "Under-18 staff"),
+              label: label("未成年员工资料", "Under-16 staff"),
             },
           ]}
         />

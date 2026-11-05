@@ -10,7 +10,7 @@
  * 创建分两步（建号 → 写入「管理」分店）：第一步成功后账号已存在、无法回滚，因此第二步失败时
  * 停在本页提示「第 2 步失败」，只重试第二步，绝不重复创建；建号结果未知（超时 / 5xx）时冻结表单，先核对。
  *
- * 「姓名与联系」补上必填电话和生日；未满 18 岁时出现「监护人」一节（设计图 9，与店长版共用组件）。
+ * 「姓名与联系」补上必填电话和生日；未满 16 岁时出现「监护人」一节（设计图 9，与店长版共用组件）。
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -537,7 +537,7 @@ export function AdminCreateScreen() {
             disabled={frozen}
           />
         </View>
-        {/* 新增：必填电话与生日（设计图 9）；未满 18 岁时出现「监护人」一节，与店长版同一组件。 */}
+        {/* 新增：必填电话与生日（设计图 9）；未满 16 岁时出现「监护人」一节，与店长版同一组件。 */}
         <View onLayout={anchor("phone")}>
           <NewStaffPhoneField
             value={values.phone}

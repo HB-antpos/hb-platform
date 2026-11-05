@@ -353,7 +353,7 @@ public sealed class EmployeeMinorManagerCandidateDto
 }
 
 /// <summary>
-/// 店长 / HR 视角下一名未满 18 岁员工的合规概况（Web「未成年用工合规」页签与手机「人员管理 → 员工详情」共用）。
+/// 店长 / HR 视角下一名未满 16 岁员工的合规概况（Web「未成年用工合规」页签与手机「人员管理 → 员工详情」共用）。
 /// 没有任何合规记录的员工也会返回，<see cref="Stage"/> 为 not_sent。
 /// </summary>
 public sealed class EmployeeMinorStaffComplianceDto
@@ -407,7 +407,7 @@ public sealed class EmployeeMinorStaffComplianceListDto
     public bool SmsAvailable { get; set; }
 }
 
-/// <summary>单个员工的合规概况；员工未满 18 岁才有 <see cref="Item"/>。</summary>
+/// <summary>单个员工的合规概况；员工未满 16 岁才有 <see cref="Item"/>。</summary>
 public sealed class EmployeeMinorStaffComplianceDetailDto
 {
     public EmployeeMinorStaffComplianceDto? Item { get; set; }
@@ -452,7 +452,7 @@ public sealed class EmployeeMinorGuardianLinkRevokeDto
     public int ExpectedRevision { get; set; }
 }
 
-/// <summary>新建员工时一并录入的监护人（员工未满 18 岁时四项必填）。</summary>
+/// <summary>新建员工时一并录入的监护人（员工未满 16 岁时四项必填）。</summary>
 public sealed class NewStaffGuardianDto
 {
     [StringLength(200)] public string? Name { get; set; }

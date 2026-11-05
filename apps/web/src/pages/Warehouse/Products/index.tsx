@@ -40,6 +40,7 @@ import type { MulticodeSetItem } from '../../../types/multiCodeSet';
 import type { PushProductsToHqResult, PushProductsToHqStoreOption, PushProductsToHqUpdateField, } from '../../../types/posProduct';
 import { useSnapshotSort } from '../../../hooks/useSnapshotSort';
 import { copyTextToClipboard } from '../../../utils/clipboard';
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel';
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard';
 import { RequestError } from '../../../utils/request';
 import { lookupSuggestedDiscounts, previewPriceNotification, setSuggestedDiscounts } from '../../../services/storePriceUpdateTaskService';
@@ -401,8 +402,9 @@ function saveActiveWarehouseProductBatchUpdateJob(job: ActiveWarehouseProductBat
 function buildSupplierOptions(suppliers: SupplierOption[]): SupplierSelectOption[] {
     return suppliers.map((item) => ({
         value: item.code,
-        label: `${item.code} - ${item.name}`,
-        searchText: `${item.code} ${item.name} ${item.shopNumber ?? ''}`.toLowerCase(),
+        // 无「查看国内供应商名称」权限时名称为空，只显示代码。
+        label: formatDomesticSupplierLabel(item.code, item.name),
+        searchText: `${item.code} ${item.name ?? ''} ${item.shopNumber ?? ''}`.toLowerCase(),
     }));
 }
 function filterSupplierOption(input: string, option?: DefaultOptionType) {
@@ -3322,7 +3324,7 @@ export default function WarehouseProductsPage() {
           onMutationCommitted={handleCategoryMutationCommitted}
           onCategoriesChanged={handleCategoriesChanged}/>) : null}
 
-      <ImportFromDomesticModal open={importFromDomesticOpen} onCancel={() => setImportFromDomesticOpen(false)} onSuccess={() => void refreshCurrentList({ page: 1 })}/>
+      <ImportFromDomesticModal open={importFromDomesticOpen} onCancel={() => setImportFromDomesticOpen(false)} onSuccess={() => void refreshCurrentList({ page: 1 })} showSupplierName={access.canViewDomesticSupplierName}/>
 
       <ImportNonHbModal open={importNonHbOpen} onCancel={() => setImportNonHbOpen(false)} onSuccess={() => void refreshCurrentList({ page: 1 })}/>
 

@@ -74,6 +74,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canViewSalesDetail: [P.SalesDashboard.SalesDetailView],
   canViewCompactSalesBoard: [P.SalesDashboard.CompactBoardView],
   canViewMonthlyDailySalesDownload: [P.SalesDashboard.MonthlyDailySalesDownloadView],
+  canViewHolidaySalesReport: [P.SalesDashboard.HolidaySalesReportView],
   canViewProductMovementReport: [P.SalesDashboard.ProductMovementView],
   canViewBatchProductSalesAnalysis: [P.SalesDashboard.BatchProductSalesView],
   canViewWarehouseProductFlowAnalysis: [P.SalesDashboard.WarehouseFlowView],
@@ -88,6 +89,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageStoreProducts: [P.StoreProducts.View],
   canManagePricing: [P.PricingStrategy.View],
   canManagePromotions: [P.Promotions.View],
+  // 商品陈列图页签：从菜单授予只补 View；Edit / Manage 不是菜单叶子，由角色权限页单独授予。
+  canViewPlanogram: [P.Planogram.View],
   canManageAdvertisements: [P.Advertisements.View],
   canViewAttendanceSchedule: [P.Attendance.AdminView, P.Attendance.ScheduleViewStore],
   // 与 access.ts 一致：审核入口只认 Approval.ReviewManagedStore（请假审核也走同一接口）
@@ -221,6 +224,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/executive-sales-intelligence/sales-detail-v2', title: 'menu.salesDetail', accessKey: 'canViewSalesDetail' },
       { path: '/executive-sales-intelligence/compact-sales-board', title: 'menu.compactSalesBoard', accessKey: 'canViewCompactSalesBoard' },
       { path: '/executive-sales-intelligence/monthly-daily-sales-download', title: 'menu.monthlyDailySalesDownload', accessKey: 'canViewMonthlyDailySalesDownload' },
+      { path: '/executive-sales-intelligence/holiday-sales-report', title: 'menu.holidaySalesReport', accessKey: 'canViewHolidaySalesReport' },
       { path: '/executive-sales-intelligence/product-movement-report', title: 'menu.productMovementReport', accessKey: 'canViewProductMovementReport' },
       { path: '/executive-sales-intelligence/warehouse-product-flow-analysis', title: 'menu.warehouseProductFlowAnalysis', accessKey: 'canViewWarehouseProductFlowAnalysis' },
       { path: '/executive-sales-intelligence/purchase-sales-analysis', title: 'menu.purchaseSalesAnalysis', accessKey: 'canViewPurchaseSalesAnalysis' },
@@ -241,6 +245,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
           { path: '/pos-admin/store-product-price', title: 'menu.storeProductPrice', accessKey: 'canManageStoreProducts' },
           { path: '/pos-admin/pricing-strategies', title: 'menu.pricingStrategies', accessKey: 'canManagePricing' },
           { path: '/pos-admin/promotions', title: 'menu.promotions', accessKey: 'canManagePromotions' },
+          { path: '/pos-admin/planograms', title: 'menu.planogram', accessKey: 'canViewPlanogram' },
         ],
       },
       {
@@ -279,7 +284,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
 ]
 
 /** 自带后台入口规则（见 webPortalAccess 的 ADMIN_ENTRY_RULES）的独立页面：从菜单授予时不连带授予工作台。 */
-const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash'])
+const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms'])
 
 const warehouseStaffVisibleMenuPaths = new Set([
   '/warehouse',

@@ -224,7 +224,8 @@ export default function BatchDetailDrawer({ open, batch, onClose }: BatchDetailD
 
   const meta = batch ? (
     <div className="pc-drawer-meta">
-      <span>{detail?.supplierName || batch.supplierName}</span>
+      {/* 没有「查看国内供应商名称」权限时名称为空，回退到供应商编码。 */}
+      <span>{detail?.supplierName || batch.supplierName || detail?.supplierCode || batch.supplierCode}</span>
       {(detail?.prefixCode || batch.prefixCode) ? <span className="pc-prefix-tag">{detail?.prefixCode || batch.prefixCode}</span> : null}
       <span>·</span>
       <span>

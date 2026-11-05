@@ -575,7 +575,7 @@ public sealed partial class EmployeeMinorComplianceService
 
     // ───────────── 店长发起填写请求 ─────────────
 
-    /// <summary>店长可管理门店里按员工资料生日判定未满 18 岁的员工，附最新档案状态与未完成请求。管理员须指定门店。</summary>
+    /// <summary>店长可管理门店里按员工资料生日判定未满 16 岁的员工，附最新档案状态与未完成请求。管理员须指定门店。</summary>
     public async Task<ApiResponse<List<EmployeeMinorManagerCandidateDto>>> GetManagerCandidatesAsync(string? storeCode)
     {
         var scope = await _storeScope.GetScopeAsync();
@@ -584,9 +584,9 @@ public sealed partial class EmployeeMinorComplianceService
         if (scope.IsAdmin && string.IsNullOrWhiteSpace(storeCode)) return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.Error("请选择门店", "STORE_REQUIRED");
         var storeCodes = string.IsNullOrWhiteSpace(storeCode) ? scope.StoreCodes.ToList() : new List<string> { storeCode.Trim() };
         if (storeCodes.Count == 0) return ApiResponse<List<EmployeeMinorManagerCandidateDto>>.OK(new());
-        // 生日早于此日期的已满 18 岁；以悉尼当天为准，避免 UTC 跨日把生日当天算错。
+        // 生日早于此日期的已满 16 岁（MinorAgeLimit），不再属于未成年合规范围；以悉尼当天为准，避免 UTC 跨日把生日当天算错。
         var today = SydneyToday();
-        var adultCutoff = today.AddYears(-18);
+        var adultCutoff = today.AddYears(-MinorEmploymentComplianceCalculator.MinorAgeLimit);
         var rows = await _context.Db.Queryable<UserStore>()
             .InnerJoin<Store>((us, st) => us.StoreGUID == st.StoreGUID)
             .InnerJoin<EmployeeProfile>((us, st, ep) => ep.UserGUID == us.UserGUID)
@@ -627,7 +627,7 @@ public sealed partial class EmployeeMinorComplianceService
         if (store is null || !scope.CanAccessStoreGuid(store.StoreGUID)) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该员工不在你管理的门店", "FORBIDDEN");
         var profile = await _context.Db.Queryable<EmployeeProfile>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).FirstAsync();
         if (profile?.Birthday is null) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("员工资料缺少出生日期，请先补充", "DOB_REQUIRED");
-        if (AgeOn(profile.Birthday.Value.Date, SydneyToday()) >= 18) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该员工已满 18 岁，无需填写未成年用工资料", "NOT_MINOR");
+        if (AgeOn(profile.Birthday.Value.Date, SydneyToday()) >= MinorEmploymentComplianceCalculator.MinorAgeLimit) return ApiResponse<EmployeeMinorComplianceRequestDto>.Error("该员工已满 16 岁，无需填写未成年用工资料", "NOT_MINOR");
         var user = await _context.Db.Queryable<User>().Where(x => x.UserGUID == userGuid && !x.IsDeleted).FirstAsync();
         var name = string.IsNullOrWhiteSpace(user?.FullName) ? user?.Username : user!.FullName;
         var existing = await _context.Db.Queryable<EmployeeMinorComplianceRequest>()

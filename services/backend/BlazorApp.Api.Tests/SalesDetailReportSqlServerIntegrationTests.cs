@@ -4,6 +4,7 @@ using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.Background;
 using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
@@ -112,6 +113,44 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
         Assert.Equal("P-MULTI", product.Code);
         Assert.Equal(40m, product.Revenue);
         Assert.Equal(1, result.Data.Products.Total);
+    }
+
+    /// <summary>
+    /// 没有「查看国内供应商名称」权限的账号不能拿关键词试探国内供应商名称：名称这一支匹配不到，
+    /// 供应商代码、商品字段照常命中；澳洲范围下的澳洲供应商名称不受限。
+    /// SQL Server 上带关键词的查询只走投影（未建投影时服务直接拒绝），所以这里只验证投影路径。
+    /// </summary>
+    [SalesDetailReportSqlServerFact]
+    public async Task 无国内供应商名称权限时关键词不匹配国内供应商名称_代码商品字段与澳洲供应商名称仍可命中()
+    {
+        await using var fixture = await SalesDetailSqlServerFixture.CreateAsync();
+        await fixture.SeedFreshStateAsync(SeedDate);
+        await fixture.SeedStoreAsync("B1", "测试店");
+        await fixture.SeedChinaSupplierAsync("C2", "Beta 国内供应商");
+        await fixture.SeedLocalSupplierAsync("AUS1", "Gamma 澳洲供应商");
+        await fixture.SeedProductAsync("P-MULTI", "普通商品", englishName: "Alpha 英文名", itemNumber: "货号");
+        await fixture.SeedFactAsync(SeedDate, "B1", "C2", "P-MULTI", 4, 40m, "统计名称", "统计条码");
+        await fixture.SeedFactAsync(SeedDate, "B1", "AUS1", "P-AUS", 1, 10m, "澳洲商品");
+        await fixture.EnableProjectionAsync(SeedDate);
+
+        async Task<int> CountAsync(SalesDetailKind kind, string search) =>
+            (await fixture.CreateService().GetSalesDetailReportAsync(
+                Range(), kind, branchCodes: new() { "B1" }, search: search,
+                sections: new[] { SalesDetailSection.Products })).Data!.Products!.Total;
+
+        // 有权限（请求之外）：国内供应商名称、代码、商品字段都能命中。
+        Assert.Equal(1, await CountAsync(SalesDetailKind.China, "Beta"));
+        Assert.Equal(1, await CountAsync(SalesDetailKind.China, "C2"));
+        Assert.Equal(1, await CountAsync(SalesDetailKind.China, "Alpha"));
+        Assert.Equal(1, await CountAsync(SalesDetailKind.Australia, "Gamma"));
+
+        using (DomesticSupplierInfoMasking.BeginQueryScope(canView: false))
+        {
+            Assert.Equal(0, await CountAsync(SalesDetailKind.China, "Beta"));
+            Assert.Equal(1, await CountAsync(SalesDetailKind.China, "C2"));
+            Assert.Equal(1, await CountAsync(SalesDetailKind.China, "Alpha"));
+            Assert.Equal(1, await CountAsync(SalesDetailKind.Australia, "Gamma"));
+        }
     }
 
     [SalesDetailReportSqlServerFact]
@@ -1733,7 +1772,13 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
             }
             if (selectedProduct != null) command.Parameters.AddWithValue("@sdrSelectedProduct", selectedProduct);
             var tokens = search.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            for (var i = 0; i < tokens.Length; i++) command.Parameters.AddWithValue($"@sdrSearch{i}", $"%{tokens[i]}%");
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                command.Parameters.AddWithValue($"@sdrSearch{i}", $"%{tokens[i]}%");
+                // 供应商名称两支用独立参数；这里按「有国内供应商名称权限」的账号取值，与通用关键词相同。
+                command.Parameters.AddWithValue($"@sdrChinaNameSearch{i}", $"%{tokens[i]}%");
+                command.Parameters.AddWithValue($"@sdrFactNameSearch{i}", $"%{tokens[i]}%");
+            }
             var sets = new List<List<object?[]>>();
             await using var reader = await command.ExecuteReaderAsync();
             do
@@ -1965,7 +2010,13 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
             for (var i = 0; i < (warehouseCategories?.Length ?? 0); i++) command.Parameters.AddWithValue($"@sdrCategoryWarehouse{i}", warehouseCategories![i]);
             if (selectedProduct != null) command.Parameters.AddWithValue("@sdrSelectedProduct", selectedProduct);
             var tokens = search?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
-            for (var i = 0; i < tokens.Length; i++) command.Parameters.AddWithValue($"@sdrSearch{i}", $"%{tokens[i]}%");
+            for (var i = 0; i < tokens.Length; i++)
+            {
+                command.Parameters.AddWithValue($"@sdrSearch{i}", $"%{tokens[i]}%");
+                // 供应商名称两支用独立参数；这里按「有国内供应商名称权限」的账号取值，与通用关键词相同。
+                command.Parameters.AddWithValue($"@sdrChinaNameSearch{i}", $"%{tokens[i]}%");
+                command.Parameters.AddWithValue($"@sdrFactNameSearch{i}", $"%{tokens[i]}%");
+            }
             for (var i = 0; i < (branches?.Length ?? 0); i++)
             {
                 command.Parameters.AddWithValue($"@sdrBranch{i}", branches![i]);

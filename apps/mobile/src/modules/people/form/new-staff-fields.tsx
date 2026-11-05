@@ -54,7 +54,7 @@ export function NewStaffPhoneField({
 
 /**
  * 生日：点开纯 JS 年/月/日弹窗（复用员工资料的 BirthdayPickerDialog），最早 1940 年、最晚悉尼今天。
- * 右侧显示年龄：成年灰色「N 岁」，未满 18 岁琥珀色「N 岁 · 未成年」。
+ * 右侧显示年龄：16 岁及以上灰色「N 岁」，未满 16 岁琥珀色「N 岁 · 未成年」。
  */
 export function NewStaffBirthdayField({
   value,
@@ -125,7 +125,7 @@ const GUARDIAN_ERROR_KEYS: Record<keyof NewStaffGuardianErrors, Record<string, s
 };
 
 /**
- * 「监护人」一节（黄色边框卡片）：只在生日未满 18 岁时由页面渲染。
+ * 「监护人」一节（黄色边框卡片）：只在生日未满 16 岁时由页面渲染。
  * 姓名、关系（四个选项，提交英文值）、手机（04 开头）、邮箱四项必填。
  */
 export function NewStaffGuardianSection({

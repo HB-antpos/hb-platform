@@ -106,7 +106,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>生日。店长新增员工时必填（控制器校验），写入员工资料。</summary>
         public DateTime? Birthday { get; set; }
 
-        /// <summary>监护人；生日未满 18 岁时必填，预填进未成年用工合规草稿。</summary>
+        /// <summary>监护人；生日未满 16 岁时必填，预填进未成年用工合规草稿。</summary>
         public NewStaffGuardianDto? Guardian { get; set; }
 
         /// <summary>

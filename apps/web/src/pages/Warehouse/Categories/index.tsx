@@ -51,6 +51,7 @@ import {
   type WarehouseProductsTableQuery,
 } from '../../../services/warehouseProductService'
 import type { SupplierOption } from '../../../types/domesticProduct'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import {
   ALL_PRODUCTS_FILTER_KEY,
   UNCATEGORIZED_PRODUCTS_FILTER_KEY,
@@ -161,8 +162,9 @@ type SupplierSelectOption = DefaultOptionType & {
 function buildSupplierOptions(suppliers: SupplierOption[]): SupplierSelectOption[] {
   return suppliers.map((item) => ({
     value: item.code,
-    label: `${item.code} - ${item.name}`,
-    searchText: `${item.code} ${item.name} ${item.shopNumber ?? ''}`.toLowerCase(),
+    // 无「查看国内供应商名称」权限时名称为空，只显示代码。
+    label: formatDomesticSupplierLabel(item.code, item.name),
+    searchText: `${item.code} ${item.name ?? ''} ${item.shopNumber ?? ''}`.toLowerCase(),
   }))
 }
 
@@ -549,8 +551,11 @@ export default function WarehouseCategoriesPage() {
   )
 
   const renderSupplierCell = (record: WarehouseProductListItem) => {
-    const name = record.domesticSupplierName || record.localSupplierName
-    const code = record.domesticSupplierCode || record.localSupplierCode
+    // 有国内供应商时整格按国内供应商显示（没有名称权限时只剩代码）；没有国内供应商才回退澳洲供应商，
+    // 避免国内名称缺失时出现「澳洲供应商名称 + 国内供应商代码」的错配。
+    const hasDomesticSupplier = Boolean(record.domesticSupplierCode || record.domesticSupplierName)
+    const name = hasDomesticSupplier ? record.domesticSupplierName : record.localSupplierName
+    const code = hasDomesticSupplier ? record.domesticSupplierCode : record.localSupplierCode
     if (!name && !code) {
       return '--'
     }

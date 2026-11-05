@@ -77,6 +77,7 @@
     <Compile Include="StoreProductMaintenanceWarehousePriceSyncTests.cs" />
     <Compile Include="StoreProductMaintenanceEnsureStorePriceTests.cs" />
     <Compile Include="StorePriceUpdateTaskServiceTests.cs" />
+    <Compile Include="StoreSyncWarehousePriceTests.cs" />
     <Compile Include="WarehouseProductSupplyNoticeTests.cs" />
     <Compile Include="WarehouseProductBatchUpdateSupplyNoticeTests.cs" />
     <Compile Include="StoreProductMaintenanceLookupTests.cs" />
@@ -99,6 +100,7 @@
     <Compile Include="DeviceRegistrationRustDeskVersionTests.cs" />
     <Compile Include="DeviceRegistrationReactServiceTests.cs" />
     <Compile Include="DeviceActivationCodeManagementTests.cs" />
+    <Compile Include="RemoteMaintenanceCommitTests.cs" />
     <Compile Include="RemoteMaintenanceContractTests.cs" />
     <Compile Include="RemoteMaintenancePrepareTests.cs" />
     <Compile Include="RemoteMaintenanceRegistrationResolverTests.cs" />
@@ -289,6 +291,7 @@
     <Compile Include="WarehouseProductRecordAuthorizationTests.cs" />
     <Compile Include="SalesDashboardReportRevenueTests.cs" />
     <Compile Include="MonthlyStoreDailySalesReactServiceTests.cs" />
+    <Compile Include="HolidaySalesReportBuilderTests.cs" />
     <Compile Include="MonthlyStoreDailySalesSqlServerIntegrationTests.cs" />
     <Compile Include="WeeklyReportTests.cs" />
     <Compile Include="SalesDetailQueryFlightsTests.cs" />
@@ -466,6 +469,7 @@
     <Compile Include="ContainerNewProductsControllerTests.cs" />
     <Compile Include="HealthControllerNetworkDiagnosticsTests.cs" />
     <Compile Include="ContainerNumberMaskingTests.cs" />
+    <Compile Include="DomesticSupplierInfoMaskingTests.cs" />
     <Compile Include="MobileAppInstallLinksControllerTests.cs" />
     <Compile Include="ContainerNewProductsServiceSqliteTests.cs" />
     <Compile Include="ContainerWarehouseArrivalTests.cs" />
@@ -509,6 +513,10 @@
     <Compile Include="ApiExceptionFilterDetailsTests.cs" />
     <Compile Include="EnglishOnlyEmailTemplatesTests.cs" />
     <Compile Include="SmsTests.cs" />
+    <Compile Include="PlanogramTests.cs" />
+    <Compile Include="PlanogramPlanTests.cs" />
+    <Compile Include="PlanogramPublishTests.cs" />
+    <Compile Include="PlanogramBatchTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

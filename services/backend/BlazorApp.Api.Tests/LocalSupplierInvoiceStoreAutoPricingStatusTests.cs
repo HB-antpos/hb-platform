@@ -101,6 +101,18 @@ namespace BlazorApp.Api.Tests
             // 明细自身的定价方案不受分店状态影响。
             Assert.True(byGuid["D-manual"].AutoPricing);
             Assert.False(byGuid["D-auto"].AutoPricing);
+
+            // 本店现价与自动定价状态取自同一条分店价格记录，规则完全一致。
+            Assert.Equal(3.50m, byGuid["D-auto"].StoreRetailPrice);
+            Assert.Equal(2.50m, byGuid["D-manual"].StoreRetailPrice);
+            Assert.Null(byGuid["D-other-store-only"].StoreRetailPrice);
+            Assert.Null(byGuid["D-deleted"].StoreRetailPrice);
+            Assert.Null(byGuid["D-no-product"].StoreRetailPrice);
+            Assert.Equal(4.99m, byGuid["D-duplicate"].StoreRetailPrice);
+
+            // 只读展示：明细自己的指定零售价保持原样，不能被本店现价回填（否则「更新到分店」会把旧价写回）。
+            Assert.Null(byGuid["D-manual"].RetailPrice);
+            Assert.Equal(9.99m, byGuid["D-auto"].RetailPrice);
         }
 
         private async Task SeedAsync()
@@ -132,7 +144,7 @@ namespace BlazorApp.Api.Tests
                 IsDeleted = false,
             }).ExecuteCommandAsync();
 
-            static StoreLocalSupplierInvoiceDetails Detail(string guid, string? code, bool autoPricing) => new()
+            static StoreLocalSupplierInvoiceDetails Detail(string guid, string? code, bool autoPricing, decimal? retailPrice = null) => new()
             {
                 DetailGUID = guid,
                 InvoiceGUID = InvoiceGuid,
@@ -140,11 +152,12 @@ namespace BlazorApp.Api.Tests
                 SupplierCode = "SUP01",
                 ProductCode = code,
                 AutoPricing = autoPricing,
+                RetailPrice = retailPrice,
                 IsDeleted = false,
             };
             await _db.Insertable(new List<StoreLocalSupplierInvoiceDetails>
             {
-                Detail("D-auto", "P-AUTO", autoPricing: false),
+                Detail("D-auto", "P-AUTO", autoPricing: false, retailPrice: 9.99m),
                 Detail("D-manual", "P-MANUAL", autoPricing: true),
                 Detail("D-other-store-only", "P-OTHER", autoPricing: true),
                 Detail("D-deleted", "P-DELETED", autoPricing: true),
@@ -154,24 +167,25 @@ namespace BlazorApp.Api.Tests
 
             var older = new DateTime(2026, 10, 1, 0, 0, 0, DateTimeKind.Utc);
             var newer = new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc);
-            static StoreRetailPrice Price(string store, string code, bool auto, DateTime updatedAt, bool deleted = false) => new()
+            static StoreRetailPrice Price(string store, string code, bool auto, DateTime updatedAt, bool deleted = false, decimal? retail = null) => new()
             {
                 UUID = Guid.NewGuid().ToString("N"),
                 StoreCode = store,
                 ProductCode = code,
                 IsAutoPricing = auto,
+                StoreRetailPriceValue = retail,
                 CreatedAt = updatedAt,
                 UpdatedAt = updatedAt,
                 IsDeleted = deleted,
             };
             await _db.Insertable(new List<StoreRetailPrice>
             {
-                Price("S01", "P-AUTO", true, older),
-                Price("S01", "P-MANUAL", false, older),
-                Price("S02", "P-OTHER", true, older),
-                Price("S01", "P-DELETED", true, older, deleted: true),
-                Price("S01", "P-DUP", false, older),
-                Price("S01", "P-DUP", true, newer),
+                Price("S01", "P-AUTO", true, older, retail: 3.50m),
+                Price("S01", "P-MANUAL", false, older, retail: 2.50m),
+                Price("S02", "P-OTHER", true, older, retail: 7.77m),
+                Price("S01", "P-DELETED", true, older, deleted: true, retail: 8.88m),
+                Price("S01", "P-DUP", false, older, retail: 1.99m),
+                Price("S01", "P-DUP", true, newer, retail: 4.99m),
             }).ExecuteCommandAsync();
         }
 

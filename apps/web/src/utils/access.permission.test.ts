@@ -376,6 +376,9 @@ const backendNavigationEntryCases: Array<[string, string]> = [
   [P.Myob.ConnectionManage, '/pos-admin/myob'],
   [P.Myob.EmployeeBind, '/pos-admin/myob'],
   [P.Attendance.PayrollEdit, '/pos-admin/myob'],
+  [P.Planogram.View, '/pos-admin/planograms'],
+  [P.Planogram.Edit, '/pos-admin/planograms'],
+  [P.Planogram.Manage, '/pos-admin/planograms'],
   [P.FaceMatch.Manage, '/system/face-match'],
   [P.FaceMatch.Traffic.View, '/system/face-match'],
   [P.FaceMatch.Unwelcome.Manage, '/system/face-match'],
@@ -1052,6 +1055,7 @@ const adminWebMenuPreview = buildWebRoleMenuPreview(adminAccess, translate, {
 const productStatisticMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/product-statistics')
 const compactSalesBoardMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/compact-sales-board')
 const monthlyDailySalesDownloadMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/monthly-daily-sales-download')
+const holidaySalesReportMenu = findWebMenuNode(adminWebMenuPreview, '/executive-sales-intelligence/holiday-sales-report')
 const productMovementReportOnlyWebPreview = buildWebRoleMenuPreview(productMovementReportOnlyAccess, translate, {
   includeHidden: true,
 })
@@ -1071,6 +1075,10 @@ const hiddenCompactSalesBoardForProductMovementOnly = findWebMenuNode(
 const hiddenMonthlyDailySalesDownloadForProductMovementOnly = findWebMenuNode(
   productMovementReportOnlyWebPreview,
   '/executive-sales-intelligence/monthly-daily-sales-download',
+)
+const hiddenHolidaySalesReportForProductMovementOnly = findWebMenuNode(
+  productMovementReportOnlyWebPreview,
+  '/executive-sales-intelligence/holiday-sales-report',
 )
 const localPurchaseOnlyWebPreview = buildWebRoleMenuPreview(localPurchaseDashboardOnlyAccess, translate, {
   includeHidden: true,
@@ -1213,6 +1221,18 @@ assertEqual(
 )
 
 assertEqual(
+  holidaySalesReportMenu?.visible,
+  true,
+  '管理员应显示节日销售报告入口',
+)
+
+assertEqual(
+  holidaySalesReportMenu?.permissionCodes.join(','),
+  P.SalesDashboard.HolidaySalesReportView,
+  '节日销售报告应仅要求本页查看权限',
+)
+
+assertEqual(
   productMovementParentMenu?.visible,
   true,
   '只有商品经营分析权限时销售看板父菜单应可见',
@@ -1240,6 +1260,12 @@ assertEqual(
   hiddenMonthlyDailySalesDownloadForProductMovementOnly?.visible,
   false,
   '只有商品经营分析权限时不应打开月度日销售下载',
+)
+
+assertEqual(
+  hiddenHolidaySalesReportForProductMovementOnly?.visible,
+  false,
+  '只有商品经营分析权限时不应打开节日销售报告',
 )
 
 assertEqual(
@@ -1861,6 +1887,107 @@ assertEqual(
   buildAccess(createCurrentUser({ permissions: [P.Attendance.AdminView] })).canReviewAttendance,
   false,
   '只有查看全部考勤权限不能显示考勤审核按钮',
+)
+
+// 商品陈列图（「商品与价格」合并页的页签）：Manage ⊇ Edit ⊇ View；新权限默认不授予任何角色，管理员放行；
+// 只有它的账号也能进后台、登录落到该页签；从角色菜单授予时只补 Planogram.View，不连带授予工作台。
+assertEqual(P.Planogram.View, 'Planogram.View', '前端权限码需与后端 Permissions.Planogram.View 一致')
+assertEqual(P.Planogram.Edit, 'Planogram.Edit', '前端权限码需与后端 Permissions.Planogram.Edit 一致')
+assertEqual(P.Planogram.Manage, 'Planogram.Manage', '前端权限码需与后端 Permissions.Planogram.Manage 一致')
+const planogramView = buildAccess(createCurrentUser({ permissions: [P.Planogram.View] }))
+assertEqual(planogramView.canViewPlanogram, true, 'View 可查看')
+assertEqual(planogramView.canEditPlanogram, false, 'View 不能编辑')
+assertEqual(planogramView.canManagePlanogram, false, 'View 不能维护型号')
+const planogramEdit = buildAccess(createCurrentUser({ permissions: [P.Planogram.Edit] }))
+assertEqual(planogramEdit.canViewPlanogram, true, 'Edit 隐含查看（只拿到精确权限码时也成立）')
+assertEqual(planogramEdit.canEditPlanogram, true, 'Edit 可编辑')
+assertEqual(planogramEdit.canManagePlanogram, false, 'Edit 不能维护型号')
+const planogramManage = buildAccess(createCurrentUser({ permissions: [P.Planogram.Manage] }))
+assertEqual(planogramManage.canViewPlanogram, true, 'Manage 隐含查看')
+assertEqual(planogramManage.canEditPlanogram, true, 'Manage 隐含编辑')
+assertEqual(planogramManage.canManagePlanogram, true, 'Manage 可维护型号')
+const planogramAdmin = buildAccess(createCurrentUser({ roleNames: ['Admin'] }))
+assertEqual(planogramAdmin.canViewPlanogram && planogramAdmin.canEditPlanogram && planogramAdmin.canManagePlanogram, true, '管理员放行')
+const planogramNobody = buildAccess(createCurrentUser({ permissions: [] }))
+assertEqual(planogramNobody.canViewPlanogram || planogramNobody.canEditPlanogram || planogramNobody.canManagePlanogram, false, '没有权限码默认不放行')
+// 商品价格类权限不能顺带打开陈列图（新权限默认不授予任何角色）
+for (const permission of [P.PosProducts.View, P.PosProducts.Manage, P.StoreProducts.View, P.PricingStrategy.Edit, P.Promotions.Edit]) {
+  assertEqual(buildAccess(createCurrentUser({ permissions: [permission] })).canViewPlanogram, false, `${permission} 不应放开商品陈列图`)
+}
+// 陈列权限也不能反向放开商品维护 / 价格页
+assertEqual(planogramManage.canViewPosProducts, false, 'Manage 不连带商品维护')
+assertEqual(planogramManage.canManagePricing, false, 'Manage 不连带价格策略')
+assertEqual(planogramManage.canAccessDashboard, false, 'Manage 不连带工作台')
+assertEqual(planogramView.canAccessAdminShell, true, '只有陈列图权限也应能进入后台')
+assertEqual(getDefaultWebPath(planogramView), '/pos-admin/planograms', '只有陈列图权限时默认落到该页签')
+for (const target of ['/pos-admin/planograms', '/pos-admin/planograms?tab=models&view=hook', '/pos-admin/products-pricing']) {
+  assertEqual(resolveAuthorizedWebTarget(target, planogramView), target, `${target} 应放行`)
+}
+assertEqual(resolveAuthorizedWebTarget('/pos-admin/promotions', planogramView), undefined, '陈列图权限不放行同一合并页里的其他页签地址')
+assertEqual(resolveAuthorizedWebTarget('/pos-admin/local-supplier-invoices', planogramView), undefined, '陈列图权限不放行其他后台页面')
+assertEqual(resolveAuthorizedWebTarget('/pos-admin/planograms', planogramNobody), undefined, '无权限不放行')
+assertEqual(resolveAuthorizedWebTarget('/pos-admin/planograms', planogramAdmin), '/pos-admin/planograms', '管理员放行')
+
+const planogramOnlyPreview = buildWebRoleMenuPreview(planogramView, translate, {
+  includeHidden: true,
+  explicitPermissionCodes: [P.Planogram.View],
+})
+const planogramMenu = findWebMenuNode(planogramOnlyPreview, '/pos-admin/planograms')
+assertEqual(planogramMenu?.visible, true, '菜单预览应显示商品陈列图')
+assertEqual(planogramMenu?.permissionCodes.join(','), P.Planogram.View, '菜单只承载 Planogram.View')
+assertEqual(findWebMenuNode(planogramOnlyPreview, '/pos-admin/products-pricing')?.visible, true, '陈列图点亮「商品与价格」合并页')
+assertEqual(getAccessKeyPermissionCodes('canViewPlanogram').join(','), P.Planogram.View, '访问键映射到 Planogram.View')
+assertEqual(findWebMenuNode(planogramOnlyPreview, '/pos-admin/products')?.visible, false, '陈列图权限不点亮商品维护页签')
+const planogramAddPreview = buildWebRoleMenuPreview(buildAccess(createCurrentUser({ permissions: [] })), translate, {
+  includeHidden: true,
+  explicitPermissionCodes: [],
+})
+assertEqual(
+  findWebMenuNode(planogramAddPreview, '/pos-admin/planograms')?.edit.addPermissionCodes.join(','),
+  P.Planogram.View,
+  '从角色菜单授予陈列图只补 Planogram.View，不连带授予工作台（它自带后台入口）',
+)
+
+// 查看国内供应商名称：专用权限、管理国内供应商、管理员三者之一即可；其余账号只看到供应商代码。
+assertEqual(P.DomesticPurchase.ViewSupplierName, 'DomesticPurchase.ViewSupplierName', '权限码须与后端一致')
+assertEqual(buildAccess(null).canViewDomesticSupplierName, false, '未登录默认不可见国内供应商名称')
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [] })).canViewDomesticSupplierName,
+  false,
+  '没有任何权限时不可见国内供应商名称',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.DomesticPurchase.ViewSupplierName] })).canViewDomesticSupplierName,
+  true,
+  '持有 DomesticPurchase.ViewSupplierName 可见国内供应商名称',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.DomesticPurchase.ManageSuppliers] })).canViewDomesticSupplierName,
+  true,
+  '管理国内供应商的账号视为可见国内供应商名称',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ roleNames: ['Admin'] })).canViewDomesticSupplierName,
+  true,
+  '管理员可见国内供应商名称',
+)
+const domesticProductManager = buildAccess(createCurrentUser({
+  permissions: [P.DomesticPurchase.ManageProducts, P.DomesticPurchase.ManagePrefixCodes, P.Warehouse.Manage],
+}))
+assertEqual(
+  domesticProductManager.canViewDomesticSupplierName,
+  false,
+  '管理国内商品 / 前缀码 / 仓库的权限不连带国内供应商名称',
+)
+assertEqual(
+  domesticProductManager.canManageDomesticSuppliers,
+  false,
+  '查看名称的判断不得反过来放开国内供应商管理',
+)
+assertEqual(
+  buildAccess(createCurrentUser({ permissions: [P.DomesticPurchase.ViewSupplierName] })).canManageDomesticSuppliers,
+  false,
+  '只有查看名称权限时不得进入国内供应商管理',
 )
 
 console.log('access.permission.test: ok')

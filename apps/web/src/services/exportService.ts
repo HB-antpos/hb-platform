@@ -28,12 +28,15 @@ export interface ExportResult {
 
 export interface ProductGradeExportOptions {
   includeProductImage?: boolean
+  /** 是否导出「供应商」名称列；没有查看国内供应商名称权限时传 false，只保留「供应商编码」列。默认导出。 */
+  includeSupplierName?: boolean
   fileName?: string
   onProgress?: (progress: number, message: string) => void
 }
 
 export interface ProductGradeWorksheetOptions {
   includeProductImage?: boolean
+  includeSupplierName?: boolean
 }
 
 export interface ContainerDetailExportItem {
@@ -623,6 +626,7 @@ export async function exportProductGradesToExcel(
 
   const { productImageColIndex } = populateProductGradesWorksheet(worksheet, products, {
     includeProductImage: mergedOptions.includeProductImage,
+    includeSupplierName: mergedOptions.includeSupplierName,
   })
 
   const failedProductImages: ExportResult['failedProductImages'] = []
@@ -724,8 +728,10 @@ export function populateProductGradesWorksheet(
   options: ProductGradeWorksheetOptions = {},
 ) {
   const includeProductImage = options.includeProductImage ?? true
+  // 没有查看国内供应商名称权限时后端不返回名称：去掉「供应商」名称列，只导出「供应商编码」，避免整列为空。
+  const includeSupplierName = options.includeSupplierName ?? true
   const columns: Array<{ header: string; key: string; width: number; valueType?: 'moneyRmb' | 'moneyAud' }> = [
-    { header: '供应商', key: 'supplierName', width: 24 },
+    ...(includeSupplierName ? [{ header: '供应商', key: 'supplierName', width: 24 }] : []),
     { header: '供应商编码', key: 'supplierCode', width: 14 },
     { header: '货号', key: 'hbProductNo', width: 18 },
     { header: '条码', key: 'barcode', width: 20 },

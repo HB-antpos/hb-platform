@@ -224,7 +224,8 @@ describe("设备运行状态心跳（对齐 WPF #613）", () => {
 });
 
 test("设备尚未认证（待注册、待审批、已锁定）时不暴露下发资料同步：启动与定时都不请求", async () => {
-  jest.useFakeTimers();
+  // 固定为白天：夜间周期是 5 分钟，180 秒内本来就不会触发定时同步，断言会失去意义。
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
   for (const device of ["registration-required", "pending-approval", "locked"]) {
     const { requestSync, services } = receiptProfileServices({ device });
     mockRuntime = { services };
@@ -243,7 +244,8 @@ test("设备尚未认证（待注册、待审批、已锁定）时不暴露下�
 });
 
 test("离线时不轮询下发资料（继续使用本机资料），联网状态恢复后立即补一次并恢复定时", async () => {
-  jest.useFakeTimers();
+  // 固定为白天：夜间窗口会把 60 秒周期放慢到 5 分钟，不固定时间时 CI 在 22:00–06:00 跑必挂。
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
   const { requestSync, services } = receiptProfileServices();
   mockRuntime = { services };
   mockConnectivity = "offline";

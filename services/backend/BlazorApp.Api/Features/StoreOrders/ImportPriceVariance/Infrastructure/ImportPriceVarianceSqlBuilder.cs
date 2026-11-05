@@ -1,6 +1,7 @@
 using System.Text;
 using BlazorApp.Api.Features.StoreOrders.ImportPriceVariance.Domain;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using SqlSugar;
 
 namespace BlazorApp.Api.Features.StoreOrders.ImportPriceVariance.Infrastructure;
@@ -278,6 +279,11 @@ ORDER BY {orderBy}
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
             parameters.Add(new SugarParameter("@Keyword", $"%{query.Keyword.Trim()}%"));
+            // 没有「查看国内供应商名称」权限的账号不能按名称搜索：名称这一支用独立参数，无权限时是匹配不到的占位关键词。
+            parameters.Add(new SugarParameter(
+                "@SupplierNameKeyword",
+                $"%{DomesticSupplierInfoMasking.GuardNameKeyword(query.Keyword.Trim())}%"
+            ));
             rowFilters.AppendLine(
                 """
     AND (
@@ -290,7 +296,7 @@ ORDER BY {orderBy}
         OR p.ProductName LIKE @Keyword
         OR dp.ProductName LIKE @Keyword
         OR dp.SupplierCode LIKE @Keyword
-        OR cs.SupplierName LIKE @Keyword
+        OR cs.SupplierName LIKE @SupplierNameKeyword
     )
 """
             );
@@ -428,7 +434,8 @@ FinalRows AS (
             "productcode" => "ProductCode",
             "itemnumber" => "ItemNumber",
             "suppliercode" => "SupplierCode",
-            "suppliername" => "SupplierName",
+            // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+            "suppliername" => DomesticSupplierInfoMasking.IsNameSearchAllowed ? "SupplierName" : "SupplierCode",
             "domesticprice" => "DomesticPrice",
             "warehouseimportprice" => "WarehouseImportPrice",
             "unitvolume" => "UnitVolume",

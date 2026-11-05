@@ -395,9 +395,14 @@ assertDeepEqual(
     jobId: "job-9",
     status: "Succeeded",
     message: "ok",
-    summary: { total: 5, productExists: 3, productNotExists: 2, barcodeNormal: 4, barcodeAbnormal: 1 },
+    summary: { total: 5, productExists: 3, productNotExists: 2, barcodeNormal: 4, barcodeAbnormal: 1, autoPricingUnavailable: 0 },
   },
-  "check job snapshot reads the backend summary"
+  "check job snapshot reads the backend summary; old backend without autoPricingUnavailable reads as 0"
+);
+assertEqual(
+  normalizeCheckProductsSummary({ summary: { total: 5, productExists: 3, productNotExists: 2, barcodeNormal: 4, barcodeAbnormal: 1, AutoPricingUnavailable: 2 } })?.autoPricingUnavailable,
+  2,
+  "autoPricingUnavailable is read from the backend summary (PascalCase tolerated)"
 );
 assertDeepEqual(
   normalizeCheckProductsJob({ success: true, data: { JobId: "job-10", Status: "Running" } }),
@@ -412,7 +417,7 @@ assertDeepEqual(
       { detailGuid: "c", productStatus: 2, barcodeStatus: 1 },
     ],
   }),
-  { total: 3, productExists: 1, productNotExists: 2, barcodeNormal: 2, barcodeAbnormal: 1 },
+  { total: 3, productExists: 1, productNotExists: 2, barcodeNormal: 2, barcodeAbnormal: 1, autoPricingUnavailable: 0 },
   "missing summary is rebuilt from the per-row results"
 );
 assertEqual(normalizeCheckProductsSummary({}), null, "no summary and no results gives null");

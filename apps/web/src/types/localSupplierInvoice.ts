@@ -94,6 +94,11 @@ export interface LocalSupplierInvoiceItemDto {
    * 与 autoPricing（本行执行时要写入的定价方案）不同。
    */
   storeIsAutoPricing?: boolean | null
+  /**
+   * 本单分店当前的零售价（分店价格表），与 storeIsAutoPricing 同一条记录，仅展示；未匹配商品或本店还没有分店价格时为空。
+   * 与 retailPrice（本行指定零售价，「更新到分店」优先写入它）不同，绝不能回填进 retailPrice。
+   */
+  storeRetailPrice?: number | null
 }
 
 export interface LocalSupplierInvoiceSalesAnalysisItemDto {
@@ -651,6 +656,8 @@ export interface ProductCheckResult {
   lastPurchasePrice?: number
   pricingFloatRate?: number
   newAutoRetailPrice?: number
+  /** 自动定价开着但进货价低于下限（0.10）时的原因；此时倍率与新自动零售价为空，行内按它提示。 */
+  autoPricingUnavailableReason?: string
   productInfo?: {
     productCode?: string
     productName?: string
@@ -678,6 +685,8 @@ export interface CheckProductsResponse {
     productNotExists: number
     barcodeNormal: number
     barcodeAbnormal: number
+    /** 自动定价开着但进货价低于下限、没生成自动零售价的行数；旧后端没有这个字段。 */
+    autoPricingUnavailable?: number
   }
 }
 

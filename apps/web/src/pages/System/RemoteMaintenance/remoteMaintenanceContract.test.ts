@@ -28,5 +28,10 @@ assert(pageSource.includes('requestGateRef.current.invalidate()'), 'hidden/clean
 assert(pageSource.includes('setLoadError'), 'failed refresh must expose a stale data warning')
 assert(pageSource.includes('record.onlineStatus === \'offline\''), 'offline rows must retain and label last service status')
 assert(pageSource.includes('setCredentialPassword(null)'), 'credential state must clear before and after use')
+// 分店过滤用启用分店下拉（名称可搜、值仍是分店代码），列表第一列显示分店名称。
+assert(pageSource.includes('getActiveStores'), 'store filter must be fed by the active store list')
+assert(pageSource.includes('showSearch') && pageSource.includes('options={storeOptions}'), 'store filter must be a searchable dropdown')
+assert(pageSource.includes('storeNameByCode.get(record.storeCode)'), 'store column must show the store name')
+assert(!pageSource.includes('storeCodePlaceholder'), 'store filter must not fall back to a free-text store code input')
 
 console.log('remoteMaintenanceContract.test: ok')

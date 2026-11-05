@@ -41,6 +41,8 @@ export interface CompactBoardWorkbookOptions {
   loadImage?: ImageLoader
   /** 只给前 N 行嵌图（默认 500，与销售明细带图导出上限一致），其余行只导出数据 */
   imageRowLimit?: number
+  /** 是否导出「国内供应商」名称列；没有查看国内供应商名称权限时传 false，只保留代码列。默认导出。 */
+  includeSupplierName?: boolean
 }
 
 export interface CompactBoardExportOptions extends CompactBoardWorkbookOptions {
@@ -110,9 +112,13 @@ export async function buildCompactBoardWorkbook(rows: readonly CompactSalesBoard
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet('国内商品明细')
   const imageRowLimit = Math.max(0, Math.min(options.imageRowLimit ?? MAX_PRODUCT_IMAGE_EXPORT_ROWS, rows.length))
-  worksheet.columns = COLUMNS
+  // 没有查看国内供应商名称权限时后端不返回名称：去掉「国内供应商」名称列，只保留代码列，避免整列为空。
+  const columns = options.includeSupplierName === false
+    ? COLUMNS.filter(column => column.key !== 'supplierName')
+    : COLUMNS
+  worksheet.columns = columns
   worksheet.getRow(1).values = ['销售看板 · 国内商品明细']
-  worksheet.mergeCells(1, 1, 1, COLUMNS.length)
+  worksheet.mergeCells(1, 1, 1, columns.length)
   worksheet.getCell(1, 1).font = { bold: true, size: 15, color: { argb: 'FF143452' } }
   const notes = [
     `${options.startDate} ~ ${options.endDate}`,
@@ -124,7 +130,7 @@ export async function buildCompactBoardWorkbook(rows: readonly CompactSalesBoard
   ]
   worksheet.getRow(2).values = [notes.join('  ·  ')]
   const header = worksheet.getRow(3)
-  header.values = COLUMNS.map(column => String(column.header ?? ''))
+  header.values = columns.map(column => String(column.header ?? ''))
   header.height = 28
   header.eachCell(cell => {
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
@@ -132,7 +138,7 @@ export async function buildCompactBoardWorkbook(rows: readonly CompactSalesBoard
     cell.alignment = { vertical: 'middle' }
   })
   worksheet.views = [{ state: 'frozen', ySplit: 3 }]
-  worksheet.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: COLUMNS.length } }
+  worksheet.autoFilter = { from: { row: 3, column: 1 }, to: { row: 3, column: columns.length } }
 
   const columnNumber = (key: string) => worksheet.getColumn(key).number
   rows.forEach((product, index) => {

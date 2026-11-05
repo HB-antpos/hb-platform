@@ -104,6 +104,7 @@ export const P = {
     ManageSuppliers: 'DomesticPurchase.ManageSuppliers',
     ManageProducts: 'DomesticPurchase.ManageProducts',
     ManagePrefixCodes: 'DomesticPurchase.ManagePrefixCodes',
+    ViewSupplierName: 'DomesticPurchase.ViewSupplierName',
   },
   Reports: {
     View: 'Reports.View',
@@ -114,6 +115,7 @@ export const P = {
     SalesDetailView: 'SalesDashboard.SalesDetail.View',
     CompactBoardView: 'SalesDashboard.CompactBoard.View',
     MonthlyDailySalesDownloadView: 'SalesDashboard.MonthlyDailySalesDownload.View',
+    HolidaySalesReportView: 'SalesDashboard.HolidaySalesReport.View',
     ProductMovementView: 'SalesDashboard.ProductMovement.View',
     BatchProductSalesView: 'SalesDashboard.BatchProductSales.View',
     WarehouseFlowView: 'SalesDashboard.WarehouseFlow.View',
@@ -167,6 +169,13 @@ export const P = {
   PricingStrategy: {
     View: 'PricingStrategy.View',
     Edit: 'PricingStrategy.Edit',
+  },
+  // 商品陈列图（「商品与价格」页内页签）：看方案 / 参数 / 型号、维护商品陈列参数、维护货架与挂钩型号并发布方案；
+  // 与后端 Permissions.Planogram.* 一致，后端 PermissionAliases 设 Manage ⊇ Edit ⊇ View（新权限默认不授予任何角色，Admin 靠角色放行）。
+  Planogram: {
+    View: 'Planogram.View',
+    Edit: 'Planogram.Edit',
+    Manage: 'Planogram.Manage',
   },
   LocalPurchase: {
     View: 'LocalPurchase.View',

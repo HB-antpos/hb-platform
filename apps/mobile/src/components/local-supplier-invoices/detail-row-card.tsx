@@ -14,6 +14,7 @@ import {
   getPricingSummary,
   getProductStatusFilter,
   getPurchasePriceChange,
+  getRetailPriceDisplay,
 } from "@/modules/local-supplier-invoices/detail";
 import type { LocalSupplierInvoiceItem } from "@/modules/local-supplier-invoices/types";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -83,6 +84,16 @@ export const DetailRowCard = memo(function DetailRowCard({
       case "none": return t("detail.priceChange.noPrice");
     }
   })();
+  // 零售价：没填指定零售价时灰色显示本店现价；下方小字给本店现价与倍率，倍率不到 1.5 倍标红。
+  const retail = getRetailPriceDisplay(detail);
+  const retailHint = retail.storeRetailPrice === null
+    ? null
+    : [
+      retail.source === "designated"
+        ? t("detail.retailStoreWithPrice", { price: formatMoney(retail.storeRetailPrice) })
+        : t("detail.retailStore"),
+      retail.storeMarkupText ? t("detail.retailMarkup", { rate: retail.storeMarkupText }) : null,
+    ].filter(Boolean).join(" · ");
   const priceChangeStyle = priceChange.kind === "up"
     ? (priceChange.level === "light" ? styles.upLight : styles.up)
     : priceChange.kind === "down" ? styles.down : styles.neutral;
@@ -202,7 +213,12 @@ export const DetailRowCard = memo(function DetailRowCard({
         </View>
         <View style={styles.num}>
           <Text style={styles.numLabel}>{t("detail.retailPrice")}</Text>
-          <EditedValue edited={edited.has("retailPrice")}><Text style={styles.numValue}>{formatMoney(detail.retailPrice)}</Text></EditedValue>
+          <EditedValue edited={edited.has("retailPrice")}>
+            <Text style={[styles.numValue, retail.source === "store" && styles.numValueMuted]}>{formatMoney(retail.value)}</Text>
+          </EditedValue>
+          {retailHint ? (
+            <Text style={[styles.change, retail.storeMarkupLow ? styles.up : styles.neutral]} numberOfLines={1}>{retailHint}</Text>
+          ) : null}
         </View>
         <View style={styles.num}>
           <Text style={styles.numLabel}>{t("labels.subtotal")}</Text>
@@ -218,6 +234,7 @@ export const DetailRowCard = memo(function DetailRowCard({
               {pricing.newAutoRetailPrice != null ? ` · ${t("detail.pricing.newPrice", { price: formatMoney(pricing.newAutoRetailPrice) })}` : ""}
             </Text>
             {storeStatusTag}
+            {pricing.belowMinimum ? <DetailTag label={t("detail.pricing.belowMin")} tone="orange" /> : null}
           </View>
           <View style={styles.line}>
             <View style={styles.statusTags}>{productStatusTag}{barcodeStatusTag}</View>
@@ -294,6 +311,7 @@ const styles = StyleSheet.create({
   numWide: { flex: 1.5 },
   numLabel: { fontSize: 10.5, color: HB_COLORS.textSecondary },
   numValue: { fontSize: 13, fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
+  numValueMuted: { color: HB_COLORS.textSecondary, fontWeight: "500" },
   change: { fontSize: 10.5, fontWeight: "700" },
   up: { color: HB_COLORS.danger },
   upLight: { color: "#D92D20" },

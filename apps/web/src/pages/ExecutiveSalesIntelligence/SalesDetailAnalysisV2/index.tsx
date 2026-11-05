@@ -6,6 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../../../hooks/useIsMobile'
 import { useProductImageVersions } from '../../../hooks/useProductImageVersion'
 import { useAuthStore } from '../../../store/auth'
+import { formatDomesticSupplierNameFirst, hasDomesticSupplierName } from '../../../utils/domesticSupplierLabel'
 import { toProductImagePreviewUrl, toProductThumbnailUrl } from '../../../utils/productImageThumbnail'
 import { MetricPair, ReportControls, useReportText } from '../ReportWorkbench/ReportControls'
 import { growth, normalizeKeyword, reportPeriod } from '../ReportWorkbench/logic'
@@ -336,7 +337,9 @@ export default function SalesDetailAnalysisV2() {
     return (a[key]! - b[key]!) * (ascending ? 1 : -1) || a.code.localeCompare(b.code)
   })
   const supplierRows = sortedRows('suppliers', (suppliers.data?.rows ?? []).filter(row => `${row.name} ${row.code}`.toLowerCase().includes(supplierSearch.trim().toLowerCase())))
-  const supplierOptions = (suppliers.data?.rows ?? []).map(row => ({ value: row.code, label: `${row.name || row.code} · ${row.code}` }))
+  // 国内供应商页签：无「查看国内供应商名称」权限时名称为空，只显示代码（不拼成「代码 · 代码」）；澳洲页签保持原样。
+  const supplierOptions = (suppliers.data?.rows ?? []).map(row => ({ value: row.code,
+    label: kind === 'china' ? formatDomesticSupplierNameFirst(row.code, row.name) : `${row.name || row.code} · ${row.code}` }))
   const supplierCategoryTree = buildSalesDetailSupplierCategoryTree(categoryGroups ?? [], code =>
     supplierOptions.find(option => option.value === code)?.label || code || text('供应商分类', 'Supplier categories'))
   // 复用分类父子关系，仓库树直接从分类根节点展示，不添加供应商分组。
@@ -410,10 +413,13 @@ export default function SalesDetailAnalysisV2() {
   const railNameButton = (panel: RailPanel, row: SalesDetailRow, index: number) => {
     const dimension = dimensionOf(panel)
     const selected = isDimensionSelected(dimension, row.code)
+    // 国内供应商页签且没有名称（无「查看国内供应商名称」权限）：只显示一次代码，不留「 · 代码」也不重复；
+    // 澳洲页签与分店栏保持原样。
+    const codeOnly = kind === 'china' && panel === 'suppliers' && !hasDomesticSupplierName(row.code, row.name)
     return <button data-code={row.code} aria-pressed={selected} className={styles.nameButton}
-      onClick={() => pick(dimension, row)} title={`${row.name} · ${row.code}`}>
+      onClick={() => pick(dimension, row)} title={codeOnly ? row.code : `${row.name} · ${row.code}`}>
       <span className={styles.rank}>{String(index + 1).padStart(2, '0')}</span>
-      <span className={styles.railName}><strong>{row.name || row.code}</strong>{panel === 'suppliers' && <small>{row.code}</small>}</span>
+      <span className={styles.railName}><strong>{row.name || row.code}</strong>{panel === 'suppliers' && !codeOnly && <small>{row.code}</small>}</span>
     </button>
   }
   const railTable = (panel: RailPanel, rows: SalesDetailRow[]) => {

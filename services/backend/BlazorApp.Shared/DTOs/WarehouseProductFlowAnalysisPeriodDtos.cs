@@ -1,3 +1,6 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
+
 namespace BlazorApp.Shared.DTOs
 {
     /// <summary>单一业务日期范围。</summary>
@@ -59,6 +62,7 @@ namespace BlazorApp.Shared.DTOs
 
         public string? SupplierCode { get; set; }
 
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? SupplierName { get; set; }
     }
 }

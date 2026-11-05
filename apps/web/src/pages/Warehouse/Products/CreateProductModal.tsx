@@ -29,6 +29,7 @@ import {
 } from '../../../services/warehouseProductService'
 import { getActiveStores, type StoreOption } from '../../../services/storeService'
 import type { ProductType, SupplierOption } from '../../../types/domesticProduct'
+import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabel'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
 interface CreateProductModalProps {
@@ -203,7 +204,8 @@ export default function CreateProductModal({ open, suppliers, onCancel, onSucces
     () =>
       suppliers.map((item) => ({
         value: item.code,
-        label: `${item.code} - ${item.name}`,
+        // 无「查看国内供应商名称」权限时名称为空，只显示代码。
+        label: formatDomesticSupplierLabel(item.code, item.name),
       })),
     [suppliers],
   )

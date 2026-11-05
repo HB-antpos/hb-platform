@@ -54,7 +54,7 @@ export function NewStaffPhoneItem() {
 }
 
 /**
- * 生日 + 年龄标签；未满 18 岁时在下方展开黄色「监护人」区块（四项必填）。
+ * 生日 + 年龄标签；未满 16 岁时在下方展开黄色「监护人」区块（四项必填）。
  * 区块收起时监护人字段会从表单注销，不参与校验；提交时也不会带 guardian（见 buildNewStaffPayloadFields）。
  */
 export function NewStaffBirthdayAndGuardian() {
@@ -119,7 +119,7 @@ export function NewStaffBirthdayAndGuardian() {
         >
           <Typography.Text strong>
             <SafetyCertificateOutlined style={{ color: token.colorWarning, marginInlineEnd: 6 }} />
-            {t('system.usersNewStaff.guardianTitle', '监护人（未满 18 岁必填）')}
+            {t('system.usersNewStaff.guardianTitle', '监护人（未满 16 岁必填）')}
           </Typography.Text>
           <Typography.Paragraph type="secondary" style={{ fontSize: token.fontSizeSM, margin: '4px 0 12px' }}>
             {t(

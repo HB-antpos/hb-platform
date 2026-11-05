@@ -67,6 +67,7 @@ function createEmptyAccess(): AccessControl {
     canViewSalesDetail: false,
     canViewCompactSalesBoard: false,
     canViewMonthlyDailySalesDownload: false,
+    canViewHolidaySalesReport: false,
     canViewProductMovementReport: false,
     canViewBatchProductSalesAnalysis: false,
     canViewShopBatchProductSales: false,
@@ -102,6 +103,9 @@ function createEmptyAccess(): AccessControl {
     canEditPricing: false,
     canManagePromotions: false,
     canEditPromotions: false,
+    canViewPlanogram: false,
+    canEditPlanogram: false,
+    canManagePlanogram: false,
     canManageAdvertisements: false,
     canEditAdvertisements: false,
     canViewAustralianSuppliers: false,
@@ -109,6 +113,7 @@ function createEmptyAccess(): AccessControl {
     canManageDomesticSuppliers: false,
     canManageDomesticProducts: false,
     canManageDomesticPrefixCodes: false,
+    canViewDomesticSupplierName: false,
     canViewAttendanceSchedule: false,
     canEditAttendanceSchedule: false,
     canViewAttendanceAvailability: false,
@@ -272,6 +277,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canViewSalesDetail = hasPermission(P.SalesDashboard.SalesDetailView)
   const canViewCompactSalesBoard = hasPermission(P.SalesDashboard.CompactBoardView)
   const canViewMonthlyDailySalesDownload = hasPermission(P.SalesDashboard.MonthlyDailySalesDownloadView)
+  const canViewHolidaySalesReport = hasPermission(P.SalesDashboard.HolidaySalesReportView)
   const canViewProductMovementReport = hasPermission(P.SalesDashboard.ProductMovementView)
   const canViewBatchProductSalesAnalysis = hasPermission(P.SalesDashboard.BatchProductSalesView)
   // 订货前台货号销量页只认前台权限码，不与后台销售看板权限互相放行，避免订货员被判定为拥有后台入口。
@@ -289,7 +295,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || currentExactPermissionSet.has(P.Reports.ProductMovementView.toLowerCase())
   // 父菜单由可见子页决定，不额外要求工作台或报表总权限。
   const canViewSalesIntelligence =
-    canViewSalesData || canViewSalesDetail || canViewCompactSalesBoard || canViewMonthlyDailySalesDownload ||
+    canViewSalesData || canViewSalesDetail || canViewCompactSalesBoard || canViewMonthlyDailySalesDownload || canViewHolidaySalesReport ||
     canViewProductMovementReport || canViewWarehouseProductFlowAnalysis ||
     canViewLocalProductSalesAnalysis || canViewPurchaseAmountDashboard || canViewBatchProductSalesAnalysis ||
     canViewLocalSupplierPurchaseSalesAnalysis
@@ -342,6 +348,12 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManagePromotions = isAdmin || hasPermission(P.Promotions.View)
   const canEditPromotions = isAdmin || hasPermission(P.Promotions.Edit)
 
+  // 商品陈列图：Manage ⊇ Edit ⊇ View。后端下发的 permissions 已按 PermissionAliases 展开，这里再按同一包含关系推一次，
+  // 保证只拿到精确权限码（如角色预览）时行为一致；管理员由 hasPermission 统一放行。
+  const canManagePlanogram = hasPermission(P.Planogram.Manage)
+  const canEditPlanogram = canManagePlanogram || hasPermission(P.Planogram.Edit)
+  const canViewPlanogram = canEditPlanogram || hasPermission(P.Planogram.View)
+
   // 广告
   const canManageAdvertisements = isAdmin || hasPermission(P.Advertisements.View)
   const canEditAdvertisements = isAdmin || hasPermission(P.Advertisements.Edit)
@@ -355,6 +367,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageDomesticProducts = isAdmin || hasPermission(P.DomesticPurchase.ManageProducts)
   const canManageDomesticPrefixCodes =
     isAdmin || hasPermission(P.DomesticPurchase.ManagePrefixCodes)
+  // 国内供应商名称：管理国内供应商的账号也视为可见
+  const canViewDomesticSupplierName =
+    canManageDomesticSuppliers || hasPermission(P.DomesticPurchase.ViewSupplierName)
 
   // 排班考勤
   const canViewAttendanceSchedule =
@@ -510,6 +525,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewSalesDetail,
     canViewCompactSalesBoard,
     canViewMonthlyDailySalesDownload,
+    canViewHolidaySalesReport,
     canViewProductMovementReport,
     canViewBatchProductSalesAnalysis,
     canViewShopBatchProductSales,
@@ -545,6 +561,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canEditPricing,
     canManagePromotions,
     canEditPromotions,
+    canViewPlanogram,
+    canEditPlanogram,
+    canManagePlanogram,
     canManageAdvertisements,
     canEditAdvertisements,
     canViewAustralianSuppliers,
@@ -552,6 +571,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canManageDomesticSuppliers,
     canManageDomesticProducts,
     canManageDomesticPrefixCodes,
+    canViewDomesticSupplierName,
     canViewAttendanceSchedule,
     canEditAttendanceSchedule,
     canViewAttendanceAvailability,

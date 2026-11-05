@@ -10,6 +10,8 @@ import {
   describeSyncTargetChange,
   getDefaultSelectedSyncTargets,
   getSelectableSyncTargetCodes,
+  resolveEffectiveSyncFields,
+  willSyncWarehousePrice,
 } from "./sync-targets";
 import { createTask } from "./test-helpers";
 import type { SyncTargetStore } from "./types";
@@ -101,5 +103,20 @@ assert.deepEqual(discountJob.payload, {
   retailPrice: 12,
   discountRate: 0.2,
 });
+
+// 仓库商品：进货价由仓库统一管理（分店扫码对账会按仓库进货价静默覆盖），强制不同步进货价。
+const withPurchase = { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: true };
+assert.deepEqual(
+  resolveEffectiveSyncFields(withPurchase, true),
+  { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: false },
+  "仓库商品强制关闭进货价同步"
+);
+assert.equal(resolveEffectiveSyncFields(withPurchase, false), withPurchase, "非仓库商品保持用户的勾选");
+
+// 仓库商品且勾选了零售价或折扣，才会一并更新仓库价；与后端触发条件一致。
+assert.equal(willSyncWarehousePrice({ syncRetailPrice: true, syncDiscountRate: false }, true), true);
+assert.equal(willSyncWarehousePrice({ syncRetailPrice: false, syncDiscountRate: true }, true), true);
+assert.equal(willSyncWarehousePrice({ syncRetailPrice: false, syncDiscountRate: false }, true), false, "两项都没勾不改仓库");
+assert.equal(willSyncWarehousePrice({ syncRetailPrice: true, syncDiscountRate: true }, false), false, "非仓库商品不提示");
 
 console.log("price-updates/sync-and-discount.test.ts: ok");

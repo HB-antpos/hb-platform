@@ -39,6 +39,17 @@ export interface AttendanceQuery {
   offset?: number
 }
 
+/** 排班用的分店员工（GET attendance/employees，与手机排班表同一接口）；age 只在 21 岁以下时有值（后端 ResolveMinorAge）。 */
+export interface AttendanceEmployeeDto {
+  userGuid: string
+  username: string
+  fullName?: string | null
+  employmentType?: 'fullTime' | 'partTime' | 'casual' | null
+  age?: number | null
+  isStoreManager?: boolean
+  managesStore?: boolean
+}
+
 export interface AttendanceScheduleDto {
   scheduleGuid: string
   storeCode: string

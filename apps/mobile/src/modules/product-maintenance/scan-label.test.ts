@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { getVerifiedScanPrintTarget, resolveScannedCodeLabel, shouldAutoPrintDiscountLabel } from "./scan-label";
+import {
+  getVerifiedScanPrintTarget,
+  resolveFocusLabelTarget,
+  resolveScannedCodeFocus,
+  resolveScannedCodeLabel,
+  shouldAutoPrintDiscountLabel,
+} from "./scan-label";
 import type { ProductDetail, ScanLabelResult } from "./types";
 
 const result: ScanLabelResult = {
@@ -58,6 +64,19 @@ const setScan: ScanLabelResult = {
 };
 assert.equal(getVerifiedScanPrintTarget(setScan, "SET-1", "1042"), setScan.printTarget);
 assert.equal(getVerifiedScanPrintTarget(setScan, "OTHER", "1042"), null);
+// 套装标签只用套装价：主档在本店没有门店价行（快路径不补建）时仍可打套装码；多码 / 主条码仍要求门店价行。
+const noStorePriceDetail = { ...result.detail!, storePrice: null };
+assert.equal(
+  getVerifiedScanPrintTarget({ ...setScan, detail: noStorePriceDetail }, "SET-1", "1042"),
+  setScan.printTarget,
+);
+assert.equal(getVerifiedScanPrintTarget({ ...result, detail: noStorePriceDetail }, "9528503822107", "1042"), null);
+const multiScanNoStorePrice: ScanLabelResult = {
+  ...setScan,
+  detail: noStorePriceDetail,
+  printTarget: { ...setScan.printTarget!, kind: "multi", barcode: "SET-1", codeId: "multi-1", discountRate: 0 },
+};
+assert.equal(getVerifiedScanPrintTarget(multiScanNoStorePrice, "SET-1", "1042"), null);
 const multiScan: ScanLabelResult = {
   ...setScan,
   printTarget: { ...setScan.printTarget!, kind: "multi", codeId: "multi-1", discountRate: 0.1 },
@@ -84,7 +103,8 @@ const setDetail: ProductDetail = {
   } as ProductDetail["setCodes"][number]],
 };
 assert.deepEqual(resolveScannedCodeLabel(setDetail, " 9527815000021 "), {
-  kind: "set", codeId: "set-9", barcode: "9527815000021", retailPrice: 3.5, discountRate: 0,
+  // 套装子码与多码同口径：折扣跟主档门店价（setDetail 的门店折扣 0.2）。
+  kind: "set", codeId: "set-9", barcode: "9527815000021", retailPrice: 3.5, discountRate: 0.2,
 });
 const multiDetail: ProductDetail = {
   ...baseDetail,
@@ -117,5 +137,56 @@ assert.equal(shouldAutoPrintDiscountLabel(null), false);
 assert.equal(shouldAutoPrintDiscountLabel(undefined), false);
 assert.equal(shouldAutoPrintDiscountLabel(Number.NaN), false);
 assert.equal(shouldAutoPrintDiscountLabel(Number.POSITIVE_INFINITY), false);
+
+// 扫码焦点：服务端目标优先（source=server），套装折扣跟主档门店价；没有服务端目标时按已加载码表本地匹配（source=local）。
+assert.deepEqual(
+  resolveScannedCodeFocus(baseDetail, "SET-1", setScan.printTarget),
+  { kind: "set", codeId: "set-1", barcode: "SET-1", retailPrice: 4, discountRate: 0.2, source: "server" },
+);
+assert.deepEqual(
+  resolveScannedCodeFocus({ ...baseDetail, storePrice: null }, "SET-1", setScan.printTarget)?.discountRate,
+  0,
+  "主档没有门店价行时套装折扣按 0",
+);
+assert.deepEqual(
+  resolveScannedCodeFocus(setDetail, " 9527815000021 ", null),
+  { kind: "set", codeId: "set-9", barcode: "9527815000021", retailPrice: 3.5, discountRate: 0.2, source: "local" },
+);
+assert.deepEqual(
+  resolveScannedCodeFocus(multiDetail, "MULTI-1", null),
+  { kind: "multi", codeId: "multi-uuid", barcode: "MULTI-1", retailPrice: 1.5, discountRate: 0.2, source: "local" },
+);
+assert.deepEqual(
+  resolveScannedCodeFocus(baseDetail, "9528503822107", null),
+  { kind: "product", codeId: "price-1", barcode: "9528503822107", retailPrice: 1.5, discountRate: 0.2, source: "local" },
+);
+assert.equal(resolveScannedCodeFocus(baseDetail, "9528000000001", null)?.kind, "clearance");
+// 商品名之类的手动关键字不会精确命中，不设焦点；码表分页未含的码同样为 null，由调用方在码表加载后再试。
+assert.equal(resolveScannedCodeFocus(baseDetail, "Tissue", null), null);
+assert.equal(resolveScannedCodeFocus(baseDetail, "9527815000099", null), null);
+
+// 焦点码打印目标按「当前」详情取价：套装优先码表同行（用户可能刚改过套装价），多码跟随当前主档门店价。
+const setFocus = resolveScannedCodeFocus(baseDetail, "SET-1", setScan.printTarget)!;
+assert.deepEqual(
+  resolveFocusLabelTarget({ storePrice: baseDetail.storePrice, setCodes: [] }, setFocus),
+  { kind: "set", codeId: "set-1", barcode: "SET-1", retailPrice: 4, discountRate: 0.2 },
+);
+assert.deepEqual(
+  resolveFocusLabelTarget(
+    { storePrice: baseDetail.storePrice, setCodes: [{ ...setDetail.setCodes[0], setBarcode: "SET-1", setRetailPrice: 4.5 }] },
+    setFocus,
+  ),
+  // 按条码匹配到码表行后以该行为准：行 id、行价都取码表里的值。
+  { kind: "set", codeId: "set-9", barcode: "SET-1", retailPrice: 4.5, discountRate: 0.2 },
+);
+const multiFocus = resolveScannedCodeFocus(multiDetail, "MULTI-1", null)!;
+assert.deepEqual(
+  resolveFocusLabelTarget(
+    { storePrice: { ...multiDetail.storePrice!, retailPrice: 1.8, discountRate: 0 }, setCodes: [] },
+    multiFocus,
+  ),
+  { kind: "multi", codeId: "multi-uuid", barcode: "MULTI-1", retailPrice: 1.8, discountRate: 0 },
+);
+assert.equal(resolveFocusLabelTarget(baseDetail, resolveScannedCodeFocus(baseDetail, "9528503822107", null)!), null);
 
 console.log("scan-label.test.ts: ok");

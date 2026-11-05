@@ -1,6 +1,7 @@
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
+using BlazorApp.Shared.Helper;
 using BlazorApp.Shared.Models;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Logging;
@@ -975,15 +976,19 @@ namespace BlazorApp.Api.Services
                 }
 
                 var detail = detailResult.Data;
+                // 导出文件不经过 JSON 遮罩：没有「查看国内供应商名称」权限的账号，文件里只写供应商代码。
+                var exportSupplierName = DomesticSupplierInfoMasking.IsNameVisibleInCurrentAction
+                    ? detail.SupplierName
+                    : null;
                 using var workbook = new XLWorkbook();
                 var worksheet = workbook.Worksheets.Add("批次明细");
 
                 worksheet.Cell(1, 1).Value = "批次号";
                 worksheet.Cell(1, 2).Value = detail.BatchNumber;
                 worksheet.Cell(1, 3).Value = "供应商";
-                worksheet.Cell(1, 4).Value = string.IsNullOrWhiteSpace(detail.SupplierName)
+                worksheet.Cell(1, 4).Value = string.IsNullOrWhiteSpace(exportSupplierName)
                     ? detail.SupplierCode
-                    : $"{detail.SupplierCode} - {detail.SupplierName}";
+                    : $"{detail.SupplierCode} - {exportSupplierName}";
                 worksheet.Cell(2, 1).Value = "创建时间";
                 worksheet.Cell(2, 2).Value = detail.CreatedTime.ToString("yyyy-MM-dd HH:mm:ss");
                 worksheet.Cell(2, 3).Value = "总数量";
@@ -1015,9 +1020,9 @@ namespace BlazorApp.Api.Services
                 headerRange.Style.Fill.BackgroundColor = XLColor.LightGray;
                 headerRange.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Center;
 
-                var supplierText = string.IsNullOrWhiteSpace(detail.SupplierName)
+                var supplierText = string.IsNullOrWhiteSpace(exportSupplierName)
                     ? detail.SupplierCode
-                    : $"{detail.SupplierCode} - {detail.SupplierName}";
+                    : $"{detail.SupplierCode} - {exportSupplierName}";
                 var sortedItems = OrderBatchDetailItemsForExport(detail.Items);
 
                 var row = headerRow + 1;

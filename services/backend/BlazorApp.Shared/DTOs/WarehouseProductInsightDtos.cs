@@ -19,6 +19,7 @@ public sealed class WarehouseProductInsightProductDto
     public string? Barcode { get; set; }
     public string? ProductImage { get; set; }
     public string? SupplierCode { get; set; }
+    [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
     public string? SupplierName { get; set; }
     public string? LocationCode { get; set; }
     public int? StockQuantity { get; set; }

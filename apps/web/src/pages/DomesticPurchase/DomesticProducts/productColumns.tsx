@@ -5,6 +5,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { SortOrder } from 'antd/es/table/interface'
 import type { TFunction } from 'i18next'
 import type { DomesticProductItem, ProductType } from '../../../types/domesticProduct'
+import { hasDomesticSupplierName } from '../../../utils/domesticSupplierLabel'
 import { CopyableText, ProductStatusText, ProductTypeTag } from './ProductCells'
 import ProductThumb from './ProductThumb'
 import {
@@ -119,14 +120,26 @@ export function buildProductColumns({
       sorter: true,
       sortDirections: SORT_DIRECTIONS,
       sortOrder: sortOrderForColumn('supplier', sortField, sortOrder),
-      render: (_, record) => (
-        <div className="dp-c2">
-          <span className="dp-c2-t" title={record.supplierName}>
-            {record.supplierName || '--'}
-          </span>
-          <span className="dp-c2-s dp-mono">{record.supplierCode}</span>
-        </div>
-      ),
+      render: (_, record) => {
+        // 没有「查看国内供应商名称」权限时后端不返回名称：主行直接显示代码，不再出现「--」加一行代码。
+        if (!hasDomesticSupplierName(record.supplierCode, record.supplierName)) {
+          return (
+            <div className="dp-c2">
+              <span className="dp-c2-t" title={record.supplierCode || undefined}>
+                {record.supplierCode || '--'}
+              </span>
+            </div>
+          )
+        }
+        return (
+          <div className="dp-c2">
+            <span className="dp-c2-t" title={record.supplierName}>
+              {record.supplierName || '--'}
+            </span>
+            <span className="dp-c2-s dp-mono">{record.supplierCode}</span>
+          </div>
+        )
+      },
     },
     {
       key: 'productType',

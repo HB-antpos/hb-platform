@@ -147,6 +147,37 @@ namespace BlazorApp.Api.Controllers.React
                     })
                     .ToList(),
             };
+
+            // 仓库商品（供应商 200 且有仓库档案）：同步会一并把仓库零售价 / 建议折扣更新为本店的值，
+            // 面板据此提示；这里只读，不写任何数据。
+            var supplierCode = (
+                await _db.Queryable<Product>()
+                    .Where(product => product.ProductCode == code && !product.IsDeleted)
+                    .Select(product => product.LocalSupplierCode)
+                    .FirstAsync()
+            )?.Trim();
+            var warehouseRow = await _db.Queryable<WarehouseProduct>()
+                .Where(warehouse => warehouse.ProductCode == code && !warehouse.IsDeleted)
+                .Select(warehouse => new { warehouse.OEMPrice })
+                .FirstAsync();
+            if (
+                warehouseRow != null
+                && string.Equals(
+                    supplierCode,
+                    BlazorApp.Api.Services.React.StoreProductPriceReactService.WarehouseSupplierCode,
+                    StringComparison.Ordinal
+                )
+            )
+            {
+                dto.WarehouseApplicable = true;
+                dto.WarehouseRetailPrice = warehouseRow.OEMPrice;
+                if (_priceTaskService != null)
+                {
+                    var suggested = await _priceTaskService.GetSuggestedDiscountsAsync(new[] { code });
+                    dto.WarehouseSuggestedDiscountRate = suggested.TryGetValue(code, out var rate) ? rate : null;
+                }
+            }
+
             return Ok(ApiResponse<StoreProductSyncTargetsDto>.OK(dto, "查询成功"));
         }
 
@@ -188,6 +219,8 @@ namespace BlazorApp.Api.Controllers.React
                     SyncDiscountRate = request.SyncDiscountRate,
                     SyncPurchasePrice = request.SyncPurchasePrice,
                     Mode = SyncModeConstants.Overwrite,
+                    // 仓库商品同步其它分店时必须一并更新仓库价，否则其它分店扫码仍提示「是否同步仓库价格」。
+                    SyncWarehouse = true,
                 },
                 guard.Access.ActorLabel
             );
@@ -196,9 +229,16 @@ namespace BlazorApp.Api.Controllers.React
                 return Ok(ApiResponse<MobileSyncStoreProductToOtherStoresResultDto>.Error(result.Message));
             }
 
+            var syncResult = result.Data as SyncToOtherStoresResultDto;
             return Ok(
                 ApiResponse<MobileSyncStoreProductToOtherStoresResultDto>.OK(
-                    new MobileSyncStoreProductToOtherStoresResultDto { UpdatedStoreCount = targets.Count },
+                    new MobileSyncStoreProductToOtherStoresResultDto
+                    {
+                        UpdatedStoreCount = targets.Count,
+                        WarehouseUpdated = syncResult?.WarehouseUpdated ?? false,
+                        WarehouseRetailPrice = syncResult?.WarehouseRetailPrice,
+                        WarehouseSuggestedDiscountRate = syncResult?.WarehouseSuggestedDiscountRate,
+                    },
                     result.Message
                 )
             );

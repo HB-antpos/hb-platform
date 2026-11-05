@@ -202,6 +202,7 @@ export const salesEnglishCopy = {
   "error.cartUpdateFailed": "The cart could not be updated.",
   "error.invalidQuantity": "Enter a positive whole-number quantity.",
   "error.invalidPrice": "Enter a valid price with up to two decimals.",
+  "error.priceTooHigh": "Price cannot exceed {{max}}.",
   "error.invalidDiscount":
     "Enter a valid discount amount or a percent from 0 to 100.",
   "error.emptyCart": "Add an item before checkout.",
@@ -415,6 +416,7 @@ const salesChineseCopy = {
   "error.cartUpdateFailed": "购物车更新失败。",
   "error.invalidQuantity": "请输入正整数数量。",
   "error.invalidPrice": "请输入最多两位小数的有效价格。",
+  "error.priceTooHigh": "价格不能超过 {{max}}。",
   "error.invalidDiscount": "请输入有效折扣金额，或 0 至 100 的百分比。",
   "error.emptyCart": "请先加入商品再结账。",
   "error.cashInvalid": "请输入最多两位小数的有效现金金额。",

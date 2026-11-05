@@ -12,6 +12,25 @@ export const DEFAULT_SYNC_FIELDS: SyncFieldSelection = {
   syncPurchasePrice: false,
 };
 
+/**
+ * 仓库商品的进货价由仓库价统一管理：分店扫码对账时会静默按仓库进货价覆盖，
+ * 从某个分店同步进货价既没有意义也会被立刻覆盖回去，所以强制不同步、面板也不再显示该开关。
+ */
+export function resolveEffectiveSyncFields(
+  fields: SyncFieldSelection,
+  warehouseApplicable: boolean
+): SyncFieldSelection {
+  return warehouseApplicable ? { ...fields, syncPurchasePrice: false } : fields;
+}
+
+/** 仓库商品且本次勾选了零售价或折扣时，同步会一并更新仓库价（后端以同样条件判断）。 */
+export function willSyncWarehousePrice(
+  fields: Pick<SyncFieldSelection, "syncRetailPrice" | "syncDiscountRate">,
+  warehouseApplicable: boolean
+): boolean {
+  return warehouseApplicable && (fields.syncRetailPrice || fields.syncDiscountRate);
+}
+
 export function isSyncTargetSelectable(target: SyncTargetStore) {
   return target.hasRecord;
 }

@@ -1,0 +1,376 @@
+/*
+ * 商品陈列图 PDF 页面样式（设计稿 docs/design/planogram-20261104/05-pdf.html 的 A3 横向 1218 × 861 逻辑像素；1 mm = 2.9 px）。
+ * 页面是定宽定高的绝对定位版式：html2canvas 截图时整页按纸张比例铺满 PDF 页面，所以这里的尺寸只是逻辑像素，字号 / 间距不随纸张变。
+ * 全部样式限定在 .planogram-pdf-page 内，且不依赖应用的全局样式、CSS 变量与暗色主题（打印永远白底黑字）。
+ */
+.planogram-pdf-root {
+  color: #1f1f1f;
+}
+
+.planogram-pdf-page {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+  color: #1f1f1f;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.planogram-pdf-page *,
+.planogram-pdf-page *::before,
+.planogram-pdf-page *::after {
+  box-sizing: border-box;
+}
+
+/* ---- 页头 ---- */
+.planogram-pdf-page .pdfp-head {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #1f1f1f;
+}
+
+.planogram-pdf-page .pdfp-head h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #1f1f1f;
+}
+
+.planogram-pdf-page .pdfp-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #444;
+}
+
+.planogram-pdf-page .pdfp-head-left {
+  min-width: 0;
+}
+
+.planogram-pdf-page .pdfp-head-right {
+  flex: none;
+  max-width: 46%;
+  text-align: right;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #444;
+}
+
+.planogram-pdf-page .pdfp-head-right strong {
+  display: block;
+  font-size: 14px;
+  color: #1f1f1f;
+}
+
+.planogram-pdf-page .pdfp-head.is-compact {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.planogram-pdf-page .pdfp-head.is-compact .pdfp-head-right {
+  max-width: none;
+  text-align: left;
+}
+
+.planogram-pdf-page .pdfp-head.is-compact .pdfp-head-right strong {
+  display: inline;
+  margin-right: 8px;
+  font-size: 12px;
+}
+
+.planogram-pdf-page .pdfp-head.is-compact .pdfp-head-right div {
+  display: inline;
+  margin-right: 10px;
+}
+
+/* ---- 版面图与说明栏 ---- */
+.planogram-pdf-page .pdfp-board {
+  position: absolute;
+  line-height: 0;
+}
+
+.planogram-pdf-page .pdfp-board svg {
+  display: block;
+}
+
+.planogram-pdf-page .pdfp-panel-wrap {
+  position: absolute;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: #444;
+}
+
+.planogram-pdf-page .pdfp-panel-wrap.is-bottom {
+  border-top: 1px solid #d9d9d9;
+  padding-top: 6px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.planogram-pdf-page .pdfp-panel.is-bottom {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1.1fr;
+  gap: 14px;
+}
+
+.planogram-pdf-page .pdfp-panel-wrap.is-bottom .is-secondary {
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.planogram-pdf-page .pdfp-panel section + section {
+  margin-top: 8px;
+}
+
+.planogram-pdf-page .pdfp-panel.is-bottom section + section {
+  margin-top: 0;
+}
+
+.planogram-pdf-page .pdfp-panel-title {
+  margin-bottom: 4px;
+  font-weight: 600;
+  color: #1f1f1f;
+}
+
+.planogram-pdf-page .is-secondary {
+  font-size: 9.5px;
+  color: #8c8c8c;
+}
+
+.planogram-pdf-page .is-conflict {
+  color: #cf1322;
+}
+
+.planogram-pdf-page .pdfp-legend-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+/* ---- 序号徽标（清单行号；与版面图上的气泡一一对应） ---- */
+.planogram-pdf-page .pdfp-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 15px;
+}
+
+.planogram-pdf-page .pdfp-badge.is-error {
+  background: #ff4d4f;
+}
+
+.planogram-pdf-page .pdfp-checkbox {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 1.2px solid #595959;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+/* ---- 页脚 ---- */
+.planogram-pdf-page .pdfp-foot {
+  position: absolute;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding-top: 6px;
+  border-top: 1px solid #d9d9d9;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: #444;
+  white-space: nowrap;
+}
+
+.planogram-pdf-page .pdfp-foot-left {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.planogram-pdf-page .pdfp-foot-note + .pdfp-foot-note {
+  margin-left: 14px;
+}
+
+.planogram-pdf-page .pdfp-foot-right {
+  flex: none;
+}
+
+/* 英文 / 双语页脚：左右两块各自最多折两行（高度 38），文案不再被省略号 / 裁切吃掉 */
+.planogram-pdf-page .pdfp-foot.is-multiline {
+  line-height: 1.3;
+  white-space: normal;
+  overflow: hidden;
+}
+
+.planogram-pdf-page .pdfp-foot.is-multiline .pdfp-foot-left {
+  flex: 1;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.planogram-pdf-page .pdfp-foot.is-multiline .pdfp-foot-note {
+  display: inline-block;
+}
+
+.planogram-pdf-page .pdfp-foot.is-multiline .pdfp-foot-right {
+  max-width: 44%;
+  text-align: right;
+}
+
+.planogram-pdf-page .pdfp-brand {
+  position: absolute;
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.planogram-pdf-page .pdfp-pageno {
+  position: absolute;
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+}
+
+/* ---- 执行清单 ---- */
+.planogram-pdf-page .pdfp-summary {
+  position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 28px;
+  padding-top: 10px;
+  font-size: 12px;
+}
+
+.planogram-pdf-page .pdfp-summary b {
+  margin-right: 4px;
+  font-size: 16px;
+}
+
+.planogram-pdf-page .pdfp-summary .is-muted {
+  color: #888;
+}
+
+.planogram-pdf-page .pdfp-tables {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+}
+
+.planogram-pdf-page .pdfp-table {
+  flex: none;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.planogram-pdf-page .pdfp-table th {
+  padding: 0 5px;
+  border: 1px solid #bfbfbf;
+  background: #f0f0f0;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: left;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.planogram-pdf-page .pdfp-table.is-latin-head th {
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+.planogram-pdf-page .pdfp-table td {
+  padding: 0 5px;
+  border: 1px solid #d9d9d9;
+  line-height: 1.2;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 单元格里的每一行单独省略（td 上的 text-overflow 管不到里面的块级 div） */
+.planogram-pdf-page .pdfp-table td > div,
+.planogram-pdf-page .pdfp-table th > div {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planogram-pdf-page .pdfp-table.is-en th > div {
+  /* 英文单语表头允许折成两行（表头行高 26 放得下两行 10px）：不同机器的字体宽度不一样，宁可折行也不截断 */
+  white-space: normal;
+  line-height: 1.1;
+}
+
+/* 商品名 / 挂钩名：文字已在逻辑里按列宽折好行（最多 2 行、超出加「…」），这里每行单独一个 div，只管字号与行高 */
+.planogram-pdf-page .pdfp-table td.is-lines > div {
+  font-size: 10.5px;
+  line-height: 1.15;
+}
+
+.planogram-pdf-page .pdfp-table.is-bi td.is-lines > div {
+  /* 双语行高 36：中文名 2 行 + 英文名 1 行（或 1 + 2）共 3 行要放进去，行距收紧 */
+  line-height: 1.1;
+}
+
+.planogram-pdf-page .pdfp-table td.is-lines.is-hook > div {
+  font-size: 10px;
+}
+
+.planogram-pdf-page .pdfp-table td.is-lines > .is-secondary {
+  font-size: 9.5px;
+}
+
+.planogram-pdf-page .pdfp-table .is-c {
+  text-align: center;
+}
+
+.planogram-pdf-page .pdfp-table .is-mono {
+  font-family: Menlo, Consolas, 'Courier New', monospace;
+  font-size: 10.5px;
+}
+
+.planogram-pdf-page .pdfp-table tr.grp td {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+.planogram-pdf-page .pdfp-table tr.is-error td {
+  background: #fff1f0;
+}
+
+.planogram-pdf-page .pdfp-continued {
+  position: absolute;
+  font-size: 10.5px;
+  color: #888;
+  text-align: right;
+}
+
+.planogram-pdf-page .pdfp-empty {
+  position: absolute;
+  font-size: 12px;
+  color: #888;
+}

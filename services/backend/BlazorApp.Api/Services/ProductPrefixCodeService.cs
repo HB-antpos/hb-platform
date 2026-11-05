@@ -44,10 +44,12 @@ namespace BlazorApp.Api.Services
                 // 应用搜索条件
                 if (!string.IsNullOrWhiteSpace(query.Search))
                 {
+                    // 没有「查看国内供应商名称」权限时，名称这一支换成匹配不到的占位关键词。
+                    var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(query.Search);
                     prefixQuery = prefixQuery.Where((p, s) =>
                         p.PrefixName.Contains(query.Search) ||
                         (p.PrefixDescription != null && p.PrefixDescription.Contains(query.Search)) ||
-                        (s.SupplierName != null && s.SupplierName.Contains(query.Search)));
+                        (s.SupplierName != null && s.SupplierName.Contains(supplierNameKeyword)));
                 }
 
                 if (!string.IsNullOrWhiteSpace(query.SupplierCode))

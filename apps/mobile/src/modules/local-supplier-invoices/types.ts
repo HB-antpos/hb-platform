@@ -153,6 +153,11 @@ export interface LocalSupplierInvoiceItem {
   isSpecialProduct: boolean;
   /** 本店分店价格表里的自动定价状态，仅展示；与本行要写入的 autoPricing 不同。 */
   storeIsAutoPricing: boolean | null;
+  /**
+   * 本店分店价格表里的当前零售价，与 storeIsAutoPricing 同一条记录，仅展示；未匹配商品或本店未建价格时为 null。
+   * 与 retailPrice（本行指定零售价，「更新到分店」优先写入它）不同，绝不能回填进 retailPrice。
+   */
+  storeRetailPrice: number | null;
 }
 
 /** 表头可编辑字段（对应 Web UpdateInvoiceRequest 中本页实际发送的 5 项）。 */
@@ -198,6 +203,8 @@ export interface CheckProductsSummary {
   productNotExists: number;
   barcodeNormal: number;
   barcodeAbnormal: number;
+  /** 自动定价开着但进货价低于下限（0.10）、没生成自动零售价的行数；旧后端没有这个字段。 */
+  autoPricingUnavailable?: number;
 }
 
 /** 商品检测后台任务快照。status：Queued / Running 为进行中，Succeeded / Failed 为终态。 */

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+using BlazorApp.Shared.Helper;
 using SqlSugar;
 using System.ComponentModel.DataAnnotations;
 
@@ -32,6 +34,7 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>
         /// 国内供应商名称（来自 ChinaSupplier）
         /// </summary>
+        [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
         public string? DomesticSupplierName { get; set; }
 
        

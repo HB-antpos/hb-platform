@@ -1,0 +1,299 @@
+import { LeftOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
+import { useKeepAliveContext } from 'keepalive-for-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react'
+import { useTranslation } from 'react-i18next'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import {
+  getHolidayCategoryDetail,
+  getHolidayCategoryMap,
+  getHolidayProductStores,
+  getHolidaySalesReport,
+  type HolidayCategoryDetail,
+  type HolidayCategoryKey,
+  type HolidayProduct,
+  type HolidayProductStores,
+  type HolidaySalesReport,
+  type HolidaySupplierFilter,
+} from '../../../services/holidaySalesReportService'
+import { useAuthStore } from '../../../store/auth'
+import { formatSydneyIsoDate } from '../../../utils/sydneyDate'
+import { useReportQuery } from '../ReportWorkbench/useReportQuery'
+import { CategoryDrawer, ProductStoresDrawer } from './Drawers'
+import { defaultYear, formatMonthDay, resolveStore, seasonPhase, stepStore, storeOptions, yearOptions } from './logic'
+import en from './messages.en.json'
+import zh from './messages.zh.json'
+import {
+  BenchmarkCard,
+  CategoryMapDrawer,
+  CategoryTable,
+  DailyChart,
+  Footer,
+  InsightCard,
+  KpiRow,
+  ProductBoards,
+  StoreTable,
+  type Tr,
+} from './Sections'
+import styles from './styles.module.css'
+
+// 页面文案随本页代码块懒注册，不进首屏 i18n 包（首屏体积预算很紧）。
+registerPageMessages({ zh, en })
+
+const REPORT_METRIC_ID = 'holiday-sales-report'
+const MAP_METRIC_ID = 'holiday-sales-report-category-map'
+const PRODUCT_METRIC_ID = 'holiday-sales-report-product'
+const CATEGORY_METRIC_ID = 'holiday-sales-report-category'
+const SUPPLIERS: { value: HolidaySupplierFilter; labelKey: string }[] = [
+  { value: 'all', labelKey: 'supplier.all' },
+  { value: '257', labelKey: 'supplier.kfc' },
+  { value: '243', labelKey: 'supplier.brazco' },
+]
+
+type ViewMode = 'all' | 'store'
+
+const HolidaySalesReportPage: FC = () => {
+  const { t, i18n } = useTranslation()
+  const tr = useCallback<Tr>((key, params) => t(`holidaySalesReport.${key}`, params) as string, [t])
+
+  const { active } = useKeepAliveContext()
+  const access = useAuthStore((state) => state.access)
+  const currentUser = useAuthStore((state) => state.currentUser)
+
+  // 悉尼时区的「今天」：决定默认年份与年份上限；页面被保活后重新激活时刷新，避免跨天后仍用旧日期。
+  const today = useMemo(() => formatSydneyIsoDate(), [active])
+  const [year, setYear] = useState(() => defaultYear(formatSydneyIsoDate()))
+  const [supplier, setSupplier] = useState<HolidaySupplierFilter>('all')
+  const [mode, setMode] = useState<ViewMode>('all')
+  const [storeCode, setStoreCode] = useState<string | null>(null)
+  const [refresh, setRefresh] = useState(0)
+  const [mapOpen, setMapOpen] = useState(false)
+  // 钻取：榜单里点商品 → 商品的分店数据；大类表里点大类 → 大类明细（分店 / 商品两个标签）
+  const [drillProduct, setDrillProduct] = useState<HolidayProduct | null>(null)
+  const [drillCategory, setDrillCategory] = useState<HolidayCategoryKey | null>(null)
+  const [categoryStore, setCategoryStore] = useState<{ code: string; name: string } | null>(null)
+  const forceRefreshRef = useRef(false)
+
+  // 分店授权范围由服务端按用户解析；这里只用来区分缓存键，并判断有没有可看的分店。
+  const scopeKey = useMemo(() => {
+    const codes = access.visibleStoreCodes()
+    return codes == null ? 'ALL' : [...new Set(codes.map((code) => code.trim()).filter(Boolean))].sort().join('|')
+  }, [access])
+  const hasStoreScope = Boolean(currentUser) && scopeKey !== ''
+  const baseKey = `holiday-sales:${currentUser?.userGUID ?? ''}:${scopeKey}:${year}:${supplier}`
+
+  const loadReport = (branchCode?: string) => async (signal: AbortSignal) => {
+    // 强制刷新只在点「刷新」时传给服务端，普通切换仍可命中服务端缓存。
+    const forceRefresh = forceRefreshRef.current
+    return { data: await getHolidaySalesReport({ year, supplierCode: supplier, branchCode, forceRefresh }, signal) }
+  }
+
+  // 合计视图始终加载：分店下拉与「分店排行」都要用它。
+  const allQuery = useReportQuery<HolidaySalesReport>(`${baseKey}:ALL`, loadReport(), {
+    active,
+    enabled: hasStoreScope,
+    refresh,
+    metricId: REPORT_METRIC_ID,
+  })
+  const options = useMemo(() => storeOptions(allQuery.data), [allQuery.data])
+  const activeStore = mode === 'store' ? resolveStore(storeCode, options) : null
+
+  const storeQuery = useReportQuery<HolidaySalesReport>(`${baseKey}:${activeStore ?? ''}`, loadReport(activeStore ?? undefined), {
+    active,
+    enabled: hasStoreScope && mode === 'store' && activeStore !== null,
+    refresh,
+    metricId: REPORT_METRIC_ID,
+  })
+
+  const mapQuery = useReportQuery(
+    `holiday-map:${currentUser?.userGUID ?? ''}:${scopeKey}:${year}`,
+    async (signal) => ({ data: await getHolidayCategoryMap(year, signal) }),
+    { active, enabled: hasStoreScope && mapOpen, metricId: MAP_METRIC_ID },
+  )
+
+  // 「刷新」要让本次触发的所有查询都带 forceRefresh（合计与单店查询在同一次提交里各自读取），
+  // 它们的 effect 都排在本 effect 之前，所以这里再复位，之后切筛选仍走服务端缓存。
+  useEffect(() => {
+    forceRefreshRef.current = false
+  }, [refresh])
+
+  const single = mode === 'store'
+
+  const productQuery = useReportQuery<HolidayProductStores>(
+    `holiday-product:${currentUser?.userGUID ?? ''}:${scopeKey}:${year}:${drillProduct?.productCode ?? ''}`,
+    async (signal) => ({ data: await getHolidayProductStores(year, drillProduct?.productCode ?? '', signal) }),
+    { active, enabled: hasStoreScope && drillProduct !== null, metricId: PRODUCT_METRIC_ID },
+  )
+  // 单店视图里大类抽屉只看当前店；合计视图里点了某家店后才按该店取
+  const categoryBranch = single ? activeStore ?? undefined : categoryStore?.code
+  const categoryQuery = useReportQuery<HolidayCategoryDetail>(
+    `holiday-category:${currentUser?.userGUID ?? ''}:${scopeKey}:${year}:${supplier}:${drillCategory ?? ''}:${categoryBranch ?? 'ALL'}`,
+    async (signal) => ({
+      data: await getHolidayCategoryDetail({ year, categoryKey: drillCategory ?? 'Costume', branchCode: categoryBranch, supplierCode: supplier }, signal),
+    }),
+    { active, enabled: hasStoreScope && drillCategory !== null && !(single && activeStore === null), metricId: CATEGORY_METRIC_ID },
+  )
+  const closeDrills = () => {
+    setDrillProduct(null)
+    setDrillCategory(null)
+    setCategoryStore(null)
+  }
+
+  const query = single ? storeQuery : allQuery
+  // 单店视图要等合计视图先出来（拿到分店列表）才知道默认看哪家店。
+  const loading = single ? allQuery.loading || (activeStore !== null && storeQuery.loading) : allQuery.loading
+  const report = query.data
+  const error = single ? allQuery.error ?? storeQuery.error : allQuery.error
+  const isEmpty = Boolean(report) && report!.totals.amount === 0 && report!.totals.purchaseQuantity === 0
+
+  const onRefresh = () => {
+    forceRefreshRef.current = true
+    setRefresh((value) => value + 1)
+  }
+  const openStore = (code: string) => {
+    setStoreCode(code)
+    setMode('store')
+  }
+
+  const title = report
+    ? single && report.branchName
+      ? tr('titleStore', { year: report.year, store: `${report.branchCode} ${report.branchName}` })
+      : tr('titleAll', { year: report.year })
+    : tr('title')
+
+  return (
+    <div className={styles.page} aria-busy={loading}>
+      <header className={styles.head}>
+        <div className={styles.titleBlock}>
+          <h1>
+            {title}
+            {report && (
+              <span className={styles.phase}>
+                {seasonPhase(report) === 'running'
+                  ? tr('phase.running')
+                  : tr('phase.ended', { date: formatMonthDay(report.holidayDate) })}
+              </span>
+            )}
+          </h1>
+          {report && (
+            <p className={styles.subtitle}>
+              {tr('subtitle', { from: formatMonthDay(report.salesFrom), through: formatMonthDay(report.salesThrough) })}
+            </p>
+          )}
+        </div>
+        <div className={styles.headActions}>
+          <button type="button" className={styles.button} onClick={() => setMapOpen(true)}>
+            {tr('actions.categoryMap')}
+          </button>
+          <button type="button" className={styles.button} onClick={onRefresh} disabled={loading} aria-label={tr('actions.refresh')} title={tr('actions.refresh')}>
+            <ReloadOutlined spin={loading} />
+          </button>
+        </div>
+      </header>
+
+      <div className={styles.filters}>
+        <span className={styles.filterLabel}>{tr('filters.view')}</span>
+        <div className={styles.segment} role="group" aria-label={tr('filters.view')}>
+          <button type="button" className={mode === 'all' ? styles.segmentOn : undefined} aria-pressed={mode === 'all'} onClick={() => { setMode('all'); closeDrills() }}>
+            {tr('view.all')}
+          </button>
+          <button type="button" className={mode === 'store' ? styles.segmentOn : undefined} aria-pressed={mode === 'store'} onClick={() => { setMode('store'); closeDrills() }}>
+            {tr('view.store')}
+          </button>
+        </div>
+        {single && (
+          <div className={styles.storePicker}>
+            <button type="button" className={styles.stepButton} aria-label={tr('store.prev')} title={tr('store.prev')} disabled={options.length < 2} onClick={() => setStoreCode(stepStore(activeStore, options, -1))}>
+              <LeftOutlined />
+            </button>
+            <select className={styles.select} aria-label={tr('filters.store')} value={activeStore ?? ''} onChange={(event) => setStoreCode(event.target.value)}>
+              {activeStore === null && <option value="">{tr('store.placeholder')}</option>}
+              {options.map((store) => (
+                <option key={store.branchCode} value={store.branchCode}>
+                  {store.branchCode} {store.branchName}
+                </option>
+              ))}
+            </select>
+            <button type="button" className={styles.stepButton} aria-label={tr('store.next')} title={tr('store.next')} disabled={options.length < 2} onClick={() => setStoreCode(stepStore(activeStore, options, 1))}>
+              <RightOutlined />
+            </button>
+          </div>
+        )}
+        <span className={styles.filterLabel}>{tr('filters.year')}</span>
+        <select className={styles.select} aria-label={tr('filters.year')} value={year} onChange={(event) => { setYear(Number(event.target.value)); closeDrills() }}>
+          {yearOptions(today).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+        <span className={styles.filterLabel}>{tr('filters.supplier')}</span>
+        <div className={styles.chips} role="group" aria-label={tr('filters.supplier')}>
+          {SUPPLIERS.map((option) => (
+            <button key={option.value} type="button" className={supplier === option.value ? styles.chipOn : styles.chip} aria-pressed={supplier === option.value} onClick={() => { setSupplier(option.value); closeDrills() }}>
+              {tr(option.labelKey)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!hasStoreScope && <div className={styles.empty}>{tr('state.noAccess')}</div>}
+      {hasStoreScope && loading && !report && (
+        <div className={styles.empty}>
+          {tr('state.loading')}
+          {(single ? allQuery.slow || storeQuery.slow : allQuery.slow) && <div className={styles.hint}>{tr('state.slow')}</div>}
+        </div>
+      )}
+      {hasStoreScope && !loading && !report && error && (
+        <div className={styles.errorBox} role="alert">
+          {tr('state.error', { message: error })}
+          <button type="button" className={styles.button} onClick={onRefresh}>{tr('state.retry')}</button>
+        </div>
+      )}
+      {hasStoreScope && !loading && !report && !error && <div className={styles.empty}>{tr('state.empty', { year })}</div>}
+      {report && isEmpty && <div className={styles.empty}>{single ? tr('state.storeEmpty') : tr('state.empty', { year: report.year })}</div>}
+
+      {report && !isEmpty && (
+        <>
+          <KpiRow report={report} single={single} tr={tr} allStoresSellThrough={report.benchmark?.sellThrough ?? null} />
+          <div className={styles.row}>
+            <DailyChart report={report} tr={tr} language={i18n.language} />
+            <InsightCard report={report} tr={tr} />
+          </div>
+          <CategoryTable report={report} single={single} tr={tr} benchmark={report.benchmark} onOpenMap={() => setMapOpen(true)}
+            onOpenCategory={(key) => { setCategoryStore(null); setDrillCategory(key) }}
+          />
+          <ProductBoards report={report} single={single} tr={tr} onOpen={setDrillProduct} />
+          {single && report.benchmark ? <BenchmarkCard report={report} benchmark={report.benchmark} tr={tr} /> : <StoreTable report={report} tr={tr} onOpen={openStore} />}
+          <Footer report={report} tr={tr} />
+        </>
+      )}
+
+      <CategoryDrawer
+        open={drillCategory !== null}
+        onClose={() => { setDrillCategory(null); setCategoryStore(null) }}
+        categoryKey={drillCategory}
+        data={categoryQuery.data}
+        loading={categoryQuery.loading}
+        error={categoryQuery.error}
+        single={single}
+        storeFilter={categoryStore}
+        onPickStore={(code, name) => setCategoryStore({ code, name })}
+        onClearStore={() => setCategoryStore(null)}
+        onOpenProduct={setDrillProduct}
+        tr={tr}
+      />
+      {/* 商品抽屉写在大类抽屉之后：从大类清单里点商品时叠在它上面 */}
+      <ProductStoresDrawer
+        open={drillProduct !== null}
+        onClose={() => setDrillProduct(null)}
+        product={drillProduct}
+        data={productQuery.data}
+        loading={productQuery.loading}
+        error={productQuery.error}
+        currentStore={single ? activeStore : null}
+        tr={tr}
+      />
+      <CategoryMapDrawer open={mapOpen} onClose={() => setMapOpen(false)} map={mapQuery.data} loading={mapQuery.loading} error={mapQuery.error} tr={tr} />
+    </div>
+  )
+}
+
+export default HolidaySalesReportPage

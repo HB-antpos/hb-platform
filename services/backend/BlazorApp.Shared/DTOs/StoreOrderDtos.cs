@@ -19,6 +19,7 @@ namespace BlazorApp.Shared.DTOs
     public string? LocalSupplierCode { get; set; }
     public string? LocalSupplierName { get; set; }
     public string? DomesticSupplierCode { get; set; }
+    [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
     public string? DomesticSupplierName { get; set; }
 
     /// <summary>
@@ -410,6 +411,7 @@ namespace BlazorApp.Shared.DTOs
     public string? ProductName { get; set; }
     public string? ProductImage { get; set; }
     public string? SupplierCode { get; set; }
+    [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
     public string? SupplierName { get; set; }
     public decimal? DomesticPrice { get; set; }
     public decimal? WarehouseImportPrice { get; set; }
@@ -533,6 +535,7 @@ namespace BlazorApp.Shared.DTOs
   public class StoreOrderImportPriceVarianceSupplierSummaryDto
   {
     public string? SupplierCode { get; set; }
+    [JsonConverter(typeof(DomesticSupplierInfoJsonConverter))]
     public string? SupplierName { get; set; }
     public int ProductCount { get; set; }
     public int DetailCount { get; set; }

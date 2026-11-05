@@ -146,6 +146,8 @@ internal sealed class WarehouseProductTableQueryStore : ProductWarehouseSliceBas
 
         if (keyword != null && !isCodeLikeKeyword && !useTextSearchCandidates)
         {
+            // 没有「查看国内供应商名称」权限的账号不能按名称搜出商品：名称这一支换成匹配不到的占位关键词。
+            var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(keyword);
             var globalSearchExpression = Expressionable.Create<
                 WarehouseProduct,
                 DomesticProduct,
@@ -163,7 +165,7 @@ internal sealed class WarehouseProductTableQueryStore : ProductWarehouseSliceBas
                     || (p.ItemNumber != null && p.ItemNumber.Contains(keyword))
                     || (p.Barcode != null && p.Barcode.Contains(keyword))
                     || (c.CategoryName != null && c.CategoryName.Contains(keyword))
-                    || (s.SupplierName != null && s.SupplierName.Contains(keyword))
+                    || (s.SupplierName != null && s.SupplierName.Contains(supplierNameKeyword))
                     || (p.LocalSupplierCode != null && p.LocalSupplierCode.Contains(keyword))
                     || (ls.Name != null && ls.Name.Contains(keyword))
             );
@@ -299,6 +301,11 @@ internal sealed class WarehouseProductTableQueryStore : ProductWarehouseSliceBas
                         break;
                     case "suppliername":
                     case "domesticsuppliername":
+                        // 没有名称权限的账号按名称列筛选时一律筛不出结果，不能借列头筛选试探名称。
+                        if (!DomesticSupplierInfoMasking.IsNameSearchAllowed)
+                        {
+                            values = new List<string> { DomesticSupplierInfoMasking.BlockedNameKeyword };
+                        }
                         query = WarehouseProductTableFilters.ApplyWarehouseTextMatchFilter(
                             query,
                             values,
@@ -566,6 +573,14 @@ internal sealed class WarehouseProductTableQueryStore : ProductWarehouseSliceBas
         if (sortPlan.HasRequestedSort)
         {
             var sort = sortPlan.Sort;
+            // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按供应商代码排。
+            if (
+                !DomesticSupplierInfoMasking.IsNameSearchAllowed
+                && (sort == "suppliername" || sort == "domesticsuppliername")
+            )
+            {
+                sort = "suppliercode";
+            }
             if (sort == "productname" || sort == "name")
                 query = orderDesc
                     ? query.OrderBy((w, dp, s, p, c, ls) => p.ProductName, OrderByType.Desc)

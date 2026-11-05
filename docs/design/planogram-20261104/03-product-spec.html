@@ -1,0 +1,113 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>商品陈列参数</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>
+.pagehead{display:flex;align-items:center;justify-content:space-between}
+.pagehead h1{font-size:18px;margin:0;font-weight:600}
+.ptabs{display:flex;border-bottom:1px solid #f0f0f0;padding:0 16px}
+.ptabs span{padding:12px 4px;margin-right:24px;font-size:14px;color:rgba(0,0,0,.65);border-bottom:2px solid transparent}
+.ptabs span.on{color:#1677ff;border-color:#1677ff;font-weight:500}
+.filters{display:flex;gap:10px;padding:14px 16px;align-items:center}
+.mask{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.drawer{position:absolute;right:0;top:0;bottom:0;width:640px;background:#fff;box-shadow:-6px 0 16px rgba(0,0,0,.08);display:flex;flex-direction:column}
+.drawer .dh{height:56px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;justify-content:space-between;padding:0 24px;font-size:16px;font-weight:600}
+.drawer .db{flex:1;overflow:hidden;padding:16px 24px}
+.drawer .df{height:56px;border-top:1px solid #f0f0f0;display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:0 24px}
+.sec{font-size:13px;font-weight:600;margin:12px 0 6px;display:flex;align-items:center;gap:8px}
+.sec .muted{font-weight:400}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 14px}
+.fld label{display:block;font-size:12px;color:rgba(0,0,0,.65);margin-bottom:4px}
+.fld .input,.fld .select{height:30px;border-radius:8px;width:100%}
+.unit{color:rgba(0,0,0,.35);font-size:12px;margin-left:auto}
+.ops a{color:#1677ff;margin-right:12px;font-size:13px}
+.phead{display:flex;gap:12px;align-items:center;padding:10px 12px;background:#fafafa;border-radius:8px}
+.hk td,.hk th{padding:6px 10px!important;font-size:12px}
+.hk .input.sm{width:56px;display:inline-flex}
+</style></head><body>
+<div class="app" style="position:relative">
+  <aside class="sider">
+    <div class="brand"><div class="brand-mark">HB</div><span class="brand-text">HB Admin Platform</span></div>
+    <div class="menu">
+      <div class="item"><i class="ti ti-layout-dashboard ic"></i>工作台</div>
+      <div class="group">商品与价格</div>
+      <div class="item sub">商品维护</div><div class="item sub">分店商品价格</div><div class="item sub">促销活动</div><div class="item sub active">商品陈列图</div><div class="item sub">价格任务</div>
+      <div class="group">结算与现金</div><div class="item sub">门店现金</div><div class="item sub">结算明细</div>
+      <div class="group">设备与远程</div><div class="item sub">设备管理</div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="header">
+      <div class="crumb"><i class="ti ti-layout-sidebar-left-collapse" style="margin-right:14px;color:rgba(0,0,0,.65)"></i>商品与价格<span class="sep">/</span><b>商品陈列图</b></div>
+      <div class="hdr-right"><span class="muted">中文 ▾</span><span class="btn primary"><i class="ti ti-shopping-bag"></i>订货前台</span><span class="avatar"><i class="ti ti-user"></i></span><div style="line-height:1.2"><div style="font-weight:600;font-size:13px">admin</div><div class="muted tiny">Administrator</div></div></div>
+    </div>
+    <div class="tabs"><span class="tab"><i class="ti ti-home"></i>工作台</span><span class="tab on">商品陈列图 <i class="ti ti-x muted"></i></span></div>
+    <div class="content">
+      <div class="pagehead"><div><h1>商品陈列图</h1><div class="muted tiny">陈列方案、商品陈列参数、货架与挂钩型号</div></div>
+        <div style="display:flex;gap:8px"><span class="btn"><i class="ti ti-download"></i>下载模板</span><span class="btn"><i class="ti ti-file-import"></i>批量导入 Excel</span></div></div>
+      <div class="card" style="flex:1;min-height:0">
+        <div class="ptabs"><span>陈列方案 6</span><span class="on">商品陈列参数 128</span><span>货架与挂钩型号</span></div>
+        <div class="filters"><div class="input" style="width:280px"><i class="ti ti-search muted"></i><span class="ph">货号 / 条码 / 名称</span></div><span class="select">分类：文具<span class="caret">▼</span></span><span class="select">供应商：全部<span class="caret">▼</span></span><span class="seg"><span class="on">全部</span><span>已设参数 128</span><span>未设参数</span><span>被方案引用 37</span></span></div>
+        <table class="tbl"><thead><tr><th style="width:56px">图</th><th>货号 / 条码</th><th>名称</th><th>包装 宽 × 高 × 厚</th><th>吊孔偏移</th><th>单件重</th><th>默认挂钩</th><th>每钩挂数</th><th>被方案引用</th><th>更新</th><th>操作</th></tr></thead><tbody>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#bae0ff">圆珠</div></td><td><div class="mono">XD0001202</div><div class="muted tiny mono">9312345678021</div></td><td>圆珠笔 10 支 · 蓝</td><td>90 × 185 × 20 mm</td><td>10 mm</td><td>85 g</td><td>双钩带价签 200</td><td>9 <span class="muted tiny">自动</span></td><td>3</td><td class="muted tiny">11-03 16:20</td><td class="ops"><a>编辑</a></td></tr>
+<tr class="sel"><td><div class="thumb" style="width:36px;height:36px;background:#fff1b8">A6</div></td><td><div class="mono">XD0001211</div><div class="muted tiny mono">9312345678113</div></td><td>笔记本 A6 横线 80 页</td><td>110 × 155 × 12 mm</td><td>10 mm</td><td>95 g</td><td>双钩带价签 200</td><td>15 <span class="muted tiny">自动</span></td><td>2</td><td class="muted tiny">11-04 09:40</td><td class="ops"><a>编辑</a></td></tr>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#ffe7ba">胶带</div></td><td><div class="mono">XD0001210</div><div class="muted tiny mono">9312345678106</div></td><td>胶带 2 卷装</td><td>100 × 150 × 55 mm</td><td>12 mm</td><td>120 g</td><td>双钩带价签 200</td><td><b>3</b> <span class="tag gold" style="height:18px;font-size:11px">手填</span></td><td>2</td><td class="muted tiny">11-02 14:05</td><td class="ops"><a>编辑</a></td></tr>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#f4ffb8">尺子</div></td><td><div class="mono">XD0001209</div><div class="muted tiny mono">9312345678090</div></td><td>尺子 30cm 透明</td><td>45 × 330 × 5 mm</td><td>8 mm</td><td>30 g</td><td>双钩带价签 200</td><td><b>20</b> <span class="tag gold" style="height:18px;font-size:11px">手填</span> <span class="muted tiny">自动 36</span></td><td>1</td><td class="muted tiny">11-02 14:01</td><td class="ops"><a>编辑</a></td></tr>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#d9f7be">剪刀</div></td><td><div class="mono">XD0001203</div><div class="muted tiny mono">9312345678038</div></td><td>剪刀 170mm 办公</td><td>95 × 215 × 15 mm</td><td>10 mm</td><td>70 g</td><td>双钩带价签 200</td><td>12 <span class="muted tiny">自动</span></td><td>2</td><td class="muted tiny">11-01 10:12</td><td class="ops"><a>编辑</a></td></tr>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#d6e4ff">订书</div></td><td><div class="mono">XD0001212</div><div class="muted tiny mono">9312345678120</div></td><td>订书机 迷你 · 套装 <span class="tag blue" style="height:18px;font-size:11px">套装</span></td><td>90 × 200 × 40 mm</td><td>10 mm</td><td>160 g</td><td>双钩带价签 200</td><td>4 <span class="muted tiny">自动</span></td><td>2</td><td class="muted tiny">10-31 17:48</td><td class="ops"><a>编辑</a></td></tr>
+<tr style="background:#fffbe6"><td><div class="thumb" style="width:36px;height:36px">无图</div></td><td><div class="mono">XD0001213</div><div class="muted tiny mono">9312345678137</div></td><td>文件夹 A4 彩色</td><td colspan="5" style="color:#d46b08"><i class="ti ti-alert-circle"></i> 未设陈列参数 · 不能拖入设计器</td><td>0</td><td class="muted tiny">—</td><td class="ops"><a>补充参数</a></td></tr>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#ffd6e7">马克</div></td><td><div class="mono">XD0001208</div><div class="muted tiny mono">9312345678083</div></td><td>马克笔 4 色</td><td>115 × 190 × 20 mm</td><td>10 mm</td><td>90 g</td><td>双钩带价签 200</td><td>9 <span class="muted tiny">自动</span></td><td>2</td><td class="muted tiny">10-31 17:40</td><td class="ops"><a>编辑</a></td></tr>
+<tr><td><div class="thumb" style="width:36px;height:36px;background:#ffccc7">便利</div></td><td><div class="mono">XD0001205</div><div class="muted tiny mono">9312345678052</div></td><td>便利贴 3 本装</td><td>80 × 105 × 30 mm</td><td>10 mm</td><td>75 g</td><td>双钩带价签 200</td><td>6 <span class="muted tiny">自动</span></td><td>2</td><td class="muted tiny">10-31 17:38</td><td class="ops"><a>编辑</a></td></tr>
+</tbody></table>
+<div style="display:flex;justify-content:flex-end;padding:12px 16px;gap:8px;align-items:center" class="muted tiny">共 128 条 · 第 1 / 7 页 <span class="btn sm">‹</span><span class="btn sm" style="border-color:#1677ff;color:#1677ff">1</span><span class="btn sm">2</span><span class="btn sm">3</span><span class="btn sm">›</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="mask"></div>
+  <div class="drawer"><div class="dh">编辑陈列参数<i class="ti ti-x muted" style="font-weight:400"></i></div><div class="db">
+    <div class="phead"><div class="thumb" style="width:52px;height:52px;background:#fff1b8">A6</div><div style="flex:1"><div style="font-weight:600">笔记本 A6 横线 80 页</div><div class="muted tiny mono">XD0001211 · 9312345678113 · 零售 $2.50 · 文具 / 本册</div></div><span class="tag">普通商品</span></div>
+    <div style="display:flex;gap:18px;margin-top:12px">
+      <div style="flex:1">
+        <div class="sec">包装尺寸 <span class="muted tiny">挂板正面朝外的外包装，单位 mm</span></div>
+        <div class="grid">
+          <div class="fld"><label>宽 W *</label><div class="input">110<span class="unit">mm</span></div></div>
+          <div class="fld"><label>高 H *</label><div class="input">155<span class="unit">mm</span></div></div>
+          <div class="fld"><label>厚 T（挂钩方向）*</label><div class="input">12<span class="unit">mm</span></div></div>
+          <div class="fld"><label>吊孔距顶边</label><div class="input">10<span class="unit">mm</span></div></div>
+          <div class="fld"><label>吊孔类型</label><span class="select" style="min-width:0">欧式挂孔<span class="caret">▼</span></span></div>
+          <div class="fld"><label>单件重</label><div class="input">95<span class="unit">g</span></div></div>
+        </div>
+        <div class="sec">尺寸来源</div>
+        <span class="seg"><span class="on">人工量取</span><span>供应商资料</span><span>同套装主档</span></span>
+      </div>
+      <div style="width:230px;border:1px dashed #d9d9d9;border-radius:8px;background:#fafafa;padding:8px" id="dim"></div>
+    </div>
+    <div class="sec" style="margin-top:14px">每钩挂数 <span class="muted tiny">按挂钩型号自动换算：⌊(臂长 − 臂端预留) ÷ 厚 T⌋；可手填覆盖，超承重标黄</span></div>
+    <table class="tbl hk"><thead><tr><th>挂钩型号</th><th>臂长 / 预留</th><th>自动换算</th><th>手填</th><th>生效</th><th>承重核对</th><th>默认</th></tr></thead><tbody>
+      <tr><td>双钩带价签 150</td><td>150 / 20</td><td>10</td><td><span class="input sm"><span class="ph">—</span></span></td><td><b>10</b></td><td><span class="tag green" style="height:18px;font-size:11px">0.95 / 3 kg</span></td><td><span class="chk"><i></i></span></td></tr>
+      <tr style="background:#e6f4ff"><td>双钩带价签 200</td><td>200 / 20</td><td>15</td><td><span class="input sm"><span class="ph">—</span></span></td><td><b>15</b></td><td><span class="tag green" style="height:18px;font-size:11px">1.43 / 3 kg</span></td><td><span class="chk"><i class="on"></i></span></td></tr>
+      <tr><td>双钩带价签 250</td><td>250 / 20</td><td>19</td><td><span class="input sm">16</span></td><td><b>16</b> <span class="tag gold" style="height:16px;font-size:10px">手填</span></td><td><span class="tag green" style="height:18px;font-size:11px">1.52 / 4 kg</span></td><td><span class="chk"><i></i></span></td></tr>
+      <tr><td>双钩带价签 300</td><td>300 / 20</td><td>23</td><td><span class="input sm"><span class="ph">—</span></span></td><td><b>23</b></td><td><span class="tag green" style="height:18px;font-size:11px">2.19 / 4 kg</span></td><td><span class="chk"><i></i></span></td></tr>
+    </tbody></table>
+    <div class="muted tiny" style="margin-top:8px">提示：改尺寸后，已引用本商品的 2 个方案会在下次打开时重新校验，冲突处标红但不会自动移动。</div>
+  </div><div class="df"><span class="muted tiny" style="margin-right:auto">上次更新 2026-11-04 09:40 · admin</span><span class="btn">取消</span><span class="btn primary">保存</span></div></div>
+</div>
+<script>
+// 尺寸示意：正视 + 侧视
+const W=110,H=155,T=12,S=0.7; const fx=40,fy=28;
+let s=`<svg width="214" height="220" xmlns="http://www.w3.org/2000/svg" font-size="9" font-family="-apple-system,PingFang SC,Segoe UI,sans-serif">`;
+s+=`<rect x="${fx}" y="${fy}" width="${W*S}" height="${H*S}" rx="2" fill="#fff1b8" stroke="#595959"/>`;
+s+=`<rect x="${fx+W*S/2-6}" y="${fy+10*S-2}" width="12" height="4" rx="2" fill="#fff" stroke="#8c8c8c"/>`;
+s+=`<text x="${fx+W*S/2}" y="${fy+H*S/2+4}" text-anchor="middle" fill="rgba(0,0,0,.55)">正视</text>`;
+s+=`<line x1="${fx}" y1="${fy-10}" x2="${fx+W*S}" y2="${fy-10}" stroke="#1677ff" stroke-width=".8"/><text x="${fx+W*S/2}" y="${fy-13}" text-anchor="middle" fill="#1677ff">W 110</text>`;
+s+=`<line x1="${fx-10}" y1="${fy}" x2="${fx-10}" y2="${fy+H*S}" stroke="#1677ff" stroke-width=".8"/><text x="${fx-13}" y="${fy+H*S/2}" text-anchor="end" fill="#1677ff">H</text><text x="${fx-13}" y="${fy+H*S/2+10}" text-anchor="end" fill="#1677ff">155</text>`;
+s+=`<line x1="${fx+W*S+6}" y1="${fy}" x2="${fx+W*S+6}" y2="${fy+10*S}" stroke="#fa8c16" stroke-width=".8"/><text x="${fx+W*S+9}" y="${fy+8}" fill="#fa8c16">吊孔 10</text>`;
+// 侧视
+const sx=fx+W*S+58;
+s+=`<rect x="${sx}" y="${fy}" width="${T*S+2}" height="${H*S}" fill="#fff1b8" stroke="#595959"/>`;
+s+=`<line x1="${sx-2}" y1="${fy-10}" x2="${sx+T*S+4}" y2="${fy-10}" stroke="#1677ff" stroke-width=".8"/><text x="${sx+T*S/2+1}" y="${fy-13}" text-anchor="middle" fill="#1677ff">T 12</text>`;
+s+=`<text x="${sx+T*S/2+1}" y="${fy+H*S+14}" text-anchor="middle" fill="rgba(0,0,0,.55)">侧视</text>`;
+s+=`<text x="${fx+W*S/2}" y="${fy+H*S+14}" text-anchor="middle" fill="rgba(0,0,0,.55)">挂钩横向占位 = max(W, 价签 52)</text>`;
+s+='</svg>';
+document.getElementById('dim').innerHTML=s;
+</script>
+</body></html>

@@ -1263,7 +1263,7 @@
                 "顶部选择你管理的分店（选「全部分店」时不会出现新增按钮）。",
                 "点右下角 [p:Add staff member|新增员工]。",
                 "在 [d:Name and contact|姓名与联系] 填姓、名（必填）和电话（必填，04 开头的澳洲手机号）；在 [d:Login details|登录信息] 填员工邮箱和账号（账号默认等于邮箱）。",
-                "选择 [i:Date of birth|生日]（必填，用于判断是否未成年）。未满 18 岁时会出现 [d:Guardian|监护人] 区域，必须填 [i:Guardian name|监护人姓名]、[i:Relationship|关系]、[i:Guardian mobile|监护人手机]（04 开头）和 [i:Guardian email|监护人邮箱]。",
+                "选择 [i:Date of birth|生日]（必填，用于判断是否未成年）。未满 16 岁时会出现 [d:Guardian|监护人] 区域，必须填 [i:Guardian name|监护人姓名]、[i:Relationship|关系]、[i:Guardian mobile|监护人手机]（04 开头）和 [i:Guardian email|监护人邮箱]。",
                 "按需打开 [t:Enable now|立即启用]，点 [p:Create account|创建账号]。"
               ],
               "en": [
@@ -1271,7 +1271,7 @@
                 "Pick a store you manage at the top (Add is hidden when “All stores” is selected).",
                 "Tap [p:Add staff member|新增员工] at the bottom right.",
                 "Under [d:Name and contact|姓名与联系], enter first and last name (required) and phone (required, an Australian mobile starting with 04). Under [d:Login details|登录信息], enter the staff email and username (defaults to the email).",
-                "Choose the [i:Date of birth|生日] (required; it is used to check whether the person is under 18). If they are under 18, a [d:Guardian|监护人] section appears and you must fill in [i:Guardian name|监护人姓名], [i:Relationship|关系], [i:Guardian mobile|监护人手机] (starting with 04) and [i:Guardian email|监护人邮箱].",
+                "Choose the [i:Date of birth|生日] (required; it is used to check whether the person is under 16). If they are under 16, a [d:Guardian|监护人] section appears and you must fill in [i:Guardian name|监护人姓名], [i:Relationship|关系], [i:Guardian mobile|监护人手机] (starting with 04) and [i:Guardian email|监护人邮箱].",
                 "Turn on [t:Enable now|立即启用] if needed, then tap [p:Create account|创建账号]."
               ]
             },
@@ -1286,7 +1286,7 @@
                 "New staff belong to this store as Staff · Casual by default.",
                 "The username cannot be changed after creation. Check it first.",
                 "The guardian’s mobile cannot be the same as the staff member’s phone, and the guardian’s email cannot be the same as the staff member’s email.",
-                "After the account is created, send the parent an English signing link from the staff details (see “How do I send a parent the signing link for an under-18 staff member?”)."
+                "After the account is created, send the parent an English signing link from the staff details (see “How do I send a parent the signing link for an under-16 staff member?”)."
               ]
             },
             "permissions": [
@@ -1337,23 +1337,23 @@
             "id": "minor-guardian-link",
             "title": {
               "zh": "如何给未成年员工的家长发签字链接？",
-              "en": "How do I send a parent the signing link for an under-18 staff member?"
+              "en": "How do I send a parent the signing link for an under-16 staff member?"
             },
             "where": {
-              "zh": "工作台 · 人员与管理 · [k:Staff|人员管理] → 员工详情 → [d:Under-18 employment compliance|未成年用工合规]",
-              "en": "Home · Staff & admin · [k:Staff|人员管理] → staff details → [d:Under-18 employment compliance|未成年用工合规]"
+              "zh": "工作台 · 人员与管理 · [k:Staff|人员管理] → 员工详情 → [d:Under-16 employment compliance|未成年用工合规]",
+              "en": "Home · Staff & admin · [k:Staff|人员管理] → staff details → [d:Under-16 employment compliance|未成年用工合规]"
             },
             "steps": {
               "zh": [
-                "在 [k:Staff|人员管理] 点未满 18 岁员工所在行，进入 [d:Staff details|员工详情]，找到 [d:Under-18 employment compliance|未成年用工合规] 区域。",
+                "在 [k:Staff|人员管理] 点未满 16 岁员工所在行，进入 [d:Staff details|员工详情]，找到 [d:Under-16 employment compliance|未成年用工合规] 区域。",
                 "核对监护人姓名和联系方式；同意书类型按门店所在州自动选择（QLD 用儿童雇佣同意书 CE1，NSW 用公司未成年员工同意书）。",
                 "点 [p:Send guardian signing link|发送家长签字链接]，家长会收到英文的邮件 / 短信。如果其中一种没发出去，页面会提示是哪一种、什么原因。",
                 "家长打开链接，补全资料并手写签名。签完后状态变为 [d:Pending review|待审核]。",
                 "到工作台的 [k:Staff profile review|员工资料审核] 审核。通过后状态是 [d:Approved|审核通过]；需要补充的退回，状态变为 [d:Returned|退回修改]，可以回到这里重新发送。"
               ],
               "en": [
-                "In [k:Staff|人员管理], tap the row of the under-18 staff member to open [d:Staff details|员工详情] and find the [d:Under-18 employment compliance|未成年用工合规] section.",
-                "Check the guardian’s name and contact details. The consent form is chosen automatically by the store’s state (QLD uses the CE1 child employment consent; NSW uses the company consent for under-18 staff).",
+                "In [k:Staff|人员管理], tap the row of the under-16 staff member to open [d:Staff details|员工详情] and find the [d:Under-16 employment compliance|未成年用工合规] section.",
+                "Check the guardian’s name and contact details. The consent form is chosen automatically by the store’s state (QLD uses the CE1 child employment consent; NSW uses the company consent for under-16 staff).",
                 "Tap [p:Send guardian signing link|发送家长签字链接]. The parent gets an English email / SMS. If one of them could not be sent, the page tells you which one and why.",
                 "The parent opens the link, completes the details and signs by hand. After signing, the status becomes [d:Pending review|待审核].",
                 "Review it under [k:Staff profile review|员工资料审核] on Home. Once passed, the status is [d:Approved|审核通过]; if more information is needed it is returned and the status becomes [d:Returned|退回修改], so you can resend it from here."
@@ -1371,6 +1371,69 @@
                 "Statuses: Not sent, Awaiting guardian, Link expired, Pending review, Returned, Approved.",
                 "Staff members no longer get reminders and do not fill anything in themselves; their page only shows the details and review progress.",
                 "The date of birth and guardian details are already required when you create the staff member (see “How do I create a staff account?”)."
+              ]
+            },
+            "permissions": [
+              "Attendance.Schedule.ViewStore",
+              "Attendance.Schedule.EditManagedStore"
+            ]
+          },
+          {
+            "id": "roster-manage",
+            "title": {
+              "zh": "店长如何用手机给员工排班并发布？",
+              "en": "How does a store manager roster staff and publish the week in the app?"
+            },
+            "where": {
+              "zh": "工作台 · 人员与管理 · [k:Attendance management|考勤管理] → [tab:Roster|排班]",
+              "en": "Home · Staff & admin · [k:Attendance management|考勤管理] → [tab:Roster|排班]"
+            },
+            "steps": {
+              "zh": [
+                "§排班前准备",
+                "在 [tab:Home|工作台] 的「人员与管理」里点 [k:Attendance management|考勤管理]，切到 [tab:Roster|排班] 页签（账号有打卡记录权限时，默认先打开 [tab:Punches|打卡记录]）。",
+                "管理多家分店时，点上方的分店按钮选要排班的分店（店长只能排自己主分店；管理员可选所有分店）。点标题两侧的 ‹ › 箭头切到要排的那一周，标题显示「N 年第 W 周」和日期范围。",
+                "§排班",
+                "表格里一行是一位员工、一列是一天。点员工那一行、那一天的格子，在 [d:Add shift|新增班次] 窗口里选一个常用班次（09:00–13:00、16:00–17:30、09:00–17:00、09:00–21:00、09:00–19:00），或用开始 / 结束时间旁的 ± 按钮每次调整 30 分钟；需要时调整 [d:Meal breaks|用餐] 次数、填 [i:Note|备注]，最后点 [p:Save|保存]（按钮上会显示这个班的工时）。",
+                "一次排多天或多人：点员工姓名，给这位员工 [d:Roster several days|批量排多天]；点表头的日期，给这一天 [d:Roster several staff|批量排多人]。选好时间并勾选日期 / 员工后，点底部的 [p:Add N shift(s)|新增 N 个班次]。已有班次、已批准请假或标了不能上班的日期 / 员工选不了。",
+                "想更快：表格上方的 [d:Add shift|添加班次] 一行放着常用班次，点一个再点要放的格子，或长按后拖到格子里；放下后提示条上有 [k:Undo|撤销]。已排好的班次要换位置，点开它，用 [k:Move to…|移到…] 或 [k:Copy to…|复制到…]，再点目标格子。",
+                "整周照搬：点 [k:Copy last week|复制上周]，确认后把上周的班次复制到本周（都是草稿；本周已有班次的员工和日期会跳过）。",
+                "§检查并发布",
+                "看表格上方的状态：[d:Draft · not published|草稿·未发布] 表示还有没发布的班次；「空缺 N 天」提示哪几天没有人上班。图例在表格下方，格子里的 ⚠︎ 表示班次和员工上报的时间冲突。",
+                "确认无误后点最下面的 [p:Publish week|发布本周]。出现「本周排班已发布」后，员工才能看到本周的正式排班。",
+                "要发到员工群：本周没有草稿时，状态旁会出现 [k:Export image|导出图片]，点开后点 [p:Share image|分享图片]，选择微信等应用发送。"
+              ],
+              "en": [
+                "§Before you start",
+                "On [tab:Home|工作台], under “Staff & admin”, tap [k:Attendance management|考勤管理], then switch to the [tab:Roster|排班] tab (if your account can view punch records, [tab:Punches|打卡记录] opens first).",
+                "If you manage several stores, tap the store button at the top to pick the store (managers can roster their primary store only; admins can pick any store). Use the ‹ › arrows beside the title to move to the week you want; the title shows the week number and date range.",
+                "§Rostering",
+                "Each row is a staff member and each column is a day. Tap the cell for that person and day. In the [d:Add shift|新增班次] window, pick a common shift (09:00–13:00, 16:00–17:30, 09:00–17:00, 09:00–21:00, 09:00–19:00) or nudge the start / end time by 30 minutes with the ± buttons. Adjust [d:Meal breaks|用餐] and add a [i:Note|备注] if needed, then tap [p:Save|保存] (the button shows the shift’s hours).",
+                "To roster several days or several people at once, tap a staff name for [d:Roster several days|批量排多天], or tap a date in the header for [d:Roster several staff|批量排多人]. Pick the times and the days / staff, then tap [p:Add N shift(s)|新增 N 个班次]. Days or staff that already have a shift, approved leave, or are marked unavailable can’t be selected.",
+                "To go faster, use the [d:Add shift|添加班次] row of common shifts above the grid: tap one, then tap the target cell, or press and hold and drag it onto a cell. A bar then offers [k:Undo|撤销]. To rearrange an existing shift, open it and use [k:Move to…|移到…] or [k:Copy to…|复制到…], then tap the target cell.",
+                "To reuse last week, tap [k:Copy last week|复制上周] and confirm. Last week’s shifts are copied into this week as drafts; staff who already have a shift that day are skipped.",
+                "§Check and publish",
+                "Check the status above the grid: [d:Draft · not published|草稿·未发布] means some shifts are still unpublished, and “N day(s) unstaffed” shows the days nobody is rostered. The legend is under the grid; a ⚠︎ in a cell means the shift clashes with the times the employee reported.",
+                "When it looks right, tap [p:Publish week|发布本周] at the bottom. Once you see “This week’s roster is published.”, staff can see the official roster for the week.",
+                "To send it to the staff chat: when the week has no drafts, [k:Export image|导出图片] appears next to the status. Tap it, then tap [p:Share image|分享图片] and pick WeChat or another app."
+              ]
+            },
+            "tips": {
+              "zh": [
+                "新建的班次（单个、批量、拖放、复制上周）一律是草稿，员工看不到，必须点 [p:Publish week|发布本周] 才生效；已发布的班次修改或移动后保持有效，直接生效。之后又出现新草稿时，状态会变回「草稿·未发布」，要再发布一次。",
+                "一天要排两段班（如早班 + 晚班）：点开已有班次，在窗口顶部点 [k:Add another shift|再加一班]。同一格里时间重叠的班次放不进去。",
+                "格子里的 [d:Avail|可] / [d:No|不可] 是员工自己上报的可上班 / 不能上班时间，[d:Leave|假] 是已批准请假。班次落在这些时间之外只是提醒（格子出现 ⚠︎，拖放时会问 [k:Place anyway|仍然放下]），可以照排。",
+                "删除班次：点开班次，点窗口底部的 [k:Set as day off|设为休息]（或班次小标签右侧的 ×），确认 [p:Delete|删除] 后关联的待审批考勤会一并取消。已有打卡记录的班次不能移动或复制，只能删除。误删的班次可在 Web 后台「排班考勤」页的 [k:Deleted rosters|已删除排班] 里恢复，恢复后一般是草稿，要重新发布。",
+                "21 岁以下员工的名字旁会显示年龄。未满 16 岁员工的班次会按未成年用工规则检查：班次照常保存，但会提示「保留 N 条未成年用工提醒」、格子里显示 !，点页面上方的 [k:Minor employment reminders|未成年用工提醒待办] 查看。",
+                "其他店长默认不在表格里（已有班次的除外），要给他们排班时点状态行的 [k:Other store managers|其他店长] 显示。想一屏看全周，点卡片右上角的全屏图标 [k:Full screen|全屏维护]。"
+              ],
+              "en": [
+                "Every new shift (single, bulk, drag and drop, or copied from last week) starts as a draft that staff cannot see until you tap [p:Publish week|发布本周]. Editing or moving a shift that is already published keeps it active right away. If new drafts appear later, the status goes back to “Draft · not published”, so publish again.",
+                "For a split day (for example morning + evening), open an existing shift and tap [k:Add another shift|再加一班] at the top of the window. Overlapping shifts can’t go in the same cell.",
+                "[d:Avail|可] / [d:No|不可] in a cell are the times the employee reported as available / unavailable, and [d:Leave|假] is approved leave. A shift outside those times is only a warning (the cell shows ⚠︎ and dragging asks [k:Place anyway|仍然放下]); you can still roster it.",
+                "To delete a shift, open it, tap [k:Set as day off|设为休息] at the bottom of the window (or the × on the shift chip), then confirm [p:Delete|删除]; related pending attendance approvals are cancelled. A shift that already has punch records can be deleted but not moved or copied. An accidental delete can be restored under [k:Deleted rosters|已删除排班] on the back-office Rosters and attendance page; a restored shift is normally a draft, so publish again.",
+                "Staff under 21 show their age beside their name. Shifts for staff under 16 are checked against the minor employment rules: the shift is still saved, but you see “Shift saved with N minor employment warning(s)” and a ! in the cell. Tap [k:Minor employment reminders|未成年用工提醒待办] above the grid to review them.",
+                "Other store managers are hidden from the grid unless they already have a shift; tap [k:Other store managers|其他店长] in the status row to show them. To see the whole week on one screen, tap the full-screen icon at the top right of the card ([k:Full screen|全屏维护])."
               ]
             },
             "permissions": [

@@ -58,7 +58,7 @@ export function buildInitialCreateFields(draft: MyobCreateDraft): MyobCreateForm
   }
 }
 
-/** 表单 → 建档请求。监护人只在未满 18 岁时带（生日改回成年后残留的监护人值不提交）；手动密码只在选「我来设置」时带。 */
+/** 表单 → 建档请求。监护人只在未满 16 岁时带（生日改回 16 岁以上后残留的监护人值不提交）；手动密码只在选「我来设置」时带。 */
 export function buildCreateRequest(
   draft: MyobCreateDraft,
   fields: MyobCreateFormFields,
@@ -95,7 +95,7 @@ export function buildCreateRequest(
   }
 }
 
-/** 表单当前是否未满 18 岁（按悉尼今天）。 */
+/** 表单当前是否未满 16 岁（按悉尼今天）。 */
 export function isCreateFormMinor(fields: MyobCreateFormFields, todayIso: string) {
   return isMinorBirthday(trimmed(fields.birthday), todayIso)
 }

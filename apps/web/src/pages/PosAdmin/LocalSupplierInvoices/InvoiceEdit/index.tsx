@@ -123,6 +123,8 @@ import {
   getProductStatusFilter,
   toggleStatusFilter,
 } from './statusFilters'
+import { isAutoPricingBelowMinimum } from './autoPricingEligibility'
+import { formatStoreMarkup, getRetailPriceDisplay } from './retailPriceDisplay'
 import {
   compareNullableNumbers,
   compareNullableText,
@@ -2178,6 +2180,15 @@ export default function InvoiceEditPage() {
     })
   }
 
+  // 检测完成提示：低价行不再让整单失败，但要说清有几行没生成自动零售价、该怎么处理。
+  const describeCheckProductsSummary = (summary: CheckProductsResponse['summary']) => {
+    const base = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', summary)
+    const unavailable = summary.autoPricingUnavailable ?? 0
+    return unavailable > 0
+      ? `${base}${t('posAdmin.invoiceWorkbench.detectAutoPricingUnavailable', { count: unavailable })}`
+      : base
+  }
+
   // ---- 商品检测 ----
   const handleCheckProducts = async () => {
     if (checking) return
@@ -2216,7 +2227,7 @@ export default function InvoiceEditPage() {
             throw new Error(completedJob.message || t('posAdmin.invoiceDetail.detectFailed', '商品检测失败'))
           }
 
-          const description = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', result.summary)
+          const description = describeCheckProductsSummary(result.summary)
           notification.success({
             message: t('posAdmin.invoiceDetail.detectCompletedTitle', '商品检测完成'),
             description,
@@ -2257,7 +2268,7 @@ export default function InvoiceEditPage() {
             invoiceGuid: submittedInvoiceGuid,
             detailGuids,
           })
-          const description = t('posAdmin.invoiceDetail.detectCompleteMsg', '检测完成：共 {{total}}条，商品存在 {{productExists}}条，不存在 {{productNotExists}}条，条码正常 {{barcodeNormal}}条，异常 {{barcodeAbnormal}}条', result.summary)
+          const description = describeCheckProductsSummary(result.summary)
           message.success(description)
           publishLocalSupplierInvoiceChanged(submittedInvoiceGuid)
           if (canApplyCheckProductsJobResult({
@@ -3309,6 +3320,41 @@ export default function InvoiceEditPage() {
     )
   }
 
+  // 零售价列：主行是指定零售价，没填时灰色显示本店现价；第二行给本店现价与倍率作对照，倍率偏低标红。
+  // 本店现价只读，点单元格编辑的始终是本行指定零售价（「更新到分店」优先写入它）。
+  const renderRetailPriceMain = (record: LocalSupplierInvoiceItemDto, value: number | undefined) => {
+    const display = getRetailPriceDisplay(record)
+    if (display.source !== 'store') return renderEditedValue(record, 'retailPrice', formatAmount(value))
+    return renderEditedValue(
+      record,
+      'retailPrice',
+      <span className="lsi-muted" title={t('posAdmin.invoiceWorkbench.retailStoreTip')}>
+        {formatAmount(display.storeRetailPrice)}
+      </span>,
+    )
+  }
+
+  const renderStoreRetailHint = (record: LocalSupplierInvoiceItemDto) => {
+    const display = getRetailPriceDisplay(record)
+    if (display.storeRetailPrice === undefined) return null
+    const label = display.source === 'designated'
+      ? t('posAdmin.invoiceWorkbench.retailStoreWithPrice', { price: formatAmount(display.storeRetailPrice) })
+      : t('posAdmin.invoiceWorkbench.retailStore')
+    const markup = display.storeMarkup === undefined
+      ? null
+      : t('posAdmin.invoiceWorkbench.retailMarkup', { rate: formatStoreMarkup(display.storeMarkup) })
+    return (
+      <span
+        className={`lsi-wb-delta ${display.storeMarkupLow ? 'lsi-wb-delta-up-strong' : 'lsi-muted'}`}
+        title={display.storeMarkupLow
+          ? t('posAdmin.invoiceWorkbench.retailMarkupLowTip')
+          : t('posAdmin.invoiceWorkbench.retailStoreTip')}
+      >
+        {markup ? `${label} · ${markup}` : label}
+      </span>
+    )
+  }
+
   const renderPricingSummary = (record: LocalSupplierInvoiceItemDto) => {
     const pricingEdited = (['autoPricing', 'pricingFloatRate', 'newAutoRetailPrice', 'isSpecialProduct', 'discountRate'] as const)
       .some((field) => canEditDetailRows && isInvoiceDetailFieldEdited(record, detailSnapshotIndex, field))
@@ -3320,10 +3366,17 @@ export default function InvoiceEditPage() {
           : t('posAdmin.invoiceWorkbench.pricingAutoNoRate'))
         : t('posAdmin.invoiceWorkbench.pricingManual')
     const hasDiscount = record.discountRate != null && record.discountRate !== 0
+    // 自动定价开着但进货价低于 0.10：后端不会给倍率和新价，行内直接说原因，不让人对着一个光秃秃的「自动」猜。
+    const autoPricingBelowMin = isAutoPricingBelowMinimum(record)
     return (
       <>
         <span className="lsi-wb-pricing-line">
           <span className={pricingEdited ? 'lsi-wb-edited' : undefined}>{modeText}</span>
+          {autoPricingBelowMin ? (
+            <span className="lsi-tag lsi-tag-orange" title={t('posAdmin.invoiceWorkbench.pricingAutoBelowMinTip')}>
+              {t('posAdmin.invoiceWorkbench.pricingAutoBelowMin')}
+            </span>
+          ) : null}
           {record.isSpecialProduct ? (
             <span className="lsi-tag lsi-tag-orange">{t('posAdmin.invoiceWorkbench.pricingSpecial')}</span>
           ) : null}
@@ -3568,26 +3621,31 @@ export default function InvoiceEditPage() {
       title: t('posAdmin.invoiceWorkbench.colRetailPrice'),
       dataIndex: 'retailPrice',
       key: 'retailPrice',
-      width: 92,
+      // 第二行要放「本店 12.99 · ×1.59」，比单行时略宽。
+      width: 112,
       align: 'right',
-      sorter: (a, b) => compareNullableNumbers(a.retailPrice, b.retailPrice),
+      // 排序按单元格显示的值：没填指定零售价的行按本店现价参与排序。
+      sorter: (a, b) => compareNullableNumbers(getRetailPriceDisplay(a).value, getRetailPriceDisplay(b).value),
       ...getNumberColumnFilterProps('retailPrice', t('posAdmin.invoiceDetail.retailPrice', '零售价')),
       render: (v: number, record) => (
-        <EditableNumberCell
-          value={v}
-          detailGuid={record.detailGUID}
-          field="retailPrice"
-          onSave={handleInlineDetailSave}
-          readOnly={!canEditDetailRows}
-          active={isInlineNumberEditActive(record.detailGUID, 'retailPrice')}
-          onActivate={() => activateInlineNumberEdit(record.detailGUID, 'retailPrice')}
-          onDeactivate={() => deactivateInlineNumberEdit(record.detailGUID, 'retailPrice')}
-          onNavigate={handleInlineNumberNavigate}
-          // 零售价列较窄，编辑态使用紧凑输入框，避免撑开单元格；↑↓ 可连续录入相邻行。
-          inputWidth={COMPACT_NUMBER_INPUT_WIDTH}
-          controls={false}
-          displayValue={renderEditedValue(record, 'retailPrice', formatAmount(v))}
-        />
+        <div className="lsi-wb-cell lsi-wb-cell-end">
+          <EditableNumberCell
+            value={v}
+            detailGuid={record.detailGUID}
+            field="retailPrice"
+            onSave={handleInlineDetailSave}
+            readOnly={!canEditDetailRows}
+            active={isInlineNumberEditActive(record.detailGUID, 'retailPrice')}
+            onActivate={() => activateInlineNumberEdit(record.detailGUID, 'retailPrice')}
+            onDeactivate={() => deactivateInlineNumberEdit(record.detailGUID, 'retailPrice')}
+            onNavigate={handleInlineNumberNavigate}
+            // 零售价列较窄，编辑态使用紧凑输入框，避免撑开单元格；↑↓ 可连续录入相邻行。
+            inputWidth={COMPACT_NUMBER_INPUT_WIDTH}
+            controls={false}
+            displayValue={renderRetailPriceMain(record, v)}
+          />
+          {renderStoreRetailHint(record)}
+        </div>
       ),
     },
     {

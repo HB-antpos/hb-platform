@@ -2245,10 +2245,12 @@ namespace BlazorApp.Api.Tests
         [Theory]
         [InlineData("2010-05-18", "2026-05-18", 16)]
         [InlineData("2010-05-19", "2026-05-18", 15)]
-        [InlineData("2008-05-18", "2026-05-18", null)]
+        [InlineData("2008-05-18", "2026-05-18", 18)]
         [InlineData("2008-05-19", "2026-05-18", 17)]
+        [InlineData("2005-05-18", "2026-05-18", null)]
+        [InlineData("2005-05-19", "2026-05-18", 20)]
         [InlineData("2030-01-01", "2026-05-18", null)]
-        public void ResolveMinorAge_OnlyReturnsAgeUnder18(string birthday, string today, int? expected)
+        public void ResolveMinorAge_OnlyReturnsAgeUnder21(string birthday, string today, int? expected)
         {
             Assert.Equal(
                 expected,

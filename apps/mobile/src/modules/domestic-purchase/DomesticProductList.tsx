@@ -16,11 +16,13 @@ import {
   TextInput,
 } from "react-native-paper";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { OptionPickerSheet } from "@/components/ui/OptionPickerSheet";
 import {
   fetchDomesticProducts,
   fetchDomesticSuppliers,
   updateDomesticProduct,
 } from "@/modules/domestic-purchase/api";
+import { formatDomesticSupplierLabel } from "@/modules/domestic-purchase/supplier-label";
 import type {
   DomesticProductListItem,
   DomesticSupplierOption,
@@ -102,7 +104,8 @@ function buildEditState(product: DomesticProductListItem): DomesticProductEditSt
 
 function buildCopyText(product: DomesticProductListItem, labels: Record<string, string>) {
   return [
-    `${labels.supplier}: ${formatDisplayValue([product.supplierCode, product.supplierName].filter(Boolean).join(" - "))}`,
+    // 没有「查看国内供应商名称」权限时名称为空，复制出去的文本也只带供应商代码。
+    `${labels.supplier}: ${formatDisplayValue(formatDomesticSupplierLabel(product.supplierCode, product.supplierName))}`,
     `${labels.image}: ${formatDisplayValue(product.productImage)}`,
     `${labels.itemNumber}: ${formatDisplayValue(product.hbProductNo)}`,
     `${labels.barcode}: ${formatDisplayValue(product.barcode)}`,
@@ -214,6 +217,20 @@ export function DomesticProductList() {
   // 供应商筛选弹窗按名字排序（接口原序不保证顺序）。
   const sortedSuppliers = useMemo(() => sortSuppliersByName(suppliers, language), [suppliers, language]);
 
+  // 筛选弹窗选项：首项 value 为空串 =「全部供应商」（与价格策略页同一约定）；
+  // 搜索由 OptionPickerSheet 按 label / value 过滤，label 含编码与名称，两者都能搜到。
+  // 没有「查看国内供应商名称」权限时名称为空，label 只剩供应商代码（也就只能按代码搜）。
+  const supplierPickerOptions = useMemo(
+    () => [
+      { value: "", label: t("productList.filters.allSuppliers") },
+      ...sortedSuppliers.map((supplier) => ({
+        value: supplier.supplierCode,
+        label: formatDomesticSupplierLabel(supplier.supplierCode, supplier.supplierName),
+      })),
+    ],
+    [sortedSuppliers, t]
+  );
+
   const activeFilterCount = useMemo(
     () => [selectedSupplier, appliedProductNo.trim()].filter(Boolean).length,
     [appliedProductNo, selectedSupplier]
@@ -226,6 +243,19 @@ export function DomesticProductList() {
       void loadProducts(1, { supplier });
     },
     [loadProducts]
+  );
+
+  // 弹窗回传的是编码：空串清除筛选；找不到对应供应商时忽略，避免误清空当前筛选。
+  const handleSupplierPick = useCallback(
+    (code: string) => {
+      if (!code) {
+        handleSupplierSelect(null);
+        return;
+      }
+      const supplier = suppliers.find((item) => item.supplierCode === code);
+      if (supplier) handleSupplierSelect(supplier);
+    },
+    [handleSupplierSelect, suppliers]
   );
 
   const handleSearch = useCallback(() => {
@@ -376,7 +406,7 @@ export function DomesticProductList() {
                   {formatDisplayValue(item.productName)}
                 </Text>
                 <Text variant="bodySmall" style={styles.mutedText}>
-                  {formatDisplayValue([item.supplierCode, item.supplierName].filter(Boolean).join(" - "))}
+                  {formatDisplayValue(formatDomesticSupplierLabel(item.supplierCode, item.supplierName))}
                 </Text>
               </View>
             </View>
@@ -427,7 +457,7 @@ export function DomesticProductList() {
 
         <Button mode="outlined" onPress={() => setSupplierModalVisible(true)} style={styles.fullButton}>
           {selectedSupplier
-            ? `${selectedSupplier.supplierCode} - ${selectedSupplier.supplierName}`
+            ? formatDomesticSupplierLabel(selectedSupplier.supplierCode, selectedSupplier.supplierName)
             : t("productList.filters.allSuppliers")}
         </Button>
 
@@ -517,56 +547,20 @@ export function DomesticProductList() {
         }
       />
 
-      <Portal>
-        <Modal
-          visible={supplierModalVisible}
-          onDismiss={() => setSupplierModalVisible(false)}
-          contentContainerStyle={styles.supplierModal}
-        >
-          <View style={styles.supplierModalHeader}>
-            <View style={styles.supplierModalTitleWrap}>
-              <Text variant="titleMedium" style={styles.modalTitle}>
-                {t("productList.filters.supplierTitle")}
-              </Text>
-              <Text variant="bodySmall" style={styles.mutedText}>
-                {selectedSupplier
-                  ? `${selectedSupplier.supplierCode} - ${selectedSupplier.supplierName}`
-                  : t("productList.filters.allSuppliers")}
-              </Text>
-            </View>
-            <Button compact onPress={() => setSupplierModalVisible(false)}>
-              {t("common:actions.close")}
-            </Button>
-          </View>
-          <Divider style={styles.divider} />
-          <ScrollView style={styles.supplierList}>
-            <Button
-              mode={selectedSupplier ? "text" : "contained-tonal"}
-              icon={selectedSupplier ? undefined : "check"}
-              onPress={() => handleSupplierSelect(null)}
-              style={styles.supplierOption}
-              contentStyle={styles.supplierOptionContent}
-            >
-              {t("productList.filters.allSuppliers")}
-            </Button>
-            {sortedSuppliers.map((supplier) => {
-              const selected = selectedSupplier?.supplierCode === supplier.supplierCode;
-              return (
-                <Button
-                  key={supplier.supplierCode}
-                  mode={selected ? "contained-tonal" : "text"}
-                  icon={selected ? "check" : undefined}
-                  onPress={() => handleSupplierSelect(supplier)}
-                  style={styles.supplierOption}
-                  contentStyle={styles.supplierOptionContent}
-                >
-                  {supplier.supplierCode} - {supplier.supplierName}
-                </Button>
-              );
-            })}
-          </ScrollView>
-        </Modal>
+      {/* 供应商筛选：与价格策略、季节卡片等页面统一使用底部抽屉选择器（自带 Portal，放在页面层即可）。 */}
+      <OptionPickerSheet
+        visible={supplierModalVisible}
+        title={t("productList.filters.supplierTitle")}
+        cancelLabel={t("common:actions.cancel")}
+        options={supplierPickerOptions}
+        selectedValue={selectedSupplier?.supplierCode ?? ""}
+        searchable
+        searchPlaceholder={t("productList.filters.supplierSearchPlaceholder")}
+        onSelect={handleSupplierPick}
+        onDismiss={() => setSupplierModalVisible(false)}
+      />
 
+      <Portal>
         <Modal
           visible={Boolean(editingProduct && editState)}
           onDismiss={() => {
@@ -689,7 +683,7 @@ export function DomesticProductList() {
                   </Text>
                   <Text variant="bodySmall" style={styles.mutedText}>
                     {t("productList.fields.supplier")}:{" "}
-                    {formatDisplayValue([editingProduct?.supplierCode, editingProduct?.supplierName].filter(Boolean).join(" - "))}
+                    {formatDisplayValue(formatDomesticSupplierLabel(editingProduct?.supplierCode, editingProduct?.supplierName))}
                   </Text>
                 </View>
                 <View style={styles.modalActions}>
@@ -876,32 +870,6 @@ const styles = StyleSheet.create({
   },
   paginationText: {
     color: "#344054",
-  },
-  supplierModal: {
-    margin: 14,
-    padding: 14,
-    borderRadius: 18,
-    backgroundColor: "#FFFFFF",
-    maxHeight: "82%",
-  },
-  supplierModalHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  supplierModalTitleWrap: {
-    flex: 1,
-  },
-  supplierList: {
-    maxHeight: 520,
-  },
-  supplierOption: {
-    marginVertical: 2,
-    alignItems: "stretch",
-  },
-  supplierOptionContent: {
-    justifyContent: "flex-start",
   },
   editModal: {
     margin: 14,

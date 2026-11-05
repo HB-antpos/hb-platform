@@ -235,6 +235,60 @@ namespace BlazorApp.Api.Tests
             Assert.False(await _db.Queryable<Product>().AnyAsync(x => x.ItemNumber == "NEW-ITEM-1"));
         }
 
+        [Fact]
+        public async Task 执行_自动定价开着的新品进货价低于下限_整单拦截并提示核对进货价或关闭自动定价()
+        {
+            await SeedInvoiceAsync();
+            // detail-2 自动定价开着、进货价粘贴成 0.023，没有现成的新自动零售价：写入阶段会按进货价算零售价，底层会抛异常。
+            var lowCost = await _db.Queryable<StoreLocalSupplierInvoiceDetails>().SingleAsync(x => x.DetailGUID == "detail-2");
+            lowCost.PurchasePrice = 0.023m;
+            lowCost.AutoPricing = true;
+            await _db.Updateable(lowCost).ExecuteCommandAsync();
+
+            var result = await CreateService().BatchExecuteActionsAsync(
+                InvoiceGuid,
+                new List<string> { "detail-1", "detail-2" },
+                "tester"
+            );
+
+            Assert.False(result.Success);
+            Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+            var error = Assert.Single(Assert.IsType<BatchExecuteActionsResultDto>(result.Details).Errors);
+            Assert.Contains("detail-2", error);
+            Assert.Contains("货号 NEW-ITEM-2", error);
+            Assert.Contains("进货价低于 0.10，无法自动定价", error);
+            Assert.Contains("关闭自动定价", error);
+
+            // 整单零写入：另一行正常的新品也没建。
+            Assert.Equal(0, await _db.Queryable<Product>().CountAsync());
+        }
+
+        [Fact]
+        public async Task 写入层兜底_自动定价开着的低价新品计失败并带原因_不抛异常炸掉整批()
+        {
+            await SeedInvoiceAsync();
+            var details = await _db.Queryable<StoreLocalSupplierInvoiceDetails>()
+                .Where(x => x.InvoiceGUID == InvoiceGuid)
+                .OrderBy(x => x.DetailGUID)
+                .ToListAsync();
+            var lowCost = details.Single(x => x.DetailGUID == "detail-2");
+            lowCost.PurchasePrice = 0.023m;
+            lowCost.AutoPricing = true;
+            var header = await _db.Queryable<StoreLocalSupplierInvoice>().FirstAsync(x => x.InvoiceGUID == InvoiceGuid);
+
+            var result = await CreateStore().BatchCreateProductsAsync(
+                details,
+                header,
+                "tester",
+                new Dictionary<string, int>()
+            );
+
+            // 低价行计失败并带原因（调用方据此整单回滚），正常行不受影响。
+            Assert.Equal(1, result.FailedCount);
+            Assert.Equal(1, result.SuccessCount);
+            Assert.Contains(result.Errors, error => error.Contains("货号 NEW-ITEM-2") && error.Contains("进货价低于 0.10，无法自动定价"));
+        }
+
         public void Dispose()
         {
             _db.Dispose();

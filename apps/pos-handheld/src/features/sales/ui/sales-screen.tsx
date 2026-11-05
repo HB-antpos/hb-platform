@@ -66,6 +66,7 @@ import {
 
 import type { CartLine, CartSnapshot } from "@/core/contracts";
 import type { NewTransactionGate } from "@/core/contracts/app-updates";
+import { MAX_MANUAL_UNIT_PRICE_DISPLAY } from "@/features/sales/domain";
 import { scanTiming } from "@/features/sales/runtime/scan-timing";
 import {
   PosKeyboardAwareFlatList,
@@ -467,7 +468,7 @@ export function SalesScreen({
             label: t("status.failed"),
             onPress: () => presenter.dismissError(),
             tone: "danger" as const,
-            value: t(errorCopyKey(state.errorCode)),
+            value: t(errorCopyKey(state.errorCode), ERROR_COPY_VALUES),
     },
         ]
       : []),
@@ -770,15 +771,24 @@ export function SalesScreen({
     notifyManualInputBlurred();
   };
 
+  // 单价上限提示只属于弹窗里这一次输入：关闭弹窗或切换编辑项时清掉，下次打开不再残留旧提示。
+  const dismissPriceTooHighError = (): void => {
+    if (presenter.getState().errorCode === "price-too-high") {
+      presenter.dismissError();
+    }
+  };
+
   const closeOpenItemInput = (): void => {
     numericInputModalActiveRef.current = false;
     notifyManualInputBlurred();
+    dismissPriceTooHighError();
     setOpenItemVisible(false);
   };
 
   const closeLineEditInput = (): void => {
     numericInputModalActiveRef.current = false;
     notifyManualInputBlurred();
+    dismissPriceTooHighError();
     setLineEdit(null);
   };
 
@@ -981,6 +991,7 @@ export function SalesScreen({
   }, []);
 
   const selectLineEditMode = (mode: LineEditMode): void => {
+    dismissPriceTooHighError();
     setLineEdit((current) => {
       if (!current) return null;
       const line = state.cart.lines.find(
@@ -1962,7 +1973,7 @@ export function SalesScreen({
       {!compactSalesLayout && state.errorCode ? (
         <ErrorBanner
           dismissLabel={t("common.dismiss")}
-          message={t(errorCopyKey(state.errorCode))}
+          message={t(errorCopyKey(state.errorCode), ERROR_COPY_VALUES)}
           onDismiss={() => presenter.dismissError()}
         />
       ) : null}
@@ -2391,6 +2402,16 @@ export function SalesScreen({
                       {t(errorCopyKey(state.errorCode))}
                     </Text>
                   ) : null}
+                  {/* 弹窗会盖住主界面错误条 / 状态条，超限提示直接显示在弹窗里。 */}
+                  {state.errorCode === "price-too-high" ? (
+                    <Text
+                      accessibilityRole="alert"
+                      style={styles.cashError}
+                      testID="sales-open-item-price-error"
+                    >
+                      {t("error.priceTooHigh", ERROR_COPY_VALUES)}
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={styles.numericKeypadColumn}>
                   <SalesNumberKeypad
@@ -2615,6 +2636,16 @@ export function SalesScreen({
                     testID="sales-line-edit-value"
                     value={lineEdit?.value ?? ""}
                   />
+                  {lineEdit?.mode === "price" &&
+                  state.errorCode === "price-too-high" ? (
+                    <Text
+                      accessibilityRole="alert"
+                      style={styles.cashError}
+                      testID="sales-line-edit-price-error"
+                    >
+                      {t("error.priceTooHigh", ERROR_COPY_VALUES)}
+                    </Text>
+                  ) : null}
                 </View>
                 <View style={styles.numericKeypadColumn}>
                   <SalesNumberKeypad
@@ -3670,6 +3701,9 @@ function cartLineKeyExtractor(line: CartLine): string {
   return line.lineId;
 }
 
+// 错误文案的占位值：单价上限来自共享常量，不在文案里写死。
+const ERROR_COPY_VALUES = { max: MAX_MANUAL_UNIT_PRICE_DISPLAY } as const;
+
 function errorCopyKey(errorCode: string): SalesCopyKey {
   switch (errorCode) {
     case "search-required":
@@ -3688,6 +3722,8 @@ function errorCopyKey(errorCode: string): SalesCopyKey {
       return "error.invalidQuantity";
     case "invalid-price":
       return "error.invalidPrice";
+    case "price-too-high":
+      return "error.priceTooHigh";
     case "invalid-discount":
       return "error.invalidDiscount";
     case "empty-cart":

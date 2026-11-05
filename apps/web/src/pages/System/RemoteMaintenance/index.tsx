@@ -26,6 +26,7 @@ import {
   getRemoteMaintenanceCredential,
   getRemoteMaintenanceDevices,
 } from '../../../services/remoteMaintenanceService'
+import { getActiveStores, type StoreOption } from '../../../services/storeService'
 import type {
   RemoteMaintenanceDevice,
   RemoteMaintenanceDevicePage,
@@ -67,6 +68,8 @@ export default function RemoteMaintenancePage() {
   const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
   const [storeCode, setStoreCode] = useState('')
+  // 分店下拉与列表里的分店名称共用同一份启用分店列表（label=分店名称，value=分店代码）。
+  const [storeOptions, setStoreOptions] = useState<StoreOption[]>([])
   const [onlineStatus, setOnlineStatus] = useState<RemoteOnlineStatus>()
   const [serviceStatus, setServiceStatus] = useState<RemoteServiceStatus>()
   const [loading, setLoading] = useState(false)
@@ -139,6 +142,28 @@ export default function RemoteMaintenancePage() {
     }
   }, [isAdmin, loadDevices, page, pageSize])
 
+  useEffect(() => {
+    if (!isAdmin) return
+    let disposed = false
+    void getActiveStores()
+      .then((stores) => {
+        if (!disposed) setStoreOptions(stores)
+      })
+      .catch((error) => {
+        // 分店列表只用于显示名称和下拉；失败不影响设备列表，名称退回显示分店代码。
+        console.error('Failed to load stores for remote maintenance', error)
+        if (!disposed) message.warning(t('system.remoteMaintenance.storesLoadFailed'))
+      })
+    return () => {
+      disposed = true
+    }
+  }, [isAdmin, t])
+
+  const storeNameByCode = useMemo(
+    () => new Map(storeOptions.map((option) => [option.value, option.label])),
+    [storeOptions],
+  )
+
   const resetFilters = () => {
     requestGateRef.current.invalidate()
     setKeyword('')
@@ -202,8 +227,12 @@ export default function RemoteMaintenancePage() {
       width: 150,
       render: (_value, record) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text strong>{record.storeCode || '--'}</Typography.Text>
-          <Typography.Text type="secondary">{record.deviceCode || '--'}</Typography.Text>
+          <Typography.Text strong>
+            {storeNameByCode.get(record.storeCode) || record.storeCode || '--'}
+          </Typography.Text>
+          <Typography.Text type="secondary">
+            {[record.storeCode, record.deviceCode].filter(Boolean).join(' · ') || '--'}
+          </Typography.Text>
         </Space>
       ),
     },
@@ -308,7 +337,7 @@ export default function RemoteMaintenancePage() {
         </Space>
       ),
     },
-  ], [openCredential, t])
+  ], [openCredential, storeNameByCode, t])
 
   useEffect(() => {
     if (isAdmin) return
@@ -344,12 +373,21 @@ export default function RemoteMaintenancePage() {
             onChange={(event) => { setKeyword(event.target.value); setPage(1) }}
             onPressEnter={() => void loadDevices(1, pageSize)}
           />
-          <Input
+          <Select
             allowClear
-            value={storeCode}
-            placeholder={t('system.remoteMaintenance.storeCodePlaceholder')}
-            onChange={(event) => { setStoreCode(event.target.value); setPage(1) }}
-            onPressEnter={() => void loadDevices(1, pageSize)}
+            showSearch
+            optionFilterProp="label"
+            value={storeCode || undefined}
+            placeholder={t('system.remoteMaintenance.storePlaceholder')}
+            options={storeOptions}
+            // 名称或分店代码都能搜到（输入 1042 也能命中）。
+            filterOption={(input, option) => {
+              const keyword = input.trim().toLowerCase()
+              return !keyword
+                || String(option?.label ?? '').toLowerCase().includes(keyword)
+                || String(option?.value ?? '').toLowerCase().includes(keyword)
+            }}
+            onChange={(value: string | undefined) => { setStoreCode(value ?? ''); setPage(1) }}
           />
           <Select
             allowClear

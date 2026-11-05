@@ -56,6 +56,8 @@ internal sealed class WarehouseProductImportQueryStore : ProductWarehouseSliceBa
         if (!string.IsNullOrWhiteSpace(request.GlobalSearch))
         {
             var keyword = request.GlobalSearch.Trim().ToLower();
+            // 没有「查看国内供应商名称」权限的账号不能按名称搜出商品：名称这一支换成匹配不到的占位关键词。
+            var supplierNameKeyword = DomesticSupplierInfoMasking.GuardNameKeyword(keyword);
             query = query.Where(
                 (product, supplier) =>
                     (
@@ -76,7 +78,7 @@ internal sealed class WarehouseProductImportQueryStore : ProductWarehouseSliceBa
                     )
                     || (
                         supplier.SupplierName != null
-                        && supplier.SupplierName.ToLower().Contains(keyword)
+                        && supplier.SupplierName.ToLower().Contains(supplierNameKeyword)
                     )
             );
         }
@@ -132,6 +134,11 @@ internal sealed class WarehouseProductImportQueryStore : ProductWarehouseSliceBa
                         );
                         break;
                     case "suppliername":
+                        // 没有名称权限的账号按名称列筛选时一律筛不出结果，不能借列头筛选试探名称。
+                        if (!DomesticSupplierInfoMasking.IsNameSearchAllowed)
+                        {
+                            lowers = new List<string> { DomesticSupplierInfoMasking.BlockedNameKeyword };
+                        }
                         query = query.Where(
                             (product, supplier) =>
                                 supplier.SupplierName != null
@@ -152,6 +159,11 @@ internal sealed class WarehouseProductImportQueryStore : ProductWarehouseSliceBa
         if (!string.IsNullOrWhiteSpace(request.SortBy))
         {
             var sort = request.SortBy.ToLower();
+            // 按被遮掉的国内供应商名称排序会泄露相对顺序，无权限时改按货号排。
+            if (sort == "suppliername" && !DomesticSupplierInfoMasking.IsNameSearchAllowed)
+            {
+                sort = "itemnumber";
+            }
             if (sort is "productname" or "name")
                 query = orderDesc
                     ? query.OrderBy((product, supplier) => product.ProductName, OrderByType.Desc)

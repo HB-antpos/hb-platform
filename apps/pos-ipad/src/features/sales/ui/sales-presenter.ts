@@ -11,6 +11,7 @@ import {
 import type { CashDrawerDisposition } from "@/features/checkout/cash/cash-checkout-service";
 import {
   calculateCashSettlement,
+  isManualUnitPriceWithinMaximum,
   roundCashAmount,
   type MergeCompatibleCartLinesResult,
 } from "@/features/sales/domain";
@@ -37,6 +38,8 @@ export type SalesErrorCode =
   | "cart-update-failed"
   | "invalid-quantity"
   | "invalid-price"
+  /** 手工输入的单价超过 MAX_MANUAL_UNIT_PRICE_CENTS（9999）：拒绝本次输入，购物车不变。 */
+  | "price-too-high"
   | "invalid-discount"
   | "empty-cart"
   | "cash-invalid"
@@ -753,6 +756,12 @@ export class SalesPresenter {
       this.publishBlockedAddAttempt("manual");
       return Promise.resolve(false);
     }
+    // 开价商品单价上限与 WPF 一致；超限只拒绝本次输入，不进工作流、不改购物车。
+    if (!isManualUnitPriceWithinMaximum(unitPriceCents)) {
+      this.patchState({ errorCode: "price-too-high" });
+      this.publishBlockedAddAttempt("manual");
+      return Promise.resolve(false);
+    }
     if (!this.dependencies.capabilities.catalog) {
       this.patchState({ errorCode: "runtime-unavailable" });
       this.publishBlockedAddAttempt("manual");
@@ -870,6 +879,11 @@ export class SalesPresenter {
   ): Promise<boolean> {
     if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents < 0) {
       this.patchState({ errorCode: "invalid-price" });
+      return Promise.resolve(false);
+    }
+    // 改价同样受手工单价上限约束；只校验本次输入，购物车里原有的高价行不受影响。
+    if (!isManualUnitPriceWithinMaximum(unitPriceCents)) {
+      this.patchState({ errorCode: "price-too-high" });
       return Promise.resolve(false);
     }
     return this.runCartMutation(() =>

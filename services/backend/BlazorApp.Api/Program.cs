@@ -134,6 +134,8 @@ builder
     {
         // 仓库改价后把"已通知几家分店"的汇总写入响应头，供前端提示"已发送到通知列表"。
         options.Filters.Add<BlazorApp.Api.Filters.PriceNotificationHeaderFilter>();
+        // 没有「查看国内供应商名称」权限的账号：响应里的国内供应商名称等字段输出为空，且不能按名称搜索。
+        options.Filters.Add<BlazorApp.Api.Filters.DomesticSupplierInfoMaskingFilter>();
     })
     .AddJsonOptions(options =>
     {
@@ -827,6 +829,10 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeePaymentSourc
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeSyncService, BlazorApp.Api.Services.Myob.MyobEmployeeSyncService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayrollEmployerService, BlazorApp.Api.Services.Myob.MyobPayrollEmployerService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayCategoryService, BlazorApp.Api.Services.Myob.MyobPayCategoryService>();
+// 商品陈列图（迁移 20261104.001-planogram 建表）：货架 / 挂钩型号、商品陈列参数与陈列方案（批 2）。
+builder.Services.AddScoped<BlazorApp.Api.Services.Planogram.IPlanogramModelService, BlazorApp.Api.Services.Planogram.PlanogramModelService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Planogram.IProductDisplaySpecService, BlazorApp.Api.Services.Planogram.ProductDisplaySpecService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Planogram.IPlanogramPlanService, BlazorApp.Api.Services.Planogram.PlanogramPlanService>();
 // 工资供数：与工资表同一个考勤服务实例（同一请求内共用同一个 DbContext / 缓存）。
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource>(sp =>
     (BlazorApp.Api.Services.Myob.IAttendancePayrollPushSource)sp.GetRequiredService<IAttendanceReactService>());
@@ -1432,6 +1438,7 @@ builder.Services.Configure<BlazorApp.Api.Features.PosReceipts.PosReceiptOptions>
 builder.Services.AddScoped<BlazorApp.Api.Features.PosReceipts.IPosReceiptService, BlazorApp.Api.Features.PosReceipts.PosReceiptService>();
 builder.Services.AddScoped<ISalesDashboardReactService, SalesDashboardReactService>();
 builder.Services.AddScoped<IMonthlyStoreDailySalesReactService, MonthlyStoreDailySalesReactService>();
+builder.Services.AddScoped<IHolidaySalesReportReactService, BlazorApp.Api.Services.React.HolidaySalesReport.HolidaySalesReportReactService>();
 // 分店现金管理（存银行 / 现金支出 / 现金池）。现金池流入只认日结实点现金：取数口读 POSM_DailyClose
 // （收银端日结上传，表由 Hbpos.Api 建立、后台只读）；若需临时停用，换回 NotConnectedCashDailyCloseSource 即可。
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashAccessResolver, BlazorApp.Api.Services.StoreCash.CashAccessResolver>();

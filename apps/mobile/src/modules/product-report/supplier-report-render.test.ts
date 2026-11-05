@@ -282,6 +282,18 @@ async function run() {
     assert.equal(byLabel("Pressable", "open Sample Gift & Homewares Pty Ltd")!.props.accessibilityState.selected, true, "联动选中的行带选中态");
     assert.equal(chinaTexts.filter((text) => text === "成本待补全").length, 2, "成本待补全沿用文字提示");
 
+    // 没有「查看国内供应商名称」权限：名称回退成代码、编号行留空，中国页签也只显示一次代码。
+    await render(
+      React.createElement(SupplierReportTable, {
+        rows: [tableRow("c", "HB196", "", false, () => undefined, true)],
+        isChina: true,
+        hint: "hint-text",
+        sort: { field: "amount", order: "desc" },
+        onSort: () => undefined,
+      }),
+    );
+    assert.equal(texts().filter((text) => text === "HB196").length, 1, "名称缺失时中国页签只显示一次供应商代码");
+
     // ───────────── 供应商弹窗 ─────────────
     const supplier = {
       id: "s1",
@@ -381,6 +393,35 @@ async function run() {
     // 关闭
     await act(() => byLabel("IconButton", lookup("actions.close"))!.props.onPress());
     assert.equal(sheetEvents.at(-1), "close");
+
+    // 没有「查看国内供应商名称」权限：名称回退成代码，标题显示代码，副标题不再重复一遍代码。
+    await render(
+      React.createElement(SupplierDetailSheet, {
+        key: "china-code-only",
+        supplier: { ...supplier, id: "s2", supplierCode: "HB196", supplierName: "HB196" },
+        kind: "china",
+        queryParams: {
+          startDate: "2026-10-01",
+          endDate: "2026-10-21",
+          compareStartDate: "2025-10-01",
+          compareEndDate: "2025-10-21",
+          compareMode: "ByDate",
+          branchCodes: ["BNK", "PAR"],
+        },
+        rangeLabel: "2026-10-01 ~ 2026-10-21",
+        accountIdentity: "u1",
+        scopeVersion: 1,
+        summaryShareText: "营业额占比 8.5%",
+        growthNewLabel: "新增",
+        costPendingLabel: "成本待补全",
+        costNoActivityLabel: "无交易活动",
+        onClose: () => undefined,
+        onLinkFilter: () => undefined,
+      }),
+    );
+    const codeOnlyTexts = texts();
+    assert.equal(codeOnlyTexts.filter((text) => text.includes("HB196")).length, 1, "名称缺失时弹窗只在标题显示一次供应商代码");
+    assert.ok(codeOnlyTexts.includes("2026-10-01 ~ 2026-10-21 · 全部分店"), "副标题只剩日期范围与分店范围，开头没有多余分隔符");
   } finally {
     await act(() => root.render(React.createElement(React.Fragment)));
   }

@@ -1,0 +1,84 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>陈列方案列表</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.31.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="common.css">
+<style>
+.pagehead{display:flex;align-items:center;justify-content:space-between}
+.pagehead h1{font-size:18px;margin:0;font-weight:600}
+.ptabs{display:flex;border-bottom:1px solid #f0f0f0;padding:0 16px}
+.ptabs span{padding:12px 4px;margin-right:24px;font-size:14px;color:rgba(0,0,0,.65);border-bottom:2px solid transparent}
+.ptabs span.on{color:#1677ff;border-color:#1677ff;font-weight:500}
+.filters{display:flex;gap:10px;padding:14px 16px;align-items:center}
+.ops a{color:#1677ff;margin-right:10px;font-size:13px;white-space:nowrap}
+.ops a.muted2{color:rgba(0,0,0,.45)}
+.mask{position:absolute;inset:0;background:rgba(0,0,0,.45)}
+.modal{position:absolute;left:50%;top:70px;transform:translateX(-50%);width:760px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);display:flex;flex-direction:column}
+.modal .mh{padding:16px 24px;font-size:16px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+.modal .mb{padding:0 24px 8px;display:flex;gap:20px}
+.modal .mf{padding:12px 24px 16px;display:flex;justify-content:flex-end;gap:8px;align-items:center}
+.opt{display:flex;align-items:center;margin:10px 0;font-size:13px}
+.opt .k{width:88px;color:rgba(0,0,0,.65);flex:none}
+.opt .chk{margin-right:14px}
+.pv{width:300px;flex:none;background:#f5f5f5;border-radius:8px;padding:12px;display:flex;flex-direction:column;align-items:center;gap:8px}
+.page{background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15);position:relative;overflow:hidden}
+.sumline{display:flex;gap:14px;font-size:12px;color:rgba(0,0,0,.65)}
+</style></head><body>
+<div class="app" style="position:relative">
+  <aside class="sider">
+    <div class="brand"><div class="brand-mark">HB</div><span class="brand-text">HB Admin Platform</span></div>
+    <div class="menu">
+      <div class="item"><i class="ti ti-layout-dashboard ic"></i>工作台</div>
+      <div class="group">商品与价格</div>
+      <div class="item sub">商品维护</div><div class="item sub">分店商品价格</div><div class="item sub">促销活动</div><div class="item sub active">商品陈列图</div><div class="item sub">价格任务</div>
+      <div class="group">结算与现金</div><div class="item sub">门店现金</div><div class="item sub">结算明细</div>
+      <div class="group">设备与远程</div><div class="item sub">设备管理</div>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="header">
+      <div class="crumb"><i class="ti ti-layout-sidebar-left-collapse" style="margin-right:14px;color:rgba(0,0,0,.65)"></i>商品与价格<span class="sep">/</span><b>商品陈列图</b></div>
+      <div class="hdr-right"><span class="muted">中文 ▾</span><span class="btn primary"><i class="ti ti-shopping-bag"></i>订货前台</span><span class="avatar"><i class="ti ti-user"></i></span><div style="line-height:1.2"><div style="font-weight:600;font-size:13px">admin</div><div class="muted tiny">Administrator</div></div></div>
+    </div>
+    <div class="tabs"><span class="tab"><i class="ti ti-home"></i>工作台</span><span class="tab on">商品陈列图 <i class="ti ti-x muted"></i></span></div>
+    <div class="content">
+      <div class="pagehead"><div><h1>商品陈列图</h1><div class="muted tiny">陈列方案、商品陈列参数、货架与挂钩型号</div></div>
+        <div style="display:flex;gap:8px"><span class="btn"><i class="ti ti-file-import"></i>导入方案 JSON</span><span class="btn primary"><i class="ti ti-plus"></i>新建方案</span></div></div>
+      <div class="card" style="flex:1;min-height:0">
+        <div class="ptabs"><span class="on">陈列方案 6</span><span>商品陈列参数 128</span><span>货架与挂钩型号</span></div>
+        <div class="filters"><div class="input" style="width:240px"><i class="ti ti-search muted"></i><span class="ph">方案名称 / 商品货号</span></div><span class="select">货架型号：全部<span class="caret">▼</span></span><span class="seg"><span class="on">全部</span><span>草稿 2</span><span>已发布 3</span><span>已归档 1</span></span></div>
+        <table class="tbl"><thead><tr><th>方案</th><th>货架 / 节数</th><th>商品 / 挂钩 / 挂货</th><th>板面利用</th><th>状态</th><th>版本</th><th>更新</th><th>操作</th></tr></thead><tbody>
+<tr><td><b>文具挂板 A1</b><div class="muted tiny">开学季文具主推</div></td><td>单面洞洞板 900×1200<div class="muted tiny">2 节</div></td><td>12 / 51 / 433</td><td>39%</td><td><span class="tag orange">草稿</span> <span class="tag red" style="height:18px;font-size:11px">冲突 1</span></td><td>v3</td><td class="muted tiny">11-04 10:12<br>admin</td><td class="ops"><a>打开</a><a>复制</a><a>导出 PDF</a><a class="muted2">发布</a><a class="muted2">···</a></td></tr>
+<tr><td><b>电池与数码配件 B2</b></td><td>单面洞洞板 900×1500<div class="muted tiny">3 节</div></td><td>28 / 96 / 1 120</td><td>61%</td><td><span class="tag green">已发布</span></td><td>v2</td><td class="muted tiny">11-01 15:30<br>sean</td><td class="ops"><a>打开</a><a>复制</a><a>导出 PDF</a><a class="muted2">新版本</a><a class="muted2">···</a></td></tr>
+<tr><td><b>玩具小件 C1</b></td><td>双面洞洞板 1200×1800<div class="muted tiny">4 节（双面各 2）</div></td><td>36 / 140 / 980</td><td>58%</td><td><span class="tag green">已发布</span></td><td>v5</td><td class="muted tiny">10-28 11:02<br>admin</td><td class="ops"><a>打开</a><a>复制</a><a>导出 PDF</a><a class="muted2">新版本</a><a class="muted2">···</a></td></tr>
+<tr><td><b>美妆小件 D1</b></td><td>单面洞洞板 900×1200<div class="muted tiny">1 节</div></td><td>9 / 22 / 180</td><td>44%</td><td><span class="tag orange">草稿</span></td><td>v1</td><td class="muted tiny">10-27 09:14<br>sean</td><td class="ops"><a>打开</a><a>复制</a><a>导出 PDF</a><a class="muted2">发布</a><a class="muted2">···</a></td></tr>
+<tr><td><b>Xmas 挂饰 2026</b></td><td>单面洞洞板 900×1500<div class="muted tiny">2 节</div></td><td>18 / 60 / 520</td><td>52%</td><td><span class="tag green">已发布</span></td><td>v1</td><td class="muted tiny">10-20 17:45<br>admin</td><td class="ops"><a>打开</a><a>复制</a><a>导出 PDF</a><a class="muted2">新版本</a><a class="muted2">···</a></td></tr>
+<tr style="color:rgba(0,0,0,.45)"><td><b>厨房小工具 E1</b></td><td>单面洞洞板 600×1200<div class="muted tiny">2 节</div></td><td>14 / 40 / 300</td><td>47%</td><td><span class="tag gray">已归档</span></td><td>v2</td><td class="muted tiny">09-30 12:00<br>admin</td><td class="ops"><a>查看</a><a>复制</a><a>导出 PDF</a><a class="muted2">恢复</a></td></tr>
+</tbody></table>
+      </div>
+    </div>
+  </div>
+  <div class="mask"></div>
+  <div class="modal">
+    <div class="mh">导出版面图 PDF · 文具挂板 A1 <i class="ti ti-x muted" style="font-weight:400"></i></div>
+    <div class="mb">
+      <div style="flex:1">
+        <div class="opt"><span class="k">导出版本</span><span class="seg"><span class="on">已保存 v3</span><span>当前编辑中（先保存）</span></span></div>
+        <div class="opt"><span class="k">纸张</span><span class="seg"><span class="on">A3 横向</span><span>A4 横向</span><span>A4 纵向</span></span></div>
+        <div class="opt"><span class="k">比例</span><span class="seg"><span class="on">自动适配（约 1:4.5）</span><span>1:5</span><span>1:10</span></span><span class="muted tiny" style="margin-left:10px">每页 2 节</span></div>
+        <div class="opt"><span class="k">内容</span><span class="chk"><i class="on"></i>版面图</span><span class="chk"><i class="on"></i>执行清单</span><span class="chk"><i class="on"></i>序号气泡</span><span class="chk"><i class="on"></i>价格</span></div>
+        <div class="opt"><span class="k"></span><span class="chk"><i class="on"></i>孔位列/行号</span><span class="chk"><i></i>商品实拍图</span><span class="chk"><i></i>条码</span><span class="chk"><i></i>空白检查栏</span></div>
+        <div class="opt"><span class="k">语言</span><span class="seg"><span class="on">中文</span><span>English（门店用）</span><span>双语</span></span></div>
+        <div class="opt"><span class="k">页眉</span><span class="muted tiny">方案名 · 货架型号 · 间距 10 / 10 · 版本 v3 · 2026-11-04 · 制图 admin · 页码</span></div>
+        <div class="opt"><span class="k">文件名</span><span class="input" style="flex:1;height:28px;border-radius:8px;font-size:12px" >Planogram_文具挂板A1_v3_zh_20261104.pdf</span></div>
+        <div class="muted tiny" style="background:#fafafa;border-radius:8px;padding:8px 10px;line-height:1.6">版面图与执行清单按同一序号对应，门店照清单逐钩上货；商品实拍图需经图片代理加载，勾选后导出会慢几秒。</div>
+      </div>
+      <div class="pv"><div class="muted tiny">预览 · 第 1 / 3 页</div><div class="page" id="pv" style="width:276px;height:195px"></div><div class="page" style="width:276px;height:40px;display:flex;align-items:center;justify-content:center" class="muted tiny"><span class="muted tiny">第 2–3 页：执行清单（51 行）</span></div><div class="sumline"><span>商品 12</span><span>挂钩 51</span><span>挂货 433</span></div></div>
+    </div>
+    <div class="mf"><span class="tag red" style="margin-right:auto"><i class="ti ti-alert-triangle" style="margin-right:4px"></i>有 1 处冲突，导出会在图上标红</span><span class="btn">取消</span><span class="btn"><i class="ti ti-printer"></i>打印</span><span class="btn primary"><i class="ti ti-download"></i>下载 PDF</span></div>
+  </div>
+</div>
+<script src="plano.js"></script>
+<script>
+const r=PLANO.render({scale:0.12,ox:14,oy:18,print:true,rulers:false});
+document.getElementById('pv').innerHTML=`<div style="position:absolute;left:8px;top:6px;font-size:6px;font-weight:600">商品陈列图 · 文具挂板 A1 <span style="font-weight:400;color:#888">单面洞洞板 900×1200 · 2 节 · v3</span></div><div style="position:absolute;left:20px;top:20px">${r.svg}</div>`;
+</script>
+</body></html>

@@ -300,9 +300,26 @@ public sealed class RemoteMaintenanceService
         if (string.IsNullOrWhiteSpace(row.CredentialCiphertext)) row.CredentialCiphertext = _secretProtector.ProtectPassword(request.Password);
         if (!string.IsNullOrWhiteSpace(row.CommitResponseCiphertext))
         {
-            if (!string.Equals(row.RustdeskId, Normalize(request.RustdeskId, MaxRustdeskIdLength), StringComparison.Ordinal)
-                || !string.Equals(row.ClientVersion, Normalize(request.ClientVersion, MaxVersionLength), StringComparison.Ordinal))
-                return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_CONFLICT", "同一操作的 RustDesk 客户端信息不匹配");
+            var requestedRustdeskId = Normalize(request.RustdeskId, MaxRustdeskIdLength);
+            var requestedClientVersion = Normalize(request.ClientVersion, MaxVersionLength);
+            if (!string.Equals(row.RustdeskId, requestedRustdeskId, StringComparison.Ordinal)
+                || !string.Equals(row.ClientVersion, requestedClientVersion, StringComparison.Ordinal))
+            {
+                // RustDesk 被卸载后 WPF 沿用原操作号和密码完整重装，新装的 RustDesk 可能换了 ID（或版本）。
+                // 上面已用登记密码核验过身份，这里只刷新登记的 ID/版本；监控 token 和提交响应保持不变，
+                // 状态服务与地址簿无需重新登记。条件限定同一已提交操作，防止与并发 prepare/删除交错。
+                // 没有登记密码可核验时（理论上不应出现）保持原冲突，不允许凭操作号改 ID。
+                if (string.IsNullOrWhiteSpace(expectedPassword))
+                    return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_CONFLICT", "同一操作的 RustDesk 客户端信息不匹配");
+                var refreshed = await _dbContext.Db.Updateable<RemoteMaintenanceDevice>()
+                    .SetColumns(x => new RemoteMaintenanceDevice { RustdeskId = requestedRustdeskId, ClientVersion = requestedClientVersion })
+                    .Where(x => x.Id == row.Id && !x.IsDeleted && x.LastOperationId == request.OperationId && x.CommitResponseCiphertext != null)
+                    .ExecuteCommandAsync();
+                if (refreshed != 1) return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_CONFLICT", "设备登记正在被其他操作处理");
+                _logger.LogInformation(
+                    "Remote maintenance re-registered after reinstall. DeviceId={DeviceId}, OldRustdeskId={OldRustdeskId}, NewRustdeskId={NewRustdeskId}, OldVersion={OldVersion}, NewVersion={NewVersion}",
+                    row.Id, row.RustdeskId, requestedRustdeskId, row.ClientVersion, requestedClientVersion);
+            }
             try { return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Ok(JsonSerializer.Deserialize<RemoteMaintenanceCommitResponseDto>(_secretProtector.UnprotectOperationResponse(row.CommitResponseCiphertext))!); }
             catch { return RemoteMaintenanceResult<RemoteMaintenanceCommitResponseDto>.Fail("REMOTE_MAINTENANCE_OPERATION_UNAVAILABLE", "操作响应无法恢复"); }
         }
@@ -430,6 +447,8 @@ public sealed class RemoteMaintenanceService
     /// <summary>
     /// 比对心跳观察到的 RustDesk 版本与中心下发版本。下发版本可以带公司构建后缀（如 1.4.9-hb1），
     /// 而 rustdesk.exe 的文件版本只有上游版本号（1.4.9），所以只比较“-”之前的部分；数字版本按 主.次.修订 比较，忽略多出的 .0。
+    /// 实际 rustdesk.exe 的产品版本形如 1.4.9+67（“+”后是 Flutter 的构建号，生产 42 台设备都是这样上报的），
+    /// 构建号不代表版本不同，所以“+”之后的部分同样忽略；否则 Version.TryParse 解析失败，退回字符串比较，全部被误判为偏离。
     /// </summary>
     internal static string ResolveRustDeskVersionStatus(string? observed, string? serviceStatus, string? expected)
     {
@@ -438,7 +457,7 @@ public sealed class RemoteMaintenanceService
         if (observed.Length == 0) return RemoteMaintenanceRustDeskVersionStatuses.Missing;
         if (string.IsNullOrWhiteSpace(expected)) return RemoteMaintenanceRustDeskVersionStatuses.Unknown;
 
-        static string BaseVersion(string value) => value.Split('-', 2)[0].Trim();
+        static string BaseVersion(string value) => value.Split(['-', '+'], 2)[0].Trim();
         var actualBase = BaseVersion(observed);
         var expectedBase = BaseVersion(expected);
         var same = Version.TryParse(actualBase, out var actualVersion) && Version.TryParse(expectedBase, out var expectedVersion)

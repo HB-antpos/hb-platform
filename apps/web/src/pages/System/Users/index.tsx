@@ -1621,7 +1621,7 @@ export default function SystemUsersPage() {
         return
       }
       setCreateLoading(true)
-      // 新建员工：电话、生日必填；未满 18 岁才带监护人（生日改回成年时残留的监护人值不提交）。
+      // 新建员工：电话、生日必填；未满 16 岁才带监护人（生日改回 16 岁以上时残留的监护人值不提交）。
       const newStaffFields = buildNewStaffPayloadFields(
         { ...values, birthday: formatBirthdayValue(values.birthday) },
         formatSydneyIsoDate(),

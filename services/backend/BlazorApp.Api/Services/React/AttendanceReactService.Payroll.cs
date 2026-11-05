@@ -670,7 +670,8 @@ namespace BlazorApp.Api.Services.React
                         UserName = employee.UserName,
                         Date = birthdayDate,
                         AgeYears = ageOnBirthday,
-                        IsMinor = ageOnBirthday < 18,
+                        // 21 岁以下的生日都提示核对时薪（青少年时薪按年龄逐年变），与排班 / 工时显示年龄同一门槛。
+                        IsMinor = ageOnBirthday < JuniorAgeLimit,
                     });
                 }
             }
