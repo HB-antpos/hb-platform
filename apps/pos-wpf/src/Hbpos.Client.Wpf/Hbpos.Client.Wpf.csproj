@@ -14,6 +14,11 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.8" />
     <PackageReference Include="PCEFTPOS.EFTClient.IPInterface" Version="1.7.3" />
     <PackageReference Include="QRCoder" Version="1.8.0" />
+    <!--
+      Zeller 刷卡机 SDK，只从 Zeller 私有源下载（见 apps/pos-wpf/NuGet.config，凭据走环境变量 NuGetPackageSourceCredentials_zeller）。
+      只有 Services/Zeller/Sdk 下的文件引用它；运行时依赖 WebView2 运行时。
+    -->
+    <PackageReference Include="Zeller.PaymentsSdk" Version="0.1.0" />
   </ItemGroup>
 
   <PropertyGroup>
