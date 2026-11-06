@@ -89,6 +89,11 @@ export type InstallmentRepaymentCapabilities = Readonly<{
   repaymentClaimPrepareProviderV1?: boolean;
   /** 旧 API 缺失时适配器必须填 false，禁止假定 Card 可用。 */
   cardRepaymentSupported: boolean;
+  /**
+   * 服务端放开的刷卡续付通道（已归一为小写：square / linkly / zeller / manual）。
+   * 旧服务端缺失或为 null 时保持 undefined，调用方回退到只看 cardRepaymentSupported，不得据此收紧。
+   */
+  cardRepaymentProviders?: readonly string[];
   crossDeviceRepaymentEnabled: boolean;
   crossDeviceCancelRefundEnabled: boolean;
   crossDeviceVoidEnabled: boolean;

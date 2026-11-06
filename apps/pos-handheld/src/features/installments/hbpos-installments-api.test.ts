@@ -368,6 +368,35 @@ test("旧 capabilities payload 缺少取消 claim 与跨机动作字段时保持
   });
 });
 
+test("capabilities 解析服务端放开的刷卡续付通道：归一为小写去重；缺失 / null 保持缺省；非法响应拒绝", async () => {
+  const base = {
+    repaymentClaimsSupported: true,
+    repaymentClaimsRequired: false,
+    crossDeviceRepaymentEnabled: false,
+    preparedClaimTtlSeconds: 120,
+  };
+  const providersOf = async (cardRepaymentProviders: unknown): Promise<unknown> => {
+    const api = new HbposInstallmentsApi(
+      new QueueTransport([{ success: true, data: { ...base, cardRepaymentSupported: true, cardRepaymentProviders } }]),
+      "S1",
+    );
+    const capabilities = await api.getCapabilities();
+    return "cardRepaymentProviders" in capabilities ? capabilities.cardRepaymentProviders : "absent";
+  };
+
+  assert.deepEqual(await providersOf(["Square", " LINKLY ", "square", "", "Zeller", "manual"]), [
+    "square",
+    "linkly",
+    "zeller",
+    "manual",
+  ]);
+  assert.deepEqual(await providersOf([]), [], "空列表是服务端明确不放开任何刷卡通道");
+  assert.equal(await providersOf(null), "absent", "null 视同旧服务端缺失，不得当成空列表收紧");
+  assert.equal(await providersOf(undefined), "absent");
+  await assert.rejects(() => providersOf("square"), /cardRepaymentProviders/);
+  await assert.rejects(() => providersOf(["square", 1]), /cardRepaymentProviders/);
+});
+
 test("cancel claim 不携带门店或收银员身份，并复用同一 durable operation", async () => {
   const payload = {
     installmentGuid,
