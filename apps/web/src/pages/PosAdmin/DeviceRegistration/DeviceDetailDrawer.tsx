@@ -26,8 +26,8 @@ import {
 import {
   collectDistinctOptions,
   getDeviceStatusActions,
-  isLongUptime,
   mergeDeviceDetailView,
+  shouldWarnLongUptime,
   type DeviceStatusAction,
 } from './deviceManagementLogic'
 import {
@@ -251,7 +251,7 @@ export default function DeviceDetailDrawer({
                   <dt>{t('posAdmin.devices.mgmt.drawer.uptime')}</dt>
                   <dd>
                     {formatUptime(view.systemUptimeSeconds, t)}
-                    {isLongUptime(view.systemUptimeSeconds) ? (
+                    {shouldWarnLongUptime(view.status, view.systemUptimeSeconds) ? (
                       <span className="dev-mgmt-warn"> · {t('posAdmin.devices.mgmt.drawer.restartHint')}</span>
                     ) : null}
                   </dd>
