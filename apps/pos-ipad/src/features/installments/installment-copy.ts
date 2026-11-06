@@ -145,6 +145,28 @@ export const installmentEnglishCopy = {
   "blocked.offline": "Reconnect before continuing this lay-by operation.",
   "blocked.permission": "The current cashier does not have permission for this action.",
   "blocked.busy": "Another lay-by operation is still running.",
+  "supervisor.title": "Card repayment awaiting supervisor confirmation",
+  "supervisor.hint":
+    "This lay-by is locked by a card repayment whose result is unknown. Check the card terminal or bank records, then confirm whether the customer was charged.",
+  "supervisor.detailAmount": "Amount",
+  "supervisor.detailProvider": "Card channel",
+  "supervisor.detailDevice": "Started on",
+  "supervisor.detailUpdated": "Last update",
+  "supervisor.chargedAction": "Confirm charged",
+  "supervisor.notChargedAction": "Confirm not charged",
+  "supervisor.needsPermission":
+    "Ask a supervisor with lay-by cancellation permission to review this repayment.",
+  "supervisor.dialogCharged": "Confirm the customer WAS charged",
+  "supervisor.dialogNotCharged": "Confirm the customer was NOT charged",
+  "supervisor.chargedWarning":
+    "Only confirm after checking the terminal or bank record. The repayment will be recorded against this lay-by.",
+  "supervisor.notChargedWarning":
+    "Only confirm after checking the customer was not charged. The lock is released and the customer can pay again.",
+  "supervisor.reasonAccessibility": "Resolution reason",
+  "supervisor.reasonPlaceholder": "Where did you verify the transaction? (required)",
+  "supervisor.referenceAccessibility": "Verification reference",
+  "supervisor.referencePlaceholder": "Approval code / RRN (optional)",
+  "supervisor.submit": "Submit resolution",
   "blocked.recovery": "Recover the unknown payment outcome before another action.",
   "blocked.unavailable": "The secure payment route is unavailable. Refresh and try again.",
   "navigation.failed": "Payment could not be prepared. Nothing was charged; check the cart or lay-by and try again.",
@@ -211,6 +233,12 @@ export const installmentEnglishCopy = {
   "status.repayment-complete": "Repayment recorded.",
   "status.recovery-complete":
     "Previous payment and lay-by action recovered.",
+  "status.supervisor-charged-complete":
+    "Confirmed charged; the card repayment has been recorded.",
+  "status.supervisor-not-charged-complete":
+    "Confirmed not charged; the lock is released and the customer can pay again.",
+  "status.supervisor-reason-required":
+    "Enter the resolution reason (where you verified the transaction).",
   "status.void-complete": "Lay-by voided.",
 } as const;
 
@@ -357,6 +385,27 @@ const installmentChineseCopy = {
   "blocked.offline": "请恢复联网后再执行此分期操作。",
   "blocked.permission": "当前收银员没有执行此操作的权限。",
   "blocked.busy": "另一项分期操作仍在处理中。",
+  "supervisor.title": "刷卡续付待主管确认",
+  "supervisor.hint":
+    "该分期被一笔结果不明的刷卡续付占用。请核对刷卡机或银行记录，再确认顾客是否已被扣款。",
+  "supervisor.detailAmount": "金额",
+  "supervisor.detailProvider": "刷卡通道",
+  "supervisor.detailDevice": "发起设备",
+  "supervisor.detailUpdated": "最后更新",
+  "supervisor.chargedAction": "确认已扣款",
+  "supervisor.notChargedAction": "确认未扣款",
+  "supervisor.needsPermission": "请让有分期取消权限的主管核实这笔续付并结案。",
+  "supervisor.dialogCharged": "确认顾客已被扣款",
+  "supervisor.dialogNotCharged": "确认顾客没有被扣款",
+  "supervisor.chargedWarning":
+    "请先核对刷卡机或银行记录再确认。这笔续付将按金额记入该分期。",
+  "supervisor.notChargedWarning":
+    "请先核实顾客确实没有被扣款再确认。占用将解除，顾客可重新付款。",
+  "supervisor.reasonAccessibility": "结案原因",
+  "supervisor.reasonPlaceholder": "在哪里核实了这笔交易？（必填）",
+  "supervisor.referenceAccessibility": "核实依据",
+  "supervisor.referencePlaceholder": "批准码 / RRN（选填）",
+  "supervisor.submit": "提交结案",
   "blocked.recovery": "支付结果未知，请先完成恢复。",
   "blocked.unavailable": "安全支付入口暂不可用，请刷新后重试。",
   "navigation.failed": "支付准备失败，未发生扣款；请核对购物车或分期状态后重试。",
@@ -420,6 +469,10 @@ const installmentChineseCopy = {
   "status.pickup-complete": "取货已确认。",
   "status.repayment-complete": "续付已记录。",
   "status.recovery-complete": "上一笔支付与分期状态已恢复。",
+  "status.supervisor-charged-complete": "主管已确认扣款，刷卡续付已入账。",
+  "status.supervisor-not-charged-complete":
+    "主管已确认未扣款，占用已解除，可重新收款。",
+  "status.supervisor-reason-required": "请填写结案原因（例如核实了哪里的交易记录）。",
   "status.void-complete": "分期已作废。",
 } as const satisfies Record<InstallmentCopyKey, string>;
 

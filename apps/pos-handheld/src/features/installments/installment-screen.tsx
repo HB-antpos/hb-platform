@@ -68,10 +68,13 @@ export type InstallmentScreenPresenter = Pick<
   InstallmentPresenter,
   | "capabilities"
   | "cancelWithRefund"
+  | "closeSupervisorResolve"
   | "confirmPickup"
+  | "confirmSupervisorResolve"
   | "getState"
   | "load"
   | "loadMore"
+  | "openSupervisorResolve"
   | "recoverBlocking"
   | "reprintSelected"
   | "retryDetails"
@@ -83,6 +86,8 @@ export type InstallmentScreenPresenter = Pick<
   | "setPickupNote"
   | "setSearchQuery"
   | "setStatusFilter"
+  | "setSupervisorResolveReason"
+  | "setSupervisorResolveReference"
   | "setVoidReason"
   | "subscribe"
   | "voidSelected"
@@ -951,6 +956,11 @@ function DetailsPane({
             locale={locale}
             reprint={state.reprint}
           />
+          <SupervisorResolvePanel
+            locale={locale}
+            presenter={presenter}
+            state={state}
+          />
         </PosKeyboardAwareScrollView>
       </View>
     </View>
@@ -1653,6 +1663,128 @@ function RefundModeSelector({
   );
 }
 
+/**
+ * 卡状态不明的刷卡续付占用该分期时，让有分期取消权限的主管核实后结案（对齐 WPF #1194）。
+ * 只展示安全描述符（金额、通道、发起设备、时间），不含卡引用。没有权限只提示找主管，不展示结案按钮。
+ */
+function SupervisorResolvePanel({
+  locale,
+  presenter,
+  state,
+}: Readonly<{
+  locale: InstallmentLocale;
+  presenter: InstallmentScreenPresenter;
+  state: InstallmentPresenterState;
+}>) {
+  const pending = state.pendingCardRepayment;
+  if (!pending || !state.online) return null;
+  const dialog = state.supervisorResolve;
+  const detail = [
+    `${installmentText(locale, "supervisor.detailAmount")}: ${money(pending.amountCents)}`,
+    `${installmentText(locale, "supervisor.detailProvider")}: ${pending.provider}`,
+    ...(pending.claimantDeviceCode
+      ? [`${installmentText(locale, "supervisor.detailDevice")}: ${pending.claimantDeviceCode}`]
+      : []),
+    `${installmentText(locale, "supervisor.detailUpdated")}: ${localMinute(pending.updatedAtIso)}`,
+  ].join(" · ");
+  return (
+    <View style={styles.dangerPanel} testID="installment-supervisor-panel">
+      <Text style={styles.actionDockTitle}>
+        {installmentText(locale, "supervisor.title")}
+      </Text>
+      <Text style={styles.confirmationText}>
+        {installmentText(locale, "supervisor.hint")}
+      </Text>
+      <Text style={styles.confirmationText} testID="installment-supervisor-details">
+        {detail}
+      </Text>
+      {dialog.kind === "closed" ? (
+        state.access.canCancel ? (
+          <View style={styles.confirmationActions}>
+            <ActionButton
+              disabled={state.busy}
+              label={installmentText(locale, "supervisor.chargedAction")}
+              onPress={() => presenter.openSupervisorResolve("charged")}
+              testID="installment-supervisor-charged"
+              tone="danger"
+            />
+            <ActionButton
+              disabled={state.busy}
+              label={installmentText(locale, "supervisor.notChargedAction")}
+              onPress={() => presenter.openSupervisorResolve("not-charged")}
+              testID="installment-supervisor-not-charged"
+              tone="danger"
+            />
+          </View>
+        ) : (
+          <Text style={styles.recoveryText} testID="installment-supervisor-needs-permission">
+            {installmentText(locale, "supervisor.needsPermission")}
+          </Text>
+        )
+      ) : (
+        <View style={styles.confirmation} testID="installment-supervisor-dialog">
+          <Text style={styles.actionDockTitle}>
+            {installmentText(
+              locale,
+              dialog.decision === "charged"
+                ? "supervisor.dialogCharged"
+                : "supervisor.dialogNotCharged",
+            )}
+          </Text>
+          <Text style={styles.confirmationText}>
+            {installmentText(
+              locale,
+              dialog.decision === "charged"
+                ? "supervisor.chargedWarning"
+                : "supervisor.notChargedWarning",
+            )}
+          </Text>
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={installmentText(locale, "supervisor.reasonAccessibility")}
+            onChangeText={(value) => presenter.setSupervisorResolveReason(value)}
+            placeholder={installmentText(locale, "supervisor.reasonPlaceholder")}
+            style={styles.textInput}
+            testID="installment-supervisor-reason"
+            value={dialog.reason}
+          />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={installmentText(locale, "supervisor.referenceAccessibility")}
+            onChangeText={(value) => presenter.setSupervisorResolveReference(value)}
+            placeholder={installmentText(locale, "supervisor.referencePlaceholder")}
+            style={styles.textInput}
+            testID="installment-supervisor-reference"
+            value={dialog.reference}
+          />
+          <View style={styles.confirmationActions}>
+            <ActionButton
+              disabled={state.busy}
+              label={installmentText(locale, "action.back")}
+              onPress={() => presenter.closeSupervisorResolve()}
+              testID="installment-supervisor-back"
+              tone="quiet"
+            />
+            <ActionButton
+              disabled={state.busy}
+              label={installmentText(locale, "supervisor.submit")}
+              onPress={() => void presenter.confirmSupervisorResolve()}
+              testID="installment-supervisor-submit"
+              tone="danger"
+            />
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+/** ISO 时间转终端本地时区的「年-月-日 时:分」，无法解析时原样返回。 */
+function localMinute(iso: string): string {
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function ConfirmationStrip({
   kind,
   locale,
@@ -1801,6 +1933,7 @@ function StatusBanner({
     "payment-recovery-required",
     "permission-required",
     "service-unavailable",
+    "supervisor-reason-required",
   ].includes(statusCode);
   return (
     <NoticeBanner

@@ -56,6 +56,7 @@ import type {
   InstallmentRepaymentClaimCreateCommand,
   InstallmentRepaymentClaimIdentity,
   InstallmentRepaymentClaimResolveCommand,
+  InstallmentRepaymentClaimSupervisorResolveCommand,
   InstallmentsRemotePort,
 } from "@/features/installments/installment-models";
 import {
@@ -441,6 +442,227 @@ test("服务端只放开部分刷卡通道：本机已配置也不展示未放�
     ["linkly-cloud", true, null],
     ["voucher", true, null],
   ]);
+});
+
+function blockingCardClaim(
+  overrides: Partial<InstallmentRepaymentClaim> = {},
+): InstallmentRepaymentClaim {
+  return Object.freeze({
+    installmentGuid: "installment-1",
+    operationGuid: "20000000-0000-4000-8000-000000000009",
+    paymentGuid: "20000000-0000-4000-8000-000000000010",
+    amountCents: 2_500,
+    method: "card" as const,
+    idempotencyKey: "claim-key",
+    status: "Unknown" as const,
+    provider: "zeller",
+    providerAttemptId: "SECRET-ATTEMPT-ID",
+    createdAtIso: "2026-07-28T07:00:00.000Z",
+    updatedAtIso: "2026-07-28T07:30:00.000Z",
+    expiresAtIso: null,
+    commit: null,
+    alreadyExists: true,
+    claimantDeviceCode: "WPF-POS-2",
+    ...overrides,
+  });
+}
+
+function supportSupervisorResolve(harness: ReturnType<typeof createHarness>): void {
+  harness.api.capabilities = {
+    ...harness.api.capabilities,
+    cardRepaymentSupervisorResolveSupported: true,
+  };
+}
+
+test("查占用：只在支持、在线、有权限且占用是「卡 + 状态不明」时返回安全描述符，其余一律 null", async () => {
+  const workflowFor = (harness: ReturnType<typeof createHarness>) =>
+    workflowOf(harness.runtime.createPresenter());
+
+  // 服务端不支持（能力位缺失）：不发 blocking 请求。
+  const unsupported = createHarness();
+  unsupported.api.blockingClaim = blockingCardClaim();
+  assert.equal(await workflowFor(unsupported).getPendingCardRepayment!("installment-1"), null);
+  assert.deepEqual(unsupported.api.blockingCalls, []);
+
+  const supported = createHarness();
+  supportSupervisorResolve(supported);
+  supported.api.blockingClaim = blockingCardClaim();
+  const pending = await workflowFor(supported).getPendingCardRepayment!("installment-1");
+  assert.deepEqual(pending, {
+    installmentGuid: "installment-1",
+    operationGuid: "20000000-0000-4000-8000-000000000009",
+    amountCents: 2_500,
+    provider: "zeller",
+    claimantDeviceCode: "WPF-POS-2",
+    status: "Unknown",
+    updatedAtIso: "2026-07-28T07:30:00.000Z",
+  });
+  // 描述符不泄露 providerAttemptId 等受保护材料。
+  assert.equal(JSON.stringify(pending).includes("SECRET-ATTEMPT-ID"), false);
+
+  // 不是「卡 + ProviderPending / Unknown + 有通道」的占用都不给结案入口。
+  for (const claim of [
+    blockingCardClaim({ method: "voucher" }),
+    blockingCardClaim({ status: "Prepared" }),
+    blockingCardClaim({ status: "Committed" }),
+    blockingCardClaim({ provider: null }),
+    null,
+  ]) {
+    const harness = createHarness();
+    supportSupervisorResolve(harness);
+    harness.api.blockingClaim = claim;
+    assert.equal(await workflowFor(harness).getPendingCardRepayment!("installment-1"), null);
+  }
+
+  // 离线、读取失败：返回 null 而不是抛错（不能挡住详情）。
+  const offline = createHarness();
+  supportSupervisorResolve(offline);
+  offline.api.blockingClaim = blockingCardClaim();
+  offline.online.value = false;
+  assert.equal(await workflowFor(offline).getPendingCardRepayment!("installment-1"), null);
+  assert.deepEqual(offline.api.blockingCalls, []);
+  const failing = createHarness();
+  supportSupervisorResolve(failing);
+  failing.api.blockingError = new HbposApiError("down", { kind: "http", status: 503 });
+  assert.equal(await workflowFor(failing).getPendingCardRepayment!("installment-1"), null);
+});
+
+test("主管结案：需要在线与分期取消权限、原因必填；成功后回读最新详情，服务端结论不被本机收尾失败推翻", async () => {
+  const input = (overrides: Record<string, unknown> = {}) => ({
+    installmentGuid: "installment-1",
+    operationGuid: "20000000-0000-4000-8000-000000000009",
+    decision: "charged" as const,
+    reason: "  Checked Zeller portal  ",
+    reference: "  RRN-1  ",
+    ...overrides,
+  });
+
+  const ok = createHarness();
+  supportSupervisorResolve(ok);
+  ok.api.blockingClaim = blockingCardClaim();
+  const resolved = await workflowOf(ok.runtime.createPresenter()).resolvePendingCardRepayment!(input());
+  assert.deepEqual(ok.api.supervisorResolveCalls, [
+    {
+      installmentGuid: "installment-1",
+      operationGuid: "20000000-0000-4000-8000-000000000009",
+      decision: "charged",
+      reason: "Checked Zeller portal",
+      reference: "RRN-1",
+    },
+  ]);
+  assert.deepEqual(ok.api.detailsCalls, ["installment-1"], "结案后回读最新详情");
+  assert.equal(resolved, ok.api.detailsResponse);
+
+  // 缺取消权限：不发任何请求（服务端也会复核，这里先挡住）。
+  const noCancel = createHarness({
+    permissions: ALL_PERMISSIONS.filter((code) => code !== INSTALLMENTS_CANCEL_PERMISSION),
+  });
+  supportSupervisorResolve(noCancel);
+  noCancel.api.blockingClaim = blockingCardClaim();
+  await assert.rejects(workflowOf(noCancel.runtime.createPresenter()).resolvePendingCardRepayment!(input()));
+  assert.deepEqual(noCancel.api.supervisorResolveCalls, []);
+
+  // 服务端不支持、原因为空 / 过长、依据过长、离线：全部失败关闭且不发请求。
+  const unsupported = createHarness();
+  unsupported.api.blockingClaim = blockingCardClaim();
+  await assert.rejects(workflowOf(unsupported.runtime.createPresenter()).resolvePendingCardRepayment!(input()));
+  for (const bad of [{ reason: "   " }, { reason: "x".repeat(201) }, { reference: "r".repeat(101) }, { decision: "bogus" }]) {
+    const harness = createHarness();
+    supportSupervisorResolve(harness);
+    harness.api.blockingClaim = blockingCardClaim();
+    await assert.rejects(workflowOf(harness.runtime.createPresenter()).resolvePendingCardRepayment!(input(bad)));
+    assert.deepEqual(harness.api.supervisorResolveCalls, [], JSON.stringify(bad));
+  }
+  const offline = createHarness();
+  supportSupervisorResolve(offline);
+  offline.api.blockingClaim = blockingCardClaim();
+  offline.online.value = false;
+  await assert.rejects(workflowOf(offline.runtime.createPresenter()).resolvePendingCardRepayment!(input()));
+  assert.deepEqual(offline.api.supervisorResolveCalls, []);
+
+  // 服务端拒绝（如 403 / 409）：抛出，不回读详情、不伪造成功。
+  const refused = createHarness();
+  supportSupervisorResolve(refused);
+  refused.api.blockingClaim = blockingCardClaim();
+  refused.api.supervisorResolveError = new HbposApiError("denied", { kind: "http", status: 403 });
+  await assert.rejects(workflowOf(refused.runtime.createPresenter()).resolvePendingCardRepayment!(input()));
+  assert.deepEqual(refused.api.detailsCalls, []);
+});
+
+test("主管结案走完整 presenter 流程：选中分期读到占用 → 打开对话框 → 原因必填 → 结案后占用与对话框收起", async () => {
+  const harness = createHarness();
+  supportSupervisorResolve(harness);
+  harness.api.blockingClaim = blockingCardClaim();
+  const presenter = harness.runtime.createPresenter();
+  await presenter.load();
+  await presenter.select("installment-1");
+  assert.equal(presenter.getState().pendingCardRepayment?.provider, "zeller");
+
+  presenter.openSupervisorResolve("not-charged");
+  assert.equal(presenter.getState().supervisorResolve.kind, "open");
+  // 原因为空：给出提示、不发请求，对话框保持打开。
+  await presenter.confirmSupervisorResolve();
+  assert.equal(presenter.getState().statusCode, "supervisor-reason-required");
+  assert.deepEqual(harness.api.supervisorResolveCalls, []);
+  assert.equal(presenter.getState().supervisorResolve.kind, "open");
+
+  presenter.setSupervisorResolveReason("Terminal shows no charge");
+  presenter.setSupervisorResolveReference("");
+  await presenter.confirmSupervisorResolve();
+  assert.equal(presenter.getState().statusCode, "supervisor-not-charged-complete");
+  assert.equal(presenter.getState().pendingCardRepayment, null);
+  assert.deepEqual(presenter.getState().supervisorResolve, { kind: "closed" });
+  // 前面的 assert.deepEqual(…, []) 会把数组窄化成 never[]，这里用显式类型的局部变量读取。
+  const calls: readonly InstallmentRepaymentClaimSupervisorResolveCommand[] =
+    harness.api.supervisorResolveCalls;
+  assert.equal(calls[0]?.decision, "not-charged");
+  assert.equal(calls[0]?.reference, null);
+});
+
+test("主管结案：没有分期取消权限时只提示、不打开对话框；服务端失败时对话框保持打开方便重试", async () => {
+  const noCancel = createHarness({
+    permissions: ALL_PERMISSIONS.filter((code) => code !== INSTALLMENTS_CANCEL_PERMISSION),
+  });
+  supportSupervisorResolve(noCancel);
+  noCancel.api.blockingClaim = blockingCardClaim();
+  const first = noCancel.runtime.createPresenter();
+  await first.load();
+  await first.select("installment-1");
+  assert.ok(first.getState().pendingCardRepayment, "没有取消权限也能看到占用，只是不能结案");
+  first.openSupervisorResolve("charged");
+  assert.equal(first.getState().statusCode, "permission-required");
+  assert.equal(first.getState().supervisorResolve.kind, "closed");
+
+  const failing = createHarness();
+  supportSupervisorResolve(failing);
+  failing.api.blockingClaim = blockingCardClaim();
+  failing.api.supervisorResolveError = new HbposApiError("down", { kind: "http", status: 503 });
+  const second = failing.runtime.createPresenter();
+  await second.load();
+  await second.select("installment-1");
+  second.openSupervisorResolve("charged");
+  second.setSupervisorResolveReason("Checked bank");
+  await second.confirmSupervisorResolve();
+  assert.notEqual(second.getState().statusCode, "supervisor-charged-complete");
+  assert.equal(second.getState().supervisorResolve.kind, "open", "失败时对话框保持打开");
+  assert.ok(second.getState().pendingCardRepayment, "失败时占用信息仍在");
+});
+
+test("续付遇到占用（BUSY）失败后，刷新占用信息，让主管入口出现", async () => {
+  const harness = createHarness({ claimCreateErrorCode: "INSTALLMENT_REPAYMENT_BUSY" });
+  supportSupervisorResolve(harness);
+  const presenter = harness.runtime.createPresenter();
+  await presenter.load();
+  await presenter.select("installment-1");
+  assert.equal(presenter.getState().pendingCardRepayment, null);
+
+  // 选中之后另一台机器才发起续付并卡在状态不明；本机续付撞上占用。
+  harness.api.blockingClaim = blockingCardClaim();
+  fillVoucherRepayment(presenter);
+  await presenter.addRepayment();
+
+  assert.equal(presenter.getState().statusCode, "claim-busy");
+  assert.equal(presenter.getState().pendingCardRepayment?.operationGuid, "20000000-0000-4000-8000-000000000009");
 });
 
 test("任意其他 400 不得被泛化为 Card unsupported 终结", async () => {
@@ -3757,6 +3979,34 @@ class ScriptedApi {
       status: "ProviderPending",
     });
     return this.claim;
+  }
+
+  /** 占用该分期的续付 claim（blocking 查询）；null 表示没有占用。 */
+  public blockingClaim: InstallmentRepaymentClaim | null = null;
+  public blockingError: Error | null = null;
+  public readonly blockingCalls: string[] = [];
+  public readonly supervisorResolveCalls: InstallmentRepaymentClaimSupervisorResolveCommand[] = [];
+  public supervisorResolveError: Error | null = null;
+
+  public async getBlockingRepaymentClaim(installmentGuid: string) {
+    this.blockingCalls.push(installmentGuid);
+    if (this.blockingError) throw this.blockingError;
+    return this.blockingClaim;
+  }
+
+  public async supervisorResolveRepaymentClaim(
+    command: InstallmentRepaymentClaimSupervisorResolveCommand,
+  ) {
+    this.events.push(`claim-supervisor-resolve:${command.decision}`);
+    this.supervisorResolveCalls.push(command);
+    if (this.supervisorResolveError) throw this.supervisorResolveError;
+    const current = this.blockingClaim;
+    if (!current) throw new Error("no blocking claim to resolve");
+    this.blockingClaim = null;
+    return Object.freeze({
+      ...current,
+      status: command.decision === "charged" ? "Committed" : "Declined",
+    } as InstallmentRepaymentClaim);
   }
 
   public async getRepaymentClaim(identity: InstallmentRepaymentClaimIdentity) {

@@ -233,6 +233,48 @@ test("还款顾客只读，银行卡拒绝超付并冻结所选 Linkly provider"
   assert.equal(repaymentInputs[0]?.cashTenderedCents, undefined);
 });
 
+test("续付遇到占用 / 服务端未放开通道：支付页给出可区分的「本次未收款」提示，其余失败仍是通用提示", async () => {
+  const cases: ReadonlyArray<readonly [InstallmentWorkflowError, string]> = [
+    [new InstallmentWorkflowError("claim-busy", "busy"), "INSTALLMENT_REPAYMENT_BUSY"],
+    [
+      new InstallmentWorkflowError("payment-method-unsupported", "unsupported"),
+      "INSTALLMENT_REPAYMENT_METHOD_UNSUPPORTED",
+    ],
+    [new InstallmentWorkflowError("online-required", "offline"), "ONLINE_REQUIRED"],
+    [new InstallmentWorkflowError("conflict", "changed"), "PAYMENT_CHECKOUT_FAILED"],
+    [new InstallmentWorkflowError("claim-review-required", "review"), "PAYMENT_CHECKOUT_FAILED"],
+  ];
+  for (const [error, expectedCode] of cases) {
+    const presenter = new InstallmentCheckoutPresenter({
+      entry: installmentRepaymentPaymentEntry(INSTALLMENT_ID),
+      createDrafts: {
+        getSnapshot: () => null,
+        subscribe: () => () => undefined,
+      },
+      initialOnline: true,
+      permissions: repaymentPermissions(),
+      workflow: workflowStub({
+        addRepayment: async () => {
+          throw error;
+        },
+        // 占用 / 通道未放开发生在任何 provider 调用之前、本地 action 已终结：没有需要恢复的本机事实。
+        hasRecoveryRequired: async () => false,
+      }),
+      createTenderId: () => `tender-${error.code}`,
+    });
+
+    assert.equal(await presenter.initialize(), true);
+    assert.equal(presenter.selectMethod("linkly-cloud"), true);
+    presenter.setAmountText("10.00");
+    assert.equal(await presenter.submitSelected(), true);
+    assert.equal(await presenter.confirm(), false, error.code);
+    assert.equal(presenter.getState().runtimeErrorCode, expectedCode, error.code);
+    // 没有本机恢复事实：回到可重新选择付款方式的状态，不伪造恢复入口。
+    assert.equal(presenter.getState().phase, "ready", error.code);
+    assert.equal(presenter.getState().allowedActions.recover, false, error.code);
+  }
+});
+
 test("现金续付先准备再确认，重复点击不重复调用任一阶段", async () => {
   let prepareCalls = 0;
   let confirmCalls = 0;

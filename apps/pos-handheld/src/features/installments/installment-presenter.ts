@@ -13,8 +13,10 @@ import type {
   InstallmentDetails,
   InstallmentDeviceScope,
   InstallmentPaymentMethod,
+  InstallmentPendingCardRepayment,
   InstallmentRepaymentCapabilities,
   InstallmentCashRepaymentPreparation,
+  InstallmentSupervisorDecision,
 } from "./installment-models";
 
 import type { InstallmentStatus, InstallmentSummary } from "@/core/contracts";
@@ -93,6 +95,21 @@ export interface InstallmentWorkflowPort {
   >;
   /** 旧测试/非生产实现可省略；Presenter 会按未支持失败关闭。 */
   getRepaymentCapabilities?(): Promise<InstallmentRepaymentCapabilities>;
+  /**
+   * 占用该分期、卡状态不明的刷卡续付（任意收银机发起的），供主管结案。
+   * 辅助查询：离线 / 服务端不支持 / 没有占用 / 失败都返回 null，不抛错。旧实现可省略。
+   */
+  getPendingCardRepayment?(
+    installmentGuid: string,
+  ): Promise<InstallmentPendingCardRepayment | null>;
+  /** 主管结案：已扣款按 claim 金额入账，未扣款释放占用；返回结案后的最新详情。旧实现可省略。 */
+  resolvePendingCardRepayment?(input: Readonly<{
+    installmentGuid: string;
+    operationGuid: string;
+    decision: InstallmentSupervisorDecision;
+    reason: string;
+    reference: string | null;
+  }>): Promise<InstallmentDetails>;
   list(input: Readonly<{
     dateFilter: InstallmentDateFilter;
     deviceScope: InstallmentDeviceScope;
@@ -191,7 +208,20 @@ export type InstallmentStatusCode =
   | "repayment-complete"
   | "recovery-complete"
   | "service-unavailable"
+  | "supervisor-charged-complete"
+  | "supervisor-not-charged-complete"
+  | "supervisor-reason-required"
   | "void-complete";
+
+/** 主管结案对话框：打开时带结论、必填原因与选填核实依据。 */
+export type InstallmentSupervisorResolveState =
+  | Readonly<{ kind: "closed" }>
+  | Readonly<{
+      kind: "open";
+      decision: InstallmentSupervisorDecision;
+      reason: string;
+      reference: string;
+    }>;
 
 export type InstallmentPresenterState = Readonly<{
   access: InstallmentsAccess;
@@ -213,6 +243,8 @@ export type InstallmentPresenterState = Readonly<{
   online: boolean;
   orders: readonly InstallmentSummary[];
   pane: "history" | "create";
+  /** 选中分期当前被占用、卡状态不明的刷卡续付；有且当前收银员有取消权限时主管可结案。 */
+  pendingCardRepayment: InstallmentPendingCardRepayment | null;
   pickupNote: string;
   query: string;
   recoveryRequired: boolean;
@@ -223,6 +255,7 @@ export type InstallmentPresenterState = Readonly<{
   selectedGuid: string | null;
   statusCode: InstallmentStatusCode | null;
   statusFilter: InstallmentStatus | null;
+  supervisorResolve: InstallmentSupervisorResolveState;
   cancelReason: string;
   /** 用户选择的取消退款方式；有刷卡原付款时实际以 capabilities 的强制退代金券为准。 */
   cancelRefundMode: InstallmentCancelRefundMode;
@@ -300,6 +333,7 @@ export class InstallmentPresenter {
       online: options.initialOnline,
       orders: [],
       pane: "history",
+      pendingCardRepayment: null,
       pickupNote: "",
       query: "",
       recoveryRequired: false,
@@ -310,6 +344,7 @@ export class InstallmentPresenter {
       selectedGuid: null,
       statusCode: null,
       statusFilter: null,
+      supervisorResolve: Object.freeze({ kind: "closed" as const }),
       cancelReason: "",
       cancelRefundMode: "original-route",
       voidReason: "",
@@ -643,9 +678,11 @@ export class InstallmentPresenter {
     this.patch({
       details: null,
       detailsLoading: true,
+      pendingCardRepayment: null,
       reprint: { kind: "idle" },
       selectedGuid: installmentGuid,
       statusCode: null,
+      supervisorResolve: Object.freeze({ kind: "closed" as const }),
     });
     try {
       const details = await this.workflow.getDetails({
@@ -658,6 +695,9 @@ export class InstallmentPresenter {
         detailsLoading: false,
         statusCode: details ? null : "details-unavailable",
       });
+      if (details) {
+        await this.refreshPendingCardRepayment(installmentGuid, generation);
+      }
     } catch (error) {
       if (!this.isCurrentDetail(generation, installmentGuid)) return;
       const statusCode = workflowFailureCode(error);
@@ -677,6 +717,134 @@ export class InstallmentPresenter {
             : "details-failed",
       });
     }
+  }
+
+  /** 读取选中分期的占用信息；失败或没有占用都视为「没有」，不影响详情展示。 */
+  private async refreshPendingCardRepayment(
+    installmentGuid: string,
+    generation: number,
+  ): Promise<void> {
+    if (!this.workflow.getPendingCardRepayment) return;
+    let pending: InstallmentPendingCardRepayment | null = null;
+    try {
+      pending = await this.workflow.getPendingCardRepayment(installmentGuid);
+    } catch {
+      pending = null;
+    }
+    if (!this.isCurrentDetail(generation, installmentGuid)) return;
+    this.patch({ pendingCardRepayment: pending });
+  }
+
+  /** 打开主管结案对话框；需要分期取消权限与在线，权限不足时只给提示，不展示对话框。 */
+  public openSupervisorResolve(decision: InstallmentSupervisorDecision): void {
+    if (this.destroyed || !this.state.pendingCardRepayment) return;
+    if (decision !== "charged" && decision !== "not-charged") return;
+    if (!this.state.access.canCancel) {
+      this.patch({ statusCode: "permission-required" });
+      return;
+    }
+    if (!this.state.online) {
+      this.patch({ statusCode: "online-required" });
+      return;
+    }
+    this.patch({
+      statusCode: null,
+      supervisorResolve: Object.freeze({
+        kind: "open" as const,
+        decision,
+        reason: "",
+        reference: "",
+      }),
+    });
+  }
+
+  public closeSupervisorResolve(): void {
+    if (this.destroyed || this.state.busy) return;
+    this.patch({
+      statusCode: null,
+      supervisorResolve: Object.freeze({ kind: "closed" as const }),
+    });
+  }
+
+  public setSupervisorResolveReason(value: string): void {
+    const dialog = this.state.supervisorResolve;
+    if (this.destroyed || dialog.kind !== "open") return;
+    this.patch({
+      statusCode: null,
+      supervisorResolve: Object.freeze({ ...dialog, reason: value.slice(0, 200) }),
+    });
+  }
+
+  public setSupervisorResolveReference(value: string): void {
+    const dialog = this.state.supervisorResolve;
+    if (this.destroyed || dialog.kind !== "open") return;
+    this.patch({
+      statusCode: null,
+      supervisorResolve: Object.freeze({ ...dialog, reference: value.slice(0, 100) }),
+    });
+  }
+
+  /**
+   * 提交主管结案。刻意不走 guardWrite：它会在本机 recoveryRequired 时拒绝，
+   * 而主管结案恰恰是本机恢复卡住（卡状态一直不明）时的出路；跨机也由服务端按同店 + 取消权限复核。
+   */
+  public confirmSupervisorResolve(): Promise<void> {
+    const pending = this.state.pendingCardRepayment;
+    const dialog = this.state.supervisorResolve;
+    const resolve = this.workflow.resolvePendingCardRepayment;
+    if (this.destroyed || !pending || dialog.kind !== "open" || !resolve) {
+      return Promise.resolve();
+    }
+    if (this.actionInFlight) return this.actionInFlight;
+    if (this.reprintInFlight || this.state.reprint.kind === "submitting") {
+      return this.reprintInFlight ?? Promise.resolve();
+    }
+    if (!this.state.access.canCancel) {
+      this.patch({ statusCode: "permission-required" });
+      return Promise.resolve();
+    }
+    if (!this.state.online) {
+      this.patch({ statusCode: "online-required" });
+      return Promise.resolve();
+    }
+    const reason = optionalTrimmed(dialog.reason);
+    if (!reason) {
+      this.patch({ statusCode: "supervisor-reason-required" });
+      return Promise.resolve();
+    }
+    const reference = optionalTrimmed(dialog.reference);
+    const decision = dialog.decision;
+    const successCode: InstallmentStatusCode =
+      decision === "charged"
+        ? "supervisor-charged-complete"
+        : "supervisor-not-charged-complete";
+    const running = this.runAction(async () => {
+      const details = await resolve.call(this.workflow, {
+        installmentGuid: pending.installmentGuid,
+        operationGuid: pending.operationGuid,
+        decision,
+        reason,
+        reference,
+      });
+      // 结论已落账：占用信息与对话框随之收起；失败时对话框保持打开，方便修正后重试。
+      this.patch({
+        pendingCardRepayment: null,
+        supervisorResolve: Object.freeze({ kind: "closed" as const }),
+      });
+      return details;
+    }, successCode);
+    return running.then(async () => {
+      // runAction 成功会把 recoveryRequired 清零；但本机若仍有未收尾的 action（中央结论已生效，
+      // 本地收尾失败留待下次恢复），必须重新亮起恢复提示，不能让界面假装一切已完成。
+      if (this.destroyed || this.state.statusCode !== successCode) return;
+      try {
+        if (await this.workflow.hasRecoveryRequired?.()) {
+          this.patch({ recoveryRequired: true });
+        }
+      } catch {
+        // 无法核实本地事实时不改动界面状态，下一次进入分期页会重新读取。
+      }
+    });
   }
 
   public async retryDetails(): Promise<void> {
@@ -992,6 +1160,12 @@ export class InstallmentPresenter {
             statusCode === "payment-recovery-required",
           statusCode,
         });
+        if (statusCode === "claim-busy" && this.state.selectedGuid) {
+          await this.refreshPendingCardRepayment(
+            this.state.selectedGuid,
+            this.detailGeneration,
+          );
+        }
       } finally {
         if (this.actionInFlight === running) {
           this.actionInFlight = null;

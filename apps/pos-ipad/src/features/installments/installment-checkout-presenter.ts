@@ -452,9 +452,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
         });
         return true;
       } catch (error) {
-        const onlineRequired =
-          error instanceof InstallmentWorkflowError &&
-          error.code === "online-required";
+        const failureCode = repaymentSubmitFailureCode(error);
         let recoveryRequired = true;
         try {
           recoveryRequired =
@@ -466,18 +464,13 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
         if (!recoveryRequired) {
           this.patch({
             phase: "ready",
-            runtimeErrorCode: onlineRequired
-              ? "ONLINE_REQUIRED"
-              : "PAYMENT_CHECKOUT_FAILED",
+            runtimeErrorCode: failureCode,
           });
           return false;
         }
         this.patch({
           phase: "recovery-required",
-          runtimeErrorCode:
-            onlineRequired
-              ? "ONLINE_REQUIRED"
-              : "PAYMENT_CHECKOUT_FAILED",
+          runtimeErrorCode: failureCode,
           allowedActions: allowedActions({ recover: true }),
         });
         return false;
@@ -1164,6 +1157,32 @@ function checkoutPresentation(
     fullInstallmentConfirmationRequired: false,
     cashRepaymentStatus: "idle",
   });
+}
+
+/**
+ * 续付提交失败时支付页展示的错误码。占用中与通道未放开都发生在任何 provider 调用之前、
+ * 本地 action 已终结，明确告诉收银员「本次未收款」；其余失败保持原来的通用提示。
+ */
+function repaymentSubmitFailureCode(
+  error: unknown,
+):
+  | "ONLINE_REQUIRED"
+  | "INSTALLMENT_REPAYMENT_BUSY"
+  | "INSTALLMENT_REPAYMENT_METHOD_UNSUPPORTED"
+  | "PAYMENT_CHECKOUT_FAILED" {
+  if (!(error instanceof InstallmentWorkflowError)) {
+    return "PAYMENT_CHECKOUT_FAILED";
+  }
+  switch (error.code) {
+    case "online-required":
+      return "ONLINE_REQUIRED";
+    case "claim-busy":
+      return "INSTALLMENT_REPAYMENT_BUSY";
+    case "payment-method-unsupported":
+      return "INSTALLMENT_REPAYMENT_METHOD_UNSUPPORTED";
+    default:
+      return "PAYMENT_CHECKOUT_FAILED";
+  }
 }
 
 function customerPresentation(
