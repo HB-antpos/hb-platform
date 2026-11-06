@@ -143,10 +143,13 @@ export interface InstallmentWorkflowPort {
 
 export type InstallmentWorkflowErrorCode =
   | "authorization-declined"
+  /** 该分期另有一笔续付占用（INSTALLMENT_REPAYMENT_BUSY）；本次未收款，可稍后重试或请主管核对。 */
+  | "claim-busy"
   | "claim-review-required"
   | "cash-confirmation-required"
   | "conflict"
   | "online-required"
+  | "payment-method-unsupported"
   | "payment-recovery-required"
   /** 原路退不支持所选原付款（刷卡），需改选"全部退代金券"；未发生任何退款。 */
   | "refund-method-unsupported"
@@ -170,6 +173,7 @@ export type InstallmentStatusCode =
   | "cancel-complete"
   | "cancel-refund-method-unsupported"
   | "cancel-refund-mode-unsupported"
+  | "claim-busy"
   | "claim-review-required"
   | "conflict"
   | "create-complete"
@@ -180,6 +184,7 @@ export type InstallmentStatusCode =
   | "invalid-create"
   | "invalid-repayment"
   | "online-required"
+  | "payment-method-unsupported"
   | "payment-recovery-required"
   | "permission-required"
   | "pickup-complete"
@@ -1316,6 +1321,10 @@ function workflowFailureCode(error: unknown): InstallmentStatusCode {
       return "authorization-declined";
     }
     if (error.code === "conflict") return "conflict";
+    if (error.code === "claim-busy") return "claim-busy";
+    if (error.code === "payment-method-unsupported") {
+      return "payment-method-unsupported";
+    }
     if (error.code === "claim-review-required") {
       return "claim-review-required";
     }

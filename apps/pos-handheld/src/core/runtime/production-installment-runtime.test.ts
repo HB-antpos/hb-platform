@@ -29,6 +29,7 @@ import {
 import { HbposApiError } from "@/core/api/hbpos-api";
 import type { InstallmentSnapshot, PaymentAttempt } from "@/core/contracts";
 import type { CashierLoginResult } from "@/core/security/cashier-authentication";
+import type { PaymentProviderAvailability } from "@/features/payments/runtime/payment-provider-registry";
 import {
   INSTALLMENTS_ADD_REPAYMENT_PERMISSION,
   INSTALLMENTS_CANCEL_PERMISSION,
@@ -278,7 +279,8 @@ test("claim BUSY 在 provider plan 与授权前停止，且不接管远端 Pendi
 
   await presenter.addRepayment();
 
-  assert.equal(presenter.getState().statusCode, "conflict");
+  // BUSY 发生在任何 provider 调用之前：界面给出「本次未收款，可稍后重试或请主管核对」，而不是笼统的 conflict。
+  assert.equal(presenter.getState().statusCode, "claim-busy");
   assert.equal(harness.payments.prepareCalls, 0);
   assert.equal(harness.payments.authorizeCalls, 0);
   assert.equal(harness.api.beginClaimCalls.length, 0);
@@ -334,7 +336,7 @@ test("旧 capability 误放行 Card 时仅精确 unsupported 400 原子终结，
       (error) =>
         error instanceof Error &&
         "code" in error &&
-        error.code === "conflict",
+        error.code === "payment-method-unsupported",
     );
 
     assert.deepEqual(harness.actionStore.finalizedCreatedReasons, [
@@ -354,6 +356,91 @@ test("旧 capability 误放行 Card 时仅精确 unsupported 400 原子终结，
     });
     assert.equal(harness.payments.beginCalls, 1);
   }
+});
+
+test("服务端未放开通道（400）在界面上是 payment-method-unsupported，且本次未收款", async () => {
+  const harness = createHarness({
+    claimCreateErrorCode: "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED",
+    claimCreateErrorStatus: 400,
+  });
+  const presenter = harness.runtime.createPresenter();
+  await presenter.load();
+  await presenter.select("installment-1");
+  fillVoucherRepayment(presenter);
+
+  await presenter.addRepayment();
+
+  assert.equal(presenter.getState().statusCode, "payment-method-unsupported");
+  assert.equal(harness.payments.prepareCalls, 0);
+  assert.equal(harness.payments.beginCalls, 0);
+  assert.equal(harness.payments.authorizeCalls, 0);
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+  assert.deepEqual(harness.actionStore.finalizedCreatedReasons, ["PaymentMethodUnsupported"]);
+});
+
+test("服务端只放开部分刷卡通道：本机已配置也不展示未放开的通道；缺字段或读取失败不收紧", async () => {
+  const configured: readonly PaymentProviderAvailability[] = [
+    { provider: "square", available: true, blocker: null },
+    { provider: "linkly-cloud", available: true, blocker: null },
+    { provider: "voucher", available: true, blocker: null },
+  ];
+  const availabilityOf = async (
+    harness: ReturnType<typeof createHarness>,
+  ): Promise<readonly (readonly [string, boolean, string | null])[]> =>
+    (await workflowOf(harness.runtime.createPresenter()).listPaymentProviderAvailability!()).map(
+      (entry) => [entry.provider, entry.available, entry.blocker] as const,
+    );
+
+  // 服务端只放开 square + zeller + manual：linkly-cloud 被过滤（失败关闭），券不受影响；zeller / manual 本机没有通道，忽略。
+  const partial = createHarness();
+  partial.payments.providerAvailability = configured;
+  partial.api.capabilities = {
+    ...partial.api.capabilities,
+    cardRepaymentProviders: ["Square", " zeller ", "manual"],
+  };
+  assert.deepEqual(await availabilityOf(partial), [
+    ["square", true, null],
+    ["linkly-cloud", false, "PAYMENT_PROVIDER_UNKNOWN"],
+    ["voucher", true, null],
+  ]);
+
+  // anz / linkly-cloud 都归一为 linkly（对齐服务端 NormalizeFamily）。
+  const linklyOnly = createHarness();
+  linklyOnly.payments.providerAvailability = configured;
+  linklyOnly.api.capabilities = { ...linklyOnly.api.capabilities, cardRepaymentProviders: ["anz"] };
+  assert.deepEqual(await availabilityOf(linklyOnly), [
+    ["square", false, "PAYMENT_PROVIDER_UNKNOWN"],
+    ["linkly-cloud", true, null],
+    ["voucher", true, null],
+  ]);
+
+  // 空列表 = 没有任何刷卡通道，券仍可用。
+  const none = createHarness();
+  none.payments.providerAvailability = configured;
+  none.api.capabilities = { ...none.api.capabilities, cardRepaymentProviders: [] };
+  assert.deepEqual(await availabilityOf(none), [
+    ["square", false, "PAYMENT_PROVIDER_UNKNOWN"],
+    ["linkly-cloud", false, "PAYMENT_PROVIDER_UNKNOWN"],
+    ["voucher", true, null],
+  ]);
+
+  // 旧服务端没有该字段：保持本机配置，不收紧。
+  const legacy = createHarness();
+  legacy.payments.providerAvailability = configured;
+  assert.deepEqual(await availabilityOf(legacy), [
+    ["square", true, null],
+    ["linkly-cloud", true, null],
+    ["voucher", true, null],
+  ]);
+
+  // 能力位读取失败：同样不在这里收紧（真正续付时会重新读取并 fail closed）。
+  const failing = createHarness({ capabilityErrorStatus: 503 });
+  failing.payments.providerAvailability = configured;
+  assert.deepEqual(await availabilityOf(failing), [
+    ["square", true, null],
+    ["linkly-cloud", true, null],
+    ["voucher", true, null],
+  ]);
 });
 
 test("任意其他 400 不得被泛化为 Card unsupported 终结", async () => {
@@ -2903,6 +2990,8 @@ class ScriptedPayments implements InstallmentMutationPaymentPort {
   public confirmCalls = 0;
   public prepareCalls = 0;
   public charges = 0;
+  /** 本机配置下各通道的可用性；缺省为空数组，与此前没有该方法时的行为一致（运行时用 ?. 调用）。 */
+  public providerAvailability: readonly PaymentProviderAvailability[] = [];
   public cashSettlementState: "Prepared" | "Approved" | "Missing" = "Prepared";
   public readonly actions: InstallmentPaymentAction[] = [];
   public readonly prepareBindings: {
@@ -2921,6 +3010,12 @@ class ScriptedPayments implements InstallmentMutationPaymentPort {
     private readonly cancelAllRefundsDeclined = true,
   ) {
     this.outcomes = [...outcomes];
+  }
+
+  public async listProviderAvailability(): Promise<
+    readonly PaymentProviderAvailability[]
+  > {
+    return this.providerAvailability;
   }
 
   public async prepareRepaymentClaim(persistedActionId: string) {
