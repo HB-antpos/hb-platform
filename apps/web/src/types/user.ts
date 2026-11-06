@@ -9,6 +9,8 @@ export interface UserQueryDto {
   roleGuid?: string
   storeGuid?: string
   isActive?: boolean
+  /** 登录情况筛选：never = 从未登录（lastLoginAt 为空），logged = 登录过；不传 = 全部。 */
+  loginState?: 'never' | 'logged'
   sortBy?: string
   sortDirection?: string
 }

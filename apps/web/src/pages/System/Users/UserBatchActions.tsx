@@ -1,4 +1,4 @@
-import { CheckCircleOutlined, CloseCircleOutlined, MinusCircleOutlined, ShopOutlined, StopOutlined, UsergroupAddOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, CloseCircleOutlined, MinusCircleOutlined, SendOutlined, ShopOutlined, StopOutlined, UsergroupAddOutlined } from '@ant-design/icons'
 import { Alert, Button, Modal, Select, Space, Typography, message } from 'antd'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -36,6 +36,10 @@ interface UserBatchActionsProps {
   canManageStores: boolean
   /** 管理员可以批量授予「可管理」分店关系 */
   canGrantManageableStores: boolean
+  /** Users.ResetPassword：给已勾选的员工发送通知（邮件 / 短信）。 */
+  canSendNotification: boolean
+  /** 点「发送通知」：由页面打开发送抽屉，目标是当前勾选的人。 */
+  onSendNotification: () => void
   /** 可选分店：范围受限的店长只会看到自己管辖的分店 */
   storeOptions: { label: string; value: string }[]
   /** 范围受限店长不能编辑的账号，提前跳过，避免整批被后端回滚。 */
@@ -53,6 +57,8 @@ export default function UserBatchActions({
   roleOptions,
   canManageStores,
   canGrantManageableStores,
+  canSendNotification,
+  onSendNotification,
   storeOptions,
   isOutOfScope,
   onClearSelection,
@@ -224,6 +230,12 @@ export default function UserBatchActions({
   return (
     <>
       <SelectionActionBar selectedCount={selectedUsers.length} onClearSelection={onClearSelection}>
+        {canSendNotification ? (
+          // 最前面的主按钮：先筛「从未登录」再全选，就是「账号已开通」的主要发送对象。
+          <Button size="small" type="primary" icon={<SendOutlined />} onClick={onSendNotification}>
+            {t('system.usersBatch.sendNotification', '发送通知')}
+          </Button>
+        ) : null}
         {canEditStatus ? (
           <>
             <Button size="small" icon={<CheckCircleOutlined />} onClick={() => openStatusConfirm(true)}>

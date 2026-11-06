@@ -51,6 +51,7 @@ function createEmptyAccess(): AccessControl {
     canDeleteProduct: false,
     canReadUser: false,
     canReadUserConsole: false,
+    canResetUserPassword: false,
     canWriteUser: false,
     canDeleteUser: false,
     canReadRole: false,
@@ -253,6 +254,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canReadUser = isAdmin || hasPermission(P.Users.View)
   // Web 后台 /system/users 菜单与页面只认 Users.ViewWebConsole；Users.View 保留给移动端员工列表/用户管理与接口。
   const canReadUserConsole = isAdmin || hasPermission(P.Users.ViewWebConsole)
+  // 员工通知（发送、预检、预览、查记录）与重置密码同源，不新增权限码；模板的新建 / 修改仅管理员（页面内用 isAdmin 判断）。
+  const canResetUserPassword = isAdmin || hasPermission(P.Users.ResetPassword)
   const canWriteUser = isAdmin || hasPermission(P.Users.Create) || hasPermission(P.Users.Edit)
   const canDeleteUser = isAdmin || hasPermission(P.Users.Delete)
   const canReadRole = isAdmin || hasPermission(P.Roles.View)
@@ -509,6 +512,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canDeleteProduct,
     canReadUser,
     canReadUserConsole,
+    canResetUserPassword,
     canWriteUser,
     canDeleteUser,
     canReadRole,

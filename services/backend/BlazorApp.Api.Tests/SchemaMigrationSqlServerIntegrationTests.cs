@@ -4219,6 +4219,97 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 员工通知三张表_新表_可重复执行_模板键唯一_识别列漂移缺表和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54450。
+        var noTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54450, noTable.Number);
+
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+
+        // 重复执行不报错、不丢已写入的行。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StaffNotificationTemplate (Id, TemplateKey, Name, Kind, IsEnabled, EmailSubject, EmailBody, SmsBody, CreatedBy, CreatedAtUtc, UpdatedBy, UpdatedAtUtc)
+            VALUES (N't-1', N'account-activated', N'x', N'system', 1, N's', N'b', N'', N'admin', SYSUTCDATETIME(), N'admin', SYSUTCDATETIME());
+            INSERT dbo.StaffNotificationBatch (Id, TemplateKey, TemplateName, CreatedBy, CreatedByUserGuid, SendEmail, SendSms, Status, TotalCount, CreatedAtUtc)
+            VALUES (N'b-1', N'account-activated', N'x', N'admin', N'u-1', 1, 0, N'queued', 1, SYSUTCDATETIME());
+            INSERT dbo.StaffNotificationRecipient (Id, BatchId, UserGuid, DisplayName, EmailStatus, SmsStatus, SmsSegments, Note, SortOrder, UpdatedAtUtc)
+            VALUES (N'r-1', N'b-1', N'u-1', N'Mia', N'pending', N'none', 0, N'', 0, SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationTemplate"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationBatch"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationRecipient"));
+
+        // 模板键唯一：同一个键不能出现两行（系统模板只会有一行被改动的记录）。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StaffNotificationTemplate (Id, TemplateKey, Name, Kind, IsEnabled, EmailSubject, EmailBody, SmsBody, CreatedBy, CreatedAtUtc, UpdatedBy, UpdatedAtUtc)
+            VALUES (N't-2', N'account-activated', N'y', N'system', 1, N's', N'b', N'', N'admin', SYSUTCDATETIME(), N'admin', SYSUTCDATETIME());
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 模板表列宽漂移 → 54451。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationTemplate ALTER COLUMN Name nvarchar(50) NOT NULL;");
+        var templateWidth = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54451, templateWidth.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationTemplate ALTER COLUMN Name nvarchar(100) NOT NULL;");
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+
+        // 模板键唯一索引缺失 → 54453；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_StaffNotificationTemplate_Key ON dbo.StaffNotificationTemplate;");
+        var noKeyIndex = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54453, noKeyIndex.Number);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+
+        // 批次表：列可空性漂移 → 54455；创建时间索引缺失 → 54457。
+        // 已有行的 FinishedAtUtc 是 NULL，要先填值才能改成 NOT NULL。
+        await ExecuteNonQueryAsync(main, """
+            UPDATE dbo.StaffNotificationBatch SET FinishedAtUtc = SYSUTCDATETIME() WHERE FinishedAtUtc IS NULL;
+            ALTER TABLE dbo.StaffNotificationBatch ALTER COLUMN FinishedAtUtc datetime2 NOT NULL;
+            """);
+        var batchNullable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54455, batchNullable.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationBatch ALTER COLUMN FinishedAtUtc datetime2 NULL;");
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_StaffNotificationBatch_Created ON dbo.StaffNotificationBatch;");
+        var noBatchIndex = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54457, noBatchIndex.Number);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+
+        // 收件人表：打码邮箱列宽漂移 → 54459；批次索引缺失 → 54461。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationRecipient ALTER COLUMN EmailMask nvarchar(50) NULL;");
+        var recipientWidth = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54459, recipientWidth.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationRecipient ALTER COLUMN EmailMask nvarchar(200) NULL;");
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_StaffNotificationRecipient_Batch ON dbo.StaffNotificationRecipient;");
+        var noRecipientIndex = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54461, noRecipientIndex.Number);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+
+        // 收件人表被删：54458；批次表被删：54454；重新执行迁移补回，其余表的行仍在。
+        await ExecuteNonQueryAsync(main, "DROP TABLE dbo.StaffNotificationRecipient;");
+        var noRecipientTable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54458, noRecipientTable.Number);
+        await ExecuteNonQueryAsync(main, "DROP TABLE dbo.StaffNotificationBatch;");
+        var noBatchTable = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql));
+        Assert.Equal(54454, noBatchTable.Number);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationTemplate"));
+        Assert.Equal(0, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationBatch"));
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 在线小票分享链接表_新表_可重复执行_令牌哈希唯一_识别列漂移和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

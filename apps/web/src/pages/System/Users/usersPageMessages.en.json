@@ -5,6 +5,11 @@
       "moreActions": "More actions",
       "totalUsers": "{{count}} users",
       "statusFilter": "Account status",
+      "loginStateFilter": "Sign-in status",
+      "loginStateAll": "All",
+      "loginStateNever": "Never signed in",
+      "loginStateLogged": "Signed in before",
+      "sendNotification": "Send notification",
       "lastLoginNever": "Never signed in",
       "lastLoginJustNow": "Just now",
       "lastLoginMinutes": "{{count}} min ago",
@@ -83,6 +88,7 @@
       "fullNameAutoHint": "When you fill in or change the family, given or middle name below, the full name is regenerated on save"
     },
     "usersBatch": {
+      "sendNotification": "Send notification",
       "listSeparator": ", ",
       "namesAndMore": "{{names}} and {{count}} in total",
       "clauseSeparator": "; ",

@@ -7,6 +7,16 @@ using BlazorApp.Shared.Models;
 
 namespace BlazorApp.Api.Services;
 
+/// <summary>生成随机密码后交给邮件渲染的信息。密码只存在于这个对象和邮件里。</summary>
+public sealed record GeneratedPasswordMail(string ToEmail, string DisplayName, string LoginName, string Password)
+{
+    /// <summary>record 自动生成的 ToString 会带出所有属性；以后有人用 {@mail} 打日志会泄露随机密码，所以显式去掉。</summary>
+    public override string ToString() => "GeneratedPasswordMail { Password = *** }";
+}
+
+/// <summary>按模板渲染好的邮件（主题 / 纯文本 / HTML）。公开接口不能暴露 internal 的 EmailContent，所以单独定义。</summary>
+public sealed record RenderedEmailContent(string Subject, string Text, string Html);
+
 public interface IPasswordResetService
 {
     /// <summary>登录页自助找回：无论邮箱是否存在都返回同一结果，防止枚举账号。</summary>
@@ -27,6 +37,16 @@ public interface IPasswordResetService
     /// 新密码一送达，旧密码与旧设备上的登录立即失效；发信失败会恢复原密码哈希。
     /// </summary>
     Task<ApiResponse<PasswordSetupEmailResultDto>> SendResetPasswordAsync(string userGuid, string requestedBy);
+
+    /// <summary>
+    /// 员工通知「账号已开通」用：与初始密码同一条通道（写入随机密码 → 发信 → 失败恢复原密码 → 送达后吊销旧登录），
+    /// 区别只在邮件内容由调用方按模板渲染。「须改密」原因记为 created-emailed，临时密码 72 小时失效。
+    /// </summary>
+    Task<ApiResponse<PasswordSetupEmailResultDto>> SendTemplatedPasswordAsync(
+        string userGuid,
+        string requestedBy,
+        Func<GeneratedPasswordMail, RenderedEmailContent> buildContent
+    );
 
     /// <summary>用邮箱 + 验证码设置新密码。成功后清除须改密标记并吊销该账号全部登录会话，并回传登录名。</summary>
     Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(string email, string code, string newPassword, string? requestIp);
@@ -131,6 +151,22 @@ public sealed class PasswordResetService : IPasswordResetService
     public Task<ApiResponse<PasswordSetupEmailResultDto>> SendResetPasswordAsync(string userGuid, string requestedBy) =>
         SendGeneratedPasswordAsync(userGuid, requestedBy, isReset: true);
 
+    public Task<ApiResponse<PasswordSetupEmailResultDto>> SendTemplatedPasswordAsync(
+        string userGuid,
+        string requestedBy,
+        Func<GeneratedPasswordMail, RenderedEmailContent> buildContent
+    ) =>
+        SendGeneratedPasswordAsync(
+            userGuid,
+            requestedBy,
+            isReset: false,
+            sendMail: mail =>
+            {
+                var content = buildContent(mail);
+                return _emailSender.SendRenderedAsync(mail.ToEmail, content.Subject, content.Text, content.Html, "staff-notification");
+            }
+        );
+
     /// <summary>
     /// 生成随机密码并发到员工邮箱的共用实现。isReset 只影响邮件文案、「须改密」原因和提示语，
     /// 写库、发信、失败回滚、吊销旧登录的流程完全一致。
@@ -138,7 +174,8 @@ public sealed class PasswordResetService : IPasswordResetService
     private async Task<ApiResponse<PasswordSetupEmailResultDto>> SendGeneratedPasswordAsync(
         string userGuid,
         string requestedBy,
-        bool isReset
+        bool isReset,
+        Func<GeneratedPasswordMail, Task<ApiResponse<bool>>>? sendMail = null
     )
     {
         var db = _context.Db;
@@ -189,13 +226,29 @@ public sealed class PasswordResetService : IPasswordResetService
             throw;
         }
 
-        var send = await _emailSender.SendInitialPasswordAsync(
-            user.Email,
-            string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName!,
-            user.Username,
-            initialPassword,
-            isReset: isReset
-        );
+        var displayName = string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName!;
+        // 员工通知传入自己的发信委托（按模板渲染邮件）；其余调用沿用固定文案的初始密码 / 重置密码邮件。
+        ApiResponse<bool> send;
+        try
+        {
+            send = sendMail != null
+                ? await sendMail(new GeneratedPasswordMail(user.Email, displayName, user.Username, initialPassword))
+                : await _emailSender.SendInitialPasswordAsync(
+                    user.Email,
+                    displayName,
+                    user.Username,
+                    initialPassword,
+                    isReset: isReset
+                );
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 此时新密码已经落库：渲染 / 发信一旦抛异常，必须和「发送失败」走同一条回滚路径，
+            // 否则员工的旧密码已被换掉、新密码却谁也没收到。日志只记异常类型，不记收件人与密码。
+            _logger.LogError("发送随机密码邮件时出现意外异常，将恢复原密码，异常类型：{ExceptionType}", ex.GetType().Name);
+            send = ApiResponse<bool>.Error("邮件发送失败，请稍后重试", AccountPasswordEmailSender.AccountEmailSendFailedCode);
+        }
+
         if (!send.Success)
         {
             // 没送达的初始密码立即作废：以新哈希为条件恢复，避免覆盖期间别处发生的改密。

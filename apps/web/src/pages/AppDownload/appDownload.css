@@ -1,0 +1,92 @@
+/* 员工 App 下载短链页（公开页，不在后台外壳里）。类名统一 app-download- 前缀。 */
+.app-download-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 24px 16px;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+.app-download-card {
+  width: 100%;
+  max-width: 560px;
+  box-sizing: border-box;
+  padding: 36px 28px 40px;
+  border: 1px solid #e1e5ec;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  text-align: center;
+}
+
+.app-download-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.app-download-sub {
+  margin: 0 0 24px;
+  color: #667085;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.app-download-qrs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 28px;
+}
+
+.app-download-qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 148px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.app-download-qr small {
+  color: #667085;
+  font-size: 12.5px;
+  font-weight: 400;
+}
+
+.app-download-qr-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 148px;
+  height: 148px;
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+  color: #667085;
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.app-download-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.app-download-note {
+  margin: 16px 0 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.5;
+}

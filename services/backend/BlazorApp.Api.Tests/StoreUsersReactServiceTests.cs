@@ -1305,6 +1305,12 @@ namespace BlazorApp.Api.Tests
                 }));
             }
 
+            public Task<ApiResponse<PasswordSetupEmailResultDto>> SendTemplatedPasswordAsync(
+                string userGuid,
+                string requestedBy,
+                Func<GeneratedPasswordMail, RenderedEmailContent> buildContent
+            ) => throw new NotSupportedException("店员列表服务不会用到员工通知的模板化密码发送");
+
             public Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(string email, string code, string newPassword, string? requestIp) =>
                 Task.FromResult(ApiResponse<PasswordResetConfirmResultDto>.OK(new PasswordResetConfirmResultDto()));
         }

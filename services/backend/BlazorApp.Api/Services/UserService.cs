@@ -123,6 +123,16 @@ namespace BlazorApp.Api.Services
                     userQuery = userQuery.Where(u => u.IsActive == query.IsActive.Value);
                 }
 
+                // 登录情况筛选：never=从未登录，logged=登录过
+                if (string.Equals(query.LoginState, "never", StringComparison.OrdinalIgnoreCase))
+                {
+                    userQuery = userQuery.Where(u => u.LastLoginAt == null);
+                }
+                else if (string.Equals(query.LoginState, "logged", StringComparison.OrdinalIgnoreCase))
+                {
+                    userQuery = userQuery.Where(u => u.LastLoginAt != null);
+                }
+
                 // 角色筛选 - 优化为子查询
                 if (!string.IsNullOrEmpty(query.RoleGuid))
                 {
@@ -439,6 +449,16 @@ namespace BlazorApp.Api.Services
                     baseQuery = baseQuery.Where(
                         (u, ur, r, us, s) => u.IsActive == query.IsActive.Value
                     );
+                }
+
+                // 登录情况筛选：never=从未登录，logged=登录过
+                if (string.Equals(query.LoginState, "never", StringComparison.OrdinalIgnoreCase))
+                {
+                    baseQuery = baseQuery.Where((u, ur, r, us, s) => u.LastLoginAt == null);
+                }
+                else if (string.Equals(query.LoginState, "logged", StringComparison.OrdinalIgnoreCase))
+                {
+                    baseQuery = baseQuery.Where((u, ur, r, us, s) => u.LastLoginAt != null);
                 }
 
                 // 角色筛选

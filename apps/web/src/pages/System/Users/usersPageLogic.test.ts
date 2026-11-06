@@ -24,6 +24,7 @@ import {
   resolveLoginToggleErrorKind,
   splitVisibleStores,
   toIsActiveQuery,
+  toLoginStateQuery,
   withLoginEnabled,
 } from './usersPageLogic'
 import type { UserDto } from '../../../types/user'
@@ -31,6 +32,9 @@ import type { UserDto } from '../../../types/user'
 assert.equal(toIsActiveQuery('all'), undefined, '「全部」不应向后端传 isActive')
 assert.equal(toIsActiveQuery('active'), true, '「启用」应查询 isActive=true')
 assert.equal(toIsActiveQuery('inactive'), false, '「停用」应查询 isActive=false')
+assert.equal(toLoginStateQuery('all'), undefined, '登录情况「全部」不应向后端传 loginState')
+assert.equal(toLoginStateQuery('never'), 'never', '「从未登录」应查询 loginState=never')
+assert.equal(toLoginStateQuery('logged'), 'logged', '「已登录过」应查询 loginState=logged')
 
 // 用本地时间构造「现在」，保证跨天判断在任何时区下都确定。
 const now = new Date(2026, 9, 5, 12, 30, 0)

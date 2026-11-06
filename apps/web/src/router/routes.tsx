@@ -138,6 +138,7 @@ const SystemStoresPage = lazy(() => import('../pages/System/Stores'))
 const SystemEmployeeProfilesPage = lazy(() => import('../pages/System/EmployeeProfiles'))
 const SystemUsersPage = lazy(() => import('../pages/System/Users'))
 const SystemPermissionsPage = lazy(() => import('../pages/System/Permissions'))
+const StaffNotificationsPage = lazy(() => import('../pages/System/StaffNotifications'))
 const WarehouseCategoriesPage = lazy(() => import('../pages/Warehouse/Categories'))
 const ContainerDetailPage = lazy(() => import('../pages/Warehouse/ContainerDetail'))
 const ContainerAllocationSalesPage = lazy(() => import('../pages/Warehouse/ContainerAllocationSales'))
@@ -229,6 +230,8 @@ const ACCOUNTS_NAV_GROUP: NavGroupDefinition = {
     { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles', keepAlive: true, element: <SystemEmployeeProfilesPage /> },
     { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole', keepAlive: true, element: <SystemRolesPage /> },
     { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole', keepAlive: true, element: <SystemPermissionsPage /> },
+    // 员工通知（模板 + 发送记录）：与「重置密码」同源的权限；模板编辑仅管理员，页面内再判断。
+    { path: '/system/staff-notifications', title: 'menu.staffNotifications', accessKey: 'canResetUserPassword', keepAlive: true, element: <StaffNotificationsPage /> },
   ],
 }
 

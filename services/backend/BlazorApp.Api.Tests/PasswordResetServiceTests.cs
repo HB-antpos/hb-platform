@@ -420,6 +420,64 @@ public sealed class PasswordResetServiceTests : IDisposable
         Assert.True(all.Distinct().Count() > 1990);
     }
 
+    [Fact]
+    public async Task SendTemplatedPassword_按调用方渲染的内容发信_密码落库并打72小时失效标记()
+    {
+        var user = await SeedUserAsync("staff", "staff@example.com");
+        var service = CreateService();
+        string? passwordSeenByRenderer = null;
+
+        var result = await service.SendTemplatedPasswordAsync(user.UserGUID, "admin", mail =>
+        {
+            passwordSeenByRenderer = mail.Password;
+            Assert.Equal("staff@example.com", mail.ToEmail);
+            return new RenderedEmailContent("Custom subject", $"pw={mail.Password}", "<p>x</p>");
+        });
+
+        Assert.True(result.Success);
+        var sent = Assert.Single(_sender.RenderedSent);
+        Assert.Equal(("staff@example.com", "Custom subject"), sent);
+        Assert.Empty(_sender.InitialSent); // 没有走固定文案的初始密码邮件
+        var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == user.UserGUID);
+        Assert.True(PasswordHasher.VerifyPassword(passwordSeenByRenderer!, stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        var requirement = await UserPasswordChangeRequirements.GetAsync(_db, user.UserGUID);
+        Assert.Equal(UserPasswordChangeRequirement.ReasonCreatedEmailed, requirement!.Reason);
+    }
+
+    [Fact]
+    public async Task SendTemplatedPassword_渲染时抛异常_按发送失败处理_恢复原密码_不留须改密标记()
+    {
+        // 新密码此时已经落库：渲染 / 发信抛异常也必须走回滚，不能让员工的旧密码被换掉而新密码谁都没收到。
+        var user = await SeedUserAsync("staff", "staff@example.com");
+        await SeedRefreshTokenAsync(user.UserGUID, "session-1");
+        var service = CreateService();
+
+        var result = await service.SendTemplatedPasswordAsync(user.UserGUID, "admin", _ => throw new InvalidOperationException("boom"));
+
+        Assert.False(result.Success);
+        Assert.Equal(AccountPasswordEmailSender.AccountEmailSendFailedCode, result.ErrorCode);
+        Assert.Empty(_sender.RenderedSent);
+        var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == user.UserGUID);
+        Assert.True(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        Assert.Null(await UserPasswordChangeRequirements.GetAsync(_db, user.UserGUID));
+        Assert.False((await _db.Queryable<RefreshToken>().SingleAsync()).IsRevoked); // 没送达，旧登录不动
+    }
+
+    [Fact]
+    public async Task SendTemplatedPassword_发信失败_恢复原密码()
+    {
+        var user = await SeedUserAsync("staff", "staff@example.com");
+        _sender.FailNext = true;
+
+        var result = await CreateService().SendTemplatedPasswordAsync(
+            user.UserGUID, "admin", mail => new RenderedEmailContent("S", mail.Password, "<p></p>"));
+
+        Assert.False(result.Success);
+        var stored = await _db.Queryable<User>().SingleAsync(item => item.UserGUID == user.UserGUID);
+        Assert.True(PasswordHasher.VerifyPassword("Secret123", stored.PasswordHash, PasswordHasher.PasswordFormatRaw, out _));
+        Assert.Null(await UserPasswordChangeRequirements.GetAsync(_db, user.UserGUID));
+    }
+
     private AccountEmailChangeService CreateEmailChangeService() =>
         new(CreateContext(_db), _sender, NullLogger<AccountEmailChangeService>.Instance);
 
@@ -528,6 +586,26 @@ public sealed class PasswordResetServiceTests : IDisposable
         )
         {
             EmailChangeSent.Add((toEmail, loginName, code));
+            return Task.FromResult(ApiResponse<bool>.OK(true));
+        }
+
+        public List<(string To, string Subject)> RenderedSent { get; } = new();
+
+        public Task<ApiResponse<bool>> SendRenderedAsync(
+            string toEmail,
+            string subject,
+            string text,
+            string html,
+            string kind,
+            CancellationToken cancellationToken = default
+        )
+        {
+            if (FailNext)
+            {
+                FailNext = false;
+                return Task.FromResult(ApiResponse<bool>.Error("邮件发送失败，请稍后重试", "ACCOUNT_EMAIL_SEND_FAILED"));
+            }
+            RenderedSent.Add((toEmail, subject));
             return Task.FromResult(ApiResponse<bool>.OK(true));
         }
     }

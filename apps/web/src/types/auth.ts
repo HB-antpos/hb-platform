@@ -43,6 +43,8 @@ export interface AccessControl {
   canDeleteProduct: boolean
   canReadUser: boolean
   canReadUserConsole: boolean
+  /** 重置密码 / 发送员工通知（邮件、短信）：Users.ResetPassword；「员工通知」页签与用户管理页「发送通知」入口共用。 */
+  canResetUserPassword: boolean
   canWriteUser: boolean
   canDeleteUser: boolean
   canReadRole: boolean

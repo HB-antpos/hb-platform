@@ -34,6 +34,19 @@ public interface IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     );
 
+    /// <summary>
+    /// 发送已按模板渲染好的邮件（员工通知）：同样复用发票邮箱后台配置的公司 SMTP 账号。
+    /// kind 只进日志，不会输出正文，所以随机密码不会进入日志。
+    /// </summary>
+    Task<ApiResponse<bool>> SendRenderedAsync(
+        string toEmail,
+        string subject,
+        string text,
+        string html,
+        string kind,
+        CancellationToken cancellationToken = default
+    );
+
     /// <summary>发送绑定 / 更换邮箱验证码到待验证的新邮箱。</summary>
     Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
         string toEmail,
@@ -91,6 +104,15 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         var content = BuildInitialPassword(displayName, loginName, initialPassword, isReset);
         return SendAsync(toEmail, content, isReset ? "reset-password" : "initial-password", cancellationToken);
     }
+
+    public Task<ApiResponse<bool>> SendRenderedAsync(
+        string toEmail,
+        string subject,
+        string text,
+        string html,
+        string kind,
+        CancellationToken cancellationToken = default
+    ) => SendAsync(toEmail, new EmailContent(subject, text, html), kind, cancellationToken);
 
     public Task<ApiResponse<bool>> SendEmailChangeCodeAsync(
         string toEmail,

@@ -519,6 +519,8 @@
     <Compile Include="PlanogramPlanTests.cs" />
     <Compile Include="PlanogramPublishTests.cs" />
     <Compile Include="PlanogramBatchTests.cs" />
+    <Compile Include="StaffNotificationTemplateLogicTests.cs" />
+    <Compile Include="StaffNotificationServiceTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

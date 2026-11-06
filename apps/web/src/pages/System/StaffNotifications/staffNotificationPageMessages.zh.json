@@ -1,0 +1,163 @@
+{
+  "system": {
+    "staffNotifications": {
+      "page": {
+        "title": "员工通知",
+        "subtitle": "用模板给员工发邮件、短信",
+        "tabTemplates": "模板",
+        "tabLogs": "发送记录",
+        "discardTitle": "放弃未保存的修改？",
+        "discardContent": "模板还有没保存的修改，切换页签后这些修改会丢失。",
+        "discardOk": "放弃修改",
+        "discardCancel": "继续编辑"
+      },
+      "templates": {
+        "adminOnly": "只有管理员能修改模板，你可以查看现有文案。",
+        "loadFailed": "加载模板失败",
+        "retry": "重试",
+        "empty": "还没有模板",
+        "newTemplate": "新建模板",
+        "newDraftName": "新建模板（未保存）",
+        "cardSystem": "系统",
+        "cardDisabled": "已停用",
+        "cardEmail": "邮件",
+        "cardSms": "短信",
+        "cardMetaIssuesPassword": "发放随机密码",
+        "cardMetaGeneral": "普通通知",
+        "cardUpdated": "{{date}} 更新",
+        "nameLabel": "模板名称",
+        "namePlaceholder": "例如：门店培训通知",
+        "enabled": "启用",
+        "insertHint": "点击插入",
+        "mailOnlySuffix": "（仅邮件）",
+        "variable": {
+          "name": "员工姓名",
+          "email": "登录邮箱",
+          "store": "所属分店",
+          "app_link": "下载短链",
+          "login_box": "邮箱 + 随机密码框",
+          "download_buttons": "iPhone / Android 按钮"
+        },
+        "insertOnlyEmailBody": "这个变量是整块内容，只能放进邮件正文。",
+        "emailTitle": "邮件",
+        "emailSubject": "主题",
+        "emailBody": "正文",
+        "emailSubjectPlaceholder": "邮件主题，只能用英文",
+        "emailBodyPlaceholder": "邮件正文，只能用英文；点上面的变量插入姓名、下载按钮等",
+        "smsTitle": "短信",
+        "smsBody": "正文",
+        "smsBodyPlaceholder": "短信正文，只能用英文和常用标点；留空则这个模板不发短信",
+        "smsInfo": "超过 160 字符会拆成多条计费；出现中文、弯引号或 emoji 时不能保存。",
+        "save": "保存模板",
+        "saveSuccess": "模板已保存",
+        "createSuccess": "模板已创建",
+        "saveFailed": "保存模板失败",
+        "resetDefault": "恢复默认文案",
+        "resetConfirmTitle": "恢复「{{name}}」的默认文案？",
+        "resetConfirmContent": "当前的主题、正文和短信文案会被默认版本覆盖，名称和启用状态保持不变。",
+        "resetOk": "恢复默认",
+        "resetSuccess": "已恢复默认文案",
+        "resetFailed": "恢复默认文案失败",
+        "switchDiscardTitle": "放弃未保存的修改？",
+        "switchDiscardContent": "当前模板还有没保存的修改，切换后这些修改会丢失。",
+        "switchDiscardOk": "放弃修改",
+        "switchDiscardCancel": "继续编辑",
+        "check": {
+          "name": {
+            "length": {
+              "fail": "模板名称需要 1–{{max}} 个字符（现在 {{length}} 个）"
+            },
+            "duplicate": {
+              "fail": "已有同名模板，请换一个名称"
+            }
+          },
+          "email": {
+            "loginBox": {
+              "pass": "含 {{variable}}（这个模板必须有，删掉不能保存）",
+              "fail": "缺少 {{variable}}：这个模板会发放随机密码，必须放进邮件正文，否则员工收不到密码，不能保存"
+            },
+            "loginBoxNotIssued": {
+              "warn": "普通通知模板不发放密码，{{variable}} 不会生效，建议删掉"
+            },
+            "download": {
+              "pass": "含下载入口",
+              "warn": "没有下载入口：可放 {{buttons}} 或 {{link}}（不放也能保存）"
+            },
+            "english": {
+              "pass": "全英文，没有中文字符",
+              "fail": "邮件只能用英文，主题和正文里不能有中文或全角标点"
+            },
+            "variables": {
+              "fail": "有不认识的变量：{{variables}}，只能用页面上列出的变量"
+            },
+            "length": {
+              "fail": "邮件超长：主题 {{subject}} / {{subjectMax}}，正文 {{body}} / {{bodyMax}} 字符"
+            }
+          },
+          "sms": {
+            "length": {
+              "empty": "没有写短信：这个模板不会发短信",
+              "pass": "{{length}} / {{limit}} 字符，按 {{segments}} 条计费",
+              "fail": "估算 {{length}} 字符，按 {{segments}} 条计费，超过最多 3 条（{{maxLength}} 字符）的上限"
+            },
+            "mailOnlyVariables": {
+              "pass": "不含密码（{{variable}} 不能放进短信）",
+              "fail": "短信里不能放 {{variables}}，它们只能放进邮件"
+            },
+            "charset": {
+              "pass": "只用英文和常用标点",
+              "fail": "有短信不支持的字符：{{chars}}（中文、弯引号、emoji 会让一条短信变成 70 字符、费用翻倍）"
+            },
+            "variables": {
+              "fail": "有不认识的变量：{{variables}}，短信只能用 {{allowed}}"
+            }
+          }
+        }
+      },
+      "logs": {
+        "dateStart": "开始日期",
+        "dateEnd": "结束日期",
+        "templateFilter": "模板",
+        "channelFilter": "渠道",
+        "resultFilter": "结果",
+        "channelEmail": "邮件",
+        "channelSms": "短信",
+        "keywordPlaceholder": "搜索员工 / 操作人",
+        "query": "查询",
+        "refresh": "刷新",
+        "columnTime": "发送时间（悉尼）",
+        "columnTemplate": "模板",
+        "columnOperator": "操作人",
+        "columnRecipients": "收件人",
+        "columnEmail": "邮件",
+        "columnSms": "短信",
+        "columnSmsCost": "短信费用",
+        "smsCostHint": "只统计实际发出的条数",
+        "columnResult": "结果",
+        "columnAction": "操作",
+        "recipientsCount": "{{count}} 人",
+        "total": "共 {{count}} 批",
+        "interrupted": "已中断",
+        "retry": "重试失败项",
+        "retryConfirmTitle": "重试这一批的失败项？",
+        "retryConfirmContent": "只重发失败的渠道：邮件失败的重发邮件；只有短信失败的只补短信，不会重新生成密码。",
+        "retryOk": "开始重试",
+        "retryStarted": "已开始重试，这一行会随结果更新",
+        "retryFailed": "重试失败",
+        "retryFinished": "重试已结束",
+        "pollGiveUp": "暂时查不到重试进度，后台仍在发送，请稍后点「刷新」查看",
+        "loadFailed": "加载发送记录失败",
+        "empty": "没有符合条件的发送记录",
+        "detailEmployee": "员工",
+        "detailEmail": "邮箱",
+        "detailPhone": "手机号",
+        "detailEmailStatus": "邮件",
+        "detailSmsStatus": "短信",
+        "detailNote": "说明",
+        "detailLoadFailed": "加载逐人明细失败",
+        "detailRetry": "重试加载",
+        "detailEmpty": "这一批没有逐人明细"
+      }
+    }
+  }
+}

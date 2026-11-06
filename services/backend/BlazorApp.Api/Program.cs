@@ -792,6 +792,16 @@ builder.Services.AddHttpClient<BlazorApp.Api.Services.Sms.ISmsGateway, BlazorApp
 builder.Services.AddScoped<BlazorApp.Api.Services.Sms.ISmsSender, BlazorApp.Api.Services.Sms.SmsSender>(); // 短信发送：总闸、澳洲手机号规范化、按号与全站限流、发送记录
 builder.Services.AddScoped<IAccountPasswordEmailSender, AccountPasswordEmailSender>(); // 员工设置 / 找回密码验证码邮件，同样复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 员工邮箱验证码设置 / 找回密码
+// 员工通知（后台用模板给员工发邮件 / 短信；首个模板「账号已开通」发放随机密码）：
+// 接口只判断和入队，逐人发送由 StaffNotificationBackgroundService 完成。表由迁移 20261106.001-staff-notification 创建，须先执行 --schema=migrate 再部署。
+builder.Services.Configure<BlazorApp.Api.Services.StaffNotifications.StaffNotificationOptions>(builder.Configuration.GetSection(BlazorApp.Api.Services.StaffNotifications.StaffNotificationOptions.SectionName)); // 下载链接公开基址，默认生产域名，不配也能用
+builder.Services.AddSingleton<BlazorApp.Api.Services.StaffNotifications.StaffNotificationSignal>(); // 入队后叫醒后台任务
+builder.Services.AddSingleton<BlazorApp.Api.Services.StaffNotifications.IStaffNotificationSignal>(sp => sp.GetRequiredService<BlazorApp.Api.Services.StaffNotifications.StaffNotificationSignal>());
+builder.Services.AddScoped<BlazorApp.Api.Services.StaffNotifications.IStaffNotificationTemplateService, BlazorApp.Api.Services.StaffNotifications.StaffNotificationTemplateService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StaffNotifications.IStaffNotificationLinkProvider, BlazorApp.Api.Services.StaffNotifications.StaffNotificationLinkProvider>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StaffNotifications.IStaffNotificationService, BlazorApp.Api.Services.StaffNotifications.StaffNotificationService>();
+builder.Services.AddScoped<BlazorApp.Api.Services.StaffNotifications.StaffNotificationDispatcher>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.StaffNotifications.StaffNotificationBackgroundService>();
 builder.Services.AddSingleton<ILoginAttemptLimiter>(_ => new LoginAttemptLimiter()); // 登录失败限流（进程内计数，必须单例才能跨请求累计；账号 5 次 / IP 100 次 / 15 分钟）
 builder.Services.AddScoped<IAccountEmailChangeService, AccountEmailChangeService>(); // 员工绑定 / 更换账号邮箱（验证码发到新邮箱）
 builder.Services.AddHttpClient("minor-employment-documents");

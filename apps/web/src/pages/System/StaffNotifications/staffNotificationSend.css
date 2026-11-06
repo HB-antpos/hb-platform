@@ -1,0 +1,171 @@
+/* 发送员工通知抽屉与确认 / 结果弹窗。类名统一 staff-notify-send- 前缀，避免与全局样式冲突。 */
+
+.staff-notify-send-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 372px;
+  gap: 20px;
+  align-items: start;
+}
+
+.staff-notify-send-section + .staff-notify-send-section {
+  margin-top: 18px;
+}
+
+.staff-notify-send-label {
+  margin-bottom: 8px;
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.staff-notify-send-label-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.staff-notify-send-hint {
+  display: block;
+  margin-top: 2px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.staff-notify-send-channel {
+  display: grid;
+  grid-template-columns: 44px 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+
+.staff-notify-send-channel .staff-notify-send-hint {
+  margin: 0;
+}
+
+.staff-notify-send-contact {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.staff-notify-send-name {
+  display: block;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.staff-notify-send-verdict {
+  display: block;
+}
+
+.staff-notify-send-verdict .ant-tag {
+  margin-inline-end: 4px;
+}
+
+.staff-notify-send-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.staff-notify-send-summary {
+  color: #344054;
+  font-size: 13.5px;
+}
+
+.staff-notify-send-summary b {
+  color: #1f2937;
+}
+
+/* 右侧预览 */
+.staff-notify-send-preview .ant-card-body {
+  padding: 0;
+}
+
+.staff-notify-send-preview {
+  position: sticky;
+  top: 0;
+}
+
+.staff-notify-send-preview-meta {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  color: #667085;
+  font-size: 12.5px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.staff-notify-send-preview-meta b {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.staff-notify-send-preview-frame {
+  display: block;
+  width: 100%;
+  min-height: 160px;
+  border: 0;
+  background: #fff;
+}
+
+.staff-notify-send-preview-body {
+  min-height: 120px;
+}
+
+.staff-notify-send-preview-sms {
+  padding: 12px 14px 14px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.staff-notify-send-sms-bubble {
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: #e9e9eb;
+  color: #111;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.staff-notify-send-preview-note {
+  padding: 10px 14px;
+  border-top: 1px solid #f0f0f0;
+  color: #667085;
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+/* 确认弹窗：已登录过的人点名列出，名单很长时内部滚动 */
+.staff-notify-send-reissue-names {
+  max-height: 96px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.staff-notify-send-progress {
+  padding: 8px 0 4px;
+}
+
+@media (max-width: 960px) {
+  .staff-notify-send-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .staff-notify-send-preview {
+    position: static;
+  }
+}
