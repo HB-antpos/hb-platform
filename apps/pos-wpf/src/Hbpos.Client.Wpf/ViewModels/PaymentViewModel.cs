@@ -827,6 +827,15 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             return;
         }
 
+        if (value && IsBelowInstallmentMinimumTotal())
+        {
+            // 中文注释：订单总额不够 Lay-by 起订金额：不允许打开，弹窗告知起订金额与当前金额，开关保持关闭。
+            // 续付历史 Lay-by 单（有 _installmentRepaymentOrder）与锁定模式不受起订金额限制，IsBelowInstallmentMinimumTotal 已排除。
+            ShowInstallmentMinimumNotice();
+            IsInstallmentPaymentEnabled = false;
+            return;
+        }
+
         if (!value)
         {
             _installmentRepaymentOrder = null;
@@ -844,13 +853,6 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         OpenInstallmentCustomerDialogCommand.NotifyCanExecuteChanged();
         RecalculateTenderSummary();
         NotifyPaymentCommandStates();
-
-        // 中文注释：收银员切到 Lay-by 时订单总额就不够起订金额，立刻弹窗告知，而不是等到点确认才在状态栏出一行字。
-        // 续付历史 Lay-by 单（有 _installmentRepaymentOrder）与锁定模式不受起订金额限制，不提示。
-        if (value && IsBelowInstallmentMinimumTotal())
-        {
-            ShowInstallmentMinimumNotice();
-        }
     }
 
     partial void OnIsInstallmentSwitchLockedChanged(bool value)

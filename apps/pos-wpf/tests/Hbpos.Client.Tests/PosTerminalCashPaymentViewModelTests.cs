@@ -7552,7 +7552,7 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
-    public void Payment_page_installment_toggle_below_minimum_total_opens_notice_and_can_be_closed()
+    public void Payment_page_installment_toggle_below_minimum_total_opens_notice_and_stays_off()
     {
         var cart = new PosCartService();
         cart.AddItem(CreateItem("SKU-INST-NOTICE-LOW", "Notice Low Tea", "939011", PriceSourceKind.StoreRetailPrice, 49.99m));
@@ -7566,7 +7566,8 @@ public sealed class PosTerminalCashPaymentViewModelTests
 
         viewModel.IsInstallmentPaymentEnabled = true;
 
-        // 总额不足 $50：打开 Lay-by 开关时立即弹出起订金额提示。
+        // 总额不足 $50：不允许打开 Lay-by，立即弹出起订金额提示，开关保持关闭。
+        Assert.False(viewModel.IsInstallmentPaymentEnabled);
         Assert.True(viewModel.IsInstallmentMinimumNoticeOpen);
         Assert.False(string.IsNullOrWhiteSpace(viewModel.InstallmentMinimumNoticeMessage));
 
@@ -7588,6 +7589,7 @@ public sealed class PosTerminalCashPaymentViewModelTests
 
         viewModel.IsInstallmentPaymentEnabled = true;
 
+        Assert.True(viewModel.IsInstallmentPaymentEnabled);
         Assert.False(viewModel.IsInstallmentMinimumNoticeOpen);
     }
 
