@@ -686,36 +686,11 @@ namespace BlazorApp.Api.Services
         /// 导致列表能看到详情页明令禁止读取的管理员账号。只有「仓库经理（非超管）」才会返回非空名单，
         /// 超级管理员与店长（走上面的分店范围过滤）不受这里影响。
         /// </summary>
-        private async Task<string[]> ResolveWarehouseHiddenUserGuidsAsync(ISqlSugarClient db)
-        {
-            if (_manageableStoreScopeService == null)
-            {
-                return Array.Empty<string>();
-            }
-
-            var actor = await UserAccessMutationSecurity.ResolveActorAsync(
+        private Task<string[]> ResolveWarehouseHiddenUserGuidsAsync(ISqlSugarClient db) =>
+            UserAccessMutationSecurity.ResolveWarehouseHiddenUserGuidsAsync(
                 db,
                 _manageableStoreScopeService
             );
-            if (!actor.IsWarehouseManager)
-            {
-                return Array.Empty<string>();
-            }
-
-            var hidden = await UserAccessMutationSecurity.GetHighPrivilegeUserGuidsAsync(
-                db,
-                candidateUserGuids: null,
-                warehouseDelegation: true
-            );
-            var actorLevel = await UserAccessMutationSecurity.GetUserLevelAsync(db, actor.UserGuid);
-            hidden.UnionWith(
-                await UserAccessMutationSecurity.GetUserGuidsAtOrAboveLevelAsync(db, actorLevel)
-            );
-
-            return hidden
-                .Where(userGuid => !string.Equals(userGuid, actor.UserGuid, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-        }
 
         private async Task<UserListStoreScope> ResolveUserListStoreScopeAsync(ISqlSugarClient db)
         {

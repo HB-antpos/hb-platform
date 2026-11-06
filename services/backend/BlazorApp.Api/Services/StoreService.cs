@@ -1157,6 +1157,16 @@ WHEN NOT MATCHED THEN
                     .InnerJoin<User>((us, u) => us.UserGUID == u.UserGUID)
                     .Where((us, u) => us.StoreGUID == storeGuid);
 
+                // 仓库经理不可见管理员与不低于自己等级的账号（与详情页口径一致）；其他身份名单为空
+                var warehouseHiddenGuids = await UserAccessMutationSecurity.ResolveWarehouseHiddenUserGuidsAsync(
+                    db,
+                    _manageableStoreScopeService
+                );
+                if (warehouseHiddenGuids.Length > 0)
+                {
+                    userQuery = userQuery.Where((us, u) => !warehouseHiddenGuids.Contains(u.UserGUID));
+                }
+
                 // 搜索条件
                 if (!string.IsNullOrEmpty(query.Search))
                 {

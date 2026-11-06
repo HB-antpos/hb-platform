@@ -330,7 +330,23 @@ namespace BlazorApp.Api.Services
 
             if (!scope.IsStoreManager)
             {
-                return null;
+                // 仓库经理被范围服务当作 IsAdmin，原先这里返回 null（不限制）会拿到全部成员；
+                // 改为「全部未删除用户 − 隐藏名单」。超管 / 其他角色隐藏名单为空，仍返回 null 不变。
+                var warehouseHidden = await UserAccessMutationSecurity.ResolveWarehouseHiddenUserGuidsAsync(
+                    db,
+                    _manageableStoreScopeService
+                );
+                if (warehouseHidden.Length == 0)
+                {
+                    return null;
+                }
+
+                var allUserGuids = await db.Queryable<User>()
+                    .Where(user => !user.IsDeleted)
+                    .Select(user => user.UserGUID)
+                    .ToListAsync();
+                var hiddenSet = new HashSet<string>(warehouseHidden, StringComparer.OrdinalIgnoreCase);
+                return allUserGuids.Where(userGuid => !hiddenSet.Contains(userGuid)).ToArray();
             }
 
             var managedStoreGuids = scope.StoreGuids
