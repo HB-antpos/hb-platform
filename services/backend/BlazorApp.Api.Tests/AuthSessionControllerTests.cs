@@ -199,6 +199,120 @@ public sealed class AuthSessionControllerTests : IDisposable
         authService.Verify(service => service.LoginAsync(It.IsAny<LoginRequest>()), Times.Once);
     }
 
+    private static Mock<IAuthService> AuthServiceFailingWith(string errorCode, string message)
+    {
+        var authService = new Mock<IAuthService>();
+        authService
+            .Setup(service => service.LoginAsync(It.IsAny<LoginRequest>()))
+            .ReturnsAsync(new LoginResponse { Success = false, Message = message, ErrorCode = errorCode });
+        return authService;
+    }
+
+    [Fact]
+    public async Task Login_AfterFiveCredentialFailures_LocksAccountWithoutVerifyingPasswordAgain()
+    {
+        // 锁定期内连正确密码也不验证：否则攻击者继续猜，猜中就放行，锁定形同虚设。
+        var authService = AuthServiceFailingWith(LoginErrorCodes.InvalidCredentials, "用户名或密码错误");
+        var controller = CreateController(authService.Object, loginAttemptLimiter: new LoginAttemptLimiter());
+
+        for (var i = 0; i < 5; i++)
+        {
+            var failed = await controller.Login(new LoginRequest { Username = "Victim", Password = "guess" + i });
+            Assert.False(failed.Success);
+            Assert.Equal("用户名或密码错误", failed.Message);
+            // 普通的凭据错误对外仍是通用文案，不带错误码，保持原有行为。
+            Assert.Null(failed.ErrorCode);
+        }
+
+        var locked = await controller.Login(new LoginRequest { Username = "  victim  ", Password = "guess5" });
+
+        Assert.False(locked.Success);
+        Assert.Equal(LoginErrorCodes.RateLimited, locked.ErrorCode);
+        Assert.Contains("15 分钟", locked.Message);
+        authService.Verify(service => service.LoginAsync(It.IsAny<LoginRequest>()), Times.Exactly(5));
+    }
+
+    [Fact]
+    public async Task Login_WhenAccountLocked_DoesNotAffectOtherAccounts()
+    {
+        var authService = AuthServiceFailingWith(LoginErrorCodes.InvalidCredentials, "用户名或密码错误");
+        var controller = CreateController(authService.Object, loginAttemptLimiter: new LoginAttemptLimiter());
+        for (var i = 0; i < 5; i++)
+        {
+            await controller.Login(new LoginRequest { Username = "victim", Password = "guess" });
+        }
+
+        var other = await controller.Login(new LoginRequest { Username = "bystander", Password = "guess" });
+
+        Assert.Null(other.ErrorCode);
+        authService.Verify(service => service.LoginAsync(It.Is<LoginRequest>(r => r.Username == "bystander")), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(LoginErrorCodes.LoginRestricted, "该账号未开通登录权限，请联系店长")]
+    [InlineData(LoginErrorCodes.Error, "登录过程中出现错误，请稍后重试")]
+    public async Task Login_NonCredentialFailures_AreNotCountedAndStayGeneric(string errorCode, string message)
+    {
+        // 账号未开通登录、系统异常都不是密码猜测：不计入限流（避免误锁），对外仍是通用文案（保持原有行为）。
+        var authService = AuthServiceFailingWith(errorCode, message);
+        var limiter = new Mock<ILoginAttemptLimiter>();
+        var controller = CreateController(authService.Object, loginAttemptLimiter: limiter.Object);
+
+        var result = await controller.Login(new LoginRequest { Username = "someone", Password = "x" });
+
+        Assert.False(result.Success);
+        Assert.Equal("用户名或密码错误", result.Message);
+        Assert.Null(result.ErrorCode);
+        limiter.Verify(l => l.RecordFailure(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Login_CredentialFailure_IsRecordedWithNormalizedAccountKey()
+    {
+        var authService = AuthServiceFailingWith(LoginErrorCodes.InvalidCredentials, "用户名或密码错误");
+        var limiter = new Mock<ILoginAttemptLimiter>();
+        var controller = CreateController(authService.Object, loginAttemptLimiter: limiter.Object);
+
+        await controller.Login(new LoginRequest { Username = "  Staff.One@Example.com ", Password = "x" });
+
+        limiter.Verify(l => l.RecordFailure("staff.one@example.com", It.IsAny<string?>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Login")]
+    [InlineData("SessionLogin")]
+    public async Task Login_WhenEmailedTemporaryPasswordExpired_TellsStaffToAskManager(string action)
+    {
+        // 密码对但临时密码过期：必须让员工知道是「过期」而不是「密码错」，并告诉他找店长重新发送；也不计入限流。
+        var authService = AuthServiceFailingWith(LoginErrorCodes.TempPasswordExpired, "临时密码已过期，请联系店长重新发送");
+        var limiter = new Mock<ILoginAttemptLimiter>();
+        var controller = CreateController(authService.Object, loginAttemptLimiter: limiter.Object);
+
+        var result = await InvokeAsync(controller, action, new LoginRequest { Username = "newhire", Password = "Ab3x" });
+
+        Assert.NotNull(result);
+        Assert.False(GetBoolean(result!, "Success"));
+        Assert.Equal("临时密码已过期，请联系店长重新发送", result!.GetType().GetProperty("Message")!.GetValue(result));
+        Assert.Equal(LoginErrorCodes.TempPasswordExpired, result.GetType().GetProperty("ErrorCode")!.GetValue(result));
+        limiter.Verify(l => l.RecordFailure(It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Login_WhenLimiterReportsLockout_RejectsBeforeCallingAuthService()
+    {
+        var authService = new Mock<IAuthService>();
+        var limiter = new Mock<ILoginAttemptLimiter>();
+        limiter.Setup(l => l.GetLockoutSeconds(It.IsAny<string>(), It.IsAny<string?>())).Returns(61);
+        var controller = CreateController(authService.Object, loginAttemptLimiter: limiter.Object);
+
+        var result = await controller.Login(new LoginRequest { Username = "victim", Password = "Right123" });
+
+        Assert.Equal(LoginErrorCodes.RateLimited, result.ErrorCode);
+        // 61 秒向上取整为 2 分钟。
+        Assert.Contains("2 分钟", result.Message);
+        authService.Verify(service => service.LoginAsync(It.IsAny<LoginRequest>()), Times.Never);
+    }
+
     [Theory]
     [InlineData("Login")]
     [InlineData("SessionLogin")]
@@ -800,7 +914,8 @@ public sealed class AuthSessionControllerTests : IDisposable
     private AuthController CreateController(
         IAuthService authService,
         IRoleService? roleService = null,
-        IUserService? userService = null
+        IUserService? userService = null,
+        ILoginAttemptLimiter? loginAttemptLimiter = null
     )
     {
         var controller = new AuthController(
@@ -808,7 +923,8 @@ public sealed class AuthSessionControllerTests : IDisposable
             CreateSqlSugarContext(_db),
             roleService ?? Mock.Of<IRoleService>(),
             userService ?? Mock.Of<IUserService>(),
-            Mock.Of<ILogger<AuthController>>()
+            Mock.Of<ILogger<AuthController>>(),
+            loginAttemptLimiter: loginAttemptLimiter
         );
 
         var httpContext = new DefaultHttpContext();

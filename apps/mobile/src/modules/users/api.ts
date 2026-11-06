@@ -98,15 +98,19 @@ export async function createStoreUser(payload: StoreUserCreatePayload): Promise<
 }
 
 /**
- * 给店员邮箱发设置密码验证码（代替手动重置密码）。
+ * 给店员邮箱发密码邮件（代替手动重置密码，店长全程不经手密码）。三种模式，同一个接口：
+ * - resetPassword=true：店长重置密码。后端生成随机密码发到员工邮箱，旧密码与旧设备登录立即失效，
+ *   员工首次登录须改成自己的密码（邮件写「密码已被重置」）。旧版后端会忽略该字段、退回发验证码。
+ * - initialPassword=true：新建员工页的「重新发送」/ 开通登录，重新生成初始密码发到员工邮箱（邮件写「账号已创建」）。
+ * - 都不传：发设置密码验证码（旧行为，员工自己在登录页设置）。
  * 老账号没有可用邮箱时带上 email：后端先写入员工邮箱再发送，一步完成。
- * initialPassword=true：新建员工页的「重新发送」，改为重新生成初始密码并发到员工邮箱。
  */
 export async function sendStoreUserPasswordSetupEmail(payload: {
   userGuid: string;
   storeCode: string;
   email?: string;
   initialPassword?: boolean;
+  resetPassword?: boolean;
 }): Promise<PasswordSetupEmailResult> {
   const email = payload.email?.trim();
   const response = await apiClient.post(
@@ -115,6 +119,7 @@ export async function sendStoreUserPasswordSetupEmail(payload: {
       storeCode: payload.storeCode,
       ...(email ? { email } : {}),
       ...(payload.initialPassword ? { initialPassword: true } : {}),
+      ...(payload.resetPassword ? { resetPassword: true } : {}),
     }
   );
   const result = normalizePasswordSetupEmailResult(response.data);

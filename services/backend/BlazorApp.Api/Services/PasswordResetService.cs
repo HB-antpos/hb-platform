@@ -21,6 +21,13 @@ public interface IPasswordResetService
     /// </summary>
     Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(string userGuid, string requestedBy);
 
+    /// <summary>
+    /// 店长重置员工密码：与初始密码同一条通道（系统生成随机密码发到员工邮箱，店长不经手，员工首次登录必须改密），
+    /// 区别只在邮件文案写「密码已被重置、旧密码已失效」，且「须改密」原因记为 reset。
+    /// 新密码一送达，旧密码与旧设备上的登录立即失效；发信失败会恢复原密码哈希。
+    /// </summary>
+    Task<ApiResponse<PasswordSetupEmailResultDto>> SendResetPasswordAsync(string userGuid, string requestedBy);
+
     /// <summary>用邮箱 + 验证码设置新密码。成功后清除须改密标记并吊销该账号全部登录会话，并回传登录名。</summary>
     Task<ApiResponse<PasswordResetConfirmResultDto>> ConfirmAsync(string email, string code, string newPassword, string? requestIp);
 }
@@ -118,9 +125,20 @@ public sealed class PasswordResetService : IPasswordResetService
         return ApiResponse<PasswordSetupEmailResultDto>.OK(issued.Data!, $"设置密码邮件已发送到 {MaskEmail(user.Email)}");
     }
 
-    public async Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(
+    public Task<ApiResponse<PasswordSetupEmailResultDto>> SendInitialPasswordAsync(string userGuid, string requestedBy) =>
+        SendGeneratedPasswordAsync(userGuid, requestedBy, isReset: false);
+
+    public Task<ApiResponse<PasswordSetupEmailResultDto>> SendResetPasswordAsync(string userGuid, string requestedBy) =>
+        SendGeneratedPasswordAsync(userGuid, requestedBy, isReset: true);
+
+    /// <summary>
+    /// 生成随机密码并发到员工邮箱的共用实现。isReset 只影响邮件文案、「须改密」原因和提示语，
+    /// 写库、发信、失败回滚、吊销旧登录的流程完全一致。
+    /// </summary>
+    private async Task<ApiResponse<PasswordSetupEmailResultDto>> SendGeneratedPasswordAsync(
         string userGuid,
-        string requestedBy
+        string requestedBy,
+        bool isReset
     )
     {
         var db = _context.Db;
@@ -139,6 +157,8 @@ public sealed class PasswordResetService : IPasswordResetService
         }
 
         var previousHash = user.PasswordHash;
+        // 记下写入前的「须先改密」标记整行（可能没有）：发信失败回滚时按原样还原（见下方失败分支）。
+        var previousRequirement = await UserPasswordChangeRequirements.GetAsync(db, userGuid);
         var initialPassword = GenerateInitialPassword();
         var newHash = PasswordHasher.HashSubmittedPassword(initialPassword, PasswordHasher.PasswordFormatRaw);
         var now = DateTime.UtcNow;
@@ -156,7 +176,8 @@ public sealed class PasswordResetService : IPasswordResetService
             await UserPasswordChangeRequirements.RequireAsync(
                 db,
                 userGuid,
-                UserPasswordChangeRequirement.ReasonCreated,
+                // 4 位随机临时密码强度低：用 -emailed 原因标记，登录时超过 72 小时即失效（见 AuthService.LoginAsync）。
+                isReset ? UserPasswordChangeRequirement.ReasonResetEmailed : UserPasswordChangeRequirement.ReasonCreatedEmailed,
                 requestedBy,
                 now
             );
@@ -172,16 +193,25 @@ public sealed class PasswordResetService : IPasswordResetService
             user.Email,
             string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName!,
             user.Username,
-            initialPassword
+            initialPassword,
+            isReset: isReset
         );
         if (!send.Success)
         {
             // 没送达的初始密码立即作废：以新哈希为条件恢复，避免覆盖期间别处发生的改密。
-            await db.Updateable<User>()
+            var restored = await db.Updateable<User>()
                 .SetColumns(item => item.PasswordHash == previousHash)
                 .SetColumns(item => item.UpdatedAt == DateTime.UtcNow)
                 .Where(item => item.UserGUID == userGuid && item.PasswordHash == newHash)
                 .ExecuteCommandAsync();
+            // 密码已恢复成原样，「须先改密」标记也要还原成写入前的样子：重置对象是在用的老账号，
+            // 原本没有标记就删掉（否则员工用旧密码登录会被无故强制改密）；原本有标记就按原行写回
+            // （原因、时间都不变，否则手输密码的标记会被换成会过期的临时密码标记）。
+            // 仅当哈希确实是我们恢复的才动标记，期间别处发生的改密不被覆盖。
+            if (restored > 0)
+            {
+                await UserPasswordChangeRequirements.RestoreAsync(db, userGuid, previousRequirement);
+            }
             return ApiResponse<PasswordSetupEmailResultDto>.Error(
                 send.Message,
                 send.ErrorCode ?? AccountPasswordEmailSender.AccountEmailSendFailedCode
@@ -199,10 +229,11 @@ public sealed class PasswordResetService : IPasswordResetService
             .Where(item => item.UserGUID == userGuid && item.ConsumedAtUtc == null)
             .ExecuteCommandAsync();
 
-        _logger.LogInformation("已向员工邮箱发送初始密码，操作人：{RequestedBy}", requestedBy);
+        var label = isReset ? "重置后的新密码" : "初始密码";
+        _logger.LogInformation("已向员工邮箱发送{Label}，操作人：{RequestedBy}", label, requestedBy);
         return ApiResponse<PasswordSetupEmailResultDto>.OK(
             new PasswordSetupEmailResultDto { MaskedEmail = MaskEmail(user.Email) },
-            $"初始密码已发送到 {MaskEmail(user.Email)}"
+            $"{label}已发送到 {MaskEmail(user.Email)}"
         );
     }
 

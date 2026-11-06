@@ -792,6 +792,7 @@ builder.Services.AddHttpClient<BlazorApp.Api.Services.Sms.ISmsGateway, BlazorApp
 builder.Services.AddScoped<BlazorApp.Api.Services.Sms.ISmsSender, BlazorApp.Api.Services.Sms.SmsSender>(); // 短信发送：总闸、澳洲手机号规范化、按号与全站限流、发送记录
 builder.Services.AddScoped<IAccountPasswordEmailSender, AccountPasswordEmailSender>(); // 员工设置 / 找回密码验证码邮件，同样复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<IPasswordResetService, PasswordResetService>(); // 员工邮箱验证码设置 / 找回密码
+builder.Services.AddSingleton<ILoginAttemptLimiter>(_ => new LoginAttemptLimiter()); // 登录失败限流（进程内计数，必须单例才能跨请求累计；账号 5 次 / IP 100 次 / 15 分钟）
 builder.Services.AddScoped<IAccountEmailChangeService, AccountEmailChangeService>(); // 员工绑定 / 更换账号邮箱（验证码发到新邮箱）
 builder.Services.AddHttpClient("minor-employment-documents");
 builder.Services.AddScoped<EmployeeProfileSensitiveChangeService>();

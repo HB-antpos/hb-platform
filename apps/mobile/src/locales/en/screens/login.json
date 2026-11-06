@@ -116,6 +116,8 @@
     "server": "The server is busy right now. Wait a moment, then tap Retry.",
     "http": "Login failed. Try again later or ask an admin. Error code: {{status}}",
     "locationRequired": "Login requires your current precise location. Allow location access and try again.",
+    "tooManyAttempts": "Too many failed attempts. Try again in about {{minutes}} minutes.",
+    "tempPasswordExpired": "This temporary password has expired. Ask your manager to send a new one.",
     "stepTimeout": "Login is taking too long on this device. Tap Retry; if it keeps happening, fully close and reopen the app.",
     "default": "Login failed. Please try again later."
   },

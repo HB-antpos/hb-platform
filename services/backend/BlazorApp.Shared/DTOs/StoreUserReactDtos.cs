@@ -152,6 +152,12 @@ namespace BlazorApp.Shared.DTOs
         /// 未传或 false 仍发送设置密码验证码。
         /// </summary>
         public bool? InitialPassword { get; set; }
+
+        /// <summary>
+        /// true 表示店长重置密码：生成 4 位随机密码发到员工邮箱（邮件写「密码已被重置、旧密码已失效」，须改密原因记为 reset）。
+        /// 与 InitialPassword 同时传时以本字段为准；未传或 false 时行为不变，旧版 App 仍走验证码。
+        /// </summary>
+        public bool? ResetPassword { get; set; }
     }
 
     public class UpdateStoreUserDto

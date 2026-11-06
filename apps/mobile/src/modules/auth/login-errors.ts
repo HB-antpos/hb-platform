@@ -95,6 +95,18 @@ export function getFriendlyLoginErrorDescriptor(error: unknown): LoginErrorDescr
     return { key: "errors.locationRequired" };
   }
 
+  // 后端登录限流：「登录失败次数过多，请约 N 分钟后再试」。必须排在「停用 / 锁定」判断之前，
+  // 否则会被当成账号不可用；N 取自消息，取不到时按 15 分钟。重试按钮没用（等不到时间不会变好），不给。
+  if (includesAny(message, ["登录失败次数过多", "too many failed"])) {
+    const minutes = Number(/(\d+)/.exec(message)?.[1] ?? 15);
+    return { key: "errors.tooManyAttempts", values: { minutes: minutes > 0 ? minutes : 15 } };
+  }
+
+  // 邮件发出的临时密码超过 72 小时失效：密码是对的，但要告诉员工去找店长重新发送，不能说成「密码不正确」。
+  if (includesAny(message, ["临时密码已过期", "temporary password has expired"])) {
+    return { key: "errors.tempPasswordExpired" };
+  }
+
   if (
     includesAny(message, [
       "停用",

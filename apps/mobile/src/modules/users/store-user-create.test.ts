@@ -48,7 +48,7 @@ async function run() {
   });
 
   const { apiClient } = await import("../../shared/api/client");
-  const { createStoreUser, toSafeStoreUserErrorLog, updateStoreUser } = await import("./api");
+  const { createStoreUser, sendStoreUserPasswordSetupEmail, toSafeStoreUserErrorLog, updateStoreUser } = await import("./api");
   const requests: RequestRecord[] = [];
   const originalPost = apiClient.post;
   const originalPut = apiClient.put;
@@ -189,6 +189,35 @@ async function run() {
     for (const key of ["middleName", "familyName"]) {
       assert.equal(key in (requests[0].body as Record<string, unknown>), false, `${key} 未变化不得发送`);
     }
+    requests.length = 0;
+
+    // 密码邮件接口三种模式：resetPassword（重置）/ initialPassword（开通 / 重发）/ 都不传（旧行为，验证码）。
+    // 请求体只带被置为 true 的标志，旧版后端见不到未知字段以外的任何变化。
+    apiClient.post = (async (url: string, body?: unknown) => {
+      requests.push({ body, method: "post", url });
+      return { data: { maskedEmail: "st***@example.com" } };
+    }) as typeof apiClient.post;
+    const reset = await sendStoreUserPasswordSetupEmail({ userGuid: "user-1", storeCode: "S001", resetPassword: true });
+    assert.equal(reset.maskedEmail, "st***@example.com");
+    await sendStoreUserPasswordSetupEmail({ userGuid: "user-1", storeCode: "S001", initialPassword: true });
+    await sendStoreUserPasswordSetupEmail({ userGuid: "user-1", storeCode: "S001", email: " new@example.com " });
+    assert.deepEqual(requests, [
+      {
+        method: "post",
+        url: "/react/v1/store-users/user-1/password-setup-email",
+        body: { storeCode: "S001", resetPassword: true },
+      },
+      {
+        method: "post",
+        url: "/react/v1/store-users/user-1/password-setup-email",
+        body: { storeCode: "S001", initialPassword: true },
+      },
+      {
+        method: "post",
+        url: "/react/v1/store-users/user-1/password-setup-email",
+        body: { storeCode: "S001", email: "new@example.com" },
+      },
+    ]);
     requests.length = 0;
 
     const initialPassword = "must-never-enter-logs";

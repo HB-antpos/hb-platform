@@ -54,6 +54,26 @@ public sealed class EnglishOnlyEmailTemplatesTests
     }
 
     [Fact]
+    public void 重置密码邮件_只有英文_写明旧密码已失效_且不再说账号已创建()
+    {
+        var content = AccountPasswordEmailSender.BuildInitialPassword("Alex", "alex.login", "Ab3x", isReset: true);
+
+        AssertEnglishOnly(content);
+        Assert.Contains("has been reset", content.Subject);
+        foreach (var body in new[] { content.Text, content.Html })
+        {
+            Assert.Contains("alex.login", body);
+            Assert.Contains("Ab3x", body);
+            Assert.Contains("New password", body);
+            Assert.Contains("old password no longer works", body);
+            Assert.Contains("choose your own password", body);
+            Assert.DoesNotContain("account has been created", body);
+            // 旧密码已失效，不能再劝员工「忽略」这封邮件，否则会把员工锁在外面。
+            Assert.DoesNotContain("you can ignore it", body);
+        }
+    }
+
+    [Fact]
     public void 绑定邮箱验证码邮件_只有英文且保留关键信息()
     {
         var content = AccountPasswordEmailSender.BuildEmailChangeCode("Alex", "alex.login", "654321", "10 minutes");

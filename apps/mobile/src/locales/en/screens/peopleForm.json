@@ -107,7 +107,7 @@
     "assignmentValue": "{{store}} · Store staff · Casual",
     "copyAccount": "Copy username",
     "copiedAccount": "Username copied",
-    "loginDisabledNotice": "This staff member can't log in to the app or web yet, and no password email was sent. To change this, turn on \"Allow login to the app and web\" in Edit profile. When you save, you'll be asked to send a password setup email.",
+    "loginDisabledNotice": "This staff member can't log in to the app or web yet, and no password email was sent. To change this, turn on \"Allow login to the app and web\" in Edit profile. When you save, you'll be asked to email them a password.",
     "inviteSent": "Initial password sent to {{email}}. They must change it the first time they log in.",
     "inviteFailed": "The account was created but the initial password email was not sent: {{reason}}. You can send it again.",
     "inviteFailedFallback": "Email could not be sent",
@@ -198,7 +198,7 @@
     "emailEmptyHint": "No usable email yet. Add one so password emails can be sent to them.",
     "emailDeliverable": "Can receive mail",
     "sectionLogin": "Login",
-    "loginHelper": "If you change this from \"Blocked\" to \"Allowed\", you'll be asked to send a password setup email when you save.",
+    "loginHelper": "If you change this from \"Blocked\" to \"Allowed\", you'll be asked to email them a password when you save.",
     "statusNotice": "To enable or disable the account, use the Disable button on the details page (it asks you to confirm).",
     "save": "Save",
     "saveWithCount": "Save changes ({{count}})"
