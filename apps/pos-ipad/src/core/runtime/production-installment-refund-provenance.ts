@@ -2,6 +2,7 @@ import type {
   InstallmentOriginalTenderEvidence,
   InstallmentRefundProvenanceRemotePort,
   InstallmentRefundProvenanceSnapshot,
+  InstallmentTenderProvider,
 } from "./production-installment-payment-adapter";
 
 import {
@@ -304,18 +305,23 @@ function safeEvidence(
 
 function providerMatchesMethod(
   method: InstallmentOriginalTenderEvidence["method"],
-  provider: PaymentProvider | null,
+  provider: InstallmentTenderProvider | null,
 ): boolean {
   if (method === "cash") return provider === null;
   if (method === "voucher") return provider === "voucher";
-  return provider === "square" || provider === "linkly-cloud";
+  return (
+    provider === "square" ||
+    provider === "linkly-cloud" ||
+    provider === "zeller" ||
+    provider === "manual-card"
+  );
 }
 
 function providerFor(
   method: InstallmentOriginalTenderEvidence["method"],
   reference: string | null,
   transactions: readonly GeneratedCardTransaction[],
-): PaymentProvider | null | undefined {
+): InstallmentTenderProvider | null | undefined {
   if (method === "cash") return null;
   if (method === "voucher") return "voucher";
 
@@ -329,8 +335,22 @@ function providerFor(
     processors.some(
       (value) => value.includes("linkly") || value.includes("anz"),
     ) || /^(?:ANZ|ANZCLOUD|LINKLY)(?::|$)/iu.test(reference ?? "");
-  if (square === linkly) return undefined;
-  return square ? "square" : "linkly-cloud";
+  // 中文注释：Zeller 引用是 ZELLER: / ZELLERRF:（含主管确认、没有交易号的未核实格式），处理器名为 Zeller；
+  // 手动刷卡引用是 MANUAL:，处理器名为 Manual。口径对齐 WPF，格式损坏的 Zeller 引用也算 Zeller，不回退成别的通道。
+  const zeller =
+    processors.some((value) => value === "zeller") ||
+    /^ZELLER(?:RF)?:/iu.test(reference ?? "");
+  const manual =
+    processors.some((value) => value === "manual") ||
+    /^MANUAL:/iu.test(reference ?? "");
+  // 必须恰好属于一个通道；一笔付款同时带两个通道的证据说明来源冲突，失败关闭。
+  const families = [
+    square ? "square" : null,
+    linkly ? "linkly-cloud" : null,
+    zeller ? "zeller" : null,
+    manual ? "manual-card" : null,
+  ].filter((value): value is InstallmentTenderProvider => value !== null);
+  return families.length === 1 ? families[0] : undefined;
 }
 
 function cardTransactionsFrom(

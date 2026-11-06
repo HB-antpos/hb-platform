@@ -7,6 +7,7 @@ import type {
   InstallmentCancelRefundMode,
   InstallmentOriginalTenderEvidence,
   InstallmentRefundProvenanceSnapshot,
+  InstallmentTenderProvider,
 } from "../runtime/production-installment-payment-adapter";
 import type {
   InstallmentProtectedProvenanceImport,
@@ -599,9 +600,13 @@ function normalizeEvidence(
   if (
     (method === "cash" && normalizedProvider !== null) ||
     (method === "voucher" && normalizedProvider !== "voucher") ||
+    // 中文注释：Zeller / 手动刷卡原付款只允许登记为证据（退代金券用）；它们不会生成 provider attempt，
+    // seededReferences 对它们照旧抛错，原路退款无法被误打开。
     (method === "card" &&
       normalizedProvider !== "square" &&
-      normalizedProvider !== "linkly-cloud")
+      normalizedProvider !== "linkly-cloud" &&
+      normalizedProvider !== "zeller" &&
+      normalizedProvider !== "manual-card")
   ) {
     throw new TypeError("Installment tender provider is invalid.");
   }
@@ -849,12 +854,14 @@ function normalizeCardTransactions(
   );
 }
 
-function paymentProvider(value: unknown): PaymentProvider | null {
+function paymentProvider(value: unknown): InstallmentTenderProvider | null {
   if (
     value === null ||
     value === "square" ||
     value === "linkly-cloud" ||
-    value === "voucher"
+    value === "voucher" ||
+    value === "zeller" ||
+    value === "manual-card"
   ) {
     return value;
   }
