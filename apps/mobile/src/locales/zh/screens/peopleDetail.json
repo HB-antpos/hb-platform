@@ -131,7 +131,8 @@
       "access": "账号授权",
       "pos": "收银权限",
       "copyPermissions": "复制权限给他人",
-      "loginRecords": "登录记录"
+      "loginRecords": "登录记录",
+      "sendNotice": "发送通知"
     },
     "barcodeConnected": "标签打印机 · {{status}}",
     "barcodeNoPrinter": "还没有选择标签打印机",
@@ -145,7 +146,8 @@
     "disableSubtitle": "可随时重新启用",
     "enableTitle": "启用账号",
     "enableSubtitle": "恢复登录，排班与考勤不受影响",
-    "hint": "没有权限的操作不会显示"
+    "hint": "没有权限的操作不会显示",
+    "sendNoticeSubtitle": "邮件 + 短信 · 账号已开通"
   },
   "confirm": {
     "disableTitle": "停用 {{name}}？",

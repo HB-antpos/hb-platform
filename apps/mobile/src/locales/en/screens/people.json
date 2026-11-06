@@ -50,7 +50,15 @@
     "filteredDescription": "Try a different status filter."
   },
   "batch": {
-    "selected": "{{count}} selected"
+    "selected": "{{count}} selected",
+    "entry": "Select staff",
+    "selectVisible": "Select all {{count}}",
+    "clearVisible": "Clear selection",
+    "noticeHint": "Review on the next step",
+    "print": "Staff code",
+    "sendNotice": "Send notice",
+    "noticeRecords": "Send history",
+    "noticeLimit": "You can send to up to {{count}} staff at a time"
   },
   "storeSheet": {
     "title": "Switch store",

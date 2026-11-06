@@ -53,6 +53,8 @@ const EXISTING_REAL_PAGE_FILES = [
   "app/(shell)/users/[userGuid]/edit.tsx",
   "app/(shell)/users/[userGuid]/profile.tsx", // 个人信息（员工个人信息维护）编辑页
   "app/(shell)/users/[userGuid]/pos-terminal-permissions.tsx",
+  "app/(shell)/users/notices/index.tsx", // 员工通知：发送记录
+  "app/(shell)/users/notices/send.tsx", // 员工通知：批量核对收件人
   "app/(shell)/device-management.tsx",
   "app/(shell)/employee-profile.tsx",
   "app/(shell)/employee-profile-review/index.tsx",
@@ -103,8 +105,8 @@ async function assertFileExists(relativePath: string) {
 async function run() {
   assert.equal(
     EXISTING_REAL_PAGE_FILES.length,
-    50,
-    "导航改版前的真实业务页面必须全部保留（人员管理合并新增 users/[userGuid]/index、login-records、edit、profile 四页）"
+    52,
+    "导航改版前的真实业务页面必须全部保留（人员管理合并新增 users/[userGuid]/index、login-records、edit、profile 四页，员工通知新增 users/notices/index、send 两页）"
   );
   await Promise.all(EXISTING_REAL_PAGE_FILES.map(assertFileExists));
   await assertFileExists("app/(shell)/workbench.tsx");
@@ -116,7 +118,7 @@ async function run() {
 
   assert.equal(
     EXISTING_REAL_PAGE_FILES.filter((path) => path.startsWith("app/(shell)/")).length,
-    48,
+    50,
     "除认证和隐私政策外，所有真实业务页面（含详情）都必须位于 Shell Stack"
   );
   await assert.rejects(

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, StyleSheet, View } from "react-native";
-import { useNavigation, useRouter } from "expo-router";
+import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ActivityIndicator, Text } from "react-native-paper";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -24,6 +24,9 @@ import { getDisplayableEmail } from "@/modules/users/staff-email-username";
 import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { usePrinterStore } from "@/modules/printer/state";
+import { StaffNoticeActivationCard } from "@/modules/staff-notices/activation-card";
+import { shouldOfferActivationCard } from "@/modules/staff-notices/logic";
+import { StaffNoticeSendSheet } from "@/modules/staff-notices/send-sheet";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { resolveLocaleTag } from "@/shared/i18n/types";
@@ -108,6 +111,9 @@ export function StorePersonDetail({
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [barcodeVisible, setBarcodeVisible] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(false);
+  // 「补充员工邮箱」跳到编辑页，回来后重新打开发送弹层（重新打开即重新预检）。
+  const reopenNoticeRef = useRef(false);
   const [statusIntent, setStatusIntent] = useState<StatusIntent | null>(null);
   const [snackbar, setSnackbar] = useState("");
   const [showSensitive, setShowSensitive] = useState(false);
@@ -132,13 +138,14 @@ export function StorePersonDetail({
       scope: {
         authenticated,
         isDeviceMode: env.isDeviceMode,
+        accountSession: sessionKind === "account",
         storeManageable,
         barcodeStoreAllowed: storeManageable && env.posEnabledStores.some((store) => store.storeCode === storeCode),
         hasManageableStores: env.manageableStores.length > 0,
         hasStoreContext: Boolean(storeCode),
       },
     });
-  }, [access, actorGuid, authenticated, currentUser?.roleNames, env.isDeviceMode, env.manageableStores.length, env.posEnabledStores, person, storeCode, storeManageable]);
+  }, [access, actorGuid, authenticated, currentUser?.roleNames, env.isDeviceMode, env.manageableStores.length, env.posEnabledStores, person, sessionKind, storeCode, storeManageable]);
   const layout = useMemo(() => (permissions && person ? buildDetailLayout(permissions, person.active) : null), [permissions, person]);
 
   // ───────── 分店与权限摘要（只在有授权资格时才请求，避免无谓的 403）─────────
@@ -245,10 +252,23 @@ export function StorePersonDetail({
     // 先关「更多」弹层，再打开下一个：都是 Paper Portal 弹层，不存在 iOS 原生 Modal 连续切换被吞的问题。
     setMoreVisible(false);
     if (key === "barcode") setBarcodeVisible(true);
+    else if (key === "sendNotice") setNoticeVisible(true);
     else if (key === "access") openAccess("stores");
     else if (key === "pos") openPos();
     else if (key === "copyPermissions") openAccess("permissions", true);
   }, [openAccess, openPos]);
+
+  useFocusEffect(useCallback(() => {
+    if (!reopenNoticeRef.current) return;
+    reopenNoticeRef.current = false;
+    setNoticeVisible(true);
+  }, []));
+
+  const handleNoticeEditEmail = useCallback(() => {
+    reopenNoticeRef.current = true;
+    setNoticeVisible(false);
+    openEdit();
+  }, [openEdit]);
 
   const handleSendSetupEmail = useCallback(async (email?: string) => {
     if (!storeCode || !permissions?.passwordModes.email) return;
@@ -405,6 +425,7 @@ export function StorePersonDetail({
           total: posData.assignablePermissions.length,
         })
       : t("peopleDetail:more.posSubtitleFallback", { store: storeTitle }),
+    sendNotice: t("peopleDetail:more.sendNoticeSubtitle"),
     copyPermissions: t("peopleDetail:more.copySubtitle"),
     loginRecords: "",
   };
@@ -464,6 +485,15 @@ export function StorePersonDetail({
             onSubmit={(email) => void handleSendSetupEmail(email)}
             errorMessage={passwordError}
           />
+          {noticeVisible && permissions.canSendNotice ? (
+            <StaffNoticeSendSheet
+              userGuid={userGuid}
+              staffName={personName}
+              loginName={person.username}
+              onDismiss={() => setNoticeVisible(false)}
+              onEditEmail={permissions.canEdit ? handleNoticeEditEmail : undefined}
+            />
+          ) : null}
           <StaffBarcodeDialog
             actorGuid={actorGuid}
             storeCode={storeCode}
@@ -512,6 +542,15 @@ export function StorePersonDetail({
           onStatus: setStatusIntent,
         }}
       />
+
+      {shouldOfferActivationCard({
+        canSendNotice: permissions.canSendNotice,
+        active: person.active,
+        loginEnabled: profile.loginEnabled,
+        lastLoginTime: profile.lastLoginTime,
+      }) ? (
+        <StaffNoticeActivationCard onPress={() => setNoticeVisible(true)} />
+      ) : null}
 
       <SectionTitle title={t("peopleDetail:sections.access")} />
       <InfoCard>

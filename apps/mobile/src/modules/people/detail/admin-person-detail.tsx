@@ -17,6 +17,7 @@ import { localizeAccessRoleName } from "@/modules/users/access-permission-presen
 import { StaffPasswordSetupDialog } from "@/modules/users/staff-password-setup-dialog";
 import { StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { usePrinterStore } from "@/modules/printer/state";
+import { StaffNoticeSendSheet } from "@/modules/staff-notices/send-sheet";
 import type { StoreUserListItem } from "@/modules/users/types";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -83,6 +84,7 @@ export function AdminPersonDetail({
   const queryClient = useQueryClient();
   const { t, language } = useAppTranslation(["userManagement", "peopleDetail", "common"]);
   const { actorKey, access, user: currentUser, isAuthenticated } = useIdentitySession();
+  const sessionKind = useAuthStore((state) => state.sessionKind);
   const printer = usePrinterStore((state) => state.savedPrinter);
   const printerStatus = usePrinterStore((state) => state.status);
 
@@ -110,6 +112,7 @@ export function AdminPersonDetail({
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [barcodeVisible, setBarcodeVisible] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(false);
   const [statusIntent, setStatusIntent] = useState<StatusIntent | null>(null);
   const [statusBusy, setStatusBusy] = useState(false);
   const loginMutation = useSetIdentityUserLoginEnabled(actorKey);
@@ -138,6 +141,7 @@ export function AdminPersonDetail({
       scope: {
         authenticated: isAuthenticated,
         isDeviceMode: env.isDeviceMode,
+        accountSession: sessionKind === "account",
         // 管理员版走全局接口：范围由全局码与受保护目标规则裁决，不再按「当前选中的分店」限制。
         storeManageable: true,
         barcodeStoreAllowed: Boolean(barcodeStoreCode)
@@ -147,7 +151,7 @@ export function AdminPersonDetail({
         hasStoreContext: Boolean(emailStoreCode),
       },
     });
-  }, [access, actorKey, barcodeStoreCode, currentUser?.roleNames, emailStoreCode, env.isDeviceMode, env.manageableStores, env.posEnabledStores, isAuthenticated, person]);
+  }, [access, actorKey, barcodeStoreCode, currentUser?.roleNames, emailStoreCode, env.isDeviceMode, env.manageableStores, env.posEnabledStores, isAuthenticated, person, sessionKind]);
   const layout = useMemo(() => (permissions && person ? buildDetailLayout(permissions, person.active) : null), [permissions, person]);
   // 「允许登录」行的形态：复用上面的 canEdit / isSelf，不另起权限判断。
   const loginToggle = useMemo(
@@ -225,6 +229,7 @@ export function AdminPersonDetail({
   const handleMoreSelect = useCallback((key: MoreItemKey) => {
     setMoreVisible(false);
     if (key === "barcode") setBarcodeVisible(true);
+    else if (key === "sendNotice") setNoticeVisible(true);
     else if (key === "access") openAccess("stores");
     else if (key === "pos") openPos();
     else if (key === "copyPermissions") openAccess("permissions", true);
@@ -425,6 +430,7 @@ export function AdminPersonDetail({
     : t("peopleDetail:more.barcodeNoPrinter");
   const moreSubtitles: Record<MoreItemKey, string> = {
     barcode: printerSubtitle,
+    sendNotice: t("peopleDetail:more.sendNoticeSubtitle"),
     access: t("peopleDetail:more.accessSubtitle"),
     pos: t("peopleDetail:more.posSubtitleAdmin"),
     copyPermissions: t("peopleDetail:more.copySubtitle"),
@@ -531,6 +537,18 @@ export function AdminPersonDetail({
             onSubmitDirectPassword={(password) => void handleDirectPassword(password)}
             errorMessage={passwordError}
           />
+          {noticeVisible && permissions.canSendNotice ? (
+            <StaffNoticeSendSheet
+              userGuid={userGuid}
+              staffName={name.primary}
+              loginName={person.username}
+              onDismiss={() => setNoticeVisible(false)}
+              onEditEmail={permissions.canEdit ? () => {
+                setNoticeVisible(false);
+                openEdit();
+              } : undefined}
+            />
+          ) : null}
           <StaffBarcodeDialog
             actorGuid={actorKey}
             storeCode={barcodeStoreCode}

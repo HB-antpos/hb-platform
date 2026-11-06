@@ -18,6 +18,7 @@ import {
 import { PersonListRow } from "@/modules/people/person-list-row";
 import { buildStaffPersonItem } from "@/modules/people/person-list-item";
 import { resolvePersonName } from "@/modules/people/person-name";
+import { STAFF_NOTICE_MAX_RECIPIENTS, encodeUserGuidsParam } from "@/modules/staff-notices/logic";
 import { useStoreUsers, type StoreUserListItem } from "@/modules/users";
 import { StaffBarcodeBatchDialog, StaffBarcodeDialog } from "@/modules/users/staff-barcode/StaffBarcodeDialogs";
 import { canManageStaffBarcode } from "@/modules/users/staff-barcode/eligibility";
@@ -55,6 +56,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
   const access = useAuthStore((state) => state.access);
   const currentUser = useAuthStore((state) => state.user);
   const authenticated = useAuthStore((state) => state.isAuthenticated);
+  const sessionKind = useAuthStore((state) => state.sessionKind);
   const actorGuid = currentUser?.userGUID || currentUser?.userGuid || "";
   const {
     stores,
@@ -269,6 +271,31 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
   );
   const canBatchPrint =
     !isDeviceMode && canEditUsers && managedStoreCode && isStoreManageable(managedStoreCode, manageableStores);
+  // 批量发通知：发放密码等于重置密码，沿用重置权限；和批量打印一样只在明确的可管理分店下开放。
+  // 只在真实账号会话下开放：设备模式没有账号身份，iOS 审核走本地模拟接口（没有这组接口）。
+  const canViewNoticeRecords = sessionKind === "account" && !isDeviceMode && canResetPasswords;
+  const canBatchNotice = Boolean(
+    canViewNoticeRecords && managedStoreCode && isStoreManageable(managedStoreCode, manageableStores)
+  );
+  const canNoticeUser = useCallback(
+    (user: StoreUserListItem) => canBatchNotice && user.userGUID !== actorGuid && user.status === 1,
+    [actorGuid, canBatchNotice]
+  );
+  const canSelectUser = useCallback(
+    (user: StoreUserListItem) => canManageUserBarcode(user) || canNoticeUser(user),
+    [canManageUserBarcode, canNoticeUser]
+  );
+  const noticeUsers = useMemo(
+    () => users.filter((user) => selectedUserGuids.has(user.userGUID) && canNoticeUser(user)),
+    [canNoticeUser, selectedUserGuids, users]
+  );
+  // 「全选」只作用于当前筛选结果：先点「待首次登录」再全选，就是账号开通通知的主要发送对象。
+  const selectableVisibleGuids = useMemo(
+    () => filteredUsers.filter(canSelectUser).map((user) => user.userGUID),
+    [canSelectUser, filteredUsers]
+  );
+  const allVisibleSelected =
+    selectableVisibleGuids.length > 0 && selectableVisibleGuids.every((guid) => selectedUserGuids.has(guid));
 
   const subtitle = useMemo(() => {
     const kind = resolveStoreListSubtitleKind({
@@ -292,6 +319,32 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
       return next;
     });
   }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedUserGuids((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) selectableVisibleGuids.forEach((guid) => next.delete(guid));
+      else selectableVisibleGuids.forEach((guid) => next.add(guid));
+      return next;
+    });
+  }, [allVisibleSelected, selectableVisibleGuids]);
+
+  const exitBatchSelection = useCallback(() => {
+    setBatchSelecting(false);
+    setSelectedUserGuids(new Set());
+  }, []);
+
+  const openNoticeReview = useCallback(() => {
+    if (noticeUsers.length > STAFF_NOTICE_MAX_RECIPIENTS) {
+      setSnackbarMessage(tp("batch.noticeLimit", { count: STAFF_NOTICE_MAX_RECIPIENTS }));
+      return;
+    }
+    router.push({
+      pathname: "/users/notices/send",
+      params: { userGuids: encodeUserGuidsParam(noticeUsers.map((user) => user.userGUID)) },
+    } as unknown as Parameters<typeof router.push>[0]);
+    exitBatchSelection();
+  }, [exitBatchSelection, noticeUsers, router, tp]);
 
   const renderRow = useCallback(
     ({ item: row }: { item: StaffListRow }) => {
@@ -319,6 +372,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
         typeLabel: isSelf ? roleSummary : employmentType,
       });
       const canUseBarcode = !isSelf && canManageUserBarcode(user);
+      const canSelect = !isSelf && canSelectUser(user);
       const selectedForBatch = selectedUserGuids.has(user.userGUID);
 
       return (
@@ -326,9 +380,9 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
           item={person}
           position={row.position}
           testID="compact-staff-row"
-          onPress={isSelf ? undefined : () => (batchSelecting && canUseBarcode ? toggleSelection(user.userGUID) : openStaffDetail(user))}
+          onPress={isSelf ? undefined : () => (batchSelecting && canSelect ? toggleSelection(user.userGUID) : openStaffDetail(user))}
           leading={
-            batchSelecting && canUseBarcode ? (
+            batchSelecting && canSelect ? (
               <IconButton
                 icon={selectedForBatch ? "checkbox-marked" : "checkbox-blank-outline"}
                 size={22}
@@ -363,6 +417,7 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
     [
       batchSelecting,
       canManageUserBarcode,
+      canSelectUser,
       language,
       managedStoreCode,
       openStaffDetail,
@@ -403,17 +458,28 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
       subtitle={subtitle}
       chrome={chrome}
       right={
-        canBatchPrint ? (
-          <HeaderIconButton
-            icon={batchSelecting ? "close" : "printer-outline"}
-            label={batchSelecting ? t("staffBarcode.batch.cancelSelection") : t("staffBarcode.batch.entry")}
-            selected={batchSelecting}
-            onPress={() => {
-              setBatchSelecting((current) => !current);
-              setSelectedUserGuids(new Set());
-            }}
-          />
-        ) : null
+        <>
+          {canViewNoticeRecords && !batchSelecting ? (
+            <HeaderIconButton
+              icon="history"
+              label={tp("batch.noticeRecords")}
+              onPress={() => router.push("/users/notices" as unknown as Parameters<typeof router.push>[0])}
+            />
+          ) : null}
+          {canBatchPrint || canBatchNotice ? (
+            <HeaderIconButton
+              icon={batchSelecting ? "close" : canBatchNotice ? "checkbox-multiple-marked-outline" : "printer-outline"}
+              label={batchSelecting
+                ? t("staffBarcode.batch.cancelSelection")
+                : canBatchNotice ? tp("batch.entry") : t("staffBarcode.batch.entry")}
+              selected={batchSelecting}
+              onPress={() => {
+                setBatchSelecting((current) => !current);
+                setSelectedUserGuids(new Set());
+              }}
+            />
+          ) : null}
+        </>
       }
     >
       <View style={styles.filterArea}>
@@ -441,6 +507,13 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
           value={statusFilter}
           onChange={setStatusFilter}
         />
+        {batchSelecting && selectableVisibleGuids.length ? (
+          <Pressable accessibilityRole="button" onPress={toggleSelectAll} hitSlop={6} style={styles.selectAll}>
+            <Text variant="labelLarge" style={styles.selectAllText}>
+              {allVisibleSelected ? tp("batch.clearVisible") : tp("batch.selectVisible", { count: selectableVisibleGuids.length })}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <FlatList
@@ -496,20 +569,32 @@ export function StoreStaffList({ chrome }: { chrome: PeopleHubChrome }) {
 
       {batchSelecting ? (
         <View style={styles.bottomBar}>
-          <StickyActionBar summary={tp("batch.selected", { count: selectedUsers.length })}>
-            <Button
-              mode="outlined"
-              onPress={() => {
-                setBatchSelecting(false);
-                setSelectedUserGuids(new Set());
-              }}
-            >
-              {t("staffBarcode.batch.cancelSelection")}
-            </Button>
-            <Button mode="contained" onPress={() => setBatchVisible(true)} disabled={!selectedUsers.length}>
-              {t("staffBarcode.batch.confirm", { count: selectedUsers.length })}
-            </Button>
-          </StickyActionBar>
+          {canBatchNotice ? (
+            // 两个按钮加摘要放不进 StickyActionBar（按钮区会和摘要平分剩余宽度），这里让按钮按内容宽度、摘要占满余下空间。
+            <View style={styles.noticeBar}>
+              <View style={styles.noticeBarText}>
+                <Text style={styles.noticeBarTitle} numberOfLines={1}>{tp("batch.selected", { count: selectedUserGuids.size })}</Text>
+                <Text style={styles.noticeBarHint} numberOfLines={1}>{tp("batch.noticeHint")}</Text>
+              </View>
+              {canBatchPrint ? (
+                <Button mode="outlined" compact onPress={() => setBatchVisible(true)} disabled={!selectedUsers.length}>
+                  {tp("batch.print")}
+                </Button>
+              ) : null}
+              <Button mode="contained" compact onPress={openNoticeReview} disabled={!noticeUsers.length}>
+                {tp("batch.sendNotice")}
+              </Button>
+            </View>
+          ) : (
+            <StickyActionBar summary={tp("batch.selected", { count: selectedUsers.length })}>
+              <Button mode="outlined" onPress={exitBatchSelection}>
+                {t("staffBarcode.batch.cancelSelection")}
+              </Button>
+              <Button mode="contained" onPress={() => setBatchVisible(true)} disabled={!selectedUsers.length}>
+                {t("staffBarcode.batch.confirm", { count: selectedUsers.length })}
+              </Button>
+            </StickyActionBar>
+          )}
         </View>
       ) : canCreateUsers && selectedStoreCanCreate ? (
         // 只有「可管理的明确分店」才显示新增；全部已分配分店 / 仅查看的分店不显示（原来是点了才弹提示）。
@@ -579,6 +664,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 24,
   },
+  noticeBar: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.white,
+    borderTopColor: HB_COLORS.outlineMuted,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: HB_SPACING.xs,
+    paddingHorizontal: HB_SPACING.md,
+    paddingVertical: HB_SPACING.sm,
+  },
+  noticeBarHint: { color: HB_COLORS.textSecondary, fontSize: 12, marginTop: 1 },
+  noticeBarText: { flex: 1, minWidth: 0 },
+  noticeBarTitle: { color: HB_COLORS.textPrimary, fontSize: 12.5, fontWeight: "800" },
   onlyStaffNote: {
     alignItems: "flex-start",
     flexDirection: "row",
@@ -592,6 +690,8 @@ const styles = StyleSheet.create({
   },
   rowRight: { alignItems: "center", flexDirection: "row" },
   searchFlex: { flex: 1, minWidth: 0 },
+  selectAll: { alignSelf: "flex-start", paddingVertical: 2 },
+  selectAllText: { color: HB_COLORS.action },
   sectionHeader: { paddingBottom: 6, paddingTop: 10 },
   storeSearchRow: { alignItems: "center", flexDirection: "row", gap: 8 },
 });

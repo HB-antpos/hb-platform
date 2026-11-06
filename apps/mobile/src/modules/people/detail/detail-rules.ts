@@ -55,6 +55,8 @@ export interface DetailTargetFacts {
 export interface DetailScopeFacts {
   authenticated: boolean;
   isDeviceMode: boolean;
+  /** 是真实账号会话（不是设备会话、也不是走本地模拟接口的 iOS 审核会话）。 */
+  accountSession: boolean;
   /** 目标所在分店是否在操作者可管理分店内（管理员恒为 true；店长 = isPrimary 分店；设备模式 = 绑定分店）。 */
   storeManageable: boolean;
   /** 个人码专用：该分店既可管理又已启用 POS。 */
@@ -96,6 +98,11 @@ export interface DetailPermissions {
   canOpenProfile: boolean;
   /** 个人信息页可保存：在 canOpenProfile 之上再要求 EmployeeProfiles.EditManagedStore，否则页面只读、不显示保存按钮。 */
   canEditProfile: boolean;
+  /**
+   * 「发送通知」（给这个员工发模板邮件 / 短信）：发放密码等于重置密码，沿用重置密码权限。
+   * 这里只决定入口显示；能不能发由服务端预检逐人判断（店长只能发给本店店员）。
+   */
+  canSendNotice: boolean;
   access: UserAccessEligibility;
 }
 
@@ -164,6 +171,15 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
     && (variant === "store" ? scope.storeManageable : adminScopeOk);
   const canEditProfile = canOpenProfile && actor.hasPermission(PERMISSIONS.EmployeeProfiles.EditManagedStore);
 
+  // 设备模式没有账号身份，iOS 审核走本地模拟接口（没有这组接口），都用不了；本人和受保护目标后端也会拦，入口就不出现。
+  const canSendNotice = canResetPasswords
+    && scope.accountSession
+    && !scope.isDeviceMode
+    && !isSelf
+    && !isProtectedTarget
+    && target.active
+    && (variant === "store" ? scope.storeManageable : adminScopeOk);
+
   const canPrintBarcode = !isSelf && canManageStaffBarcode({
     authenticated: scope.authenticated,
     deviceOnly: scope.isDeviceMode,
@@ -195,6 +211,7 @@ export function resolveDetailPermissions(input: DetailPermissionInput): DetailPe
     canViewLoginRecords: variant === "admin" && actor.hasPermission(PERMISSIONS.Users.View),
     canOpenProfile,
     canEditProfile,
+    canSendNotice,
     access,
   };
 }
@@ -219,7 +236,7 @@ export interface QuickAction {
   danger?: boolean;
 }
 
-export type MoreItemKey = "barcode" | "access" | "pos" | "copyPermissions" | "loginRecords";
+export type MoreItemKey = "barcode" | "sendNotice" | "access" | "pos" | "copyPermissions" | "loginRecords";
 
 export interface DetailLayout {
   /** 店长版头部卡片里的快捷操作（按顺序，没权限的不出现）。 */
@@ -252,6 +269,7 @@ export function buildDetailLayout(permissions: DetailPermissions, active: boolea
 
   const moreItems: MoreItemKey[] = [];
   if (permissions.canPrintBarcode) moreItems.push("barcode");
+  if (permissions.canSendNotice) moreItems.push("sendNotice");
   if (permissions.canOpenAccess) moreItems.push("access");
   if (permissions.canOpenPos) moreItems.push("pos");
   if (permissions.canCopyPermissions) moreItems.push("copyPermissions");

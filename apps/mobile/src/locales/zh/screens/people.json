@@ -50,7 +50,15 @@
     "filteredDescription": "换一个状态筛选试试。"
   },
   "batch": {
-    "selected": "已选 {{count}} 人"
+    "selected": "已选 {{count}} 人",
+    "entry": "批量选择",
+    "selectVisible": "全选当前 {{count}} 人",
+    "clearVisible": "取消全选",
+    "noticeHint": "其余在下一步核对",
+    "print": "个人码",
+    "sendNotice": "发送通知",
+    "noticeRecords": "发送记录",
+    "noticeLimit": "一次最多发送给 {{count}} 人"
   },
   "storeSheet": {
     "title": "切换分店",

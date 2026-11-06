@@ -220,7 +220,6 @@ public sealed class SmsSenderTests : IDisposable
     [Theory]
     [InlineData("Username")]
     [InlineData("ApiKey")]
-    [InlineData("From")]
     [InlineData("LogHashKey")]
     public async Task 总闸打开但缺任何一项必填配置_仍然拒发(string missing)
     {
@@ -230,7 +229,6 @@ public sealed class SmsSenderTests : IDisposable
             {
                 case "Username": o.Username = ""; break;
                 case "ApiKey": o.ApiKey = " "; break;
-                case "From": o.From = ""; break;
                 case "LogHashKey": o.LogHashKey = ""; break;
             }
         });
@@ -240,6 +238,17 @@ public sealed class SmsSenderTests : IDisposable
         Assert.False(sender.IsAvailable);
         Assert.Equal(SmsErrorCodes.Disabled, result.ErrorCode);
         Assert.Empty(_gateway.Calls);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("HotBargain")]
+    [InlineData("+61412345678")]
+    public void 发件号码是可选的_不填或填字母发件名也能发(string from)
+    {
+        var sender = CreateSender(o => o.From = from);
+
+        Assert.True(sender.IsAvailable);
     }
 
     [Theory]
@@ -449,8 +458,41 @@ public sealed class ClickSendSmsGatewayTests
         using var sent = System.Text.Json.JsonDocument.Parse(request.Body);
         var message = Assert.Single(sent.RootElement.GetProperty("messages").EnumerateArray());
         Assert.Equal("+61412345678", message.GetProperty("to").GetString());
-        Assert.Equal("HotBargain", message.GetProperty("from").GetString());
+        // 配置里写的是字母发件名 HotBargain：不使用字母发件名，请求里不能带 from。
+        Assert.False(message.TryGetProperty("from", out _));
+        Assert.Equal("hb-platform", message.GetProperty("source").GetString());
         Assert.Equal("Hot Bargain: hello", message.GetProperty("body").GetString());
+    }
+
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData("HotBargain", null)]
+    [InlineData("0412345678", null)]
+    [InlineData("+61", null)]
+    [InlineData("+61 412 345 678", null)]
+    [InlineData("+61412345678", "+61412345678")]
+    [InlineData(" +61412345678 ", "+61412345678")]
+    public async Task 只有E164专用号码才作为from传给服务商_字母发件名一律不传(string configured, string? expectedFrom)
+    {
+        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, Accepted("SUCCESS")));
+        var options = Options();
+        options.From = configured;
+        var gateway = new ClickSendSmsGateway(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(options), NullLogger<ClickSendSmsGateway>.Instance);
+
+        var result = await gateway.SendAsync("+61412345678", "Hot Bargain: hello", CancellationToken.None);
+
+        Assert.True(result.Success);
+        using var sent = System.Text.Json.JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+        var message = Assert.Single(sent.RootElement.GetProperty("messages").EnumerateArray());
+        if (expectedFrom is null)
+        {
+            Assert.False(message.TryGetProperty("from", out _));
+        }
+        else
+        {
+            Assert.Equal(expectedFrom, message.GetProperty("from").GetString());
+        }
     }
 
     [Theory]

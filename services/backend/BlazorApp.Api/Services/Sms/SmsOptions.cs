@@ -18,8 +18,23 @@ public sealed class SmsOptions
     /// <summary>ClickSend API Key（在 ClickSend 后台 API Credentials 页生成，可随时重置）。</summary>
     public string ApiKey { get; set; } = string.Empty;
 
-    /// <summary>发件方：字母 sender ID（最长 11 位，澳洲需先在服务商处登记）或 E.164 号码。</summary>
+    /// <summary>
+    /// 发件号码，可选。只有填了 E.164 专用号码（如 +61412345678）才会作为 from 传给服务商；
+    /// 留空、或填了字母发件名（alpha tag）都不传 from——不使用字母发件名，由 ClickSend 按账号默认的号码发出。
+    /// 字母发件名没在 ClickSend 登记时，服务商会改用共享号并给账号发提醒邮件，所以干脆不传。
+    /// </summary>
     public string From { get; set; } = string.Empty;
+
+    /// <summary>实际传给服务商的 from：只有 E.164 专用号码才传，其余（含字母发件名）一律返回 null。</summary>
+    internal string? ResolveSenderNumber()
+    {
+        var value = (From ?? string.Empty).Trim();
+        return value.Length is >= 9 and <= 16
+            && value[0] == '+'
+            && value.Skip(1).All(char.IsAsciiDigit)
+            ? value
+            : null;
+    }
 
     /// <summary>
     /// 发送记录里手机号哈希用的 HMAC 密钥。澳洲手机号空间很小，不加密钥的哈希可被穷举还原，
@@ -42,7 +57,6 @@ public sealed class SmsOptions
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(Username)
         && !string.IsNullOrWhiteSpace(ApiKey)
-        && !string.IsNullOrWhiteSpace(From)
         && !string.IsNullOrWhiteSpace(LogHashKey);
 
     public bool IsAvailable => Enabled && IsConfigured;
