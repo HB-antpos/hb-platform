@@ -194,8 +194,8 @@ public sealed class SmsSenderTests : IDisposable
         return new SmsSender(CreateContext(_db), _gateway, Options.Create(options), NullLogger<SmsSender>.Instance);
     }
 
-    private static SmsRequest Request(string phone, string? body = null) =>
-        new(SmsPurposes.GuardianVerificationCode, phone, body ?? SmsMessages.VerificationCode("123456", 10), "42");
+    private static SmsRequest Request(string phone, string? body = null, string? senderId = null) =>
+        new(SmsPurposes.GuardianVerificationCode, phone, body ?? SmsMessages.VerificationCode("123456", 10), "42", senderId);
 
     private static string Hash(string e164)
     {
@@ -277,6 +277,8 @@ public sealed class SmsSenderTests : IDisposable
         var call = Assert.Single(_gateway.Calls);
         Assert.Equal("+61412345678", call.To);
         Assert.Equal(body, call.Body);
+        // 没指定发件名 = 默认发件名（SMS_FROM）。监护人验证码等系统短信一律走这条。
+        Assert.Equal("HotBargain", call.From);
 
         var row = await _db.Queryable<SmsSendLog>().SingleAsync();
         Assert.Equal(SmsSendStatuses.Sent, row.Status);
@@ -291,6 +293,40 @@ public sealed class SmsSenderTests : IDisposable
         var everything = string.Join('|', row.PhoneHash, row.PhoneMask, row.Purpose, row.RelatedKey, row.ProviderMessageId, row.ErrorCode);
         Assert.DoesNotContain("412345678", everything);
         Assert.DoesNotContain("654321", everything);
+    }
+
+    [Fact]
+    public async Task 指定白名单里的发件名_网关收到该发件名_忽略大小写并用配置里的规范写法()
+    {
+        var sender = CreateSender(o => o.Senders = "ANTPOS");
+
+        var result = await sender.SendAsync(Request("0412 345 678", senderId: "antpos"));
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal("ANTPOS", Assert.Single(_gateway.Calls).From);
+    }
+
+    [Fact]
+    public async Task 指定不在白名单的发件名_拒发_不调服务商也不写记录()
+    {
+        var sender = CreateSender(o => o.Senders = "ANTPOS");
+
+        var result = await sender.SendAsync(Request("0412 345 678", senderId: "SomeoneElse"));
+
+        Assert.False(result.Success);
+        Assert.Equal(SmsErrorCodes.SenderNotAllowed, result.ErrorCode);
+        Assert.Empty(_gateway.Calls);
+        Assert.Empty(await _db.Queryable<SmsSendLog>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 没配额外发件名时_只有默认发件名可选_指定ANTPOS也被拒()
+    {
+        var result = await CreateSender().SendAsync(Request("0412 345 678", senderId: "ANTPOS"));
+
+        Assert.False(result.Success);
+        Assert.Equal(SmsErrorCodes.SenderNotAllowed, result.ErrorCode);
+        Assert.Empty(_gateway.Calls);
     }
 
     [Fact]
@@ -393,14 +429,54 @@ public sealed class SmsSenderTests : IDisposable
 
     private sealed class FakeGateway : ISmsGateway
     {
-        public List<(string To, string Body)> Calls { get; } = new();
+        public List<(string To, string Body, string From)> Calls { get; } = new();
         public SmsGatewayResult? Next { get; set; }
 
-        public Task<SmsGatewayResult> SendAsync(string toE164, string body, CancellationToken cancellationToken)
+        public Task<SmsGatewayResult> SendAsync(string toE164, string body, string from, CancellationToken cancellationToken)
         {
-            Calls.Add((toE164, body));
+            Calls.Add((toE164, body, from));
             return Task.FromResult(Next ?? new SmsGatewayResult(true, $"SM-fake-{Calls.Count}", null));
         }
+    }
+}
+
+public sealed class SmsOptionsSenderTests
+{
+    [Fact]
+    public void 默认发件名永远排第一_额外发件名按逗号分号空格切分_去重并忽略格式不合法的项()
+    {
+        var options = new SmsOptions
+        {
+            From = "HotBargain",
+            Senders = "ANTPOS, hotbargain;Na!me  A +61412345678,, 1Start",
+        };
+
+        // 「hotbargain」与默认项重复（忽略大小写）；「Na!me」含符号、「A」太短、「1Start」数字开头，格式都不合法；E.164 号码合法。
+        Assert.Equal(new[] { "HotBargain", "ANTPOS", "+61412345678" }, options.GetSenderChoices());
+    }
+
+    [Theory]
+    [InlineData(null, "HotBargain")]
+    [InlineData("", "HotBargain")]
+    [InlineData("  ", "HotBargain")]
+    [InlineData("antpos", "ANTPOS")]
+    [InlineData(" ANTPOS ", "ANTPOS")]
+    [InlineData("Nope", null)]
+    public void 解析请求里的发件名_没指定用默认项_指定了必须命中白名单(string? requested, string? expected)
+    {
+        var options = new SmsOptions { From = "HotBargain", Senders = "ANTPOS" };
+
+        Assert.Equal(expected, options.ResolveSender(requested));
+    }
+
+    [Fact]
+    public void 没配默认发件名时_没有任何可选项_任何指定都解析失败()
+    {
+        var options = new SmsOptions { From = "", Senders = "ANTPOS" };
+
+        Assert.Equal(new[] { "ANTPOS" }, options.GetSenderChoices());
+        // 没有默认项时，「没指定」会落到第一个额外项；但 IsAvailable 要求 From 非空，此状态下发送本来就整体不可用。
+        Assert.False(options.IsConfigured);
     }
 }
 
@@ -436,7 +512,7 @@ public sealed class ClickSendSmsGatewayTests
     {
         var (gateway, handler) = Create(_ => Json(HttpStatusCode.OK, Accepted("SUCCESS", "msg-999")));
 
-        var result = await gateway.SendAsync("+61412345678", "Hot Bargain: hello", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "Hot Bargain: hello", "HotBargain", CancellationToken.None);
 
         Assert.True(result.Success);
         Assert.Equal("msg-999", result.ProviderMessageId);
@@ -456,19 +532,17 @@ public sealed class ClickSendSmsGatewayTests
 
     [Theory]
     [InlineData("HotBargain")]
+    [InlineData("ANTPOS")]
     [InlineData("+61412345678")]
-    public async Task 配置了发件方就原样作为from传给服务商_字母发件名和专用号码都一样(string configured)
+    public async Task 调用方给的发件名原样作为from传给服务商_字母发件名和专用号码都一样(string from)
     {
-        var handler = new StubHandler(_ => Json(HttpStatusCode.OK, Accepted("SUCCESS")));
-        var options = Options();
-        options.From = configured;
-        var gateway = new ClickSendSmsGateway(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(options), NullLogger<ClickSendSmsGateway>.Instance);
+        var (gateway, handler) = Create(_ => Json(HttpStatusCode.OK, Accepted("SUCCESS")));
 
-        await gateway.SendAsync("+61412345678", "Hot Bargain: hello", CancellationToken.None);
+        await gateway.SendAsync("+61412345678", "Hot Bargain: hello", from, CancellationToken.None);
 
         using var sent = System.Text.Json.JsonDocument.Parse(Assert.Single(handler.Requests).Body);
         var message = Assert.Single(sent.RootElement.GetProperty("messages").EnumerateArray());
-        Assert.Equal(configured, message.GetProperty("from").GetString());
+        Assert.Equal(from, message.GetProperty("from").GetString());
     }
 
     [Fact]
@@ -476,7 +550,7 @@ public sealed class ClickSendSmsGatewayTests
     {
         var (gateway, _) = Create(_ => Json(HttpStatusCode.BadRequest, """{"http_code":400,"response_code":"BAD_REQUEST","response_msg":"The request is invalid."}"""));
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal("CLICKSEND_BAD_REQUEST", result.ErrorCode);
@@ -490,7 +564,7 @@ public sealed class ClickSendSmsGatewayTests
     {
         var (gateway, _) = Create(_ => Json(HttpStatusCode.OK, Accepted(status)));
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Null(result.ProviderMessageId);
@@ -503,7 +577,7 @@ public sealed class ClickSendSmsGatewayTests
         var (gateway, _) = Create(_ => Json(HttpStatusCode.Unauthorized,
             """{"http_code":401,"response_code":"UNAUTHORIZED","response_msg":"Invalid credentials for +61412345678."}"""));
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal("CLICKSEND_UNAUTHORIZED", result.ErrorCode);
@@ -516,7 +590,7 @@ public sealed class ClickSendSmsGatewayTests
         var (gateway, _) = Create(_ => Json(HttpStatusCode.OK,
             Accepted("bad number +61412345678 and a very long free text that must never be stored verbatim")));
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ErrorCode);
@@ -530,7 +604,7 @@ public sealed class ClickSendSmsGatewayTests
         var (gateway, _) = Create(_ => Json(HttpStatusCode.OK,
             """{"http_code":200,"response_code":"SUCCESS","data":{"messages":[]}}"""));
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal("CLICKSEND_NO_MESSAGE", result.ErrorCode);
@@ -541,7 +615,7 @@ public sealed class ClickSendSmsGatewayTests
     {
         var (gateway, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.BadGateway) { Content = new StringContent("<html>bad gateway</html>") });
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal("HTTP_502", result.ErrorCode);
@@ -552,7 +626,7 @@ public sealed class ClickSendSmsGatewayTests
     {
         var (gateway, _) = Create(_ => throw new HttpRequestException("connection refused to https://sms.example.test/ ops@example.test"));
 
-        var result = await gateway.SendAsync("+61412345678", "body", CancellationToken.None);
+        var result = await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
 
         Assert.False(result.Success);
         Assert.Equal("GATEWAY_EXCEPTION", result.ErrorCode);

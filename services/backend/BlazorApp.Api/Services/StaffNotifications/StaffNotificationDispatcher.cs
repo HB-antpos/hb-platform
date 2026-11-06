@@ -307,7 +307,8 @@ internal sealed class StaffNotificationDispatcher
             template.SmsBody,
             new StaffNotificationRenderContext(displayName, user.Email, recipient.StoreName ?? string.Empty, links.AppLink, links.IosUrl, links.AndroidUrl)
         );
-        var result = await _smsSender.SendAsync(new SmsRequest(SmsPurposes.StaffNotification, e164, body, batch.Id), cancellationToken);
+        // 发件名取批次上记录的那个（发送时选的，重试沿用）；历史批次为空 = 默认发件名。
+        var result = await _smsSender.SendAsync(new SmsRequest(SmsPurposes.StaffNotification, e164, body, batch.Id, batch.SmsSenderId), cancellationToken);
         return result.Success
             ? new ChannelOutcome(true, string.Empty, string.Empty, SmsMessages.SegmentCount(body))
             : new ChannelOutcome(false, result.ErrorCode ?? SmsErrorCodes.SendFailed, result.Message);

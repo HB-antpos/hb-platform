@@ -66,9 +66,21 @@ public sealed class StaffNotificationPreflightRecipientDto
     public int SmsSegments { get; set; }
 }
 
+/// <summary>短信可选发件名：Id 就是 ClickSend 里登记的发件名（如 HotBargain / ANTPOS）。</summary>
+public sealed class StaffNotificationSmsSenderDto
+{
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>默认项（服务端配置的 SMS_FROM），永远排第一，前端默认选中它。</summary>
+    public bool IsDefault { get; set; }
+}
+
 public sealed class StaffNotificationPreflightDto
 {
     public bool SmsAvailable { get; set; }
+
+    /// <summary>发送时可选的短信发件名；短信不可用时为空。恰有一项 IsDefault。</summary>
+    public List<StaffNotificationSmsSenderDto> SmsSenders { get; set; } = new();
     public int SmsUsedLast24h { get; set; }
     public int SmsDailyLimit { get; set; }
     public decimal SmsUnitCostAud { get; set; }
@@ -103,6 +115,9 @@ public sealed class StaffNotificationSendRequestDto
     public List<string> UserGuids { get; set; } = new();
     public bool SendEmail { get; set; } = true;
     public bool SendSms { get; set; }
+
+    /// <summary>本次短信用的发件名；不传 / 留空 = 默认发件名。必须在预检返回的 SmsSenders 里，否则发送被拒。</summary>
+    public string? SmsSenderId { get; set; }
 
     /// <summary>操作人已确认：选中的人里有登录过的，发放密码会让他们的旧密码失效、所有设备被踢下线。</summary>
     public bool ConfirmReissue { get; set; }
@@ -143,6 +158,9 @@ public class StaffNotificationBatchDto
     public int SmsRequested { get; set; }
     public int SmsSent { get; set; }
     public int SmsFailed { get; set; }
+
+    /// <summary>这批短信用的发件名；没发短信的批次与改动前的历史批次为空。</summary>
+    public string? SmsSenderId { get; set; }
 
     /// <summary>实际发出的短信条数合计。</summary>
     public int SmsSegments { get; set; }

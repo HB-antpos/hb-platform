@@ -29,6 +29,7 @@ import {
   insertTextAtSelection,
   isSmsQuotaExceeded,
   reconcileSelection,
+  resolveSmsSenderId,
   startBatchPolling,
   summarizeSelection,
   validateTemplateDraft,
@@ -488,6 +489,23 @@ const flush = () => new Promise<void>((resolve) => setImmediate(resolve))
   await flush()
   assert.deepEqual(finished, ['completed'], '中间成功过一次，失败计数清零，不会提前放弃')
   assert.equal(gaveUp.length, 0)
+}
+
+// ===== 短信发件名：选择仍有效就沿用，失效回落默认项，空名单不传 =====
+{
+  const senders = [{ id: 'HotBargain', isDefault: true }, { id: 'ANTPOS', isDefault: false }]
+  assert.equal(resolveSmsSenderId(senders, undefined), 'HotBargain', '没选过用默认项')
+  assert.equal(resolveSmsSenderId(senders, 'ANTPOS'), 'ANTPOS', '选择仍在名单里就沿用')
+  assert.equal(resolveSmsSenderId(senders, 'HotBargain'), 'HotBargain')
+  assert.equal(resolveSmsSenderId(senders, 'Removed'), 'HotBargain', '重新预检后选的项已不在名单里：回落默认项，不能把失效值传给后端')
+  assert.equal(resolveSmsSenderId(senders, ''), 'HotBargain', '空串不是有效选择')
+  assert.equal(resolveSmsSenderId(senders.slice(0, 1), 'ANTPOS'), 'HotBargain', '名单缩成只剩默认项')
+  // 默认项不在第一位也按 isDefault 找；整个名单都没标默认项时退而取第一项。
+  assert.equal(resolveSmsSenderId([{ id: 'ANTPOS', isDefault: false }, { id: 'HotBargain', isDefault: true }], undefined), 'HotBargain')
+  assert.equal(resolveSmsSenderId([{ id: 'A', isDefault: false }, { id: 'B', isDefault: false }], 'gone'), 'A')
+  // 短信不可用 / 名单为空：没有可传的发件名。
+  assert.equal(resolveSmsSenderId([], undefined), undefined)
+  assert.equal(resolveSmsSenderId([], 'ANTPOS'), undefined)
 }
 
 console.log('staffNotificationLogic tests passed')

@@ -61,6 +61,9 @@ services:
       - Sms__Username=${SMS_CLICKSEND_USERNAME:-}
       - Sms__ApiKey=${SMS_CLICKSEND_API_KEY:-}
       - Sms__From=${SMS_FROM:-}
+      # SMS_SENDERS：员工通知发送时可额外选择的发件名，逗号分隔（如 ANTPOS）；SMS_FROM 永远是默认项。
+      # 每个字母发件名都要各自在 ClickSend 登记并通过 ACMA 验证；空 = 只有 SMS_FROM 一个选项。
+      - Sms__Senders=${SMS_SENDERS:-}
       - Sms__LogHashKey=${SMS_LOG_HASH_KEY:-}
       - Sms__PerPhoneHourLimit=${SMS_PER_PHONE_HOUR_LIMIT:-5}
       - Sms__PerPhoneDayLimit=${SMS_PER_PHONE_DAY_LIMIT:-10}

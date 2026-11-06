@@ -29,7 +29,10 @@
       "sms_unavailable": "短信服务未开启",
       "no_phone": "没有手机号",
       "not_mobile": "不是手机号"
-    }
+    },
+    "smsSender": "短信发件名",
+    "smsSenderHint": "收件人手机上显示的名称",
+    "smsSenderDefault": "默认"
   },
   "ready": {
     "password": "可以发送。随机密码发到员工邮箱。",
@@ -157,7 +160,8 @@
     "createdBy": "操作人 {{name}}",
     "emptyTitle": "还没有发送记录",
     "emptyDescription": "给员工发过通知后会显示在这里。",
-    "loadFailed": "发送记录加载失败"
+    "loadFailed": "发送记录加载失败",
+    "sender": "发件名 {{name}}"
   },
   "time": {
     "today": "今天",

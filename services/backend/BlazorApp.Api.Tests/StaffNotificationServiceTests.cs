@@ -152,6 +152,23 @@ public sealed class StaffNotificationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task 预检_返回可选发件名_默认发件名排第一_短信服务没开时没有选项()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+
+        var on = await CreateService().PreflightAsync(Preflight(mia.UserGUID));
+        Assert.Collection(
+            on.Data!.SmsSenders,
+            first => { Assert.Equal("HotBargain", first.Id); Assert.True(first.IsDefault); },
+            second => { Assert.Equal("ANTPOS", second.Id); Assert.False(second.IsDefault); }
+        );
+
+        _sms.Available = false;
+        var off = await CreateService().PreflightAsync(Preflight(mia.UserGUID));
+        Assert.Empty(off.Data!.SmsSenders);
+    }
+
+    [Fact]
     public async Task 预检_自建模板只发短信_没有手机号的人没有任何可发渠道_被拦下()
     {
         var withPhone = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
@@ -498,6 +515,106 @@ public sealed class StaffNotificationServiceTests : IDisposable
         Assert.Single(_email.Rendered); // 没有再发第二封邮件
         Assert.Equal(afterFirstRun, await PasswordHashOfAsync(mia.UserGUID)); // 密码没有被重新生成
         Assert.Equal("all_sent", (await service.GetBatchAsync(sent.Data.BatchId)).Data!.Result);
+    }
+
+    [Fact]
+    public async Task 发送_不指定发件名_用默认发件名_批次记录它_后台发给服务商时带上它()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+        var service = CreateService();
+
+        var sent = await service.SendAsync(SendRequest(mia.UserGUID), "admin");
+        Assert.True(sent.Success, sent.Message);
+        Assert.Equal("HotBargain", (await _db.Queryable<StaffNotificationBatch>().SingleAsync()).SmsSenderId);
+
+        await RunDispatcherAsync();
+
+        Assert.Equal("HotBargain", Assert.Single(_sms.Sent).SenderId);
+        Assert.Equal("HotBargain", (await service.GetBatchAsync(sent.Data!.BatchId)).Data!.SmsSenderId);
+    }
+
+    [Fact]
+    public async Task 发送_指定ANTPOS_批次记录它_后台发给服务商时用ANTPOS_批次列表也带出来()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+        var service = CreateService();
+        var request = SendRequest(mia.UserGUID);
+        request.SmsSenderId = "antpos"; // 忽略大小写，落库用配置里的规范写法
+
+        var sent = await service.SendAsync(request, "admin");
+        Assert.True(sent.Success, sent.Message);
+        await RunDispatcherAsync();
+
+        Assert.Equal("ANTPOS", (await _db.Queryable<StaffNotificationBatch>().SingleAsync()).SmsSenderId);
+        Assert.Equal("ANTPOS", Assert.Single(_sms.Sent).SenderId);
+        var listed = (await service.ListBatchesAsync(new StaffNotificationBatchQueryDto())).Data!;
+        Assert.Equal("ANTPOS", Assert.Single(listed.Items).SmsSenderId);
+    }
+
+    [Fact]
+    public async Task 发送_指定不在白名单的发件名_整体拒绝_不建批次_不重置密码()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+        var oldHash = await PasswordHashOfAsync(mia.UserGUID);
+        var request = SendRequest(mia.UserGUID);
+        request.SmsSenderId = "SomeoneElse";
+
+        var result = await CreateService().SendAsync(request, "admin");
+
+        Assert.False(result.Success);
+        Assert.Equal("VALIDATION_ERROR", result.ErrorCode);
+        Assert.Empty(await _db.Queryable<StaffNotificationBatch>().ToListAsync());
+        Assert.Equal(oldHash, await PasswordHashOfAsync(mia.UserGUID));
+    }
+
+    [Fact]
+    public async Task 发送_只发邮件时_忽略发件名字段_批次不记录发件名()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+        var request = SendRequest(mia.UserGUID);
+        request.SendSms = false;
+        request.SmsSenderId = "ANTPOS";
+
+        var sent = await CreateService().SendAsync(request, "admin");
+
+        Assert.True(sent.Success, sent.Message);
+        Assert.Null((await _db.Queryable<StaffNotificationBatch>().SingleAsync()).SmsSenderId);
+        Assert.Null((await CreateService().GetBatchAsync(sent.Data!.BatchId)).Data!.SmsSenderId);
+    }
+
+    [Fact]
+    public async Task 短信服务没开时_指定的发件名被忽略_邮件照发_批次不记录发件名()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+        _sms.Available = false;
+        var request = SendRequest(mia.UserGUID);
+        request.SmsSenderId = "SomeoneElse";
+
+        var sent = await CreateService().SendAsync(request, "admin");
+
+        Assert.True(sent.Success, sent.Message);
+        Assert.Null((await _db.Queryable<StaffNotificationBatch>().SingleAsync()).SmsSenderId);
+    }
+
+    [Fact]
+    public async Task 重试_沿用批次当初选的发件名_不会悄悄换回默认发件名()
+    {
+        var mia = await SeedUserAsync("mia", "mia@example.com", phone: "0491 570 156");
+        _sms.Handler = _ => ApiResponse<bool>.Error("短信发送失败，请稍后重试", SmsErrorCodes.SendFailed);
+        var service = CreateService();
+        var request = SendRequest(mia.UserGUID);
+        request.SmsSenderId = "ANTPOS";
+        var sent = await service.SendAsync(request, "admin");
+        await RunDispatcherAsync();
+        Assert.Empty(_sms.Sent); // 第一次全部失败
+
+        _sms.Handler = null;
+        var retry = await service.RetryAsync(sent.Data!.BatchId, "admin");
+        Assert.True(retry.Success, retry.Message);
+        await RunDispatcherAsync();
+
+        Assert.Equal("ANTPOS", Assert.Single(_sms.Sent).SenderId);
+        Assert.Equal("ANTPOS", (await service.GetBatchAsync(sent.Data.BatchId)).Data!.SmsSenderId);
     }
 
     [Fact]
@@ -1070,7 +1187,7 @@ public sealed class StaffNotificationServiceTests : IDisposable
         var context2 = CreateContext(db2);
         var second = new StaffNotificationService(
             context2, _scope, new StaffNotificationTemplateService(context2), new FakeLinks(), _sms,
-            Options.Create(new SmsOptions { GlobalDayLimit = 300 }), _signal, NullLogger<StaffNotificationService>.Instance
+            SmsConfigured(), _signal, NullLogger<StaffNotificationService>.Instance
         );
 
         var results = await Task.WhenAll(
@@ -1267,13 +1384,17 @@ public sealed class StaffNotificationServiceTests : IDisposable
         return result.Data!;
     }
 
+    /// <summary>与生产一致：短信可用意味着配置了默认发件名；这里另外开放 ANTPOS 作为可选发件名。</summary>
+    private static IOptions<SmsOptions> SmsConfigured() =>
+        Options.Create(new SmsOptions { From = "HotBargain", Senders = "ANTPOS", GlobalDayLimit = 300 });
+
     private IStaffNotificationService CreateService() => new StaffNotificationService(
         _context,
         _scope,
         new StaffNotificationTemplateService(_context),
         new FakeLinks(),
         _sms,
-        Options.Create(new SmsOptions { GlobalDayLimit = 300 }),
+        SmsConfigured(),
         _signal,
         NullLogger<StaffNotificationService>.Instance
     );

@@ -4219,6 +4219,60 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 员工通知批次表加发件名列_依赖批次表_保留已有行_可重复执行_识别缺列和签名漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 批次表还没建（20261106.001 未执行）：Apply 与 Verify 都是 54462，不会顺手建表。
+        var applyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.ApplySql));
+        Assert.Equal(54462, applyNoTable.Number);
+        var verifyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql));
+        Assert.Equal(54462, verifyNoTable.Number);
+
+        // 加列之前就存在的「老批次」：迁移后必须原样保留，新列为 NULL（= 按默认发件名处理）。
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StaffNotificationBatch (Id, TemplateKey, TemplateName, CreatedBy, CreatedByUserGuid, SendEmail, SendSms, Status, TotalCount, CreatedAtUtc)
+            VALUES (N'b-old', N'account-activated', N'x', N'admin', N'u-1', 1, 1, N'completed', 1, SYSUTCDATETIME());
+            """);
+
+        // 列还没加：只读门禁报 54463。
+        var noColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql));
+        Assert.Equal(54463, noColumn.Number);
+
+        await ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationBatch WHERE Id = N'b-old' AND SmsSenderId IS NULL"));
+
+        // 加了列之后，原来的员工通知只读门禁仍然通过（它只校验自己列出的列，不拒绝多出来的列）。
+        await ExecuteNonQueryAsync(main, StaffNotificationSchema.VerifySql);
+
+        // 可重复执行：不报错、不重复加列、不丢数据；新列能写入发件名。
+        await ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.StaffNotificationBatch SET SmsSenderId = N'ANTPOS' WHERE Id = N'b-old';");
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StaffNotificationBatch WHERE SmsSenderId = N'ANTPOS'"));
+
+        // 列宽漂移 → 54463；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationBatch ALTER COLUMN SmsSenderId nvarchar(16) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql));
+        Assert.Equal(54463, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationBatch ALTER COLUMN SmsSenderId nvarchar(32) NULL;");
+        await ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql);
+
+        // 可空性漂移（历史批次没有发件名，列必须可空）→ 54463。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StaffNotificationBatch ALTER COLUMN SmsSenderId nvarchar(32) NOT NULL;");
+        var nullable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StaffNotificationSmsSenderSchema.VerifySql));
+        Assert.Equal(54463, nullable.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 员工通知三张表_新表_可重复执行_模板键唯一_识别列漂移缺表和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

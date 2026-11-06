@@ -11,7 +11,8 @@ public sealed record SmsGatewayResult(bool Success, string? ProviderMessageId, s
 /// <summary>短信服务商适配层。换服务商只需要新增一个实现并改 Program.cs 的注册。</summary>
 public interface ISmsGateway
 {
-    Task<SmsGatewayResult> SendAsync(string toE164, string body, CancellationToken cancellationToken);
+    /// <param name="from">发件方（字母发件名或 E.164 号码）。必须由调用方保证已通过白名单校验；服务商要求每条短信都带 from。</param>
+    Task<SmsGatewayResult> SendAsync(string toE164, string body, string from, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -35,14 +36,15 @@ internal sealed class ClickSendSmsGateway : ISmsGateway
         _logger = logger;
     }
 
-    public async Task<SmsGatewayResult> SendAsync(string toE164, string body, CancellationToken cancellationToken)
+    public async Task<SmsGatewayResult> SendAsync(string toE164, string body, string from, CancellationToken cancellationToken)
     {
         var url = $"{_options.ApiBaseUrl.TrimEnd('/')}/v3/sms/send";
+        // 请求里必须带 from（省略会被 ClickSend 以 HTTP 400 拒绝）；字母发件名与 E.164 号码都原样传。
         var payload = JsonSerializer.Serialize(new
         {
             messages = new[]
             {
-                new { source = "hb-platform", from = _options.From, to = toE164, body },
+                new { source = "hb-platform", from, to = toE164, body },
             },
         });
         using var request = new HttpRequestMessage(HttpMethod.Post, url)

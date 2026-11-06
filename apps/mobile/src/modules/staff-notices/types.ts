@@ -51,8 +51,16 @@ export interface StaffNoticePreflightRecipient {
   smsSegments: number;
 }
 
+/** 短信可选发件名（ClickSend 的 Alpha Tag）。默认项排第一，恰有一项 isDefault。 */
+export interface StaffNoticeSmsSender {
+  id: string;
+  isDefault: boolean;
+}
+
 export interface StaffNoticePreflight {
   smsAvailable: boolean;
+  /** 可选发件名；短信不可用时为空。旧后端没有这个字段，所以按可选处理。 */
+  smsSenders?: StaffNoticeSmsSender[];
   smsUsedLast24h: number;
   smsDailyLimit: number;
   smsUnitCostAud: number;
@@ -78,6 +86,8 @@ export interface StaffNoticePreview {
 }
 
 export interface StaffNoticeSendRequest extends StaffNoticePreflightRequest {
+  /** 本次短信用的发件名；不传 = 默认项。服务端会校验必须在白名单里。 */
+  smsSenderId?: string;
   confirmReissue: boolean;
 }
 
@@ -107,6 +117,8 @@ export interface StaffNoticeBatch {
   smsRequested: number;
   smsSent: number;
   smsFailed: number;
+  /** 这批短信用的发件名；没发短信的批次与改动前的历史批次为空。 */
+  smsSenderId?: string | null;
   canRetry: boolean;
 }
 

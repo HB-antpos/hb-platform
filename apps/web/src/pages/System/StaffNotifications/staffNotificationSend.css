@@ -45,6 +45,20 @@
   margin: 0;
 }
 
+/* 短信发件名：缩进 52px = 开关列 44px + 间距 8px，与上面渠道行的名称列对齐。 */
+.staff-notify-send-sender {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 2px 0 6px 52px;
+  font-size: 13px;
+}
+
+.staff-notify-send-sender .staff-notify-send-hint {
+  margin: 0;
+}
+
 .staff-notify-send-contact {
   display: block;
   overflow: hidden;

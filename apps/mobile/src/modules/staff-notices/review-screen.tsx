@@ -31,6 +31,7 @@ import {
   reconcileSelection,
   resolveDefaultSelection,
   resolveDefaultTemplate,
+  resolveSmsSenderId,
   summarizeSelection,
   templateSupportsSms,
   type StaffNoticeRecipientFilter,
@@ -64,6 +65,8 @@ export function StaffNoticeReviewScreen() {
 
   const [sendEmail, setSendEmail] = useState(true);
   const [sendSms, setSendSms] = useState(true);
+  // 用户选的短信发件名；undefined = 还没选，用预检给的默认项。
+  const [senderChoice, setSenderChoice] = useState<string | undefined>(undefined);
   const effectiveEmail = sendEmail || Boolean(template?.requiresEmail);
   const effectiveSms = sendSms && templateSupportsSms(template);
   const request = useMemo(
@@ -75,6 +78,8 @@ export function StaffNoticeReviewScreen() {
   const preflightQuery = useStaffNoticePreflight(request);
   const preflight = preflightQuery.data;
   const recipients = useMemo(() => preflight?.recipients ?? [], [preflight]);
+  // 本次实际发件名：选择已失效则回落默认项；没开短信 / 没有可选项时为空，发送时不传（服务端用默认发件名）。
+  const smsSenderId = effectiveSms ? resolveSmsSenderId(preflight?.smsSenders, senderChoice) : undefined;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectionReadyRef = useRef(false);
@@ -114,7 +119,7 @@ export function StaffNoticeReviewScreen() {
     if (!request) return;
     setSendError(null);
     try {
-      const result = await sendMutation.mutateAsync({ ...request, userGuids: [...selected], confirmReissue });
+      const result = await sendMutation.mutateAsync({ ...request, userGuids: [...selected], smsSenderId, confirmReissue });
       setConfirmVisible(false);
       setBatchId(result.batchId);
     } catch (error) {
@@ -179,8 +184,11 @@ export function StaffNoticeReviewScreen() {
               emailSubtitle={template.requiresEmail ? t("channels.emailRequired") : ""}
               smsText={preflight?.smsAvailable === false ? t("channels.smsSkip.sms_unavailable") : t("channels.smsBatchHint")}
               smsAvailable={preflight?.smsAvailable ?? true}
+              smsSenders={preflight?.smsSenders}
+              smsSenderId={smsSenderId}
               onChangeEmail={setSendEmail}
               onChangeSms={setSendSms}
+              onChangeSmsSender={setSenderChoice}
             />
           </>
         ) : !templatesQuery.isLoading ? (

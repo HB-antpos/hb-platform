@@ -7,6 +7,7 @@ import type {
   StaffNoticePreflightRecipient,
   StaffNoticeRecipientReason,
   StaffNoticeRecipientResult,
+  StaffNoticeSmsSender,
   StaffNoticeTemplate,
 } from "./types";
 
@@ -19,6 +20,20 @@ export const ACCOUNT_ACTIVATED_TEMPLATE_KEY = "account-activated";
 
 export function resolveDefaultTemplate(templates: readonly StaffNoticeTemplate[]): StaffNoticeTemplate | null {
   return templates.find((template) => template.key === ACCOUNT_ACTIVATED_TEMPLATE_KEY) ?? templates[0] ?? null;
+}
+
+/**
+ * 本次短信实际使用的发件名（与 Web 同一规则）：
+ * 用户选的仍在预检返回的名单里就用它；已不在（重新预检后白名单变了）回落默认项，没标默认项取第一项；
+ * 名单为空（短信不可用 / 旧后端）返回 undefined，发送时就不传，由服务端用默认发件名。
+ */
+export function resolveSmsSenderId(
+  senders: readonly StaffNoticeSmsSender[] | undefined,
+  chosenId: string | undefined,
+): string | undefined {
+  if (!senders || senders.length === 0) return undefined;
+  if (chosenId !== undefined && senders.some((sender) => sender.id === chosenId)) return chosenId;
+  return (senders.find((sender) => sender.isDefault) ?? senders[0]).id;
 }
 
 export function templateSupportsSms(template: StaffNoticeTemplate | null | undefined): boolean {

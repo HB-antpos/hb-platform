@@ -355,16 +355,24 @@ export default function LogsTab() {
       },
     ]
     return (
-      <MeasuredTable<StaffNotificationRecipientResult>
-        metricId="system.staff-notifications.batch-recipients"
-        rowKey="id"
-        size="small"
-        pagination={false}
-        columns={detailColumns}
-        dataSource={state.detail.recipients}
-        locale={{ emptyText: t('system.staffNotifications.logs.detailEmpty', '这一批没有逐人明细') }}
-        scroll={{ x: 760 }}
-      />
+      <>
+        {/* 这批短信用的发件名；没发短信的批次与改动前的历史批次为空，不显示。 */}
+        {state.detail.smsSenderId ? (
+          <Typography.Text type="secondary" className="staff-notify-detail-sender">
+            {t('system.staffNotifications.logs.smsSender', '短信发件名：{{name}}', { name: state.detail.smsSenderId })}
+          </Typography.Text>
+        ) : null}
+        <MeasuredTable<StaffNotificationRecipientResult>
+          metricId="system.staff-notifications.batch-recipients"
+          rowKey="id"
+          size="small"
+          pagination={false}
+          columns={detailColumns}
+          dataSource={state.detail.recipients}
+          locale={{ emptyText: t('system.staffNotifications.logs.detailEmpty', '这一批没有逐人明细') }}
+          scroll={{ x: 760 }}
+        />
+      </>
     )
   }
 

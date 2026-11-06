@@ -71,3 +71,15 @@ assert.match(review, /userGuids: \[\.\.\.selected\]/, "只发勾选的人");
 assert.match(hooks, /"preflight", request\][\s\S]*?gcTime: 0,\s*staleTime: 0/);
 assert.match(hooks, /poll && !isBatchFinished\(query\.state\.data\) \? STAFF_NOTICE_POLL_MS : false/);
 assert.match(hooks, /\["staffNotices", actorKey, "batches"\]/, "发送记录缓存按账号隔离");
+
+// 短信发件名：两处发送入口都要把本次选择带进请求（服务端按白名单校验，不传 = 默认发件名）；
+// 选择行只在「短信开着且可选项多于 1 个」时才出现，只有默认一项时界面保持不变。
+const ui = read("src/modules/staff-notices/ui.tsx");
+for (const [name, source] of [["单人发送面板", sendSheet], ["批量核对页", review]] as const) {
+  assert.match(source, /resolveSmsSenderId\(preflight\?\.smsSenders, senderChoice\)/, `${name}要用预检返回的名单解析发件名`);
+  assert.match(source, /smsSenderId/, `${name}要把发件名传给发送请求`);
+}
+assert.match(sendSheet, /mutateAsync\(\{ \.\.\.request, smsSenderId, confirmReissue: confirmed \}\)/);
+assert.match(review, /mutateAsync\(\{ \.\.\.request, userGuids: \[\.\.\.selected\], smsSenderId, confirmReissue \}\)/);
+assert.match(ui, /\(smsSenders\?\.length \?\? 0\) > 1/, "只有可选项多于 1 个才露出发件名选择");
+assert.match(records, /batch\.smsSenderId/, "发送记录要带出批次用的发件名");

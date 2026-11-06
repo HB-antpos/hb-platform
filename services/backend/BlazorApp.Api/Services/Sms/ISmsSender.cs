@@ -7,7 +7,11 @@ namespace BlazorApp.Api.Services.Sms;
 /// <param name="ToPhone">收件手机号，接受 0412 345 678 / +61 412 345 678 等写法，发送前统一成 E.164。</param>
 /// <param name="Body">短信正文，只有英文。</param>
 /// <param name="RelatedKey">关联的业务主键（如档案 Id），只放非个人信息，进发送记录便于排查。</param>
-public sealed record SmsRequest(string Purpose, string ToPhone, string Body, string? RelatedKey = null);
+/// <param name="SenderId">
+/// 指定发件名：必须在 <see cref="SmsOptions.GetSenderChoices"/> 的白名单里，否则被拒（SMS_SENDER_NOT_ALLOWED）；
+/// 不传 = 用默认发件名（<see cref="SmsOptions.From"/>）。监护人验证码等系统短信都不传。
+/// </param>
+public sealed record SmsRequest(string Purpose, string ToPhone, string Body, string? RelatedKey = null, string? SenderId = null);
 
 public static class SmsPurposes
 {
@@ -25,6 +29,7 @@ public static class SmsErrorCodes
     public const string PhoneRateLimited = "SMS_PHONE_RATE_LIMITED";
     public const string DailyBudgetExceeded = "SMS_DAILY_BUDGET_EXCEEDED";
     public const string SendFailed = "SMS_SEND_FAILED";
+    public const string SenderNotAllowed = "SMS_SENDER_NOT_ALLOWED";
 }
 
 /// <summary>

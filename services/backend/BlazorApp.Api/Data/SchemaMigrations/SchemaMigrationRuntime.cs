@@ -284,6 +284,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStaffNotificationAsync(CancellationToken cancellationToken);
 
+    Task ApplyStaffNotificationSmsSenderAsync(CancellationToken cancellationToken);
+
+    Task VerifyStaffNotificationSmsSenderAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1810,6 +1814,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StaffNotificationSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyStaffNotificationSmsSenderAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            StaffNotificationSmsSenderSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 加列后过精确签名（可空 nvarchar(32)），通过后协调器才登记账本。
+        await VerifyStaffNotificationSmsSenderAsync(cancellationToken);
+    }
+
+    public async Task VerifyStaffNotificationSmsSenderAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            StaffNotificationSmsSenderSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

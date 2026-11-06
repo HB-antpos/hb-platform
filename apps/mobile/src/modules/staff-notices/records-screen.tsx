@@ -153,6 +153,7 @@ function BatchCard({
     t("records.people", { count: batch.totalCount }),
     batch.emailRequested > 0 ? t("result.emailCount", { sent: batch.emailSent, total: batch.emailRequested }) : null,
     batch.smsRequested > 0 ? t("result.smsCount", { sent: batch.smsSent, total: batch.smsRequested }) : null,
+    batch.smsSenderId ? t("records.sender", { name: batch.smsSenderId }) : null,
   ].filter(Boolean);
 
   return (

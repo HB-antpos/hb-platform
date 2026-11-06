@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace BlazorApp.Api.Services.Sms;
 
 /// <summary>
@@ -27,6 +29,13 @@ public sealed class SmsOptions
     public string From { get; set; } = string.Empty;
 
     /// <summary>
+    /// 额外可选的发件名（逗号 / 分号 / 空格分隔，如 ANTPOS）。与 <see cref="From"/> 一起构成「发送时可选」的白名单，
+    /// <see cref="From"/> 永远是默认项。只接受字母发件名（3–11 位、字母开头、仅字母数字）或 E.164 号码，格式不对的项直接忽略。
+    /// 每个字母发件名都要各自在 ClickSend 登记并通过 ACMA 验证，否则发出的短信可能显示 Unverified 或被拦截。
+    /// </summary>
+    public string Senders { get; set; } = string.Empty;
+
+    /// <summary>
     /// 发送记录里手机号哈希用的 HMAC 密钥。澳洲手机号空间很小，不加密钥的哈希可被穷举还原，
     /// 所以记录表只存带密钥的哈希 + 打码号码，不存明文号码。
     /// </summary>
@@ -51,4 +60,39 @@ public sealed class SmsOptions
         && !string.IsNullOrWhiteSpace(LogHashKey);
 
     public bool IsAvailable => Enabled && IsConfigured;
+
+    // 字母发件名：3–11 位、字母开头、仅字母数字（ACMA / ClickSend 的规则，不允许空格与下划线）；或 E.164 号码。
+    private static readonly Regex SenderFormat = new(@"^(?:[A-Za-z][A-Za-z0-9]{2,10}|\+[1-9][0-9]{7,14})$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 发送时可选的发件名：默认项（<see cref="From"/>）在第一位，后面是 <see cref="Senders"/> 里格式合法且不重复的项。
+    /// 这是服务端白名单，前端传来的发件名必须命中其中一项，否则任何登录账号都能让系统冒用任意名字发短信。
+    /// </summary>
+    public IReadOnlyList<string> GetSenderChoices()
+    {
+        var choices = new List<string>();
+        if (!string.IsNullOrWhiteSpace(From)) choices.Add(From.Trim());
+
+        var extras = (Senders ?? string.Empty).Split(new[] { ',', ';', ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var item in extras)
+        {
+            if (!SenderFormat.IsMatch(item)) continue;
+            if (choices.Any(existing => string.Equals(existing, item, StringComparison.OrdinalIgnoreCase))) continue;
+            choices.Add(item);
+        }
+
+        return choices;
+    }
+
+    /// <summary>
+    /// 把请求里的发件名解析成真正要传给服务商的值：没指定 = 默认项；指定了就必须在白名单里（忽略大小写，返回配置里的规范写法）；
+    /// 不在白名单返回 null，调用方应拒绝发送。
+    /// </summary>
+    public string? ResolveSender(string? requested)
+    {
+        var choices = GetSenderChoices();
+        if (choices.Count == 0) return null;
+        if (string.IsNullOrWhiteSpace(requested)) return choices[0];
+        return choices.FirstOrDefault(item => string.Equals(item, requested.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
 }
