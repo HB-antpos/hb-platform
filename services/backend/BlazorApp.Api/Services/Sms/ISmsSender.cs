@@ -13,6 +13,8 @@ public static class SmsPurposes
 {
     public const string GuardianSigningLink = "GuardianSigningLink";
     public const string GuardianVerificationCode = "GuardianVerificationCode";
+    /// <summary>后台「员工通知」批量发送的短信（账号已开通等模板）。</summary>
+    public const string StaffNotification = "StaffNotification";
 }
 
 public static class SmsErrorCodes

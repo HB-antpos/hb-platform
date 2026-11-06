@@ -5,6 +5,8 @@ const PUBLIC_APP_PATHS = new Set([
   '/minor-employment/sign',
   '/support/hb-supplier-order',
   '/support/faq',
+  // 员工 App 下载短链：短信 / 邮件里的链接，免登录，按设备分流到 App Store / 最新 APK。
+  '/app',
 ])
 
 export function isPublicAppPath(pathname: string) {

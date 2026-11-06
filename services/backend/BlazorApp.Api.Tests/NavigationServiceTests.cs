@@ -311,6 +311,21 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_员工通知页签认ResetPassword_只有这个权限的后台账号也能看到账号与权限合并页()
+    {
+        // Dashboard.View 仅用于满足后台导航准入门槛；「员工通知」页签与「重置密码」同源，不新增权限码。
+        var resetPasswordOnly = CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", Permissions.Users.ResetPassword)
+        );
+
+        var systemMenu = Assert.Single(_service.BuildMenu(resetPasswordOnly), item => item.Path == "/system");
+        var accounts = Assert.Single(systemMenu.Children!, item => item.Path == "/system/accounts");
+
+        Assert.Contains(Permissions.Users.ResetPassword, accounts.AnyPermissions!);
+    }
+
+    [Fact]
     public void BuildMenu_EmergencyLoginKeysRequiresSystemManageSettings()
     {
         var authorized = CreateUser(

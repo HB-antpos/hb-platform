@@ -1,0 +1,19 @@
+{
+  "system": {
+    "staffNotifications": {
+      "channelStatus": {
+        "sent": "Sent",
+        "failed": "Failed",
+        "pending": "Sending",
+        "notSent": "Not sent",
+        "unfinished": "Unfinished"
+      },
+      "batchResult": {
+        "running": "Sending",
+        "allSent": "All sent",
+        "partialFailed": "Partly failed",
+        "allFailed": "All failed"
+      }
+    }
+  }
+}

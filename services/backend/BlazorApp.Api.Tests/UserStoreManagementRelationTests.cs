@@ -592,6 +592,31 @@ namespace BlazorApp.Api.Tests
             Assert.DoesNotContain(filtered.Data!.Items!, user => user.UserGUID == "scoped-user");
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task UserLists_LoginStateFilter_SplitsNeverLoggedInFromLoggedIn(bool optimized)
+        {
+            // 后台「员工通知」靠它找出刚开通、还没登录过的账号：never = 最近登录时间为空，logged = 登录过。
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            await _db.Updateable<User>()
+                .SetColumns(user => user.LastLoginAt == DateTime.UtcNow.AddDays(-2))
+                .Where(user => user.UserGUID == "scoped-user")
+                .ExecuteCommandAsync();
+            var service = CreateUserService();
+
+            var all = await GetUsersAsync(service, optimized, new UserQueryDto { Page = 1, PageSize = 100 });
+            var never = await GetUsersAsync(service, optimized, new UserQueryDto { Page = 1, PageSize = 100, LoginState = "never" });
+            var logged = await GetUsersAsync(service, optimized, new UserQueryDto { Page = 1, PageSize = 100, LoginState = "LOGGED" }); // 大小写不敏感
+            var ignored = await GetUsersAsync(service, optimized, new UserQueryDto { Page = 1, PageSize = 100, LoginState = "bogus" });
+
+            Assert.Equal("scoped-user", Assert.Single(logged.Data!.Items!).UserGUID);
+            Assert.DoesNotContain(never.Data!.Items!, user => user.UserGUID == "scoped-user");
+            Assert.NotEmpty(never.Data.Items!);
+            Assert.Equal(all.Data!.Total, never.Data.Total + logged.Data.Total); // 两个筛选正好把全部用户分成两半
+            Assert.Equal(all.Data.Total, ignored.Data!.Total); // 不认识的值当作不过滤
+        }
+
         [Fact]
         public async Task UserMutation_StaleStoreManagerClaimFailsClosedAfterRoleRemoval()
         {

@@ -14,6 +14,14 @@ export function toIsActiveQuery(filter: UserStatusFilter): boolean | undefined {
   return undefined
 }
 
+/** 工具栏「登录情况」下拉：全部 / 从未登录 / 已登录过。 */
+export type UserLoginStateFilter = 'all' | 'never' | 'logged'
+
+/** 登录情况下拉 → 后端 loginState 查询参数；「全部」不传参数。 */
+export function toLoginStateQuery(filter: UserLoginStateFilter): 'never' | 'logged' | undefined {
+  return filter === 'never' || filter === 'logged' ? filter : undefined
+}
+
 /** 超过该天数未登录的账号在列表中弱提示。 */
 export const STALE_LOGIN_DAYS = 30
 

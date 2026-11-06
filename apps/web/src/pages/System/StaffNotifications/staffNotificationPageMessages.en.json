@@ -1,0 +1,163 @@
+{
+  "system": {
+    "staffNotifications": {
+      "page": {
+        "title": "Staff notifications",
+        "subtitle": "Send staff emails and text messages from templates",
+        "tabTemplates": "Templates",
+        "tabLogs": "Send log",
+        "discardTitle": "Discard unsaved changes?",
+        "discardContent": "This template has unsaved changes. They will be lost if you switch tabs.",
+        "discardOk": "Discard changes",
+        "discardCancel": "Keep editing"
+      },
+      "templates": {
+        "adminOnly": "Only administrators can edit templates. You can view the current wording.",
+        "loadFailed": "Failed to load templates",
+        "retry": "Retry",
+        "empty": "No templates yet",
+        "newTemplate": "New template",
+        "newDraftName": "New template (unsaved)",
+        "cardSystem": "System",
+        "cardDisabled": "Disabled",
+        "cardEmail": "Email",
+        "cardSms": "SMS",
+        "cardMetaIssuesPassword": "Issues a random password",
+        "cardMetaGeneral": "General notice",
+        "cardUpdated": "Updated {{date}}",
+        "nameLabel": "Template name",
+        "namePlaceholder": "e.g. Store training notice",
+        "enabled": "Enabled",
+        "insertHint": "Click to insert",
+        "mailOnlySuffix": " (email only)",
+        "variable": {
+          "name": "Staff name",
+          "email": "Sign-in email",
+          "store": "Store",
+          "app_link": "App download link",
+          "login_box": "Email + random password box",
+          "download_buttons": "iPhone / Android buttons"
+        },
+        "insertOnlyEmailBody": "This variable is a whole block and can only go in the email body.",
+        "emailTitle": "Email",
+        "emailSubject": "Subject",
+        "emailBody": "Body",
+        "emailSubjectPlaceholder": "Email subject, English only",
+        "emailBodyPlaceholder": "Email body, English only. Use the variables above for the name, download buttons, etc.",
+        "smsTitle": "SMS",
+        "smsBody": "Body",
+        "smsBodyPlaceholder": "SMS text, English letters and common punctuation only. Leave empty to send no SMS.",
+        "smsInfo": "Over 160 characters is split into several billed messages. Chinese text, curly quotes or emoji cannot be saved.",
+        "save": "Save template",
+        "saveSuccess": "Template saved",
+        "createSuccess": "Template created",
+        "saveFailed": "Failed to save the template",
+        "resetDefault": "Restore default wording",
+        "resetConfirmTitle": "Restore the default wording of “{{name}}”?",
+        "resetConfirmContent": "The current subject, body and SMS text will be replaced by the default version. The name and enabled state stay as they are.",
+        "resetOk": "Restore default",
+        "resetSuccess": "Default wording restored",
+        "resetFailed": "Failed to restore the default wording",
+        "switchDiscardTitle": "Discard unsaved changes?",
+        "switchDiscardContent": "This template has unsaved changes. They will be lost if you switch.",
+        "switchDiscardOk": "Discard changes",
+        "switchDiscardCancel": "Keep editing",
+        "check": {
+          "name": {
+            "length": {
+              "fail": "The template name needs 1–{{max}} characters (now {{length}})"
+            },
+            "duplicate": {
+              "fail": "A template with this name already exists. Please use another name"
+            }
+          },
+          "email": {
+            "loginBox": {
+              "pass": "Contains {{variable}} (required for this template; it cannot be saved without it)",
+              "fail": "{{variable}} is missing. This template issues a random password and must include it in the email body, otherwise the staff member never receives the password, so it cannot be saved"
+            },
+            "loginBoxNotIssued": {
+              "warn": "General notice templates do not issue passwords, so {{variable}} has no effect. Consider removing it"
+            },
+            "download": {
+              "pass": "Includes a download entry",
+              "warn": "No download entry. You can add {{buttons}} or {{link}} (saving without it is allowed)"
+            },
+            "english": {
+              "pass": "English only, no Chinese characters",
+              "fail": "Emails must be in English. No Chinese or full-width punctuation in the subject or body"
+            },
+            "variables": {
+              "fail": "Unknown variable(s): {{variables}}. Only the variables listed above can be used"
+            },
+            "length": {
+              "fail": "Email too long: subject {{subject}} / {{subjectMax}}, body {{body}} / {{bodyMax}} characters"
+            }
+          },
+          "sms": {
+            "length": {
+              "empty": "No SMS text: this template will not send an SMS",
+              "pass": "{{length}} / {{limit}} characters, billed as {{segments}} message(s)",
+              "fail": "About {{length}} characters, billed as {{segments}} messages. The limit is 3 messages ({{maxLength}} characters)"
+            },
+            "mailOnlyVariables": {
+              "pass": "No password in the SMS ({{variable}} cannot go in an SMS)",
+              "fail": "{{variables}} cannot go in an SMS. They are email-only"
+            },
+            "charset": {
+              "pass": "English letters and common punctuation only",
+              "fail": "Unsupported SMS character(s): {{chars}}. Chinese text, curly quotes and emoji turn one SMS into 70 characters and double the cost"
+            },
+            "variables": {
+              "fail": "Unknown variable(s): {{variables}}. An SMS can only use {{allowed}}"
+            }
+          }
+        }
+      },
+      "logs": {
+        "dateStart": "Start date",
+        "dateEnd": "End date",
+        "templateFilter": "Template",
+        "channelFilter": "Channel",
+        "resultFilter": "Result",
+        "channelEmail": "Email",
+        "channelSms": "SMS",
+        "keywordPlaceholder": "Search staff / operator",
+        "query": "Search",
+        "refresh": "Refresh",
+        "columnTime": "Sent at (Sydney)",
+        "columnTemplate": "Template",
+        "columnOperator": "Operator",
+        "columnRecipients": "Recipients",
+        "columnEmail": "Email",
+        "columnSms": "SMS",
+        "columnSmsCost": "SMS cost",
+        "smsCostHint": "Only messages actually sent are counted",
+        "columnResult": "Result",
+        "columnAction": "Action",
+        "recipientsCount": "{{count}} staff",
+        "total": "{{count}} batches",
+        "interrupted": "Interrupted",
+        "retry": "Retry failed",
+        "retryConfirmTitle": "Retry the failed items of this batch?",
+        "retryConfirmContent": "Only the failed channels are resent: failed emails are resent; if only the SMS failed, only the SMS is sent again. No new password is generated.",
+        "retryOk": "Start retry",
+        "retryStarted": "Retry started. This row will update with the result",
+        "retryFailed": "Retry failed",
+        "retryFinished": "Retry finished",
+        "pollGiveUp": "Cannot read the retry progress right now. Sending continues in the background, so press Refresh later to check",
+        "loadFailed": "Failed to load the send log",
+        "empty": "No send records match the filters",
+        "detailEmployee": "Staff",
+        "detailEmail": "Email",
+        "detailPhone": "Phone",
+        "detailEmailStatus": "Email",
+        "detailSmsStatus": "SMS",
+        "detailNote": "Note",
+        "detailLoadFailed": "Failed to load the per-person details",
+        "detailRetry": "Reload",
+        "detailEmpty": "This batch has no per-person details"
+      }
+    }
+  }
+}

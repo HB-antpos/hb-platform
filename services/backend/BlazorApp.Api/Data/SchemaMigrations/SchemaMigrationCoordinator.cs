@@ -112,6 +112,7 @@ internal sealed class SchemaMigrationCoordinator
         "20261030.004-attendance-settings-single-active";
     internal const string PosReceiptShareLinkMigrationId = "20261030.005-pos-receipt-share-link";
     internal const string PlanogramMigrationId = "20261104.001-planogram";
+    internal const string StaffNotificationMigrationId = "20261106.001-staff-notification";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -458,6 +459,11 @@ internal sealed class SchemaMigrationCoordinator
             PlanogramMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyPlanogramAsync(cancellationToken)
+        ),
+        new(
+            StaffNotificationMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyStaffNotificationAsync(cancellationToken)
         ),
     ];
 

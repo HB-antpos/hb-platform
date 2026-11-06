@@ -5,6 +5,11 @@
       "moreActions": "更多操作",
       "totalUsers": "共 {{count}} 位用户",
       "statusFilter": "账号状态",
+      "loginStateFilter": "登录情况",
+      "loginStateAll": "全部",
+      "loginStateNever": "从未登录",
+      "loginStateLogged": "已登录过",
+      "sendNotification": "发送通知",
       "lastLoginNever": "从未登录",
       "lastLoginJustNow": "刚刚",
       "lastLoginMinutes": "{{count}} 分钟前",
@@ -83,6 +88,7 @@
       "fullNameAutoHint": "填写或修改下方的姓、名、中间名后，保存时姓名会按它们自动生成"
     },
     "usersBatch": {
+      "sendNotification": "发送通知",
       "listSeparator": "、",
       "namesAndMore": "{{names}} 等 {{count}} 位",
       "clauseSeparator": "；",

@@ -56,6 +56,12 @@ namespace BlazorApp.Shared.DTOs
         public bool? IsActive { get; set; }
 
         /// <summary>
+        /// 登录情况过滤：never=从未登录（最近登录时间为空），logged=登录过；空=全部。
+        /// 后台「员工通知」用它找出刚开通、还没登录过的账号。
+        /// </summary>
+        public string? LoginState { get; set; }
+
+        /// <summary>
         /// 排序字段
         /// </summary>
         public string? SortBy { get; set; } = "CreatedAt";

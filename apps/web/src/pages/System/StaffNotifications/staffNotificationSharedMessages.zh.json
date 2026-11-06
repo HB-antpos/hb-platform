@@ -1,0 +1,19 @@
+{
+  "system": {
+    "staffNotifications": {
+      "channelStatus": {
+        "sent": "已发出",
+        "failed": "失败",
+        "pending": "发送中",
+        "notSent": "未发送",
+        "unfinished": "未完成"
+      },
+      "batchResult": {
+        "running": "发送中",
+        "allSent": "全部发出",
+        "partialFailed": "部分失败",
+        "allFailed": "全部失败"
+      }
+    }
+  }
+}

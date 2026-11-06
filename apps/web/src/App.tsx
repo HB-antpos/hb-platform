@@ -21,6 +21,8 @@ const loadShopLayout = () => import('./layout/ShopLayout')
 
 const AdminLayout = lazy(loadAdminLayout)
 const ShopLayout = lazy(loadShopLayout)
+// 员工 App 下载短链（短信里的 hotbargain.vip/app）：独立代码块，不进首屏。
+const AppDownloadPage = lazy(() => import('./pages/AppDownload'))
 const BrowserExtensionPrivacyPage = lazy(() => import('./pages/BrowserExtensionPrivacy'))
 const HbSupplierOrderSupportPage = lazy(() => import('./pages/HbSupplierOrderSupport'))
 const MobilePrivacyPage = lazy(() => import('./pages/MobilePrivacy'))
@@ -103,6 +105,10 @@ function AppBootstrap() {
       <Route
         path="/minor-employment/guardian/:token"
         element={<RouteLoadBoundary resetKey="minor-employment-guardian"><MinorEmploymentParentSignaturePage /></RouteLoadBoundary>}
+      />
+      <Route
+        path="/app"
+        element={<RouteLoadBoundary resetKey="app-download"><AppDownloadPage /></RouteLoadBoundary>}
       />
       <Route
         path="/r/:token"

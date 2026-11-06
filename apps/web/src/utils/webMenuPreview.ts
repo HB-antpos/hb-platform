@@ -49,6 +49,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageSystemSettings: [P.System.ManageSettings],
   canViewAppDownloads: [P.System.ViewAppDownloads, P.System.ManageAppDownloads],
   canReadUserConsole: [P.Users.ViewWebConsole],
+  canResetUserPassword: [P.Users.ResetPassword],
   canReadRole: [P.Roles.View],
   canViewDeviceRegistration: [
     P.DeviceRegistration.View,
@@ -152,6 +153,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
           { path: '/system/employee-profiles', title: 'menu.systemEmployeeProfiles', accessKey: 'canViewEmployeeProfiles' },
           { path: '/system/roles', title: 'menu.systemRoles', accessKey: 'canReadRole' },
           { path: '/system/permissions', title: 'menu.systemPermissions', accessKey: 'canReadRole' },
+          { path: '/system/staff-notifications', title: 'menu.staffNotifications', accessKey: 'canResetUserPassword' },
         ],
       },
       {

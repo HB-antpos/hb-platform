@@ -15,6 +15,7 @@ import {
   SafetyCertificateOutlined,
   SaveOutlined,
   SearchOutlined,
+  SendOutlined,
   ShopOutlined,
   StopOutlined,
 } from '@ant-design/icons'
@@ -140,9 +141,10 @@ import {
   splitVisibleStores,
   syncCreateNicknameWithGivenName,
   toIsActiveQuery,
+  toLoginStateQuery,
   withLoginEnabled,
 } from './usersPageLogic'
-import type { UserStatusFilter } from './usersPageLogic'
+import type { UserLoginStateFilter, UserStatusFilter } from './usersPageLogic'
 import {
   DEFAULT_SYSTEM_LIST_PAGE_SIZE,
   createLatestRequestGuard,
@@ -168,8 +170,10 @@ type UserDrawerTab = 'info' | 'assignments' | 'permissions' | 'mobile-menu' | 'p
 
 // 「个人信息」页签的编辑器与「员工个人信息维护」页共用同一个组件；按需加载，不拖大用户管理页的首包。
 const ManagedEmployeeProfileEditor = lazy(() => import('../EmployeeProfiles/ManagedEmployeeProfileEditor'))
+// 发送员工通知抽屉（含确认 / 进度 / 结果弹窗）：点「发送通知」才加载，同样不拖大用户管理页的首包。
+const SendNotificationDrawer = lazy(() => import('../StaffNotifications/SendNotificationDrawer'))
 
-type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'reset-password' | 'toggle-active' | 'toggle-login'
+type UserRowAction = 'login-records' | 'pos' | 'cashier-qr' | 'send-notification' | 'reset-password' | 'toggle-active' | 'toggle-login'
 
 /** 开关「允许登录」只需要的用户字段；列表行与详情对象都满足。 */
 type LoginToggleTarget = Pick<UserDto, 'userGUID' | 'username' | 'email' | 'fullName' | 'lastLoginAt' | 'roleNames'>
@@ -208,6 +212,11 @@ export default function SystemUsersPage() {
   const [selectedStoreGuid, setSelectedStoreGuid] = useState<string | undefined>(undefined)
   const [selectedRoleGuid, setSelectedRoleGuid] = useState<string | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<UserStatusFilter>('all')
+  // 登录情况：全部 / 从未登录 / 已登录过。先筛「从未登录」再全选，就是「账号已开通」的主要发送对象。
+  const [loginStateFilter, setLoginStateFilter] = useState<UserLoginStateFilter>('all')
+  // 发送员工通知抽屉的目标：batch = 勾选的人，single = 行尾菜单这一行的人；id 让每次打开都是全新的抽屉状态。
+  const [notifyTarget, setNotifyTarget] = useState<{ id: number; userGuids: string[]; mode: 'batch' | 'single'; open: boolean } | null>(null)
+  const notifyOpenCountRef = useRef(0)
   // 批量操作的勾选：跨页保留，筛选条件或关键字变化时清空，避免对看不见的账号误操作。
   const [selectedUsers, setSelectedUsers] = useState<UserDto[]>([])
 
@@ -335,7 +344,8 @@ export default function SystemUsersPage() {
   // 后端只允许管理员维护用户角色（ADMIN_REQUIRED），接口本身还要求 Roles.ManageUsers。
   const canBatchManageRoles = access.isAdmin && access.hasPermission(P.Roles.ManageUsers)
   const canBatchManageStores = access.hasPermission(P.Users.ManageStores)
-  const canBatchSelectUsers = canEditUsers || canBatchManageRoles || canBatchManageStores
+  // 只有「重置密码」权限的人也能勾选，用来批量发送通知。
+  const canBatchSelectUsers = canEditUsers || canBatchManageRoles || canBatchManageStores || canResetUserPassword
   const canEditUserPermissions = canManageUserPermissions || (
     isCurrentUserScoped && canManagePosTerminalPermissions
   )
@@ -482,6 +492,7 @@ export default function SystemUsersPage() {
           search: keyword || undefined,
           roleGuid: selectedRoleGuid,
           isActive: toIsActiveQuery(statusFilter),
+          loginState: toLoginStateQuery(loginStateFilter),
           sortBy: currentSortBy || undefined,
           sortDirection: currentSortOrder === 'ascend' ? 'asc' : currentSortOrder === 'descend' ? 'desc' : undefined,
         }
@@ -535,6 +546,7 @@ export default function SystemUsersPage() {
         storeGuid: selectedStoreGuid,
         roleGuid: selectedRoleGuid,
         isActive: toIsActiveQuery(statusFilter),
+        loginState: toLoginStateQuery(loginStateFilter),
         sortBy: currentSortBy || undefined,
         sortDirection: currentSortOrder === 'ascend' ? 'asc' : currentSortOrder === 'descend' ? 'desc' : undefined,
       })
@@ -618,7 +630,7 @@ export default function SystemUsersPage() {
   }, [currentUser?.userGUID, isCurrentUserScoped, managedStoreKey])
 
   // 筛选即查询：下拉与状态分段立即生效，关键字防抖 300ms；记录上一次的取值，避免首屏与 StrictMode 重复请求。
-  const filterQueryKey = `${selectedStoreGuid ?? ''}|${selectedRoleGuid ?? ''}|${statusFilter}`
+  const filterQueryKey = `${selectedStoreGuid ?? ''}|${selectedRoleGuid ?? ''}|${statusFilter}|${loginStateFilter}`
   const lastFilterQueryKeyRef = useRef(filterQueryKey)
   const lastKeywordRef = useRef(keyword)
 
@@ -1404,11 +1416,27 @@ export default function SystemUsersPage() {
     })
   }
 
+  const openSendNotification = (userGuids: string[], mode: 'batch' | 'single') => {
+    if (!canResetUserPassword || !userGuids.length) return
+    notifyOpenCountRef.current += 1
+    setNotifyTarget({ id: notifyOpenCountRef.current, userGuids, mode, open: true })
+  }
+
+  // 抽屉里「邮箱存疑 / 缺邮箱」的人：收起通知抽屉，打开该用户的编辑抽屉去改邮箱；改完再重新发送通知。
+  const handleEditNotificationEmail = (userGuid: string) => {
+    const record = data.find((user) => user.userGUID === userGuid) ?? selectedUsers.find((user) => user.userGUID === userGuid)
+    if (!record) return
+    setNotifyTarget((current) => (current ? { ...current, open: false } : current))
+    openUserDrawer(record)
+  }
+
   const handleRowAction = (record: UserDto, action: UserRowAction) => {
     if (action === 'login-records' || action === 'pos') {
       openUserDrawer(record, action)
     } else if (action === 'cashier-qr') {
       setCashierBarcodeUser(record)
+    } else if (action === 'send-notification') {
+      openSendNotification([record.userGUID], 'single')
     } else if (action === 'reset-password') {
       openResetPassword(record)
     } else if (action === 'toggle-active') {
@@ -2011,6 +2039,8 @@ export default function SystemUsersPage() {
 
     const accountItems: NonNullable<MenuProps['items']> = []
     if (canResetUserPassword) {
+      // 发送通知与重置密码同属账号操作组，同受 Users.ResetPassword 控制，放在「重置密码」之前。
+      accountItems.push({ key: 'send-notification', icon: <SendOutlined />, label: t('system.usersWorkspace.sendNotification', '发送通知') })
       accountItems.push({ key: 'reset-password', icon: <LockOutlined />, label: t('system.users.resetPassword', '重置密码') })
     }
     // 不提供停用当前登录账号的入口，避免把自己锁在系统外。
@@ -3147,6 +3177,20 @@ export default function SystemUsersPage() {
             onChange={(value) => setSelectedRoleGuid(value)}
             options={roleOptions}
           />
+          <Select<UserLoginStateFilter>
+            allowClear
+            placeholder={t('system.usersWorkspace.loginStateFilter', '登录情况')}
+            aria-label={t('system.usersWorkspace.loginStateFilter', '登录情况')}
+            style={{ width: 130 }}
+            // 「全部」显示为占位文字，清除也回到「全部」。
+            value={loginStateFilter === 'all' ? undefined : loginStateFilter}
+            onChange={(value) => setLoginStateFilter(value ?? 'all')}
+            options={[
+              { value: 'all', label: t('system.usersWorkspace.loginStateAll', '全部') },
+              { value: 'never', label: t('system.usersWorkspace.loginStateNever', '从未登录') },
+              { value: 'logged', label: t('system.usersWorkspace.loginStateLogged', '已登录过') },
+            ]}
+          />
           <Segmented<UserStatusFilter>
             aria-label={t('system.usersWorkspace.statusFilter', '账号状态')}
             value={statusFilter}
@@ -3177,6 +3221,8 @@ export default function SystemUsersPage() {
               roleOptions={roleOptions}
               canManageStores={canBatchManageStores}
               canGrantManageableStores={access.isAdmin}
+              canSendNotification={canResetUserPassword}
+              onSendNotification={() => openSendNotification(selectedUsers.map((user) => user.userGUID), 'batch')}
               storeOptions={visibleStoreOptions}
               isOutOfScope={(user) => isCurrentUserScoped && hasForbiddenRoleForScopedManager(user)}
               onClearSelection={() => setSelectedUsers([])}
@@ -3245,6 +3291,25 @@ export default function SystemUsersPage() {
           }}
         />
       </Card>
+
+      {notifyTarget ? (
+        <Suspense fallback={null}>
+          <SendNotificationDrawer
+            key={notifyTarget.id}
+            open={notifyTarget.open}
+            userGuids={notifyTarget.userGuids}
+            onClose={() => setNotifyTarget((current) => (current ? { ...current, open: false } : current))}
+            // 收起动画结束后卸载；期间若又打开了新的（open 为 true），不能把它卸掉。
+            onAfterClose={() => setNotifyTarget((current) => (current && !current.open ? null : current))}
+            onFinished={() => {
+              // 批量发送走完后清空勾选，避免对同一批人误发第二遍；单人发送不动勾选。
+              if (notifyTarget.mode === 'batch') setSelectedUsers([])
+            }}
+            onViewLogs={() => navigate('/system/staff-notifications?tab=logs')}
+            onEditEmail={canEditUsers ? handleEditNotificationEmail : undefined}
+          />
+        </Suspense>
+      ) : null}
 
       {cashierBarcodeUser && access.isAdmin && canManagePosTerminalPermissions && (
         <UserCashierBarcodeModal

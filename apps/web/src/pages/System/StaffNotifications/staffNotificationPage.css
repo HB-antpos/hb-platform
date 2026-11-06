@@ -1,0 +1,302 @@
+/* 员工通知页（模板 + 发送记录）。类名统一 staff-notify- 前缀，避免与全局样式冲突；不使用 CSS Modules。 */
+
+.staff-notify-loading {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+}
+
+.staff-notify-readonly-alert {
+  margin-bottom: 14px;
+}
+
+/* ===== 模板页签 ===== */
+
+.staff-notify-grid {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.staff-notify-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.staff-notify-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #e1e5ec;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.staff-notify-card:hover {
+  border-color: #91caff;
+}
+
+.staff-notify-card:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
+
+.staff-notify-card-active {
+  border-color: #1677ff;
+  background: #f0f6ff;
+}
+
+.staff-notify-card-draft {
+  cursor: default;
+}
+
+.staff-notify-card-disabled .staff-notify-card-name {
+  color: #8a94a6;
+}
+
+.staff-notify-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  font-weight: 600;
+}
+
+.staff-notify-card-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.staff-notify-card-tags {
+  display: inline-flex;
+  flex: none;
+  gap: 4px;
+}
+
+.staff-notify-card-channels {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.staff-notify-card-channels .ant-tag {
+  margin-inline-end: 0;
+}
+
+.staff-notify-card-meta {
+  color: #667085;
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.staff-notify-editor-empty {
+  padding: 48px 0;
+}
+
+.staff-notify-editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.staff-notify-editor-head .ant-space {
+  height: 32px;
+}
+
+.staff-notify-vars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f7f9fc;
+}
+
+.staff-notify-vars-hint {
+  font-size: 12.5px;
+}
+
+.staff-notify-var {
+  padding: 0 7px;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  background: #fafafa;
+  color: rgba(0, 0, 0, 0.88);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.staff-notify-var:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+
+.staff-notify-var:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 1px;
+}
+
+/* 整块内容（邮箱 + 密码框、下载按钮）只能放进邮件：蓝色区分。 */
+.staff-notify-var-block {
+  border-color: #91caff;
+  background: #e6f4ff;
+  color: #0958d9;
+}
+
+.staff-notify-var code {
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.staff-notify-channels {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.staff-notify-channel {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #e1e5ec;
+  border-radius: 10px;
+}
+
+.staff-notify-channel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.staff-notify-field-label {
+  display: block;
+  margin-bottom: 4px;
+  color: #667085;
+  font-size: 12.5px;
+}
+
+.staff-notify-text {
+  font-family: Menlo, Consolas, monospace;
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+}
+
+.staff-notify-checks {
+  margin: 10px 0 0;
+  padding: 0;
+  color: #344054;
+  font-size: 12.5px;
+  line-height: 22px;
+  list-style: none;
+}
+
+.staff-notify-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.staff-notify-check-icon {
+  flex: none;
+  margin-top: 4px;
+}
+
+.staff-notify-check-pass .staff-notify-check-icon {
+  color: #52c41a;
+}
+
+.staff-notify-check-warn .staff-notify-check-icon {
+  color: #faad14;
+}
+
+.staff-notify-check-fail {
+  color: #cf1322;
+}
+
+.staff-notify-check-fail .staff-notify-check-icon {
+  color: #ff4d4f;
+}
+
+.staff-notify-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* ===== 发送记录页签 ===== */
+
+.staff-notify-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.staff-notify-search {
+  width: 220px;
+  max-width: 100%;
+}
+
+.staff-notify-refresh {
+  margin-left: auto;
+}
+
+.staff-notify-result-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.staff-notify-interrupted {
+  font-size: 12px;
+}
+
+.staff-notify-detail-state {
+  padding: 8px 0;
+  text-align: center;
+}
+
+.staff-notify-detail-person {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.staff-notify-detail-store {
+  color: #667085;
+  font-size: 12px;
+}
+
+.staff-notify-detail-note {
+  font-size: 12.5px;
+  color: #475467;
+}
+
+@media (max-width: 960px) {
+  .staff-notify-grid,
+  .staff-notify-channels {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
