@@ -42,6 +42,15 @@ export interface InstallmentCardProviderSelectionPort {
   loadEnabledProviders(): Promise<readonly InstallmentCardProvider[]>;
 }
 
+/**
+ * 分期原付款证据里的 provider：本机能执行的 PaymentProvider，外加 WPF 等其他端收的 Zeller。
+ *
+ * 中文注释：Zeller 只出现在「原付款描述」里，本机目前没有 Zeller 通道，所以它不属于 PaymentProvider，
+ * 也不会产生 provider attempt；这类原付款在取消时只能走「退代金券」，原路退由 requiredEvidenceProvider 失败关闭。
+ * 线 B 接入 Zeller 通道后再把它并入 PaymentProvider。
+ */
+export type InstallmentTenderProvider = PaymentProvider | "zeller";
+
 export type InstallmentOriginalTenderEvidence = Readonly<{
   evidenceId: string;
   sourceAttemptId: string;
@@ -49,7 +58,7 @@ export type InstallmentOriginalTenderEvidence = Readonly<{
   installmentGuid: string;
   method: "cash" | "card" | "voucher";
   amountCents: number;
-  provider: PaymentProvider | null;
+  provider: InstallmentTenderProvider | null;
   provenance: "local-approved-attempt" | "hbpos-protected-details";
 }>;
 
@@ -1575,9 +1584,13 @@ function validateProvenanceSnapshot(
     if (
       (evidence.method === "cash" && evidence.provider !== null) ||
       (evidence.method === "voucher" && evidence.provider !== "voucher") ||
+      // 中文注释：刷卡原付款允许 Square / Linkly（可原路退）以及 Zeller / 手动刷卡（只能退代金券）。
+      // 原路退时 requiredEvidenceProvider 仍只放行 Square / Linkly，其余失败关闭。
       (evidence.method === "card" &&
         evidence.provider !== "square" &&
-        evidence.provider !== "linkly-cloud")
+        evidence.provider !== "linkly-cloud" &&
+        evidence.provider !== "zeller" &&
+        evidence.provider !== "manual-card")
     ) {
       throw provenanceInvalid();
     }

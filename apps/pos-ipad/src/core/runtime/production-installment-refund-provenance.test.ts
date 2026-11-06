@@ -199,6 +199,80 @@ test("退代金券模式不要求原卡交易证据，但卡 provider 仍须可�
   assert.equal(unknownVault.imports.length, 0);
 });
 
+test("WPF 收的 Zeller / 手动刷卡分期付款：能识别为原付款证据；来源冲突或无法归类仍失败关闭", async () => {
+  const zellerPayment =
+    "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f";
+  const cases: ReadonlyArray<
+    Readonly<{ name: string; payment: Record<string, unknown>; provider: string }>
+  > = [
+    {
+      name: "已核实的 Zeller",
+      payment: payment("01", 2, 20, zellerPayment, [card("Zeller", "uuid", null, 20)], null),
+      provider: "zeller",
+    },
+    {
+      // 主管确认、没有交易号的未核实格式：服务端没有卡交易明细。
+      name: "未核实的 Zeller",
+      payment: payment("01", 2, 20, "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00", null, null),
+      provider: "zeller",
+    },
+    {
+      name: "格式损坏的小写 Zeller 引用也算 Zeller，不回退成别的通道",
+      payment: payment("01", 2, 20, "zeller:broken", null, null),
+      provider: "zeller",
+    },
+    {
+      name: "手动刷卡（引用 MANUAL:）",
+      payment: payment("01", 2, 20, "MANUAL:0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00", null, null),
+      provider: "manual-card",
+    },
+    {
+      name: "手动刷卡（只有处理器 Manual）",
+      payment: payment("01", 2, 20, null, [card("Manual", "", null, 20)], null),
+      provider: "manual-card",
+    },
+  ];
+
+  for (const item of cases) {
+    // 退代金券：不要求卡引用 / 卡交易，Zeller 与手动刷卡都应作为原付款证据登记。
+    const voucherVault = new RecordingVault(null);
+    const voucherMode = await new HbposInstallmentRefundProvenance(
+      new RecordingTransport([ok(details({ paidAmount: 20, payments: [item.payment] }))]),
+      voucherVault,
+    ).resolveOrImport({ ...scope(), refundMode: "voucher" });
+    assert.equal(voucherMode.complete, true, item.name);
+    assert.deepEqual(
+      voucherMode.tenders.map(({ method, provider }) => [method, provider]),
+      [["card", item.provider]],
+      item.name,
+    );
+  }
+
+  // 原路退保持严格：没有引用或卡交易的 Zeller / 手动刷卡仍不完整（取消前由运行时直接拒绝，这里是第二道门）。
+  const strictVault = new RecordingVault(null);
+  const strict = await new HbposInstallmentRefundProvenance(
+    new RecordingTransport([ok(details({
+      paidAmount: 20,
+      payments: [payment("01", 2, 20, "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00", null, null)],
+    }))]),
+    strictVault,
+  ).resolveOrImport(scope());
+  assert.equal(strict.complete, false);
+  assert.equal(strictVault.imports.length, 0);
+
+  // 同一笔付款同时带 Zeller 引用与 Square 处理器：来源冲突，退代金券也失败关闭。
+  const conflictVault = new RecordingVault(null);
+  const conflict = await new HbposInstallmentRefundProvenance(
+    new RecordingTransport([ok(details({
+      paidAmount: 20,
+      payments: [payment("01", 2, 20, zellerPayment, [card("Square", "x", null, 20)], null)],
+    }))]),
+    conflictVault,
+  ).resolveOrImport({ ...scope(), refundMode: "voucher" });
+  assert.equal(conflict.complete, false);
+  assert.equal(conflictVault.imports.length, 0);
+});
+
 test("seedRefundAttempt 只委托受保护 vault，adapter 仍会复核 attempt 身份", async () => {
   const vault = new RecordingVault(snapshot([]));
   const provenance = new HbposInstallmentRefundProvenance(

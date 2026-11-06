@@ -7052,6 +7052,208 @@ BEGIN
 END;
 `;
 
+/**
+ * M55 分期原付款证据支持 Zeller 与手动刷卡（对齐 WPF）：
+ * WPF 收的 Zeller / 手动刷卡分期付款，手机端取消分期（退代金券）时要把它们登记为原付款证据，
+ * 但 installment_original_tender_evidence 的 CHECK 只允许 square / linkly-cloud 的刷卡，
+ * SQLite 不能原地改 CHECK，只能重建表。
+ *
+ * 1. 新增允许值：provider 列加 'zeller'、'manual-card'；card 方式的 provider 允许 square / linkly-cloud / zeller / manual-card。
+ *    其余列、不可变与禁止删除语义原样保留；历史行原样复制。
+ * 2. 唯一的外键子表 installment_refund_provenance_items 要先暂存、删除，再在证据表重建后回灌；
+ *    否则 DROP 证据表时的隐式 DELETE 会触发外键违例。不使用 ALTER TABLE RENAME，
+ *    避免 SQLite 重命名时对触发器体里引用的表做一致性检查而失败。
+ * 3. 引用证据表的触发器（含另外两张表上的两个）只能 DROP 后按原定义重建。
+ * 4. 整个迁移在 applyMigrations 的独占事务内执行，要么全成功要么全回滚；本迁移不可回退。
+ *
+ * 本迁移只放宽「原付款证据」；installment_provider_attempts（本机发起的分期付款尝试）的 provider CHECK 不动，
+ * Zeller 原路退款仍然不存在，requiredEvidenceProvider 对它们失败关闭。
+ */
+const M55 = `
+DROP TRIGGER trg_installment_cash_settlements_approved_evidence;
+DROP TRIGGER trg_installment_provider_attempts_approved_material;
+DROP TRIGGER trg_installment_original_tender_evidence_immutable;
+DROP TRIGGER trg_installment_original_tender_evidence_no_delete;
+DROP TRIGGER trg_installment_refund_item_binding;
+DROP TRIGGER trg_installment_refund_item_immutable;
+DROP TRIGGER trg_installment_refund_item_no_delete;
+
+CREATE TABLE installment_original_tender_evidence_m55_stash AS
+  SELECT * FROM installment_original_tender_evidence;
+CREATE TABLE installment_refund_provenance_items_m55_stash AS
+  SELECT * FROM installment_refund_provenance_items;
+
+DROP TABLE installment_refund_provenance_items;
+DROP TABLE installment_original_tender_evidence;
+
+-- 本地 purchase 与 Hbpos 受保护导入共用描述符；原卡引用和券材料只在密文。
+CREATE TABLE installment_original_tender_evidence (
+  evidence_id TEXT PRIMARY KEY,
+  origin_action_id TEXT NULL
+    REFERENCES installment_actions(action_id),
+  store_code TEXT NOT NULL,
+  device_code TEXT NOT NULL,
+  installment_guid TEXT NOT NULL,
+  payment_guid TEXT NOT NULL,
+  source_attempt_id TEXT NOT NULL,
+  method TEXT NOT NULL CHECK (method IN ('cash', 'card', 'voucher')),
+  amount_cents INTEGER NOT NULL CHECK (
+    typeof(amount_cents) = 'integer' AND amount_cents > 0
+  ),
+  provider TEXT NULL CHECK (
+    provider IS NULL
+    OR provider IN ('square', 'linkly-cloud', 'voucher', 'zeller', 'manual-card')
+  ),
+  provenance TEXT NOT NULL CHECK (
+    provenance IN ('local-approved-attempt', 'hbpos-protected-details')
+  ),
+  payload_revision INTEGER NOT NULL CHECK (payload_revision = 1),
+  protected_payload_ciphertext BLOB NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  CHECK (
+    (method = 'cash' AND provider IS NULL)
+    OR (method = 'voucher' AND provider = 'voucher')
+    OR (method = 'card' AND provider IN ('square', 'linkly-cloud', 'zeller', 'manual-card'))
+  ),
+  CHECK (
+    (provenance = 'local-approved-attempt' AND origin_action_id IS NOT NULL)
+    OR
+    (provenance = 'hbpos-protected-details' AND origin_action_id IS NULL)
+  )
+);
+
+INSERT INTO installment_original_tender_evidence (
+  evidence_id, origin_action_id, store_code, device_code, installment_guid,
+  payment_guid, source_attempt_id, method, amount_cents, provider, provenance,
+  payload_revision, protected_payload_ciphertext, created_at_iso
+)
+SELECT
+  evidence_id, origin_action_id, store_code, device_code, installment_guid,
+  payment_guid, source_attempt_id, method, amount_cents, provider, provenance,
+  payload_revision, protected_payload_ciphertext, created_at_iso
+FROM installment_original_tender_evidence_m55_stash;
+
+CREATE INDEX ix_installment_original_tender_installment
+  ON installment_original_tender_evidence (
+    store_code, installment_guid, created_at_iso
+  );
+
+CREATE INDEX ix_installment_original_tender_payment
+  ON installment_original_tender_evidence (
+    payment_guid, source_attempt_id
+  );
+
+CREATE TABLE installment_refund_provenance_items (
+  refund_action_id TEXT NOT NULL
+    REFERENCES installment_refund_provenance_snapshots(refund_action_id),
+  sequence INTEGER NOT NULL CHECK (
+    typeof(sequence) = 'integer' AND sequence >= 0
+  ),
+  evidence_id TEXT NOT NULL UNIQUE
+    REFERENCES installment_original_tender_evidence(evidence_id),
+  source_payment_guid TEXT NOT NULL UNIQUE,
+  source_attempt_id TEXT NOT NULL UNIQUE,
+  PRIMARY KEY (refund_action_id, sequence)
+);
+
+INSERT INTO installment_refund_provenance_items (
+  refund_action_id, sequence, evidence_id, source_payment_guid, source_attempt_id
+)
+SELECT
+  refund_action_id, sequence, evidence_id, source_payment_guid, source_attempt_id
+FROM installment_refund_provenance_items_m55_stash;
+
+DROP TABLE installment_refund_provenance_items_m55_stash;
+DROP TABLE installment_original_tender_evidence_m55_stash;
+
+CREATE TRIGGER trg_installment_original_tender_evidence_immutable
+BEFORE UPDATE ON installment_original_tender_evidence
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_ORIGINAL_TENDER_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_installment_original_tender_evidence_no_delete
+BEFORE DELETE ON installment_original_tender_evidence
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_ORIGINAL_TENDER_DELETE_FORBIDDEN');
+END;
+
+CREATE TRIGGER trg_installment_cash_settlements_approved_evidence
+BEFORE UPDATE OF state ON installment_cash_settlements
+FOR EACH ROW
+WHEN NEW.state = 'Approved'
+  AND NEW.operation = 'purchase'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM installment_original_tender_evidence evidence
+    WHERE evidence.evidence_id = NEW.original_tender_evidence_id
+      AND evidence.origin_action_id = NEW.action_id
+      AND evidence.payment_guid = NEW.payment_guid
+      AND evidence.source_attempt_id = NEW.settlement_id
+      AND evidence.amount_cents = NEW.amount_cents
+      AND evidence.method = 'cash'
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_CASH_APPROVED_EVIDENCE_REQUIRED');
+END;
+
+CREATE TRIGGER trg_installment_provider_attempts_approved_material
+BEFORE UPDATE OF state ON installment_provider_attempts
+FOR EACH ROW
+WHEN NEW.state = 'Approved' AND (
+  NOT EXISTS (
+    SELECT 1
+    FROM installment_approved_materials material
+    WHERE material.attempt_id = NEW.attempt_id
+  )
+  OR (
+    NEW.operation = 'purchase'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM installment_original_tender_evidence evidence
+      WHERE evidence.evidence_id = NEW.original_tender_evidence_id
+        AND evidence.origin_action_id = NEW.action_id
+        AND evidence.payment_guid = NEW.payment_guid
+        AND evidence.source_attempt_id = NEW.attempt_id
+        AND evidence.amount_cents = ABS(NEW.amount_cents)
+    )
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_PROVIDER_APPROVED_MATERIAL_REQUIRED');
+END;
+
+CREATE TRIGGER trg_installment_refund_item_immutable
+BEFORE UPDATE ON installment_refund_provenance_items
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_REFUND_ITEM_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_installment_refund_item_binding
+BEFORE INSERT ON installment_refund_provenance_items
+FOR EACH ROW
+WHEN NOT EXISTS (
+  SELECT 1
+  FROM installment_original_tender_evidence evidence
+  WHERE evidence.evidence_id = NEW.evidence_id
+    AND evidence.payment_guid = NEW.source_payment_guid
+    AND evidence.source_attempt_id = NEW.source_attempt_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_REFUND_ITEM_BINDING_INVALID');
+END;
+
+CREATE TRIGGER trg_installment_refund_item_no_delete
+BEFORE DELETE ON installment_refund_provenance_items
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_REFUND_ITEM_DELETE_FORBIDDEN');
+END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7107,6 +7309,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 52, name: "M52_unblock_next_payment_after_parked_recovery", sql: M52 },
   { version: 53, name: "M53_square_refund_settlements", sql: M53 },
   { version: 54, name: "M54_daily_close_cash_rounding", sql: M54 },
+  { version: 55, name: "M55_installment_original_tender_zeller_manual", sql: M55 },
 ];
 
 export async function applyMigrations(
