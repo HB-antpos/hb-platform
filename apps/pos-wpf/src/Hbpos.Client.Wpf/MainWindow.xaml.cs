@@ -99,6 +99,7 @@ public partial class MainWindow : Window, IDisplayMovableWindow
 #if DEBUG
         _viewModel.AppUpdate.ConfigureDebugForceUpdateDismissed(ResumeStartupAfterDebugUpdateDismissalAsync);
 #endif
+        _viewModel.AppUpdate.ConfigureFooterRecheck(() => _appUpdateCoordinator.CheckForUpdatesAsync(manual: true));
         DataContext = _viewModel;
         InitializeComponent();
         if (colorThemeSwitcher is null)

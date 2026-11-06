@@ -291,16 +291,39 @@ public sealed class MainWindowXamlTests
             .ToList();
 
         Assert.Contains("{Binding AppUpdate.CurrentVersion, Mode=OneWay}", attributeValues);
+        // 中文注释：主窗口里只剩回退目标版本的文字；升级入口已抽成 FooterUpdateButton 控件，由主窗口按版本状态控制可见性。
         Assert.Equal(
-            2,
+            1,
             attributeValues.Count(value =>
                 string.Equals(value, "{Binding AppUpdate.TargetVersion, Mode=OneWay}", StringComparison.Ordinal)));
-        Assert.Contains("{Binding AppUpdate.HasDifferentTargetVersion}", attributeValues);
+        Assert.Contains("{Binding HasDifferentTargetVersion}", attributeValues);
+        Assert.Contains("{Binding IsRollbackTarget}", attributeValues);
         Assert.Contains("{Binding AppUpdate.IsRollbackTarget}", attributeValues);
+        Assert.Contains("{Binding AppUpdate}", attributeValues);
         Assert.Contains("{loc:Loc shell.footer.currentVersion}", attributeValues);
-        Assert.Contains("{loc:Loc shell.footer.latestVersion}", attributeValues);
         Assert.Contains("{loc:Loc shell.footer.targetVersion}", attributeValues);
+        Assert.DoesNotContain("{loc:Loc shell.footer.latestVersion}", attributeValues);
         Assert.DoesNotContain("{Binding VersionStatusText}", attributeValues);
+
+        var footerButton = XDocument.Load(Path.Combine(
+            repoRoot,
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "Views",
+            "Controls",
+            "FooterUpdateButton.xaml"));
+        var footerValues = footerButton.Descendants()
+            .Attributes()
+            .Select(attribute => attribute.Value)
+            .ToList();
+        Assert.Contains("{loc:Loc shell.footer.latestVersion}", footerValues);
+        Assert.Contains("{Binding UpdateFromFooterCommand}", footerValues);
+        Assert.Equal(
+            2,
+            footerValues.Count(value =>
+                string.Equals(value, "{Binding TargetVersion, Mode=OneWay}", StringComparison.Ordinal)));
 
         foreach (var resourceName in new[] { "Strings.resx", "Strings.zh-CN.resx" })
         {

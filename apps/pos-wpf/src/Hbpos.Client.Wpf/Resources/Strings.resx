@@ -1351,6 +1351,10 @@
   <data name="appUpdate.notice.ready" xml:space="preserve"><value>Downloaded. Install when the till is free.</value></data>
   <data name="appUpdate.notice.waitingForTransaction" xml:space="preserve"><value>Install after the current sale.</value></data>
   <data name="appUpdate.notice.later" xml:space="preserve"><value>Later</value></data>
+  <data name="appUpdate.footer.tooltip" xml:space="preserve"><value>Tap to update to the latest version</value></data>
+  <data name="appUpdate.footer.updating" xml:space="preserve"><value>Updating to </value></data>
+  <data name="appUpdate.footer.waitingForTransaction" xml:space="preserve"><value>Finish this sale first, then tap to update</value></data>
+  <data name="appUpdate.footer.failed" xml:space="preserve"><value>Couldn't check or download the update. Try again later</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>Approval required</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>The current cashier cannot perform this operation.</value></data>
   <data name="shell.operationAuthorization.operationLabel" xml:space="preserve"><value>CURRENT OPERATION</value></data>

@@ -983,29 +983,26 @@
                         <Run Text=": " />
                         <Run Text="{Binding AppUpdate.CurrentVersion, Mode=OneWay}" />
                     </TextBlock>
-                    <TextBlock FontSize="10"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource PosPrimaryTextBrush}"
-                               VerticalAlignment="Center"
-                               Margin="10,0,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="{x:Type TextBlock}">
+                    <!-- 新版本入口：点击更新或重新检查，细节见控件；回退版本不给入口。 -->
+                    <controls:FooterUpdateButton x:Name="FooterUpdateButton"
+                                                 Margin="10,0,0,0"
+                                                 VerticalAlignment="Center"
+                                                 DataContext="{Binding AppUpdate}">
+                        <controls:FooterUpdateButton.Style>
+                            <Style TargetType="{x:Type controls:FooterUpdateButton}">
                                 <Setter Property="Visibility" Value="Collapsed" />
                                 <Style.Triggers>
                                     <MultiDataTrigger>
                                         <MultiDataTrigger.Conditions>
-                                            <Condition Binding="{Binding AppUpdate.HasDifferentTargetVersion}" Value="True" />
-                                            <Condition Binding="{Binding AppUpdate.IsRollbackTarget}" Value="False" />
+                                            <Condition Binding="{Binding HasDifferentTargetVersion}" Value="True" />
+                                            <Condition Binding="{Binding IsRollbackTarget}" Value="False" />
                                         </MultiDataTrigger.Conditions>
                                         <Setter Property="Visibility" Value="Visible" />
                                     </MultiDataTrigger>
                                 </Style.Triggers>
                             </Style>
-                        </TextBlock.Style>
-                        <Run Text="{loc:Loc shell.footer.latestVersion}" />
-                        <Run Text=": " />
-                        <Run Text="{Binding AppUpdate.TargetVersion, Mode=OneWay}" />
-                    </TextBlock>
+                        </controls:FooterUpdateButton.Style>
+                    </controls:FooterUpdateButton>
                     <TextBlock FontSize="10"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource PosDangerTextBrush}"

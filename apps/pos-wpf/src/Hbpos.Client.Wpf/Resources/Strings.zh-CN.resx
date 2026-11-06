@@ -3555,6 +3555,10 @@
   <data name="appUpdate.notice.ready" xml:space="preserve"><value>已下载，收银台空闲时可安装</value></data>
   <data name="appUpdate.notice.waitingForTransaction" xml:space="preserve"><value>当前交易完成后可安装</value></data>
   <data name="appUpdate.notice.later" xml:space="preserve"><value>稍后</value></data>
+  <data name="appUpdate.footer.tooltip" xml:space="preserve"><value>点击更新到最新版本</value></data>
+  <data name="appUpdate.footer.updating" xml:space="preserve"><value>正在更新到 </value></data>
+  <data name="appUpdate.footer.waitingForTransaction" xml:space="preserve"><value>请先完成当前交易，再点击更新</value></data>
+  <data name="appUpdate.footer.failed" xml:space="preserve"><value>检查或下载更新失败，请稍后重试</value></data>
   <data name="shell.operationAuthorization.title" xml:space="preserve"><value>需要操作授权</value></data>
   <data name="shell.operationAuthorization.message" xml:space="preserve"><value>当前收银员没有执行此操作的权限。</value></data>
   <data name="shell.operationAuthorization.operationLabel" xml:space="preserve"><value>当前操作</value></data>
