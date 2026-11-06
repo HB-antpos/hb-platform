@@ -2,6 +2,7 @@ import { INSTALLMENT_RECEIPT_TERMS } from "@hb/pos-receipt-core/features/receipt
 import {
   buildSaleReceiptDocument,
   documentToEscPosBytes,
+  receiptOrderShortCode,
 } from "@hb/pos-receipt-core/features/receipts/receipt-document";
 import {
   resolveReceiptTermsBlock,
@@ -91,6 +92,8 @@ export class InstallmentReceiptReprintPreparationService {
         orderNumber: details.installmentNumber,
         orderGuid: details.installmentGuid,
         orderDisplay: details.installmentNumber,
+        // 中文注释：顶部加分期单号末 8 位条码（对齐 WPF #1207），扫它即可在分期中心定位；完整单号仍印在「Order:」行。
+        orderBarcode: receiptOrderShortCode(details.installmentNumber),
         soldAtIso: details.createdAtIso,
         cashierName: details.cashierName,
         storeCode: details.storeCode,

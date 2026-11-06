@@ -70,6 +70,12 @@ export type SaleInput = Readonly<{
   statusText?: string;
   printedAtIso?: string;
   includeMachineCodes?: boolean;
+  /**
+   * 顶部（「Order:」行之前）的居中一维条码内容，目前只有分期补打传入（见 receiptOrderShortCode）。
+   * 不传（默认）则完全不打印，其它所有小票的输出保持字节级不变。
+   * 条码在当前纸宽放不下时静默省略，不抛错：它只是辅助扫码，不能因此让整张小票打不出来。
+   */
+  orderBarcode?: string;
   /** 由票据领域生成并安全校验的业务扩展行；UI 不得注入原始支付材料。 */
   extraInfoLines?: readonly string[];
   /**
@@ -80,6 +86,34 @@ export type SaleInput = Readonly<{
 }>;
 type DailyInput = Readonly<{ locale: ReceiptLocale; paper: ReceiptPaper; storeName: string; businessDate: string; deviceCode: string; cashierName: string; paymentTotals: readonly Readonly<{ method: string; salesCents: number; refundCents: number; netCents: number }>[]; orderCount: number; salesCents: number; refundCents: number; netCents: number; expectedCashCents: number; countedCashCents: number; differenceCents: number }>;
 type BankInput = Readonly<{ locale: ReceiptLocale; paper: ReceiptPaper; status: string; cardType?: string; maskedCardNumber?: string; reference?: string; rawText?: string }>;
+
+/**
+ * 该值能否在当前纸宽打出 Code128。非可打印 ASCII 或放不下都返回 false 而不是抛错：
+ * 顶部条码只是辅助扫码，不能让整张小票因它打不出来（对比 appendCode128：真正要打印时才严格抛错）。
+ */
+function canPrintCode128(value: string, paper: ReceiptPaper): boolean {
+  try {
+    return receiptCode128ModuleWidth(receiptCode128(value), paper) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** 与 WPF ReceiptOrderShortCode.Length 一致：条码内容取显示单号的末 8 位。 */
+const RECEIPT_ORDER_SHORT_CODE_LENGTH = 8;
+
+/**
+ * 由小票上的显示单号（分期单号，形如 IP-门店号-32 位十六进制）生成顶部条码内容：
+ * 取末 8 位并转大写，不足 8 位则取全部。口径对齐 WPF ReceiptOrderShortCode.CreateFromDisplayNumber（#1207）。
+ */
+export function receiptOrderShortCode(displayNumber: string): string {
+  const trimmed = displayNumber.trim();
+  return (
+    trimmed.length <= RECEIPT_ORDER_SHORT_CODE_LENGTH
+      ? trimmed
+      : trimmed.slice(-RECEIPT_ORDER_SHORT_CODE_LENGTH)
+  ).toUpperCase();
+}
 
 /**
  * 小票状态行默认值（对齐 WPF #885）：净额为负的退款单打印 Refund，其余才是 Paid。
@@ -130,6 +164,12 @@ export function buildSaleReceiptDocument(input: SaleInput): EscPosDocument {
   }
   b.blank();
 
+  // 中文注释：分期单号约 40 位（IP-门店号-32 位十六进制），80mm 纸放不下整串 Code128，
+  // 所以顶部条码只放单号末 8 位，分期中心的搜索按「包含」匹配单号，扫它即可定位；完整单号仍由下面的「Order:」行印出。
+  const orderBarcode = nonBlank(input.orderBarcode);
+  if (orderBarcode && canPrintCode128(orderBarcode, input.paper)) {
+    b.barcode(orderBarcode);
+  }
   if (input.orderPresentation === "guid-only") {
     if (!orderGuid) throw new Error("Sale receipt GUID display requires orderGuid.");
     b.text(orderGuid);
@@ -417,6 +457,7 @@ function assertSafeSaleText(input: SaleInput): void {
     ["orderNumber", input.orderNumber],
     ["orderGuid", input.orderGuid],
     ["orderDisplay", input.orderDisplay],
+    ["orderBarcode", input.orderBarcode],
     ["soldAtIso", input.soldAtIso],
     ["cashierName", input.cashierName],
     ["storeCode", input.storeCode],

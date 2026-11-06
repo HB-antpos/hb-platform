@@ -11,6 +11,7 @@ import {
   buildSaleReceiptDocument,
   documentToEscPosBytes,
   displayWidth,
+  receiptOrderShortCode,
 } from "@hb/pos-receipt-core/features/receipts/receipt-document";
 
 const sale = {
@@ -240,6 +241,59 @@ test("80mm 销售小票严格使用 WPF 商品列、标题和正式打印语义"
     documentToEscPosBytes(document),
     [0x1b, 0x61, 0, 0x1b, 0x45, 0, ...new TextEncoder().encode("----------")],
   ), "分隔线必须显式恢复左对齐和非粗体，不能继承 Total 的状态");
+});
+
+test("分期小票顶部条码：取显示单号末 8 位并转大写，印在「Order:」行之前；不传时与原输出逐字节一致", () => {
+  const installmentNumber = "IP-1013-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00";
+  assert.equal(receiptOrderShortCode(installmentNumber), "3D2E1F00");
+  assert.equal(receiptOrderShortCode("  ins-100  "), "INS-100", "不足 8 位取全部，去掉首尾空白");
+  assert.equal(receiptOrderShortCode("ab"), "AB");
+
+  const base = { ...sale, orderGuid: fullOrderGuid, orderDisplay: installmentNumber, includeMachineCodes: true };
+  for (const paper of ["58mm", "80mm"] as const) {
+    const without = buildSaleReceiptDocument({ ...base, paper });
+    const withBarcode = buildSaleReceiptDocument({ ...base, paper, orderBarcode: receiptOrderShortCode(installmentNumber) });
+
+    const barcodeIndexes = withBarcode.lines.flatMap((line, index) => (line.kind === "barcode" ? [index] : []));
+    assert.equal(barcodeIndexes.length, 1, `${paper}：只多出顶部这一条条码`);
+    const barcode = withBarcode.lines[barcodeIndexes[0]!]!;
+    assert.ok(barcode.kind === "barcode" && barcode.value === "3D2E1F00");
+    const orderIndex = withBarcode.lines.findIndex((line) => line.kind === "text" && line.text.startsWith("Order: "));
+    assert.ok(orderIndex > barcodeIndexes[0]!, `${paper}：条码在「Order:」行之前`);
+    assert.ok(
+      withBarcode.lines.filter((line) => line.kind === "text" && line.text.startsWith("Order: ")).length === 1,
+      "完整单号仍由「Order:」行印出",
+    );
+    // 去掉那一条条码行后，其余内容与不传时完全相同。
+    assert.deepEqual(
+      withBarcode.lines.filter((_, index) => index !== barcodeIndexes[0]),
+      without.lines,
+    );
+    // 字节层：标准 2 点模块 Code128 命令出现在带条码的小票里，不传时没有。
+    assert.ok(containsBytes(documentToEscPosBytes(withBarcode), [0x1d, 0x77, 2]));
+    assert.equal(containsBytes(documentToEscPosBytes(without), [0x1d, 0x77, 2]), false);
+
+    // 空串、纯空白：与不传（上面的 without）逐字节一致，其余所有小票的输出保持不变。
+    const baseline = documentToEscPosBytes(without);
+    for (const orderBarcode of ["", "   "]) {
+      assert.deepEqual(documentToEscPosBytes(buildSaleReceiptDocument({ ...base, paper, orderBarcode })), baseline);
+    }
+  }
+});
+
+test("分期小票顶部条码只是辅助扫码：放不下、非可打印 ASCII 时静默省略，小票照常生成；控制字符照旧拒绝", () => {
+  const base = { ...sale, orderGuid: fullOrderGuid, orderDisplay: "IP-1013-AAAA", includeMachineCodes: true };
+  const withoutBarcode = buildSaleReceiptDocument(base);
+  // 58mm 放不下的超长值、含中文（receiptCode128 会抛 TypeError）都不得让小票失败。
+  for (const orderBarcode of ["A".repeat(60), "单号-1"]) {
+    const document = buildSaleReceiptDocument({ ...base, orderBarcode });
+    assert.deepEqual(document.lines, withoutBarcode.lines, orderBarcode);
+    assert.doesNotThrow(() => documentToEscPosBytes(document));
+  }
+  assert.throws(
+    () => buildSaleReceiptDocument({ ...base, orderBarcode: "AB\u001bC" }),
+    /control characters/i,
+  );
 });
 
 test("销售小票统一拒绝可注入 ESC/POS 命令的控制字符", () => {
