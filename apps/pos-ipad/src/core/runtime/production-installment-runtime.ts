@@ -42,6 +42,8 @@ import type {
   InstallmentPaymentCommand,
   InstallmentPaymentMethod,
   InstallmentCardProvider,
+  InstallmentPendingCardRepayment,
+  InstallmentSupervisorDecision,
   InstallmentPickupCommand,
   InstallmentRepaymentCapabilities,
   InstallmentCashRepaymentPreparation,
@@ -642,6 +644,124 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         : new Set(capabilities.cardRepaymentProviders.map(cardProviderFamily));
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * 占用该分期、卡状态不明的刷卡续付（任意收银机发起的），供主管结案。
+   * 这是辅助查询：离线、服务端不支持、没有占用、占用不是「卡 + 状态不明」或任何读取失败都返回 null，
+   * 不抛错——界面只是不展示结案入口，不能因此挡住分期详情。
+   */
+  public async getPendingCardRepayment(
+    installmentGuid: string,
+  ): Promise<InstallmentPendingCardRepayment | null> {
+    try {
+      const session = requireScopedLease(
+        this.context.lease,
+        this.context.terminal,
+      );
+      requirePermission(session, INSTALLMENTS_VIEW_PERMISSION);
+      if (!(await this.context.input.connectivity.isOnline())) return null;
+      const capabilities = validateRepaymentCapabilities(
+        await this.context.capabilities(),
+      );
+      if (capabilities.cardRepaymentSupervisorResolveSupported !== true) {
+        return null;
+      }
+      const claim = await this.context.input.api.getBlockingRepaymentClaim(
+        requiredText(installmentGuid, "installment guid"),
+      );
+      requireScopedLease(this.context.lease, this.context.terminal);
+      if (
+        !claim ||
+        claim.method !== "card" ||
+        (claim.status !== "ProviderPending" && claim.status !== "Unknown") ||
+        !claim.provider
+      ) {
+        return null;
+      }
+      return Object.freeze({
+        installmentGuid: claim.installmentGuid,
+        operationGuid: claim.operationGuid,
+        amountCents: claim.amountCents,
+        provider: claim.provider,
+        claimantDeviceCode: claim.claimantDeviceCode ?? null,
+        status: claim.status,
+        updatedAtIso: claim.updatedAtIso,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 主管结案卡状态不明的刷卡续付：「已扣款」按 claim 金额入账，「未扣款」释放占用。
+   * 资金结论由服务端落账并留痕（写入卡对账异常表供财务复核）；这里只做本机侧的前置复核与收尾：
+   * 在线、当前收银员须有分期取消权限（服务端也会复核）、原因必填。
+   * 结案成功后，若本机正好是发起续付的收银机，尽力按中央结论把本地锁定的 action 收尾；
+   * 收尾失败不影响已落账的结论（下次恢复会重试）。最后回读最新详情返回。
+   */
+  public async resolvePendingCardRepayment(
+    input: Readonly<{
+      installmentGuid: string;
+      operationGuid: string;
+      decision: InstallmentSupervisorDecision;
+      reason: string;
+      reference: string | null;
+    }>,
+  ): Promise<InstallmentDetails> {
+    await this.assertOnlineAndScoped();
+    this.requireCurrentPermission(INSTALLMENTS_CANCEL_PERMISSION);
+    const installmentGuid = requiredText(input.installmentGuid, "installment guid");
+    const operationGuid = requiredText(input.operationGuid, "operation guid");
+    const reason = input.reason.trim();
+    const reference = input.reference?.trim() || null;
+    if (
+      (input.decision !== "charged" && input.decision !== "not-charged") ||
+      reason.length === 0 ||
+      reason.length > 200 ||
+      (reference !== null && reference.length > 100)
+    ) {
+      throw workflowError("conflict", "Supervisor resolution input is invalid.");
+    }
+    const capabilities = await this.getRequiredRepaymentCapabilities();
+    if (capabilities.cardRepaymentSupervisorResolveSupported !== true) {
+      throw workflowError(
+        "conflict",
+        "This server does not support supervisor resolution of card repayments.",
+      );
+    }
+
+    try {
+      await this.context.input.api.supervisorResolveRepaymentClaim({
+        installmentGuid,
+        operationGuid,
+        decision: input.decision,
+        reason,
+        reference,
+      });
+    } catch (error) {
+      throw mapRemoteError(error);
+    }
+    requireScopedLease(this.context.lease, this.context.terminal);
+
+    // 中文注释：服务端结论已落账。本机若是发起方，把本地锁定的 action 按中央结论收尾；失败只留待下次恢复。
+    try {
+      const blocking = await this.loadBlockingOperation();
+      if (blocking) await this.recoverBlockingOperation(blocking);
+    } catch {
+      // 不吞掉资金事实：中央结论已生效，本机残留 action 由 hasRecoveryRequired / recoverBlocking 继续处理。
+    }
+
+    try {
+      const details = await this.context.input.api.getDetails(installmentGuid);
+      requireScopedLease(this.context.lease, this.context.terminal);
+      if (!details) {
+        throw workflowError("conflict", "Installment details are unavailable.");
+      }
+      return details;
+    } catch (error) {
+      throw mapRemoteError(error);
     }
   }
 
@@ -3568,6 +3688,9 @@ function validateRepaymentCapabilities(
     (capabilities.repaymentClaimPrepareProviderV1 !== undefined &&
       typeof capabilities.repaymentClaimPrepareProviderV1 !== "boolean") ||
     typeof capabilities.cardRepaymentSupported !== "boolean" ||
+    (capabilities.cardRepaymentSupervisorResolveSupported !== undefined &&
+      typeof capabilities.cardRepaymentSupervisorResolveSupported !==
+        "boolean") ||
     (capabilities.cardRepaymentProviders !== undefined &&
       (!Array.isArray(capabilities.cardRepaymentProviders) ||
         capabilities.cardRepaymentProviders.some(

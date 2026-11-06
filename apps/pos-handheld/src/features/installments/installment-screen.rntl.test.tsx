@@ -1058,6 +1058,95 @@ test("运行时未接线页安全返回", async () => {
   await screen.unmount();
 });
 
+const PENDING_CARD_REPAYMENT = {
+  installmentGuid: "10000000-0000-4000-8000-000000000001",
+  operationGuid: "20000000-0000-4000-8000-000000000009",
+  amountCents: 2_500,
+  provider: "zeller",
+  claimantDeviceCode: "WPF-POS-2",
+  status: "Unknown" as const,
+  updatedAtIso: "2026-11-06T01:02:03.000Z",
+};
+
+test("卡状态不明的续付占用分期时，详情页展示主管结案面板；有取消权限可选两个结论", async () => {
+  const { presenter, spies } = createPresenter({
+    details: details("Active"),
+    orders: [summary()],
+    pendingCardRepayment: PENDING_CARD_REPAYMENT,
+    selectedGuid: GUID,
+  });
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+
+  expect(screen.getByTestId("installment-supervisor-panel")).toBeTruthy();
+  const detail = screen.getByTestId("installment-supervisor-details");
+  // toHaveTextContent 传字符串要求整段相等，子串匹配用正则；更新时间按终端本地时区渲染，这里不断言。
+  expect(detail).toHaveTextContent(/\$25\.00/u);
+  expect(detail).toHaveTextContent(/zeller/u);
+  expect(detail).toHaveTextContent(/WPF-POS-2/u);
+  expect(screen.queryByTestId("installment-supervisor-needs-permission")).toBeNull();
+  expect(screen.queryByTestId("installment-supervisor-dialog")).toBeNull();
+
+  await fireEvent.press(screen.getByTestId("installment-supervisor-charged"));
+  expect(spies.openSupervisorResolve).toHaveBeenLastCalledWith("charged");
+  await fireEvent.press(screen.getByTestId("installment-supervisor-not-charged"));
+  expect(spies.openSupervisorResolve).toHaveBeenLastCalledWith("not-charged");
+  await screen.unmount();
+});
+
+test("没有分期取消权限只提示找主管，不展示结案按钮；没有占用时不展示面板", async () => {
+  const noPermission = createPresenter({
+    access: {
+      canAddRepayment: true,
+      canCancel: false,
+      canConfirmPickup: true,
+      canCreate: true,
+      canView: true,
+    },
+    details: details("Active"),
+    orders: [summary()],
+    pendingCardRepayment: PENDING_CARD_REPAYMENT,
+    selectedGuid: GUID,
+  });
+  const first = await render(<InstallmentScreen presenter={noPermission.presenter} />);
+  expect(first.getByTestId("installment-supervisor-needs-permission")).toBeTruthy();
+  expect(first.queryByTestId("installment-supervisor-charged")).toBeNull();
+  expect(first.queryByTestId("installment-supervisor-not-charged")).toBeNull();
+  await first.unmount();
+
+  const none = createPresenter({
+    details: details("Active"),
+    orders: [summary()],
+    selectedGuid: GUID,
+  });
+  const second = await render(<InstallmentScreen presenter={none.presenter} />);
+  expect(second.queryByTestId("installment-supervisor-panel")).toBeNull();
+  await second.unmount();
+});
+
+test("主管结案对话框：原因必填输入、依据选填，返回与提交都交给 presenter", async () => {
+  const { presenter, spies } = createPresenter({
+    details: details("Active"),
+    orders: [summary()],
+    pendingCardRepayment: PENDING_CARD_REPAYMENT,
+    selectedGuid: GUID,
+    supervisorResolve: { kind: "open", decision: "not-charged", reason: "", reference: "" },
+  });
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+
+  expect(screen.getByTestId("installment-supervisor-dialog")).toBeTruthy();
+  // 对话框打开时不再重复展示两个结论按钮。
+  expect(screen.queryByTestId("installment-supervisor-charged")).toBeNull();
+  await fireEvent.changeText(screen.getByTestId("installment-supervisor-reason"), "Checked Zeller portal");
+  expect(spies.setSupervisorResolveReason).toHaveBeenCalledWith("Checked Zeller portal");
+  await fireEvent.changeText(screen.getByTestId("installment-supervisor-reference"), "RRN123");
+  expect(spies.setSupervisorResolveReference).toHaveBeenCalledWith("RRN123");
+  await fireEvent.press(screen.getByTestId("installment-supervisor-submit"));
+  expect(spies.confirmSupervisorResolve).toHaveBeenCalledTimes(1);
+  await fireEvent.press(screen.getByTestId("installment-supervisor-back"));
+  expect(spies.closeSupervisorResolve).toHaveBeenCalledTimes(1);
+  await screen.unmount();
+});
+
 function createPresenter(
   overrides: Partial<InstallmentPresenterState>,
   canReprint = false,
@@ -1095,6 +1184,7 @@ function createPresenter(
     online: true,
     orders: [],
     pane: "history",
+    pendingCardRepayment: null,
     pickupNote: "",
     query: "",
     recoveryRequired: false,
@@ -1105,6 +1195,7 @@ function createPresenter(
     selectedGuid: null,
     statusCode: null,
     statusFilter: null,
+    supervisorResolve: { kind: "closed" },
     voidReason: "",
     ...overrides,
   };
@@ -1115,6 +1206,13 @@ function createPresenter(
   };
   const spies = {
     cancelWithRefund: jest.fn(async () => undefined),
+    closeSupervisorResolve: jest.fn(() => undefined),
+    confirmSupervisorResolve: jest.fn(async () => undefined),
+    openSupervisorResolve: jest.fn(
+      (_value: "charged" | "not-charged") => undefined,
+    ),
+    setSupervisorResolveReason: jest.fn((_value: string) => undefined),
+    setSupervisorResolveReference: jest.fn((_value: string) => undefined),
     confirmPickup: jest.fn(async () => undefined),
     load: jest.fn(async () => undefined),
     loadMore: jest.fn(async () => undefined),

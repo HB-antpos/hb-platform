@@ -70,7 +70,11 @@ export type PaymentUiRuntimeErrorCode =
   | PaymentCheckoutErrorCode
   | LinklyOperatorErrorCode
   | "INSTALLMENT_CASH_CONFIRMATION_REQUIRED"
-  | "INSTALLMENT_CASH_CANCELLATION_FAILED";
+  | "INSTALLMENT_CASH_CANCELLATION_FAILED"
+  /** 该分期另有一笔续付占用；本次未收款（发生在任何 provider 调用之前）。 */
+  | "INSTALLMENT_REPAYMENT_BUSY"
+  /** 服务端未放开所选刷卡通道的续付；本次未收款（发生在任何 provider 调用之前）。 */
+  | "INSTALLMENT_REPAYMENT_METHOD_UNSUPPORTED";
 
 export type PaymentPresenterTender = Readonly<{
   tenderGuid: string;

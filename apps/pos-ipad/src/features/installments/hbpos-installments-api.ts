@@ -17,6 +17,7 @@ import type {
   InstallmentRepaymentClaimCreateCommand,
   InstallmentRepaymentClaimIdentity,
   InstallmentRepaymentClaimResolveCommand,
+  InstallmentRepaymentClaimSupervisorResolveCommand,
   InstallmentCancelClaim,
   InstallmentCancelClaimCommitCommand,
   InstallmentCancelClaimCreateCommand,
@@ -26,6 +27,7 @@ import type {
   InstallmentRefundCommand,
   InstallmentsRemotePort,
   InstallmentVoidCommand,
+  InstallmentSupervisorDecision,
 } from "./installment-models";
 
 import {
@@ -70,6 +72,8 @@ type GeneratedPickupRequest =
       operationGuid?: string;
       idempotencyKey?: string;
     }>;
+type GeneratedSupervisorResolveRequest =
+  components["schemas"]["InstallmentRepaymentClaimSupervisorResolveRequest"];
 type GeneratedPickupResponse =
   components["schemas"]["InstallmentConfirmPickupResponse"];
 type GeneratedRefundCommand =
@@ -99,6 +103,12 @@ const REFUND_MODE_TO_API = Object.freeze({
   "original-route": 1,
   voucher: 2,
 } satisfies Readonly<Record<InstallmentCancelRefundMode, 1 | 2>>);
+
+/** 主管结案结论 → 服务端 InstallmentRepaymentSupervisorDecision（1 = ConfirmedCharged，2 = ConfirmedNotCharged）。 */
+const SUPERVISOR_DECISION_TO_API = Object.freeze({
+  charged: 1,
+  "not-charged": 2,
+} satisfies Readonly<Record<InstallmentSupervisorDecision, 1 | 2>>);
 
 const RESOLVE_OUTCOME_TO_API = Object.freeze({
   Released: 1,
@@ -169,6 +179,14 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
         "capabilities.cardRepaymentSupported",
       ),
       ...optionalCardRepaymentProviders(payload.cardRepaymentProviders),
+      ...(payload.cardRepaymentSupervisorResolveSupported === undefined
+        ? {}
+        : {
+            cardRepaymentSupervisorResolveSupported: responseBoolean(
+              payload.cardRepaymentSupervisorResolveSupported,
+              "capabilities.cardRepaymentSupervisorResolveSupported",
+            ),
+          }),
       crossDeviceRepaymentEnabled: responseBoolean(
         payload.crossDeviceRepaymentEnabled,
         "capabilities.crossDeviceRepaymentEnabled",
@@ -284,6 +302,48 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
     const response = await this.transport.request<HbposEnvelope<unknown>>({
       method: "GET",
       url: claimUrl(identity),
+    });
+    return this.mapRepaymentClaim(
+      unwrapHbposEnvelope(response.data),
+      identity.installmentGuid,
+      identity.operationGuid,
+    );
+  }
+
+  public async getBlockingRepaymentClaim(
+    installmentGuid: string,
+  ): Promise<InstallmentRepaymentClaim | null> {
+    const guid = requestUuid(installmentGuid, "installmentGuid");
+    const response = await this.transport.request<HbposEnvelope<unknown>>({
+      method: "GET",
+      url: `/api/v1/installments/${guid}/repayment-claims/blocking`,
+    });
+    const payload = unwrapHbposEnvelope(response.data);
+    if (!isRecord(payload)) throw invalidResponse("blockingRepaymentClaim");
+    if (payload.claim === null || payload.claim === undefined) return null;
+    // 中文注释：占用的 operationGuid 事先未知，只核对分期单号；其余字段与普通 claim 同一套严格校验。
+    return this.mapRepaymentClaim(payload.claim, guid, null);
+  }
+
+  public async supervisorResolveRepaymentClaim(
+    command: InstallmentRepaymentClaimSupervisorResolveCommand,
+  ): Promise<InstallmentRepaymentClaim> {
+    const identity = mapClaimIdentity(command);
+    // 资金结论必须是已知枚举：未知值不能带着 undefined 发给服务端。
+    const decision = Object.hasOwn(SUPERVISOR_DECISION_TO_API, command.decision)
+      ? SUPERVISOR_DECISION_TO_API[command.decision]
+      : undefined;
+    if (decision === undefined) throw invalidRequest("decision");
+    const reference = optionalRequestText(command.reference, "reference", 100);
+    const request: GeneratedSupervisorResolveRequest = {
+      decision,
+      reason: requestText(command.reason, "reason", 200),
+      ...(reference === null ? {} : { reference }),
+    };
+    const response = await this.transport.request<HbposEnvelope<unknown>>({
+      method: "POST",
+      url: claimUrl(identity, "/supervisor-resolve"),
+      data: request,
     });
     return this.mapRepaymentClaim(
       unwrapHbposEnvelope(response.data),
@@ -778,7 +838,7 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
   private mapRepaymentClaim(
     input: unknown,
     expectedInstallmentGuid: string,
-    expectedOperationGuid: string,
+    expectedOperationGuid: string | null,
   ): InstallmentRepaymentClaim {
     if (!isRecord(input)) throw invalidResponse("repaymentClaim");
     const installmentGuid = responseUuid(
@@ -791,10 +851,15 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
     );
     if (
       installmentGuid !== expectedInstallmentGuid ||
-      operationGuid !== expectedOperationGuid
+      (expectedOperationGuid !== null && operationGuid !== expectedOperationGuid)
     ) {
       throw invalidResponse("repaymentClaim.identity");
     }
+    const claimantDeviceCode = responseOptionalText(
+      input.claimantDeviceCode,
+      "repaymentClaim.claimantDeviceCode",
+      128,
+    );
     return Object.freeze({
       installmentGuid,
       operationGuid,
@@ -849,6 +914,8 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
         input.alreadyExists,
         "repaymentClaim.alreadyExists",
       ),
+      // 缺省不带该键：旧服务端不返回，也保持既有 claim 映射的 deepEqual 断言不变。
+      ...(claimantDeviceCode === null ? {} : { claimantDeviceCode }),
     });
   }
 

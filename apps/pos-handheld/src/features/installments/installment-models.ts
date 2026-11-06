@@ -94,6 +94,11 @@ export type InstallmentRepaymentCapabilities = Readonly<{
    * 旧服务端缺失或为 null 时保持 undefined，调用方回退到只看 cardRepaymentSupported，不得据此收紧。
    */
   cardRepaymentProviders?: readonly string[];
+  /**
+   * 服务端支持主管结案卡状态不明的刷卡续付（blocking 查询 + supervisor-resolve）。
+   * 旧服务端缺失时保持 undefined，按不支持处理，界面不展示结案入口。
+   */
+  cardRepaymentSupervisorResolveSupported?: boolean;
   crossDeviceRepaymentEnabled: boolean;
   crossDeviceCancelRefundEnabled: boolean;
   crossDeviceVoidEnabled: boolean;
@@ -182,7 +187,36 @@ export type InstallmentRepaymentClaim = Readonly<{
     alreadyRecorded: boolean;
   }> | null;
   alreadyExists: boolean;
+  /** 发起这笔续付的收银机；主管在别的收银机上结案时据此提示。旧服务端不返回，此时缺省。 */
+  claimantDeviceCode?: string | null;
 }>;
+
+/** 主管对卡状态不明的刷卡续付做的人工结论（对应服务端 ConfirmedCharged / ConfirmedNotCharged）。 */
+export type InstallmentSupervisorDecision = "charged" | "not-charged";
+
+/**
+ * 占用某个分期、卡状态不明的刷卡续付（任意收银机发起的）：主管可据此结案。
+ * 只含界面需要的安全描述符；不含 providerAttemptId、卡引用等受保护材料。
+ */
+export type InstallmentPendingCardRepayment = Readonly<{
+  installmentGuid: string;
+  operationGuid: string;
+  amountCents: number;
+  provider: string;
+  claimantDeviceCode: string | null;
+  status: "ProviderPending" | "Unknown";
+  updatedAtIso: string;
+}>;
+
+export type InstallmentRepaymentClaimSupervisorResolveCommand =
+  InstallmentRepaymentClaimIdentity &
+    Readonly<{
+      decision: InstallmentSupervisorDecision;
+      /** 必填，最长 200：核实了哪里的交易记录。 */
+      reason: string;
+      /** 选填，最长 100：银行批准码、RRN 等核实依据。 */
+      reference: string | null;
+    }>;
 
 export type InstallmentCashRepaymentPreparation = Readonly<{
   installmentGuid: string;
@@ -330,6 +364,14 @@ export interface InstallmentsRemotePort {
   ): Promise<InstallmentRepaymentClaim>;
   resolveRepaymentClaim(
     command: InstallmentRepaymentClaimResolveCommand,
+  ): Promise<InstallmentRepaymentClaim>;
+  /** 占用该分期的续付 claim（同店任意收银机）；没有占用时返回 null。 */
+  getBlockingRepaymentClaim(
+    installmentGuid: string,
+  ): Promise<InstallmentRepaymentClaim | null>;
+  /** 主管结案卡状态不明的刷卡续付；需要分期取消权限，结论由服务端落账并留痕。 */
+  supervisorResolveRepaymentClaim(
+    command: InstallmentRepaymentClaimSupervisorResolveCommand,
   ): Promise<InstallmentRepaymentClaim>;
   commitRepaymentClaim(
     command: InstallmentRepaymentClaimCommitCommand,

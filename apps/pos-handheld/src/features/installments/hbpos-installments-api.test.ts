@@ -397,6 +397,136 @@ test("capabilities 解析服务端放开的刷卡续付通道：归一为小写�
   await assert.rejects(() => providersOf(["square", 1]), /cardRepaymentProviders/);
 });
 
+test("主管结案能力位与占用查询：缺失保持缺省；没有占用返回 null；占用映射含发起设备，分期单号不符拒绝", async () => {
+  const base = {
+    repaymentClaimsSupported: true,
+    repaymentClaimsRequired: false,
+    crossDeviceRepaymentEnabled: false,
+    preparedClaimTtlSeconds: 120,
+  };
+  const capabilityOf = async (flag: unknown): Promise<unknown> => {
+    const api = new HbposInstallmentsApi(
+      new QueueTransport([{ success: true, data: { ...base, cardRepaymentSupported: true, ...(flag === undefined ? {} : { cardRepaymentSupervisorResolveSupported: flag }) } }]),
+      "S1",
+    );
+    const capabilities = await api.getCapabilities();
+    return "cardRepaymentSupervisorResolveSupported" in capabilities
+      ? capabilities.cardRepaymentSupervisorResolveSupported
+      : "absent";
+  };
+  assert.equal(await capabilityOf(undefined), "absent", "旧服务端缺失：保持缺省，界面不展示结案入口");
+  assert.equal(await capabilityOf(true), true);
+  assert.equal(await capabilityOf(false), false);
+  await assert.rejects(() => capabilityOf("yes"), /cardRepaymentSupervisorResolveSupported/);
+
+  const claim = {
+    installmentGuid,
+    operationGuid,
+    paymentGuid,
+    amount: 25,
+    method: 2,
+    idempotencyKey: operationGuid,
+    status: 6,
+    provider: "zeller",
+    providerAttemptId: "attempt-1",
+    createdAtUtc: "2026-11-06T01:00:00Z",
+    updatedAtUtc: "2026-11-06T01:01:00Z",
+    expiresAtUtc: null,
+    commit: null,
+    alreadyExists: true,
+    claimantDeviceCode: "WPF-POS-2",
+  };
+  const transport = new QueueTransport([
+    { success: true, data: { claim } },
+    { success: true, data: {} },
+    { success: true, data: { claim: null } },
+    { success: true, data: { claim: { ...claim, installmentGuid: paymentGuid } } },
+    { success: true, data: { claim: { ...claim, claimantDeviceCode: undefined } } },
+  ]);
+  const api = new HbposInstallmentsApi(transport, "S1");
+
+  const blocking = await api.getBlockingRepaymentClaim(installmentGuid);
+  assert.equal(blocking?.operationGuid, operationGuid, "占用的 operationGuid 事先未知，按响应取值");
+  assert.equal(blocking?.claimantDeviceCode, "WPF-POS-2");
+  assert.equal(blocking?.amountCents, 2_500);
+  assert.equal(await api.getBlockingRepaymentClaim(installmentGuid), null, "claim 缺失 = 没有占用");
+  assert.equal(await api.getBlockingRepaymentClaim(installmentGuid), null, "claim 为 null = 没有占用");
+  await assert.rejects(() => api.getBlockingRepaymentClaim(installmentGuid), /identity/, "分期单号与请求不一致必须拒绝");
+  const withoutDevice = await api.getBlockingRepaymentClaim(installmentGuid);
+  assert.equal("claimantDeviceCode" in (withoutDevice ?? {}), false, "旧服务端不返回发起设备：不带该键");
+  assert.deepEqual(transport.requests.map((request) => [request.method, request.url]), [
+    ["GET", `/api/v1/installments/${installmentGuid}/repayment-claims/blocking`],
+    ["GET", `/api/v1/installments/${installmentGuid}/repayment-claims/blocking`],
+    ["GET", `/api/v1/installments/${installmentGuid}/repayment-claims/blocking`],
+    ["GET", `/api/v1/installments/${installmentGuid}/repayment-claims/blocking`],
+    ["GET", `/api/v1/installments/${installmentGuid}/repayment-claims/blocking`],
+  ]);
+  await assert.rejects(() => api.getBlockingRepaymentClaim("not-a-guid"));
+});
+
+test("主管结案请求：结论映射为服务端枚举，原因必填并 trim，依据留空则不发送，非法输入不发请求", async () => {
+  const resolved = {
+    installmentGuid,
+    operationGuid,
+    paymentGuid,
+    amount: 25,
+    method: 2,
+    idempotencyKey: operationGuid,
+    status: 3,
+    provider: "zeller",
+    providerAttemptId: "attempt-1",
+    createdAtUtc: "2026-11-06T01:00:00Z",
+    updatedAtUtc: "2026-11-06T01:02:00Z",
+    expiresAtUtc: null,
+    commit: null,
+    alreadyExists: false,
+  };
+  const transport = new QueueTransport([
+    { success: true, data: { ...resolved, status: 3 } },
+    { success: true, data: { ...resolved, status: 5 } },
+  ]);
+  const api = new HbposInstallmentsApi(transport, "S1");
+  const identity = { installmentGuid, operationGuid };
+
+  const charged = await api.supervisorResolveRepaymentClaim({
+    ...identity,
+    decision: "charged",
+    reason: "  Checked Zeller portal  ",
+    reference: "  RRN-1  ",
+  });
+  const notCharged = await api.supervisorResolveRepaymentClaim({
+    ...identity,
+    decision: "not-charged",
+    reason: "No charge on terminal",
+    reference: "   ",
+  });
+  assert.equal(charged.status, "Committed");
+  assert.equal(notCharged.status, "Declined");
+  const url = `/api/v1/installments/${installmentGuid}/repayment-claims/${operationGuid}/supervisor-resolve`;
+  assert.deepEqual(
+    transport.requests.map((request) => [request.method, request.url, request.data]),
+    [
+      ["POST", url, { decision: 1, reason: "Checked Zeller portal", reference: "RRN-1" }],
+      ["POST", url, { decision: 2, reason: "No charge on terminal" }],
+    ],
+  );
+
+  // 非法输入：全部在发请求之前拒绝。
+  const before = transport.requests.length;
+  for (const bad of [
+    { reason: "   " },
+    { reason: "x".repeat(201) },
+    { reason: "has\u0007control" },
+    { reference: "r".repeat(101) },
+    { decision: "bogus" as never },
+  ]) {
+    await assert.rejects(() =>
+      api.supervisorResolveRepaymentClaim({ ...identity, decision: "charged", reason: "ok", reference: null, ...bad }),
+    );
+  }
+  assert.equal(transport.requests.length, before);
+});
+
 test("cancel claim 不携带门店或收银员身份，并复用同一 durable operation", async () => {
   const payload = {
     installmentGuid,
