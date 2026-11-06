@@ -410,6 +410,9 @@ namespace BlazorApp.Shared.Constants
             public const string ManageSuppliers = "DomesticPurchase.ManageSuppliers";
             public const string ManageProducts = "DomesticPurchase.ManageProducts";
             public const string ManagePrefixCodes = "DomesticPurchase.ManagePrefixCodes";
+            // 查看国内供应商名称（含店铺号、联系人、联系方式、门头照、备注）：没有它时接口只返回供应商代码（如 HB196）。
+            // 默认只授予 WarehouseManager（管理员自动放行）；「管理国内供应商」经 PermissionAliases 自动具备，其余国内采购权限不自动具备。
+            public const string ViewSupplierName = "DomesticPurchase.ViewSupplierName";
         }
 
         public static class Reports
@@ -427,6 +430,9 @@ namespace BlazorApp.Shared.Constants
             // 月度日销售下载页：按分店、按日查看并下载营业额、刷卡、现金。
             public const string MonthlyDailySalesDownloadView =
                 "SalesDashboard.MonthlyDailySalesDownload.View";
+
+            // 节日销售报告（万圣节）：KFC / Brazco 节日商品的销售、卖断、滞销，按全部分店合计与分店独立查看。
+            public const string HolidaySalesReportView = "SalesDashboard.HolidaySalesReport.View";
             public const string ProductMovementView = "SalesDashboard.ProductMovement.View";
             public const string BatchProductSalesView = "SalesDashboard.BatchProductSales.View";
             public const string WarehouseFlowView = "SalesDashboard.WarehouseFlow.View";
@@ -485,6 +491,20 @@ namespace BlazorApp.Shared.Constants
             public const string Edit = "PricingStrategy.Edit";
         }
 
+        // 商品陈列图（方案 docs/plans/2026-11-04-planogram-shelf-display-designer.md 第 8 节）：Web「商品与价格」合并页的页签。
+        // 默认不授予任何角色，由管理员在生产手动授权（迁移 20261104.001-planogram 入库）；PermissionAliases 设 Manage ⊇ Edit ⊇ View。
+        public static class Planogram
+        {
+            /// <summary>看方案 / 商品陈列参数 / 货架与挂钩型号（只读）。</summary>
+            public const string View = "Planogram.View";
+
+            /// <summary>建改方案、维护商品陈列参数。</summary>
+            public const string Edit = "Planogram.Edit";
+
+            /// <summary>维护货架与挂钩型号、清除商品陈列参数、发布与归档方案。</summary>
+            public const string Manage = "Planogram.Manage";
+        }
+
         public static class DeviceRegistration
         {
             public const string View = "DeviceRegistration.View";
@@ -531,6 +551,11 @@ namespace BlazorApp.Shared.Constants
                 [Users.CreateStoreStaff] = [Users.Create],
                 [Users.EditStoreStaff] = [Users.Edit],
                 [Users.ResetStoreStaffPassword] = [Users.ResetPassword],
+                // 商品陈列图：Manage 隐含 Edit、Edit 隐含 View（持有高一级权限即满足低一级接口与菜单）；反向不成立。
+                [Planogram.View] = [Planogram.Edit, Planogram.Manage],
+                [Planogram.Edit] = [Planogram.Manage],
+                // 「管理国内供应商」页面本身就是编辑名称与联系方式，持有它必须能看到名称；反向不成立。
+                [DomesticPurchase.ViewSupplierName] = [DomesticPurchase.ManageSuppliers],
             };
 
         public static class AustralianSuppliers

@@ -74,6 +74,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.SalesDashboard.SalesDetailView, "查看销售明细", "销售看板", "Web 页面 /executive-sales-intelligence/sales-detail-v2 - 按供应商、分店和商品查看销售明细"),
                 new(Permissions.SalesDashboard.CompactBoardView, "查看独立销售看板", "销售看板", "Web 页面 /executive-sales-intelligence/compact-sales-board - 查看紧凑布局的分店、供应商和商品销售数据"),
                 new(Permissions.SalesDashboard.MonthlyDailySalesDownloadView, "查看月度日销售下载", "销售看板", "Web 页面 /executive-sales-intelligence/monthly-daily-sales-download - 按分店、按日查看并下载某个月的营业额、刷卡和现金"),
+                new(Permissions.SalesDashboard.HolidaySalesReportView, "查看节日销售报告", "销售看板", "Web 页面 /executive-sales-intelligence/holiday-sales-report - 查看万圣节 KFC / Brazco 商品的销售、卖断提前天数、滞销与库存，可看全部分店合计或单店"),
                 new(Permissions.SalesDashboard.ProductMovementView, "查看商品经营分析", "销售看板", "Web 页面 /executive-sales-intelligence/product-movement-report - 查看商品经营表现和店长动作建议"),
                 new(Permissions.SalesDashboard.BatchProductSalesView, "查看批量货号销量", "销售看板", "Web 页面 /executive-sales-intelligence/purchase-sales-analysis「批量货号销量」标签 - 按导入货号查看商品每日销量、分店销量及折扣成交情况"),
                 new(Permissions.SalesDashboard.WarehouseFlowView, "查看仓库商品流转分析", "销售看板", "Web 页面 /executive-sales-intelligence/warehouse-product-flow-analysis 与移动端「仓库商品进销」- 查看仓库商品的进货、发货和销售流转"),
@@ -351,6 +352,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.DomesticPurchase.ManageSuppliers, "管理国内供应商", "国内采购", "Web 页面 /domestic-purchase/china-suppliers - 管理国内供应商"),
                 new(Permissions.DomesticPurchase.ManageProducts, "管理国内商品", "国内采购", "Web 页面 /domestic-purchase/product-creation 与 /product-import - 创建和导入商品"),
                 new(Permissions.DomesticPurchase.ManagePrefixCodes, "管理前缀码", "国内采购", "Web 页面 /domestic-purchase/prefix-code-management - 管理商品前缀码"),
+                // 名称 / 描述须与入库脚本 Data/Migrations/20261105_AddDomesticSupplierNamePermission.sql 保持一致；只写入 WarehouseManager 模板。
+                new(Permissions.DomesticPurchase.ViewSupplierName, "查看国内供应商名称", "国内采购", "Web 与移动端所有显示国内供应商的页面及导出文件 - 默认只显示供应商代码（如 HB196），有此权限才显示供应商名称、店铺号、联系人与联系方式"),
                 // 销售看板各页已改由 SalesDashboard.* 逐页授权，Reports.View 只剩高管看板的三个聚合接口。
                 new(Permissions.Reports.View, "查看报表", "报表", "高管看板接口 - 时段客流、分店日绩效与周绩效层级接口；同时视为 Reports.ProductMovement.View 的别名"),
                 // 显示名与 SalesDashboard.ProductMovement.View 区分开，避免角色配置页出现两个同名权限。
@@ -446,6 +449,10 @@ namespace BlazorApp.Shared.Constants
                 // 仅注册权限，不写入角色模板；定价策略直接影响分店售价，由管理员显式授予。
                 new(Permissions.PricingStrategy.View, "查看定价策略", "定价策略", "Web 页面 /pos-admin/pricing-strategies - 查看与试算自动价格策略"),
                 new(Permissions.PricingStrategy.Edit, "编辑定价策略", "定价策略", "Web 页面 /pos-admin/pricing-strategies - 新增、编辑、删除自动价格策略"),
+                // 商品陈列图：默认不授予任何角色；入库由迁移 20261104.001-planogram 幂等完成。名称 / 描述须与迁移 ApplySql 保持一致。
+                new(Permissions.Planogram.View, "查看商品陈列图", "商品陈列图", "Web 页面 /pos-admin/planograms - 查看陈列方案、商品陈列参数与货架 / 挂钩型号"),
+                new(Permissions.Planogram.Edit, "编辑商品陈列图", "商品陈列图", "Web 页面 /pos-admin/planograms - 新建与编辑陈列方案、维护商品陈列参数（包装尺寸、吊孔偏移、每钩挂数）"),
+                new(Permissions.Planogram.Manage, "管理商品陈列图", "商品陈列图", "Web 页面 /pos-admin/planograms - 维护货架与挂钩型号、清除商品陈列参数、发布与归档陈列方案"),
                 new(Permissions.DeviceRegistration.View, "查看设备注册", "系统管理", "Web 页面 /system/device-registration 与移动端「设备管理」- 查看 POS 设备注册列表与状态"),
                 new(Permissions.DeviceRegistration.Manage, "管理设备注册", "系统管理", "Web 页面 /system/device-registration - 审核、维护或管理设备注册"),
                 // 仅注册权限，不写入 StoreManager/WarehouseManager 角色模板；手工委派仍受可管理分店范围约束。
@@ -525,6 +532,7 @@ namespace BlazorApp.Shared.Constants
                         Permissions.DomesticPurchase.ManageSuppliers,
                         Permissions.DomesticPurchase.ManageProducts,
                         Permissions.DomesticPurchase.ManagePrefixCodes,
+                        Permissions.DomesticPurchase.ViewSupplierName,
                         Permissions.Reports.View,
                         // 澳洲供应商接口原按 WarehouseManager 角色放行，改为权限策略后由模板保留原能力。
                         Permissions.AustralianSuppliers.View,
