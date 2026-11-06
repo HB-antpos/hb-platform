@@ -76,6 +76,12 @@ assert.doesNotMatch(editScreen, /userManagement:fields\.enabled/, "编辑页不�
 assert.match(editScreen, /shouldPromptPasswordSetup\(/, "从不能登录改为能登录后必须提示发设置密码邮件");
 assert.match(editScreen, /<StaffPasswordSetupDialog/, "提示发送设置密码邮件必须复用现有弹窗");
 assert.match(editScreen, /canResetUserPassword/, "无重置密码权限不弹设置密码邮件");
+assert.match(
+  editScreen,
+  /setupEmailMutation\.mutateAsync\(\{[^}]*initialPassword: true[^}]*\}\)/,
+  "编辑页弹窗是「关→开登录」的开通账号：发初始密码（账号已创建文案），不是重置",
+);
+assert.doesNotMatch(editScreen, /resetPassword: true/, "编辑页开通登录不能走重置通道（邮件会写成「旧密码已失效」）");
 assert.match(editScreen, /useLeaveGuard\(dirty\)/, "有未保存改动时返回先确认");
 assert.match(editScreen, /isSelf/, "本人行不提供编辑");
 assert.match(editScreen, /canModifyIdentityUser\(/, "管理员接口编辑必须复核目标是否可修改");

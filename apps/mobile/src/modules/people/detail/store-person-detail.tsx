@@ -253,10 +253,10 @@ export function StorePersonDetail({
   const handleSendSetupEmail = useCallback(async (email?: string) => {
     if (!storeCode || !permissions?.passwordModes.email) return;
     setPasswordError(null);
-    // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置。
+    // 店长不再手动设新密码：后端生成随机密码发到员工邮箱（resetPassword），旧密码立即失效，员工首次登录自己改。
     // 老账号没有可用邮箱时 email 为就地补填的邮箱，后端先保存再发送。
     try {
-      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode, email });
+      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode, email, resetPassword: true });
       setPasswordVisible(false);
       setSnackbar(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
     } catch (error) {

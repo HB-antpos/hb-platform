@@ -116,6 +116,8 @@
     "server": "服务器暂时繁忙，请稍后点「重试」。",
     "http": "登录失败，请稍后重试或联系管理员。错误码：{{status}}",
     "locationRequired": "登录需要采集当前位置。请允许精确定位后再登录。",
+    "tooManyAttempts": "登录失败次数过多，请约 {{minutes}} 分钟后再试。",
+    "tempPasswordExpired": "临时密码已过期，请联系店长重新发送。",
     "stepTimeout": "登录处理超时，请点「重试」；多次出现请完全关闭并重新打开 App。",
     "default": "登录失败，请稍后重试。"
   },

@@ -326,8 +326,9 @@ function PersonEditor({ userGuid, storeCode }: { userGuid: string; storeCode: st
     }
     setPasswordError(null);
     try {
-      // 店长不再手动设新密码：给员工邮箱发验证码，员工在登录页自己设置；老账号没有可用邮箱时 email 为就地补填的邮箱。
-      const result = await setupEmailMutation.mutateAsync({ userGuid: passwordUser.userGUID, storeCode, email });
+      // 这里是「关→开登录」后的开通账号，不是重置：用初始密码通道（initialPassword，邮件写「账号已创建」）。
+      // 店长不再手动设新密码；老账号没有可用邮箱时 email 为就地补填的邮箱。
+      const result = await setupEmailMutation.mutateAsync({ userGuid: passwordUser.userGUID, storeCode, email, initialPassword: true });
       setPasswordUser(null);
       finishSaved(t("userManagement:messages.passwordSetupEmailSent", { email: result.maskedEmail }));
     } catch (error) {

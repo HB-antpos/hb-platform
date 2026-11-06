@@ -106,6 +106,12 @@ for (const [label, detail] of [["店长版", storeDetail], ["管理员版", admi
   assert.match(detail, /setupEmailMutation\.mutateAsync\(/, `${label}重置密码必须改为发送设置密码邮件，不手动设新密码`);
   assert.match(
     detail,
+    /setupEmailMutation\.mutateAsync\(\{[^}]*resetPassword: true[^}]*\}\)/,
+    `${label}重置密码必须走 resetPassword 通道（随机密码邮件，旧密码立即失效），不能退回验证码`,
+  );
+  assert.doesNotMatch(detail, /initialPassword: true/, `${label}重置不是新建账号，不能用「账号已创建」的初始密码文案`);
+  assert.match(
+    detail,
     /console\.warn\("\[people-detail\] password setup email failed", toSafeStoreUserErrorLog\(error\)\)/,
     `${label}发送设置密码邮件失败只能记录脱敏后的错误元数据`,
   );

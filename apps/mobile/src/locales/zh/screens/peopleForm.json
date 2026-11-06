@@ -107,7 +107,7 @@
     "assignmentValue": "{{store}} · 店员 · 临时工",
     "copyAccount": "复制账号",
     "copiedAccount": "账号已复制",
-    "loginDisabledNotice": "该员工暂不能登录 App 和 Web，没有发送任何密码邮件。需要时在「编辑资料」里打开「允许登录 App 和 Web」，保存后会提示发送设置密码邮件。",
+    "loginDisabledNotice": "该员工暂不能登录 App 和 Web，没有发送任何密码邮件。需要时在「编辑资料」里打开「允许登录 App 和 Web」，保存后会提示给员工发密码邮件。",
     "inviteSent": "初始密码已发送到 {{email}}。员工首次登录后须修改密码。",
     "inviteFailed": "账号已创建，但初始密码邮件没有发出：{{reason}}。可以重新发送。",
     "inviteFailedFallback": "邮件发送失败",
@@ -198,7 +198,7 @@
     "emailEmptyHint": "还没有可用邮箱，设置后才能给员工发密码邮件。",
     "emailDeliverable": "可收信",
     "sectionLogin": "登录",
-    "loginHelper": "从「不允许」改为「允许」后，保存时会提示给员工发设置密码邮件。",
+    "loginHelper": "从「不允许」改为「允许」后，保存时会提示给员工发密码邮件。",
     "statusNotice": "启用 / 停用不在这里改：用详情页的「停用」按钮，有单独的确认。",
     "save": "保存",
     "saveWithCount": "保存 · {{count}} 项改动"

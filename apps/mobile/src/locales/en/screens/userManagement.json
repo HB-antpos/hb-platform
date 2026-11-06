@@ -24,7 +24,7 @@
     "disable": "Disable",
     "resetPassword": "Reset password",
     "confirmReset": "Reset",
-    "sendPasswordSetupEmail": "Send password setup email",
+    "sendPasswordSetupEmail": "Send new password by email",
     "saveEmailAndSend": "Save email and send"
   },
   "posPermissions": {
@@ -534,13 +534,13 @@
     "resetPasswordTitle": "Reset staff password",
     "resetPasswordDescription": "Set a new password for {{username}}. Share it with this staff member after saving.",
     "statusConfirmMessage": "Are you sure you want to {{action}} {{username}}?",
-    "resetPasswordEmailDescription": "A password setup code will be emailed to {{username}} ({{email}}). They use it under \"Set up / forgot password\" on the login screen. Their old password keeps working until then.",
-    "resetPasswordNoEmail": "This account only has a store placeholder email, so the code can't be sent. Enter the staff member's own email to send it there.",
+    "resetPasswordEmailDescription": "A new random password will be emailed to {{username}} ({{email}}). Any old password stops working immediately, and they choose their own password the first time they sign in.",
+    "resetPasswordNoEmail": "This account only has a store placeholder email, so the password can't be sent. Enter the staff member's own email to send it there.",
     "resetPasswordNoEmailTitle": "This account has no usable email",
     "staffEmailLabel": "Staff email",
     "staffEmailHelper": "The username {{username}} stays the same. They can also use this email to reset their password from the login screen.",
-    "setupStepSave": "Save the email and send a 6-digit code (valid for 72 hours)",
-    "setupStepEmployee": "The staff member taps \"Set up / forgot password\" on the login screen and sets a new password with the code"
+    "setupStepSave": "Save the email and send a new random password",
+    "setupStepEmployee": "The staff member signs in with it and chooses their own password the first time"
   },
   "messages": {
     "noAccessTitle": "No staff view access",
@@ -573,7 +573,7 @@
     "passwordReset": "Password reset",
     "phoneInvalid": "Enter an Australian mobile (10 digits starting with 04)",
     "emailRequired": "Enter the staff email",
-    "passwordSetupEmailSent": "Password setup email sent to {{email}}",
+    "passwordSetupEmailSent": "New password emailed to {{email}}",
     "emailNotDeliverable": "Enter an email address the staff member can receive mail at"
   },
   "create": {

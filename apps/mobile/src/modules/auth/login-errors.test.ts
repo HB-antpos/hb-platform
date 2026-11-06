@@ -21,6 +21,44 @@ assertEqual(
   "disabled account gets admin-contact guidance"
 );
 
+// 后端登录限流：不能被「锁定」之类的关键词误判成账号不可用，分钟数取自消息，也不给「重试」按钮。
+assertEqual(
+  getFriendlyLoginErrorDescriptor(new Error("登录失败次数过多，请约 15 分钟后再试")).key,
+  "errors.tooManyAttempts",
+  "rate limited login is not reported as an unavailable account"
+);
+
+assertEqual(
+  getFriendlyLoginErrorDescriptor(new Error("登录失败次数过多，请约 2 分钟后再试")).values?.minutes,
+  2,
+  "wait minutes are taken from the backend message"
+);
+
+assertEqual(
+  getFriendlyLoginErrorDescriptor(new Error("登录失败次数过多，请稍后再试")).values?.minutes,
+  15,
+  "wait minutes fall back to 15 when the message has none"
+);
+
+assertEqual(
+  getFriendlyLoginErrorDescriptor(new Error("登录失败次数过多，请约 15 分钟后再试")).retryable,
+  undefined,
+  "rate limited login does not offer retry"
+);
+
+// 邮件临时密码超过 72 小时：密码没输错，要告诉员工找店长重新发送。
+assertEqual(
+  getFriendlyLoginErrorDescriptor(new Error("临时密码已过期，请联系店长重新发送")).key,
+  "errors.tempPasswordExpired",
+  "expired temporary password is not reported as a wrong password"
+);
+
+assertEqual(
+  getFriendlyLoginErrorDescriptor(new Error("临时密码已过期，请联系店长重新发送")).retryable,
+  undefined,
+  "expired temporary password does not offer retry"
+);
+
 assertEqual(
   getFriendlyLoginErrorDescriptor(new Error("登录需要位置信息")).key,
   "errors.locationRequired",
