@@ -1,0 +1,177 @@
+<UserControl x:Class="Hbpos.Client.Wpf.Views.Controls.FooterUpdateButton"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:loc="clr-namespace:Hbpos.Client.Wpf.Localization"
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes"
+             xmlns:services="clr-namespace:Hbpos.Client.Wpf.Services"
+             AutomationProperties.AutomationId="FooterUpdateButton">
+    <!-- 底部状态栏的新版本入口：DataContext 为 AppUpdateState。点击直接更新（安装包还在）或重新检查（点过「稍后」后）；
+         交易中只给提示，更新/检查期间换成进度；没有动画时也能正常点击。可见性由宿主按版本状态控制。 -->
+    <Grid x:Name="FooterLatestVersionHost">
+        <Button x:Name="FooterLatestVersionButton"
+                Command="{Binding UpdateFromFooterCommand}"
+                services:ButtonFeedback.Cue="VersionNotice"
+                AutomationProperties.AutomationId="FooterLatestVersionButton"
+                ToolTip="{loc:Loc appUpdate.footer.tooltip}"
+                Height="30"
+                Cursor="Hand"
+                Focusable="False">
+            <Button.Template>
+                <ControlTemplate TargetType="{x:Type Button}">
+                    <Grid>
+                        <Border x:Name="Chrome"
+                                Padding="10,0"
+                                Background="{DynamicResource PosPrimarySoftBrush}"
+                                BorderBrush="{DynamicResource PosPrimaryBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <materialDesign:PackIcon x:Name="Arrow" Kind="ArrowUpCircleOutline" Width="15" Height="15" Margin="0,0,6,0" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}">
+                                    <materialDesign:PackIcon.RenderTransform>
+                                        <TranslateTransform />
+                                    </materialDesign:PackIcon.RenderTransform>
+                                </materialDesign:PackIcon>
+                                <TextBlock x:Name="Label" FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}">
+                                    <Run Text="{loc:Loc shell.footer.latestVersion}" />
+                                    <Run Text=": " />
+                                    <Run Text="{Binding TargetVersion, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Border>
+                        <!-- 呼吸动画的叠加层：只动它的透明度，不改共享的主题画刷。 -->
+                        <Border x:Name="PulseOverlay"
+                                Opacity="0"
+                                IsHitTestVisible="False"
+                                Background="{DynamicResource PosPrimaryBrush}"
+                                BorderBrush="{DynamicResource PosPrimaryTextBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <!-- 一直轻柔呼吸提醒有新版本；交易中、悬停、按下时停下，系统关闭动画时也不播放。 -->
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding IsTransactionInProgress}" Value="False" />
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="False" />
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsPressed}" Value="False" />
+                                <Condition Binding="{Binding Source={x:Static SystemParameters.ClientAreaAnimation}, Mode=OneWay}" Value="True" />
+                            </MultiDataTrigger.Conditions>
+                            <MultiDataTrigger.EnterActions>
+                                <BeginStoryboard x:Name="PulseStoryboard">
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetName="PulseOverlay"
+                                                         Storyboard.TargetProperty="Opacity"
+                                                         From="0" To="0.4"
+                                                         Duration="0:0:0.8"
+                                                         AutoReverse="True"
+                                                         RepeatBehavior="Forever">
+                                            <DoubleAnimation.EasingFunction>
+                                                <SineEase EasingMode="EaseInOut" />
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                        <DoubleAnimation Storyboard.TargetName="Arrow"
+                                                         Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)"
+                                                         From="0" To="-2"
+                                                         Duration="0:0:0.8"
+                                                         AutoReverse="True"
+                                                         RepeatBehavior="Forever">
+                                            <DoubleAnimation.EasingFunction>
+                                                <SineEase EasingMode="EaseInOut" />
+                                            </DoubleAnimation.EasingFunction>
+                                        </DoubleAnimation>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </MultiDataTrigger.EnterActions>
+                            <MultiDataTrigger.ExitActions>
+                                <StopStoryboard BeginStoryboardName="PulseStoryboard" />
+                            </MultiDataTrigger.ExitActions>
+                        </MultiDataTrigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Chrome" Property="BorderBrush" Value="{DynamicResource PosPrimaryTextBrush}" />
+                            <Setter TargetName="Label" Property="TextDecorations" Value="Underline" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Chrome" Property="Opacity" Value="0.8" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Button.Template>
+            <Button.Style>
+                <Style TargetType="{x:Type Button}">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding UpdateFromFooterCommand.IsRunning}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Button.Style>
+        </Button>
+        <Border x:Name="FooterLatestVersionBusy"
+                Height="30"
+                Padding="10,0"
+                Background="{DynamicResource PosPrimarySoftBrush}"
+                BorderBrush="{DynamicResource PosPrimaryBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
+                AutomationProperties.AutomationId="FooterLatestVersionBusy">
+            <Border.Style>
+                <Style TargetType="{x:Type Border}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding UpdateFromFooterCommand.IsRunning}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock FontSize="10" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{DynamicResource PosPrimaryTextBrush}">
+                    <Run Text="{loc:Loc appUpdate.footer.updating}" />
+                    <Run Text="{Binding TargetVersion, Mode=OneWay}" />
+                </TextBlock>
+                <ProgressBar Width="70"
+                             Height="4"
+                             Margin="8,0,0,0"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="{Binding DownloadProgressPercent, Mode=OneWay}"
+                             Foreground="{DynamicResource PosPrimaryTextBrush}"
+                             Background="{DynamicResource PosDividerBrush}"
+                             BorderThickness="0"
+                             VerticalAlignment="Center">
+                    <ProgressBar.Style>
+                        <Style TargetType="{x:Type ProgressBar}">
+                            <Setter Property="IsIndeterminate" Value="True" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasDownloadProgress}" Value="True">
+                                    <Setter Property="IsIndeterminate" Value="False" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ProgressBar.Style>
+                </ProgressBar>
+            </StackPanel>
+        </Border>
+        <Popup IsOpen="{Binding IsFooterHintVisible, Mode=TwoWay}"
+               PlacementTarget="{Binding ElementName=FooterLatestVersionHost}"
+               Placement="Top"
+               VerticalOffset="-6"
+               StaysOpen="False"
+               AllowsTransparency="True"
+               PopupAnimation="Fade">
+            <Border Padding="10,6"
+                    Margin="0,0,10,10"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    AutomationProperties.AutomationId="FooterLatestVersionHint">
+                <Border.Effect>
+                    <DropShadowEffect Color="#FF101828" Opacity="0.18" BlurRadius="12" ShadowDepth="3" Direction="270" />
+                </Border.Effect>
+                <TextBlock Text="{Binding FooterHintText}" FontSize="11" Foreground="{DynamicResource PosTextBrush}" />
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

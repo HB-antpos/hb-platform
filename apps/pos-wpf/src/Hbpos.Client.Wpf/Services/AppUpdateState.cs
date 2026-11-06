@@ -26,7 +26,20 @@ public sealed partial class AppUpdateState : ObservableObject
         RetryForceUpdateCommand = new AsyncRelayCommand(RetryForceUpdateAsync, CanRetryForceUpdate);
         ExitApplicationCommand = new RelayCommand(ExitApplication, CanExitApplication);
         PostponeForceUpdateCommand = new AsyncRelayCommand(PostponeForceUpdateAsync, () => CanPostponeForceUpdate);
+        UpdateFromFooterCommand = new AsyncRelayCommand(UpdateFromFooterAsync, () => !IsDownloading);
     }
+
+    // 中文注释：底部「最新版本」按钮点了「稍后」之后安装入口已被清掉，只能重新走一次手动检查（复用已校验的安装包，再弹安装确认框）。
+    private Func<Task<AppUpdateCoordinatorResult>>? _footerRecheckAsync;
+    private int _footerHintVersion;
+    private static readonly TimeSpan FooterHintDuration = TimeSpan.FromSeconds(4);
+
+    // 中文注释：底部按钮上方的短提示（交易中、检查失败），几秒后自动收起。
+    [ObservableProperty]
+    private bool _isFooterHintVisible;
+
+    [ObservableProperty]
+    private string _footerHintText = string.Empty;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsForceUpdateBlocking))]
@@ -152,6 +165,14 @@ public sealed partial class AppUpdateState : ObservableObject
     public IRelayCommand ExitApplicationCommand { get; }
 
     public IAsyncRelayCommand PostponeForceUpdateCommand { get; }
+
+    // 中文注释：点击底部「最新版本」：安装包还在就直接安装，否则重新检查；交易中只给提示，不拉起安装器。
+    public IAsyncRelayCommand UpdateFromFooterCommand { get; }
+
+    public void ConfigureFooterRecheck(Func<Task<AppUpdateCoordinatorResult>> recheckAsync)
+    {
+        _footerRecheckAsync = recheckAsync;
+    }
 
     public void InitializeCurrentVersion(string currentVersion)
     {
@@ -451,6 +472,57 @@ public sealed partial class AppUpdateState : ObservableObject
         return _installAsync is not null && !IsDownloading;
     }
 
+    private async Task UpdateFromFooterAsync()
+    {
+        var target = TargetVersion ?? "<null>";
+        if (IsTransactionInProgress)
+        {
+            ConsoleLog.Write("AppUpdate", $"footer latest version clicked path=waiting-transaction target={target}");
+            ShowFooterHint("appUpdate.footer.waitingForTransaction");
+            return;
+        }
+
+        if (_installAsync is not null)
+        {
+            ConsoleLog.Write("AppUpdate", $"footer latest version clicked path=install target={target}");
+            await InstallAsync();
+            return;
+        }
+
+        if (_footerRecheckAsync is null)
+        {
+            return;
+        }
+
+        ConsoleLog.Write("AppUpdate", $"footer latest version clicked path=recheck target={target}");
+        var result = await _footerRecheckAsync();
+        if (result.Status is AppUpdateCoordinatorStatus.CheckFailed
+            or AppUpdateCoordinatorStatus.PolicyFailed
+            or AppUpdateCoordinatorStatus.DownloadFailed
+            or AppUpdateCoordinatorStatus.InstallFailed)
+        {
+            ShowFooterHint("appUpdate.footer.failed");
+        }
+    }
+
+    private void ShowFooterHint(string statusKey)
+    {
+        FooterHintText = FormatStatus(statusKey);
+        IsFooterHintVisible = true;
+        var version = ++_footerHintVersion;
+        _ = HideFooterHintLaterAsync(version);
+    }
+
+    private async Task HideFooterHintLaterAsync(int version)
+    {
+        await Task.Delay(FooterHintDuration);
+        // 中文注释：期间又弹出了新提示就让新提示自己计时；Delay 之后回到 UI 线程的同步上下文，可直接改属性。
+        if (version == _footerHintVersion)
+        {
+            IsFooterHintVisible = false;
+        }
+    }
+
     private void ClearOptionalUpdate()
     {
         if (IsForceUpdateRequired)
@@ -568,6 +640,7 @@ public sealed partial class AppUpdateState : ObservableObject
         RetryForceUpdateCommand.NotifyCanExecuteChanged();
         ExitApplicationCommand.NotifyCanExecuteChanged();
         PostponeForceUpdateCommand.NotifyCanExecuteChanged();
+        UpdateFromFooterCommand.NotifyCanExecuteChanged();
     }
 
     private static string FormatStatus(string statusKey, params object[] args)
