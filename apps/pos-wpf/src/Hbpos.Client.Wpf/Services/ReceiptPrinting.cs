@@ -763,7 +763,6 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
     {
         var builder = new ReceiptDocumentBuilder();
         var printedAt = printTime ?? DateTimeOffset.Now;
-        var orderId = receipt.OrderGuid.ToString();
 
         var brandName = FirstNonBlank(settings.BrandName, settings.StoreName, receipt.StoreCode);
         builder.Text(brandName, ReceiptPrintAlignment.Center, isEmphasized: true);
@@ -815,20 +814,21 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
             builder.Blank();
         }
 
-        // 中文注释：普通销售/退款单（没有 OrderDisplay）用居中一维条码代替整串 GUID 文本：内容是 GUID 末 8 位（与后端 ShortOrderNo 同口径），
-        // 3 点模块宽、80 点高，条码下方由打印机印出可读 8 位单号；二维码仍编码完整 GUID，退货可扫它精确定位。
-        // 分期单的编号来自 InstallmentNumber（OrderDisplay 有值），保持「Order: 编号」文本行与底部条码不变。
-        var usesOrderBarcode = string.IsNullOrWhiteSpace(receipt.OrderDisplay);
-        if (usesOrderBarcode)
+        // 中文注释：顶部居中一条一维条码代替整串 GUID 文本：3 点模块宽、80 点高，条码下方由打印机印出可读单号。
+        // 普通销售/退款单（没有 OrderDisplay）：内容是 GUID 末 8 位（与后端 ShortOrderNo 同口径），退货可扫它定位。
+        // 分期单的编号来自 InstallmentNumber（OrderDisplay 有值，约 40 位，80mm 纸放不下）：条码取编号末 8 位，
+        // 分期中心搜索按「包含」匹配编号，扫它即可定位；完整编号仍以「Order: 编号」文本行印在条码下方。
+        var orderDisplay = receipt.OrderDisplay?.Trim();
+        var hasOrderDisplay = !string.IsNullOrWhiteSpace(orderDisplay);
+        builder.Barcode(
+            hasOrderDisplay
+                ? ReceiptOrderShortCode.CreateFromDisplayNumber(orderDisplay!)
+                : ReceiptOrderShortCode.Create(receipt.OrderGuid),
+            OrderBarcodeModuleWidth,
+            OrderBarcodeHeight);
+        if (hasOrderDisplay)
         {
-            builder.Barcode(
-                ReceiptOrderShortCode.Create(receipt.OrderGuid),
-                OrderBarcodeModuleWidth,
-                OrderBarcodeHeight);
-        }
-        else
-        {
-            builder.Text($"Order: {receipt.OrderDisplay!.Trim()}");
+            builder.Text($"Order: {orderDisplay}");
         }
 
         builder.Text($"Date: {receipt.SoldAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
@@ -940,11 +940,6 @@ public sealed class ReceiptTextFormatter : IReceiptTextFormatter
         }
 
         builder.Separator();
-        if (!usesOrderBarcode)
-        {
-            // 中文注释：分期单底部条码沿用完整 GUID；普通单的条码已移到顶部，这里不再重复印。
-            builder.Barcode(orderId);
-        }
 
         // 中文注释：订单小票不再印二维码（2026-10-31 产品决定）；退货查单改扫顶部的 8 位单号条码，
         // 退款代金券 / 余额凭证上的二维码是顾客要扫的券码，不受影响。

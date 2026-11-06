@@ -19,6 +19,16 @@ public static class ReceiptOrderShortCode
     }
 
     /// <summary>
+    /// 由小票上的显示单号（分期单号，形如 IP-门店号-32 位十六进制）生成条码内容：取末 <see cref="Length"/> 位并转大写，
+    /// 不足 8 位则取全部。分期中心的搜索按「包含」匹配分期单号，所以扫到这 8 位即可定位。
+    /// </summary>
+    public static string CreateFromDisplayNumber(string displayNumber)
+    {
+        var trimmed = displayNumber.Trim();
+        return (trimmed.Length <= Length ? trimmed : trimmed[^Length..]).ToUpperInvariant();
+    }
+
+    /// <summary>
     /// 判断输入是否恰好是 8 位十六进制（扫码枪扫到小票条码的结果），是则输出大写规范形式。
     /// 前后空白会被忽略；7 位、9 位、带横杠、含非十六进制字符一律不是短码，
     /// 这样完整 GUID、商品条码、货号都不会被误当成单号。

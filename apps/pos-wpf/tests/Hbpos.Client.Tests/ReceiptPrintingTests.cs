@@ -215,7 +215,7 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
-    public void Installment_receipt_for_active_order_prints_terms_after_payments_and_before_barcode()
+    public void Installment_receipt_for_active_order_prints_terms_after_payments_and_the_order_barcode_at_the_top()
     {
         var order = CreateInstallmentOrder(InstallmentStatus.Active, paidAmount: 20m, balanceAmount: 60m);
 
@@ -238,13 +238,13 @@ public sealed class ReceiptPrintingTests
         var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "LAY-BY TERMS");
         var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
         Assert.True(paymentAt >= 0 && paymentAt < termsAt, "条款必须在付款明细之后");
-        Assert.True(termsAt < barcodeAt, "条款必须在条码之前");
+        Assert.True(barcodeAt >= 0 && barcodeAt < paymentAt, "订单条码在小票顶部，位于付款明细之前");
         // 条款前有分隔线，标题居中加粗（与同位置的 Refunds and returns 一致）。
         Assert.Equal(ReceiptPrintElementKind.Separator, elements[termsAt - 1].Kind);
         Assert.Equal(ReceiptPrintAlignment.Center, elements[termsAt].Alignment);
         Assert.True(elements[termsAt].IsEmphasized);
         // 条款块自身（标题到下一条分隔线之间）每行都不超过 42 字符纸宽；
-        // 不对整张小票断言宽度：条码预览行 "BARCODE <36 位订单号>" 本身就是 44 字符，与条款无关。
+        // 不对整张小票断言宽度：只检查条款块自身。
         var termsEnd = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Separator, termsAt + 1);
         Assert.All(
             elements.Skip(termsAt).Take(termsEnd - termsAt),
@@ -402,7 +402,7 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
-    public void Installment_terms_keep_their_position_after_return_policy_and_before_the_barcode_when_customized()
+    public void Installment_terms_keep_their_position_after_return_policy_when_customized()
     {
         var settings = ReceiptPrinterSettings.Default with
         {
@@ -416,7 +416,7 @@ public sealed class ReceiptPrintingTests
         var policyAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Refunds and returns");
         var termsAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "LAY-BY TERMS");
         var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
-        Assert.True(policyAt >= 0 && policyAt < termsAt && termsAt < barcodeAt);
+        Assert.True(barcodeAt >= 0 && barcodeAt < policyAt && policyAt < termsAt);
         Assert.Equal(ReceiptPrintElementKind.Separator, elements[termsAt - 1].Kind);
         Assert.Equal(ReceiptPrintAlignment.Center, elements[termsAt].Alignment);
         Assert.True(elements[termsAt].IsEmphasized);
@@ -681,23 +681,37 @@ public sealed class ReceiptPrintingTests
     }
 
     [Fact]
-    public void Receipt_with_order_display_keeps_the_text_line_and_the_bottom_guid_barcode()
+    public void Receipt_with_order_display_prints_the_same_top_barcode_as_a_sale_with_the_order_number_tail()
     {
-        // 分期单的编号来自 InstallmentNumber（OrderDisplay 有值）：保持「Order: 编号」文本行与底部完整 GUID 条码。
-        var receipt = ActiveInstallmentReceipt();
-        Assert.False(string.IsNullOrWhiteSpace(receipt.OrderDisplay));
+        // 分期单的编号来自 InstallmentNumber（OrderDisplay 有值，约 40 位，纸放不下）：
+        // 顶部与普通销售一样印一条 3 点宽、80 点高的居中条码，内容取编号末 8 位；「Order: 编号」文本行紧随其后。
+        var receipt = ActiveInstallmentReceipt() with { OrderDisplay = "IP-1042-0123456789abcdef0123456789abcdef" };
 
         var document = new ReceiptTextFormatter().Build(receipt, ReceiptPrinterSettings.Default);
 
         var elements = document.Elements;
-        var orderAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == $"Order: {receipt.OrderDisplay!.Trim()}");
         var barcode = Assert.Single(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
         var barcodeAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Barcode);
-        Assert.True(orderAt >= 0 && orderAt < barcodeAt);
-        Assert.Equal(receipt.OrderGuid.ToString(), barcode.Text);
-        Assert.Equal(ReceiptPrintElement.DefaultBarcodeModuleWidth, barcode.BarcodeModuleWidth);
-        Assert.Equal(ReceiptPrintElement.DefaultBarcodeHeight, barcode.BarcodeHeight);
+        var orderAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text == "Order: IP-1042-0123456789abcdef0123456789abcdef");
+        var dateAt = IndexOfElement(elements, element => element.Kind == ReceiptPrintElementKind.Text && element.Text.StartsWith("Date: ", StringComparison.Ordinal));
+        Assert.Equal("89ABCDEF", barcode.Text);
+        Assert.Equal(3, barcode.BarcodeModuleWidth);
+        Assert.Equal(80, barcode.BarcodeHeight);
+        Assert.True(barcodeAt >= 0 && barcodeAt < orderAt && orderAt < dateAt);
+        // 不再在底部重复印完整 GUID 条码，也没有二维码。
+        Assert.DoesNotContain(elements, element => element.Text == receipt.OrderGuid.ToString());
         Assert.DoesNotContain(elements, element => element.Kind == ReceiptPrintElementKind.QrCode);
+        Assert.Equal("BARCODE 89ABCDEF", Assert.Single(document.PreviewRows, row => row.IsBarcode).Text);
+    }
+
+    [Theory]
+    [InlineData("IP-1042-0123456789abcdef0123456789abcdef", "89ABCDEF")]
+    [InlineData("  IP-1042-0123456789ABCDEF0123456789ABCDEF  ", "89ABCDEF")]
+    [InlineData("IO-20260704-0001", "704-0001")]
+    [InlineData("A1", "A1")]
+    public void Order_display_number_barcode_uses_the_last_eight_characters_in_upper_case(string displayNumber, string expected)
+    {
+        Assert.Equal(expected, ReceiptOrderShortCode.CreateFromDisplayNumber(displayNumber));
     }
 
     [Fact]
