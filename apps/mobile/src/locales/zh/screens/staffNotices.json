@@ -1,0 +1,172 @@
+{
+  "entry": {
+    "activationTitle": "还没登录过这个账号",
+    "activationBody": "发送「账号已开通」通知：随机密码发到邮箱，附 App 下载链接，可再发一条短信提醒。",
+    "activationAction": "发送账号开通通知"
+  },
+  "sheet": {
+    "title": "发送通知",
+    "cancel": "取消",
+    "send": "发送",
+    "preview": "预览邮件与短信",
+    "previewHint": "密码在预览里是圆点，发送时才生成",
+    "addEmail": "补充员工邮箱",
+    "addEmailHint": "保存后自动回到这里重新检查",
+    "checking": "正在检查…",
+    "noTemplates": "没有可用的通知模板，请到 Web 后台启用",
+    "loadFailed": "模板加载失败，请稍后再试",
+    "checkFailed": "检查失败，请稍后再试",
+    "sendFailed": "发送失败，请稍后再试"
+  },
+  "channels": {
+    "email": "邮件",
+    "sms": "短信",
+    "emailNotSet": "未设置邮箱",
+    "emailRequired": "这个模板必须发邮件",
+    "smsBatchHint": "有手机号的员工会收到提醒",
+    "smsSkip": {
+      "sms_off": "这次不发短信",
+      "sms_unavailable": "短信服务未开启",
+      "no_phone": "没有手机号",
+      "not_mobile": "不是手机号"
+    }
+  },
+  "ready": {
+    "password": "可以发送。随机密码发到员工邮箱。",
+    "passwordSms": "可以发送。随机密码发到员工邮箱，短信提醒查收（约 {{cost}}）。",
+    "general": "可以发送。",
+    "generalSms": "可以发送（短信约 {{cost}}）。"
+  },
+  "confirm": {
+    "alreadyLoggedIn": "{{time}} 登录过。发送后旧密码立即失效，所有设备会被退出登录，要用邮件里的新密码重新登录。",
+    "suspiciousEmail": "{{email}} 不像真实邮箱，密码可能收不到。请确认邮箱无误再发。"
+  },
+  "confirmCheck": {
+    "reissue": "我已确认要重新发放密码",
+    "email": "我已确认邮箱无误",
+    "required": "不勾选不能发送"
+  },
+  "blocked": {
+    "no_email": "没有可用邮箱，不能发送。随机密码只能通过邮件发给员工本人，请先补充邮箱。",
+    "account_inactive": "账号已停用，不能发送。",
+    "login_disabled": "账号已关闭登录，不能发送。",
+    "forbidden": "这个员工不在你的管理范围内。",
+    "not_found": "找不到这个员工。",
+    "self": "不能给自己发：发放密码会把你自己退出登录。",
+    "no_channel": "选中的渠道都发不出去。",
+    "in_progress": "这个员工已在另一批发送中，请等它结束。"
+  },
+  "reasonShort": {
+    "already_logged_in": "已登录过",
+    "suspicious_email": "邮箱存疑",
+    "no_email": "缺邮箱",
+    "account_inactive": "已停用",
+    "login_disabled": "已关闭登录",
+    "forbidden": "无权限",
+    "not_found": "找不到",
+    "self": "本人",
+    "no_channel": "无可用渠道",
+    "in_progress": "发送中"
+  },
+  "review": {
+    "title": "发送通知",
+    "titleActivation": "发送账号开通通知",
+    "subtitle": "已选 {{count}} 人 · 先核对收件人",
+    "filters": {
+      "all": "全部",
+      "ready": "可发送",
+      "confirm": "需确认",
+      "blocked": "不可发送"
+    },
+    "emailOnly": "只发邮件",
+    "loggedInHint": "{{time}} 登录过，旧密码将失效",
+    "suspiciousHint": "这个邮箱不像真实邮箱",
+    "summary": "将发送 {{count}} 人",
+    "summaryWithSms": "邮件 {{emails}} 封 · 短信 {{sms}} 条（约 {{cost}}）",
+    "summaryEmailOnly": "邮件 {{emails}} 封",
+    "send": "发送（{{count}} 人）",
+    "selectStaff": "选择 {{name}}",
+    "unknownStaff": "未知员工",
+    "emptyFilter": "这个筛选下没有员工",
+    "emptyTitle": "还没有选人",
+    "emptyDescription": "请回到人员列表选择员工。",
+    "noAccessTitle": "没有权限",
+    "noAccessDescription": "发送员工通知需要重置密码权限。"
+  },
+  "confirmDialog": {
+    "title": "确认发送「{{name}}」",
+    "recipients": "收件人 {{count}} 人",
+    "recipientsSkipped": "收件人 {{count}} 人（跳过 {{skipped}} 人）",
+    "emails": "邮件 {{count}} 封",
+    "emailsPassword": "邮件 {{count}} 封，每人一个新的随机密码",
+    "sms": "短信 {{count}} 条，约 {{cost}}（近 24 小时已发 {{used}} / {{limit}}）",
+    "reissueWarning": "{{count}} 人已登录过：{{names}}。邮件发出后旧密码立即失效，所有设备退出登录。",
+    "nameSeparator": "、",
+    "back": "返回修改",
+    "confirm": "确认发送"
+  },
+  "progress": {
+    "title": "正在发送",
+    "subtitle": "{{name}} · {{count}} 人",
+    "processed": "已处理 {{done}} / {{total}}",
+    "hint": "关闭这个窗口不影响发送，结果可在「发送记录」里看。",
+    "background": "转入后台",
+    "offline": "连接中断，发送仍在继续，正在重试…"
+  },
+  "result": {
+    "title": "发送结果",
+    "emailCount": "邮件 {{sent}} / {{total}}",
+    "smsCount": "短信 {{sent}} / {{total}}",
+    "retry": "重试失败项（{{count}}）",
+    "retryFailed": "重试失败，请稍后再试",
+    "done": "完成",
+    "waiting": "等待中",
+    "receiptHint": "「已发出」表示邮件服务器已接收，不等于员工已收到；退信目前收不到回执。",
+    "channel": {
+      "sent": "已发出",
+      "failed": "失败",
+      "pending": "发送中…",
+      "skipped": "未发"
+    }
+  },
+  "preview": {
+    "title": "预览",
+    "to": "收件 {{email}}",
+    "smsInfo": "{{length}} 个字符 · 计费 {{segments}} 条",
+    "smsInvalid": "短信含不支持的字符，发送时会被拒绝",
+    "noSms": "这个模板没有短信版本。",
+    "textHint": "这里是邮件的文字内容，排版以员工收到的邮件为准。",
+    "loadFailed": "预览加载失败，请稍后再试"
+  },
+  "records": {
+    "title": "发送记录",
+    "subtitleMine": "我发出的通知",
+    "subtitleAll": "全部发送记录",
+    "filters": {
+      "all": "全部",
+      "failed": "有失败",
+      "running": "发送中"
+    },
+    "results": {
+      "running": "发送中",
+      "all_sent": "全部发出",
+      "partial_failed": "部分失败",
+      "all_failed": "全部失败"
+    },
+    "people": "{{count}} 人",
+    "createdBy": "操作人 {{name}}",
+    "emptyTitle": "还没有发送记录",
+    "emptyDescription": "给员工发过通知后会显示在这里。",
+    "loadFailed": "发送记录加载失败"
+  },
+  "time": {
+    "today": "今天",
+    "yesterday": "昨天"
+  },
+  "templates": {
+    "accountActivated": {
+      "name": "账号已开通",
+      "description": "随机密码走邮件 · 附下载链接"
+    }
+  }
+}

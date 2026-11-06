@@ -131,7 +131,8 @@
       "access": "Account access",
       "pos": "POS permissions",
       "copyPermissions": "Copy permissions to others",
-      "loginRecords": "Login history"
+      "loginRecords": "Login history",
+      "sendNotice": "Send notice"
     },
     "barcodeConnected": "Label printer · {{status}}",
     "barcodeNoPrinter": "No label printer selected yet",
@@ -145,7 +146,8 @@
     "disableSubtitle": "Can be enabled again anytime",
     "enableTitle": "Enable account",
     "enableSubtitle": "Restores login. Roster and attendance aren't affected",
-    "hint": "Actions you cannot use are not shown"
+    "hint": "Actions you cannot use are not shown",
+    "sendNoticeSubtitle": "Email + SMS · Account ready"
   },
   "confirm": {
     "disableTitle": "Disable {{name}}?",

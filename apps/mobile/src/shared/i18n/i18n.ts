@@ -40,6 +40,7 @@ import dailyClosesEn from "@/locales/en/screens/dailyCloses.json";
 import pricingStrategiesEn from "@/locales/en/screens/pricingStrategies.json";
 import faceMatchEn from "@/locales/en/screens/faceMatch.json";
 import trafficStatsEn from "@/locales/en/screens/trafficStats.json";
+import staffNoticesEn from "@/locales/en/screens/staffNotices.json";
 import attendanceLeaveEn from "@/locales/en/screens/attendanceLeave.json";
 import attendanceHoursEn from "@/locales/en/screens/attendanceHours.json";
 import payslipsEn from "@/locales/en/screens/payslips.json";
@@ -94,6 +95,7 @@ import dailyClosesZh from "@/locales/zh/screens/dailyCloses.json";
 import pricingStrategiesZh from "@/locales/zh/screens/pricingStrategies.json";
 import faceMatchZh from "@/locales/zh/screens/faceMatch.json";
 import trafficStatsZh from "@/locales/zh/screens/trafficStats.json";
+import staffNoticesZh from "@/locales/zh/screens/staffNotices.json";
 import attendanceLeaveZh from "@/locales/zh/screens/attendanceLeave.json";
 import attendanceHoursZh from "@/locales/zh/screens/attendanceHours.json";
 import payslipsZh from "@/locales/zh/screens/payslips.json";
@@ -146,6 +148,7 @@ const resources = {
     pricingStrategies: pricingStrategiesZh,
     faceMatch: faceMatchZh,
     trafficStats: trafficStatsZh,
+    staffNotices: staffNoticesZh,
     attendanceLeave: attendanceLeaveZh,
     attendanceHours: attendanceHoursZh,
     payslips: payslipsZh,
@@ -204,6 +207,7 @@ const resources = {
     pricingStrategies: pricingStrategiesEn,
     faceMatch: faceMatchEn,
     trafficStats: trafficStatsEn,
+    staffNotices: staffNoticesEn,
     attendanceLeave: attendanceLeaveEn,
     attendanceHours: attendanceHoursEn,
     payslips: payslipsEn,
@@ -260,7 +264,7 @@ if (!i18n.isInitialized) {
     lng: DEFAULT_APP_LANGUAGE,
     fallbackLng: DEFAULT_APP_LANGUAGE,
     defaultNS: "common",
-    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "minorEmployment", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "storeCash", "dailyCloses", "pricingStrategies", "faceMatch", "notifications", "push", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "warehousePicking", "seasonalProductInsights", "containerNewProducts", "containerDetail", "appInstall", "salesOrders", "legacyEmployeeLogs", "userManagement", "people", "cashRegisterUsers", "warehouse", "workbench", "peopleDetail", "peopleProfiles", "peopleForm", "peoplePos", "peopleRoles", "peopleAccess", "accountSwitch", "networkTest"],
+    ns: ["appDownloads", "wpfVersions", "common", "advertisements", "attendance", "login", "home", "cart", "domesticPurchase", "deviceManagement", "employeeProfile", "employeeProfileReview", "minorEmployment", "installmentOrders", "localSupplierInvoices", "orders", "promotions", "preorder", "seasonalCards", "settings", "storeVouchers", "storeCash", "dailyCloses", "pricingStrategies", "faceMatch", "notifications", "push", "productQuery", "productInsights", "priceUpdates", "warehouseProductInsights", "warehousePicking", "seasonalProductInsights", "containerNewProducts", "containerDetail", "appInstall", "salesOrders", "legacyEmployeeLogs", "userManagement", "people", "cashRegisterUsers", "warehouse", "workbench", "peopleDetail", "peopleProfiles", "peopleForm", "peoplePos", "peopleRoles", "peopleAccess", "accountSwitch", "networkTest", "staffNotices"],
     interpolation: {
       escapeValue: false,
     },

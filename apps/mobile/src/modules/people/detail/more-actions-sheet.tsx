@@ -13,6 +13,7 @@ export interface MoreRowModel {
 
 const MORE_ICONS: Record<MoreItemKey, { icon: string; tone: PeopleTone }> = {
   barcode: { icon: "printer-outline", tone: "blue" },
+  sendNotice: { icon: "send-outline", tone: "blue" },
   access: { icon: "shield-key-outline", tone: "blue" },
   pos: { icon: "cash-register", tone: "green" },
   copyPermissions: { icon: "content-copy", tone: "violet" },

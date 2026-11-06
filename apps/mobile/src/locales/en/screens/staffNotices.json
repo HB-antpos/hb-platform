@@ -1,0 +1,172 @@
+{
+  "entry": {
+    "activationTitle": "This account has not been used yet",
+    "activationBody": "Send the Account ready notice: a random password goes to their email with the app download link, plus an optional SMS reminder.",
+    "activationAction": "Send account notice"
+  },
+  "sheet": {
+    "title": "Send notice",
+    "cancel": "Cancel",
+    "send": "Send",
+    "preview": "Preview email and SMS",
+    "previewHint": "Password shows as dots in the preview",
+    "addEmail": "Add staff email",
+    "addEmailHint": "You will come back here after saving",
+    "checking": "Checking…",
+    "noTemplates": "No notice templates are available. Enable one in the web console.",
+    "loadFailed": "Could not load templates. Please try again later.",
+    "checkFailed": "Check failed. Please try again later.",
+    "sendFailed": "Could not send. Please try again later."
+  },
+  "channels": {
+    "email": "Email",
+    "sms": "SMS",
+    "emailNotSet": "No email set",
+    "emailRequired": "This template must go by email",
+    "smsBatchHint": "Staff with a mobile get a reminder",
+    "smsSkip": {
+      "sms_off": "No SMS this time",
+      "sms_unavailable": "SMS service is off",
+      "no_phone": "No mobile number",
+      "not_mobile": "Not a mobile number"
+    }
+  },
+  "ready": {
+    "password": "Ready to send. A random password goes to their email.",
+    "passwordSms": "Ready to send. A random password goes to their email, with an SMS reminder (about {{cost}}).",
+    "general": "Ready to send.",
+    "generalSms": "Ready to send (SMS about {{cost}})."
+  },
+  "confirm": {
+    "alreadyLoggedIn": "Last logged in {{time}}. Sending makes the old password stop working and logs out all their devices. They will need the new password from the email.",
+    "suspiciousEmail": "{{email}} does not look like a real address, so the password may not arrive. Check it before sending."
+  },
+  "confirmCheck": {
+    "reissue": "I confirm a new password should be issued",
+    "email": "I confirm this email is correct",
+    "required": "Tick this to send"
+  },
+  "blocked": {
+    "no_email": "No usable email, so this cannot be sent. The random password can only go to the staff member by email. Add an email first.",
+    "account_inactive": "This account is disabled, so this cannot be sent.",
+    "login_disabled": "Log in is turned off for this account, so this cannot be sent.",
+    "forbidden": "This staff member is outside your management scope.",
+    "not_found": "This staff member could not be found.",
+    "self": "You cannot send this to yourself: issuing a password would log you out.",
+    "no_channel": "None of the selected channels can reach this staff member.",
+    "in_progress": "This staff member is in another send that is still running. Wait for it to finish."
+  },
+  "reasonShort": {
+    "already_logged_in": "Logged in before",
+    "suspicious_email": "Check email",
+    "no_email": "No email",
+    "account_inactive": "Disabled",
+    "login_disabled": "Log in off",
+    "forbidden": "No access",
+    "not_found": "Not found",
+    "self": "You",
+    "no_channel": "No channel",
+    "in_progress": "Sending"
+  },
+  "review": {
+    "title": "Send notice",
+    "titleActivation": "Send account notice",
+    "subtitle": "{{count}} selected · Review recipients first",
+    "filters": {
+      "all": "All",
+      "ready": "Ready",
+      "confirm": "Confirm",
+      "blocked": "Can't send"
+    },
+    "emailOnly": "Email only",
+    "loggedInHint": "Last login {{time}}",
+    "suspiciousHint": "This email does not look real",
+    "summary": "Sending to {{count}}",
+    "summaryWithSms": "{{emails}} email · {{sms}} SMS (about {{cost}})",
+    "summaryEmailOnly": "{{emails}} email",
+    "send": "Send ({{count}})",
+    "selectStaff": "Select {{name}}",
+    "unknownStaff": "Unknown staff member",
+    "emptyFilter": "No staff in this filter",
+    "emptyTitle": "No one selected",
+    "emptyDescription": "Go back to the staff list and select staff.",
+    "noAccessTitle": "No access",
+    "noAccessDescription": "Sending staff notices needs the reset password permission."
+  },
+  "confirmDialog": {
+    "title": "Send {{name}}?",
+    "recipients": "Recipients: {{count}}",
+    "recipientsSkipped": "Recipients: {{count}} ({{skipped}} skipped)",
+    "emails": "Emails: {{count}}",
+    "emailsPassword": "Emails: {{count}}, each with a new random password",
+    "sms": "SMS: {{count}}, about {{cost}} ({{used}} / {{limit}} used in the last 24 hours)",
+    "reissueWarning": "{{count}} logged in before: {{names}}. Once the email is sent, the old password stops working and all devices are logged out.",
+    "nameSeparator": ", ",
+    "back": "Go back",
+    "confirm": "Send now"
+  },
+  "progress": {
+    "title": "Sending",
+    "subtitle": "{{name}} · {{count}} staff",
+    "processed": "Processed {{done}} / {{total}}",
+    "hint": "Closing this window does not stop the send. Results are in Send history.",
+    "background": "Run in background",
+    "offline": "Connection lost. Sending continues, retrying…"
+  },
+  "result": {
+    "title": "Send results",
+    "emailCount": "Email {{sent}} / {{total}}",
+    "smsCount": "SMS {{sent}} / {{total}}",
+    "retry": "Retry failed ({{count}})",
+    "retryFailed": "Retry failed. Please try again later.",
+    "done": "Done",
+    "waiting": "Waiting",
+    "receiptHint": "Sent means the mail server accepted it, not that the staff member received it. Bounces are not reported yet.",
+    "channel": {
+      "sent": "sent",
+      "failed": "failed",
+      "pending": "sending…",
+      "skipped": "not sent"
+    }
+  },
+  "preview": {
+    "title": "Preview",
+    "to": "To {{email}}",
+    "smsInfo": "{{length}} characters · billed as {{segments}}",
+    "smsInvalid": "This SMS has unsupported characters and will be rejected",
+    "noSms": "This template has no SMS version.",
+    "textHint": "This is the email text. The layout staff receive may look different.",
+    "loadFailed": "Could not load the preview. Please try again later."
+  },
+  "records": {
+    "title": "Send history",
+    "subtitleMine": "Notices you sent",
+    "subtitleAll": "All send history",
+    "filters": {
+      "all": "All",
+      "failed": "Has failures",
+      "running": "Sending"
+    },
+    "results": {
+      "running": "Sending",
+      "all_sent": "All sent",
+      "partial_failed": "Partly failed",
+      "all_failed": "All failed"
+    },
+    "people": "{{count}} staff",
+    "createdBy": "Sent by {{name}}",
+    "emptyTitle": "No send history yet",
+    "emptyDescription": "Notices you send to staff will appear here.",
+    "loadFailed": "Could not load send history"
+  },
+  "time": {
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "templates": {
+    "accountActivated": {
+      "name": "Account ready",
+      "description": "Emails a password and app link"
+    }
+  }
+}

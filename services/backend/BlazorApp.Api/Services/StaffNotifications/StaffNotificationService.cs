@@ -44,6 +44,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
     public const string TemplateDisabledCode = "TEMPLATE_DISABLED";
     public const string NoRecipientsCode = "NO_RECIPIENTS";
     public const string BatchNotFoundCode = "BATCH_NOT_FOUND";
+    private const string StoreStaffRoleName = "StoreStaff";
 
     /// <summary>邮件没发出，所以同一个人的短信也不发：重试时靠这个标记把短信一起恢复。</summary>
     internal const string SmsHeldByEmailFailure = "EMAIL_FAILED";
@@ -155,6 +156,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
         {
             EmailSubject = email.Subject,
             EmailHtml = email.Html,
+            EmailText = email.Text,
             SmsText = smsText,
             SmsLength = smsText.Length,
             SmsSegments = smsText.Length == 0 ? 0 : SmsMessages.SegmentCount(smsText),
@@ -519,7 +521,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
     )
     {
         var db = _context.Db;
-        var decision = await UserAccessMutationSecurity.ValidateTargetAsync(db, actor, item.UserGuid);
+        var decision = await ValidateRecipientAsync(actor, item.UserGuid);
         if (!decision.IsAllowed) return "无权重试该员工";
 
         var retriesEmail = item.EmailStatus == StaffNotificationChannelStatuses.Failed;
@@ -568,6 +570,28 @@ internal sealed class StaffNotificationService : IStaffNotificationService
 
     private async Task<UserAccessMutationActor> ResolveActorAsync() =>
         await UserAccessMutationSecurity.ResolveActorAsync(_context.Db, _scopeService);
+
+    /// <summary>
+    /// 操作人能不能给这个员工发通知。在通用的目标校验（高权限账号、等级、分店范围）之上，店长再加一条：
+    /// 目标必须是店员角色。发放密码等于重置密码，店长现有的重置入口（StoreUserReactService.LoadManagedUserAsync）只认店员，
+    /// 这里不能比它更宽，否则店长能重置「挂在本店、等级更低、但不是店员」的账号。
+    /// </summary>
+    private async Task<UserAccessMutationDecision> ValidateRecipientAsync(UserAccessMutationActor actor, string userGuid)
+    {
+        var db = _context.Db;
+        var decision = await UserAccessMutationSecurity.ValidateTargetAsync(db, actor, userGuid);
+        if (!decision.IsAllowed || !actor.IsStoreManager) return decision;
+
+        var isStoreStaff = await db.Queryable<UserRole>()
+            .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+            .Where((userRole, role) =>
+                userRole.UserGUID == userGuid
+                && !userRole.IsDeleted
+                && !role.IsDeleted
+                && role.RoleName == StoreStaffRoleName)
+            .AnyAsync();
+        return isStoreStaff ? decision : new UserAccessMutationDecision(false, "无权修改该用户", "USER_SCOPE_DENIED");
+    }
 
     /// <summary>
     /// 预检、预览、发送共用的判断：解析模板与操作人，再逐人评估能不能发、要不要确认。
@@ -645,7 +669,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
             var isSelf = template.IssuesPassword && string.Equals(actor.UserGuid, user.UserGUID, StringComparison.OrdinalIgnoreCase);
             if (!isSelf)
             {
-                var decision = await UserAccessMutationSecurity.ValidateTargetAsync(db, actor, user.UserGUID);
+                var decision = await ValidateRecipientAsync(actor, user.UserGUID);
                 if (!decision.IsAllowed)
                 {
                     dto.Status = "blocked";

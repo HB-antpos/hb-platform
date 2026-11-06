@@ -225,6 +225,10 @@ public sealed class StaffNotificationServiceTests : IDisposable
         Assert.Contains("Hi Mia Chen,", preview.EmailHtml);
         Assert.Contains("mia@example.com", preview.EmailHtml);
         Assert.Contains("••••", preview.EmailHtml);
+        // 移动端没有 WebView，预览用纯文本版：内容与 HTML 一致，密码同样是圆点，不带任何标签。
+        Assert.Contains("Hi Mia Chen,", preview.EmailText);
+        Assert.Contains("••••", preview.EmailText);
+        Assert.DoesNotContain("<", preview.EmailText);
         Assert.Contains("https://hotbargain.vip/app", preview.SmsText);
         Assert.Equal(139, preview.SmsLength);
         Assert.Equal(1, preview.SmsSegments);
@@ -797,6 +801,67 @@ public sealed class StaffNotificationServiceTests : IDisposable
         Assert.Equal(StaffNotificationService.BatchNotFoundCode, (await CreateService().GetBatchAsync(adminBatch)).ErrorCode);
         Assert.Equal(StaffNotificationService.BatchNotFoundCode, (await CreateService().RetryAsync(adminBatch, "manager")).ErrorCode);
         Assert.True((await CreateService().GetBatchAsync(managerBatch)).Success);
+    }
+
+    [Fact]
+    public async Task 预检_店长只能发给本店店员_外店和非店员角色都被拦下且不泄露资料()
+    {
+        var manager = await SeedStoreManagerAsync();
+        var staffRole = new Role { RoleGUID = Guid.NewGuid().ToString(), RoleName = "StoreStaff", IsActive = true };
+        await _db.Insertable(staffRole).ExecuteCommandAsync();
+
+        var ownStaff = await SeedUserAsync("own.staff", "own.staff@example.com", store: "Sunnybank");
+        var otherStoreStaff = await SeedUserAsync("other.staff", "other.staff@example.com", store: "Chermside");
+        await _db.Insertable(new[]
+        {
+            new UserRole { UserGUID = ownStaff.UserGUID, RoleGUID = staffRole.RoleGUID },
+            new UserRole { UserGUID = otherStoreStaff.UserGUID, RoleGUID = staffRole.RoleGUID },
+        }).ExecuteCommandAsync();
+        // 挂在本店、但不是店员角色的账号：现有重置入口管不到，这里也不能管。
+        var ownNonStaff = await SeedUserAsync("own.other", "own.other@example.com", store: "Sunnybank");
+
+        _scope.UserGuid = manager.UserGUID;
+        var result = await CreateService().PreflightAsync(new StaffNotificationPreflightRequestDto
+        {
+            TemplateKey = StaffNotificationTemplateDefaults.AccountActivatedKey,
+            UserGuids = new List<string> { ownStaff.UserGUID, otherStoreStaff.UserGUID, ownNonStaff.UserGUID, manager.UserGUID },
+            SendEmail = true,
+        });
+
+        var rows = result.Data!.Recipients.ToDictionary(item => item.UserGuid);
+        Assert.Equal("ready", rows[ownStaff.UserGUID].Status);
+        Assert.Equal("own.staff@example.com", rows[ownStaff.UserGUID].Email);
+        foreach (var forbidden in new[] { otherStoreStaff, ownNonStaff })
+        {
+            var row = rows[forbidden.UserGUID];
+            Assert.Equal("blocked", row.Status);
+            Assert.Contains("forbidden", row.Reasons);
+            Assert.True(string.IsNullOrEmpty(row.Email));
+            Assert.True(string.IsNullOrEmpty(row.LoginName));
+        }
+        Assert.Contains("self", rows[manager.UserGUID].Reasons);
+    }
+
+    [Fact]
+    public async Task 发送_店长给本店店员发送_批次只有操作人自己看得到()
+    {
+        var manager = await SeedStoreManagerAsync();
+        var staffRole = new Role { RoleGUID = Guid.NewGuid().ToString(), RoleName = "StoreStaff", IsActive = true };
+        await _db.Insertable(staffRole).ExecuteCommandAsync();
+        var staff = await SeedUserAsync("own.staff", "own.staff@example.com", store: "Sunnybank");
+        await _db.Insertable(new UserRole { UserGUID = staff.UserGUID, RoleGUID = staffRole.RoleGUID }).ExecuteCommandAsync();
+
+        _scope.UserGuid = manager.UserGUID;
+        var sent = await CreateService().SendAsync(new StaffNotificationSendRequestDto
+        {
+            TemplateKey = StaffNotificationTemplateDefaults.AccountActivatedKey,
+            UserGuids = new List<string> { staff.UserGUID },
+            SendEmail = true,
+        }, "manager");
+
+        Assert.True(sent.Success, sent.Message);
+        Assert.Equal(1, sent.Data!.TotalCount);
+        Assert.Equal(1, (await CreateService().ListBatchesAsync(new StaffNotificationBatchQueryDto())).Data!.Total);
     }
 
     [Fact]
@@ -1467,7 +1532,7 @@ public sealed class StaffNotificationsControllerMetadataTests
             .Where(method => method.GetCustomAttributes<Microsoft.AspNetCore.Mvc.Routing.HttpMethodAttribute>().Any());
 
     [Fact]
-    public void 控制器要求登录_每个接口都有Users_ResetPassword策略()
+    public void 控制器要求登录_每个接口都有重置密码策略_发送类接口店长也能进()
     {
         Assert.Contains(ControllerType.GetCustomAttributes<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>(), _ => true);
         var actions = Actions().ToList();
@@ -1476,11 +1541,24 @@ public sealed class StaffNotificationsControllerMetadataTests
         foreach (var action in actions)
         {
             var policies = action.GetCustomAttributes<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>().Select(item => item.Policy).ToList();
-            Assert.True(
-                policies.Contains(BlazorApp.Shared.Constants.Permissions.Users.ResetPassword),
-                $"{action.Name} 缺少 Users.ResetPassword 策略"
-            );
+            var adminOnly = action.GetCustomAttributes<Microsoft.AspNetCore.Authorization.AuthorizeAttribute>().Any(item => item.Roles == "Admin");
+            // 模板写操作仍只给管理员；其余接口用店长持有的店员码，全局码经别名同样满足。
+            var expected = adminOnly
+                ? BlazorApp.Shared.Constants.Permissions.Users.ResetPassword
+                : BlazorApp.Shared.Constants.Permissions.Users.ResetStoreStaffPassword;
+            Assert.True(policies.Contains(expected), $"{action.Name} 缺少 {expected} 策略");
         }
+    }
+
+    [Fact]
+    public void 全局重置密码权限经别名满足店员码_Web后台入口不受影响()
+    {
+        var aliases = BlazorApp.Shared.Constants.Permissions.GetPermissionAliases();
+
+        Assert.Contains(
+            BlazorApp.Shared.Constants.Permissions.Users.ResetPassword,
+            aliases[BlazorApp.Shared.Constants.Permissions.Users.ResetStoreStaffPassword]
+        );
     }
 
     [Theory]

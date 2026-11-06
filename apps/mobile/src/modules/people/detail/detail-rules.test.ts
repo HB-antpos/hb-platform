@@ -68,6 +68,7 @@ function scope(overrides: Partial<DetailScopeFacts> = {}): DetailScopeFacts {
   return {
     authenticated: true,
     isDeviceMode: false,
+    accountSession: true,
     storeManageable: true,
     barcodeStoreAllowed: true,
     hasManageableStores: true,
@@ -153,10 +154,36 @@ assertEqual(resolveDetailVariant({ identityAllowed: true, isDeviceMode: false, i
   assertEqual(layout.quickActions.map((item) => item.key), ["edit", "password", "barcode", "status"], "店长版四个快捷操作按序出现");
   assertEqual(layout.quickActions[3], { key: "status", intent: "disable", danger: true }, "启用中的员工，状态快捷操作是红色停用");
   assertEqual(layout.headerEdit, false, "店长版头部没有 ✎（编辑在快捷操作里）");
-  assertEqual(layout.moreItems, ["barcode", "access", "pos", "copyPermissions"], "更多弹层顺序：个人码 / 授权 / 收银权限 / 复制权限，不含登录记录");
+  assertEqual(layout.moreItems, ["barcode", "sendNotice", "access", "pos", "copyPermissions"], "更多弹层顺序：个人码 / 发送通知 / 授权 / 收银权限 / 复制权限，不含登录记录");
   assertEqual(layout.moreStatus, "disable", "更多弹层底部红色停用");
   assertEqual(layout.showMore, true, "有可用项时显示 ⋮");
   assertEqual(layout.footerStatus, null, "店长版没有页面底部整行停用按钮");
+}
+
+// ───────────── 发送通知：沿用重置密码权限，本人 / 受保护目标 / 设备模式 / 已停用都不出现 ─────────────
+
+{
+  assertEqual(permissionsFor({ actor: actor("manager") }).canSendNotice, true, "店长对本店店员可发通知");
+  assertEqual(permissionsFor({ actor: actor("viewer") }).canSendNotice, false, "没有重置密码权限不能发通知");
+  assertEqual(
+    permissionsFor({ actor: actor("manager"), target: target({ userGuid: "mgr-1" }) }).canSendNotice,
+    false,
+    "不能给自己发（发放密码会把自己退出登录）",
+  );
+  assertEqual(
+    permissionsFor({ actor: actor("manager"), target: target({ roleNames: ["StoreManager"] }) }).canSendNotice,
+    false,
+    "店长不能给受保护角色发",
+  );
+  assertEqual(permissionsFor({ actor: actor("manager"), scope: scope({ isDeviceMode: true }) }).canSendNotice, false, "设备模式没有账号身份");
+  assertEqual(permissionsFor({ actor: actor("manager"), scope: scope({ accountSession: false }) }).canSendNotice, false, "iOS 审核走本地模拟接口，没有这组接口");
+  assertEqual(permissionsFor({ actor: actor("manager"), scope: scope({ storeManageable: false }) }).canSendNotice, false, "不是自己管理的分店");
+  assertEqual(permissionsFor({ actor: actor("manager"), target: target({ active: false }) }).canSendNotice, false, "已停用账号不出现入口");
+  assertEqual(
+    permissionsFor({ variant: "admin", actor: actor("admin"), target: target({ roleNames: ["Warehouse"] }) }).canSendNotice,
+    true,
+    "管理员版不限店员角色，能不能发由服务端预检判断",
+  );
 }
 
 // ───────────── 没权限的操作直接不显示（不是灰着） ─────────────
@@ -281,7 +308,7 @@ assertEqual(resolveStatusAction(false), { intent: "enable", nextActive: true, da
   assertEqual(layout.quickActions, [], "管理员版没有头部快捷操作行");
   assertEqual(layout.headerEdit, true, "管理员版头部 ✎ 编辑");
   assertEqual(layout.footerStatus, "disable", "管理员版页面底部是整行停用按钮");
-  assertEqual(layout.moreItems, ["barcode", "access", "pos", "copyPermissions", "loginRecords"], "管理员版更多弹层含登录记录");
+  assertEqual(layout.moreItems, ["barcode", "sendNotice", "access", "pos", "copyPermissions", "loginRecords"], "管理员版更多弹层含登录记录");
 }
 
 {

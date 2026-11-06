@@ -87,6 +87,9 @@ public sealed class StaffNotificationPreviewDto
 
     /// <summary>服务端渲染好的 HTML 片段，密码位置是圆点。前端放进 sandbox iframe 展示。</summary>
     public string EmailHtml { get; set; } = string.Empty;
+
+    /// <summary>邮件的纯文本版（发信时的 text 部分），密码同样是圆点。移动端没有 WebView，预览用这份。</summary>
+    public string EmailText { get; set; } = string.Empty;
     public string SmsText { get; set; } = string.Empty;
     public int SmsLength { get; set; }
     public int SmsSegments { get; set; }
