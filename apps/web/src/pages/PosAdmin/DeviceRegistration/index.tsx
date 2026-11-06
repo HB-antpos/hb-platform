@@ -61,9 +61,9 @@ import {
   getBatchActionTargets,
   getDeviceStatusActions,
   getUptimeParts,
-  isLongUptime,
   isRustDeskVersionOutdated,
   runWithConcurrency,
+  shouldWarnLongUptime,
   type CountedOption,
   type DeviceOnlineFilter,
   type DeviceStatusAction,
@@ -596,7 +596,7 @@ export default function DeviceRegistrationPage() {
               </span>
             ) : null}
             {/* 开机太久的收银机在列表里直接标出来，方便挑出该重启的；正常开机时长不占行。 */}
-            {isLongUptime(record.systemUptimeSeconds) ? (
+            {shouldWarnLongUptime(record.status, record.systemUptimeSeconds) ? (
               <span className="dev-mgmt-sub dev-mgmt-warn dev-mgmt-ellipsis">
                 {t('posAdmin.devices.mgmt.uptime.listLong', {
                   count: getUptimeParts(record.systemUptimeSeconds)?.count ?? 0,

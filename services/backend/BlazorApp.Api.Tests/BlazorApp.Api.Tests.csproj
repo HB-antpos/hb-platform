@@ -103,6 +103,7 @@
     <Compile Include="RemoteMaintenanceCommitTests.cs" />
     <Compile Include="RemoteMaintenanceContractTests.cs" />
     <Compile Include="RemoteMaintenancePrepareTests.cs" />
+    <Compile Include="RemoteMaintenanceRebindPrepareTests.cs" />
     <Compile Include="RemoteMaintenanceRegistrationResolverTests.cs" />
     <Compile Include="RustDeskCompatControllerTests.cs" />
     <Compile Include="RustDeskCompatServiceTests.cs" />

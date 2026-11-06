@@ -13,6 +13,7 @@ import {
   getRelativeTimeParts,
   getUptimeParts,
   isLongUptime,
+  shouldWarnLongUptime,
   isRustDeskVersionOutdated,
   matchesVersionFilter,
   VERSION_FILTER_NONE,
@@ -251,6 +252,9 @@ assertEqual(isLongUptime(7 * 86_400), true, '满 7 天提示建议重启')
 assertEqual(isLongUptime(7 * 86_400 - 1), false, '不满 7 天不提示')
 assertEqual(isLongUptime(null), false, '未上报不提示')
 assertEqual(isLongUptime(0), false, '刚开机不提示')
+assertEqual(shouldWarnLongUptime(1, 7 * 86_400), true, '已启用设备开机满 7 天才标出来')
+assertEqual(shouldWarnLongUptime(0, 7 * 86_400), false, '已停用的旧注册是冻结值，不标')
+assertEqual(shouldWarnLongUptime(1, 7 * 86_400 - 1), false, '已启用但不满 7 天不标')
 
 // 远程版本：按数字逐段比较，低于最新版本才标橙；无法比较时不标
 assertEqual(compareDottedVersion('1.4.10', '1.4.9')! > 0, true, '1.4.10 高于 1.4.9（不能按字符串比）')
