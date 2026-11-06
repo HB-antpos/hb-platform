@@ -415,6 +415,11 @@ export function isLongUptime(seconds: number | null | undefined): boolean {
   return parts !== null && parts.unit === 'days' && parts.count >= LONG_UPTIME_WARNING_DAYS
 }
 
+/** 只有已启用的设备还在心跳；停用或改绑后的旧注册留的是最后一次上报的值，不算开机太久。 */
+export function shouldWarnLongUptime(status: number, seconds: number | null | undefined): boolean {
+  return status === 1 && isLongUptime(seconds)
+}
+
 /** 点分版本号按数字逐段比较（1.4.10 > 1.4.9，缺的段按 0）；任一方不是「数字.数字…」格式时无法比较，返回 null。 */
 export function compareDottedVersion(left: string | null | undefined, right: string | null | undefined): number | null {
   const parse = (value: string | null | undefined) => {

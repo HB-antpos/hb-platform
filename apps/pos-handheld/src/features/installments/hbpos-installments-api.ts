@@ -168,6 +168,7 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
         payload.cardRepaymentSupported,
         "capabilities.cardRepaymentSupported",
       ),
+      ...optionalCardRepaymentProviders(payload.cardRepaymentProviders),
       crossDeviceRepaymentEnabled: responseBoolean(
         payload.crossDeviceRepaymentEnabled,
         "capabilities.crossDeviceRepaymentEnabled",
@@ -1234,6 +1235,27 @@ function responseBoolean(value: unknown, field: string): boolean {
 
 function optionalResponseBoolean(value: unknown, field: string): boolean {
   return value === undefined ? false : responseBoolean(value, field);
+}
+
+/**
+ * 服务端放开的刷卡续付通道。缺失 / null 返回空对象（旧服务端，调用方回退）；
+ * 数组则逐项 trim、转小写、去重并丢弃空串；非数组或含非字符串项视为响应无效。
+ */
+function optionalCardRepaymentProviders(
+  value: unknown,
+): Readonly<{ cardRepaymentProviders?: readonly string[] }> {
+  if (value === undefined || value === null) return {};
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw invalidResponse("capabilities.cardRepaymentProviders");
+  }
+  const normalized = [
+    ...new Set(
+      (value as string[])
+        .map((item) => item.trim().toLowerCase())
+        .filter((item) => item.length > 0),
+    ),
+  ];
+  return { cardRepaymentProviders: Object.freeze(normalized) };
 }
 
 function responseNonNegativeInteger(value: unknown, field: string): number {

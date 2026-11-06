@@ -200,6 +200,8 @@ export const installmentEnglishCopy = {
     "Card payments cannot be refunded through the original route. Choose “All to voucher”; nothing was refunded.",
   "status.cancel-refund-mode-unsupported":
     "The server does not support voucher refunds yet; nothing was refunded. Use the original route or update the server.",
+  "status.claim-busy":
+    "Another repayment for this lay-by is still in progress. No payment was taken; wait a moment and try again, or ask a supervisor to check it.",
   "status.claim-review-required":
     "Repayment claim mismatch. No payment was started; ask a supervisor to review the audit record.",
   "status.conflict": "Server state changed; refresh first.",
@@ -212,6 +214,8 @@ export const installmentEnglishCopy = {
   "status.invalid-repayment": "Repayment amount or tender is invalid.",
   "status.invalid-date-filter": "Choose a valid date range, with the start on or before the end.",
   "status.online-required": "This operation requires a live backend.",
+  "status.payment-method-unsupported":
+    "The server has not enabled card repayment on this terminal's card channel. No payment was taken; use cash or another payment method.",
   "status.payment-recovery-required":
     "Payment outcome unknown; recovery is required before any new action.",
   "status.permission-required": "Cashier permission is required.",
@@ -418,6 +422,8 @@ const installmentChineseCopy = {
     "刷卡付款无法原路退回，请改选“全部退代金券”；未发生任何退款。",
   "status.cancel-refund-mode-unsupported":
     "服务端暂不支持退代金券，未发生任何退款；请改用原路退回或升级服务端。",
+  "status.claim-busy":
+    "该分期另有一笔续付仍在处理中，本次未收款；请稍后重试，或请主管核对。",
   "status.claim-review-required":
     "续付占用信息不一致，尚未发起付款；请让主管查看审计记录。",
   "status.conflict": "服务端状态已变化，请刷新后处理。",
@@ -430,6 +436,8 @@ const installmentChineseCopy = {
   "status.invalid-repayment": "续付金额或付款信息无效。",
   "status.invalid-date-filter": "请选择有效日期范围，开始日期不得晚于结束日期。",
   "status.online-required": "此操作必须在线完成。",
+  "status.payment-method-unsupported":
+    "服务端未开放本机刷卡通道的续付，本次未收款；请改用现金或其他付款方式。",
   "status.payment-recovery-required":
     "支付结果未知：恢复完成前禁止再次扣款、退款、作废或切换付款方式。",
   "status.permission-required": "当前收银员没有所需权限。",

@@ -828,6 +828,256 @@ test("退代金券模式：原付款证据不要求卡引用/卡交易，计划�
   });
 });
 
+const M55_EVIDENCE_TRIGGERS = [
+  "trg_installment_original_tender_evidence_immutable",
+  "trg_installment_original_tender_evidence_no_delete",
+  "trg_installment_cash_settlements_approved_evidence",
+  "trg_installment_provider_attempts_approved_material",
+  "trg_installment_refund_item_immutable",
+  "trg_installment_refund_item_binding",
+  "trg_installment_refund_item_no_delete",
+] as const;
+
+/** 在 M54 结构上建立「取消分期（退代金券）」的历史数据：action、受保护导入的证据、快照与来源行。 */
+async function seedPreM55RefundProvenance(
+  connection: SqliteConnectionPort,
+): Promise<void> {
+  const encryptor = new RecordingEncryptor();
+  const actionStore = new SqliteInstallmentActionStore(connection, encryptor, () => NOW);
+  await actionStore.createIfNone(createCancelAction("voucher"));
+  await actionStore.transition({
+    actionId: ACTION_ID,
+    expectedState: "Created",
+    nextState: "ProviderPending",
+    terminal: { storeCode: STORE_CODE, deviceCode: DEVICE_CODE },
+  });
+  const vault = new SqliteInstallmentRefundProvenanceVault(connection, encryptor, () => NOW);
+  await vault.importProtected(refundImport());
+}
+
+async function readAll(
+  connection: SqliteConnectionPort,
+  sql: string,
+): Promise<readonly Record<string, unknown>[]> {
+  return connection.getAll<Record<string, unknown>>(sql);
+}
+
+function evidenceInsertParams(
+  evidenceId: string,
+  method: string,
+  provider: string | null,
+): SqlValue[] {
+  return [
+    evidenceId, "STORE-1", "IPAD-1", INSTALLMENT_GUID,
+    `31000000-0000-4000-8000-${evidenceId.slice(-12).padStart(12, "0")}`,
+    `attempt-${evidenceId}`, method, provider, "hbpos-protected-details", new Uint8Array([1, 2, 3]), NOW,
+  ];
+}
+
+const INSERT_EVIDENCE_SQL = `INSERT INTO installment_original_tender_evidence (
+  evidence_id, origin_action_id, store_code, device_code, installment_guid,
+  payment_guid, source_attempt_id, method, amount_cents, provider, provenance,
+  payload_revision, protected_payload_ciphertext, created_at_iso
+) VALUES (?, NULL, ?, ?, ?, ?, ?, ?, 500, ?, ?, 1, ?, ?)`;
+
+test("M55 升级：证据表重建保留历史行、索引、触发器与外键，并接受 Zeller / 手动刷卡原付款", async () => {
+  await withDatabase(async (connection) => {
+    const throughM54 = POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 54);
+    await applyMigrations(connection, () => NOW, throughM54);
+    assert.equal(await schemaVersion(connection), 54);
+    await seedPreM55RefundProvenance(connection);
+
+    const evidenceBefore = await readAll(connection, "SELECT * FROM installment_original_tender_evidence ORDER BY evidence_id");
+    const itemsBefore = await readAll(connection, "SELECT * FROM installment_refund_provenance_items ORDER BY sequence");
+    assert.equal(evidenceBefore.length, 3);
+    assert.equal(itemsBefore.length, 3);
+    // 升级前 M54 结构拒绝 Zeller 原付款（这正是要放宽的约束）。
+    await assert.rejects(
+      () => connection.run(INSERT_EVIDENCE_SQL, evidenceInsertParams("pre-zeller-000000000001", "card", "zeller")),
+      /CHECK constraint failed/i,
+    );
+
+    await applyMigrations(connection, () => NOW);
+    assert.equal(await schemaVersion(connection), 55);
+
+    // 历史行逐列原样保留（含密文字节），来源行也完整。
+    assert.deepEqual(
+      await readAll(connection, "SELECT * FROM installment_original_tender_evidence ORDER BY evidence_id"),
+      evidenceBefore,
+    );
+    assert.deepEqual(
+      await readAll(connection, "SELECT * FROM installment_refund_provenance_items ORDER BY sequence"),
+      itemsBefore,
+    );
+    // 暂存表不残留；索引与 7 个触发器按原名重建；外键完好。
+    assert.equal(await tableExists(connection, "installment_original_tender_evidence_m55_stash"), false);
+    assert.equal(await tableExists(connection, "installment_refund_provenance_items_m55_stash"), false);
+    for (const trigger of M55_EVIDENCE_TRIGGERS) {
+      assert.equal(await triggerExists(connection, trigger), true, trigger);
+    }
+    assert.deepEqual(
+      (await readAll(
+        connection,
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_installment_original_tender_%' ORDER BY name`,
+      )).map((row) => row.name),
+      ["ix_installment_original_tender_installment", "ix_installment_original_tender_payment"],
+    );
+    assert.deepEqual(await readAll(connection, "PRAGMA foreign_key_check"), []);
+
+    // 新允许值：Zeller 与手动刷卡可作为刷卡原付款证据登记。
+    await connection.run(INSERT_EVIDENCE_SQL, evidenceInsertParams("post-zeller-000000000002", "card", "zeller"));
+    await connection.run(INSERT_EVIDENCE_SQL, evidenceInsertParams("post-manual-00000000003", "card", "manual-card"));
+    // 约束仍然收紧：未知通道、现金带通道、券带非券通道、刷卡带券通道都被 CHECK 拒绝。
+    // （card + NULL provider 沿用 M22 原约束：SQL 的 NULL 让 CHECK 放行，由应用层 normalizeEvidence 拒绝，本迁移不改变该语义。）
+    for (const [method, provider] of [
+      ["card", "bogus"], ["cash", "zeller"], ["voucher", "zeller"], ["card", "voucher"],
+    ] as const) {
+      await assert.rejects(
+        () => connection.run(INSERT_EVIDENCE_SQL, evidenceInsertParams(`bad-${method}-${provider}-0000`.slice(0, 24), method, provider)),
+        /CHECK constraint failed/i,
+        `${method}/${provider}`,
+      );
+    }
+
+    // 不可变与禁止删除语义仍生效；来源行仍受外键与绑定触发器保护。
+    await assert.rejects(
+      () => connection.run("UPDATE installment_original_tender_evidence SET amount_cents = 1 WHERE evidence_id = 'post-zeller-000000000002'"),
+      /INSTALLMENT_ORIGINAL_TENDER_IMMUTABLE/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM installment_original_tender_evidence WHERE evidence_id = 'post-zeller-000000000002'"),
+      /INSTALLMENT_ORIGINAL_TENDER_DELETE_FORBIDDEN/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM installment_refund_provenance_items"),
+      /INSTALLMENT_REFUND_ITEM_DELETE_FORBIDDEN/,
+    );
+    await assert.rejects(
+      () => connection.run(
+        `INSERT INTO installment_refund_provenance_items (refund_action_id, sequence, evidence_id, source_payment_guid, source_attempt_id)
+         VALUES (?, 9, 'no-such-evidence', 'no-such-guid', 'no-such-attempt')`,
+        [ACTION_ID],
+      ),
+      /INSTALLMENT_REFUND_ITEM_BINDING_INVALID|FOREIGN KEY/,
+    );
+  });
+});
+
+test("M55 中途失败整体回滚：不推进版本，历史证据与旧约束原样保留", async () => {
+  await withDatabase(async (connection) => {
+    const throughM54 = POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 54);
+    await applyMigrations(connection, () => NOW, throughM54);
+    await seedPreM55RefundProvenance(connection);
+    const evidenceBefore = await readAll(connection, "SELECT * FROM installment_original_tender_evidence ORDER BY evidence_id");
+    const itemsBefore = await readAll(connection, "SELECT * FROM installment_refund_provenance_items ORDER BY sequence");
+
+    const m55 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 55);
+    assert.ok(m55);
+    await assert.rejects(
+      () => applyMigrations(connection, () => NOW, [...throughM54, { ...m55, sql: `${m55.sql}\nCREATE TABL invalid_m55;` }]),
+      /syntax|near/i,
+    );
+
+    assert.equal(await schemaVersion(connection), 54);
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_original_tender_evidence ORDER BY evidence_id"), evidenceBefore);
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_refund_provenance_items ORDER BY sequence"), itemsBefore);
+    assert.equal(await tableExists(connection, "installment_original_tender_evidence_m55_stash"), false);
+    for (const trigger of M55_EVIDENCE_TRIGGERS) {
+      assert.equal(await triggerExists(connection, trigger), true, trigger);
+    }
+    // 旧约束仍在：回滚后依旧拒绝 Zeller。
+    await assert.rejects(
+      () => connection.run(INSERT_EVIDENCE_SQL, evidenceInsertParams("rolled-back-zeller-0004", "card", "zeller")),
+      /CHECK constraint failed/i,
+    );
+  });
+});
+
+test("Zeller / 手动刷卡原付款可经 vault 登记为证据；原路退款计划不会为它们生成 provider attempt", async () => {
+  await withMigratedDatabase(async (connection) => {
+    const encryptor = new RecordingEncryptor();
+    const actionStore = new SqliteInstallmentActionStore(connection, encryptor, () => NOW);
+    await actionStore.createIfNone(createCancelAction("voucher"));
+    await actionStore.transition({
+      actionId: ACTION_ID,
+      expectedState: "Created",
+      nextState: "ProviderPending",
+      terminal: { storeCode: STORE_CODE, deviceCode: DEVICE_CODE },
+    });
+    const vault = new SqliteInstallmentRefundProvenanceVault(connection, encryptor, () => NOW);
+    const snapshot = await vault.importProtected(Object.freeze({
+      installmentGuid: INSTALLMENT_GUID,
+      storeCode: STORE_CODE,
+      requestingDeviceCode: DEVICE_CODE,
+      paidAmountCents: 2_000,
+      tenders: Object.freeze([
+        protectedTender({
+          evidenceId: "hbpos:zeller",
+          sourceAttemptId: "hbpos:zeller-attempt",
+          sourcePaymentGuid: "30000000-0000-4000-8000-000000000041",
+          method: "card",
+          provider: "zeller",
+          reference: "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f",
+          cardTransactions: Object.freeze([]),
+        }),
+        protectedTender({
+          evidenceId: "hbpos:manual",
+          sourceAttemptId: "hbpos:manual-attempt",
+          sourcePaymentGuid: "30000000-0000-4000-8000-000000000042",
+          method: "card",
+          provider: "manual-card",
+          reference: "MANUAL:0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00",
+          cardTransactions: Object.freeze([]),
+        }),
+      ]),
+    }));
+    assert.equal(snapshot.complete, true);
+    assert.deepEqual(
+      snapshot.tenders.map((tender) => [tender.method, tender.provider]),
+      [["card", "zeller"], ["card", "manual-card"]],
+    );
+    // 公开快照只含安全描述符：原付款引用不外泄。
+    assert.equal(JSON.stringify(snapshot).includes("ZELLER:HBZ-"), false);
+    assert.equal(JSON.stringify(snapshot).includes("MANUAL:0d4c"), false);
+    // 本地快照重读按 action 冻结的退代金券模式校验，结果一致。
+    assert.deepEqual(
+      await vault.resolve({ installmentGuid: INSTALLMENT_GUID, storeCode: STORE_CODE, requestingDeviceCode: DEVICE_CODE }),
+      snapshot,
+    );
+
+    // 退代金券计划（provider 固定 voucher）可以绑定到这两笔原付款证据。
+    const voucherPlan = Object.freeze({
+      actionId: ACTION_ID,
+      attempts: Object.freeze(
+        snapshot.tenders.map((tender, index) =>
+          refundRecord(
+            tender,
+            Object.freeze({
+              ...refundAttempt(tender, "voucher"),
+              attemptId: `refund-voucher-zm-${index}`,
+              idempotencyKey: `${ACTION_ID}:refund:${tender.sourcePaymentGuid}`,
+            }),
+            index,
+            `30000000-0000-4000-8000-00000000005${index + 1}`,
+          ),
+        ),
+      ),
+      cashSettlements: Object.freeze([]),
+    });
+    const providerStore = new SqliteInstallmentProviderAttemptStore(connection, encryptor, () => NOW);
+    assert.deepEqual(await providerStore.bindPlanOrGet(voucherPlan), voucherPlan);
+
+    // 原路退款 attempt 的 provider 只可能是 Square / Linkly：Zeller 证据不能 seed 出 provider attempt。
+    await assert.rejects(
+      () => vault.seedRefundAttempt({
+        evidence: snapshot.tenders[0]!,
+        attempt: refundAttempt(snapshot.tenders[0]!, "square"),
+      }),
+      /invalid|seed|provider/i,
+    );
+  });
+});
+
 test("分期专用 voucher token/context/material 绑定 provider attempt 与 action scope，secret 全部二次加密", async () => {
   await withMigratedDatabase(async (connection) => {
     const encryptor = new RecordingEncryptor();

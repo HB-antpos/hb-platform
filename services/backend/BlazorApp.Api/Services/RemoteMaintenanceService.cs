@@ -245,6 +245,10 @@ public sealed class RemoteMaintenanceService
         if (registration is null) return RemoteMaintenanceResult<RemoteMaintenancePrepareResponseDto>.Fail("REMOTE_MAINTENANCE_DEVICE_NOT_ELIGIBLE", "当前设备不是有效的 Windows POS 设备");
         var now = EnsureUtc(_utcNow());
         var row = await _dbContext.Db.Queryable<RemoteMaintenanceDevice>().FirstAsync(x => x.DeviceRegistrationId == registration.ID && !x.IsDeleted);
+        // 设备改绑后本机还拿着旧操作号：先把已提交的旧记录接过来，否则这里会新建空记录，
+        // 返回新 DeviceId，WPF 对账永远停在 prepare-mismatch。空记录只在操作号相同时才让位。
+        if (row is null || (row.LastOperationId == request.OperationId && !IsCommitted(row)))
+            row = await AdoptReboundRowAsync(registration.ID, hardwareId, request.OperationId, cancellationToken) ?? row;
         if (row is null)
         {
             row = new RemoteMaintenanceDevice
@@ -392,6 +396,45 @@ public sealed class RemoteMaintenanceService
             && EnsureUtc(acceptedAt) > rateThreshold)
             return RemoteMaintenanceResult<object>.Fail("REMOTE_MAINTENANCE_RATE_LIMITED", "心跳过于频繁");
         return RemoteMaintenanceResult<object>.Fail("REMOTE_MAINTENANCE_SEQUENCE_REJECTED", "心跳 sequence 必须严格递增");
+    }
+
+    private static bool IsCommitted(RemoteMaintenanceDevice row) =>
+        !string.IsNullOrWhiteSpace(row.MonitorTokenHash) && !string.IsNullOrWhiteSpace(row.CommitResponseCiphertext);
+
+    /// <summary>
+    /// 把改绑前已提交的远程维护记录迁到当前注册，保留原 Id、RustDesk ID、token 和凭据。
+    /// 同一本机操作号和完整改绑证明链缺一不可，否则返回 null，不让旧凭据流向新注册。
+    /// </summary>
+    private async Task<RemoteMaintenanceDevice?> AdoptReboundRowAsync(
+        int registrationId, string hardwareId, Guid operationId, CancellationToken cancellationToken)
+    {
+        var candidates = await _dbContext.Db.Queryable<RemoteMaintenanceDevice>()
+            .Where(x => x.HardwareId == hardwareId && x.LastOperationId == operationId && x.DeviceRegistrationId != registrationId && !x.IsDeleted)
+            .ToListAsync();
+        var committed = candidates.Where(IsCommitted).ToList();
+        if (committed.Count != 1) return null;
+        var source = committed[0];
+        var resolved = await RemoteMaintenanceRegistrationResolver.ResolveAsync(_posmContext, [source], cancellationToken);
+        if (!resolved.TryGetValue(source.Id, out var target) || target.ID != registrationId) return null;
+
+        // 过滤唯一索引要求先让出注册号。不用事务：中途失败时下次 prepare 走 row 为空的分支，仍能接上。
+        var sourceId = source.Id;
+        var sourceRegistrationId = source.DeviceRegistrationId;
+        await _dbContext.Db.Updateable<RemoteMaintenanceDevice>()
+            .SetColumns(x => new RemoteMaintenanceDevice { IsDeleted = true })
+            .Where(x => x.HardwareId == hardwareId && x.LastOperationId == operationId && x.Id != sourceId && !x.IsDeleted && x.MonitorTokenHash == null && x.CommitResponseCiphertext == null)
+            .ExecuteCommandAsync();
+        var moved = await _dbContext.Db.Updateable<RemoteMaintenanceDevice>()
+            .SetColumns(x => new RemoteMaintenanceDevice { DeviceRegistrationId = registrationId })
+            .Where(x => x.Id == sourceId && x.DeviceRegistrationId == sourceRegistrationId && x.LastOperationId == operationId && !x.IsDeleted)
+            .ExecuteCommandAsync();
+        if (moved != 1)
+            return await _dbContext.Db.Queryable<RemoteMaintenanceDevice>().FirstAsync(x => x.DeviceRegistrationId == registrationId && !x.IsDeleted);
+        source.DeviceRegistrationId = registrationId;
+        _logger.LogInformation(
+            "Remote maintenance row moved after rebind. DeviceId={DeviceId}, OldRegistrationId={OldRegistrationId}, NewRegistrationId={NewRegistrationId}",
+            sourceId, sourceRegistrationId, registrationId);
+        return source;
     }
 
     private async Task<POSM_设备注册信息表?> ResolveEnabledWindowsPosAsync(string hardwareId, CancellationToken cancellationToken)

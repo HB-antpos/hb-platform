@@ -277,6 +277,65 @@ test("公开退款上下文使用 Vault 复用后余额及现金证明余额", a
   assert.equal(context?.tenderCapacities[0]?.offlineCashProof?.remainingCents, 0);
 });
 
+test("Zeller 原付款可查出，额度只允许现金或代金券代替；Square 与现金额度不受影响", async () => {
+  const remote = new FakeHistoryApi();
+  const base = remoteContext();
+  const zellerReference =
+    "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f";
+  remote.contextResult = {
+    ...base,
+    paymentCapacities: [
+      ...(base.paymentCapacities ?? []),
+      {
+        method: 2,
+        originalAmount: 2.5,
+        refundedAmount: 0,
+        remainingAmount: 2.5,
+        originalOrderGuid: orderGuid,
+        reference: zellerReference,
+        cardTransactions: [{ processor: "Zeller" }],
+      },
+      {
+        // 主管确认、没有交易号的未核实格式：仍然只能代替。
+        method: 2,
+        originalAmount: 1.5,
+        refundedAmount: 0,
+        remainingAmount: 1.5,
+        originalOrderGuid: orderGuid,
+        reference: "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f01",
+        cardTransactions: [],
+      },
+    ],
+  };
+  const adapter = createAdapter({
+    historyApi: remote,
+    capacityVault: {
+      async protect(input) {
+        return input.capacities.map((capacity) => ({
+          sourceKey: capacity.sourceKey,
+          capacityId: `opaque-${capacity.sourceKey}`,
+          remainingCents: capacity.remainingCents,
+          offlineCashEvidenceId: capacity.method === "cash" ? `proof-${capacity.sourceKey}` : null,
+        }));
+      },
+    },
+  });
+  const context = await adapter.lookupReceipt(orderGuid);
+  assert.deepEqual(
+    context?.tenderCapacities.map((capacity) => [
+      capacity.method,
+      capacity.remainingCents,
+      capacity.substituteOnly === true,
+    ]),
+    [
+      ["cash", 500, false],
+      ["card", 501, false],
+      ["card", 250, true],
+      ["card", 150, true],
+    ],
+  );
+});
+
 test("手工刷卡原付款可查出，额度只允许现金代替；集成刷卡与现金额度不受影响", async () => {
   const remote = new FakeHistoryApi();
   const base = remoteContext();

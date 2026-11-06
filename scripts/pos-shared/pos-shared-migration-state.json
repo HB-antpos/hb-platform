@@ -607,10 +607,10 @@
     {
       "path": "features/receipts/receipt-document.ts",
       "package": "pos-receipt-core",
-      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）",
+      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）；新增可选 orderBarcode 顶部单号条码（Order 行之前，含控制字符校验，放不下或非可打印 ASCII 时静默省略）与 receiptOrderShortCode（取显示单号末 8 位转大写，对齐 WPF #1207），仅分期补打传入，未传入时输出与此前逐字节一致",
       "baselineCanonicalRuntimeSha256": "be588d9a3581e769fb819e30d22bc72e1f4873eaf98c2aa754416e1ccc9af8bc",
-      "canonicalRuntimeSha256": "beb5a90c1075854a64d14e0df9a0775ecebacbb1b20dbbdf55d0ce044d09a4d0",
-      "canonicalTypeSha256": "cf79572c2d71ca9e36a7b450c92a7fcc88eb255849dcb247b699facb2ffec35c",
+      "canonicalRuntimeSha256": "b9dc9646bb7114692f0c667afef62893370ffde912c14fbbec65392d4d2d0aef",
+      "canonicalTypeSha256": "f798093a040108611613b73b6e2bf12938509e3851d59f5b4ba58a3f1ae6a979",
       "behaviorTests": [
         {
           "workspace": "packages/pos-receipt-core",

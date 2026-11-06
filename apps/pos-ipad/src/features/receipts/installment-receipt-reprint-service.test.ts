@@ -7,6 +7,7 @@ import {
   type FrozenInstallmentReceiptSettings,
   type InstallmentReceiptSettingsSource,
 } from "./installment-receipt-reprint-service";
+import { receiptCode128 } from "@hb/pos-receipt-core/features/receipts/receipt-code128";
 import type { FrozenReceiptReprintSettings } from "@hb/pos-receipt-core/features/receipts/receipt-reprint-service";
 
 import type { InstallmentDetails, InstallmentsRemotePort } from "@/features/installments/installment-models";
@@ -397,6 +398,32 @@ test("prepare 点击时重读可信分期并按 WPF 字段生成带 REPRINT 的�
   assert.match(receipt, /\*\*\*\*4321/u);
   assert.doesNotMatch(receipt, /\*\*\*\*9999/u);
   assert.match(receipt, new RegExp(installmentGuid, "u"));
+});
+
+test("分期补打顶部印单号末 8 位条码（对齐 WPF #1207），在「Order:」行之前，完整单号仍照印", async () => {
+  const installmentNumber = "IP-1013-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00";
+  const harness = createService({ response: details({ installmentNumber }) });
+
+  const prepared = await harness.service.prepare(installmentGuid);
+  assert.ok(prepared);
+  const receipt = decoder.decode(prepared.receiptBytes);
+
+  // 条码载荷是 Code128 编码后的 "3D2E1F00"；它出现在「Order:」行之前，且只出现一次。
+  const payload = receiptCode128("3D2E1F00").payload;
+  const barcodeAt = receipt.indexOf(payload);
+  // 完整单号约 47 个字符，超过 80mm 的 42 字符行宽，「Order:」行会按单词边界硬换行，所以只比对行首与尾部。
+  const orderAt = receipt.indexOf("Order: IP-1013-");
+  assert.ok(barcodeAt > receipt.indexOf("REPRINT"), "条码在状态与重打标记之后");
+  assert.ok(barcodeAt >= 0 && orderAt > barcodeAt, "条码在「Order:」行之前");
+  assert.equal(receipt.split(payload).length - 1, 1);
+  assert.ok(receipt.indexOf(installmentNumber.slice(-8), orderAt) > orderAt, "完整单号的尾部仍印在「Order:」行里");
+  assert.ok(receipt.includes("Lay-by No: IP-1013-"), "分期信息行仍带分期单号");
+  // 标准 2 点模块 Code128 命令出现在字节里（放得下才印）。
+  assert.ok(
+    Array.from({ length: prepared.receiptBytes.length - 2 }, (_, i) => i).some(
+      (i) => prepared.receiptBytes[i] === 0x1d && prepared.receiptBytes[i + 1] === 0x77 && prepared.receiptBytes[i + 2] === 2,
+    ),
+  );
 });
 
 test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () => {

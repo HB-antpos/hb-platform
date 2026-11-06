@@ -611,7 +611,38 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     const availability =
       await this.context.input.payments.listProviderAvailability?.();
     requireScopedLease(this.context.lease, this.context.terminal);
-    return Object.freeze([...(availability ?? [])]);
+    const serverEnabled = await this.serverEnabledCardProviders();
+    return Object.freeze(
+      (availability ?? []).map((entry) =>
+        // 服务端明确只放开部分通道时，本机即使配置了也不展示未放开的刷卡通道（否则点了只会被 begin-provider 400 拒绝）。
+        serverEnabled !== null &&
+        (entry.provider === "square" || entry.provider === "linkly-cloud") &&
+        !serverEnabled.has(cardProviderFamily(entry.provider))
+          ? Object.freeze({
+              ...entry,
+              available: false,
+              blocker: "PAYMENT_PROVIDER_UNKNOWN" as const,
+            })
+          : entry,
+      ),
+    );
+  }
+
+  /**
+   * 服务端放开的刷卡续付通道集合；旧服务端没有该字段、或能力位读取失败时返回 null（不收紧）：
+   * 读取失败不在这里放大成不可用，真正续付时会重新读取能力位并 fail closed。
+   */
+  private async serverEnabledCardProviders(): Promise<ReadonlySet<string> | null> {
+    try {
+      const capabilities = validateRepaymentCapabilities(
+        await this.context.capabilities(),
+      );
+      return capabilities.cardRepaymentProviders === undefined
+        ? null
+        : new Set(capabilities.cardRepaymentProviders.map(cardProviderFamily));
+    } catch {
+      return null;
+    }
   }
 
   public async list(input: Readonly<{
@@ -2162,13 +2193,9 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         (repaymentClaimLocalMismatch(error) ? "ClaimMismatch" : null);
       if (deterministic && persisted.state === "Created") {
         await this.finalizeCreatedClaimFailure(persisted, deterministic);
-        throw workflowError(
-          deterministic === "ClaimMismatch"
-            ? "claim-review-required"
-            : "conflict",
-          deterministic === "ClaimMismatch"
-            ? "Repayment claim binding mismatch requires review."
-            : "Another repayment claim is active.",
+        throw deterministicClaimWorkflowError(
+          deterministic,
+          "Repayment claim binding mismatch requires review.",
         );
       }
       throw mapRemoteError(error);
@@ -2378,15 +2405,9 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         (repaymentClaimLocalMismatch(error) ? "ClaimMismatch" : null);
       if (deterministic) {
         await this.finalizeCreatedClaimFailure(persisted, deterministic);
-        throw workflowError(
-          deterministic === "ClaimMismatch"
-            ? "claim-review-required"
-            : "conflict",
-          deterministic === "ClaimMismatch"
-            ? "Repayment claim mismatch requires review."
-            : deterministic === "PaymentMethodUnsupported"
-              ? "Card installment repayment is not supported by this server."
-            : "Another repayment claim is active.",
+        throw deterministicClaimWorkflowError(
+          deterministic,
+          "Repayment claim mismatch requires review.",
         );
       }
       if (repaymentClaimCreateAmbiguous(error)) {
@@ -3547,6 +3568,11 @@ function validateRepaymentCapabilities(
     (capabilities.repaymentClaimPrepareProviderV1 !== undefined &&
       typeof capabilities.repaymentClaimPrepareProviderV1 !== "boolean") ||
     typeof capabilities.cardRepaymentSupported !== "boolean" ||
+    (capabilities.cardRepaymentProviders !== undefined &&
+      (!Array.isArray(capabilities.cardRepaymentProviders) ||
+        capabilities.cardRepaymentProviders.some(
+          (provider) => typeof provider !== "string",
+        ))) ||
     typeof capabilities.crossDeviceRepaymentEnabled !== "boolean" ||
     typeof capabilities.crossDeviceCancelRefundEnabled !== "boolean" ||
     typeof capabilities.crossDeviceVoidEnabled !== "boolean" ||
@@ -4024,6 +4050,35 @@ function repaymentClaimNotFound(error: unknown): boolean {
     (error.status === 404 ||
       error.code?.trim().toUpperCase() === "CLAIM_NOT_FOUND")
   );
+}
+
+/**
+ * 把续付 claim 的确定性失败映射成界面可区分的工作流错误。三种情况都发生在任何 provider 调用之前、
+ * 本地 action 已终结，所以都是「本次未收款」：占用中（可稍后重试 / 请主管核对）、
+ * 服务端未放开该通道（改用现金或其他方式）、占用信息不一致（须主管查看审计记录）。
+ */
+function deterministicClaimWorkflowError(
+  deterministic: "ClaimBusy" | "ClaimMismatch" | "PaymentMethodUnsupported",
+  mismatchMessage: string,
+): InstallmentWorkflowError {
+  if (deterministic === "ClaimMismatch") {
+    return workflowError("claim-review-required", mismatchMessage);
+  }
+  if (deterministic === "PaymentMethodUnsupported") {
+    return workflowError(
+      "payment-method-unsupported",
+      "Card installment repayment is not supported by this server.",
+    );
+  }
+  return workflowError("claim-busy", "Another repayment claim is active.");
+}
+
+/** 服务端通道名归一：anz / linkly-cloud 都算 linkly（对齐服务端 NormalizeFamily）。 */
+function cardProviderFamily(provider: string): string {
+  const normalized = provider.trim().toLowerCase();
+  return normalized === "linkly-cloud" || normalized === "anz"
+    ? "linkly"
+    : normalized;
 }
 
 function repaymentClaimDeterministicFailure(
