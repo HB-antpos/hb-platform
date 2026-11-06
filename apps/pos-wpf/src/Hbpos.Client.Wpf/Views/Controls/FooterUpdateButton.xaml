@@ -54,7 +54,7 @@
                                 <Condition Binding="{Binding IsTransactionInProgress}" Value="False" />
                                 <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="False" />
                                 <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsPressed}" Value="False" />
-                                <Condition Binding="{Binding Source={x:Static SystemParameters.ClientAreaAnimation}, Mode=OneWay}" Value="True" />
+                                <Condition Binding="{Binding AnimationsEnabled}" Value="True" />
                             </MultiDataTrigger.Conditions>
                             <MultiDataTrigger.EnterActions>
                                 <BeginStoryboard x:Name="PulseStoryboard">

@@ -59,6 +59,26 @@ public sealed class FooterUpdateButtonRuntimeTests(PaymentViewRuntimeStaTestHost
         });
 
     [Fact]
+    public Task Pulse_does_not_play_when_system_animations_are_off() =>
+        host.RunAsync(async _ =>
+        {
+            ConfigureCulture("en-US");
+            var state = CreateState();
+            state.AnimationsEnabled = false;
+            var control = new FooterUpdateButton { DataContext = state };
+            Realize(control);
+            var button = Find<Button>(control, "FooterLatestVersionButton");
+            var overlay = Overlay(button);
+
+            await Task.Delay(350);
+            Assert.Equal(0, overlay.Opacity);
+            Assert.False(overlay.HasAnimatedProperties);
+            // 中文注释：没有动画时按钮仍然可见、可点击。
+            Assert.Equal(Visibility.Visible, button.Visibility);
+            Assert.True(state.UpdateFromFooterCommand.CanExecute(null));
+        });
+
+    [Fact]
     public Task Button_is_replaced_by_progress_while_the_command_runs() =>
         host.RunAsync(async _ =>
         {
@@ -87,7 +107,8 @@ public sealed class FooterUpdateButtonRuntimeTests(PaymentViewRuntimeStaTestHost
 
     private static AppUpdateState CreateState()
     {
-        var state = new AppUpdateState();
+        // 中文注释：CI 机器的会话常关闭系统动画，测试里显式开启，不依赖运行环境。
+        var state = new AppUpdateState { AnimationsEnabled = true };
         state.InitializeCurrentVersion("1.0.102");
         state.ApplyVersionCheck(new AppUpdateCheckResponse
         {

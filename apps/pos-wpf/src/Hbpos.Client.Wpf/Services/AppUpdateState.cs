@@ -34,6 +34,9 @@ public sealed partial class AppUpdateState : ObservableObject
     private int _footerHintVersion;
     private static readonly TimeSpan FooterHintDuration = TimeSpan.FromSeconds(4);
 
+    // 中文注释：底部「最新版本」按钮的呼吸动画是否允许播放；默认跟随系统的“显示动画”设置，远程桌面等会话里常被关闭。
+    public bool AnimationsEnabled { get; set; } = System.Windows.SystemParameters.ClientAreaAnimation;
+
     // 中文注释：底部按钮上方的短提示（交易中、检查失败），几秒后自动收起。
     [ObservableProperty]
     private bool _isFooterHintVisible;
