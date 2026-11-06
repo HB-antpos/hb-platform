@@ -245,6 +245,43 @@ test("手动刷卡原付款只登记代替退款额度，不生成集成刷卡�
   assert.equal(JSON.stringify(seeded[0]).includes("attempt-1"), false);
 });
 
+test("Zeller 原付款（WPF 收的单）只登记代替退款额度，不会让整张原单查不出来", async () => {
+  const transactionUuid = "3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f";
+  const references = [
+    // 已核实：ZELLER:{reference}:{transactionUuid}
+    `ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:${transactionUuid}`,
+    // 主管确认、没有交易号的未核实格式
+    "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00",
+    // 小写前缀与损坏的 Zeller 引用都要拦在 Zeller 分支，不能回退成别的刷卡通道
+    "zeller:broken",
+  ];
+  for (const reference of references) {
+    const seeded: unknown[] = [];
+    const handles = await createVault(seeded).protect({
+      storeCode: "S01", originalOrderGuid: orderGuid, loadedFrom: "remote", capacities: [{
+        sourceKey: "zeller-remote", method: "card", originalOrderGuid: orderGuid, remainingCents: 400,
+        protectedProviderMaterial: { reference, cardTransactions: [{ ...linklyTransaction(null), processor: "Zeller" }] },
+      }],
+    });
+    assert.equal(handles.length, 1);
+    assert.equal(handles[0]?.remainingCents, 400);
+    // 引用、交易号都不进入 Vault；context 只表明来源是 Zeller。
+    assert.deepEqual((seeded[0] as { protectedContext: unknown }).protectedContext, { version: 1, provider: "zeller" });
+    assert.equal(JSON.stringify(seeded[0]).includes("HBZ-"), false);
+    assert.equal(JSON.stringify(seeded[0]).includes(transactionUuid), false);
+  }
+
+  // 只有处理器是 Zeller、引用缺失时同样识别（服务端按处理器推断）。
+  const byProcessor: unknown[] = [];
+  await createVault(byProcessor).protect({
+    storeCode: "S01", originalOrderGuid: orderGuid, loadedFrom: "remote", capacities: [{
+      sourceKey: "zeller-processor", method: "card", originalOrderGuid: orderGuid, remainingCents: 400,
+      protectedProviderMaterial: { reference: "SOMETHING-ELSE", cardTransactions: [{ ...linklyTransaction(null), processor: " zeller " }] },
+    }],
+  });
+  assert.deepEqual((byProcessor[0] as { protectedContext: unknown }).protectedContext, { version: 1, provider: "zeller" });
+});
+
 test("远端 voucher capacity 允许保护，但 context 不含原券引用", async () => {
   const seeded: unknown[] = [];
   const handles = await createVault(seeded).protect({

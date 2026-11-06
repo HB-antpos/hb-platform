@@ -24,6 +24,7 @@ import type {
 import {
   buildVoucherFundedBasis,
   isManualCardReturnMaterial,
+  isZellerCardReturnMaterial,
 } from "./return-lookup-adapter";
 
 import type { CartLine } from "@hb/pos-domain/core/contracts/cart";
@@ -397,6 +398,12 @@ function cardProtectedContext(
     // 手工刷卡只登记额度，不保存引用或交易号：执行层对 manual-card 原路退款一律拒绝，
     // 收银员只能以现金或代金券代替退款（与 WPF 一致）。
     return { version: 1, provider: "manual-card" };
+  }
+  if (isZellerCardReturnMaterial(material)) {
+    // Zeller 原付款（WPF 收的单）同样只登记额度：本机没有 Zeller 刷卡通道，
+    // 引用与交易号不进入 Vault；领域层按 substituteOnly 拒绝原路退款，只能现金 / 代金券代替。
+    // 不能落到下面的 Linkly 分支——那会因缺 RFN 抛 RETURN_SOURCE_MISMATCH，让整张原单查不出来。
+    return { version: 1, provider: "zeller" };
   }
   const originalReference = requiredProviderText(
     material.protectedProviderMaterial.reference,

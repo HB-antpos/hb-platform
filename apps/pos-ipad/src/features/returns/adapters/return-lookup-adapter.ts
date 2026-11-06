@@ -575,8 +575,9 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
                 remainingCents: handle.remainingCents,
               }
             : null,
-        // 手工刷卡没有集成刷卡机退款凭据，只能现金或代金券代替退款。
-        ...(isManualCardReturnMaterial(material)
+        // 手工刷卡没有集成刷卡机退款凭据，Zeller 原付款本机无法原路退回，都只能现金或代金券代替退款。
+        ...(isManualCardReturnMaterial(material) ||
+        isZellerCardReturnMaterial(material)
           ? { substituteOnly: true }
           : {}),
       };
@@ -765,6 +766,35 @@ export function isManualCardReturnMaterial(
         typeof transaction.processor === "string" &&
         transaction.processor.trim().toLowerCase() ===
           MANUAL_CARD_PROCESSOR.toLowerCase(),
+    )
+  );
+}
+
+const ZELLER_REFERENCE_PREFIXES = ["ZELLER:", "ZELLERRF:"] as const;
+const ZELLER_PROCESSOR = "Zeller";
+
+/**
+ * 与 WPF ZellerPaymentReference.IsZeller 口径一致：引用以 ZELLER: / ZELLERRF: 开头（含主管确认、
+ * 没有交易号的未核实格式，以及损坏的 Zeller 引用——格式错误也不能回退成别的刷卡通道），或处理器为 Zeller。
+ *
+ * 中文注释：本机目前没有 Zeller 刷卡通道（线 B 才接入），拿不到原交易号就不可能原路退回，
+ * 所以 Zeller 原付款只登记代替退款额度（现金 / 代金券），与手动刷卡同一规则。
+ * 线 B 接入 Zeller 并且本机配对可用后，这里要改成“本机 Zeller 不可用才只能代替”。
+ */
+export function isZellerCardReturnMaterial(
+  material: ProtectedTenderCapacityMaterial,
+): boolean {
+  if (material.method !== "card") return false;
+  const reference = (
+    material.protectedProviderMaterial.reference?.trim() ?? ""
+  ).toUpperCase();
+  return (
+    ZELLER_REFERENCE_PREFIXES.some((prefix) => reference.startsWith(prefix)) ||
+    material.protectedProviderMaterial.cardTransactions.some(
+      (transaction) =>
+        typeof transaction.processor === "string" &&
+        transaction.processor.trim().toLowerCase() ===
+          ZELLER_PROCESSOR.toLowerCase(),
     )
   );
 }
