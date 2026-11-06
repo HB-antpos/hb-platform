@@ -93,13 +93,19 @@ export function useStoreUserMutations(storeCode?: string | null, keyword?: strin
     mutationFn: (payload: StoreUserPasswordPayload) => resetStoreUserPassword(payload),
   });
 
-  // 店长重置密码改为给员工发设置密码验证码邮件，店长不再经手新密码。
+  // 店长重置密码改为给员工发随机密码邮件（resetPassword），店长不再经手新密码。
   const setupEmailMutation = useMutation({
-    mutationFn: (payload: { userGuid: string; storeCode: string; email?: string; initialPassword?: boolean }) =>
-      sendStoreUserPasswordSetupEmail(payload),
+    mutationFn: (payload: {
+      userGuid: string;
+      storeCode: string;
+      email?: string;
+      initialPassword?: boolean;
+      resetPassword?: boolean;
+    }) => sendStoreUserPasswordSetupEmail(payload),
     onSuccess: async (_, variables) => {
-      // 补了邮箱时刷新列表与详情，界面上的「未设置」立即变成新邮箱。
-      if (!variables.email) return;
+      // 补了邮箱时刷新列表与详情，界面上的「未设置」立即变成新邮箱；
+      // 重置密码后员工进入「待首次登录」（mustChangePassword），列表与详情头部的标签也要跟着刷新。
+      if (!variables.email && !variables.resetPassword) return;
       await Promise.all([
         invalidateUsers(),
         queryClient.invalidateQueries({

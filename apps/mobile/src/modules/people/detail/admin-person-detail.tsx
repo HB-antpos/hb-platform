@@ -254,11 +254,13 @@ export function AdminPersonDetail({
     if (!emailStoreCode || !permissions?.passwordModes.email) return;
     setPasswordError(null);
     try {
-      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode: emailStoreCode, email });
+      // 后端生成随机密码发到员工邮箱（resetPassword）：旧密码立即失效，员工首次登录自己改；店长看不到密码。
+      const result = await setupEmailMutation.mutateAsync({ userGuid, storeCode: emailStoreCode, email, resetPassword: true });
       setPasswordVisible(false);
       setPasswordHint(false);
       setSnackbar(t("messages.passwordSetupEmailSent", { email: result.maskedEmail }));
-      if (email) await invalidateIdentity();
+      // 补了邮箱，或重置后员工进入「待首次登录」，管理端身份详情都要刷新。
+      await invalidateIdentity();
     } catch (error) {
       console.warn("[people-detail] password setup email failed", toSafeStoreUserErrorLog(error));
       setPasswordError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "messages.passwordResetFailed" }));
