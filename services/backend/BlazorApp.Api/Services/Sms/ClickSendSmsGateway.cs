@@ -38,19 +38,13 @@ internal sealed class ClickSendSmsGateway : ISmsGateway
     public async Task<SmsGatewayResult> SendAsync(string toE164, string body, CancellationToken cancellationToken)
     {
         var url = $"{_options.ApiBaseUrl.TrimEnd('/')}/v3/sms/send";
-        // 不使用字母发件名：只有配置了 E.164 专用号码才传 from，否则不传，由 ClickSend 按账号默认号码发出。
-        var message = new Dictionary<string, string>
+        var payload = JsonSerializer.Serialize(new
         {
-            ["source"] = "hb-platform",
-            ["to"] = toE164,
-            ["body"] = body,
-        };
-        if (_options.ResolveSenderNumber() is { } senderNumber)
-        {
-            message["from"] = senderNumber;
-        }
-
-        var payload = JsonSerializer.Serialize(new { messages = new[] { message } });
+            messages = new[]
+            {
+                new { source = "hb-platform", from = _options.From, to = toE164, body },
+            },
+        });
         using var request = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json"),
