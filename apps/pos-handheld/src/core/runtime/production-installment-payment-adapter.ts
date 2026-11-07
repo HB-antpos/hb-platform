@@ -260,6 +260,10 @@ type PaymentAdapterResult = Awaited<
   ReturnType<InstallmentMutationPaymentPort["beginOrRecover"]>
 >;
 
+type CardCancelAdapterResult = Awaited<
+  ReturnType<NonNullable<InstallmentMutationPaymentPort["cancelCardRepayment"]>>
+>;
+
 type AttemptExecution =
   | Readonly<{
       kind: "approved";
@@ -300,6 +304,103 @@ export class ProductionInstallmentPaymentAdapter
     persistedActionId: string,
   ): Promise<PaymentAdapterResult> {
     return this.run(persistedActionId);
+  }
+
+  /**
+   * 续付刷卡的“取消”（对齐 WPF #1199）：只向 Square / Linkly 的购买尝试发取消，再按通道结论落账。
+   * - 通道说已取消 / 已拒绝 → declined（调用方据此结案并释放占用）；
+   * - 通道说顾客其实已经付了 → approved（照常入账，不因为点了取消就丢掉已扣款）；
+   * - 其余一切（取消键被拒、传输歧义、尝试本身已是 Unknown）→ unknown，绝不当作“未扣款”。
+   * 与恢复共用同一个 inflight 槽：同一 action 同时只允许一个通道调用，避免取消与轮询互相踩。
+   */
+  public cancelCardRepayment(
+    persistedActionId: string,
+  ): Promise<CardCancelAdapterResult> {
+    const actionId = requiredText(persistedActionId, "persisted action id");
+    if (this.inflight.has(actionId)) {
+      throw adapterError(
+        "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
+        "Another provider call for this installment action is still running.",
+      );
+    }
+    const promise = this.executeCardCancel(actionId);
+    this.inflight.set(actionId, promise);
+    promise.then(
+      () => this.deleteInflight(actionId, promise),
+      () => this.deleteInflight(actionId, promise),
+    );
+    return promise;
+  }
+
+  private async executeCardCancel(
+    actionId: string,
+  ): Promise<CardCancelAdapterResult> {
+    const rawAction = await this.options.store.loadAction(actionId);
+    if (!rawAction) {
+      throw adapterError(
+        "INSTALLMENT_ACTION_NOT_FOUND",
+        "Persisted installment action was not found.",
+      );
+    }
+    const action = validateAction(rawAction, actionId);
+    if (action.action.kind !== "repayment" || action.action.method !== "card") {
+      throw planConflict();
+    }
+    // 中文注释：取消路径只读已有 plan，缺失就失败关闭——绝不能在这里生成新的 provider 身份。
+    const existing = await this.options.store.loadPlan(actionId);
+    if (!existing) {
+      throw adapterError(
+        "INSTALLMENT_ATTEMPT_DURABILITY_REQUIRED",
+        "Installment provider plan is missing; the card repayment cannot be cancelled here.",
+      );
+    }
+    const plan = validatePlan(existing, action);
+    const record = plan.attempts[0];
+    if (
+      plan.attempts.length !== 1 ||
+      plan.cashSettlements.length !== 0 ||
+      !record ||
+      record.attempt.operation !== "purchase" ||
+      (record.attempt.provider !== "square" &&
+        record.attempt.provider !== "linkly-cloud")
+    ) {
+      // 手动刷卡 / 代金券没有“通道取消”这回事（手动刷卡走准备-确认两阶段）。
+      throw planConflict();
+    }
+    const execution = await this.cancelProviderAttempt(action, record);
+    if (execution.kind === "declined") return Object.freeze({ kind: "declined" });
+    if (execution.kind === "unknown") return Object.freeze({ kind: "unknown" });
+    return Object.freeze({
+      kind: "approved" as const,
+      payment: await this.paymentFromApprovedRecord(action, execution.record),
+    });
+  }
+
+  private async cancelProviderAttempt(
+    action: PersistedInstallmentAction,
+    inputRecord: InstallmentProviderAttemptRecord,
+  ): Promise<AttemptExecution> {
+    const record = validateAttemptRecord(inputRecord, action);
+    const state = record.attempt.state;
+    if (state === "Approved") return Object.freeze({ kind: "approved", record });
+    if (state === "Declined" || state === "Cancelled") {
+      return Object.freeze({ kind: "declined", record });
+    }
+    if (state === "Created") {
+      // 中文注释：Created 先于任何通道调用耐久（Created→Submitted 在 submit 之前落盘），
+      // 所以这里能证明请求从未发出，可以直接本地结案为 Cancelled。
+      const cancelled = await this.transitionAttempt(record, "Cancelled");
+      return Object.freeze({ kind: "declined", record: cancelled });
+    }
+    if (state === "Unknown") {
+      // 中文注释：Unknown 说明连通道有没有收到请求都不确定，自动发取消键可能误伤已扣款交易；
+      // 只能交主管核实，这里不碰通道。
+      return Object.freeze({ kind: "unknown", record });
+    }
+    const provider = this.requireProvider(record.attempt.provider);
+    return this.callProvider(action, record, (attempt) =>
+      provider.cancel(attempt),
+    );
   }
 
   /** 中文注释：ACK 恢复绝不触发 submit、refund 或 provider recover。 */
@@ -1024,6 +1125,19 @@ export class ProductionInstallmentPaymentAdapter
       );
     }
 
+    return this.callProvider(action, record, execute);
+  }
+
+  /**
+   * 调用通道并把结论耐久落账：购买 / 恢复 / 取消共用，保证落账与归类规则只有一份。
+   * 调用本身抛错（传输层歧义）一律写成 Unknown；落账失败按原规则分流。
+   */
+  private async callProvider(
+    action: PersistedInstallmentAction,
+    inputRecord: InstallmentProviderAttemptRecord,
+    execute: (attempt: PaymentAttempt) => Promise<PaymentProviderResult>,
+  ): Promise<AttemptExecution> {
+    let record = inputRecord;
     let result: PaymentProviderResult;
     try {
       result = await execute(record.attempt);

@@ -229,6 +229,23 @@ export type InstallmentCashRepaymentPreparation = Readonly<{
   collection?: "cash" | "manual-card";
 }>;
 
+/** 仍在等顾客刷卡（或结果待确认）、可由原收银员向刷卡通道发取消的续付刷卡。 */
+export type InstallmentCardRepaymentCancellation = Readonly<{
+  installmentGuid: string;
+  amountCents: number;
+  provider: "square" | "linkly-cloud";
+}>;
+
+/**
+ * 取消刷卡续付的结论：
+ * cancelled = 通道证明未扣款，占用已释放，可重新收款；
+ * approved = 顾客其实已经付了，按成功入账（返回最新详情）。
+ * 无法证明时不返回，直接抛恢复错误，保持原阻断。
+ */
+export type InstallmentCardRepaymentCancelOutcome =
+  | Readonly<{ outcome: "cancelled" }>
+  | Readonly<{ outcome: "approved"; details: InstallmentDetails }>;
+
 export type InstallmentRepaymentClaimCreateCommand = Readonly<{
   installmentGuid: string;
   operationGuid: string;

@@ -9,6 +9,8 @@ import { isValidInstallmentDateFilter } from "./installment-date-filter";
 import type {
   InstallmentCancelRefundMode,
   InstallmentCardProvider,
+  InstallmentCardRepaymentCancelOutcome,
+  InstallmentCardRepaymentCancellation,
   InstallmentDateFilter,
   InstallmentDetails,
   InstallmentDeviceScope,
@@ -139,6 +141,13 @@ export interface InstallmentWorkflowPort {
   inspectCancellablePreparedCashRepayment?(): Promise<
     InstallmentCashRepaymentPreparation | null
   >;
+  /**
+   * 只读：当前本机阻断的是否是原收银员发起、仍可向通道取消的 Square / Linkly 续付刷卡。
+   * 辅助查询，任何失败都返回 null，不抛错；旧实现可省略。
+   */
+  inspectCancellableCardRepayment?(): Promise<InstallmentCardRepaymentCancellation | null>;
+  /** 向刷卡通道发取消并按通道结论收尾；无法证明未扣款时抛恢复错误、保持阻断。旧实现可省略。 */
+  cancelPendingCardRepayment?(): Promise<InstallmentCardRepaymentCancelOutcome>;
   confirmPreparedCashRepayment?(): Promise<InstallmentDetails>;
   /** 原设备主管明确确认尚未收现后，安全释放已锁定的现金续付。 */
   cancelPreparedCashRepayment?(): Promise<void>;

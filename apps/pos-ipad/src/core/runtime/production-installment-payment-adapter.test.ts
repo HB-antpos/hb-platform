@@ -354,6 +354,175 @@ test("Square 扣款在 Submitted CAS 后执行，批准证据加密写入后映�
   assert.equal(square.calls.length, 1);
 });
 
+/** 先让 Square 提交后停在 Pending（顾客还在刷卡），返回已绑定计划的适配器与脚本通道。 */
+async function pendingSquareRepayment() {
+  const store = new MemoryAttemptStore(paymentAction("card", "square"));
+  const square = new ScriptedProvider("square");
+  square.submitResults.push(providerResult("Pending", { checkoutId: "checkout-pending" }));
+  const adapter = createAdapter({
+    store,
+    providers: new ProviderRegistry(square),
+    configuredCardProviders: ["square"],
+  });
+  assert.deepEqual(await adapter.beginOrRecover(ACTION_ID), { kind: "unknown" });
+  const record = () => store.plans.get(ACTION_ID)!.attempts[0]!;
+  assert.equal(record().attempt.state, "Pending");
+  return { store, square, adapter, record };
+}
+
+test("续付刷卡取消：Pending 的 Square 尝试向通道发取消，通道回 Cancelled 才算未扣款并落账", async () => {
+  const { store, square, adapter, record } = await pendingSquareRepayment();
+  square.cancelResults.push(providerResult("Cancelled", { checkoutId: "checkout-pending" }));
+
+  const result = await adapter.cancelCardRepayment(ACTION_ID);
+
+  assert.deepEqual(result, { kind: "declined" });
+  assert.equal(record().attempt.state, "Cancelled");
+  assert.equal(square.calls.filter((call) => call.kind === "cancel").length, 1);
+  assert.equal(square.calls.at(-1)?.attempt.state, "Pending");
+  assert.equal(store.approvedMaterialWrites, 0);
+});
+
+test("续付刷卡取消：通道回已批准（顾客其实已付）时照常入账，不因点了取消丢掉已扣款", async () => {
+  const { store, square, adapter, record } = await pendingSquareRepayment();
+  square.cancelResults.push(
+    approvedCardResult(
+      "square",
+      { checkoutId: "checkout-pending", paymentId: "payment-paid" },
+      cardEvidence("square", "purchase", 2_500),
+    ),
+  );
+
+  const result = await adapter.cancelCardRepayment(ACTION_ID);
+
+  assert.equal(result.kind, "approved");
+  if (result.kind !== "approved") throw new Error("expected approved");
+  assert.equal(result.payment.method, "card");
+  assert.equal(result.payment.amountCents, 2_500);
+  assert.equal(record().attempt.state, "Approved");
+  assert.equal(store.approvedMaterialWrites, 1);
+});
+
+test("续付刷卡取消：通道仍 Pending / 回 Unknown / 调用抛错，一律是 unknown，绝不当作未扣款", async () => {
+  for (const scenario of ["still-pending", "unknown", "throws"] as const) {
+    const { square, adapter, record } = await pendingSquareRepayment();
+    if (scenario === "still-pending") {
+      square.cancelResults.push(providerResult("Pending", { checkoutId: "checkout-pending" }));
+    } else if (scenario === "unknown") {
+      square.cancelResults.push(providerResult("Unknown", { checkoutId: "checkout-pending" }));
+    } else {
+      square.cancelErrors.push(new Error("network down"));
+    }
+
+    const result = await adapter.cancelCardRepayment(ACTION_ID);
+
+    assert.deepEqual(result, { kind: "unknown" }, scenario);
+    assert.notEqual(record().attempt.state, "Cancelled", scenario);
+    assert.notEqual(record().attempt.state, "Declined", scenario);
+  }
+});
+
+test("续付刷卡取消：尝试仍是 Created（请求从未发出）时本地直接结案，不碰通道", async () => {
+  const store = new MemoryAttemptStore(
+    Object.freeze({ ...paymentAction("card", "square"), state: "Created" as const }),
+  );
+  const square = new ScriptedProvider("square");
+  const adapter = createAdapter({
+    store,
+    providers: new ProviderRegistry(square),
+    configuredCardProviders: ["square"],
+  });
+  await adapter.prepareRepaymentClaim(ACTION_ID);
+  // runtime 在 begin-provider 成功后才把 action 推到 ProviderPending；这里模拟那一步。
+  store.action = Object.freeze({ ...store.action, state: "ProviderPending" });
+  assert.equal(store.plans.get(ACTION_ID)!.attempts[0]!.attempt.state, "Created");
+
+  assert.deepEqual(await adapter.cancelCardRepayment(ACTION_ID), { kind: "declined" });
+  assert.equal(store.plans.get(ACTION_ID)!.attempts[0]!.attempt.state, "Cancelled");
+  assert.equal(square.calls.length, 0);
+});
+
+test("续付刷卡取消：尝试已是 Unknown 时不自动发取消键（可能误伤已扣款交易），交主管核实", async () => {
+  const { square, adapter, record } = await pendingSquareRepayment();
+  record().attempt = { ...record().attempt, state: "Unknown" };
+  const callsBefore = square.calls.length;
+
+  assert.deepEqual(await adapter.cancelCardRepayment(ACTION_ID), { kind: "unknown" });
+  assert.equal(square.calls.length, callsBefore);
+  assert.equal(record().attempt.state, "Unknown");
+});
+
+test("续付刷卡取消：计划缺失 / 手动刷卡 / 现金 / 并发调用都失败关闭，且不产生新 provider 身份", async () => {
+  // 计划缺失：取消路径绝不新建 plan。
+  const missing = new MemoryAttemptStore(paymentAction("card", "square"));
+  const missingAdapter = createAdapter({
+    store: missing,
+    providers: new ProviderRegistry(new ScriptedProvider("square")),
+    configuredCardProviders: ["square"],
+  });
+  await assert.rejects(
+    () => missingAdapter.cancelCardRepayment(ACTION_ID),
+    (error: unknown) =>
+      error instanceof InstallmentPaymentAdapterError &&
+      error.code === "INSTALLMENT_ATTEMPT_DURABILITY_REQUIRED",
+  );
+  assert.equal(missing.plans.size, 0);
+
+  // 手动刷卡没有通道可取消（走准备-确认两阶段）。
+  const manualStore = new MemoryAttemptStore(
+    Object.freeze({ ...paymentAction("card", "manual-card"), state: "Created" as const }),
+  );
+  const manual = new SpyManualCard();
+  const manualAdapter = createAdapter({
+    store: manualStore,
+    providers: new ProviderRegistry(manual),
+    configuredCardProviders: ["manual-card"],
+  });
+  await manualAdapter.prepareRepaymentClaim(ACTION_ID);
+  manualStore.action = Object.freeze({ ...manualStore.action, state: "ProviderPending" });
+  await assert.rejects(
+    () => manualAdapter.cancelCardRepayment(ACTION_ID),
+    (error: unknown) =>
+      error instanceof InstallmentPaymentAdapterError &&
+      error.code === "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
+  );
+  assert.equal(manual.calls.length, 0);
+
+  // 现金续付根本不是刷卡。
+  const cashAdapter = createAdapter({ store: new MemoryAttemptStore(paymentAction("cash")) });
+  await assert.rejects(
+    () => cashAdapter.cancelCardRepayment(ACTION_ID),
+    (error: unknown) => error instanceof InstallmentPaymentAdapterError,
+  );
+
+  // 同一 action 已有通道调用在跑时，取消被拒（不与轮询互相踩）。
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const gated = new ScriptedProvider("square");
+  gated.submit = async (attempt) => {
+    await gate;
+    return providerResult("Pending", { checkoutId: "checkout-gated" });
+  };
+  const busyStore = new MemoryAttemptStore(paymentAction("card", "square"));
+  const busyAdapter = createAdapter({
+    store: busyStore,
+    providers: new ProviderRegistry(gated),
+    configuredCardProviders: ["square"],
+  });
+  const running = busyAdapter.beginOrRecover(ACTION_ID);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.throws(
+    () => busyAdapter.cancelCardRepayment(ACTION_ID),
+    (error: unknown) =>
+      error instanceof InstallmentPaymentAdapterError &&
+      error.code === "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
+  );
+  release();
+  await running;
+});
+
 class SpyManualCard extends ManualCardPaymentAdapter {
   public readonly calls: string[] = [];
   public override async submit(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
@@ -1146,7 +1315,9 @@ class ScriptedProvider implements OnlinePaymentPort {
   public readonly submitResults: PaymentProviderResult[] = [];
   public readonly recoverResults: PaymentProviderResult[] = [];
   public readonly refundResults: PaymentProviderResult[] = [];
+  public readonly cancelResults: PaymentProviderResult[] = [];
   public readonly submitErrors: Error[] = [];
+  public readonly cancelErrors: Error[] = [];
 
   public constructor(public readonly provider: PaymentProvider) {}
 
@@ -1159,7 +1330,7 @@ class ScriptedProvider implements OnlinePaymentPort {
   }
 
   public cancel(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
-    return this.next("cancel", attempt, []);
+    return this.next("cancel", attempt, this.cancelResults, this.cancelErrors);
   }
 
   public refund(attempt: PaymentAttempt): Promise<PaymentProviderResult> {

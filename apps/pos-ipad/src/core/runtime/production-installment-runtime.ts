@@ -46,6 +46,8 @@ import type {
   InstallmentSupervisorDecision,
   InstallmentPickupCommand,
   InstallmentRepaymentCapabilities,
+  InstallmentCardRepaymentCancelOutcome,
+  InstallmentCardRepaymentCancellation,
   InstallmentCashRepaymentPreparation,
   InstallmentRepaymentClaim,
   InstallmentCancelClaim,
@@ -335,6 +337,18 @@ export interface InstallmentMutationPaymentPort {
     | Readonly<{ kind: "unknown" }>
   >;
   acknowledgeProviderAttempts?(persistedActionId: string): Promise<boolean>;
+  /**
+   * 续付刷卡进行中的取消：向 Square / Linkly 发取消并按通道结论落账。
+   * declined = 通道证明未扣款；approved = 顾客其实已付，照常入账；unknown = 无法证明，交主管。
+   * 旧测试 / 非生产实现可省略，运行时会失败关闭。
+   */
+  cancelCardRepayment?(
+    persistedActionId: string,
+  ): Promise<
+    | Readonly<{ kind: "approved"; payment: InstallmentPaymentCommand }>
+    | Readonly<{ kind: "declined" }>
+    | Readonly<{ kind: "unknown" }>
+  >;
 }
 
 /**
@@ -1430,6 +1444,84 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     }
   }
 
+  /**
+   * 只读判断：本机阻断的是否是「当前收银员自己发起、仍在等顾客刷卡或结果待确认」的 Square / Linkly 续付刷卡。
+   * 这是界面开关用的辅助查询，任何读取失败都返回 null，不抛错也不改任何状态。
+   */
+  public async inspectCancellableCardRepayment(): Promise<InstallmentCardRepaymentCancellation | null> {
+    try {
+      const session = requireScopedLease(
+        this.context.lease,
+        this.context.terminal,
+      );
+      const blocking = await this.loadBlockingOperation();
+      if (!blocking || blocking.type !== "payment") return null;
+      const persisted = blocking.action;
+      const provider = cancellableCardProviderOf(persisted);
+      if (provider === null) return null;
+      // 中文注释：别的收银员 / 收银机占用的卡续付走主管结案（A4），这里只给原发起人。
+      if (persisted.command.cashierId !== session.cashierId) return null;
+      requireScopedLease(this.context.lease, this.context.terminal);
+      return Object.freeze({
+        installmentGuid: persisted.action.installmentGuid,
+        amountCents: persisted.action.amountCents ?? 0,
+        provider,
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 取消进行中的续付刷卡（对齐 WPF #1199）：向刷卡通道发取消，再按通道结论收尾。
+   * - 通道证明未扣款 → 服务端占用 Declined、本机 action 结案 → 返回 cancelled，可立即重新收款；
+   * - 顾客其实已付 → 照常入账 → 返回 approved；
+   * - 其余（取消键被拒、传输歧义、尝试本身 Unknown）→ 抛恢复错误，保持阻断，只能再试或交主管。
+   * 取消只作用于通道调用这一步：占用、登记通道、入账提交都不因取消中断。
+   */
+  public async cancelPendingCardRepayment(): Promise<InstallmentCardRepaymentCancelOutcome> {
+    await this.assertOnlineAndScoped();
+    const blocking = await this.loadBlockingOperation();
+    if (!blocking || blocking.type !== "payment") {
+      throw workflowError("conflict", "No pending card repayment can be cancelled.");
+    }
+    const persisted = blocking.action;
+    if (cancellableCardProviderOf(persisted) === null) {
+      throw workflowError("conflict", "No pending card repayment can be cancelled.");
+    }
+    this.requireOriginalCashier(persisted);
+    this.requireCurrentPermission(INSTALLMENTS_ADD_REPAYMENT_PERMISSION);
+    if (!this.context.input.payments.cancelCardRepayment) {
+      throw workflowError(
+        "conflict",
+        "Card repayment cancellation is not supported by this runtime.",
+      );
+    }
+    try {
+      const details = await this.executeRepaymentClaimAction(persisted, {
+        recovery: true,
+        cancelProvider: true,
+      });
+      return Object.freeze({ outcome: "approved" as const, details });
+    } catch (error) {
+      if (error instanceof CardRepaymentCancelledSignal) {
+        return Object.freeze({ outcome: "cancelled" as const });
+      }
+      throw error;
+    }
+  }
+
+  /** 取消专用的通道调用：端口缺失时失败关闭，由调用方记为结果未知。 */
+  private cancelCardAtProvider(
+    actionId: string,
+  ): ReturnType<NonNullable<InstallmentMutationPaymentPort["cancelCardRepayment"]>> {
+    const payments = this.context.input.payments;
+    if (!payments.cancelCardRepayment) {
+      throw paymentRecoveryError("Card repayment cancellation is unavailable.");
+    }
+    return payments.cancelCardRepayment(actionId);
+  }
+
   public async cancelWithRefund(input: Readonly<{
     installmentGuid: string;
     reason: string | null;
@@ -2252,6 +2344,8 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       knownClaim?: InstallmentRepaymentClaim;
       knownApprovedPayment?: InstallmentPaymentCommand;
       metricPath?: InstallmentPerformanceEvent["path"];
+      /** 取消刷卡续付：用通道“取消”代替“恢复查询”；只有通道证明未扣款才会结案。 */
+      cancelProvider?: boolean;
     }> = {},
   ): Promise<InstallmentDetails> {
     let persisted = persistedInput;
@@ -2296,6 +2390,10 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     }
     if (claim.status === "Released" || claim.status === "Declined") {
       await this.releaseUnapprovedRepayment(persisted);
+      // 中文注释：取消流程里服务端已是 Declined = 另一边已证明未扣款，本机收尾后按“已取消”返回。
+      if (options.cancelProvider === true && claim.status === "Declined") {
+        throw new CardRepaymentCancelledSignal();
+      }
       throw workflowError(
         claim.status === "Declined" ? "authorization-declined" : "conflict",
         `Repayment claim is ${claim.status.toLowerCase()}.`,
@@ -2397,7 +2495,9 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
           })
         : options.explicitCashConfirmation
           ? await this.context.input.payments.confirmCashRepayment(action.actionId)
-          : options.recovery
+          : options.cancelProvider
+            ? await this.cancelCardAtProvider(action.actionId)
+            : options.recovery
             ? await this.context.input.payments.recoverBlocking(action.actionId)
             : authorize
               ? await this.context.input.payments.beginOrRecover(action.actionId)
@@ -2455,6 +2555,11 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
             ? error.message
             : "Declined repayment requires recovery.",
         );
+      }
+      // 中文注释：占用与本机 action 都已释放；取消流程用专用信号告诉调用方“已取消”，
+      // 避免把“权限被撤销 / 终端变更”这类同名 authorization-declined 误当成取消成功。
+      if (options.cancelProvider === true) {
+        throw new CardRepaymentCancelledSignal();
       }
       throw workflowError("authorization-declined", "Payment was declined.");
     }
@@ -4274,6 +4379,31 @@ function collectedKindOf(
     return "manual-card";
   }
   return null;
+}
+
+/**
+ * 可向通道取消的续付刷卡：只认 Square / Linkly 的卡续付，且本机 action 仍是 ProviderPending / Unknown。
+ * 手动刷卡走“准备-确认”两阶段（它没有通道可取消），代金券 / 现金 / 其它 action 一律不是。
+ */
+function cancellableCardProviderOf(
+  persisted: PersistedInstallmentAction,
+): "square" | "linkly-cloud" | null {
+  const action = persisted.action;
+  if (action.kind !== "repayment" || action.method !== "card") return null;
+  if (persisted.state !== "ProviderPending" && persisted.state !== "Unknown") {
+    return null;
+  }
+  if (persisted.command.kind === "cancel-refund") return null;
+  const provider = persisted.command.cardProvider;
+  return provider === "square" || provider === "linkly-cloud" ? provider : null;
+}
+
+/** 取消刷卡续付已完成收尾（占用释放 + 本机结案）的内部信号，只在 cancelPendingCardRepayment 内部使用。 */
+class CardRepaymentCancelledSignal extends Error {
+  public constructor() {
+    super("Card repayment was cancelled with provider proof of no charge.");
+    this.name = "CardRepaymentCancelledSignal";
+  }
 }
 
 function collectedProviderName(kind: CollectedRepaymentKind): string {
