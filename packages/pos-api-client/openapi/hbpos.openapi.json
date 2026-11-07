@@ -728,6 +728,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "includeSameProductCandidates",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
           }
         ],
         "responses": {
