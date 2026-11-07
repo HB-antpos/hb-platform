@@ -1,7 +1,7 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                     xmlns:sys="clr-namespace:System;assembly=mscorlib">
-    <!-- 收银首页的尺寸（字号、行高、按钮高度…）标准值：与改版前的字面量完全一致。由 PosTheme.xaml 合并，始终加载。 -->
+    <!-- 收银首页的尺寸（字号、行高、按钮高度…）标准值：除购物车数量列的 ± 按钮已按触控尺寸放大（32→48）外，其余与改版前的字面量一致。由 PosTheme.xaml 合并，始终加载。 -->
 
     <!-- 购物车表头与行 -->
     <sys:Double x:Key="PosHomeCartHeaderFontSize">12</sys:Double>  <!-- 表头字号 -->
@@ -16,12 +16,12 @@
     <GridLength x:Key="PosHomeCartThumbColumnWidth">64</GridLength>  <!-- 缩略图列宽（缩略图 + 12 间距） -->
 
     <!-- 购物车数量列 -->
-    <sys:Double x:Key="PosHomeCartStepButtonSize">32</sys:Double>  <!-- ± 按钮边长 -->
-    <sys:Double x:Key="PosHomeCartStepIconSize">18</sys:Double>  <!-- ± 图标 -->
-    <sys:Double x:Key="PosHomeCartQtyBoxWidth">50</sys:Double>  <!-- 数量框宽 -->
-    <sys:Double x:Key="PosHomeCartQtyBoxHeight">32</sys:Double>  <!-- 数量框高 -->
-    <sys:Double x:Key="PosHomeCartQtyFontSize">16</sys:Double>  <!-- 数量数字 -->
-    <GridLength x:Key="PosHomeCartQtyColumnWidth">58</GridLength>  <!-- 数量框所在列宽（数量框宽 + 8） -->
+    <sys:Double x:Key="PosHomeCartStepButtonSize">48</sys:Double>  <!-- ± 按钮边长 -->
+    <sys:Double x:Key="PosHomeCartStepIconSize">26</sys:Double>  <!-- ± 图标 -->
+    <sys:Double x:Key="PosHomeCartQtyBoxWidth">46</sys:Double>  <!-- 数量框宽 -->
+    <sys:Double x:Key="PosHomeCartQtyBoxHeight">48</sys:Double>  <!-- 数量框高 -->
+    <sys:Double x:Key="PosHomeCartQtyFontSize">20</sys:Double>  <!-- 数量数字 -->
+    <GridLength x:Key="PosHomeCartQtyColumnWidth">54</GridLength>  <!-- 数量框所在列宽（数量框宽 + 8） -->
     <Thickness x:Key="PosHomeCartSelectedRowBorderThickness">6,0,0,1</Thickness>  <!-- 选中行边框：左侧 6px 色条 + 底部 1px 分隔 -->
 
     <!-- 汇总区与 Pay Now -->

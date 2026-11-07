@@ -18,12 +18,12 @@
     <GridLength x:Key="PosHomeCartThumbColumnWidth">68</GridLength>
 
     <!-- 购物车数量列 -->
-    <sys:Double x:Key="PosHomeCartStepButtonSize">42</sys:Double>
-    <sys:Double x:Key="PosHomeCartStepIconSize">24</sys:Double>
-    <sys:Double x:Key="PosHomeCartQtyBoxWidth">60</sys:Double>
-    <sys:Double x:Key="PosHomeCartQtyBoxHeight">42</sys:Double>
+    <sys:Double x:Key="PosHomeCartStepButtonSize">50</sys:Double>
+    <sys:Double x:Key="PosHomeCartStepIconSize">28</sys:Double>
+    <sys:Double x:Key="PosHomeCartQtyBoxWidth">56</sys:Double>
+    <sys:Double x:Key="PosHomeCartQtyBoxHeight">50</sys:Double>
     <sys:Double x:Key="PosHomeCartQtyFontSize">25</sys:Double>
-    <GridLength x:Key="PosHomeCartQtyColumnWidth">64</GridLength>
+    <GridLength x:Key="PosHomeCartQtyColumnWidth">60</GridLength>
     <Thickness x:Key="PosHomeCartSelectedRowBorderThickness">8,0,0,1</Thickness>
 
     <!-- 汇总区与 Pay Now -->
