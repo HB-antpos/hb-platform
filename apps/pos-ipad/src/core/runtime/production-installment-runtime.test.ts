@@ -911,6 +911,190 @@ test("健康现金续付使用 prepare-provider 两请求路径，确认前不�
   assert.equal(await harness.runtime.hasRecoveryRequired(), false);
 });
 
+const MANUAL_CARD_REPAYMENT = Object.freeze({
+  installmentGuid: "installment-1",
+  amountCents: 1_000,
+  method: "card" as const,
+  cardProvider: "manual-card" as const,
+  voucherReference: null,
+  voucherReservationToken: null,
+});
+
+test("手动刷卡续付必须走准备→确认：addRepayment 在任何 action 或 claim 前失败关闭，确认前不收款，确认后只 commit 一次", async () => {
+  const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
+  const workflow = workflowOf(harness.runtime.createPresenter());
+
+  await assert.rejects(
+    workflow.addRepayment(MANUAL_CARD_REPAYMENT),
+    (error) =>
+      error instanceof InstallmentWorkflowError &&
+      error.code === "cash-confirmation-required",
+  );
+  assert.equal(harness.actionStore.getCurrent(), null);
+  assert.equal(harness.api.prepareProviderCalls.length, 0);
+  assert.equal(harness.api.createClaimCalls.length, 0);
+  assert.equal(harness.payments.authorizeCalls, 0);
+
+  const prepared = await workflow.prepareCashRepayment!(MANUAL_CARD_REPAYMENT);
+  assert.equal(prepared.collection, "manual-card");
+  assert.equal(prepared.amountCents, 1_000);
+  // 登记到中央的是 card 方式 + manual-card 通道；此时还没有任何确认或入账。
+  assert.equal(harness.api.prepareProviderCalls.length, 1);
+  assert.equal(harness.api.prepareProviderCalls[0]?.method, "card");
+  assert.equal(harness.api.prepareProviderCalls[0]?.provider, "manual-card");
+  assert.equal(harness.payments.confirmCalls, 0);
+  assert.equal(harness.payments.authorizeCalls, 0);
+  assert.equal(harness.api.commitClaimCalls.length, 0);
+  // 与现金一样先落耐久 fence（Unknown），重启后不会重新开放确认按钮。
+  assert.equal(harness.actionStore.getCurrent()?.state, "Unknown");
+
+  const completed = await workflow.confirmPreparedCashRepayment!();
+  assert.equal(completed.installmentGuid, "installment-1");
+  assert.equal(harness.payments.confirmCalls, 1);
+  assert.equal(harness.payments.authorizeCalls, 0);
+  assert.equal(harness.api.commitClaimCalls.length, 1);
+  assert.equal(harness.api.claim?.method, "card");
+  assert.equal(harness.api.claim?.provider, "manual-card");
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+});
+
+test("手动刷卡准备后重启：只允许主管核对，不会自动确认也不会凭恢复路径批准", async () => {
+  const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
+  await workflowOf(harness.runtime.createPresenter()).prepareCashRepayment!(
+    MANUAL_CARD_REPAYMENT,
+  );
+
+  const restarted = workflowOf(harness.rebuildRuntime().createPresenter());
+  await assert.rejects(
+    restarted.recoverBlocking(),
+    (error) =>
+      error instanceof InstallmentWorkflowError &&
+      error.code === "payment-recovery-required",
+  );
+  assert.equal(harness.payments.confirmCalls, 0);
+  assert.equal(harness.payments.authorizeCalls, 0);
+  assert.equal(harness.api.commitClaimCalls.length, 0);
+  assert.equal(harness.actionStore.getCurrent()?.state, "Unknown");
+});
+
+test("手动刷卡“未付款，返回”：原收银员无需取消权限，claim 结案为 Declined 且本地释放；别人接手取消仍要取消权限", async () => {
+  const withoutCancel = ALL_PERMISSIONS.filter(
+    (code) => code !== INSTALLMENTS_CANCEL_PERMISSION,
+  );
+  const harness = createHarness({
+    repaymentClaimPrepareProviderV1: true,
+    permissions: withoutCancel,
+  });
+  await workflowOf(harness.runtime.createPresenter()).prepareCashRepayment!(
+    MANUAL_CARD_REPAYMENT,
+  );
+  const attemptId = harness.api.claim?.providerAttemptId;
+  const operationGuid = harness.api.prepareProviderCalls[0]?.operationGuid;
+
+  // 另一位没有取消权限的收银员不能替别人取消：服务端 claim 完全不被触碰。
+  harness.currentCashier.clear();
+  activateCashier(harness.currentCashier, withoutCancel, "CASHIER-2");
+  await assert.rejects(
+    workflowOf(harness.rebuildRuntime().createPresenter()).cancelPreparedCashRepayment!(),
+  );
+  assert.equal(harness.api.resolveClaimCalls.length, 0);
+  assert.equal(harness.actionStore.getCurrent()?.state, "Unknown");
+
+  // 原收银员自己点“未付款，返回”：不需要取消权限。
+  harness.currentCashier.clear();
+  activateCashier(harness.currentCashier, withoutCancel, "CASHIER-1");
+  await workflowOf(harness.rebuildRuntime().createPresenter()).cancelPreparedCashRepayment!();
+
+  assert.deepEqual(harness.api.resolveClaimCalls, [
+    {
+      installmentGuid: "installment-1",
+      operationGuid,
+      outcome: "Declined",
+      providerAttemptId: attemptId,
+    },
+  ]);
+  assert.equal(harness.api.claim?.status, "Declined");
+  assert.equal(harness.actionStore.getCurrent(), null);
+  assert.equal(harness.payments.confirmCalls, 0);
+  assert.equal(harness.payments.authorizeCalls, 0);
+  assert.equal(harness.api.commitClaimCalls.length, 0);
+});
+
+test("手动刷卡 claim 已是 Unknown 时不能用 Declined 取消（确认可能发生过），保留 action 交主管结案", async () => {
+  const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
+  const workflow = workflowOf(harness.runtime.createPresenter());
+  await workflow.prepareCashRepayment!(MANUAL_CARD_REPAYMENT);
+  harness.api.claim = Object.freeze({ ...harness.api.claim!, status: "Unknown" });
+
+  await assert.rejects(
+    workflowOf(harness.rebuildRuntime().createPresenter()).cancelPreparedCashRepayment!(),
+    (error) =>
+      error instanceof InstallmentWorkflowError && error.code === "conflict",
+  );
+  assert.equal(harness.api.resolveClaimCalls.length, 0);
+  assert.equal(harness.actionStore.getCurrent()?.state, "Unknown");
+});
+
+test("服务端没放开 manual 通道或不支持刷卡续付时，手动刷卡在产生任何耐久 action 前失败关闭", async () => {
+  for (const configure of [
+    (harness: ReturnType<typeof createHarness>) => {
+      harness.api.capabilities = {
+        ...harness.api.capabilities,
+        cardRepaymentProviders: ["square", "linkly"],
+      };
+    },
+    (harness: ReturnType<typeof createHarness>) => {
+      harness.api.capabilities = {
+        ...harness.api.capabilities,
+        cardRepaymentSupported: false,
+      };
+    },
+  ]) {
+    const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
+    configure(harness);
+    await assert.rejects(
+      workflowOf(harness.runtime.createPresenter()).prepareCashRepayment!(
+        MANUAL_CARD_REPAYMENT,
+      ),
+      (error) =>
+        error instanceof InstallmentWorkflowError &&
+        error.code === "payment-method-unsupported",
+    );
+    assert.equal(harness.actionStore.getCurrent(), null);
+    assert.equal(harness.api.prepareProviderCalls.length, 0);
+    assert.equal(harness.api.createClaimCalls.length, 0);
+  }
+
+  // 服务端放开 manual（含 manual-card 写法）时可以准备。
+  const open = createHarness({ repaymentClaimPrepareProviderV1: true });
+  open.api.capabilities = { ...open.api.capabilities, cardRepaymentProviders: ["Manual"] };
+  const prepared = await workflowOf(open.runtime.createPresenter()).prepareCashRepayment!(
+    MANUAL_CARD_REPAYMENT,
+  );
+  assert.equal(prepared.collection, "manual-card");
+});
+
+test("手动刷卡只用于续付：创建分期的首付不接受 manual-card", async () => {
+  const harness = createHarness();
+  const presenter = harness.runtime.createPresenter();
+  const workflow = workflowOf(presenter);
+  await assert.rejects(
+    workflow.create({
+      draftRevision: 1,
+      customerName: "Customer",
+      customerPhone: "0400000000",
+      note: null,
+      downPaymentCents: 1_000,
+      method: "card",
+      cardProvider: "manual-card",
+      voucherReference: null,
+      voucherReservationToken: null,
+    }),
+  );
+  assert.equal(harness.actionStore.getCurrent(), null);
+  assert.equal(harness.payments.authorizeCalls, 0);
+});
+
 test("原设备主管明确未收现后安全释放 ProviderPending/Unknown，且不批准、不 commit、不生成新身份", async () => {
   for (const remoteStatus of ["ProviderPending", "Unknown"] as const) {
     const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
@@ -1021,6 +1205,7 @@ test("只读取消检查返回原设备 ProviderPending/Unknown 的既有现金 
       operationHash:
         harness.actionStore.getCurrent()!.intentFingerprint.slice(0, 23),
       path: "recovery",
+      collection: "cash",
     });
     assert.equal(harness.actionStore.transitionCalls.length, transitionCalls);
     assert.equal(harness.createdIdCount(), createdIdCount);

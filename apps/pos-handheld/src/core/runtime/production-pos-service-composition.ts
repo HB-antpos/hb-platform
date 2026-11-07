@@ -1585,7 +1585,8 @@ export function createProductionPosRuntimeServices(
                       provider,
                     ): provider is InstallmentCardProvider =>
                       provider === "square" ||
-                      provider === "linkly-cloud",
+                      provider === "linkly-cloud" ||
+                      provider === "manual-card",
                   );
               },
             },

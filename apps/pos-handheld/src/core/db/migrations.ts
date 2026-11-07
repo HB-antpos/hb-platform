@@ -7471,6 +7471,248 @@ BEGIN
 END;
 `;
 
+/**
+ * M57 分期付款尝试支持 Zeller 与手动刷卡（对齐 WPF #1195）：
+ * 分期续付用手动刷卡（独立刷卡机收款、收银员在 POS 上确认）时，本机账本要把这笔付款记成
+ * provider = 'manual-card' 的尝试；Zeller 同理预留（线 B 接入后使用）。
+ * installment_provider_attempts.provider 的 CHECK 只允许 square / linkly-cloud / voucher，
+ * SQLite 不能原地改 CHECK，只能重建表。
+ *
+ * 1. 新增允许值：provider 加 'zeller'、'manual-card'；其余列、索引、约束、不可变 / 禁止删除语义原样保留，历史行原样复制
+ *    （含 M44 后加的 provider_environment / provider_session_id / provider_acknowledged_at_iso 三列）。
+ * 2. 外键子表 installment_approved_materials、installment_voucher_protected_states 要先暂存、删除，
+ *    再在尝试表重建后回灌；否则 DROP 尝试表时的隐式 DELETE 会触发外键违例。
+ *    不使用 ALTER TABLE RENAME，避免 SQLite 重命名时对触发器体里引用的表做一致性检查而失败。
+ * 3. 引用这三张表的触发器（共 8 个）只能 DROP 后按当前定义重建，且必须在回灌之后重建
+ *    （插入守卫只允许新行 Created，会拦住回灌 Approved 历史行）。
+ * 4. 整个迁移在 applyMigrations 的独占事务内执行，要么全成功要么全回滚；本迁移不可回退。
+ *
+ * 本迁移只放宽账本；原路退款对 Zeller / 手动刷卡仍不存在（取消分期时刷卡只能退代金券）。
+ */
+const M57 = `
+DROP TRIGGER trg_installment_provider_attempts_insert_guard;
+DROP TRIGGER trg_installment_provider_attempts_update_guard;
+DROP TRIGGER trg_installment_provider_attempts_no_delete;
+DROP TRIGGER trg_installment_approved_materials_immutable;
+DROP TRIGGER trg_installment_approved_materials_no_delete;
+DROP TRIGGER trg_installment_voucher_state_update_guard;
+DROP TRIGGER trg_installment_voucher_state_no_delete;
+DROP TRIGGER trg_installment_provider_attempts_approved_material;
+
+CREATE TABLE installment_provider_attempts_m57_stash AS
+  SELECT * FROM installment_provider_attempts;
+CREATE TABLE installment_approved_materials_m57_stash AS
+  SELECT * FROM installment_approved_materials;
+CREATE TABLE installment_voucher_protected_states_m57_stash AS
+  SELECT * FROM installment_voucher_protected_states;
+
+DROP TABLE installment_approved_materials;
+DROP TABLE installment_voucher_protected_states;
+DROP TABLE installment_provider_attempts;
+
+CREATE TABLE installment_provider_attempts (
+  attempt_id TEXT PRIMARY KEY,
+  action_id TEXT NOT NULL
+    REFERENCES installment_provider_plans(action_id),
+  payment_guid TEXT NOT NULL,
+  source_payment_guid TEXT NULL,
+  original_tender_evidence_id TEXT NOT NULL,
+  source_attempt_id TEXT NULL,
+  sequence INTEGER NOT NULL CHECK (
+    typeof(sequence) = 'integer' AND sequence >= 0
+  ),
+  provider TEXT NOT NULL CHECK (
+    provider IN ('square', 'linkly-cloud', 'voucher', 'zeller', 'manual-card')
+  ),
+  operation TEXT NOT NULL CHECK (
+    operation IN ('purchase', 'refund')
+  ),
+  amount_cents INTEGER NOT NULL CHECK (
+    typeof(amount_cents) = 'integer'
+    AND amount_cents != 0
+    AND (
+      (operation = 'purchase' AND amount_cents > 0)
+      OR (operation = 'refund' AND amount_cents < 0)
+    )
+  ),
+  state TEXT NOT NULL CHECK (
+    state IN (
+      'Created', 'Submitted', 'Pending', 'Approved',
+      'Declined', 'Cancelled', 'Unknown'
+    )
+  ),
+  idempotency_key TEXT NOT NULL UNIQUE,
+  payload_revision INTEGER NOT NULL CHECK (payload_revision = 1),
+  protected_payload_ciphertext BLOB NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  updated_at_iso TEXT NOT NULL, provider_environment TEXT NULL, provider_session_id TEXT NULL, provider_acknowledged_at_iso TEXT NULL,
+  CHECK (
+    (operation = 'purchase'
+      AND source_payment_guid IS NULL
+      AND source_attempt_id IS NULL)
+    OR
+    (operation = 'refund'
+      AND source_payment_guid IS NOT NULL
+      AND source_attempt_id IS NOT NULL)
+  ),
+  UNIQUE (action_id, sequence),
+  UNIQUE (action_id, payment_guid)
+);
+
+CREATE INDEX ix_installment_provider_attempts_action_state
+  ON installment_provider_attempts (action_id, state, sequence);
+
+CREATE INDEX ix_installment_provider_attempts_linkly_ack_pending
+  ON installment_provider_attempts (provider, provider_environment, provider_session_id, provider_acknowledged_at_iso, state);
+
+CREATE TABLE installment_approved_materials (
+  attempt_id TEXT PRIMARY KEY
+    REFERENCES installment_provider_attempts(attempt_id),
+  payload_revision INTEGER NOT NULL CHECK (payload_revision = 1),
+  material_ciphertext BLOB NOT NULL,
+  created_at_iso TEXT NOT NULL
+);
+
+CREATE TABLE installment_voucher_protected_states (
+  protected_reference TEXT PRIMARY KEY,
+  attempt_id TEXT NOT NULL UNIQUE
+    REFERENCES installment_provider_attempts(attempt_id),
+  action_id TEXT NOT NULL
+    REFERENCES installment_actions(action_id),
+  idempotency_key TEXT NOT NULL,
+  payload_revision INTEGER NOT NULL CHECK (payload_revision = 1),
+  state_ciphertext BLOB NOT NULL,
+  created_at_iso TEXT NOT NULL,
+  updated_at_iso TEXT NOT NULL
+);
+
+INSERT INTO installment_provider_attempts (attempt_id, action_id, payment_guid, source_payment_guid, original_tender_evidence_id, source_attempt_id, sequence, provider, operation, amount_cents, state, idempotency_key, payload_revision, protected_payload_ciphertext, created_at_iso, updated_at_iso, provider_environment, provider_session_id, provider_acknowledged_at_iso)
+SELECT attempt_id, action_id, payment_guid, source_payment_guid, original_tender_evidence_id, source_attempt_id, sequence, provider, operation, amount_cents, state, idempotency_key, payload_revision, protected_payload_ciphertext, created_at_iso, updated_at_iso, provider_environment, provider_session_id, provider_acknowledged_at_iso
+FROM installment_provider_attempts_m57_stash;
+
+INSERT INTO installment_approved_materials (attempt_id, payload_revision, material_ciphertext, created_at_iso)
+SELECT attempt_id, payload_revision, material_ciphertext, created_at_iso
+FROM installment_approved_materials_m57_stash;
+
+INSERT INTO installment_voucher_protected_states (protected_reference, attempt_id, action_id, idempotency_key, payload_revision, state_ciphertext, created_at_iso, updated_at_iso)
+SELECT protected_reference, attempt_id, action_id, idempotency_key, payload_revision, state_ciphertext, created_at_iso, updated_at_iso
+FROM installment_voucher_protected_states_m57_stash;
+
+DROP TABLE installment_voucher_protected_states_m57_stash;
+DROP TABLE installment_approved_materials_m57_stash;
+DROP TABLE installment_provider_attempts_m57_stash;
+
+CREATE TRIGGER trg_installment_provider_attempts_insert_guard
+BEFORE INSERT ON installment_provider_attempts
+FOR EACH ROW
+WHEN NEW.state != 'Created'
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_PROVIDER_ATTEMPT_INITIAL_STATE_INVALID');
+END;
+
+CREATE TRIGGER trg_installment_provider_attempts_update_guard
+BEFORE UPDATE ON installment_provider_attempts
+FOR EACH ROW
+WHEN
+  NEW.attempt_id != OLD.attempt_id
+  OR NEW.action_id != OLD.action_id
+  OR NEW.payment_guid != OLD.payment_guid
+  OR NEW.source_payment_guid IS NOT OLD.source_payment_guid
+  OR NEW.original_tender_evidence_id != OLD.original_tender_evidence_id
+  OR NEW.source_attempt_id IS NOT OLD.source_attempt_id
+  OR NEW.sequence != OLD.sequence
+  OR NEW.provider != OLD.provider
+  OR NEW.operation != OLD.operation
+  OR NEW.amount_cents != OLD.amount_cents
+  OR NEW.idempotency_key != OLD.idempotency_key
+  OR NEW.payload_revision != OLD.payload_revision
+  OR NEW.created_at_iso != OLD.created_at_iso
+  OR NOT (
+    NEW.state = OLD.state
+    OR (OLD.state = 'Created'
+      AND NEW.state IN ('Submitted', 'Cancelled'))
+    OR (OLD.state = 'Submitted'
+      AND NEW.state IN (
+        'Pending', 'Approved', 'Declined', 'Cancelled', 'Unknown'
+      ))
+    OR (OLD.state = 'Pending'
+      AND NEW.state IN ('Approved', 'Declined', 'Cancelled', 'Unknown'))
+    OR (OLD.state = 'Unknown'
+      AND NEW.state IN ('Pending', 'Approved', 'Declined', 'Cancelled'))
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_PROVIDER_ATTEMPT_UPDATE_INVALID');
+END;
+
+CREATE TRIGGER trg_installment_provider_attempts_no_delete
+BEFORE DELETE ON installment_provider_attempts
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_PROVIDER_ATTEMPT_DELETE_FORBIDDEN');
+END;
+
+CREATE TRIGGER trg_installment_approved_materials_immutable
+BEFORE UPDATE ON installment_approved_materials
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_APPROVED_MATERIAL_IMMUTABLE');
+END;
+
+CREATE TRIGGER trg_installment_approved_materials_no_delete
+BEFORE DELETE ON installment_approved_materials
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_APPROVED_MATERIAL_DELETE_FORBIDDEN');
+END;
+
+CREATE TRIGGER trg_installment_voucher_state_update_guard
+BEFORE UPDATE ON installment_voucher_protected_states
+FOR EACH ROW
+WHEN
+  NEW.protected_reference != OLD.protected_reference
+  OR NEW.attempt_id != OLD.attempt_id
+  OR NEW.action_id != OLD.action_id
+  OR NEW.idempotency_key != OLD.idempotency_key
+  OR NEW.payload_revision != OLD.payload_revision
+  OR NEW.created_at_iso != OLD.created_at_iso
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_VOUCHER_STATE_REBIND_FORBIDDEN');
+END;
+
+CREATE TRIGGER trg_installment_voucher_state_no_delete
+BEFORE DELETE ON installment_voucher_protected_states
+FOR EACH ROW
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_VOUCHER_STATE_DELETE_FORBIDDEN');
+END;
+
+CREATE TRIGGER trg_installment_provider_attempts_approved_material
+BEFORE UPDATE OF state ON installment_provider_attempts
+FOR EACH ROW
+WHEN NEW.state = 'Approved' AND (
+  NOT EXISTS (
+    SELECT 1
+    FROM installment_approved_materials material
+    WHERE material.attempt_id = NEW.attempt_id
+  )
+  OR (
+    NEW.operation = 'purchase'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM installment_original_tender_evidence evidence
+      WHERE evidence.evidence_id = NEW.original_tender_evidence_id
+        AND evidence.origin_action_id = NEW.action_id
+        AND evidence.payment_guid = NEW.payment_guid
+        AND evidence.source_attempt_id = NEW.attempt_id
+        AND evidence.amount_cents = ABS(NEW.amount_cents)
+    )
+  )
+)
+BEGIN
+  SELECT RAISE(ABORT, 'INSTALLMENT_PROVIDER_APPROVED_MATERIAL_REQUIRED');
+END;
+`;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7528,6 +7770,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 54, name: "M54_daily_close_cash_rounding", sql: M54 },
   { version: 55, name: "M55_installment_original_tender_zeller_manual", sql: M55 },
   { version: 56, name: "M56_daily_close_installments", sql: M56 },
+  { version: 57, name: "M57_installment_attempts_zeller_manual", sql: M57 },
 ];
 
 export async function applyMigrations(

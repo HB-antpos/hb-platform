@@ -71,6 +71,8 @@ export type PaymentUiRuntimeErrorCode =
   | LinklyOperatorErrorCode
   | "INSTALLMENT_CASH_CONFIRMATION_REQUIRED"
   | "INSTALLMENT_CASH_CANCELLATION_FAILED"
+  | "INSTALLMENT_MANUAL_CARD_CONFIRMATION_REQUIRED"
+  | "INSTALLMENT_MANUAL_CARD_CANCELLATION_FAILED"
   /** 该分期另有一笔续付占用；本次未收款（发生在任何 provider 调用之前）。 */
   | "INSTALLMENT_REPAYMENT_BUSY"
   /** 服务端未放开所选刷卡通道的续付；本次未收款（发生在任何 provider 调用之前）。 */
@@ -119,6 +121,11 @@ export type PaymentCheckoutPresentation = Readonly<{
   canConfirm: boolean;
   fullInstallmentConfirmationRequired: boolean;
   cashRepaymentStatus?: "idle" | "ready" | "confirming";
+  /**
+   * 已登记、等收银员确认的续付是现金还是手动刷卡；缺省按现金。
+   * 两者共用 cashRepaymentStatus 这套“准备→确认”状态机，只是确认按钮与提示文案不同。
+   */
+  preparedCollection?: "cash" | "manual-card";
 }>;
 
 export type PaymentPresenterState = Readonly<{
@@ -1264,8 +1271,11 @@ export function canSelectPaymentMethod(
   method: PaymentUiMethod,
 ): boolean {
   if (state.busy) return false;
+  // 手动刷卡：普通销售整笔收；分期续付可部分收（走“准备→确认”两阶段）；创建分期的首付不支持。
   if (method === "manual-card" &&
-      (state.checkout.flow !== "regular" || state.remaining.cents <= 0)) return false;
+      ((state.checkout.flow !== "regular" &&
+        state.checkout.flow !== "installment-repayment") ||
+        state.remaining.cents <= 0)) return false;
   if (method === "linkly-cloud" && !linklyTerminalReady(state)) return false;
   const activeMethods = state.tenders.map((tender) => tender.method);
   if (state.checkout.flow !== "regular") {

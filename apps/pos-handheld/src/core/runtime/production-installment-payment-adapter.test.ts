@@ -14,6 +14,7 @@ import {
   type InstallmentVoucherMaterialPort,
 } from "./production-installment-payment-adapter";
 import type { PersistedInstallmentAction } from "./production-installment-runtime";
+import { ManualCardPaymentAdapter } from "@/features/payments/manual/manual-card-payment-adapter";
 
 import type {
   CardSyncEvidenceV1,
@@ -351,6 +352,127 @@ test("Square 扣款在 Submitted CAS 后执行，批准证据加密写入后映�
 
   await adapter.recoverBlocking(ACTION_ID);
   assert.equal(square.calls.length, 1);
+});
+
+class SpyManualCard extends ManualCardPaymentAdapter {
+  public readonly calls: string[] = [];
+  public override async submit(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
+    this.calls.push("submit");
+    return super.submit(attempt);
+  }
+  public override async recover(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
+    this.calls.push("recover");
+    return super.recover(attempt);
+  }
+}
+
+test("手动刷卡续付：计划预置 MANUAL: 引用且不触发适配器；inspect 只读为 Prepared；显式 confirm 才批准并映射 Manual 证据", async () => {
+  const store = new MemoryAttemptStore(
+    Object.freeze({ ...paymentAction("card", "manual-card"), state: "Created" as const }),
+  );
+  const manual = new SpyManualCard();
+  const adapter = createAdapter({
+    store,
+    providers: new ProviderRegistry(manual),
+    configuredCardProviders: ["manual-card"],
+  });
+
+  const binding = await adapter.prepareRepaymentClaim(ACTION_ID);
+  const attempt = store.plans.get(ACTION_ID)!.attempts[0]!.attempt;
+  assert.equal(binding.provider, "manual-card");
+  assert.equal(binding.providerAttemptId, attempt.attemptId);
+  assert.equal(attempt.state, "Created");
+  // 引用在建计划时就绑定尝试号；手动刷卡适配器只认这个值，且此时不得被调用。
+  assert.equal(attempt.references.txnRef, `MANUAL:${attempt.attemptId}`);
+  assert.equal(manual.calls.length, 0);
+
+  store.action = Object.freeze({ ...store.action, state: "ProviderPending" });
+  assert.equal(await adapter.inspectCashSettlement(ACTION_ID), "Prepared");
+  assert.equal(manual.calls.length, 0);
+  assert.equal(store.approvedMaterialWrites, 0);
+
+  const result = await adapter.confirmCashRepayment(ACTION_ID);
+  assert.equal(result.kind, "approved");
+  assert.deepEqual(manual.calls, ["submit"]);
+  assert.equal(store.approvedMaterialWrites, 1);
+  assert.equal(store.originalTenderWrites, 1);
+  if (result.kind !== "approved" || !("payment" in result)) throw new Error("expected payment");
+  assert.equal(result.payment.method, "card");
+  assert.equal(result.payment.amountCents, 2_500);
+  assert.equal(result.payment.reference, `MANUAL:${attempt.attemptId}`);
+  assert.equal(result.payment.cardTransactions.length, 1);
+  assert.equal(result.payment.cardTransactions[0]?.processor, "Manual");
+  assert.equal(result.payment.cardTransactions[0]?.amount, 25);
+  assert.equal(await adapter.inspectCashSettlement(ACTION_ID), "Approved");
+
+  // 恢复只回放已批准的同一尝试，不会再次调用适配器、也不会产生第二套身份。
+  await adapter.recoverBlocking(ACTION_ID);
+  assert.deepEqual(manual.calls, ["submit"]);
+  assert.equal(store.plans.get(ACTION_ID)!.attempts.length, 1);
+});
+
+test("手动刷卡确认中途中断（尝试 Submitted / Pending / Unknown）时 inspect 失败关闭，交主管核实而不是自动批准", async () => {
+  for (const state of ["Submitted", "Pending", "Unknown"] as const) {
+    const store = new MemoryAttemptStore(
+      Object.freeze({ ...paymentAction("card", "manual-card"), state: "Created" as const }),
+    );
+    const manual = new SpyManualCard();
+    const adapter = createAdapter({
+      store,
+      providers: new ProviderRegistry(manual),
+      configuredCardProviders: ["manual-card"],
+    });
+    await adapter.prepareRepaymentClaim(ACTION_ID);
+    store.action = Object.freeze({ ...store.action, state: "ProviderPending" });
+    const record = store.plans.get(ACTION_ID)!.attempts[0]!;
+    record.attempt = { ...record.attempt, state };
+
+    await assert.rejects(
+      () => adapter.inspectCashSettlement(ACTION_ID),
+      /supervisor recovery/,
+      state,
+    );
+    assert.equal(manual.calls.length, 0, state);
+  }
+});
+
+test("手动刷卡冻结在 action 里但本机没有该适配器时，绑定计划失败关闭", async () => {
+  const store = new MemoryAttemptStore(
+    Object.freeze({ ...paymentAction("card", "manual-card"), state: "Created" as const }),
+  );
+  const adapter = createAdapter({
+    store,
+    providers: new ProviderRegistry(new ScriptedProvider("square")),
+    configuredCardProviders: ["square"],
+  });
+  await assert.rejects(
+    () => adapter.prepareRepaymentClaim(ACTION_ID),
+    (error: unknown) =>
+      error instanceof InstallmentPaymentAdapterError &&
+      error.code === "INSTALLMENT_CARD_PROVIDER_SELECTION_INVALID",
+  );
+  assert.equal(store.plans.size, 0);
+});
+
+test("可用通道枚举包含手动刷卡，且只有注册表里真有适配器并被配置时才可用", async () => {
+  const withManual = createAdapter({
+    providers: new ProviderRegistry(new SpyManualCard(), new ScriptedProvider("square")),
+    configuredCardProviders: ["manual-card"],
+  });
+  const available = new Map(
+    (await withManual.listProviderAvailability()).map((entry) => [entry.provider, entry.available]),
+  );
+  assert.equal(available.get("manual-card"), true);
+  assert.equal(available.get("square"), false);
+
+  const withoutManual = createAdapter({
+    providers: new ProviderRegistry(new ScriptedProvider("square")),
+    configuredCardProviders: ["manual-card"],
+  });
+  const missing = new Map(
+    (await withoutManual.listProviderAvailability()).map((entry) => [entry.provider, entry.available]),
+  );
+  assert.equal(missing.get("manual-card"), false);
 });
 
 test("Linkly Pending/Unknown 只恢复同一 attempt，Approved 前不创建第二套身份", async () => {
@@ -856,7 +978,7 @@ function createAdapter(
     store?: MemoryAttemptStore;
     ids?: StableIds;
     providers?: ProviderRegistry;
-    configuredCardProviders?: readonly ("square" | "linkly-cloud")[];
+    configuredCardProviders?: readonly ("square" | "linkly-cloud" | "manual-card")[];
     provenance?: FakeProvenance;
     voucherMaterials?: FakeVoucherMaterials;
     acknowledgements?: PaymentAcknowledgementRuntimePort | null;
@@ -1165,7 +1287,7 @@ class StableIds {
 
 function paymentAction(
   method: "cash" | "card" | "voucher",
-  cardProvider?: "square" | "linkly-cloud",
+  cardProvider?: "square" | "linkly-cloud" | "manual-card",
 ): PersistedInstallmentAction {
   return Object.freeze({
     action: Object.freeze({

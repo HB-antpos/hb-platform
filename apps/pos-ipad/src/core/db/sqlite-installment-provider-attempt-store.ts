@@ -99,6 +99,7 @@ type OriginalTenderEnvelopeV1 = Readonly<{
     | Readonly<{ kind: "cash" }>
     | Readonly<{ kind: "square"; paymentId: string }>
     | Readonly<{ kind: "linkly-cloud"; rfn: string }>
+    | Readonly<{ kind: "manual-card"; txnRef: string }>
     | Readonly<{
         kind: "voucher";
         reference: string;
@@ -117,7 +118,7 @@ type PreparedOriginalTenderEvidence = Readonly<{
   sourceAttemptId: string;
   method: "cash" | "card" | "voucher";
   amountCents: number;
-  provider: "square" | "linkly-cloud" | "voucher" | null;
+  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | null;
   provenance: "local-approved-attempt" | "hbpos-protected-details";
   ciphertext: Uint8Array;
   createdAtIso: string;
@@ -901,7 +902,8 @@ function normalizeApprovedMaterial(
     if (
       !exactKeys(input, ["kind", "evidence", "receiptText"]) ||
       (attempt.provider !== "square" &&
-        attempt.provider !== "linkly-cloud")
+        attempt.provider !== "linkly-cloud" &&
+        attempt.provider !== "manual-card")
     ) {
       throw new TypeError("Approved card material is invalid.");
     }
@@ -1035,8 +1037,8 @@ async function prepareLocalEvidence(
   nowIsoInput: string,
 ): Promise<PreparedOriginalTenderEvidence> {
   const attempt = record.attempt;
-  // 手动刷卡仅用于普通销售，不得转成分期原卡退款凭据。
-  if (attempt.provider === "manual-card") throw new Error("Manual card installment evidence is unsupported.");
+  // 中文注释：手动刷卡续付也要登记原付款证据（Approved 触发器要求）；但它没有刷卡机证据，
+  // 取消分期时只能退代金券，seededReferences 对它失败关闭，原路退款不会被误打开。
   const seed = localEvidenceSeed(attempt, material);
   const envelope: OriginalTenderEnvelopeV1 = Object.freeze({
     format: "hb-pos-installment-original-tender-v1",
@@ -1164,6 +1166,12 @@ function localEvidenceSeed(
     return Object.freeze({
       kind: "linkly-cloud",
       rfn: strictText(attempt.references.rfn, "Linkly RFN", 2_048),
+    });
+  }
+  if (attempt.provider === "manual-card") {
+    return Object.freeze({
+      kind: "manual-card",
+      txnRef: strictText(attempt.references.txnRef, "Manual card reference", 2_048),
     });
   }
   if (
@@ -1668,6 +1676,7 @@ function paymentProvider(value: unknown): PaymentAttempt["provider"] {
   if (
     value === "square" ||
     value === "linkly-cloud" ||
+    value === "manual-card" ||
     value === "voucher"
   ) {
     return value;

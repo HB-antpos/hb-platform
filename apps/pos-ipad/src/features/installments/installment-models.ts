@@ -5,7 +5,8 @@ import type {
 } from "@hb/pos-domain/core/contracts/installments";
 
 export type InstallmentPaymentMethod = "cash" | "card" | "voucher";
-export type InstallmentCardProvider = "square" | "linkly-cloud";
+// 中文注释：manual-card 只用于分期续付（独立刷卡机收款、收银员确认，对齐 WPF #1195），首付 / 创建分期不接受。
+export type InstallmentCardProvider = "square" | "linkly-cloud" | "manual-card";
 export type InstallmentPaymentStatus = "Recorded" | "Voided";
 export type InstallmentDeviceScope = "store" | "device";
 export type InstallmentDatePreset =
@@ -224,6 +225,8 @@ export type InstallmentCashRepaymentPreparation = Readonly<{
   /** 仅用于性能关联的截断 sha256 标识，不是原始 operationGuid。 */
   operationHash: string;
   path?: "prepare-provider-v1" | "legacy-create-begin" | "recovery";
+  /** 收款方式：现金（核对钱箱）或手动刷卡（核对独立刷卡机）；缺省按现金。 */
+  collection?: "cash" | "manual-card";
 }>;
 
 export type InstallmentRepaymentClaimCreateCommand = Readonly<{

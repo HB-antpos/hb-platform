@@ -3277,11 +3277,118 @@ test("手动刷卡退出重进和剩余金额改变必须重新勾选", async ()
   await screen.unmount();
 });
 
-test("分期流程隐藏手动刷卡入口", async () => {
-  const harness = createUiPresenter({ providers: [providerAvailability("manual-card")] });
-  harness.publish({ ...harness.presenter.getState(), checkout: { ...harness.presenter.getState().checkout, flow: "installment-repayment" } });
-  const screen = await render(<PaymentScreen locale="zh" presenter={harness.presenter} showStatusStrip={false} />);
-  expect(screen.queryByTestId("payment-method-manual-card")).toBeNull();
+test("手动刷卡入口：创建分期的首付隐藏，分期续付开放（对齐 WPF #1195 只放开续付）", async () => {
+  for (const [flow, visible] of [
+    ["installment-create", false],
+    ["installment-repayment", true],
+  ] as const) {
+    const harness = createUiPresenter({ providers: [providerAvailability("manual-card")] });
+    harness.publish({ ...harness.presenter.getState(), checkout: { ...harness.presenter.getState().checkout, flow } });
+    const screen = await render(<PaymentScreen locale="zh" presenter={harness.presenter} showStatusStrip={false} />);
+    expect(screen.queryByTestId("payment-method-manual-card") !== null).toBe(visible);
+    await screen.unmount();
+  }
+});
+
+test("分期续付可选手动刷卡：金额可编辑且不出现销售用的勾选框", async () => {
+  const { presenter } = createUiPresenter({
+    providers: [providerAvailability("manual-card"), providerAvailability("voucher")],
+    selectedMethod: "manual-card",
+    amountText: "4.00",
+    total: aud(1_000),
+    remaining: aud(1_000),
+    allowedActions: actions({ start: true, addCash: true }),
+    checkout: {
+      flow: "installment-repayment",
+      lines: [],
+      installmentCustomer: null,
+      cash: { tenderedCents: 0, appliedCents: 0, changeCents: 0 },
+      canConfirm: false,
+      fullInstallmentConfirmationRequired: false,
+    },
+  });
+  const screen = await render(
+    <PaymentScreen locale="en" presenter={presenter} showStatusStrip={false} />,
+  );
+
+  await openPaymentEntry(screen, "manual-card");
+  // 销售的手动刷卡是整笔 + 勾选确认；分期续付走“准备→确认”，可部分收款，所以金额是输入值而不是剩余全额。
+  expect(screen.queryByTestId("payment-manual-card-confirmation")).toBeNull();
+  expect(screen.getByTestId("payment-amount").props.editable).toBe(true);
+  expect(screen.getByTestId("payment-amount").props.value).toBe("4.00");
+  await screen.unmount();
+});
+
+test("手动刷卡续付准备就绪：确认 / 返回 / 提示都是手动刷卡文案，取消弹窗不提主管与钱箱", async () => {
+  const { presenter, spies } = createUiPresenter({
+    phase: "cash-collection-ready",
+    providers: [providerAvailability("manual-card"), providerAvailability("voucher")],
+    selectedMethod: "manual-card",
+    tenders: [{
+      tenderGuid: "prepared-manual-card",
+      method: "card",
+      amount: aud(1_000),
+      reversible: false,
+      provider: "manual-card",
+    }],
+    allowedActions: actions({ cancel: true }),
+    checkout: {
+      flow: "installment-repayment",
+      lines: [],
+      installmentCustomer: null,
+      cash: { tenderedCents: 0, appliedCents: 0, changeCents: 0 },
+      canConfirm: true,
+      fullInstallmentConfirmationRequired: false,
+      cashRepaymentStatus: "ready",
+      preparedCollection: "manual-card",
+    },
+  });
+  const screen = await render(
+    <PaymentScreen locale="en" presenter={presenter} showStatusStrip={false} />,
+  );
+
+  expect(screen.getByText("Confirm card payment received")).toBeTruthy();
+  expect(screen.queryByText("Confirm cash received")).toBeNull();
+  expect(screen.getByText("Not paid — go back")).toBeTruthy();
+  expect(screen.queryByText("Cash not received — cancel repayment")).toBeNull();
+  expect(screen.getByTestId("payment-manual-card-prepared-hint")).toBeTruthy();
+  expect(screen.queryByTestId("payment-manual-card-confirmation")).toBeNull();
+
+  await fireEvent.press(screen.getByTestId("payment-cancel-prepared-cash"));
+  expect(spies.cancel).not.toHaveBeenCalled();
+  expect(screen.getByText("Confirm the card was not charged")).toBeTruthy();
+  expect(screen.queryByText("Confirm cash was not received")).toBeNull();
+  expect(screen.queryByText(/supervisor authorization/i)).toBeNull();
+  await screen.unmount();
+});
+
+test("现金续付就绪态不受影响：仍是现金确认文案，不出现手动刷卡提示", async () => {
+  const { presenter } = createUiPresenter({
+    phase: "cash-collection-ready",
+    selectedMethod: "cash",
+    tenders: [{
+      tenderGuid: "prepared-cash",
+      method: "cash",
+      amount: aud(1_000),
+      reversible: false,
+      provider: null,
+    }],
+    allowedActions: actions({ cancel: true }),
+    checkout: {
+      flow: "installment-repayment",
+      lines: [],
+      installmentCustomer: null,
+      cash: { tenderedCents: 1_000, appliedCents: 1_000, changeCents: 0 },
+      canConfirm: true,
+      fullInstallmentConfirmationRequired: false,
+      cashRepaymentStatus: "ready",
+    },
+  });
+  const screen = await render(
+    <PaymentScreen locale="en" presenter={presenter} showStatusStrip={false} />,
+  );
+  expect(screen.getByText("Confirm cash received")).toBeTruthy();
+  expect(screen.queryByTestId("payment-manual-card-prepared-hint")).toBeNull();
   await screen.unmount();
 });
 
