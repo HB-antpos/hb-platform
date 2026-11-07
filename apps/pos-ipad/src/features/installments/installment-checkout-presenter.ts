@@ -57,6 +57,7 @@ const ZERO_AUD: Money = Object.freeze({ currency: "AUD", cents: 0 });
 const EMPTY_PROVIDERS = Object.freeze([
   unavailable("square"),
   unavailable("linkly-cloud"),
+  unavailable("manual-card"),
   unavailable("voucher"),
 ]);
 
@@ -324,9 +325,10 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
 
     if (
       this.state.checkout.flow === "installment-repayment" &&
-      method === "cash"
+      (method === "cash" || method === "manual-card")
     ) {
-      return this.prepareCashRepayment(tendered.cents);
+      // 现金和手动刷卡都没有机器自动判定结果：先登记 claim 并建立耐久 fence，再由收银员确认。
+      return this.prepareCashRepayment(tendered.cents, method);
     }
 
     const tenderMethod =
@@ -366,7 +368,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
     const entry = this.options.entry;
     const tender = this.state.tenders[0];
     const preparedCashConfirmation =
-      tender?.method === "cash" &&
+      isPreparedCollectionTender(tender) &&
       this.state.tenders.length === 1 &&
       this.state.checkout.canConfirm &&
       this.state.checkout.flow === "installment-repayment" &&
@@ -444,7 +446,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
           remaining: aud(Math.max(0, details.balanceCents)),
           allowedActions: allowedActions({}),
           checkout: Object.freeze({
-            ...this.state.checkout,
+            ...withoutPreparedCollection(this.state.checkout),
             canConfirm: false,
             fullInstallmentConfirmationRequired: false,
             cashRepaymentStatus: "idle",
@@ -505,31 +507,30 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
           }
           if (prepared) {
             const appliedCents = prepared.amountCents;
+            const collection = prepared.collection ?? "cash";
             this.cashOperationHash = prepared.operationHash;
             this.cashPath = prepared.path ?? "recovery";
             this.patch({
               phase: "recovery-required",
-              runtimeErrorCode: "INSTALLMENT_CASH_CONFIRMATION_REQUIRED",
+              runtimeErrorCode:
+                collection === "manual-card"
+                  ? "INSTALLMENT_MANUAL_CARD_CONFIRMATION_REQUIRED"
+                  : "INSTALLMENT_CASH_CONFIRMATION_REQUIRED",
               allowedActions: allowedActions({
                 recover: true,
-                cancel: this.canCancelPreparedCashRepayment(),
+                cancel: this.canCancelPreparedCashRepayment(collection),
               }),
               total: aud(appliedCents),
               remaining: ZERO_AUD,
               tenders: Object.freeze([
-                Object.freeze({
-                  tenderGuid: this.options.createTenderId(),
-                  method: "cash",
-                  amount: aud(appliedCents),
-                  reversible: false,
-                  provider: null,
-                }),
+                this.preparedTender(collection, appliedCents),
               ]),
               checkout: Object.freeze({
                 ...this.state.checkout,
                 flow: "installment-repayment",
                 canConfirm: true,
                 cashRepaymentStatus: "ready",
+                preparedCollection: collection,
                 cash: Object.freeze({
                   tenderedCents: appliedCents,
                   appliedCents,
@@ -550,6 +551,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
               await workflow.inspectCancellablePreparedCashRepayment();
             if (prepared) {
               const appliedCents = prepared.amountCents;
+              const collection = prepared.collection ?? "cash";
               this.cashOperationHash = prepared.operationHash;
               this.cashPath = prepared.path ?? "recovery";
               this.patch({
@@ -562,13 +564,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
                 total: aud(appliedCents),
                 remaining: ZERO_AUD,
                 tenders: Object.freeze([
-                  Object.freeze({
-                    tenderGuid: this.options.createTenderId(),
-                    method: "cash",
-                    amount: aud(appliedCents),
-                    reversible: false,
-                    provider: null,
-                  }),
+                  this.preparedTender(collection, appliedCents),
                 ]),
                 checkout: Object.freeze({
                   ...this.state.checkout,
@@ -576,6 +572,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
                   canConfirm: false,
                   fullInstallmentConfirmationRequired: false,
                   cashRepaymentStatus: "idle",
+                  preparedCollection: collection,
                   cash: Object.freeze({
                     tenderedCents: appliedCents,
                     appliedCents,
@@ -635,7 +632,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
           remaining: aud(Math.max(0, details.balanceCents)),
           allowedActions: allowedActions({}),
           checkout: Object.freeze({
-            ...this.state.checkout,
+            ...withoutPreparedCollection(this.state.checkout),
             canConfirm: false,
             cashRepaymentStatus: "idle",
           }),
@@ -668,8 +665,8 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
     const preparedCashTender =
       this.state.checkout.flow === "installment-repayment" &&
       this.state.tenders.length === 1 &&
-      this.state.tenders[0]?.method === "cash" &&
-      this.state.tenders[0].reversible === false;
+      isPreparedCollectionTender(this.state.tenders[0]);
+    const cancelledCollection = this.state.checkout.preparedCollection ?? "cash";
     if (
       !preparedCashTender ||
       !this.state.allowedActions.cancel ||
@@ -699,7 +696,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
               })
             : allowedActions({}),
           checkout: Object.freeze({
-            ...this.state.checkout,
+            ...withoutPreparedCollection(this.state.checkout),
             canConfirm: false,
             fullInstallmentConfirmationRequired: false,
             cashRepaymentStatus: "idle",
@@ -716,7 +713,10 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
         // cancel；runtime 会先 GET 并对已 Released 结果完成本地幂等收口。
         this.patch({
           phase: "recovery-required",
-          runtimeErrorCode: "INSTALLMENT_CASH_CANCELLATION_FAILED",
+          runtimeErrorCode:
+            cancelledCollection === "manual-card"
+              ? "INSTALLMENT_MANUAL_CARD_CANCELLATION_FAILED"
+              : "INSTALLMENT_CASH_CANCELLATION_FAILED",
           allowedActions: allowedActions({
             changeProvider: false,
             cancel: true,
@@ -826,7 +826,10 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
     return false;
   }
 
-  private prepareCashRepayment(tenderedCents: number): Promise<boolean> {
+  private prepareCashRepayment(
+    tenderedCents: number,
+    collection: "cash" | "manual-card" = "cash",
+  ): Promise<boolean> {
     const entry = this.options.entry;
     if (!entry || entry.kind !== "installment-repayment") {
       return Promise.resolve(false);
@@ -842,51 +845,47 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
       }
       this.patch({ phase: "submitting", allowedActions: allowedActions({}) });
       try {
+        const manualCard = collection === "manual-card";
         const prepared = await workflow.prepareCashRepayment({
           installmentGuid: entry.installmentGuid,
           amountCents: Math.min(tenderedCents, this.state.remaining.cents),
-          method: "cash",
+          method: manualCard ? "card" : "cash",
+          ...(manualCard
+            ? { cardProvider: "manual-card" as const }
+            : { cashTenderedCents: tenderedCents }),
           voucherReference: null,
           voucherReservationToken: null,
-          cashTenderedCents: tenderedCents,
         });
         this.cashOperationHash = prepared.operationHash;
         this.cashPath = prepared.path ?? "recovery";
         const appliedCents = Math.min(prepared.amountCents, this.state.remaining.cents);
         this.patch({
           phase: "cash-collection-ready",
-          tenders: Object.freeze([
-            Object.freeze({
-              tenderGuid: this.options.createTenderId(),
-              method: "cash",
-              amount: aud(appliedCents),
-              reversible: false,
-              provider: null,
-            }),
-          ]),
+          tenders: Object.freeze([this.preparedTender(collection, appliedCents)]),
           remaining: aud(Math.max(0, this.state.total.cents - appliedCents)),
           allowedActions: allowedActions({
-            cancel: this.canCancelPreparedCashRepayment(),
+            cancel: this.canCancelPreparedCashRepayment(collection),
           }),
           checkout: Object.freeze({
             ...this.state.checkout,
             canConfirm: true,
             cashRepaymentStatus: "ready",
+            preparedCollection: collection,
             cash: Object.freeze({
-              tenderedCents,
-              appliedCents,
-              changeCents: Math.max(0, tenderedCents - appliedCents),
+              // 手动刷卡没有实收 / 找零的概念，现金口径全部为 0。
+              tenderedCents: manualCard ? 0 : tenderedCents,
+              appliedCents: manualCard ? 0 : appliedCents,
+              changeCents: manualCard
+                ? 0
+                : Math.max(0, tenderedCents - appliedCents),
             }),
           }),
           fieldIssue: null,
         });
         return true;
       } catch (error) {
-        const runtimeErrorCode =
-          error instanceof InstallmentWorkflowError &&
-          error.code === "online-required"
-            ? "ONLINE_REQUIRED"
-            : "PAYMENT_CHECKOUT_FAILED";
+        // 中文注释：占用中 / 通道未放开要给出明确提示（本次未收款），不再一律“结账失败”。
+        const runtimeErrorCode = repaymentSubmitFailureCode(error);
         let recoveryRequired = true;
         try {
           recoveryRequired =
@@ -1046,10 +1045,37 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
     return this.granted.has(permission);
   }
 
-  private canCancelPreparedCashRepayment(): boolean {
+  private canCancelPreparedCashRepayment(
+    collection: "cash" | "manual-card" = "cash",
+  ): boolean {
+    // 中文注释：现金取消需要取消权限（钱可能已进钱箱）；手动刷卡的“未付款，返回”由原收银员直接完成
+    // （对齐 WPF #1195），运行时会再核对是否原收银员、尝试是否从未被确认过。
     return (
-      this.has(INSTALLMENTS_CANCEL_PERMISSION) &&
+      (collection === "manual-card" || this.has(INSTALLMENTS_CANCEL_PERMISSION)) &&
       Boolean(this.options.workflow.cancelPreparedCashRepayment)
+    );
+  }
+
+  private preparedTender(
+    collection: "cash" | "manual-card",
+    appliedCents: number,
+  ): PaymentPresenterState["tenders"][number] {
+    return Object.freeze(
+      collection === "manual-card"
+        ? {
+            tenderGuid: this.options.createTenderId(),
+            method: "card" as const,
+            amount: aud(appliedCents),
+            reversible: false,
+            provider: "manual-card" as const,
+          }
+        : {
+            tenderGuid: this.options.createTenderId(),
+            method: "cash" as const,
+            amount: aud(appliedCents),
+            reversible: false,
+            provider: null,
+          },
     );
   }
 
@@ -1163,6 +1189,24 @@ function checkoutPresentation(
  * 续付提交失败时支付页展示的错误码。占用中与通道未放开都发生在任何 provider 调用之前、
  * 本地 action 已终结，明确告诉收银员「本次未收款」；其余失败保持原来的通用提示。
  */
+/** 已登记、等待收银员确认的收款 tender：现金，或手动刷卡（provider=manual-card）；且不可撤销。 */
+function isPreparedCollectionTender(
+  tender: PaymentPresenterState["tenders"][number] | undefined,
+): boolean {
+  return (
+    tender !== undefined &&
+    tender.reversible === false &&
+    (tender.method === "cash" || tender.provider === "manual-card")
+  );
+}
+
+function withoutPreparedCollection(
+  checkout: PaymentCheckoutPresentation,
+): PaymentCheckoutPresentation {
+  const { preparedCollection: _preparedCollection, ...rest } = checkout;
+  return rest;
+}
+
 function repaymentSubmitFailureCode(
   error: unknown,
 ):

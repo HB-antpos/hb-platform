@@ -744,7 +744,9 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         transport,
         extra: paymentPublicConfiguration,
         readPaymentMethods: () => paymentMethods,
-        allowManualCard: false,
+        // 中文注释：分期续付支持手动刷卡（独立刷卡机收款、收银员确认，对齐 WPF #1195）；
+        // 是否真正可用仍由「手动刷卡」设置开关和服务端放开的通道共同决定。
+        allowManualCard: true,
         voucherProtectedTokens:
           installmentPaymentPersistence.voucherProtectedTokens,
       });

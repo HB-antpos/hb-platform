@@ -492,7 +492,7 @@ export function PaymentScreen({
                     <Text style={styles.inputLabel}>{t("amount.label")}</Text>
                     <PosTextInput
                       accessibilityLabel={t("amount.label")}
-                      editable={!state.busy && state.selectedMethod !== "manual-card"}
+                      editable={!state.busy && !isSalesManualCard(state)}
                       keyboardType="decimal-pad"
                       onChangeText={(value) => presenter.setAmountText(value)}
                       placeholder="0.00"
@@ -504,7 +504,7 @@ export function PaymentScreen({
                         shortLandscape && styles.amountInputShort,
                       ]}
                       testID="payment-amount"
-                      value={state.selectedMethod === "manual-card"
+                      value={isSalesManualCard(state)
                         ? (state.remaining.cents / 100).toFixed(2)
                         : state.amountText}
                     />
@@ -514,9 +514,9 @@ export function PaymentScreen({
                         shortLandscape && styles.inputHintShort,
                       ]}
                     >
-                      {t(state.selectedMethod === "manual-card" ? "manualCard.amountHint" : "amount.hint")}
+                      {t(isSalesManualCard(state) ? "manualCard.amountHint" : "amount.hint")}
                     </Text>
-                    {state.selectedMethod === "manual-card" ? (
+                    {isSalesManualCard(state) ? (
                       <View style={styles.manualCardConfirmation} testID="payment-manual-card-confirmation">
                         <Text style={styles.manualCardInstructions}>{t("manualCard.instructions")}</Text>
                         <PosPressable
@@ -657,7 +657,7 @@ export function PaymentScreen({
                       !canSubmitPaymentMethod(state, state.selectedMethod)
                     }
                     label={
-                      state.selectedMethod === "manual-card"
+                      isSalesManualCard(state)
                         ? t("manualCard.confirm")
                         : state.checkout.flow === "installment-repayment" &&
                       state.selectedMethod === "cash"
@@ -861,15 +861,15 @@ export function PaymentScreen({
           />
           <View style={styles.confirmationCard}>
             <Text style={styles.confirmationTitle}>
-              {t("installment.cancelPreparedCash.title")}
+              {t(cancelPreparedModalKey(state, "title"))}
             </Text>
             <Text style={styles.confirmationBody}>
-              {t("installment.cancelPreparedCash.body")}
+              {t(cancelPreparedModalKey(state, "body"))}
             </Text>
             <View style={styles.confirmationActions}>
               <ActionButton
                 disabled={state.busy}
-                label={t("installment.cancelPreparedCash.dismiss")}
+                label={t(cancelPreparedModalKey(state, "dismiss"))}
                 onPress={closePreparedCashCancellation}
                 style={styles.confirmationAction}
                 sound="navigate"
@@ -878,7 +878,7 @@ export function PaymentScreen({
               />
               <ActionButton
                 disabled={state.busy}
-                label={t("installment.cancelPreparedCash.confirm")}
+                label={t(cancelPreparedModalKey(state, "confirm"))}
                 onPress={() => {
                   setPreparedCashCancellationOpen(false);
                   void presenter.cancel();
@@ -1588,7 +1588,7 @@ function RecoveryActions({
       {cashConfirmationRecovery ? (
         <ActionButton
           disabled={actionDisabled}
-          label={t("action.confirmCashReceived")}
+          label={t(confirmCollectionLabelKey(state))}
           onPress={() => {
             void presenter.confirm?.();
           }}
@@ -1638,7 +1638,7 @@ function RecoveryActions({
       {showPreparedCashCancellation ? (
         <ActionButton
           disabled={actionDisabled}
-          label={t("action.cancelPreparedCashRepayment")}
+          label={t(cancelPreparedLabelKey(state))}
           onPress={onCancelPreparedCash}
           sound="danger"
           style={styles.recoveryAction}
@@ -1808,7 +1808,9 @@ function PaymentSummary({
         <View style={styles.methodGrid}>
           {PAYMENT_METHODS.filter((method) =>
             // 运行时已按设置限制唯一银行卡通道；付款中暂时禁用不影响展示。
-            method === "manual-card" && state.checkout.flow !== "regular"
+            method === "manual-card" &&
+            state.checkout.flow !== "regular" &&
+            state.checkout.flow !== "installment-repayment"
               ? false
               : method === "cash"
               ? state.cashAvailable === true
@@ -1900,13 +1902,18 @@ function PaymentSummary({
         />
         {showConfirmation || showPreparedCashCancellationInFooter ? (
           <View style={styles.summaryFooter} testID="payment-summary-footer">
+            {state.checkout.preparedCollection === "manual-card" ? (
+              <Text style={styles.inputHint} testID="payment-manual-card-prepared-hint">
+                {t("installmentManualCard.prepared")}
+              </Text>
+            ) : null}
             {showConfirmation ? (
               <ActionButton
                 disabled={state.busy}
                 label={
                   state.checkout.cashRepaymentStatus === "ready" ||
                   state.checkout.cashRepaymentStatus === "confirming"
-                    ? t("action.confirmCashReceived")
+                    ? t(confirmCollectionLabelKey(state))
                     : locale === "zh"
                       ? "确认分期付款"
                       : "Confirm lay-by payment"
@@ -1920,7 +1927,7 @@ function PaymentSummary({
             {showPreparedCashCancellationInFooter ? (
               <ActionButton
                 disabled={state.busy}
-                label={t("action.cancelPreparedCashRepayment")}
+                label={t(cancelPreparedLabelKey(state))}
                 onPress={onCancelPreparedCash}
                 sound="danger"
                 style={styles.preparedCashCancelAction}
@@ -2231,12 +2238,63 @@ function statusTone(
   return "neutral";
 }
 
+/** 普通销售里的手动刷卡（整笔、勾选确认）；分期续付里的手动刷卡走“准备→确认”，不显示这套输入。 */
+function isSalesManualCard(state: PaymentPresenterState): boolean {
+  return (
+    state.selectedMethod === "manual-card" && state.checkout.flow === "regular"
+  );
+}
+
+/** 已登记、等待收银员确认的收款 tender：现金，或手动刷卡；且不可撤销。 */
+function isPreparedCollectionTender(
+  tender: PaymentPresenterState["tenders"][number],
+): boolean {
+  return (
+    tender.reversible === false &&
+    (tender.method === "cash" || tender.provider === "manual-card")
+  );
+}
+
+function confirmCollectionLabelKey(
+  state: PaymentPresenterState,
+): "action.confirmManualCardReceived" | "action.confirmCashReceived" {
+  return state.checkout.preparedCollection === "manual-card"
+    ? "action.confirmManualCardReceived"
+    : "action.confirmCashReceived";
+}
+
+/** 取消确认弹窗的四段文案：现金需要主管核对钱箱；手动刷卡由原收银员核对刷卡机。 */
+function cancelPreparedModalKey(
+  state: PaymentPresenterState,
+  part: "title" | "body" | "dismiss" | "confirm",
+):
+  | "installment.cancelPreparedCash.title"
+  | "installment.cancelPreparedCash.body"
+  | "installment.cancelPreparedCash.dismiss"
+  | "installment.cancelPreparedCash.confirm"
+  | "installment.cancelPreparedManualCard.title"
+  | "installment.cancelPreparedManualCard.body"
+  | "installment.cancelPreparedManualCard.dismiss"
+  | "installment.cancelPreparedManualCard.confirm" {
+  return state.checkout.preparedCollection === "manual-card"
+    ? (`installment.cancelPreparedManualCard.${part}` as const)
+    : (`installment.cancelPreparedCash.${part}` as const);
+}
+
+function cancelPreparedLabelKey(
+  state: PaymentPresenterState,
+): "action.cancelPreparedManualCard" | "action.cancelPreparedCashRepayment" {
+  return state.checkout.preparedCollection === "manual-card"
+    ? "action.cancelPreparedManualCard"
+    : "action.cancelPreparedCashRepayment";
+}
+
 function canCancelPreparedCash(state: PaymentPresenterState): boolean {
   return (
     state.checkout.flow === "installment-repayment" &&
     state.allowedActions.cancel &&
     state.tenders.some(
-      (tender) => tender.method === "cash" && !tender.reversible,
+      (tender) => isPreparedCollectionTender(tender),
     )
   );
 }
@@ -2247,7 +2305,7 @@ function canSafelyLeave(state: PaymentPresenterState): boolean {
     (state.checkout.cashRepaymentStatus === "ready" ||
       state.checkout.cashRepaymentStatus === "confirming" ||
       state.tenders.some(
-        (tender) => tender.method === "cash" && !tender.reversible,
+        (tender) => isPreparedCollectionTender(tender),
       ));
   if (
     !state.initialized ||

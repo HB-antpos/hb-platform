@@ -31,7 +31,7 @@ export type { InstallmentCancelRefundMode };
 
 export type InstallmentCardProvider = Extract<
   PaymentProvider,
-  "square" | "linkly-cloud"
+  "square" | "linkly-cloud" | "manual-card"
 >;
 
 export interface InstallmentCardProviderSelectionPort {
@@ -341,10 +341,18 @@ export class ProductionInstallmentPaymentAdapter
       );
     }
     const action = validateAction(rawAction, actionId, { allowCreated: true });
-    if (action.action.kind !== "repayment" || action.action.method !== "cash") {
+    const manualCard =
+      action.action.kind === "repayment" &&
+      action.action.method === "card" &&
+      action.command.kind !== "cancel-refund" &&
+      action.command.cardProvider === "manual-card";
+    if (
+      action.action.kind !== "repayment" ||
+      (action.action.method !== "cash" && !manualCard)
+    ) {
       throw adapterError(
         "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
-        "Cash settlement inspection requires a cash repayment action.",
+        "Cash settlement inspection requires a cash or manual-card repayment action.",
       );
     }
     const rawPlan = await this.options.store.loadPlan(actionId);
@@ -355,6 +363,29 @@ export class ProductionInstallmentPaymentAdapter
       );
     }
     const plan = validatePlan(rawPlan, action);
+    if (manualCard) {
+      // 中文注释：手动刷卡的“收款前状态”就是尝试仍为 Created（还没人确认过）；
+      // Approved 是已确认入账；Submitted / Pending / Unknown 说明确认动作中途中断，
+      // 钱可能已经收了，只能失败关闭交给主管核实，绝不能借恢复路径自动批准。
+      const attempt = plan.attempts[0]?.attempt;
+      if (
+        plan.attempts.length !== 1 ||
+        plan.cashSettlements.length !== 0 ||
+        !attempt ||
+        attempt.provider !== "manual-card"
+      ) {
+        throw adapterError(
+          "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
+          "Manual card repayment plan is incomplete.",
+        );
+      }
+      if (attempt.state === "Created") return "Prepared";
+      if (attempt.state === "Approved") return "Approved";
+      throw adapterError(
+        "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
+        "Manual card repayment confirmation requires supervisor recovery.",
+      );
+    }
     const settlement = plan.cashSettlements[0];
     if (!settlement || plan.cashSettlements.length !== 1) {
       throw adapterError(
@@ -446,7 +477,7 @@ export class ProductionInstallmentPaymentAdapter
       // 配置读取失败时三种在线方式全部失败关闭；UI 不得猜测默认卡通道。
     }
     return Object.freeze(
-      (["square", "linkly-cloud", "voucher"] as const).map((provider) => {
+      (["square", "linkly-cloud", "manual-card", "voucher"] as const).map((provider) => {
         const configured =
           provider === "voucher" || enabledCards.includes(provider);
         const available = configured && this.providerExists(provider);
@@ -727,7 +758,12 @@ export class ProductionInstallmentPaymentAdapter
             : positiveCents(input.amountCents),
         ),
         state: "Created",
-        references: emptyReferences(),
+        // 中文注释：手动刷卡没有刷卡机，引用就是本尝试号；适配器只在 txnRef 正好等于它时才认账，
+        // 预置后再由收银员确认才会 Approved，绝不会因恢复而凭空批准。
+        references:
+          input.provider === "manual-card"
+            ? Object.freeze({ ...emptyReferences(), txnRef: `MANUAL:${attemptId}` })
+            : emptyReferences(),
         createdAtIso: nowIso,
         updatedAtIso: nowIso,
         lastErrorCode: null,
@@ -743,7 +779,9 @@ export class ProductionInstallmentPaymentAdapter
   ): Promise<InstallmentCardProvider> {
     if (selected !== undefined) {
       if (
-        (selected !== "square" && selected !== "linkly-cloud") ||
+        (selected !== "square" &&
+          selected !== "linkly-cloud" &&
+          selected !== "manual-card") ||
         !this.providerExists(selected)
       ) {
         throw adapterError(
@@ -769,7 +807,9 @@ export class ProductionInstallmentPaymentAdapter
       ...new Set(
         configured.filter(
           (value): value is InstallmentCardProvider =>
-            value === "square" || value === "linkly-cloud",
+            value === "square" ||
+            value === "linkly-cloud" ||
+            value === "manual-card",
         ),
       ),
     ];
@@ -1098,7 +1138,8 @@ export class ProductionInstallmentPaymentAdapter
   ): Promise<InstallmentApprovedPaymentMaterial> {
     if (
       nextAttempt.provider === "square" ||
-      nextAttempt.provider === "linkly-cloud"
+      nextAttempt.provider === "linkly-cloud" ||
+      nextAttempt.provider === "manual-card"
     ) {
       if (!result.protectedSyncEvidence) {
         throw adapterError(
@@ -1821,7 +1862,11 @@ function validateStoredMaterial(
     );
   }
   if (material.kind === "card") {
-    if (attempt.provider !== "square" && attempt.provider !== "linkly-cloud") {
+    if (
+      attempt.provider !== "square" &&
+      attempt.provider !== "linkly-cloud" &&
+      attempt.provider !== "manual-card"
+    ) {
       throw materialInvalid();
     }
     const evidence = normalizeCardSyncEvidence(material.evidence);

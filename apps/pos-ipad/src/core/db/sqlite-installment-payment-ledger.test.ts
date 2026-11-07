@@ -996,6 +996,187 @@ test("M55 中途失败整体回滚：不推进版本，历史证据与旧约束�
   });
 });
 
+const M57_ATTEMPT_TRIGGERS = [
+  "trg_installment_provider_attempts_insert_guard",
+  "trg_installment_provider_attempts_update_guard",
+  "trg_installment_provider_attempts_no_delete",
+  "trg_installment_provider_attempts_approved_material",
+  "trg_installment_approved_materials_immutable",
+  "trg_installment_approved_materials_no_delete",
+  "trg_installment_voucher_state_update_guard",
+  "trg_installment_voucher_state_no_delete",
+] as const;
+
+/** 在 M56 结构上造一条已 Approved 的 Square 购买尝试（含材料与原付款证据）和一条券受保护状态。 */
+async function seedPreM57Attempts(connection: SqliteConnectionPort): Promise<void> {
+  const encryptor = new RecordingEncryptor();
+  const store = await createPurchaseStore(connection, encryptor);
+  const created = purchasePlan().attempts[0]!;
+  const submitted = withAttempt(created, {
+    state: "Submitted",
+    updatedAtIso: "2026-07-29T01:00:00.001Z",
+  });
+  assert.equal(
+    await store.compareAndUpdateAttempt({ expected: created, nextAttempt: submitted.attempt }),
+    true,
+  );
+  const approved = withAttempt(submitted, {
+    state: "Approved",
+    updatedAtIso: "2026-07-29T01:00:00.003Z",
+    receiptText: "PRIVATE RECEIPT",
+    references: { ...submitted.attempt.references, paymentId: "SQ-PAYMENT-PRIVATE" },
+  });
+  assert.equal(
+    await store.compareAndUpdateAttempt({
+      expected: submitted,
+      nextAttempt: approved.attempt,
+      approvedMaterial: cardMaterial(),
+    }),
+    true,
+  );
+  await connection.run(
+    `INSERT INTO installment_voucher_protected_states (
+      protected_reference, attempt_id, action_id, idempotency_key,
+      payload_revision, state_ciphertext, created_at_iso, updated_at_iso
+    ) VALUES ('vpr_pre_m57_000000000001', ?, ?, 'voucher-state-key', 1, ?, ?, ?)`,
+    [ATTEMPT_ID, ACTION_ID, new Uint8Array([9, 8, 7]), NOW, NOW],
+  );
+}
+
+const INSERT_ATTEMPT_SQL = `INSERT INTO installment_provider_attempts (
+  attempt_id, action_id, payment_guid, source_payment_guid,
+  original_tender_evidence_id, source_attempt_id, sequence, provider,
+  operation, amount_cents, state, idempotency_key, payload_revision,
+  protected_payload_ciphertext, created_at_iso, updated_at_iso
+) VALUES (?, ?, ?, NULL, 'evidence-x', NULL, ?, ?, 'purchase', 500, ?, ?, 1, ?, ?, ?)`;
+
+function attemptInsertParams(
+  suffix: string,
+  sequence: number,
+  provider: string,
+  state = "Created",
+): SqlValue[] {
+  return [
+    `attempt-m57-${suffix}`, ACTION_ID,
+    `32000000-0000-4000-8000-${suffix.padStart(12, "0")}`,
+    sequence, provider, state, `idem-m57-${suffix}`,
+    new Uint8Array([1]), NOW, NOW,
+  ];
+}
+
+test("M57 升级：尝试表重建保留历史行（含 Approved 材料与券受保护状态）、索引、触发器与外键，并接受 Zeller / 手动刷卡尝试", async () => {
+  await withDatabase(async (connection) => {
+    const throughM56 = POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 56);
+    await applyMigrations(connection, () => NOW, throughM56);
+    assert.equal(await schemaVersion(connection), 56);
+    await seedPreM57Attempts(connection);
+
+    const attemptsBefore = await readAll(connection, "SELECT * FROM installment_provider_attempts ORDER BY attempt_id");
+    const materialsBefore = await readAll(connection, "SELECT * FROM installment_approved_materials ORDER BY attempt_id");
+    const statesBefore = await readAll(connection, "SELECT * FROM installment_voucher_protected_states ORDER BY protected_reference");
+    assert.equal(attemptsBefore.length, 1);
+    assert.equal(materialsBefore.length, 1);
+    assert.equal(statesBefore.length, 1);
+    // 升级前 M56 结构拒绝手动刷卡 / Zeller 尝试（这正是要放宽的约束）。
+    await assert.rejects(
+      () => connection.run(INSERT_ATTEMPT_SQL, attemptInsertParams("000000000001", 1, "manual-card")),
+      /CHECK constraint failed/i,
+    );
+
+    await applyMigrations(connection, () => NOW);
+    assert.equal(await schemaVersion(connection), POS_DATABASE_MIGRATIONS.at(-1)?.version);
+
+    // 历史行逐列原样保留（含密文字节与 M44 后加的三列）。
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_provider_attempts ORDER BY attempt_id"), attemptsBefore);
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_approved_materials ORDER BY attempt_id"), materialsBefore);
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_voucher_protected_states ORDER BY protected_reference"), statesBefore);
+    // 暂存表不残留；两个索引与 8 个触发器按原名重建；外键完好。
+    for (const table of [
+      "installment_provider_attempts_m57_stash",
+      "installment_approved_materials_m57_stash",
+      "installment_voucher_protected_states_m57_stash",
+    ]) {
+      assert.equal(await tableExists(connection, table), false, table);
+    }
+    for (const trigger of M57_ATTEMPT_TRIGGERS) {
+      assert.equal(await triggerExists(connection, trigger), true, trigger);
+    }
+    assert.deepEqual(
+      (await readAll(
+        connection,
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE 'ix_installment_provider_attempts_%' ORDER BY name`,
+      )).map((row) => row.name),
+      ["ix_installment_provider_attempts_action_state", "ix_installment_provider_attempts_linkly_ack_pending"],
+    );
+    assert.deepEqual(await readAll(connection, "PRAGMA foreign_key_check"), []);
+
+    // 新允许值：手动刷卡与 Zeller 可作为尝试登记；未知通道仍被 CHECK 拒绝。
+    await connection.run(INSERT_ATTEMPT_SQL, attemptInsertParams("000000000002", 1, "manual-card"));
+    await connection.run(INSERT_ATTEMPT_SQL, attemptInsertParams("000000000003", 2, "zeller"));
+    await assert.rejects(
+      () => connection.run(INSERT_ATTEMPT_SQL, attemptInsertParams("000000000004", 3, "bogus")),
+      /CHECK constraint failed/i,
+    );
+
+    // 触发器语义仍生效：只能以 Created 入库、通道不可改、不可删、Approved 必须带材料。
+    await assert.rejects(
+      () => connection.run(INSERT_ATTEMPT_SQL, attemptInsertParams("000000000005", 3, "manual-card", "Approved")),
+      /INSTALLMENT_PROVIDER_ATTEMPT_INITIAL_STATE_INVALID/,
+    );
+    await assert.rejects(
+      () => connection.run("UPDATE installment_provider_attempts SET provider = 'zeller' WHERE attempt_id = 'attempt-m57-000000000002'"),
+      /INSTALLMENT_PROVIDER_ATTEMPT_UPDATE_INVALID/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM installment_provider_attempts WHERE attempt_id = 'attempt-m57-000000000002'"),
+      /INSTALLMENT_PROVIDER_ATTEMPT_DELETE_FORBIDDEN/,
+    );
+    await connection.run("UPDATE installment_provider_attempts SET state = 'Submitted' WHERE attempt_id = 'attempt-m57-000000000002'");
+    await assert.rejects(
+      () => connection.run("UPDATE installment_provider_attempts SET state = 'Approved' WHERE attempt_id = 'attempt-m57-000000000002'"),
+      /INSTALLMENT_PROVIDER_APPROVED_MATERIAL_REQUIRED/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM installment_approved_materials"),
+      /INSTALLMENT_APPROVED_MATERIAL_DELETE_FORBIDDEN/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM installment_voucher_protected_states"),
+      /INSTALLMENT_VOUCHER_STATE_DELETE_FORBIDDEN/,
+    );
+  });
+});
+
+test("M57 中途失败整体回滚：不推进版本，历史尝试与旧约束原样保留", async () => {
+  await withDatabase(async (connection) => {
+    const throughM56 = POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 56);
+    await applyMigrations(connection, () => NOW, throughM56);
+    await seedPreM57Attempts(connection);
+    const attemptsBefore = await readAll(connection, "SELECT * FROM installment_provider_attempts ORDER BY attempt_id");
+    const materialsBefore = await readAll(connection, "SELECT * FROM installment_approved_materials ORDER BY attempt_id");
+
+    const m57 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 57);
+    assert.ok(m57);
+    await assert.rejects(
+      () => applyMigrations(connection, () => NOW, [...throughM56, { ...m57, sql: `${m57.sql}\nCREATE TABL invalid_m57;` }]),
+      /syntax|near/i,
+    );
+
+    assert.equal(await schemaVersion(connection), 56);
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_provider_attempts ORDER BY attempt_id"), attemptsBefore);
+    assert.deepEqual(await readAll(connection, "SELECT * FROM installment_approved_materials ORDER BY attempt_id"), materialsBefore);
+    assert.equal(await tableExists(connection, "installment_provider_attempts_m57_stash"), false);
+    for (const trigger of M57_ATTEMPT_TRIGGERS) {
+      assert.equal(await triggerExists(connection, trigger), true, trigger);
+    }
+    // 旧约束仍在：回滚后依旧拒绝手动刷卡。
+    await assert.rejects(
+      () => connection.run(INSERT_ATTEMPT_SQL, attemptInsertParams("000000000009", 1, "manual-card")),
+      /CHECK constraint failed/i,
+    );
+  });
+});
+
 test("Zeller / 手动刷卡原付款可经 vault 登记为证据；原路退款计划不会为它们生成 provider attempt", async () => {
   await withMigratedDatabase(async (connection) => {
     const encryptor = new RecordingEncryptor();

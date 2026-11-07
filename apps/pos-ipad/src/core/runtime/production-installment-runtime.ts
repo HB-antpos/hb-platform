@@ -618,7 +618,9 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       (availability ?? []).map((entry) =>
         // 服务端明确只放开部分通道时，本机即使配置了也不展示未放开的刷卡通道（否则点了只会被 begin-provider 400 拒绝）。
         serverEnabled !== null &&
-        (entry.provider === "square" || entry.provider === "linkly-cloud") &&
+        (entry.provider === "square" ||
+          entry.provider === "linkly-cloud" ||
+          entry.provider === "manual-card") &&
         !serverEnabled.has(cardProviderFamily(entry.provider))
           ? Object.freeze({
               ...entry,
@@ -923,6 +925,14 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         "Cash repayment must use the prepared confirmation flow.",
       );
     }
+    // 中文注释：手动刷卡和现金一样没有机器自动判定结果，必须先登记 claim、再由收银员确认；
+    // 直接走普通卡路径会在没人确认时就把手动刷卡适配器的“一律批准”当成收款。
+    if (input.method === "card" && input.cardProvider === "manual-card") {
+      throw workflowError(
+        "cash-confirmation-required",
+        "Manual card repayment must use the prepared confirmation flow.",
+      );
+    }
     const blocking = await this.loadBlockingOperation();
     if (blocking) return this.recoverBlockingOperation(blocking);
     this.requireCurrentPermission(INSTALLMENTS_ADD_REPAYMENT_PERMISSION);
@@ -952,22 +962,25 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
   ): Promise<InstallmentCashRepaymentPreparation> {
     const prepareStartedAt = monotonicNowMilliseconds(this.context.input);
     await this.assertOnlineAndScoped();
+    // 中文注释：本入口同时服务现金和手动刷卡两种“先登记、后由收银员确认”的续付；
+    // 手动刷卡由 method=card + cardProvider=manual-card 标识，其余一律按现金处理（沿用旧行为）。
+    const manualCard =
+      input.method === "card" && input.cardProvider === "manual-card";
     const blocking = await this.loadBlockingOperation();
     if (blocking) {
       if (
         blocking.type === "payment" &&
-        blocking.action.action.kind === "repayment" &&
-        blocking.action.action.method === "cash"
+        collectedKindOf(blocking.action) !== null
       ) {
         throw workflowError(
           "cash-confirmation-required",
-          "A cash repayment is already waiting for drawer confirmation.",
+          "A repayment is already waiting for collection confirmation.",
         );
       }
       throw paymentRecoveryError("Another installment action requires recovery.");
     }
     this.requireCurrentPermission(INSTALLMENTS_ADD_REPAYMENT_PERMISSION);
-    this.requireTenderPermissions("cash");
+    this.requireTenderPermissions(manualCard ? "card" : "cash");
     const installmentGuid = requiredText(input.installmentGuid, "installment guid");
     // 中文注释：跨设备 capability 必须在任何 durable action 产生前生效；
     // 否则被服务端拒绝后会留下永远无法恢复的 Created action。
@@ -978,13 +991,28 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         "Cash installment repayment claims are not supported by this server.",
       );
     }
+    if (
+      manualCard &&
+      (!capabilities.cardRepaymentSupported ||
+        (capabilities.cardRepaymentProviders !== undefined &&
+          !capabilities.cardRepaymentProviders
+            .map(cardProviderFamily)
+            .includes("manual")))
+    ) {
+      // 中文注释：服务端没放开 manual 通道时，登记 claim 只会被拒；在产生任何耐久 action 之前就失败关闭。
+      throw workflowError(
+        "payment-method-unsupported",
+        "Manual card installment repayment is not enabled on this server.",
+      );
+    }
     await this.assertInitialMutationScope(
       installmentGuid,
       capabilities.crossDeviceRepaymentEnabled,
     );
     const candidate = await this.createRepaymentAction({
       ...input,
-      method: "cash",
+      method: manualCard ? "card" : "cash",
+      ...(manualCard ? { cardProvider: "manual-card" as const } : {}),
       installmentGuid,
       voucherReference: null,
       voucherReservationToken: null,
@@ -1026,6 +1054,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       amountCents: armed.action.amountCents ?? input.amountCents,
       operationHash,
       path: this.preparedCashPath,
+      collection: manualCard ? ("manual-card" as const) : ("cash" as const),
     });
   }
 
@@ -1038,7 +1067,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       !blocking ||
       blocking.type !== "payment" ||
       blocking.action.action.kind !== "repayment" ||
-      blocking.action.action.method !== "cash"
+      collectedKindOf(blocking.action) === null
     ) {
       return null;
     }
@@ -1077,6 +1106,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       amountCents: armed.action.amountCents!,
       operationHash: operationHashFor(armed),
       path: "recovery" as const,
+      collection: collectedKindOf(armed) ?? ("cash" as const),
     });
   }
 
@@ -1086,11 +1116,11 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       !blocking ||
       blocking.type !== "payment" ||
       blocking.action.action.kind !== "repayment" ||
-      blocking.action.action.method !== "cash"
+      collectedKindOf(blocking.action) === null
     ) {
       throw workflowError(
         "conflict",
-        "No prepared cash repayment requires confirmation.",
+        "No prepared repayment requires confirmation.",
       );
     }
     this.requireOriginalCashier(blocking.action);
@@ -1189,11 +1219,12 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       !blocking ||
       blocking.type !== "payment" ||
       blocking.action.action.kind !== "repayment" ||
-      blocking.action.action.method !== "cash"
+      collectedKindOf(blocking.action) === null
     ) {
       return null;
     }
     const persisted = blocking.action;
+    const kind = collectedKindOf(persisted)!;
     if (persisted.state !== "ProviderPending" && persisted.state !== "Unknown") {
       return null;
     }
@@ -1225,7 +1256,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       return null;
     }
     requireScopedLease(this.context.lease, this.context.terminal);
-    if (binding.provider !== "cash") return null;
+    if (binding.provider !== collectedProviderName(kind)) return null;
 
     const identity = Object.freeze({
       installmentGuid: persisted.action.installmentGuid,
@@ -1242,7 +1273,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     if (
       claim.status !== "ProviderPending" &&
       claim.status !== "Unknown" &&
-      claim.status !== "Released"
+      claim.status !== (kind === "cash" ? "Released" : "Declined")
     ) {
       return null;
     }
@@ -1254,25 +1285,36 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       amountCents: persisted.action.amountCents!,
       operationHash: operationHashFor(persisted),
       path: "recovery" as const,
+      collection: kind,
     });
   }
 
   public async cancelPreparedCashRepayment(): Promise<void> {
     await this.assertOnlineAndScoped();
-    this.requireCurrentPermission(INSTALLMENTS_CANCEL_PERMISSION);
     const blocking = await this.loadBlockingOperation();
     if (
       !blocking ||
       blocking.type !== "payment" ||
       blocking.action.action.kind !== "repayment" ||
-      blocking.action.action.method !== "cash"
+      collectedKindOf(blocking.action) === null
     ) {
       throw workflowError(
         "conflict",
-        "No prepared cash repayment can be cancelled.",
+        "No prepared repayment can be cancelled.",
       );
     }
     const persisted = blocking.action;
+    const kind = collectedKindOf(persisted)!;
+    // 中文注释：现金取消一律要取消权限（钱可能已经进了钱箱）。手动刷卡则不同：收银员在独立刷卡机上
+    // 没收到款就是“未付款，返回”（对齐 WPF #1195），原收银员不需要主管权限；
+    // 但其他人接手取消别人准备好的手动刷卡，仍要取消权限。下面还会证明尝试仍是 Created，即从未被确认过。
+    if (
+      kind === "cash" ||
+      persisted.command.cashierId !==
+        requireScopedLease(this.context.lease, this.context.terminal).cashierId
+    ) {
+      this.requireCurrentPermission(INSTALLMENTS_CANCEL_PERMISSION);
+    }
     if (persisted.state !== "ProviderPending" && persisted.state !== "Unknown") {
       throw paymentRecoveryError(
         "Only an unapproved cash repayment can be released.",
@@ -1318,10 +1360,10 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       );
     }
     requireScopedLease(this.context.lease, this.context.terminal);
-    if (binding.provider !== "cash") {
+    if (binding.provider !== collectedProviderName(kind)) {
       throw workflowError(
         "conflict",
-        "Cash repayment provider binding is not cash.",
+        "Repayment provider binding does not match the prepared collection.",
       );
     }
 
@@ -1338,20 +1380,34 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     requireScopedLease(this.context.lease, this.context.terminal);
     validateRepaymentClaim(claim, persisted.action, binding);
 
-    if (claim.status !== "Released") {
-      if (claim.status !== "ProviderPending" && claim.status !== "Unknown") {
+    // 中文注释：现金按服务端规则结案为 Released（需显式“未收现”证明）；手动刷卡结案为 Declined，
+    // 服务端只允许从 ProviderPending 走 Declined，claim 已是 Unknown 时说明确认动作可能发生过，只能主管结案。
+    const releasedStatus = kind === "cash" ? "Released" : "Declined";
+    if (claim.status !== releasedStatus) {
+      if (
+        claim.status !== "ProviderPending" &&
+        !(kind === "cash" && claim.status === "Unknown")
+      ) {
         throw workflowError(
           "conflict",
-          `Cash repayment claim cannot be released from ${claim.status}.`,
+          `Repayment claim cannot be released from ${claim.status}.`,
         );
       }
       try {
-        claim = await this.context.input.api.resolveRepaymentClaim({
-          ...identity,
-          outcome: "Released",
-          cashNotCollectedConfirmed: true,
-          providerAttemptId: binding.providerAttemptId,
-        });
+        claim = await this.context.input.api.resolveRepaymentClaim(
+          kind === "cash"
+            ? {
+                ...identity,
+                outcome: "Released",
+                cashNotCollectedConfirmed: true,
+                providerAttemptId: binding.providerAttemptId,
+              }
+            : {
+                ...identity,
+                outcome: "Declined",
+                providerAttemptId: binding.providerAttemptId,
+              },
+        );
       } catch (error) {
         // 中文注释：resolve 回包丢失时保留 blocking action；重试必须先 GET，
         // 若服务端其实已 Released，再仅完成本地 release。
@@ -1359,9 +1415,9 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       }
       requireScopedLease(this.context.lease, this.context.terminal);
       validateRepaymentClaim(claim, persisted.action, binding);
-      if (claim.status !== "Released") {
+      if (claim.status !== releasedStatus) {
         throw paymentRecoveryError(
-          "Cash repayment release was not confirmed by the server.",
+          "Repayment release was not confirmed by the server.",
         );
       }
     }
@@ -1606,7 +1662,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     }
     if (
       blocking.action.action.kind === "repayment" &&
-      blocking.action.action.method === "cash"
+      collectedKindOf(blocking.action) !== null
     ) {
       return this.recoverCashRepayment(blocking.action);
     }
@@ -1928,14 +1984,17 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       this.context.terminal,
     );
     const action = persisted.action;
+    const kind = collectedKindOf(persisted);
     if (
       action.kind !== "repayment" ||
-      action.method !== "cash" ||
+      kind === null ||
       action.paymentGuid === null ||
       action.amountCents === null
     ) {
       throw paymentRecoveryError("Cash repayment action identity is incomplete.");
     }
+    // 中文注释：服务端 claim 的 method 是 cash / card；手动刷卡登记为 card + provider=manual-card。
+    const claimMethod = kind === "cash" ? ("cash" as const) : ("card" as const);
     const identity = Object.freeze({
       installmentGuid: action.installmentGuid,
       operationGuid: action.actionId,
@@ -1954,10 +2013,10 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
           : "Cash repayment provider binding requires recovery.",
       );
     }
-    if (binding.provider !== "cash") {
+    if (binding.provider !== collectedProviderName(kind)) {
       throw workflowError(
         "conflict",
-        "Cash repayment provider binding is not cash.",
+        "Repayment provider binding does not match the prepared collection.",
       );
     }
 
@@ -1981,7 +2040,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
             ...identity,
             paymentGuid: action.paymentGuid as string,
             amountCents: action.amountCents as number,
-            method: "cash",
+            method: claimMethod,
             idempotencyKey: action.idempotencyKey,
             provider: binding.provider,
             providerAttemptId: binding.providerAttemptId,
@@ -1994,7 +2053,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
           ...identity,
           paymentGuid: action.paymentGuid as string,
           amountCents: action.amountCents as number,
-          method: "cash",
+          method: claimMethod,
           idempotencyKey: action.idempotencyKey,
         }));
       if (created.status === "Prepared" || created.status === "Unknown") {
@@ -2207,7 +2266,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
     }
     // 中文注释：现金批准默认关闭。只有 confirm/recovery 已先证明 settlement
     // 为 Approved，或传入同 operation 的 knownApprovedPayment，才显式放行。
-    if (action.method === "cash" && options.allowCashApproval !== true) {
+    if (collectedKindOf(persisted) !== null && options.allowCashApproval !== true) {
       throw workflowError(
         "cash-confirmation-required",
         "Cash must be explicitly confirmed before approval.",
@@ -3389,7 +3448,8 @@ function validatePersistedAction(
         ? command.cashTenderedCents === undefined &&
           (command.cardProvider === undefined ||
             command.cardProvider === "square" ||
-            command.cardProvider === "linkly-cloud")
+            command.cardProvider === "linkly-cloud" ||
+            command.cardProvider === "manual-card")
         : action.method === "cash"
           ? command.cardProvider === undefined &&
             (command.cashTenderedCents === undefined ||
@@ -4197,11 +4257,35 @@ function deterministicClaimWorkflowError(
 }
 
 /** 服务端通道名归一：anz / linkly-cloud 都算 linkly（对齐服务端 NormalizeFamily）。 */
+/** 现金与手动刷卡共用“先登记 claim、再由收银员确认”的两阶段；其余续付返回 null。 */
+type CollectedRepaymentKind = "cash" | "manual-card";
+
+function collectedKindOf(
+  persisted: PersistedInstallmentAction,
+): CollectedRepaymentKind | null {
+  const action = persisted.action;
+  if (action.kind !== "repayment") return null;
+  if (action.method === "cash") return "cash";
+  if (
+    action.method === "card" &&
+    persisted.command.kind !== "cancel-refund" &&
+    persisted.command.cardProvider === "manual-card"
+  ) {
+    return "manual-card";
+  }
+  return null;
+}
+
+function collectedProviderName(kind: CollectedRepaymentKind): string {
+  return kind === "cash" ? "cash" : "manual-card";
+}
+
 function cardProviderFamily(provider: string): string {
   const normalized = provider.trim().toLowerCase();
-  return normalized === "linkly-cloud" || normalized === "anz"
-    ? "linkly"
-    : normalized;
+  // 服务端把 manual-card / manualcard 归为 manual 族（与 InstallmentCardRepaymentProviders.NormalizeFamily 一致）。
+  if (normalized === "linkly-cloud" || normalized === "anz") return "linkly";
+  if (normalized === "manual-card" || normalized === "manualcard") return "manual";
+  return normalized;
 }
 
 function repaymentClaimDeterministicFailure(
@@ -4349,7 +4433,9 @@ function paymentCommandMetadata(
       input.cashTenderedCents !== undefined ||
       (input.cardProvider !== undefined &&
         input.cardProvider !== "square" &&
-        input.cardProvider !== "linkly-cloud")
+        input.cardProvider !== "linkly-cloud" &&
+        // 手动刷卡只用于续付（input 带 amountCents）；创建分期的首付不接受。
+        !(input.cardProvider === "manual-card" && !("downPaymentCents" in input)))
     ) {
       throw workflowError("conflict", "Installment card provider is invalid.");
     }

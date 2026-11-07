@@ -1030,6 +1030,250 @@ test("确认发生业务冲突但未落耐久 action 时不伪造恢复入口", 
   );
 });
 
+function manualCardWorkflow(
+  overrides: Partial<InstallmentWorkflowPort> = {},
+): InstallmentWorkflowPort {
+  return workflowStub({
+    listPaymentProviderAvailability: async () => [
+      { provider: "square", available: false, blocker: "PAYMENT_PROVIDER_UNKNOWN" },
+      { provider: "linkly-cloud", available: false, blocker: "PAYMENT_PROVIDER_UNKNOWN" },
+      { provider: "manual-card", available: true, blocker: null },
+      { provider: "voucher", available: true, blocker: null },
+    ],
+    ...overrides,
+  });
+}
+
+function manualCardPresenter(
+  workflow: InstallmentWorkflowPort,
+  tenderId = "manual-card-tender",
+): InstallmentCheckoutPresenter {
+  return new InstallmentCheckoutPresenter({
+    entry: installmentRepaymentPaymentEntry(INSTALLMENT_ID),
+    createDrafts: {
+      getSnapshot: () => null,
+      subscribe: () => () => undefined,
+    },
+    initialOnline: true,
+    // 注意：没有 Installments.Cancel 权限——手动刷卡的“未付款，返回”不应依赖它。
+    permissions: repaymentPermissions(),
+    workflow,
+    createTenderId: () => tenderId,
+  });
+}
+
+test("手动刷卡续付先准备再确认：走 prepare 而不是 addRepayment，tender 为不可撤销的手动刷卡，现金口径为 0", async () => {
+  const prepareInputs: InstallmentWorkflowRepaymentInput[] = [];
+  let confirmCalls = 0;
+  let addRepaymentCalls = 0;
+  const presenter = manualCardPresenter(
+    manualCardWorkflow({
+      addRepayment: async () => {
+        addRepaymentCalls += 1;
+        return details({});
+      },
+      prepareCashRepayment: async (input) => {
+        prepareInputs.push(input);
+        return {
+          installmentGuid: INSTALLMENT_ID,
+          operationHash: "sha256:manual-1",
+          amountCents: 1_000,
+          path: "prepare-provider-v1",
+          collection: "manual-card" as const,
+        };
+      },
+      confirmPreparedCashRepayment: async () => {
+        confirmCalls += 1;
+        return details({ balanceCents: 2_000 });
+      },
+      cancelPreparedCashRepayment: async () => undefined,
+    }),
+  );
+
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.selectMethod("manual-card"), true);
+  presenter.setAmountText("10.00");
+  assert.equal(await presenter.submitSelected(), true);
+
+  assert.equal(addRepaymentCalls, 0);
+  assert.equal(prepareInputs.length, 1);
+  assert.equal(prepareInputs[0]?.method, "card");
+  assert.equal(prepareInputs[0]?.cardProvider, "manual-card");
+  assert.equal(prepareInputs[0]?.amountCents, 1_000);
+  assert.equal(prepareInputs[0]?.cashTenderedCents, undefined);
+
+  const ready = presenter.getState();
+  assert.equal(ready.phase, "cash-collection-ready");
+  assert.equal(ready.checkout.cashRepaymentStatus, "ready");
+  assert.equal(ready.checkout.preparedCollection, "manual-card");
+  assert.equal(ready.tenders.length, 1);
+  assert.equal(ready.tenders[0]?.method, "card");
+  assert.equal(ready.tenders[0]?.provider, "manual-card");
+  assert.equal(ready.tenders[0]?.reversible, false);
+  assert.equal(ready.tenders[0]?.amount.cents, 1_000);
+  assert.deepEqual(ready.checkout.cash, { tenderedCents: 0, appliedCents: 0, changeCents: 0 });
+  // 原收银员无需取消权限即可“未付款，返回”。
+  assert.equal(ready.allowedActions.cancel, true);
+
+  const confirmations = await Promise.all([presenter.confirm(), presenter.confirm()]);
+  assert.deepEqual(confirmations, [true, false]);
+  assert.equal(confirmCalls, 1);
+  assert.equal(presenter.getState().phase, "success");
+  assert.equal(presenter.getState().checkout.preparedCollection, undefined);
+});
+
+test("手动刷卡“未付款，返回”：无取消权限也能取消，成功后清空 fence 与手动刷卡标记并回到可重试状态", async () => {
+  let cancelCalls = 0;
+  const presenter = manualCardPresenter(
+    manualCardWorkflow({
+      prepareCashRepayment: async () => ({
+        installmentGuid: INSTALLMENT_ID,
+        operationHash: "sha256:manual-cancel",
+        amountCents: 1_000,
+        path: "prepare-provider-v1",
+        collection: "manual-card" as const,
+      }),
+      cancelPreparedCashRepayment: async () => {
+        cancelCalls += 1;
+      },
+    }),
+  );
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.selectMethod("manual-card"), true);
+  presenter.setAmountText("10.00");
+  assert.equal(await presenter.submitSelected(), true);
+
+  assert.equal(await presenter.cancel(), true);
+  assert.equal(cancelCalls, 1);
+  const after = presenter.getState();
+  assert.equal(after.phase, "ready");
+  assert.equal(after.tenders.length, 0);
+  assert.equal(after.remaining.cents, 3_000);
+  assert.equal(after.checkout.canConfirm, false);
+  assert.equal(after.checkout.cashRepaymentStatus, "idle");
+  assert.equal(after.checkout.preparedCollection, undefined);
+  assert.equal(after.allowedActions.start, true);
+  assert.equal(after.allowedActions.cancel, false);
+});
+
+test("手动刷卡取消结果不明时保留 fence，并使用手动刷卡专属提示，只允许重放同一取消", async () => {
+  const presenter = manualCardPresenter(
+    manualCardWorkflow({
+      prepareCashRepayment: async () => ({
+        installmentGuid: INSTALLMENT_ID,
+        operationHash: "sha256:manual-cancel-fail",
+        amountCents: 1_000,
+        path: "prepare-provider-v1",
+        collection: "manual-card" as const,
+      }),
+      cancelPreparedCashRepayment: async () => {
+        throw new InstallmentWorkflowError("payment-recovery-required", "not confirmed");
+      },
+    }),
+  );
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.selectMethod("manual-card"), true);
+  presenter.setAmountText("10.00");
+  assert.equal(await presenter.submitSelected(), true);
+
+  assert.equal(await presenter.cancel(), false);
+  const state = presenter.getState();
+  assert.equal(state.phase, "recovery-required");
+  assert.equal(state.runtimeErrorCode, "INSTALLMENT_MANUAL_CARD_CANCELLATION_FAILED");
+  assert.equal(state.allowedActions.cancel, true);
+  assert.equal(state.allowedActions.recover, false);
+  assert.equal(state.tenders.length, 1);
+});
+
+test("手动刷卡准备失败：服务端未放开通道给出专属提示并回到可重选状态；有耐久事实则强制恢复", async () => {
+  for (const [recoveryRequired, phase] of [
+    [false, "ready"],
+    [true, "recovery-required"],
+  ] as const) {
+    const presenter = manualCardPresenter(
+      manualCardWorkflow({
+        prepareCashRepayment: async () => {
+          throw new InstallmentWorkflowError("payment-method-unsupported", "manual off");
+        },
+        hasRecoveryRequired: async () => recoveryRequired,
+      }),
+    );
+    assert.equal(await presenter.initialize(), true);
+    assert.equal(presenter.selectMethod("manual-card"), true);
+    presenter.setAmountText("10.00");
+    assert.equal(await presenter.submitSelected(), false);
+    assert.equal(
+      presenter.getState().runtimeErrorCode,
+      "INSTALLMENT_REPAYMENT_METHOD_UNSUPPORTED",
+    );
+    assert.equal(presenter.getState().phase, phase);
+    assert.equal(presenter.getState().tenders.length, 0);
+  }
+});
+
+test("Prepared 手动刷卡重启后重建手动刷卡 tender，提示核对刷卡机并可从恢复页确认", async () => {
+  let confirmCalls = 0;
+  const presenter = new InstallmentCheckoutPresenter({
+    entry: null,
+    createDrafts: {
+      getSnapshot: () => null,
+      subscribe: () => () => undefined,
+    },
+    initialOnline: true,
+    permissions: repaymentPermissions(),
+    workflow: manualCardWorkflow({
+      recoverBlocking: async () => {
+        throw new InstallmentWorkflowError("cash-confirmation-required", "check terminal");
+      },
+      inspectPreparedCashRepayment: async () => ({
+        installmentGuid: INSTALLMENT_ID,
+        operationHash: "sha256:recovered-manual",
+        amountCents: 1_000,
+        path: "recovery",
+        collection: "manual-card" as const,
+      }),
+      confirmPreparedCashRepayment: async () => {
+        confirmCalls += 1;
+        return details({ balanceCents: 2_000 });
+      },
+    }),
+    createTenderId: () => "recovered-manual-tender",
+  });
+
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(await presenter.recover(), false);
+  const state = presenter.getState();
+  assert.equal(state.runtimeErrorCode, "INSTALLMENT_MANUAL_CARD_CONFIRMATION_REQUIRED");
+  assert.equal(state.checkout.cashRepaymentStatus, "ready");
+  assert.equal(state.checkout.preparedCollection, "manual-card");
+  assert.equal(state.tenders[0]?.tenderGuid, "recovered-manual-tender");
+  assert.equal(state.tenders[0]?.method, "card");
+  assert.equal(state.tenders[0]?.provider, "manual-card");
+  assert.equal(await presenter.confirm(), true);
+  assert.equal(confirmCalls, 1);
+  assert.equal(presenter.getState().phase, "success");
+});
+
+test("现金续付仍要取消权限才开放取消（手动刷卡的放宽不外溢到现金）", async () => {
+  const presenter = manualCardPresenter(
+    manualCardWorkflow({
+      prepareCashRepayment: async () => ({
+        installmentGuid: INSTALLMENT_ID,
+        operationHash: "sha256:cash-no-perm",
+        amountCents: 1_000,
+        path: "prepare-provider-v1",
+      }),
+      cancelPreparedCashRepayment: async () => undefined,
+    }),
+  );
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.selectMethod("cash"), true);
+  presenter.setAmountText("10.00");
+  assert.equal(await presenter.submitSelected(), true);
+  assert.equal(presenter.getState().checkout.preparedCollection, "cash");
+  assert.equal(presenter.getState().allowedActions.cancel, false);
+});
+
 function createPermissions(): readonly string[] {
   return [
     INSTALLMENTS_CREATE_PERMISSION,
