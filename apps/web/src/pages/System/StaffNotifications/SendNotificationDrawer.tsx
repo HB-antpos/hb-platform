@@ -34,6 +34,7 @@ import {
   getStaffNotificationErrorMessage,
   isRecipientSelectable,
   reconcileSelection,
+  resolveSmsSenderId,
   startBatchPolling,
   summarizeSelection,
   type BatchPoller,
@@ -101,6 +102,8 @@ export default function SendNotificationDrawer({
   const [templateKey, setTemplateKey] = useState<string | undefined>(undefined)
   const [sendEmailChoice, setSendEmailChoice] = useState(true)
   const [sendSmsChoice, setSendSmsChoice] = useState(true)
+  // 用户选的短信发件名；undefined = 还没选，用预检给的默认项。
+  const [smsSenderChoice, setSmsSenderChoice] = useState<string | undefined>(undefined)
 
   const [preflight, setPreflight] = useState<StaffNotificationPreflight | null>(null)
   const [preflightLoading, setPreflightLoading] = useState(false)
@@ -158,6 +161,11 @@ export default function SendNotificationDrawer({
   const emailEnabled = template?.requiresEmail === true ? true : sendEmailChoice
   const smsAvailable = preflight?.smsAvailable === true
   const smsEnabled = sendSmsChoice && smsAvailable
+  // 本次短信实际用的发件名：选择已失效则回落默认项；没勾短信 / 没有可选项时为 undefined，发送时不传。
+  const smsSenders = preflight?.smsSenders ?? []
+  const smsSenderId = smsEnabled ? resolveSmsSenderId(smsSenders, smsSenderChoice) : undefined
+  // 只有真有得选（多于 1 项）才露出下拉；只有默认一项时保持界面不变。
+  const showSmsSenderPicker = smsEnabled && smsSenders.length > 1
   const userGuidsKey = userGuids.join(',')
 
   // ===== 预检：打开抽屉、换模板、切换渠道开关时重新调用 =====
@@ -180,6 +188,11 @@ export default function SendNotificationDrawer({
       .then((result) => {
         if (controller.signal.aborted) return
         setPreflight(result)
+        // 重新预检后可选发件名可能变了：之前选的项已不在名单里就回落默认项，不把失效值留到发送请求里。
+        // 返回空名单（比如这次预检没勾短信）时保留用户的选择，等名单回来再核对。
+        if (result.smsSenders.length > 0) {
+          setSmsSenderChoice((previous) => resolveSmsSenderId(result.smsSenders, previous))
+        }
         // setSelected 的更新函数会在稍后渲染时才执行，所以必须先把「上一次的名单」取出来再更新 ref，
         // 否则更新函数读到的已经是新名单，会把所有人都当成「已知且没勾选」，默认勾选就丢了。
         const previousRecipients = previousRecipientsRef.current
@@ -249,6 +262,7 @@ export default function SendNotificationDrawer({
         userGuids: guids,
         sendEmail: emailEnabled,
         sendSms: smsEnabled,
+        smsSenderId,
         confirmReissue,
       })
       if (!mountedRef.current) return
@@ -464,6 +478,20 @@ export default function SendNotificationDrawer({
                 {preflight && !smsAvailable ? (
                   <span className="staff-notify-send-hint">{t('system.staffNotifications.send.smsServiceOffHint', '服务器还没打开短信总开关，只能发邮件。')}</span>
                 ) : null}
+                {showSmsSenderPicker ? (
+                  <div className="staff-notify-send-sender">
+                    <span>{t('system.staffNotifications.send.smsSender', '短信发件名')}</span>
+                    <Select
+                      size="small"
+                      style={{ width: 160 }}
+                      value={smsSenderId}
+                      onChange={setSmsSenderChoice}
+                      aria-label={t('system.staffNotifications.send.smsSender', '短信发件名')}
+                      options={smsSenders.map((sender) => ({ value: sender.id, label: sender.id }))}
+                    />
+                    <span className="staff-notify-send-hint">{t('system.staffNotifications.send.smsSenderHint', '收件人手机上显示的发信人名称')}</span>
+                  </div>
+                ) : null}
                 {noChannel ? (
                   <Alert style={{ marginTop: 8 }} type="warning" showIcon message={t('system.staffNotifications.send.noChannelSelected', '至少要打开一个发送渠道。')} />
                 ) : null}
@@ -520,6 +548,7 @@ export default function SendNotificationDrawer({
           summary={summary}
           emailEnabled={emailEnabled}
           smsEnabled={smsEnabled}
+          smsSenderId={showSmsSenderPicker ? smsSenderId : undefined}
           smsUsedLast24h={preflight.smsUsedLast24h}
           smsDailyLimit={preflight.smsDailyLimit}
           smsUnitCostAud={preflight.smsUnitCostAud}

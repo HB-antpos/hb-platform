@@ -36,6 +36,14 @@ internal sealed class SmsSender : ISmsSender
         if (!_options.IsAvailable)
             return ApiResponse<bool>.Error("短信服务未开启，暂不能发送短信", SmsErrorCodes.Disabled);
 
+        // 发件名只能取服务端白名单里的值；没指定就是默认发件名。不在白名单直接拒绝，不调服务商也不记发送记录。
+        var sender = _options.ResolveSender(request.SenderId);
+        if (sender is null)
+        {
+            _logger.LogWarning("短信发件名不在白名单内，已拒绝发送，用途：{Purpose}", request.Purpose);
+            return ApiResponse<bool>.Error("所选短信发件名不可用", SmsErrorCodes.SenderNotAllowed);
+        }
+
         if (!AustralianPhoneNumber.TryNormalize(request.ToPhone, out var e164))
             return ApiResponse<bool>.Error("需要有效的澳洲手机号（04 开头），固定电话收不到短信", SmsErrorCodes.InvalidPhone);
 
@@ -83,7 +91,7 @@ internal sealed class SmsSender : ISmsSender
         };
         await db.Insertable(row).ExecuteCommandAsync();
 
-        var result = await _gateway.SendAsync(e164, request.Body, cancellationToken);
+        var result = await _gateway.SendAsync(e164, request.Body, sender, cancellationToken);
 
         var finishedAt = DateTime.UtcNow;
         var status = result.Success ? SmsSendStatuses.Sent : SmsSendStatuses.Failed;

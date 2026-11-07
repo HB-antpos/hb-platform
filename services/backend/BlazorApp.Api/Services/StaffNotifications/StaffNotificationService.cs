@@ -110,6 +110,10 @@ internal sealed class StaffNotificationService : IStaffNotificationService
         return ApiResponse<StaffNotificationPreflightDto>.OK(new StaffNotificationPreflightDto
         {
             SmsAvailable = _smsSender.IsAvailable,
+            // 可选发件名来自服务端白名单，第一项是默认发件名；短信不可用时不给选项，前端据此隐藏选择。
+            SmsSenders = _smsSender.IsAvailable
+                ? _smsOptions.GetSenderChoices().Select((id, index) => new StaffNotificationSmsSenderDto { Id = id, IsDefault = index == 0 }).ToList()
+                : new List<StaffNotificationSmsSenderDto>(),
             SmsUsedLast24h = used,
             SmsDailyLimit = _smsOptions.GlobalDayLimit,
             SmsUnitCostAud = StaffNotificationRules.SmsUnitCostAud,
@@ -197,6 +201,18 @@ internal sealed class StaffNotificationService : IStaffNotificationService
         if (prepared.Error is not null) return ApiResponse<StaffNotificationSendResultDto>.Error(prepared.Error.Message, prepared.Error.ErrorCode);
         if (!sendEmail && !dto.SendSms) return ApiResponse<StaffNotificationSendResultDto>.Error("请至少选择一个发送渠道", "VALIDATION_ERROR");
 
+        // 短信发件名：只能取服务端白名单里的值，没指定 = 默认发件名；不在白名单就整单拒绝（不能悄悄换成默认名发出去）。
+        // 短信服务没开时本来就不会发短信（收件人会被标成「短信服务未开启」跳过），此时不校验也不落库。
+        string? smsSenderId = null;
+        if (dto.SendSms && _smsSender.IsAvailable)
+        {
+            smsSenderId = _smsOptions.ResolveSender(dto.SmsSenderId);
+            if (smsSenderId is null)
+            {
+                return ApiResponse<StaffNotificationSendResultDto>.Error("所选短信发件名不可用，请重新选择", "VALIDATION_ERROR");
+            }
+        }
+
         var accepted = prepared.Assessments!.Where(item => item.Dto.Status != "blocked").ToList();
         var rejected = prepared.Assessments!
             .Where(item => item.Dto.Status == "blocked")
@@ -223,6 +239,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
             CreatedByUserGuid = actor.UserGuid,
             SendEmail = sendEmail,
             SendSms = dto.SendSms,
+            SmsSenderId = smsSenderId,
             Status = StaffNotificationBatchStatuses.Queued,
             TotalCount = accepted.Count,
             CreatedAtUtc = now,
@@ -833,6 +850,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
             SmsRequested = summary.SmsRequested,
             SmsSent = summary.SmsSent,
             SmsFailed = summary.SmsFailed,
+            SmsSenderId = summary.SmsSenderId,
             SmsSegments = summary.SmsSegments,
             SmsCostAud = summary.SmsCostAud,
             CanRetry = summary.CanRetry,
@@ -909,6 +927,7 @@ internal sealed class StaffNotificationService : IStaffNotificationService
             SmsRequested = smsRequested,
             SmsSent = smsSent,
             SmsFailed = smsFailed,
+            SmsSenderId = batch.SendSms ? batch.SmsSenderId : null,
             SmsSegments = segments,
             SmsCostAud = Math.Round(segments * StaffNotificationRules.SmsUnitCostAud, 4),
             CanRetry = finished && failedTotal > 0,

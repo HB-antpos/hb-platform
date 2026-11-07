@@ -75,6 +75,13 @@ internal sealed class StaffNotificationBatch
 
     public bool SendSms { get; set; }
 
+    /// <summary>
+    /// 这批短信用的发件名（发送时从白名单里选的，「重试失败项」沿用同一个）。
+    /// 没发短信的批次、以及迁移 20261107.001 之前的历史批次为空，发送时按默认发件名处理。
+    /// </summary>
+    [SugarColumn(Length = 32, IsNullable = true)]
+    public string? SmsSenderId { get; set; }
+
     /// <summary><see cref="StaffNotificationBatchStatuses"/>。</summary>
     [SugarColumn(Length = 20)]
     public string Status { get; set; } = StaffNotificationBatchStatuses.Queued;

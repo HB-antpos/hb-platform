@@ -9,6 +9,7 @@ import type {
   StaffNotificationPreviewRequest,
   StaffNotificationSendRequest,
   StaffNotificationSendResult,
+  StaffNotificationSmsSender,
   StaffNotificationTemplate,
   StaffNotificationTemplateSave,
 } from '../types/staffNotification'
@@ -83,11 +84,20 @@ export async function preflightStaffNotification(
   // 缺字段时给安全默认值：没有短信可用信息就当不可用，不会误显示「短信服务已开启」。
   return {
     smsAvailable: data?.smsAvailable === true,
+    smsSenders: normalizeSmsSenders(data?.smsSenders),
     smsUsedLast24h: Number(data?.smsUsedLast24h ?? 0),
     smsDailyLimit: Number(data?.smsDailyLimit ?? 0),
     smsUnitCostAud: Number(data?.smsUnitCostAud ?? 0),
     recipients: data?.recipients ?? [],
   }
+}
+
+/** 发件名列表缺省（旧后端 / 短信不可用）按空数组；丢掉没有名字的项，避免下拉里出现空选项。 */
+function normalizeSmsSenders(value: unknown): StaffNotificationSmsSender[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is StaffNotificationSmsSender => typeof item?.id === 'string' && item.id.trim() !== '')
+    .map((item) => ({ id: item.id, isDefault: item.isDefault === true }))
 }
 
 export async function previewStaffNotification(
@@ -110,6 +120,8 @@ export async function sendStaffNotification(payload: StaffNotificationSendReques
     userGuids: payload.userGuids,
     sendEmail: payload.sendEmail,
     sendSms: payload.sendSms,
+    // 空串 / 未选不传：服务端按「不传 = 默认发件名」处理。
+    ...(payload.smsSenderId ? { smsSenderId: payload.smsSenderId } : {}),
     confirmReissue: payload.confirmReissue,
   })
   const data = unwrapApiData(response)

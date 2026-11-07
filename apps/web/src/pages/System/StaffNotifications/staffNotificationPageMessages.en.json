@@ -156,7 +156,8 @@
         "detailNote": "Note",
         "detailLoadFailed": "Failed to load the per-person details",
         "detailRetry": "Reload",
-        "detailEmpty": "This batch has no per-person details"
+        "detailEmpty": "This batch has no per-person details",
+        "smsSender": "SMS sender name: {{name}}"
       }
     }
   }

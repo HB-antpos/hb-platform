@@ -7,6 +7,7 @@ import type {
   StaffNotificationPreflightRecipient,
   StaffNotificationRecipientReason,
   StaffNotificationRecipientStatus,
+  StaffNotificationSmsSender,
   StaffNotificationSmsSkipReason,
 } from '../../../types/staffNotification'
 
@@ -112,6 +113,23 @@ export function formatAud(value: number): string {
 /** 今日 / 24 小时短信额度：本次发送后是否会超过全站上限（只做提示，是否拒绝以服务端为准）。 */
 export function isSmsQuotaExceeded(used: number, limit: number, plannedSegments: number): boolean {
   return limit > 0 && plannedSegments > 0 && used + plannedSegments > limit
+}
+
+// ===== 短信发件名 =====
+
+/**
+ * 本次短信实际使用的发件名：
+ * - 用户选的那项仍在预检返回的可选列表里就用它；
+ * - 已不在列表里（重新预检后白名单变了）回落到默认项，没有标默认项就取第一项，绝不把失效值传给后端；
+ * - 列表为空（短信不可用）返回 undefined，调用方据此不传 smsSenderId。
+ */
+export function resolveSmsSenderId(
+  senders: readonly StaffNotificationSmsSender[],
+  chosenId: string | undefined,
+): string | undefined {
+  if (senders.length === 0) return undefined
+  if (chosenId !== undefined && senders.some((sender) => sender.id === chosenId)) return chosenId
+  return (senders.find((sender) => sender.isDefault) ?? senders[0]).id
 }
 
 // ===== 收件人原因：文案 key 与兜底 =====

@@ -89,9 +89,18 @@ export interface StaffNotificationPreflightRecipient {
   smsSegments: number
 }
 
+/** 短信可选发件名（ClickSend 的 Alpha Tag）；id 就是展示用的名字，如 HotBargain、ANTPOS。 */
+export interface StaffNotificationSmsSender {
+  id: string
+  /** 恰好一项为 true，且默认项永远排在第一位。 */
+  isDefault: boolean
+}
+
 export interface StaffNotificationPreflight {
   /** 短信总闸 + 配置齐全。 */
   smsAvailable: boolean
+  /** 可选发件名；短信不可用时为空数组。 */
+  smsSenders: StaffNotificationSmsSender[]
   smsUsedLast24h: number
   smsDailyLimit: number
   /** 单条估价（澳元），如 0.0792。 */
@@ -125,6 +134,8 @@ export interface StaffNotificationSendRequest {
   userGuids: string[]
   sendEmail: boolean
   sendSms: boolean
+  /** 本次短信用的发件名；不传 / 空串 = 用默认项，只在 sendSms=true 时有意义，服务端会校验白名单。 */
+  smsSenderId?: string
   confirmReissue: boolean
 }
 
@@ -169,6 +180,8 @@ export interface StaffNotificationBatch {
   smsSegments: number
   /** smsSegments * 单价。 */
   smsCostAud: number
+  /** 这批短信实际用的发件名；没发短信的批次与改动前的历史批次为 null。 */
+  smsSenderId?: string | null
   /** 有失败项且批次已结束。 */
   canRetry: boolean
 }

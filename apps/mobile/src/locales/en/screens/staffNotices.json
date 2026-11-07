@@ -29,7 +29,10 @@
       "sms_unavailable": "SMS service is off",
       "no_phone": "No mobile number",
       "not_mobile": "Not a mobile number"
-    }
+    },
+    "smsSender": "SMS sender name",
+    "smsSenderHint": "Shown on their phone",
+    "smsSenderDefault": "Default"
   },
   "ready": {
     "password": "Ready to send. A random password goes to their email.",
@@ -157,7 +160,8 @@
     "createdBy": "Sent by {{name}}",
     "emptyTitle": "No send history yet",
     "emptyDescription": "Notices you send to staff will appear here.",
-    "loadFailed": "Could not load send history"
+    "loadFailed": "Could not load send history",
+    "sender": "Sender {{name}}"
   },
   "time": {
     "today": "Today",

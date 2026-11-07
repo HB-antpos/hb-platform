@@ -17,6 +17,7 @@ import {
   resolveDefaultSelection,
   resolveDefaultTemplate,
   resolveRowOutcome,
+  resolveSmsSenderId,
   shouldOfferActivationCard,
   summarizeSelection,
   templateSupportsSms,
@@ -157,3 +158,12 @@ assert.equal(formatNoticeTime(local(6, 16), labels, now), "今天 16:05");
 assert.equal(formatNoticeTime(local(5, 10), labels, now), "昨天 10:05");
 assert.equal(formatNoticeTime(local(4, 15), labels, now), "11-04 15:05");
 assert.equal(formatNoticeTime(null, labels, now), "");
+
+// 短信发件名：选择仍在名单里就用；已失效回落默认项（没标默认就取第一项）；名单为空（短信不可用 / 旧后端）不传。
+const senders = [{ id: "HotBargain", isDefault: true }, { id: "ANTPOS", isDefault: false }];
+assert.equal(resolveSmsSenderId(senders, undefined), "HotBargain");
+assert.equal(resolveSmsSenderId(senders, "ANTPOS"), "ANTPOS");
+assert.equal(resolveSmsSenderId(senders, "Gone"), "HotBargain");
+assert.equal(resolveSmsSenderId([{ id: "AAA", isDefault: false }, { id: "BBB", isDefault: false }], "nope"), "AAA");
+assert.equal(resolveSmsSenderId([], "ANTPOS"), undefined);
+assert.equal(resolveSmsSenderId(undefined, "ANTPOS"), undefined);

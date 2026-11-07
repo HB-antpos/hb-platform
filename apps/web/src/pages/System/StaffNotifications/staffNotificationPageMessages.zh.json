@@ -156,7 +156,8 @@
         "detailNote": "说明",
         "detailLoadFailed": "加载逐人明细失败",
         "detailRetry": "重试加载",
-        "detailEmpty": "这一批没有逐人明细"
+        "detailEmpty": "这一批没有逐人明细",
+        "smsSender": "短信发件名：{{name}}"
       }
     }
   }

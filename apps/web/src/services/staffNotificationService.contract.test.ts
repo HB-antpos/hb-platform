@@ -92,6 +92,7 @@ try {
     success: true,
     data: {
       smsAvailable: true, smsUsedLast24h: 12, smsDailyLimit: 300, smsUnitCostAud: 0.0792,
+      smsSenders: [{ id: 'HotBargain', isDefault: true }, { id: 'ANTPOS', isDefault: false }],
       recipients: [{ userGuid: 'u1', status: 'ready', reasons: [], willSendEmail: true, willSendSms: true, smsSkipReason: null, smsSegments: 1 }],
     },
   })
@@ -103,10 +104,19 @@ try {
   assert.equal(preflight.smsUsedLast24h, 12)
   assert.equal(preflight.smsUnitCostAud, 0.0792)
   assert.equal(preflight.recipients.length, 1)
+  assert.deepEqual(preflight.smsSenders, [{ id: 'HotBargain', isDefault: true }, { id: 'ANTPOS', isDefault: false }], '可选发件名原样带出，默认项在前')
   // 缺字段时短信按不可用处理，名单为空数组，不会白屏。
   reset({ success: true, data: {} })
   const emptyPreflight = await preflightStaffNotification({ templateKey: 'k', userGuids: [], sendEmail: true, sendSms: true })
-  assert.deepEqual(emptyPreflight, { smsAvailable: false, smsUsedLast24h: 0, smsDailyLimit: 0, smsUnitCostAud: 0, recipients: [] })
+  assert.deepEqual(emptyPreflight, { smsAvailable: false, smsSenders: [], smsUsedLast24h: 0, smsDailyLimit: 0, smsUnitCostAud: 0, recipients: [] })
+  // 发件名列表里的坏项（缺 id / 空 id / 非对象）被丢掉，isDefault 缺省按 false；不是数组按空处理。
+  reset({ success: true, data: { smsAvailable: true, smsSenders: [{ id: 'HotBargain', isDefault: true }, { id: '  ' }, {}, null, { id: 'ANTPOS' }] } })
+  assert.deepEqual(
+    (await preflightStaffNotification({ templateKey: 'k', userGuids: [], sendEmail: true, sendSms: true })).smsSenders,
+    [{ id: 'HotBargain', isDefault: true }, { id: 'ANTPOS', isDefault: false }],
+  )
+  reset({ success: true, data: { smsAvailable: true, smsSenders: 'HotBargain' } })
+  assert.deepEqual((await preflightStaffNotification({ templateKey: 'k', userGuids: [], sendEmail: true, sendSms: true })).smsSenders, [])
 
   // ===== 预览 =====
   reset({ success: true, data: { emailSubject: 'S', emailHtml: '<p>x</p>', smsText: 'T', smsLength: 1, smsSegments: 1, smsValid: true, smsError: null } })
@@ -122,6 +132,19 @@ try {
   assert.deepEqual(calls[0]?.body, { templateKey: 'account-activated', userGuids: ['u1'], sendEmail: true, sendSms: true, confirmReissue: true })
   assert.equal(sent.batchId, 'b1')
   assert.deepEqual(sent.rejected, [], 'rejected 缺省按空数组')
+  assert.equal(calls[0] !== undefined && 'smsSenderId' in (calls[0].body ?? {}), false, '没选发件名时请求体里不带 smsSenderId')
+  // 选了发件名：随请求体传出；空串视为没选，不传。
+  reset({ success: true, data: { batchId: 'b1', status: 'queued', totalCount: 1 } })
+  await sendStaffNotification({ templateKey: 'account-activated', userGuids: ['u1'], sendEmail: true, sendSms: true, smsSenderId: 'ANTPOS', confirmReissue: false })
+  assert.deepEqual(calls[0]?.body, { templateKey: 'account-activated', userGuids: ['u1'], sendEmail: true, sendSms: true, smsSenderId: 'ANTPOS', confirmReissue: false })
+  reset({ success: true, data: { batchId: 'b1', status: 'queued', totalCount: 1 } })
+  await sendStaffNotification({ templateKey: 'account-activated', userGuids: ['u1'], sendEmail: true, sendSms: true, smsSenderId: '', confirmReissue: false })
+  assert.equal(calls[0] !== undefined && 'smsSenderId' in (calls[0].body ?? {}), false, '空串不传 smsSenderId')
+  // 发件名不在白名单：服务端返回业务错误，中文 message 能原样取出。
+  reset({ success: false, message: '短信发件名不在可选范围内' })
+  const badSender = await sendStaffNotification({ templateKey: 'k', userGuids: ['u1'], sendEmail: false, sendSms: true, smsSenderId: 'Nope', confirmReissue: false }).then(() => undefined, (error: unknown) => error)
+  assert.ok(badSender, '发件名校验失败必须抛错')
+  assert.equal(getStaffNotificationErrorMessage(badSender, '发送失败'), '短信发件名不在可选范围内')
   reset({ success: true, data: { batchId: 'b2', status: 'queued', totalCount: 1, rejected: [{ userGuid: 'u2', reason: 'self' }] } })
   assert.deepEqual((await sendStaffNotification({ templateKey: 'k', userGuids: ['u1', 'u2'], sendEmail: true, sendSms: false, confirmReissue: false })).rejected, [{ userGuid: 'u2', reason: 'self' }])
   // 选中里有已登录过的人却没确认：整个请求失败，CONFIRM_REQUIRED 能被识别。
@@ -149,6 +172,8 @@ try {
   const detail = await getStaffNotificationBatch('b 1')
   assert.equal(calls[0]?.pathname, '/api/staff-notifications/batches/b%201')
   assert.deepEqual(detail.recipients, [], '明细缺省按空数组')
+  reset({ success: true, data: { id: 'b1', smsSenderId: 'ANTPOS', recipients: [] } })
+  assert.equal((await getStaffNotificationBatch('b1')).smsSenderId, 'ANTPOS', '批次详情带出这批短信用的发件名')
 
   reset({ success: true, data: { id: 'b1', status: 'queued', recipients: [{ id: 'r1' }] } })
   const retried = await retryStaffNotificationBatch('b1')

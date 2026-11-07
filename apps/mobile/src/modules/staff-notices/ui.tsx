@@ -10,6 +10,7 @@ import type {
   StaffNoticePreflight,
   StaffNoticePreflightRecipient,
   StaffNoticeRecipientResult,
+  StaffNoticeSmsSender,
   StaffNoticeTemplate,
 } from "./types";
 
@@ -92,8 +93,11 @@ export function ChannelCard({
   emailSubtitle,
   smsText,
   smsAvailable,
+  smsSenders,
+  smsSenderId,
   onChangeEmail,
   onChangeSms,
+  onChangeSmsSender,
 }: {
   template: StaffNoticeTemplate;
   sendEmail: boolean;
@@ -101,11 +105,17 @@ export function ChannelCard({
   emailSubtitle: string;
   smsText: string;
   smsAvailable: boolean;
+  /** 可选发件名与当前选中项；只有多于 1 项且短信开着时才露出这一行。 */
+  smsSenders?: readonly StaffNoticeSmsSender[];
+  smsSenderId?: string;
   onChangeEmail: (value: boolean) => void;
   onChangeSms: (value: boolean) => void;
+  onChangeSmsSender?: (id: string) => void;
 }) {
   const { t } = useAppTranslation("staffNotices");
+  const [senderOpen, setSenderOpen] = useState(false);
   const smsEnabled = smsAvailable && templateSupportsSms(template);
+  const showSender = sendSms && smsEnabled && (smsSenders?.length ?? 0) > 1 && smsSenderId !== undefined && Boolean(onChangeSmsSender);
   return (
     <InfoCard>
       <ActionRow
@@ -125,6 +135,40 @@ export function ChannelCard({
         chevron={false}
         right={<Switch value={sendSms && smsEnabled} onValueChange={onChangeSms} disabled={!smsEnabled} />}
       />
+      {showSender ? (
+        <>
+          <ActionRow
+            icon="tag-text-outline"
+            tone="violet"
+            title={t("channels.smsSender")}
+            subtitle={t("channels.smsSenderHint")}
+            chevron={false}
+            right={(
+              <View style={styles.senderValue}>
+                <Text style={styles.senderText}>{smsSenderId}</Text>
+                <Icon source={senderOpen ? "chevron-up" : "unfold-more-horizontal"} size={20} color="#98A2B3" />
+              </View>
+            )}
+            onPress={() => setSenderOpen((current) => !current)}
+          />
+          {senderOpen
+            ? (smsSenders ?? []).map((sender) => (
+                <ActionRow
+                  key={sender.id}
+                  icon={sender.id === smsSenderId ? "check-circle" : "circle-outline"}
+                  tone={sender.id === smsSenderId ? "green" : "gray"}
+                  title={sender.id}
+                  subtitle={sender.isDefault ? t("channels.smsSenderDefault") : undefined}
+                  chevron={false}
+                  onPress={() => {
+                    setSenderOpen(false);
+                    onChangeSmsSender?.(sender.id);
+                  }}
+                />
+              ))
+            : null}
+        </>
+      ) : null}
     </InfoCard>
   );
 }
@@ -220,4 +264,6 @@ const styles = StyleSheet.create({
   resultMeta: { color: HB_COLORS.textSecondary, fontSize: 12.5, marginTop: 1 },
   resultNote: { color: HB_COLORS.danger, fontSize: 12.5, marginTop: 2 },
   resultNoteMuted: { color: HB_COLORS.textSecondary },
+  senderText: { color: HB_COLORS.textPrimary, fontSize: 14, fontWeight: "700" },
+  senderValue: { alignItems: "center", flexDirection: "row", gap: 4 },
 });

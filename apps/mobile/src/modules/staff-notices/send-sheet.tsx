@@ -7,7 +7,7 @@ import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useStaffNoticePreflight, useStaffNoticeSend, useStaffNoticeTemplates } from "./hooks";
-import { formatAud, formatNoticeTime, primaryReason, resolveDefaultTemplate, templateSupportsSms } from "./logic";
+import { formatAud, formatNoticeTime, primaryReason, resolveDefaultTemplate, resolveSmsSenderId, templateSupportsSms } from "./logic";
 import { StaffNoticePreviewSheet } from "./preview-sheet";
 import { StaffNoticeProgressSheet } from "./progress-sheet";
 import type { StaffNoticePreflightRecipient, StaffNoticeTemplate } from "./types";
@@ -39,6 +39,8 @@ export function StaffNoticeSendSheet({ userGuid, staffName, loginName, onDismiss
 
   const [sendEmail, setSendEmail] = useState(true);
   const [sendSms, setSendSms] = useState(true);
+  // 用户选的短信发件名；undefined = 还没选，用预检给的默认项。
+  const [senderChoice, setSenderChoice] = useState<string | undefined>(undefined);
   const [confirmed, setConfirmed] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -55,6 +57,8 @@ export function StaffNoticeSendSheet({ userGuid, staffName, loginName, onDismiss
   const preflightQuery = useStaffNoticePreflight(request);
   const preflight = preflightQuery.data;
   const recipient = preflight?.recipients[0] ?? null;
+  // 本次实际发件名：选择已失效则回落默认项；没开短信 / 没有可选项时为空，发送时不传（服务端用默认发件名）。
+  const smsSenderId = effectiveSms ? resolveSmsSenderId(preflight?.smsSenders, senderChoice) : undefined;
   const sendMutation = useStaffNoticeSend();
 
   const handleTemplateChange = (next: StaffNoticeTemplate) => {
@@ -67,7 +71,7 @@ export function StaffNoticeSendSheet({ userGuid, staffName, loginName, onDismiss
     if (!request) return;
     setSendError(null);
     try {
-      const result = await sendMutation.mutateAsync({ ...request, confirmReissue: confirmed });
+      const result = await sendMutation.mutateAsync({ ...request, smsSenderId, confirmReissue: confirmed });
       setBatchId(result.batchId);
     } catch (error) {
       setSendError(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "sheet.sendFailed" }));
@@ -144,8 +148,11 @@ export function StaffNoticeSendSheet({ userGuid, staffName, loginName, onDismiss
             emailSubtitle={recipient?.email ?? (recipient ? t("channels.emailNotSet") : "")}
             smsText={smsSubtitle(recipient, preflight, t)}
             smsAvailable={preflight?.smsAvailable ?? true}
+            smsSenders={preflight?.smsSenders}
+            smsSenderId={smsSenderId}
             onChangeEmail={setSendEmail}
             onChangeSms={setSendSms}
+            onChangeSmsSender={setSenderChoice}
           />
 
           {preflightQuery.isError && !recipient ? (

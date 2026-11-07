@@ -31,6 +31,8 @@ interface SendConfirmModalProps {
   summary: SendSummary
   emailEnabled: boolean
   smsEnabled: boolean
+  /** 本次短信的发件名；只有用户真有得选时才传，确认前再核对一遍。 */
+  smsSenderId?: string
   smsUsedLast24h: number
   smsDailyLimit: number
   smsUnitCostAud: number
@@ -47,6 +49,7 @@ export function SendConfirmModal({
   summary,
   emailEnabled,
   smsEnabled,
+  smsSenderId,
   smsUsedLast24h,
   smsDailyLimit,
   smsUnitCostAud,
@@ -94,6 +97,11 @@ export function SendConfirmModal({
         </span>
       ) : t('system.staffNotifications.confirm.smsNone', '不发短信'),
     },
+    ...(smsEnabled && smsSenderId ? [{
+      key: 'smsSender',
+      label: t('system.staffNotifications.confirm.smsSender', '短信发件名'),
+      children: smsSenderId,
+    }] : []),
   ]
 
   return (

@@ -111,6 +111,10 @@ assert.equal(readFileSync(resolve('src/pages/System/Users/UserBatchActions.tsx')
 // 发送抽屉在页面顶层懒注册自己的消息；预览走 sandbox iframe，不用 dangerouslySetInnerHTML；表格用 MeasuredTable。
 const drawer = readSource('SendNotificationDrawer.tsx')
 assert.equal(drawer.includes('registerPageMessages({ zh: sendMessagesZh, en: sendMessagesEn })'), true)
+// 发件名接线：选择经 resolveSmsSenderId 校验后随发送请求传出，没勾短信时 smsSenderId 为 undefined（不传）。
+assert.equal(/sendStaffNotification\(\{[\s\S]*?smsSenderId,[\s\S]*?\}\)/.test(drawer), true, '发送请求必须带上 smsSenderId')
+assert.equal(/smsEnabled\s*\?\s*resolveSmsSenderId\(/.test(drawer), true, '没勾短信时不能带发件名')
+assert.equal(drawer.includes('result.smsSenders'), true, '重新预检后要核对已选发件名是否仍有效')
 const preview = readSource('SendPreviewPane.tsx')
 assert.equal(preview.includes('dangerouslySetInnerHTML'), false, '邮件预览不能用 dangerouslySetInnerHTML')
 assert.equal(/<iframe[\s\S]*?sandbox="[^"]*"[\s\S]*?srcDoc=/.test(preview), true, '邮件预览用 sandbox iframe + srcDoc')
