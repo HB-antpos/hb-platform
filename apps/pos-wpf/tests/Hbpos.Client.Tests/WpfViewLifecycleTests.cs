@@ -795,7 +795,8 @@ public sealed class WpfViewLifecycleTests
         Assert.Equal(2, quantityButtons.Length);
         Assert.All(quantityButtons, button =>
         {
-            Assert.Equal(32, button.ActualWidth);
+            Assert.Equal(48, button.ActualWidth);
+            Assert.Equal(48, button.ActualHeight);
             AssertHorizontallyContained(button, firstRowCells[3], targetWidth, targetWindowHeight);
         });
 
