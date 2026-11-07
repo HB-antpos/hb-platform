@@ -276,9 +276,12 @@ public sealed class CatalogApiClient : ICatalogApiClient
         string storeCode,
         CancellationToken cancellationToken = default)
     {
+        // 本版本地冲突表能容纳"同一商品主条码 / 套装码各一条"，显式要求完整候选；
+        // 旧版服务端不认这个参数会直接忽略，返回的仍是旧口径，不影响同步。
         var requestUri = BuildUri(
             "api/v1/catalog/sellable-items/code-conflicts",
-            ("storeCode", storeCode));
+            ("storeCode", storeCode),
+            ("includeSameProductCandidates", "true"));
 
         var stopwatch = Stopwatch.StartNew();
         Log($"GET {requestUri} start base={_httpClient.BaseAddress}");

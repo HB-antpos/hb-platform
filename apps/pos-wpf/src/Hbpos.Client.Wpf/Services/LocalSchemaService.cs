@@ -61,6 +61,7 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         await Zeller.ZellerPaymentAttemptSchema.EnsureAsync(connection, cancellationToken);
 
         await EnsureLocalSellableItemIndexColumnsAsync(connection, cancellationToken);
+        await EnsureLocalSellableItemCodeConflictPrimaryKeyAsync(connection, cancellationToken);
         await EnsureDeviceCacheColumnsAsync(connection, cancellationToken);
         await EnsureLocalOrderColumnsAsync(connection, cancellationToken);
         await EnsureLocalOrderLineColumnsAsync(connection, cancellationToken);
@@ -294,6 +295,44 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
                 cancellationToken);
         }
 
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 旧版冲突表主键只到 ProductCode；SQLite 不能原地改主键，发现旧主键就删表重建。
+    /// 这张表只是服务端 code-conflicts 的本地缓存（每次同步按门店整体替换），丢了无损：
+    /// 重建后到下一次商品同步（同步时无论目录有无变化都会拉一次冲突候选）即恢复。
+    /// 不动 user_version：它只门控 LocalSellableItemIndex 的大表回填，为这张小表递增会让所有库白跑一遍回填。
+    /// </summary>
+    private static async Task EnsureLocalSellableItemCodeConflictPrimaryKeyAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var hasPriceSourceLabelInPrimaryKey = false;
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "PRAGMA table_info(LocalSellableItemCodeConflict);";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                // table_info 列：cid, name, type, notnull, dflt_value, pk（pk>0 表示主键成员）。
+                if (string.Equals(reader.GetString(1), "PriceSourceLabel", StringComparison.OrdinalIgnoreCase) &&
+                    reader.GetInt32(5) > 0)
+                {
+                    hasPriceSourceLabelInPrimaryKey = true;
+                }
+            }
+        }
+
+        if (hasPriceSourceLabelInPrimaryKey)
+        {
+            return;
+        }
+
+        // 到这里表一定存在（TableStatements 刚 CREATE IF NOT EXISTS 过），且是旧主键：删表重建在同一事务里，失败整体回滚。
+        await using var transaction = connection.BeginTransaction();
+        await ExecuteAsync(connection, transaction, "DROP TABLE IF EXISTS LocalSellableItemCodeConflict;", cancellationToken);
+        await ExecuteAsync(connection, transaction, LocalSellableItemCodeConflictTableSql, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -1330,6 +1369,38 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// 同一查询码对应多个候选的全部备选（服务端 code-conflicts 下发，按门店整体替换）。
+    /// 主目录表对查询码唯一，备选只能放这里；列与 LocalSellableItemIndex 一致以复用读写映射。
+    /// 主键含 PriceSource 与 PriceSourceLabel：同一商品的"主条码"与"套装码"撞码时各占一行，
+    /// 旧主键只到 ProductCode，写入第二条会触发唯一约束、整批冲突同步失败。
+    /// </summary>
+    private const string LocalSellableItemCodeConflictTableSql =
+        """
+        CREATE TABLE IF NOT EXISTS LocalSellableItemCodeConflict (
+            StoreCode TEXT NOT NULL,
+            ProductCode TEXT NOT NULL,
+            ReferenceCode TEXT NULL,
+            DisplayName TEXT NOT NULL,
+            LookupCode TEXT NOT NULL,
+            LookupCodeNormalized TEXT NOT NULL,
+            ItemNumber TEXT NULL,
+            Barcode TEXT NULL,
+            ProductImage TEXT NULL,
+            DiscountRate TEXT NULL,
+            IsSpecialProduct INTEGER NOT NULL DEFAULT 0,
+            RetailPrice TEXT NOT NULL,
+            PriceSource INTEGER NOT NULL,
+            PriceSourceLabel TEXT NOT NULL,
+            QuantityFactor TEXT NOT NULL,
+            UpdatedAt TEXT NULL,
+            ContentHash TEXT NOT NULL,
+            SyncedAt TEXT NOT NULL,
+            SortOrder INTEGER NOT NULL,
+            PRIMARY KEY (StoreCode, LookupCodeNormalized, ProductCode, PriceSource, PriceSourceLabel)
+        );
+        """;
+
     private static readonly string[] TableStatements =
     [
         """
@@ -1748,32 +1819,7 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             UpdatedAt TEXT NOT NULL
         );
         """,
-        """
-        -- 同一查询码对应多个不同商品的全部候选（服务端 code-conflicts 下发，按门店整体替换）。
-        -- 主目录表对查询码唯一，备选商品只能放这里；列与 LocalSellableItemIndex 一致以复用读写映射。
-        CREATE TABLE IF NOT EXISTS LocalSellableItemCodeConflict (
-            StoreCode TEXT NOT NULL,
-            ProductCode TEXT NOT NULL,
-            ReferenceCode TEXT NULL,
-            DisplayName TEXT NOT NULL,
-            LookupCode TEXT NOT NULL,
-            LookupCodeNormalized TEXT NOT NULL,
-            ItemNumber TEXT NULL,
-            Barcode TEXT NULL,
-            ProductImage TEXT NULL,
-            DiscountRate TEXT NULL,
-            IsSpecialProduct INTEGER NOT NULL DEFAULT 0,
-            RetailPrice TEXT NOT NULL,
-            PriceSource INTEGER NOT NULL,
-            PriceSourceLabel TEXT NOT NULL,
-            QuantityFactor TEXT NOT NULL,
-            UpdatedAt TEXT NULL,
-            ContentHash TEXT NOT NULL,
-            SyncedAt TEXT NOT NULL,
-            SortOrder INTEGER NOT NULL,
-            PRIMARY KEY (StoreCode, LookupCodeNormalized, ProductCode)
-        );
-        """,
+        LocalSellableItemCodeConflictTableSql,
         """
         CREATE TABLE IF NOT EXISTS LocalPromotionRules (
             StoreCode TEXT NOT NULL,

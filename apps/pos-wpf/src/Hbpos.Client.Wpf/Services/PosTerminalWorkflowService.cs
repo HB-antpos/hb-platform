@@ -1448,7 +1448,12 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
                 string.Equals(line.StoreCode, snapshot.StoreCode, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(line.LookupCodeNormalized, normalizedLookupCode, StringComparison.Ordinal) &&
                 EqualsIdentity(line.ProductCode, snapshot.ProductCode) &&
-                EqualsIdentity(line.ReferenceCode, snapshot.ReferenceCode))
+                EqualsIdentity(line.ReferenceCode, snapshot.ReferenceCode) &&
+                // 同商品"主条码 vs 套装码"撞码时，远程回查返回的只是胜出的套装价：
+                // 收银员选了主条码那一条就不能被悄悄改成套装价（反之亦然），否则选择等于作废。
+                !SellableCandidateCategories.IsMainSetPair(
+                    SellableCandidateCategories.Of(line.PriceSource, line.PriceSourceLabel),
+                    SellableCandidateCategories.Of(item)))
             .ToList();
 
         var updatedCount = 0;

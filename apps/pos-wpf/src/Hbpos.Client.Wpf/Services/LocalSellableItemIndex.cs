@@ -155,11 +155,12 @@ public sealed class LocalSellableItemIndex
         {
             // 单商品回写只维护受影响的索引项，避免持锁重建全量目录阻塞扫码。
             var key = new ExactLookupKey(normalizedStoreCode, normalizedLookupCode);
-            if (_exactLookupIndex.TryGetValue(key, out var existingItems) && HasMultipleProducts(existingItems))
+            if (_exactLookupIndex.TryGetValue(key, out var existingItems) && HasMultipleCandidates(existingItems))
             {
-                // 码冲突：服务端回查只返回胜出商品，整码替换会把收银员可选的其它商品冲掉，
-                // 下次扫码就不再弹出选择；因此只替换同一商品的条目。
-                RemoveProductItemsLocked(existingItems, Normalize(item.ProductCode));
+                // 码冲突：服务端回查只返回胜出候选，整码替换会把收银员可选的其它候选冲掉，
+                // 下次扫码就不再弹出选择；因此只替换同一商品的条目
+                // （同商品的"主条码 vs 套装码"价格不同时，另一类候选保留，见 RemoveSupersededItemsLocked）。
+                RemoveSupersededItemsLocked(existingItems, item);
             }
             else
             {
@@ -170,7 +171,11 @@ public sealed class LocalSellableItemIndex
         }
     }
 
-    private static bool HasMultipleProducts(List<SellableItemDto> items)
+    /// <summary>
+    /// 这个码下是否有多个收银员可选的候选：落到不同商品，
+    /// 或同一商品的"主条码 vs 套装码"两条且有效价格不同。
+    /// </summary>
+    private static bool HasMultipleCandidates(List<SellableItemDto> items)
     {
         for (var index = 1; index < items.Count; index++)
         {
@@ -180,15 +185,42 @@ public sealed class LocalSellableItemIndex
             }
         }
 
+        // 都是同一商品：仅当存在价格不同的主条码 / 套装码组合才算多候选。
+        for (var left = 0; left < items.Count; left++)
+        {
+            for (var right = left + 1; right < items.Count; right++)
+            {
+                if (IsMainSetDifferentPrice(items[left], items[right]))
+                {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
-    private void RemoveProductItemsLocked(List<SellableItemDto> existingItems, string normalizedProductCode)
+    private static bool IsMainSetDifferentPrice(SellableItemDto left, SellableItemDto right)
     {
+        return SellableCandidateCategories.IsMainSetPair(
+                   SellableCandidateCategories.Of(left),
+                   SellableCandidateCategories.Of(right)) &&
+               SellableCandidateCategories.HasDifferentEffectivePrice(left, right);
+    }
+
+    /// <summary>
+    /// 用 <paramref name="incoming"/> 替换同一商品的旧条目。
+    /// 例外：旧条目与新条目是同商品的"主条码 vs 套装码"且价格不同时保留——它们是两个独立候选，
+    /// 回查只会返回其中一个（胜出的套装码），不能因此把收银员可选的另一个冲掉。
+    /// </summary>
+    private void RemoveSupersededItemsLocked(List<SellableItemDto> existingItems, SellableItemDto incoming)
+    {
+        var normalizedProductCode = Normalize(incoming.ProductCode);
         // RemoveItemLocked 会修改 existingItems，先拷贝再逐个移除。
         foreach (var existing in existingItems.ToArray())
         {
-            if (Normalize(existing.ProductCode) == normalizedProductCode)
+            if (Normalize(existing.ProductCode) == normalizedProductCode &&
+                !IsMainSetDifferentPrice(existing, incoming))
             {
                 RemoveItemLocked(existing);
             }

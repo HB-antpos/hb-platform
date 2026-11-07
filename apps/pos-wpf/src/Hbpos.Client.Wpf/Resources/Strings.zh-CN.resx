@@ -4316,6 +4316,18 @@
   <data name="pendingChoice.title" xml:space="preserve">
     <value>条码 …{0} 有 {1} 个商品，请选择</value>
   </data>
+  <data name="pendingChoice.source.main" xml:space="preserve">
+    <value>主条码</value>
+  </data>
+  <data name="pendingChoice.source.set" xml:space="preserve">
+    <value>套装条码</value>
+  </data>
+  <data name="pendingChoice.source.multiCode" xml:space="preserve">
+    <value>多码</value>
+  </data>
+  <data name="pendingChoice.source.clearance" xml:space="preserve">
+    <value>清货价</value>
+  </data>
   <data name="pendingChoice.scannedAt" xml:space="preserve">
     <value>{0} 扫码</value>
   </data>

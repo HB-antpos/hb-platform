@@ -271,10 +271,19 @@ public sealed class PosCartService
     // 口径与冲突合并器、LocalSellableItemIndex.Upsert 判定"不同商品"一致。
     private static bool IsSameProduct(CartLine line, SellableItemDto item)
     {
-        return string.Equals(
-            NormalizeProductCode(line.ProductCode),
-            NormalizeProductCode(item.ProductCode),
-            StringComparison.OrdinalIgnoreCase);
+        if (!string.Equals(
+                NormalizeProductCode(line.ProductCode),
+                NormalizeProductCode(item.ProductCode),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // 同一商品的"主条码"与"套装码"撞码时是两个候选、价格不同：收银员先后选了不同的，必须分行，
+        // 否则后选的会并进旧行按旧价收钱。其它来源组合（如清货价覆盖本身条码）仍按同一商品合并。
+        return !SellableCandidateCategories.IsMainSetPair(
+            SellableCandidateCategories.Of(line.PriceSource, line.PriceSourceLabel),
+            SellableCandidateCategories.Of(item));
     }
 
     public CartLine? FindReturnLineBySourceKey(string returnSourceKey)

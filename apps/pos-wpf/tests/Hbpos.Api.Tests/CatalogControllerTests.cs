@@ -448,6 +448,33 @@ public sealed class CatalogControllerTests
     }
 
     [Fact]
+    public async Task GetCodeConflicts_ReturnsLegacyViewByDefaultAndFullCandidatesWhenRequested()
+    {
+        // 同一商品的主条码 / 套装码两条候选只给明确要求的新版收银端；旧版（不带参数）保持原口径。
+        CatalogLookupItemDto Item(PriceSourceKind source, string label, decimal price) => new(
+            "S01", "P01", null, "Set", "BAR01", "BAR01", null, "BAR01", price, source, label, 1m, null, null);
+        var expected = new CatalogCodeConflictsResponse(
+            "S01",
+            DateTimeOffset.UnixEpoch,
+            true,
+            [
+                Item(PriceSourceKind.ProductSetCode, "set", 7.5m),
+                Item(PriceSourceKind.StoreRetailPrice, "store-retail", 85m)
+            ]);
+        var controller = new CatalogController(new FakeCatalogService { CodeConflictsResponse = expected });
+
+        var legacy = await controller.GetCodeConflicts("S01", CancellationToken.None);
+        var full = await controller.GetCodeConflicts("S01", CancellationToken.None, includeSameProductCandidates: true);
+
+        var legacyData = Assert.IsType<ApiResult<CatalogCodeConflictsResponse>>(
+            Assert.IsType<OkObjectResult>(legacy.Result).Value).Data!;
+        var fullData = Assert.IsType<ApiResult<CatalogCodeConflictsResponse>>(
+            Assert.IsType<OkObjectResult>(full.Result).Value).Data!;
+        Assert.Empty(legacyData.Items);
+        Assert.Same(expected, fullData);
+    }
+
+    [Fact]
     public async Task GetCodeConflicts_ReturnsForbiddenWhenDeviceStoreDoesNotMatch()
     {
         var service = new FakeCatalogService();

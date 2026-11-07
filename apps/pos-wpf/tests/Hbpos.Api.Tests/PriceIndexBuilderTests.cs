@@ -354,6 +354,123 @@ public sealed class PriceIndexBuilderTests
     }
 
     [Fact]
+    public void BuildWithCodeConflicts_ReturnsMainAndSetCandidatesWhenSameProductSetCodeEqualsMainBarcodeWithDifferentPrice()
+    {
+        // 生产案例（SN81796 一类）：套装码登记成了商品自己的主条码，套装价 7.50 与主条码店价 85.00 不同，
+        // 套装码优先级更高，WPF 会静默按 7.50 收；必须把两条都作为候选下发让收银员选。
+        var input = new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Hot Stamp Set", "HB258-354", "9527825800277", 85m, null)],
+            [new StoreRetailPriceRecord("P01", 85m, null)],
+            [],
+            [],
+            [new ProductSetCodeRecord("P01", "SET-P01", "9527825800277", 7.5m, null)]);
+
+        var output = _builder.BuildWithCodeConflicts("S01", input);
+
+        var winner = Assert.Single(output.Items, x => x.LookupCode == "9527825800277");
+        Assert.Equal(PriceSourceKind.ProductSetCode, winner.PriceSource);
+        Assert.Collection(
+            output.CodeConflicts,
+            first =>
+            {
+                // 首条仍是目录胜出项（套装价），与目录一致。
+                Assert.Same(winner, first);
+                Assert.Equal(7.5m, first.RetailPrice);
+            },
+            second =>
+            {
+                Assert.Equal("P01", second.ProductCode);
+                Assert.Equal(PriceSourceKind.StoreRetailPrice, second.PriceSource);
+                Assert.Equal(85m, second.RetailPrice);
+            });
+    }
+
+    [Fact]
+    public void BuildWithCodeConflicts_IgnoresSameProductMainAndSetCodeWhenPricesAreEqual()
+    {
+        // 本次截图里的 9527825800277：主条码与套装码都是 40.00，弹窗只会多出两张一模一样的卡片，不弹。
+        var input = new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Hot Stamp Gift Box Set Of 10", "HB258-354", "9527825800277", 40m, null)],
+            [new StoreRetailPriceRecord("P01", 40m, null)],
+            [],
+            [],
+            [new ProductSetCodeRecord("P01", "SET-P01", "9527825800277", 40m, null)]);
+
+        var output = _builder.BuildWithCodeConflicts("S01", input);
+
+        Assert.Empty(output.CodeConflicts);
+    }
+
+    [Fact]
+    public void BuildWithCodeConflicts_IgnoresSetCodeThatFollowsMainPrice()
+    {
+        // 套装码自己没有价格时跟随主条码价（set-follow-main），两条价格天然一致，不是冲突。
+        var input = new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Set", "ITEM01", "BAR01", 12m, null)],
+            [new StoreRetailPriceRecord("P01", 12m, null)],
+            [],
+            [],
+            [new ProductSetCodeRecord("P01", "SET-P01", "BAR01", null, null)]);
+
+        var output = _builder.BuildWithCodeConflicts("S01", input);
+
+        Assert.Empty(output.CodeConflicts);
+    }
+
+    [Fact]
+    public void BuildWithCodeConflicts_KeepsClearancePriceOverridingSameProductMainAndSetCode()
+    {
+        // 清货价是有意覆盖本身条码的价格，不能因为主条码、套装码价格不同就弹窗。
+        var input = new PriceIndexInput(
+            null,
+            [new ProductPriceRecord("P01", "Set", "ITEM01", "BAR01", 85m, null)],
+            [new StoreRetailPriceRecord("P01", 85m, null)],
+            [],
+            [new StoreClearancePriceRecord("P01", "BAR01", 5m, null)],
+            [new ProductSetCodeRecord("P01", "SET-P01", "BAR01", 7.5m, null)]);
+
+        var output = _builder.BuildWithCodeConflicts("S01", input);
+
+        var winner = Assert.Single(output.Items, x => x.LookupCode == "BAR01");
+        Assert.Equal(PriceSourceKind.StoreClearancePrice, winner.PriceSource);
+        Assert.Empty(output.CodeConflicts);
+    }
+
+    [Fact]
+    public void BuildWithCodeConflicts_AddsSameProductAlternativeNextToItsBestCandidateAlongsideOtherProducts()
+    {
+        // 既有"另一个商品也用这个码"，又有"同商品主条码 vs 套装价格不同"：每个商品最优在前，同商品的另一条紧跟。
+        var input = new PriceIndexInput(
+            null,
+            [
+                new ProductPriceRecord("P01", "Set One", "ITEM01", "BAR01", 85m, null),
+                new ProductPriceRecord("P02", "Other", "ITEM02", null, 3m, null)
+            ],
+            [new StoreRetailPriceRecord("P01", 85m, null)],
+            [],
+            [],
+            [
+                new ProductSetCodeRecord("P01", "SET-P01", "BAR01", 7.5m, null),
+                new ProductSetCodeRecord("P02", "SET-P02", "BAR01", 2m, null)
+            ]);
+
+        var output = _builder.BuildWithCodeConflicts("S01", input);
+
+        var winner = Assert.Single(output.Items, x => x.LookupCode == "BAR01");
+        Assert.Same(winner, output.CodeConflicts[0]);
+        Assert.Equal(3, output.CodeConflicts.Count);
+        // P01 的两条候选相邻、套装在前主条码在后。
+        var p01 = output.CodeConflicts.Where(x => x.ProductCode == "P01").ToArray();
+        Assert.Equal(2, p01.Length);
+        Assert.Equal(
+            [PriceSourceKind.ProductSetCode, PriceSourceKind.StoreRetailPrice],
+            p01.Select(x => x.PriceSource).ToArray());
+    }
+
+    [Fact]
     public void BuildWithCodeConflicts_TreatsNormalizedLookupCodesAsTheSameCode()
     {
         var output = _builder.BuildWithCodeConflicts("S01", new PriceIndexInput(

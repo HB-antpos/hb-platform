@@ -178,30 +178,73 @@ public sealed class PriceIndexBuilder : IPriceIndexBuilder
 
     private static void AppendCodeConflicts(List<SellableItemDto> codeConflicts, IEnumerable<SellableItemDto> group)
     {
-        // 同一商品的多个来源（如清货价覆盖本身条码）按原优先级决胜即可，只有落到不同商品时才是冲突。
-        string? firstProductCode = null;
-        var hasMultipleProducts = false;
-        foreach (var item in group)
+        // 整组按目录决胜顺序排好；每个商品的首条就是它自己的最优价，整组首条就是目录胜出项。
+        var ordered = OrderByPriority(group).ToList();
+        var bestPerProduct = ordered
+            .DistinctBy(item => item.ProductCode, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // 同一商品的多个来源（如清货价覆盖本身条码）按原优先级决胜即可，落到不同商品时才是冲突。
+        var hasMultipleProducts = bestPerProduct.Count > 1;
+
+        // 例外：同一商品的"套装码"与"主条码"撞了同一个码且有效价格不同，也要让收银员选，
+        // 否则套装码优先级更高，会静默按套装价收（主条码 85.00 的商品被收成套装价 7.50）。
+        var sameProductAlternatives = new Dictionary<string, SellableItemDto>(StringComparer.OrdinalIgnoreCase);
+        foreach (var best in bestPerProduct)
         {
-            if (firstProductCode is null)
+            var alternative = FindMainVersusSetAlternative(best, ordered);
+            if (alternative is not null)
             {
-                firstProductCode = item.ProductCode;
-            }
-            else if (!StringComparer.OrdinalIgnoreCase.Equals(firstProductCode, item.ProductCode))
-            {
-                hasMultipleProducts = true;
-                break;
+                sameProductAlternatives[best.ProductCode] = alternative;
             }
         }
 
-        if (!hasMultipleProducts)
+        if (!hasMultipleProducts && sameProductAlternatives.Count == 0)
         {
             return;
         }
 
-        // 整组按目录决胜顺序排好后每个商品取首条：得到各商品自己的最优价，且首条就是目录胜出项。
-        codeConflicts.AddRange(OrderByPriority(group)
-            .DistinctBy(item => item.ProductCode, StringComparer.OrdinalIgnoreCase));
+        // 保持每个商品的最优价在前，同商品的另一条紧跟其后：首条仍是目录胜出项。
+        foreach (var best in bestPerProduct)
+        {
+            codeConflicts.Add(best);
+            if (sameProductAlternatives.TryGetValue(best.ProductCode, out var alternative))
+            {
+                codeConflicts.Add(alternative);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 该商品的最优候选若是主条码或套装码，且同商品还有另一类（套装 vs 主条码）候选、有效价格不同，返回那一条。
+    /// 最优候选是清货价、普通多码等（有意覆盖价格）时不处理，保持按优先级决胜。
+    /// </summary>
+    private static SellableItemDto? FindMainVersusSetAlternative(
+        SellableItemDto best,
+        IReadOnlyList<SellableItemDto> orderedGroup)
+    {
+        var bestCategory = SellableCandidateCategories.Of(best);
+        if (bestCategory == SellableCandidateCategory.Other)
+        {
+            return null;
+        }
+
+        // orderedGroup 已按优先级降序，同商品里第一条另一类候选就是它那一类的最优价。
+        foreach (var item in orderedGroup)
+        {
+            if (!StringComparer.OrdinalIgnoreCase.Equals(item.ProductCode, best.ProductCode))
+            {
+                continue;
+            }
+
+            if (SellableCandidateCategories.IsMainSetPair(bestCategory, SellableCandidateCategories.Of(item)) &&
+                SellableCandidateCategories.HasDifferentEffectivePrice(best, item))
+            {
+                return item;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

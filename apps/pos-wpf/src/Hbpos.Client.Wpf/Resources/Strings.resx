@@ -1852,6 +1852,10 @@ Logged with reference {2}</value></data>
   <data name="pos.status.pendingChoiceAbandonedAll" xml:space="preserve"><value>Discarded {0} pending item(s).</value></data>
   <data name="pendingChoice.badge" xml:space="preserve"><value>Pending {0} / {1}</value></data>
   <data name="pendingChoice.title" xml:space="preserve"><value>Barcode ...{0} matches {1} items. Choose one.</value></data>
+  <data name="pendingChoice.source.main" xml:space="preserve"><value>Main barcode</value></data>
+  <data name="pendingChoice.source.set" xml:space="preserve"><value>Set barcode</value></data>
+  <data name="pendingChoice.source.multiCode" xml:space="preserve"><value>Multi-code</value></data>
+  <data name="pendingChoice.source.clearance" xml:space="preserve"><value>Clearance</value></data>
   <data name="pendingChoice.scannedAt" xml:space="preserve"><value>{0} scanned</value></data>
   <data name="pendingChoice.sameBarcode" xml:space="preserve"><value>Same barcode as the previous pending item</value></data>
   <data name="pendingChoice.hint" xml:space="preserve"><value>Keep scanning: other items are added as usual.</value></data>

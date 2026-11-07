@@ -355,6 +355,44 @@ public sealed class PosCartServiceTests
     }
 
     [Fact]
+    public void AddConsecutiveItem_does_not_merge_same_product_main_barcode_and_set_code_candidates()
+    {
+        // 同商品主条码与套装码撞码：收银员先后选了不同候选（价格不同），后选的不能并进旧行按旧价收钱。
+        var cart = new PosCartService();
+
+        var setLine = cart.AddConsecutiveItem(CreateItem(
+            productCode: "SKU-SET", lookupCode: "9527825800277", price: 7.5m, priceSource: PriceSourceKind.ProductSetCode));
+        var mainLine = cart.AddConsecutiveItem(CreateItem(
+            productCode: "SKU-SET", lookupCode: "9527825800277", price: 85m, priceSource: PriceSourceKind.StoreRetailPrice));
+        var mainAgain = cart.AddConsecutiveItem(CreateItem(
+            productCode: "SKU-SET", lookupCode: "9527825800277", price: 85m, priceSource: PriceSourceKind.StoreRetailPrice));
+
+        Assert.Equal(2, cart.Lines.Count);
+        Assert.NotSame(setLine, mainLine);
+        Assert.Equal(7.5m, setLine.UnitPrice);
+        Assert.Equal(85m, mainLine.UnitPrice);
+        // 同一候选连续扫码仍然合并。
+        Assert.Same(mainLine, mainAgain);
+        Assert.Equal(2m, mainLine.Quantity);
+        Assert.Equal(1m, setLine.Quantity);
+    }
+
+    [Fact]
+    public void AddConsecutiveItem_still_merges_same_product_when_clearance_overrides_the_main_barcode()
+    {
+        // 只有"主条码 vs 套装码"需要区分；清货价覆盖本身条码仍按同一商品合并，保持原行为。
+        var cart = new PosCartService();
+
+        var first = cart.AddConsecutiveItem(CreateItem(
+            productCode: "SKU-A", lookupCode: "BAR-1", price: 10m, priceSource: PriceSourceKind.StoreRetailPrice));
+        var second = cart.AddConsecutiveItem(CreateItem(
+            productCode: "SKU-A", lookupCode: "BAR-1", price: 5m, priceSource: PriceSourceKind.StoreClearancePrice));
+
+        Assert.Single(cart.Lines);
+        Assert.Same(first, second);
+    }
+
+    [Fact]
     public void AddConsecutiveItem_does_not_merge_a_different_product_with_the_same_lookup_code()
     {
         var cart = new PosCartService();
