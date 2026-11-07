@@ -68,6 +68,110 @@ public sealed class LocalCatalogRepositoryTests
     }
 
     [Fact]
+    public async Task ReplaceCodeConflictItemsAsync_stores_main_and_set_candidates_of_the_same_product()
+    {
+        // 同商品的主条码与套装码撞同一个码：旧主键只到 ProductCode，写第二条会触发唯一约束让整批同步失败。
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var repository = await CreateRepositoryAsync(databasePath);
+            var set = CreateItem("S001", "P-SET", "9527825800277", "Hot Stamp Set", 7.5m) with
+            {
+                PriceSource = PriceSourceKind.ProductSetCode,
+                PriceSourceLabel = "set"
+            };
+            var main = CreateItem("S001", "P-SET", "9527825800277", "Hot Stamp Set", 85m) with
+            {
+                PriceSource = PriceSourceKind.StoreRetailPrice,
+                PriceSourceLabel = "store-retail"
+            };
+
+            await repository.ReplaceCodeConflictItemsAsync("S001", [set, main]);
+
+            var loaded = await repository.LoadCodeConflictItemsAsync("S001");
+            Assert.Equal(2, loaded.Count);
+            // 保持服务端顺序：首条是目录胜出的套装价。
+            Assert.Equal(PriceSourceKind.ProductSetCode, loaded[0].PriceSource);
+            Assert.Equal(7.5m, loaded[0].RetailPrice);
+            Assert.Equal(PriceSourceKind.StoreRetailPrice, loaded[1].PriceSource);
+            Assert.Equal(85m, loaded[1].RetailPrice);
+
+            // 内容没变时按"码 + 顺序 + 内容"比较判为未变化，不重写。
+            Assert.False(await repository.ReplaceCodeConflictItemsIfChangedAsync("S001", [set, main]));
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
+    public async Task Initialize_rebuilds_legacy_code_conflict_table_whose_primary_key_stops_at_product_code()
+    {
+        var databasePath = CreateTempDatabasePath();
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            await using (var connection = await store.OpenConnectionAsync())
+            {
+                // 旧版建表语句：主键只到 ProductCode；并放一行旧缓存数据。
+                await using var create = connection.CreateCommand();
+                create.CommandText = """
+                    CREATE TABLE LocalSellableItemCodeConflict (
+                        StoreCode TEXT NOT NULL,
+                        ProductCode TEXT NOT NULL,
+                        ReferenceCode TEXT NULL,
+                        DisplayName TEXT NOT NULL,
+                        LookupCode TEXT NOT NULL,
+                        LookupCodeNormalized TEXT NOT NULL,
+                        ItemNumber TEXT NULL,
+                        Barcode TEXT NULL,
+                        ProductImage TEXT NULL,
+                        DiscountRate TEXT NULL,
+                        IsSpecialProduct INTEGER NOT NULL DEFAULT 0,
+                        RetailPrice TEXT NOT NULL,
+                        PriceSource INTEGER NOT NULL,
+                        PriceSourceLabel TEXT NOT NULL,
+                        QuantityFactor TEXT NOT NULL,
+                        UpdatedAt TEXT NULL,
+                        ContentHash TEXT NOT NULL,
+                        SyncedAt TEXT NOT NULL,
+                        SortOrder INTEGER NOT NULL,
+                        PRIMARY KEY (StoreCode, LookupCodeNormalized, ProductCode)
+                    );
+                    INSERT INTO LocalSellableItemCodeConflict VALUES
+                        ('S001', 'P-OLD', NULL, 'Old', 'OLD-CODE', 'OLD-CODE', NULL, NULL, NULL, NULL, 0,
+                         '1', 1, 'store-retail', '1', NULL, 'hash', '2026-01-01T00:00:00Z', 0);
+                    """;
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var schema = new LocalSchemaService(store);
+            await schema.InitializeAsync();
+            var repository = new LocalCatalogRepository(store);
+
+            // 旧缓存只是服务端候选的本地副本，重建后清空，下一次商品同步即恢复。
+            Assert.Empty(await repository.LoadCodeConflictItemsAsync("S001"));
+
+            // 重建后同商品两条候选可以写入。
+            var set = CreateItem("S001", "P-SET", "BAR-1", "Set", 7.5m) with { PriceSource = PriceSourceKind.ProductSetCode, PriceSourceLabel = "set" };
+            var main = CreateItem("S001", "P-SET", "BAR-1", "Set", 85m);
+            await repository.ReplaceCodeConflictItemsAsync("S001", [set, main]);
+            Assert.Equal(2, (await repository.LoadCodeConflictItemsAsync("S001")).Count);
+
+            // 再次初始化是幂等的：新主键已就位，不能再删表清掉刚同步的候选。
+            await schema.InitializeAsync();
+            Assert.Equal(2, (await repository.LoadCodeConflictItemsAsync("S001")).Count);
+        }
+        finally
+        {
+            DeleteTempDatabase(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task Versioned_store_replace_records_the_catalog_version_in_the_same_commit()
     {
         var databasePath = CreateTempDatabasePath();

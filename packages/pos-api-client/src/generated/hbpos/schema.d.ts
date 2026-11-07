@@ -613,6 +613,7 @@ export interface paths {
             parameters: {
                 query?: {
                     storeCode?: string;
+                    includeSameProductCandidates?: boolean;
                 };
                 header?: never;
                 path?: never;

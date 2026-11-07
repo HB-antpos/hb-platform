@@ -1302,7 +1302,9 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
             $SyncedAt,
             $SortOrder
         )
-        ON CONFLICT(StoreCode, LookupCodeNormalized, ProductCode) DO NOTHING;
+        -- 冲突目标必须与 LocalSellableItemCodeConflict 的主键逐列一致（含 PriceSource、PriceSourceLabel），
+        -- 否则 SQLite 报 "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"。
+        ON CONFLICT(StoreCode, LookupCodeNormalized, ProductCode, PriceSource, PriceSourceLabel) DO NOTHING;
         """;
 
     private const string StageSellableItemSql = """

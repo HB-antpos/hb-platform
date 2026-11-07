@@ -23,6 +23,7 @@
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringHasValueToVis" />
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringIsEmptyToVis" Invert="True" />
         <converters:LocalizationKeyConverter x:Key="LocalizationKeyConverter" />
+        <converters:PriceSourceLabelConverter x:Key="PriceSourceLabelConverter" />
 
         <!-- 支付成功卡片主块文字：要给顾客现金时红字（黄底上），其余随主块配色。DataContext 为 PaymentSuccessViewModel。 -->
         <Style x:Key="SuccessHeroEmphasisTextStyle" TargetType="TextBlock">
@@ -973,7 +974,7 @@
                                            FontSize="10"
                                            Foreground="{DynamicResource PosMutedForegroundBrush}"
                                            VerticalAlignment="Center" />
-                                <TextBlock Text="{Binding PriceSourceLabel}"
+                                <TextBlock Text="{Binding PriceSourceLabel, Converter={StaticResource PriceSourceLabelConverter}}"
                                            FontSize="9"
                                            Foreground="{DynamicResource PosPrimaryTextBrush}"
                                            VerticalAlignment="Center"

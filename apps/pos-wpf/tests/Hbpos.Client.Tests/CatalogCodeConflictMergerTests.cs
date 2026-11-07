@@ -55,6 +55,54 @@ public sealed class CatalogCodeConflictMergerTests
         Assert.Same(catalog, CatalogCodeConflictMerger.Merge(catalog, [catalog[0]]));
     }
 
+    [Fact]
+    public void Merge_adds_main_barcode_candidate_when_same_product_set_code_has_a_different_price()
+    {
+        // 同一商品的套装码与主条码撞码：目录里只有胜出的套装价，要补上主条码那条让收银员选。
+        var set = CreateItem("P-SET", "Hot Stamp Set", "9527825800277", PriceSourceKind.ProductSetCode, 7.5m);
+        var main = CreateItem("P-SET", "Hot Stamp Set", "9527825800277", PriceSourceKind.StoreRetailPrice, 85m);
+
+        var merged = CatalogCodeConflictMerger.Merge([set], [set, main]);
+
+        Assert.Equal([set, main], merged);
+    }
+
+    [Fact]
+    public void Merge_does_not_add_same_product_candidate_when_prices_are_equal()
+    {
+        // 价格相同的两条只会弹出两张一模一样的卡片，不补（目录与冲突候选来自不同版本时的兜底）。
+        var set = CreateItem("P-SET", "Hot Stamp Set", "9527825800277", PriceSourceKind.ProductSetCode, 40m);
+        var main = CreateItem("P-SET", "Hot Stamp Set", "9527825800277", PriceSourceKind.StoreRetailPrice, 40m);
+
+        var merged = CatalogCodeConflictMerger.Merge([set], [set, main]);
+
+        Assert.Equal([set], merged);
+    }
+
+    [Fact]
+    public void Merge_does_not_add_main_candidate_when_clearance_wins_for_the_same_product()
+    {
+        // 清货价覆盖本身条码是有意为之，保持"商品已在就不补"的原口径。
+        var clearance = CreateItem("P-SET", "Hot Stamp Set", "BAR-1", PriceSourceKind.StoreClearancePrice, 5m);
+        var main = CreateItem("P-SET", "Hot Stamp Set", "BAR-1", PriceSourceKind.StoreRetailPrice, 85m);
+
+        var merged = CatalogCodeConflictMerger.Merge([clearance], [clearance, main]);
+
+        Assert.Equal([clearance], merged);
+    }
+
+    [Fact]
+    public void Merge_keeps_both_same_product_candidates_next_to_another_product()
+    {
+        var set = CreateItem("P-SET", "Hot Stamp Set", "BAR-1", PriceSourceKind.ProductSetCode, 7.5m);
+        var main = CreateItem("P-SET", "Hot Stamp Set", "BAR-1", PriceSourceKind.StoreRetailPrice, 85m);
+        var other = CreateItem("P-OTHER", "Other", "BAR-1", PriceSourceKind.ProductBase, 3m);
+
+        var merged = CatalogCodeConflictMerger.Merge([set], [set, main, other]);
+
+        Assert.Equal([set, main, other], merged);
+    }
+
     private static SellableItemDto CreateItem(
         string productCode,
         string name,

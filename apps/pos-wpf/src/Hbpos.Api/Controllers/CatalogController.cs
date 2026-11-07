@@ -354,11 +354,14 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
 
     /// <summary>
     /// 返回同一查询码对应多个不同商品的全部候选，供新版收银端扫码时弹窗选择；目录分页与扫码回查口径不变。
+    /// includeSameProductCandidates=true 时再带上"同一商品的主条码 / 套装码撞码且价格不同"的另一条候选；
+    /// 不带参数（旧版收银端）保持原口径，因为旧版本地冲突表认不了同商品两条。
     /// </summary>
     [HttpGet("sellable-items/code-conflicts")]
     public async Task<ActionResult<ApiResult<CatalogCodeConflictsResponse>>> GetCodeConflicts(
         [FromQuery] string storeCode,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] bool includeSameProductCandidates = false)
     {
         if (string.IsNullOrWhiteSpace(storeCode))
         {
@@ -387,9 +390,13 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
             ? $"code conflicts response store={storeCode} status=404 elapsedMs={stopwatch.ElapsedMilliseconds}"
             : $"code conflicts response store={response.StoreCode} status=200 available={response.Available} items={response.Items.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
 
-        return response is null
-            ? NotFound(ApiResult<CatalogCodeConflictsResponse>.Fail("STORE_NOT_FOUND", "store was not found or inactive"))
-            : Ok(ApiResult<CatalogCodeConflictsResponse>.Ok(response));
+        if (response is null)
+        {
+            return NotFound(ApiResult<CatalogCodeConflictsResponse>.Fail("STORE_NOT_FOUND", "store was not found or inactive"));
+        }
+
+        return Ok(ApiResult<CatalogCodeConflictsResponse>.Ok(
+            includeSameProductCandidates ? response : CodeConflictResponseCompat.ToLegacyView(response)));
     }
 
     [Authorize(Policy = CashierAuthorizationPolicies.SpecialProductsView)]
