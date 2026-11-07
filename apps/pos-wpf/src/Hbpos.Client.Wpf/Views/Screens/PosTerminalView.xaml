@@ -1553,7 +1553,7 @@
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTemplateColumn Header="{loc:Loc Quantity}" Width="1.35*" MinWidth="122" HeaderStyle="{StaticResource CartColumnHeaderCenterStyle}">
+                        <DataGridTemplateColumn Header="{loc:Loc Quantity}" Width="1.35*" MinWidth="160" HeaderStyle="{StaticResource CartColumnHeaderCenterStyle}">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <Grid HorizontalAlignment="Center" VerticalAlignment="Center">

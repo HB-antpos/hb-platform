@@ -462,7 +462,7 @@ public sealed class PosTerminalViewLayoutTests
         Assert.Equal("Center", (string?)rowNumberText.Attribute("VerticalAlignment"));
         Assert.Equal("{loc:Loc Item}", (string?)cartColumns[1].Attribute("Header"));
         Assert.Equal("{loc:Loc Quantity}", (string?)cartColumns[3].Attribute("Header"));
-        Assert.Equal("122", (string?)cartColumns[3].Attribute("MinWidth"));
+        Assert.Equal("160", (string?)cartColumns[3].Attribute("MinWidth"));
         var finalAmount = Assert.Single(view.Descendants(presentation + "TextBlock").Where(text =>
             ((string?)text.Attribute("Text"))?.Contains("{Binding ActualAmount", StringComparison.Ordinal) == true &&
             Metric((string?)text.Attribute("FontSize")) == "24"));
@@ -862,6 +862,54 @@ public sealed class PosTerminalViewLayoutTests
             4 => parts[1] + parts[3],
             _ => throw new FormatException("无效的 Thickness。"),
         };
+    }
+
+    [Fact]
+    public void Cart_quantity_step_buttons_are_touch_sized_and_fit_their_column_and_row_in_every_metrics_set()
+    {
+        // 中文注释：收银员反馈购物车 ± 按钮太小。触控按钮至少 48，且按钮 + 数量框必须装进数量列的最小宽度、
+        // 并留在行最小高度之内，否则放大后会被裁切或撑高每一行。
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        var view = XDocument.Load(Path.Combine(
+            FindRepoRoot(), "apps", "pos-wpf", "src", "Hbpos.Client.Wpf", "Views", "Screens", "PosTerminalView.xaml"));
+        var cartGrid = Assert.Single(view.Descendants(presentation + "DataGrid").Where(element =>
+            (string?)element.Attribute("AutomationProperties.AutomationId") == "CartItemsGrid"));
+        var quantityColumn = Assert.Single(cartGrid.Elements(presentation + "DataGrid.Columns"))
+            .Elements()
+            .ElementAt(3);
+        var columnMinWidth = double.Parse((string?)quantityColumn.Attribute("MinWidth")!, CultureInfo.InvariantCulture);
+
+        double Standard(string key) => double.Parse(StandardHomeMetrics.Value[key], CultureInfo.InvariantCulture);
+        foreach (var (name, metric) in new (string, Func<string, double>)[]
+                 {
+                     ("标准", Standard),
+                     ("长者", ElderMetricOrStandard),
+                 })
+        {
+            var step = metric("PosHomeCartStepButtonSize");
+            var boxHeight = metric("PosHomeCartQtyBoxHeight");
+            var qtyColumn = metric("PosHomeCartQtyColumnWidth");
+            Assert.True(step >= 48, $"{name}主题的 ± 按钮应不小于 48，实际 {step}。");
+            Assert.True(boxHeight >= step, $"{name}主题的数量框高度不应低于按钮高度。");
+            Assert.True(
+                2 * step + qtyColumn <= columnMinWidth,
+                $"{name}主题的数量列最小宽度 {columnMinWidth} 装不下两个按钮加数量框（需要 {2 * step + qtyColumn}）。");
+            Assert.True(
+                boxHeight + 8 <= metric("PosHomeCartMinRowHeight"),
+                $"{name}主题的按钮高度会撑高购物车行。");
+        }
+
+        double ElderMetricOrStandard(string key)
+        {
+            try
+            {
+                return ElderHomeMetric(key);
+            }
+            catch (Xunit.Sdk.SingleException)
+            {
+                return Standard(key);
+            }
+        }
     }
 
     [Fact]
