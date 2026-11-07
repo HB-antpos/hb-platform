@@ -920,6 +920,155 @@ const MANUAL_CARD_REPAYMENT = Object.freeze({
   voucherReservationToken: null,
 });
 
+const SQUARE_CARD_REPAYMENT = Object.freeze({
+  installmentGuid: "installment-1",
+  amountCents: 1_000,
+  method: "card" as const,
+  cardProvider: "square" as const,
+  voucherReference: null,
+  voucherReservationToken: null,
+});
+
+/** 让 Square 续付刷卡停在「结果待确认」：通道返回 Pending → 本机与服务端 claim 都是 Unknown。 */
+async function pendingCardRepayment() {
+  const harness = createHarness({ paymentOutcome: "unknown" });
+  const workflow = workflowOf(harness.runtime.createPresenter());
+  await assert.rejects(
+    workflow.addRepayment(SQUARE_CARD_REPAYMENT),
+    (error) =>
+      error instanceof InstallmentWorkflowError &&
+      error.code === "payment-recovery-required",
+  );
+  assert.equal(harness.actionStore.getCurrent()?.state, "Unknown");
+  assert.equal(harness.api.claim?.status, "Unknown");
+  return { harness, workflow };
+}
+
+test("续付刷卡取消：通道证明未扣款 → 先重开 claim 再取消，服务端 Declined、本机结案，可重新收款", async () => {
+  const { harness, workflow } = await pendingCardRepayment();
+  const operationGuid = harness.api.prepareProviderCalls[0]?.operationGuid ?? harness.api.claim?.operationGuid;
+
+  const cancellable = await workflow.inspectCancellableCardRepayment!();
+  assert.deepEqual(cancellable, {
+    installmentGuid: "installment-1",
+    amountCents: 1_000,
+    provider: "square",
+  });
+
+  harness.payments.cancelOutcome = "declined";
+  const result = await workflow.cancelPendingCardRepayment!();
+
+  assert.deepEqual(result, { outcome: "cancelled" });
+  assert.equal(harness.payments.cancelCalls, 1);
+  // 服务端只允许 ProviderPending → Declined，所以必须先 begin 再取消再 resolve。
+  const begin = harness.events.lastIndexOf("claim-begin");
+  const cancel = harness.events.lastIndexOf("payments-cancel-card");
+  const resolve = harness.events.lastIndexOf("claim-resolve:Declined");
+  assert.ok(begin >= 0 && begin < cancel && cancel < resolve, harness.events.join(","));
+  assert.equal(harness.api.claim?.status, "Declined");
+  assert.equal(
+    harness.api.resolveClaimCalls.at(-1)?.operationGuid,
+    operationGuid,
+  );
+  assert.equal(harness.actionStore.getCurrent(), null);
+  assert.equal(harness.api.commitClaimCalls.length, 0);
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+  assert.equal(await workflow.inspectCancellableCardRepayment!(), null);
+});
+
+test("续付刷卡取消：通道回已批准（顾客其实已付）时照常入账，返回 approved 而不是丢掉这笔钱", async () => {
+  const { harness, workflow } = await pendingCardRepayment();
+  harness.payments.cancelOutcome = "approved";
+
+  const result = await workflow.cancelPendingCardRepayment!();
+
+  assert.equal(result.outcome, "approved");
+  assert.equal(harness.payments.cancelCalls, 1);
+  assert.equal(harness.api.commitClaimCalls.length, 1);
+  assert.equal(harness.api.claim?.status, "Committed");
+  assert.equal(harness.api.resolveClaimCalls.some((call) => call.outcome === "Declined"), false);
+  assert.equal(harness.actionStore.getCurrent(), null);
+});
+
+test("续付刷卡取消：通道无法证明未扣款（unknown / 抛错）时保持阻断，不 Declined、不释放占用，仍可重试取消", async () => {
+  for (const outcome of ["unknown", "throw"] as const) {
+    const { harness, workflow } = await pendingCardRepayment();
+    harness.payments.cancelOutcome = outcome;
+
+    await assert.rejects(
+      workflow.cancelPendingCardRepayment!(),
+      (error) =>
+        error instanceof InstallmentWorkflowError &&
+        error.code === "payment-recovery-required",
+      outcome,
+    );
+
+    assert.equal(harness.payments.cancelCalls, 1, outcome);
+    assert.equal(harness.api.claim?.status, "Unknown", outcome);
+    assert.equal(
+      harness.api.resolveClaimCalls.some((call) => call.outcome === "Declined"),
+      false,
+      outcome,
+    );
+    assert.equal(harness.api.commitClaimCalls.length, 0, outcome);
+    assert.equal(harness.actionStore.getCurrent()?.state, "Unknown", outcome);
+    assert.notEqual(await workflow.inspectCancellableCardRepayment!(), null, outcome);
+
+    // 之后通道终于给出结论，可以再次取消并收尾。
+    harness.payments.cancelOutcome = "declined";
+    assert.deepEqual(await workflow.cancelPendingCardRepayment!(), { outcome: "cancelled" });
+    assert.equal(harness.actionStore.getCurrent(), null, outcome);
+  }
+});
+
+test("续付刷卡取消：服务端 claim 已被别处结案为 Declined 时，只做本机收尾，不再碰通道", async () => {
+  const { harness, workflow } = await pendingCardRepayment();
+  harness.api.claim = Object.freeze({ ...harness.api.claim!, status: "Declined" });
+
+  assert.deepEqual(await workflow.cancelPendingCardRepayment!(), { outcome: "cancelled" });
+  assert.equal(harness.payments.cancelCalls, 0);
+  assert.equal(harness.actionStore.getCurrent(), null);
+});
+
+test("续付刷卡取消只给原收银员；手动刷卡 / 现金 / 没有阻断时一律不可取消，且不碰通道", async () => {
+  const { harness, workflow } = await pendingCardRepayment();
+
+  // 另一位收银员接手：看不到取消入口，强行调用也被拒（应走主管结案）。
+  harness.currentCashier.clear();
+  activateCashier(harness.currentCashier, ALL_PERMISSIONS, "CASHIER-2");
+  const other = workflowOf(harness.rebuildRuntime().createPresenter());
+  assert.equal(await other.inspectCancellableCardRepayment!(), null);
+  await assert.rejects(
+    other.cancelPendingCardRepayment!(),
+    (error) =>
+      error instanceof InstallmentWorkflowError &&
+      error.code === "authorization-declined",
+  );
+  assert.equal(harness.payments.cancelCalls, 0);
+  assert.equal(harness.actionStore.getCurrent()?.state, "Unknown");
+  void workflow;
+
+  // 手动刷卡走准备-确认两阶段，没有通道可取消。
+  const manual = createHarness({ repaymentClaimPrepareProviderV1: true });
+  const manualWorkflow = workflowOf(manual.runtime.createPresenter());
+  await manualWorkflow.prepareCashRepayment!(MANUAL_CARD_REPAYMENT);
+  assert.equal(await manualWorkflow.inspectCancellableCardRepayment!(), null);
+  await assert.rejects(
+    manualWorkflow.cancelPendingCardRepayment!(),
+    (error) => error instanceof InstallmentWorkflowError && error.code === "conflict",
+  );
+
+  // 没有任何阻断时也不可取消。
+  const idle = createHarness();
+  const idleWorkflow = workflowOf(idle.runtime.createPresenter());
+  assert.equal(await idleWorkflow.inspectCancellableCardRepayment!(), null);
+  await assert.rejects(
+    idleWorkflow.cancelPendingCardRepayment!(),
+    (error) => error instanceof InstallmentWorkflowError && error.code === "conflict",
+  );
+  assert.equal(manual.payments.cancelCalls + idle.payments.cancelCalls, 0);
+});
+
 test("手动刷卡续付必须走准备→确认：addRepayment 在任何 action 或 claim 前失败关闭，确认前不收款，确认后只 commit 一次", async () => {
   const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
   const workflow = workflowOf(harness.runtime.createPresenter());
@@ -3460,6 +3609,30 @@ class ScriptedPayments implements InstallmentMutationPaymentPort {
   public recoverBlocking(persistedActionId: string) {
     this.recoverCalls += 1;
     return this.resolve(persistedActionId);
+  }
+
+  public cancelCalls = 0;
+  /** 取消刷卡续付时通道给出的结论：declined = 证明未扣款；approved = 顾客其实已付。 */
+  public cancelOutcome: "approved" | "declined" | "unknown" | "throw" = "declined";
+
+  public async cancelCardRepayment(persistedActionId: string) {
+    this.cancelCalls += 1;
+    this.events.push("payments-cancel-card");
+    if (this.cancelOutcome === "throw") throw new Error("provider transport failed");
+    if (this.cancelOutcome === "declined") return { kind: "declined" as const };
+    if (this.cancelOutcome === "unknown") return { kind: "unknown" as const };
+    const action = this.actionStore.get(persistedActionId)?.action;
+    if (!action) throw new Error("persisted action is required");
+    const payment: InstallmentPaymentCommand = {
+      paymentGuid: action.paymentGuid ?? "invalid-payment-guid",
+      method: action.method ?? "card",
+      amountCents: action.amountCents ?? 0,
+      reference: null,
+      reservationToken: null,
+      cardTransactions: [],
+      idempotencyKey: action.idempotencyKey,
+    };
+    return { kind: "approved" as const, payment };
   }
 
   public async inspectCashSettlement(_persistedActionId: string) {

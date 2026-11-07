@@ -3,6 +3,7 @@ import {
   INSTALLMENTS_CANCEL_PERMISSION,
   INSTALLMENTS_CREATE_PERMISSION,
 } from "@hb/pos-domain/features/installments/installment-authorization";
+import type { InstallmentCardRepaymentCancellation } from "./installment-models";
 import {
   INSTALLMENT_MINIMUM_DOWN_PAYMENT_CENTS,
   INSTALLMENT_MINIMUM_TOTAL_CENTS,
@@ -73,6 +74,8 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
   private destroyed = false;
   private actionInFlight: Promise<boolean> | null = null;
   private cashOperationHash: string | null = null;
+  /** 当前恢复态下可向刷卡通道取消的续付刷卡（由 workflow 只读查询得出）；null = 不可取消。 */
+  private cancellableCard: InstallmentCardRepaymentCancellation | null = null;
   private cashPath: "prepare-provider-v1" | "legacy-create-begin" | "recovery" = "recovery";
   private cashConfirmationStartedAt: number | null = null;
   private cashSuccessRecordedOperationHash: string | null = null;
@@ -470,10 +473,11 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
           });
           return false;
         }
+        const cardCancel = await this.refreshCardCancellation();
         this.patch({
           phase: "recovery-required",
           runtimeErrorCode: failureCode,
-          allowedActions: allowedActions({ recover: true }),
+          allowedActions: allowedActions({ recover: true, cancel: cardCancel }),
         });
         return false;
       }
@@ -586,6 +590,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
             // 主管取消探测失败时保留恢复阻断，不伪造可取消事实。
           }
         }
+        const cardCancel = await this.refreshCardCancellation();
         this.patch({
           phase: "recovery-required",
           runtimeErrorCode:
@@ -593,7 +598,7 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
             error.code === "online-required"
               ? "ONLINE_REQUIRED"
               : "PAYMENT_RECOVERY_FAILED",
-          allowedActions: allowedActions({ recover: true }),
+          allowedActions: allowedActions({ recover: true, cancel: cardCancel }),
           checkout: Object.freeze({
             ...this.state.checkout,
             canConfirm: false,
@@ -666,6 +671,14 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
       this.state.checkout.flow === "installment-repayment" &&
       this.state.tenders.length === 1 &&
       isPreparedCollectionTender(this.state.tenders[0]);
+    if (
+      !preparedCashTender &&
+      this.cancellableCard !== null &&
+      this.state.allowedActions.cancel &&
+      workflow.cancelPendingCardRepayment
+    ) {
+      return this.cancelPendingCardRepayment();
+    }
     const cancelledCollection = this.state.checkout.preparedCollection ?? "cash";
     if (
       !preparedCashTender ||
@@ -726,6 +739,96 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
             canConfirm: false,
             fullInstallmentConfirmationRequired: false,
             cashRepaymentStatus: "idle",
+          }),
+        });
+        return false;
+      }
+    });
+  }
+
+  /**
+   * 刷新「恢复态下能否向刷卡通道取消」：只读查询，失败一律按不可取消处理（失败关闭）。
+   */
+  private async refreshCardCancellation(): Promise<boolean> {
+    const workflow = this.options.workflow;
+    if (!workflow.inspectCancellableCardRepayment || !workflow.cancelPendingCardRepayment) {
+      this.cancellableCard = null;
+      return false;
+    }
+    try {
+      this.cancellableCard = await workflow.inspectCancellableCardRepayment();
+    } catch {
+      this.cancellableCard = null;
+    }
+    return this.cancellableCard !== null;
+  }
+
+  /**
+   * 取消进行中的刷卡续付：由 runtime 向刷卡通道发取消并按通道结论收尾。
+   * 通道证明未扣款 → 回到可重新收款；顾客其实已付 → 按成功展示；无法证明 → 保持恢复态，
+   * 并明确提示「可能已扣款，不要重复收款」。
+   */
+  private cancelPendingCardRepayment(): Promise<boolean> {
+    return this.runExclusive(async () => {
+      const workflow = this.options.workflow;
+      try {
+        const result = await workflow.cancelPendingCardRepayment!();
+        this.cancellableCard = null;
+        if (result.outcome === "approved") {
+          const details = result.details;
+          this.patch({
+            phase: "success",
+            orderGuid: details.installmentGuid,
+            total: aud(details.totalCents),
+            remaining: aud(Math.max(0, details.balanceCents)),
+            runtimeErrorCode: null,
+            allowedActions: allowedActions({}),
+            checkout: Object.freeze({
+              ...withoutPreparedCollection(this.state.checkout),
+              canConfirm: false,
+              fullInstallmentConfirmationRequired: false,
+              cashRepaymentStatus: "idle",
+            }),
+          });
+          return false;
+        }
+        const canRestart =
+          this.options.entry?.kind === "installment-repayment";
+        this.patch({
+          phase: canRestart ? "ready" : "cancelled",
+          runtimeErrorCode: null,
+          fieldIssue: null,
+          orderGuid: null,
+          remaining: aud(this.state.total.cents),
+          tenders: Object.freeze([]),
+          allowedActions: canRestart
+            ? allowedActions({
+                start: true,
+                addCash: this.has(PAYMENT_PERMISSION.takeCash),
+              })
+            : allowedActions({}),
+          checkout: Object.freeze({
+            ...withoutPreparedCollection(this.state.checkout),
+            canConfirm: false,
+            fullInstallmentConfirmationRequired: false,
+            cashRepaymentStatus: "idle",
+            cash: Object.freeze({
+              tenderedCents: 0,
+              appliedCents: 0,
+              changeCents: 0,
+            }),
+          }),
+        });
+        return true;
+      } catch {
+        // 无法证明未扣款：保持阻断，允许重试取消或走恢复核实，绝不当作未扣款。
+        const stillCancellable = await this.refreshCardCancellation();
+        this.patch({
+          phase: "recovery-required",
+          runtimeErrorCode: "INSTALLMENT_CARD_CANCELLATION_UNCONFIRMED",
+          allowedActions: allowedActions({
+            recover: true,
+            cancel: stillCancellable,
           }),
         });
         return false;

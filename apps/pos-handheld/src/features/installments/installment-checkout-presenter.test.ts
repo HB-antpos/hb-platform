@@ -1030,6 +1030,178 @@ test("确认发生业务冲突但未落耐久 action 时不伪造恢复入口", 
   );
 });
 
+function pendingCardPresenter(
+  overrides: Partial<InstallmentWorkflowPort> = {},
+): InstallmentCheckoutPresenter {
+  return new InstallmentCheckoutPresenter({
+    entry: installmentRepaymentPaymentEntry(INSTALLMENT_ID),
+    createDrafts: {
+      getSnapshot: () => null,
+      subscribe: () => () => undefined,
+    },
+    initialOnline: true,
+    // 注意：没有 Installments.Cancel 权限——原收银员取消刷卡不依赖它。
+    permissions: repaymentPermissions(),
+    workflow: workflowStub({
+      addRepayment: async () => {
+        throw new InstallmentWorkflowError(
+          "payment-recovery-required",
+          "Installment payment outcome is unknown.",
+        );
+      },
+      hasRecoveryRequired: async () => true,
+      ...overrides,
+    }),
+    createTenderId: () => "card-tender",
+  });
+}
+
+const CANCELLABLE_CARD = Object.freeze({
+  installmentGuid: INSTALLMENT_ID,
+  amountCents: 1_000,
+  provider: "square" as const,
+});
+
+async function submitPendingCard(presenter: InstallmentCheckoutPresenter) {
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.selectMethod("square"), true);
+  presenter.setAmountText("10.00");
+  assert.equal(await presenter.submitSelected(), true);
+  assert.equal(await presenter.confirm(), false);
+}
+
+test("刷卡续付结果待确认：恢复态同时开放「恢复」和「取消」，取消成功回到可重新收款且清掉刷卡 tender", async () => {
+  let cancelCalls = 0;
+  let cancellable: typeof CANCELLABLE_CARD | null = CANCELLABLE_CARD;
+  const presenter = pendingCardPresenter({
+    inspectCancellableCardRepayment: async () => cancellable,
+    cancelPendingCardRepayment: async () => {
+      cancelCalls += 1;
+      cancellable = null;
+      return { outcome: "cancelled" };
+    },
+  });
+  await submitPendingCard(presenter);
+
+  const waiting = presenter.getState();
+  assert.equal(waiting.phase, "recovery-required");
+  assert.equal(waiting.allowedActions.recover, true);
+  assert.equal(waiting.allowedActions.cancel, true);
+  assert.equal(waiting.tenders.length, 1);
+
+  // 重复点击只会取消一次（单飞）。
+  const [first, second] = await Promise.all([presenter.cancel(), presenter.cancel()]);
+  assert.equal(first || second, true);
+  assert.equal(cancelCalls, 1);
+
+  const cancelled = presenter.getState();
+  assert.equal(cancelled.phase, "ready");
+  assert.equal(cancelled.runtimeErrorCode, null);
+  assert.equal(cancelled.tenders.length, 0);
+  assert.equal(cancelled.allowedActions.cancel, false);
+  assert.equal(cancelled.allowedActions.recover, false);
+  assert.equal(cancelled.allowedActions.start, true);
+  assert.equal(cancelled.orderGuid, null);
+});
+
+test("刷卡续付取消时顾客其实已付：按成功展示，而不是当作已取消", async () => {
+  const presenter = pendingCardPresenter({
+    inspectCancellableCardRepayment: async () => CANCELLABLE_CARD,
+    cancelPendingCardRepayment: async () => ({
+      outcome: "approved",
+      details: details({ paidCents: 3_000, balanceCents: 2_000 }),
+    }),
+  });
+  await submitPendingCard(presenter);
+
+  assert.equal(await presenter.cancel(), false);
+
+  const state = presenter.getState();
+  assert.equal(state.phase, "success");
+  assert.equal(state.orderGuid, INSTALLMENT_ID);
+  assert.equal(state.remaining.cents, 2_000);
+  assert.equal(state.allowedActions.recover, false);
+  assert.equal(state.allowedActions.cancel, false);
+});
+
+test("刷卡续付取消结果不明：保持恢复态并提示可能已扣款，tender 保留，仍可重试取消或恢复", async () => {
+  const presenter = pendingCardPresenter({
+    inspectCancellableCardRepayment: async () => CANCELLABLE_CARD,
+    cancelPendingCardRepayment: async () => {
+      throw new InstallmentWorkflowError(
+        "payment-recovery-required",
+        "Installment payment outcome is unknown.",
+      );
+    },
+  });
+  await submitPendingCard(presenter);
+
+  assert.equal(await presenter.cancel(), false);
+
+  const state = presenter.getState();
+  assert.equal(state.phase, "recovery-required");
+  assert.equal(state.runtimeErrorCode, "INSTALLMENT_CARD_CANCELLATION_UNCONFIRMED");
+  assert.equal(state.allowedActions.recover, true);
+  assert.equal(state.allowedActions.cancel, true);
+  assert.equal(state.tenders.length, 1);
+});
+
+test("刷卡续付不可取消的情形（查询为空 / 查询抛错 / workflow 没有取消能力）：只保留「恢复」，不伪造取消入口", async () => {
+  const scenarios: ReadonlyArray<readonly [string, Partial<InstallmentWorkflowPort>]> = [
+    [
+      "查询为空（别人发起 / 手动刷卡）",
+      {
+        inspectCancellableCardRepayment: async () => null,
+        cancelPendingCardRepayment: async () => ({ outcome: "cancelled" }),
+      },
+    ],
+    [
+      "查询抛错",
+      {
+        inspectCancellableCardRepayment: async () => {
+          throw new Error("boom");
+        },
+        cancelPendingCardRepayment: async () => ({ outcome: "cancelled" }),
+      },
+    ],
+    ["旧 workflow 没有取消能力", {}],
+    [
+      "只有查询没有取消",
+      { inspectCancellableCardRepayment: async () => CANCELLABLE_CARD },
+    ],
+  ];
+  for (const [name, overrides] of scenarios) {
+    const presenter = pendingCardPresenter(overrides);
+    await submitPendingCard(presenter);
+    const state = presenter.getState();
+    assert.equal(state.phase, "recovery-required", name);
+    assert.equal(state.allowedActions.recover, true, name);
+    assert.equal(state.allowedActions.cancel, false, name);
+    assert.equal(await presenter.cancel(), false, name);
+  }
+});
+
+test("重新进入支付页走「恢复」仍失败时同样给出取消入口（重启后原收银员也能取消）", async () => {
+  const presenter = pendingCardPresenter({
+    recoverBlocking: async () => {
+      throw new InstallmentWorkflowError(
+        "payment-recovery-required",
+        "Installment payment outcome is unknown.",
+      );
+    },
+    inspectCancellableCardRepayment: async () => CANCELLABLE_CARD,
+    cancelPendingCardRepayment: async () => ({ outcome: "cancelled" }),
+  });
+  await submitPendingCard(presenter);
+  // 模拟取消入口被收回后再次恢复：恢复失败时重新核实。
+  assert.equal(await presenter.recover(), false);
+
+  const state = presenter.getState();
+  assert.equal(state.phase, "recovery-required");
+  assert.equal(state.allowedActions.recover, true);
+  assert.equal(state.allowedActions.cancel, true);
+});
+
 function manualCardWorkflow(
   overrides: Partial<InstallmentWorkflowPort> = {},
 ): InstallmentWorkflowPort {
