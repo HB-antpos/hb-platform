@@ -649,8 +649,8 @@
       "package": "pos-domain",
       "reason": "日结对齐 WPF #914：汇总与存档新增现金进位 cashRoundingCents（应有现金 = 现金净额 + 逐单 5 分进位），新增 sumCashRoundingCents 按订单合并现金 tender 后进位，并引入 money 的 roundAudCash",
       "baselineCanonicalRuntimeSha256": "011edd57ad1d3a3605bb4710efd7ae6a3ad16967b1db2608cc3d9b0436586c22",
-      "canonicalRuntimeSha256": "56aa64de28ea0e8fd957514c0191f3d125082ed13d39e97b1cb38f76982bf68c",
-      "canonicalTypeSha256": "a750b4d430e5faf4181b01cab3739995350252ad09b99a13e111f93f05dc0e0d",
+      "canonicalRuntimeSha256": "b7f9f583bd84bb84cabfd5f2ad8486a559d3755d9c7b5785ffa179b2d6aa6b54",
+      "canonicalTypeSha256": "26241ce4b50aa5ca04089dc9a6c15484468ebe759ecae86ccb3fa5be8a75e5ff",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -677,8 +677,8 @@
       "package": "pos-db",
       "reason": "日结对齐 WPF #914：汇总按订单合并现金 tender 计算进位，应有现金含进位；存档校验 应有现金 = 现金净额 + 进位（进位不得超过订单数×2 分）并持久化 cash_rounding_cents，列不存在时按 0 读取",
       "baselineCanonicalRuntimeSha256": "bf0e2926c5fc979d72ade18eef8da2e100e85a0f66600f497ae73145f7e36c7c",
-      "canonicalRuntimeSha256": "7e0acfe49308f93fb56d6d801485a87242ca7debab1ee007654440e130b46e2e",
-      "canonicalTypeSha256": "7f0db0799f5fa8f528c4f17b5bcefa767a980440e78e0761f75d671d2d32ea8a",
+      "canonicalRuntimeSha256": "65a8d0613a05b15317c3d0a0141902256b10e24e90e34fc6802dd9c2623828f1",
+      "canonicalTypeSha256": "8c238b890d76ecbf3394e877a8fee91cbc82438b848c2aae3fde72f3d1ea1d00",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -711,8 +711,8 @@
       "package": "pos-receipt-core",
       "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值；日结小票营业日期单独成块并加粗、保存日与营业日期不一致时追加核对提示，新增日结现金单（对齐 WPF #478）",
       "baselineCanonicalRuntimeSha256": "bb57fd4e6d35bb7ee0915adf32f0e46462df76f70a7e087797e4451e05808f3b",
-      "canonicalRuntimeSha256": "af0d1518bad838c6ecc7d0ff38c92521d127fd45dd61eac37714c3cc78e920d9",
-      "canonicalTypeSha256": "6285e9af016526b6e0b686493b90ce0fa4c9a2f93485349dc4f204ba7c9fd942",
+      "canonicalRuntimeSha256": "33378b0956794954a0f0f9b4e79b36c70a66bf5a18f79ec681c9c7a3975c6ede",
+      "canonicalTypeSha256": "dd9ba8f346c17f0c82b1c78cef575c878a9f26a8298f62a2a4189d846832e565",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",

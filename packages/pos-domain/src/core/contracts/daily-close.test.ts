@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { sumCashRoundingCents } from "./daily-close";
+import {
+  combineDailyCloseTenders,
+  emptyDailyCloseTenders,
+  sumCashRoundingCents,
+} from "./daily-close";
 
 // 进位规则与收银时一致：AUD 5 分，余 1、2 舍，余 3、4 进，负数远离零对称。
 
@@ -33,4 +37,43 @@ test("sumCashRoundingCents：空列表为 0，非整数分币直接拒绝", () =
   assert.equal(sumCashRoundingCents([]), 0);
   assert.throws(() => sumCashRoundingCents([10.5]), TypeError);
   assert.throws(() => sumCashRoundingCents([Number.NaN]), TypeError);
+});
+
+test("emptyDailyCloseTenders：恰好 cash / card / voucher 三条且全为 0", () => {
+  assert.deepEqual(emptyDailyCloseTenders(), [
+    { method: "cash", salesCents: 0, refundCents: 0, netCents: 0 },
+    { method: "card", salesCents: 0, refundCents: 0, netCents: 0 },
+    { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
+  ]);
+});
+
+test("combineDailyCloseTenders：订单与分期逐方式相加，净额 = 收款 + 退款，缺某方式按 0", () => {
+  const orders = [
+    { method: "cash", salesCents: 1_000, refundCents: -200, netCents: 800 },
+    { method: "card", salesCents: 500, refundCents: 0, netCents: 500 },
+  ] as const;
+  const installments = [
+    { method: "cash", salesCents: 300, refundCents: -100, netCents: 200 },
+    { method: "voucher", salesCents: 0, refundCents: -50, netCents: -50 },
+  ] as const;
+  assert.deepEqual(combineDailyCloseTenders(orders, installments), [
+    { method: "cash", salesCents: 1_300, refundCents: -300, netCents: 1_000 },
+    { method: "card", salesCents: 500, refundCents: 0, netCents: 500 },
+    { method: "voucher", salesCents: 0, refundCents: -50, netCents: -50 },
+  ]);
+  // 没有分期时与订单口径一致。
+  assert.deepEqual(
+    combineDailyCloseTenders(orders, emptyDailyCloseTenders()).map((entry) => entry.netCents),
+    [800, 500, 0],
+  );
+});
+
+test("combineDailyCloseTenders：合并后超出安全整数范围时抛错而不是静默失真", () => {
+  const huge = [
+    { method: "cash", salesCents: Number.MAX_SAFE_INTEGER, refundCents: 0, netCents: Number.MAX_SAFE_INTEGER },
+  ] as const;
+  assert.throws(
+    () => combineDailyCloseTenders(huge, huge),
+    /safe integer/,
+  );
 });

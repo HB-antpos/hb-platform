@@ -38,6 +38,16 @@ type TenderSummaryRow = Readonly<{
   refund_cents: unknown;
 }>;
 type OrderCashRow = Readonly<{ cash_cents: unknown }>;
+type InstallmentCashRow = Readonly<{ signed_cents: unknown }>;
+type InstallmentAttemptRow = Readonly<{ provider: unknown; signed_cents: unknown }>;
+
+/** 分期账本里归为“刷卡”的通道；代金券单独一类。未知通道一律失败关闭，不静默漏记款项。 */
+const INSTALLMENT_CARD_PROVIDERS: ReadonlySet<string> = new Set([
+  "square",
+  "linkly-cloud",
+  "zeller",
+  "manual-card",
+]);
 type DailyCloseRow = Readonly<{
   close_id: unknown;
   business_date: unknown;
@@ -51,6 +61,13 @@ type DailyCloseRow = Readonly<{
   return_quantity: unknown;
   expected_cash_cents: unknown;
   cash_rounding_cents: unknown;
+  installment_payment_count: unknown;
+  installment_cash_sales_cents: unknown;
+  installment_cash_refund_cents: unknown;
+  installment_card_sales_cents: unknown;
+  installment_card_refund_cents: unknown;
+  installment_voucher_sales_cents: unknown;
+  installment_voucher_refund_cents: unknown;
   counted_cash_cents: unknown;
   notes_subtotal_cents: unknown;
   coins_subtotal_cents: unknown;
@@ -132,9 +149,14 @@ export class SqliteDailyCloseRepository
           order_count, return_quantity, expected_cash_cents,
           counted_cash_cents, notes_subtotal_cents, coins_subtotal_cents,
           variance_cents, terminal_audit_event_id, saved_at_iso,
-          cash_rounding_cents, source_kind, state
+          cash_rounding_cents, installment_payment_count,
+          installment_cash_sales_cents, installment_cash_refund_cents,
+          installment_card_sales_cents, installment_card_refund_cents,
+          installment_voucher_sales_cents, installment_voucher_refund_cents,
+          source_kind, state
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?,
           'native', 'Preparing'
         )`,
         [
@@ -156,6 +178,13 @@ export class SqliteDailyCloseRepository
           audit.eventId,
           archive.savedAtIso,
           archive.cashRoundingCents,
+          archive.installmentPaymentCount,
+          installmentTender(archive.installmentPayments, "cash").salesCents,
+          installmentTender(archive.installmentPayments, "cash").refundCents,
+          installmentTender(archive.installmentPayments, "card").salesCents,
+          installmentTender(archive.installmentPayments, "card").refundCents,
+          installmentTender(archive.installmentPayments, "voucher").salesCents,
+          installmentTender(archive.installmentPayments, "voucher").refundCents,
         ],
       );
       for (const tender of archive.tenders) {
@@ -406,14 +435,28 @@ async function summarizeSnapshot(
      GROUP BY tenders.order_guid`,
     orderParameters,
   );
-  const cashRoundingCents = sumCashRoundingCents(
+  const orderCashRoundingCents = sumCashRoundingCents(
     orderCashRows.map((row) => safeInteger(row.cash_cents, "daily close order cash")),
+  );
+  // 分期的收款与取消退款同样进出钱箱，逐笔按 5 分进位，与订单进位合计成同一个现金进位。
+  const installments = await summarizeInstallmentPayments(
+    connection,
+    normalizedScope,
+  );
+  const cashRoundingCents = safeSum(
+    orderCashRoundingCents,
+    installments.cashRoundingCents,
+    "daily close cash rounding",
   );
   const cashNetCents =
     tenders.find((item) => item.method === "cash")?.netCents ?? 0;
-  // 应有现金 = 现金净额（订单精确金额）+ 现金进位：钱箱实点必然是 5 分整数倍。
+  // 应有现金 = 订单现金净额 + 分期现金净额（都是精确金额）+ 现金进位：钱箱实点必然是 5 分整数倍。
   const expectedCashCents = safeSum(
-    cashNetCents,
+    safeSum(
+      cashNetCents,
+      installmentTender(installments.payments, "cash").netCents,
+      "daily close cash net",
+    ),
     cashRoundingCents,
     "daily close expected cash",
   );
@@ -423,9 +466,127 @@ async function summarizeSnapshot(
     orderCount,
     returnQuantity,
     tenders,
+    installmentPayments: installments.payments,
+    installmentPaymentCount: installments.paymentCount,
     cashRoundingCents,
     expectedCashCents,
   });
+}
+
+/**
+ * 本机当天的分期收款与退款。来源是本机分期账本里已经 Approved 的付款（Approved 是终态，款项已经进出）：
+ * 现金在 installment_cash_settlements（金额恒正，operation 区分收 / 退），刷卡与代金券在 installment_provider_attempts（金额带符号）。
+ * 只统计本机（store + device）经手的动作，时间窗口与订单一致取 [from, to)，按 Approved 那一刻的 updated_at_iso 归日。
+ * 一笔付款只会有一行（payment_guid 在动作内唯一），所以不需要再去重。
+ * 现金逐笔进位到 5 分，与收银时一致；未知的刷卡通道抛错而不是漏记。
+ */
+async function summarizeInstallmentPayments(
+  connection: SqliteConnectionPort,
+  scope: DailyCloseScope,
+): Promise<
+  Readonly<{
+    payments: readonly DailyCloseTenderBreakdown[];
+    paymentCount: number;
+    cashRoundingCents: number;
+  }>
+> {
+  const parameters = scopeParameters(scope);
+  const cashRows = await connection.getAll<InstallmentCashRow>(
+    `SELECT
+       CASE settlements.operation
+         WHEN 'refund' THEN -settlements.amount_cents
+         ELSE settlements.amount_cents
+       END AS signed_cents
+     FROM installment_cash_settlements settlements
+     INNER JOIN installment_actions actions
+       ON actions.action_id = settlements.action_id
+     WHERE ${installmentPaymentFilter("settlements")}`,
+    parameters,
+  );
+  const attemptRows = await connection.getAll<InstallmentAttemptRow>(
+    `SELECT attempts.provider AS provider, attempts.amount_cents AS signed_cents
+     FROM installment_provider_attempts attempts
+     INNER JOIN installment_actions actions
+       ON actions.action_id = attempts.action_id
+     WHERE ${installmentPaymentFilter("attempts")}`,
+    parameters,
+  );
+
+  const totals = new Map<DailyCloseTenderMethod, { sales: number; refund: number }>(
+    TENDER_METHODS.map((method) => [method, { sales: 0, refund: 0 }]),
+  );
+  let paymentCount = 0;
+  const record = (method: DailyCloseTenderMethod, signedCents: number): void => {
+    // 0 元付款不存在（账本 CHECK 禁止）；真出现也不当成一笔付款。
+    if (signedCents === 0) return;
+    const bucket = totals.get(method);
+    if (!bucket) throw new Error("Daily close installment tender is invalid.");
+    if (signedCents > 0) {
+      bucket.sales = safeSum(bucket.sales, signedCents, "daily close installment sales");
+    } else {
+      bucket.refund = safeSum(bucket.refund, signedCents, "daily close installment refunds");
+    }
+    paymentCount += 1;
+  };
+
+  const cashSignedCents: number[] = [];
+  for (const row of cashRows) {
+    const signedCents = safeInteger(row.signed_cents, "daily close installment cash");
+    cashSignedCents.push(signedCents);
+    record("cash", signedCents);
+  }
+  for (const row of attemptRows) {
+    const provider = requiredText(row.provider, "installment provider");
+    const method: DailyCloseTenderMethod | null =
+      provider === "voucher"
+        ? "voucher"
+        : INSTALLMENT_CARD_PROVIDERS.has(provider)
+          ? "card"
+          : null;
+    if (method === null) {
+      throw new Error("Daily close installment provider is invalid.");
+    }
+    record(method, safeInteger(row.signed_cents, "daily close installment amount"));
+  }
+
+  const payments = Object.freeze(
+    TENDER_METHODS.map((method) => {
+      const bucket = totals.get(method) ?? { sales: 0, refund: 0 };
+      return Object.freeze({
+        method,
+        salesCents: bucket.sales,
+        refundCents: bucket.refund,
+        netCents: safeSum(bucket.sales, bucket.refund, `daily close installment ${method} net`),
+      });
+    }),
+  );
+  return Object.freeze({
+    payments,
+    paymentCount,
+    cashRoundingCents: sumCashRoundingCents(
+      cashSignedCents.filter((cents) => cents !== 0),
+    ),
+  });
+}
+
+/** 分期付款的范围条件：本机动作、已 Approved、Approved 时刻落在营业窗口 [from, to)。 */
+function installmentPaymentFilter(alias: string): string {
+  return `actions.store_code = ?
+    AND actions.device_code = ?
+    AND ${alias}.state = 'Approved'
+    AND julianday(${alias}.updated_at_iso) >= julianday(?)
+    AND julianday(${alias}.updated_at_iso) < julianday(?)`;
+}
+
+function installmentTender(
+  tenders: readonly DailyCloseTenderBreakdown[],
+  method: DailyCloseTenderMethod,
+): DailyCloseTenderBreakdown {
+  const tender = tenders.find((entry) => entry.method === method);
+  if (!tender) {
+    throw new TypeError("Daily close installment tender is missing.");
+  }
+  return tender;
 }
 
 async function readArchive(
@@ -453,6 +614,27 @@ async function readArchive(
       [closeId],
     );
   const tenders = tenderRows.map(readTender);
+  // 迁移给旧存档补 0；列不存在（M56 之前的库结构）等同于没有分期。
+  const installmentPayments = TENDER_METHODS.map((method) => {
+    const salesCents = safeInteger(
+      row[`installment_${method}_sales_cents` as const] ?? 0,
+      `daily close installment ${method} sales`,
+    );
+    const refundCents = safeInteger(
+      row[`installment_${method}_refund_cents` as const] ?? 0,
+      `daily close installment ${method} refunds`,
+    );
+    return {
+      method,
+      salesCents,
+      refundCents,
+      netCents: safeSum(
+        salesCents,
+        refundCents,
+        `daily close installment ${method} net`,
+      ),
+    };
+  });
   const denominations = denominationRows.map((entry) => ({
     denominationCents: denomination(entry.denomination_cents),
     quantity: safeInteger(entry.quantity, "daily close quantity"),
@@ -473,6 +655,11 @@ async function readArchive(
     orderCount: safeInteger(row.order_count, "daily close order count"),
     returnQuantity: requiredText(row.return_quantity, "return quantity"),
     tenders,
+    installmentPayments,
+    installmentPaymentCount: safeInteger(
+      row.installment_payment_count ?? 0,
+      "daily close installment payment count",
+    ),
     // 迁移给旧存档补 0：旧存档的应有现金本来就等于现金净额，口径不变。
     // 列不存在（M54 之前的库结构）等同于没有进位。
     cashRoundingCents: safeInteger(
@@ -537,6 +724,11 @@ function validateLegacyArchive(input: DailyCloseArchive): DailyCloseArchive {
       "daily close return quantity",
     ),
     tenders,
+    // 遗留（M6 迁入）存档发生在分期计入日结之前，不可能带分期；有值说明数据被改过，沿用同一套校验。
+    ...normalizeInstallmentFacts(
+      input.installmentPayments,
+      input.installmentPaymentCount,
+    ),
     cashRoundingCents: safeInteger(
       input.cashRoundingCents,
       "cash rounding",
@@ -594,17 +786,32 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     "cash rounding",
   );
   const cash = tenders.find((item) => item.method === "cash");
-  // 每张订单现金进位最多 ±2 分，合计不可能超过 订单数 × 2 分（与服务端 INVALID_CASH_ROUNDING 同口径）。
-  if (Math.abs(cashRoundingCents) > orderCount * 2) {
+  const installments = normalizeInstallmentFacts(
+    input.installmentPayments,
+    input.installmentPaymentCount,
+  );
+  // 每笔现金（订单或分期付款）进位最多 ±2 分，合计不可能超过 (订单数 + 分期笔数) × 2 分
+  // （与服务端 INVALID_CASH_ROUNDING 同口径）。
+  if (
+    Math.abs(cashRoundingCents) >
+    (orderCount + installments.installmentPaymentCount) * 2
+  ) {
     throw new TypeError("Daily close cash rounding exceeds the order count limit.");
   }
   if (
     !cash ||
-    safeSum(cash.netCents, cashRoundingCents, "expected cash") !==
-      expectedCashCents
+    safeSum(
+      safeSum(
+        cash.netCents,
+        installmentTender(installments.installmentPayments, "cash").netCents,
+        "expected cash",
+      ),
+      cashRoundingCents,
+      "expected cash",
+    ) !== expectedCashCents
   ) {
     throw new TypeError(
-      "Daily close expected cash does not match cash net plus rounding.",
+      "Daily close expected cash does not match cash net plus installment cash plus rounding.",
     );
   }
   const denominations = normalizeDailyCloseCounts(input.denominations);
@@ -666,6 +873,7 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     orderCount,
     returnQuantity,
     tenders,
+    ...installments,
     cashRoundingCents,
     expectedCashCents,
     denominations,
@@ -674,6 +882,35 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     countedCashCents,
     varianceCents,
   });
+}
+
+/**
+ * 分期事实自洽：三种方式各一条且收款 >= 0、退款 <= 0、净额 = 收款 + 退款；
+ * 笔数为 0 时金额必须全为 0（有金额却没有笔数，说明汇总被改过，也会让服务端的进位上限算错）。
+ */
+function normalizeInstallmentFacts(
+  payments: readonly DailyCloseTenderBreakdown[],
+  paymentCount: number,
+): Readonly<{
+  installmentPayments: readonly DailyCloseTenderBreakdown[];
+  installmentPaymentCount: number;
+}> {
+  const installmentPayments = normalizeTenders(payments);
+  const installmentPaymentCount = nonNegativeInteger(
+    paymentCount,
+    "daily close installment payment count",
+  );
+  if (
+    installmentPaymentCount === 0 &&
+    installmentPayments.some(
+      (entry) => entry.salesCents !== 0 || entry.refundCents !== 0,
+    )
+  ) {
+    throw new TypeError(
+      "Daily close installment amounts require a payment count.",
+    );
+  }
+  return Object.freeze({ installmentPayments, installmentPaymentCount });
 }
 
 function validateScope(scope: DailyCloseScope): DailyCloseScope {

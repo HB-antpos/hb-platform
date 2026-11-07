@@ -6047,6 +6047,13 @@ class MemoryDailyCloseRepository implements DailyCloseRepositoryPort {
       ...scope,
       orderCount: 1,
       returnQuantity: "0",
+    // 分期默认没有：与分期计入日结之前的口径一致。
+    installmentPayments: [
+      { method: "cash", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "card", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
+    ],
+    installmentPaymentCount: 0,
       tenders: [
         {
           method: "cash",

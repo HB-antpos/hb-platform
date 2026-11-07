@@ -130,6 +130,7 @@ export function buildDailyCloseReceipt(
       ),
     );
   }
+  appendInstallmentBlock(lines, input.archive, zh, width, tenderWidths);
   lines.push(separator(width));
   lines.push(
     twoColumns(
@@ -348,6 +349,53 @@ export function dailyCloseReceiptDisplayWidth(value: string): number {
   return [...value].reduce(
     (width, character) => width + (isWide(character) ? 2 : 1),
     0,
+  );
+}
+
+/**
+ * 分期（Lay-by）区块（对齐 WPF #1196）：分期收款不属于销售订单，所以不混进上面的支付方式表，单列：
+ * 销售列是收到的定金与续付，退款列是取消分期的退款。没有分期付款时整块不出现，小票与之前逐字节一致。
+ * 应有现金 = 现金行 + 这里的分期现金净额 + 现金进位，所以有分期时必须让收银员看到这块，才对得上账。
+ */
+function appendInstallmentBlock(
+  lines: string[],
+  archive: DailyCloseArchive,
+  zh: boolean,
+  width: DailyCloseReceiptWidth,
+  tenderWidths: readonly number[],
+): void {
+  if (archive.installmentPaymentCount <= 0) return;
+  lines.push(separator(width));
+  lines.push(
+    twoColumns(
+      zh ? "分期付款笔数/Lay-by Payments" : "Lay-by Payments",
+      String(archive.installmentPaymentCount),
+      width,
+    ),
+  );
+  let netCents = 0;
+  for (const method of ["cash", "card", "voucher"] as const) {
+    const payment = archive.installmentPayments.find(
+      (candidate) => candidate.method === method,
+    );
+    if (!payment) {
+      throw new TypeError("Daily close receipt requires all installment methods.");
+    }
+    netCents += payment.netCents;
+    lines.push(
+      columns(
+        [
+          installmentLabel(method, zh),
+          money(payment.salesCents),
+          money(payment.refundCents),
+          money(payment.netCents),
+        ],
+        tenderWidths,
+      ),
+    );
+  }
+  lines.push(
+    twoColumns(zh ? "分期净额/Lay-by Net" : "Lay-by Net", money(netCents), width),
   );
 }
 
@@ -581,6 +629,17 @@ function tenderLabel(
     return { cash: "Cash", card: "Card", voucher: "Voucher" }[method];
   }
   return { cash: "现金", card: "银行卡", voucher: "代金券" }[method];
+}
+
+/** 分期行的方式标签；58mm 首列只有 8 格，过长由 columns 按宽度截断。 */
+function installmentLabel(
+  method: "cash" | "card" | "voucher",
+  zh: boolean,
+): string {
+  if (!zh) {
+    return { cash: "LB Cash", card: "LB Card", voucher: "LB Voucher" }[method];
+  }
+  return { cash: "分期现金", card: "分期刷卡", voucher: "分期代金券" }[method];
 }
 
 function money(cents: number): string {

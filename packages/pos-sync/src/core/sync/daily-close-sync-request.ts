@@ -1,5 +1,6 @@
 import {
   AUD_CASH_DENOMINATIONS_CENTS,
+  combineDailyCloseTenders,
   type DailyCloseArchive,
   type DailyCloseTenderBreakdown,
   type DailyCloseTenderMethod,
@@ -51,15 +52,24 @@ export type DailyCloseSyncMappingOptions = Readonly<{
  * 本地日结存档 → 上传请求。不修正任何数据：存档里的汇总值不满足服务端校验时，
  * 由服务端 400 永久拒绝（服务端会精确校验 实点 = Σ(面额×数量)、纸币/硬币小计、差额与支付方式净额）。
  * 金额一律由“分”做整数换算成元，不引入浮点累加误差；不发送各支付方式笔数（存档本来没有）。
+ *
+ * 分期（Lay-by）口径对齐 WPF #1196：上传的支付方式是“销售订单 + 分期”的合并金额
+ * （服务端按「实点 − (现金净额 + 进位)」核对差额，银行结算也按合计对）；
+ * 顶层退款总额仍只含订单退款；分期笔数通过 installmentPaymentCount 告知服务端，
+ * 它据此把现金进位上限放宽到 (订单数 + 分期笔数) × 2 分，否则带分期现金的日结会被 400 永久拒收。
  */
 export function mapDailyCloseArchiveToSyncRequest(
   archive: DailyCloseArchive,
   options: DailyCloseSyncMappingOptions,
 ): DailyCloseSyncRequest {
-  const tenders = TENDER_ORDER.map((method) =>
-    mapTender(requireTender(archive.tenders, method)),
+  const combinedTenders = combineDailyCloseTenders(
+    archive.tenders,
+    archive.installmentPayments,
   );
-  // 存档没有单独保存“退款总额”：它就是各支付方式退款额（本地为非正分币）的绝对值之和。
+  const tenders = TENDER_ORDER.map((method) =>
+    mapTender(requireTender(combinedTenders, method)),
+  );
+  // 存档没有单独保存“退款总额”：它就是各支付方式的订单退款额（本地为非正分币）的绝对值之和，不含分期退款。
   const refundCents = TENDER_ORDER.reduce(
     (total, method) =>
       total + Math.abs(requireTender(archive.tenders, method).refundCents),
@@ -102,6 +112,7 @@ export function mapDailyCloseArchiveToSyncRequest(
     cashDifference: centsToAmount(archive.varianceCents),
     // 现金进位（5 分进位）：服务端按 差额 = 实点 − (现金净额 + 进位) 校验，缺省按 0 处理（旧客户端）。
     cashRoundingAmount: centsToAmount(archive.cashRoundingCents),
+    installmentPaymentCount: archive.installmentPaymentCount,
   };
 }
 

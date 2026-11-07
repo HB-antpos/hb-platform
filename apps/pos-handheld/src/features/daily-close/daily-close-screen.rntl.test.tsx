@@ -290,7 +290,38 @@ describe("DailyCloseScreen", () => {
     expect(screen.queryByTestId("daily-close-reprint")).toBeNull();
     await screen.unmount();
   });
+
+  it("有分期付款时汇总区和归档详情单列分期，没有分期时不出现", async () => {
+    const viewOnly = ["Permissions.PosTerminal.DailyClose.View"];
+    const withInstallments = new ScreenPresenter({
+      installments: true,
+      permissions: viewOnly,
+    });
+    const screen = await render(
+      <DailyCloseScreen presenter={withInstallments} />,
+    );
+    expect(screen.getByTestId("daily-close-installments")).toBeTruthy();
+    expect(screen.getByText("Lay-by payments: 4")).toBeTruthy();
+    // 三种方式各一行：现金 20.00 / -5.00 / 15.00。
+    expect(screen.getByText(/\$20\.00.*-\$5\.00.*\$15\.00/)).toBeTruthy();
+    // 归档详情在 History 视图里：笔数 + 分期净额（15 + 8 - 3 = 20.00）。
+    await fireEvent.press(screen.getByTestId("daily-close-show-history"));
+    expect(screen.getByText("Lay-by: 4 payments · net $20.00")).toBeTruthy();
+    await screen.unmount();
+
+    const plain = new ScreenPresenter({ permissions: viewOnly });
+    const plainScreen = await render(<DailyCloseScreen presenter={plain} />);
+    expect(plainScreen.queryByTestId("daily-close-installments")).toBeNull();
+    expect(plainScreen.queryByText(/Lay-by/)).toBeNull();
+    await plainScreen.unmount();
+  });
 });
+
+const installmentPayments = [
+  { method: "cash", salesCents: 2_000, refundCents: -500, netCents: 1_500 },
+  { method: "card", salesCents: 800, refundCents: 0, netCents: 800 },
+  { method: "voucher", salesCents: 0, refundCents: -300, netCents: -300 },
+] as const;
 
 class ScreenPresenter implements DailyCloseScreenPresenter {
   public readonly businessDates: string[] = [];
@@ -304,10 +335,18 @@ class ScreenPresenter implements DailyCloseScreenPresenter {
   private state: DailyCloseState;
 
   public constructor(
-    options: Partial<{ permissions: readonly string[] }> = {},
+    options: Partial<{
+      installments: boolean;
+      permissions: readonly string[];
+    }> = {},
   ) {
-    const selectedArchive = archive();
-    const summary = closeSummary();
+    // installments 为真时，汇总与归档都带 4 笔分期付款。
+    const withInstallments = <T extends DailyCloseSummary>(value: T): T =>
+      options.installments
+        ? { ...value, installmentPayments, installmentPaymentCount: 4 }
+        : value;
+    const selectedArchive = withInstallments(archive());
+    const summary = withInstallments(closeSummary());
     this.state = {
       access: resolveDailyCloseAccess(
         options.permissions ?? [
@@ -410,6 +449,13 @@ function closeSummary(): DailyCloseSummary {
     deviceCode: "IPAD-1",
     orderCount: 4,
     returnQuantity: "2",
+    // 分期默认没有：与分期计入日结之前的口径一致。
+    installmentPayments: [
+      { method: "cash", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "card", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
+    ],
+    installmentPaymentCount: 0,
     tenders: [
       {
         method: "cash",
