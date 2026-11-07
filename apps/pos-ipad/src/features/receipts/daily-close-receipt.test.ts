@@ -228,6 +228,68 @@ test("日结小票在应有现金前单独列出现金进位（中英文、两�
   assert.match(plain.lines.join("\n"), /Cash Rounding.*\$0\.00/);
 });
 
+test("日结小票有分期付款时单列 Lay-by 区块（笔数、三种方式收退净额、合计），没有分期时整块不出现", () => {
+  const base = createArchive();
+  // 分期：现金收 $20.00 退 $5.00（净额 $15.00），刷卡收 $8.00，代金券退 $3.00；共 4 笔。
+  const withInstallments = {
+    ...base,
+    installmentPaymentCount: 4,
+    installmentPayments: [
+      { method: "cash", salesCents: 2_000, refundCents: -500, netCents: 1_500 },
+      { method: "card", salesCents: 800, refundCents: 0, netCents: 800 },
+      { method: "voucher", salesCents: 0, refundCents: -300, netCents: -300 },
+    ] as const,
+    expectedCashCents: base.expectedCashCents + 1_500,
+    varianceCents: base.countedCashCents - (base.expectedCashCents + 1_500),
+  };
+  for (const paper of ["58mm", "80mm"] as const) {
+    const receipt = buildDailyCloseReceipt({
+      archive: withInstallments,
+      locale: "en",
+      paper,
+      reprint: false,
+      storeName: "Sunnybank Plaza",
+    });
+    const text = receipt.lines.join("\n");
+    assert.match(text, /Lay-by Payments\s+4/);
+    assert.match(text, /LB Cash.*\$20\.00.*-\$5\.00.*\$15\.00/);
+    assert.match(text, /LB Card.*\$8\.00.*\$0\.00.*\$8\.00/);
+    assert.match(text, /LB (Voucher|Vouch).*\$0\.00.*-\$3\.00.*-\$3\.00/);
+    // 分期净额 = 15 + 8 - 3 = $20.00，且分期区块排在订单数之前、应有现金之前。
+    assert.match(text, /Lay-by Net\s+\$20\.00/);
+    assert.ok(text.indexOf("Lay-by Payments") < text.indexOf("Orders"));
+    assert.ok(text.indexOf("Lay-by Net") < text.indexOf("Expected Cash"));
+    assert.match(text, /Expected Cash.*\$25\.00/);
+    assert.ok(
+      receipt.lines.every(
+        (line) => dailyCloseReceiptDisplayWidth(line) <= receipt.width,
+      ),
+    );
+  }
+
+  const zh = buildDailyCloseReceipt({
+    archive: withInstallments,
+    locale: "zh-CN",
+    paper: "80mm",
+    reprint: false,
+    storeName: "Sunnybank Plaza",
+  });
+  const zhText = zh.lines.join("\n");
+  assert.match(zhText, /分期付款笔数\/Lay-by Payments\s+4/);
+  assert.match(zhText, /分期现金.*\$20\.00.*-\$5\.00.*\$15\.00/);
+  assert.match(zhText, /分期净额\/Lay-by Net\s+\$20\.00/);
+
+  // 没有分期付款：小票里不出现 Lay-by 字样（与分期计入日结之前逐字一致）。
+  const plain = buildDailyCloseReceipt({
+    archive: base,
+    locale: "en",
+    paper: "80mm",
+    reprint: false,
+    storeName: "Sunnybank Plaza",
+  });
+  assert.doesNotMatch(plain.lines.join("\n"), /Lay-by|LB /);
+});
+
 function createArchive(): DailyCloseArchive {
   const denominationValues = [
     10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20, 10, 5,
@@ -253,6 +315,13 @@ function createArchive(): DailyCloseArchive {
     deviceCode: "IPAD-1",
     orderCount: 4,
     returnQuantity: "2.5",
+    // 分期默认没有：与分期计入日结之前的口径一致。
+    installmentPayments: [
+      { method: "cash", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "card", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
+    ],
+    installmentPaymentCount: 0,
     tenders: [
       {
         method: "cash",

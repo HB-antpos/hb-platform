@@ -331,6 +331,60 @@ test("服务端规则复刻自检：不满足规则的请求会被拒绝（防�
   );
 });
 
+test("分期计入日结：上传的支付方式是 订单 + 分期 的合并金额，顶层退款只含订单退款，并带上分期笔数；服务端规则通过，缺笔数则进位上限不足被拒", () => {
+  // 订单：现金销售 110.05 退款 2.05 净额 108.00；分期：现金收 50.00 退 10.00 净额 40.00，刷卡收 20.00，代金券退 3.00。
+  // 订单现金进位 +0.03，分期现金进位 +0.04（共 5 笔分期付款：现金 2 + 刷卡 1 + 代金券 2）→ 进位 +0.07。
+  const installmentPayments = [
+    { method: "cash", salesCents: 5_000, refundCents: -1_000, netCents: 4_000 },
+    { method: "card", salesCents: 2_000, refundCents: 0, netCents: 2_000 },
+    { method: "voucher", salesCents: 100, refundCents: -300, netCents: -200 },
+  ] as const;
+  const archive = archiveFixture({
+    installmentPayments,
+    installmentPaymentCount: 5,
+    cashRoundingCents: 7,
+  });
+  // 应有现金 = 订单现金 108.00 + 分期现金 40.00 + 进位 0.07 = 148.07。
+  assert.equal(archive.expectedCashCents, 14_807);
+
+  const request = mapDailyCloseArchiveToSyncRequest(archive, { clientKind: "Ipad" });
+  const wire = (method: string) => request.tenders?.find((entry) => entry.method === method);
+  assert.deepEqual(wire("Cash"), { method: "Cash", salesAmount: 160.05, refundAmount: 12.05, netAmount: 148 });
+  assert.deepEqual(wire("Card"), { method: "Card", salesAmount: 24.35, refundAmount: 0, netAmount: 24.35 });
+  assert.deepEqual(wire("Voucher"), { method: "Voucher", salesAmount: 1, refundAmount: 4.15, netAmount: -3.15 });
+  // 顶层退款总额只含订单退款（与 WPF 一致）：2.05 + 0 + 1.15 = 3.20。
+  assert.equal(request.refundAmount, 3.2);
+  assert.equal(request.installmentPaymentCount, 5);
+  assert.equal(request.cashRoundingAmount, 0.07);
+  assert.deepEqual(validateAgainstServerRules(request, SCOPE), { ok: true });
+
+  // 笔数丢掉（等同旧客户端）：订单数 7 单进位上限 ±0.14+0.01，0.16 超限；这里用 0.16 的进位证明笔数确实放宽了上限。
+  const manyRounding = archiveFixture({
+    installmentPayments,
+    installmentPaymentCount: 5,
+    cashRoundingCents: 16,
+  });
+  const manyRequest = mapDailyCloseArchiveToSyncRequest(manyRounding, { clientKind: "Ipad" });
+  assert.deepEqual(validateAgainstServerRules(manyRequest, SCOPE), { ok: true });
+  assert.deepEqual(
+    validateAgainstServerRules({ ...manyRequest, installmentPaymentCount: 0 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_ROUNDING" },
+  );
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, installmentPaymentCount: -1 }, SCOPE),
+    { ok: false, code: "INVALID_INSTALLMENT_PAYMENT_COUNT" },
+  );
+
+  // 没有分期的存档：笔数为 0、金额与之前逐项一致。
+  const plain = mapDailyCloseArchiveToSyncRequest(archiveFixture(), { clientKind: "Ipad" });
+  assert.equal(plain.installmentPaymentCount, 0);
+  assert.equal(
+    plain.tenders?.find((entry) => entry.method === "Cash")?.netAmount,
+    108,
+  );
+  assert.deepEqual(validateAgainstServerRules(plain, SCOPE), { ok: true });
+});
+
 test("现金进位：请求带 cashRoundingAmount，差额按 实点 − (现金净额 + 进位) 通过服务端规则；按旧口径（只减净额）算的差额被拒", () => {
   // 现金净额 108.00，进位 +0.03 → 应有现金 108.03；实点 = 100 + 2×5 + 2 + 3×0.05 = 112.15，差额 = +4.12。
   const rounded = archiveFixture({ cashRoundingCents: 3 });

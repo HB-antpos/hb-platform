@@ -31,6 +31,13 @@ function archive(overrides: Partial<DailyCloseArchive> = {}): DailyCloseArchive 
       { method: "card", salesCents: 2_000, refundCents: 0, netCents: 2_000 },
       { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
     ],
+    // 分期默认没有：与分期计入日结之前的口径一致。
+    installmentPayments: [
+      { method: "cash", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "card", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
+    ],
+    installmentPaymentCount: 0,
     cashRoundingCents: 0,
     expectedCashCents: 1_200,
     closeId: "close-1",

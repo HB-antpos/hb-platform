@@ -275,6 +275,31 @@ export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
                     ))}
                   </View>
 
+                  {state.summary.installmentPaymentCount > 0 ? (
+                    <View
+                      style={styles.tenderCard}
+                      testID="daily-close-installments"
+                    >
+                      <View style={styles.tenderHeader}>
+                        <Text style={styles.tenderMethod}>
+                          {dailyCloseText(locale, "installment.title", {
+                            count: state.summary.installmentPaymentCount,
+                          })}
+                        </Text>
+                        <Text style={styles.tenderValues}>
+                          {dailyCloseText(locale, "tender.values")}
+                        </Text>
+                      </View>
+                      {state.summary.installmentPayments.map((tender) => (
+                        <TenderRow
+                          key={`installment-${tender.method}`}
+                          locale={locale}
+                          tender={tender}
+                        />
+                      ))}
+                    </View>
+                  ) : null}
+
                   <View style={styles.metrics}>
                     <Metric
                       label={dailyCloseText(locale, "metric.orders")}
@@ -648,6 +673,19 @@ function ArchiveDetails({
           returns: archive.returnQuantity,
         })}
       </Text>
+      {archive.installmentPaymentCount > 0 ? (
+        <Text style={styles.detailLine}>
+          {dailyCloseText(locale, "archive.installments", {
+            count: archive.installmentPaymentCount,
+            amount: money(
+              archive.installmentPayments.reduce(
+                (total, payment) => total + payment.netCents,
+                0,
+              ),
+            ),
+          })}
+        </Text>
+      ) : null}
       <Text style={styles.detailLine}>
         {dailyCloseText(locale, "archive.rounding", {
           amount: signedMoney(archive.cashRoundingCents),

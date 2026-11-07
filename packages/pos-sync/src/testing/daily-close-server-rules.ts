@@ -132,8 +132,21 @@ function check(
       : decimalOf(wire.cashRoundingAmount);
   withinLimit(roundingDecimal, "AMOUNT_OUT_OF_RANGE");
   const cashRounding = roundMoneyCents(roundingDecimal);
-  // 每张订单的现金进位最多 ±2 分（5 分进位），合计不可能超过 订单数 × 2 分；容差 1 分。
-  if (abs(cashRounding) > BigInt(wire.orderCount as number) * 2n + 1n) {
+  // installmentPaymentCount 是可选字段（旧客户端不发，按 0 处理），不能为负。
+  const installmentPaymentCount = wire.installmentPaymentCount ?? 0;
+  if (
+    typeof installmentPaymentCount !== "number" ||
+    !Number.isInteger(installmentPaymentCount) ||
+    installmentPaymentCount < 0 ||
+    installmentPaymentCount > INT32_MAXIMUM
+  ) {
+    throw new RuleViolation("INVALID_INSTALLMENT_PAYMENT_COUNT");
+  }
+  // 每笔现金（订单或分期付款）的进位最多 ±2 分（5 分进位），合计不可能超过 (订单数 + 分期笔数) × 2 分；容差 1 分。
+  if (
+    abs(cashRounding) >
+    (BigInt(wire.orderCount as number) + BigInt(installmentPaymentCount)) * 2n + 1n
+  ) {
     throw new RuleViolation("INVALID_CASH_ROUNDING");
   }
   const noteSubtotal = roundMoneyCents(decimalOf(wire.noteSubtotal));

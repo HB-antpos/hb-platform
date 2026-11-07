@@ -39,14 +39,23 @@ export type DailyCloseSummary = DailyCloseScope &
   Readonly<{
     orderCount: number;
     returnQuantity: string;
+    /** 销售订单的支付汇总（不含分期）；分期单列在 installmentPayments。 */
     tenders: readonly DailyCloseTenderBreakdown[];
+    /**
+     * 分期（Lay-by）在本机当天收到和退回的款项，按付款方式拆开（恰好 cash / card / voucher 各一条）：
+     * 收款是定金与续付，退款是取消分期的退款。分期不是销售订单，所以不混进 tenders；
+     * 但它同样进出钱箱，应有现金与上传服务端的支付方式合计都要把它算进去（对齐 WPF #1196）。
+     */
+    installmentPayments: readonly DailyCloseTenderBreakdown[];
+    /** 分期付款笔数（现金、刷卡、代金券都算）。服务端用它放宽现金进位上限：分期现金也是逐笔进位。 */
+    installmentPaymentCount: number;
     /**
      * 现金进位合计（分，带符号）：钱箱里实际收付的是 5 分进位后的现金，而 tender 记的是订单精确金额，
      * 两者每单可差 ±2 分。应有现金 = 现金净额 + 现金进位；对账必须拿进位后的金额比，否则每天都有几分钱的假差额。
-     * 对齐 WPF #914 的 CashRoundingAmount。
+     * 对齐 WPF #914 的 CashRoundingAmount。分期现金同样逐笔进位，计入这个合计。
      */
     cashRoundingCents: number;
-    /** 应有现金 = 现金 tender 净额 + cashRoundingCents。 */
+    /** 应有现金 = 订单现金 tender 净额 + 分期现金净额 + cashRoundingCents。 */
     expectedCashCents: number;
   }>;
 
@@ -88,6 +97,42 @@ export interface DailyCloseRepositoryPort {
       limit: number;
     }>,
   ): Promise<readonly DailyCloseArchive[]>;
+}
+
+/** 全为 0 的三种支付方式汇总：没有分期、历史存档等场景使用。 */
+export function emptyDailyCloseTenders(): readonly DailyCloseTenderBreakdown[] {
+  return Object.freeze(
+    (["cash", "card", "voucher"] as const).map((method) =>
+      Object.freeze({ method, salesCents: 0, refundCents: 0, netCents: 0 }),
+    ),
+  );
+}
+
+/**
+ * 每个付款方式把“销售订单 + 分期”合并成一条：服务端按「实点现金 − (现金净额 + 进位)」核对差额，
+ * 银行结算也按合计对，所以上传用合并口径；分期明细只在本机存档和小票上单列（对齐 WPF GetCombinedSummary）。
+ */
+export function combineDailyCloseTenders(
+  orders: readonly DailyCloseTenderBreakdown[],
+  installments: readonly DailyCloseTenderBreakdown[],
+): readonly DailyCloseTenderBreakdown[] {
+  return Object.freeze(
+    (["cash", "card", "voucher"] as const).map((method) => {
+      const order = orders.find((entry) => entry.method === method);
+      const installment = installments.find((entry) => entry.method === method);
+      const salesCents = (order?.salesCents ?? 0) + (installment?.salesCents ?? 0);
+      const refundCents = (order?.refundCents ?? 0) + (installment?.refundCents ?? 0);
+      const netCents = salesCents + refundCents;
+      if (
+        !Number.isSafeInteger(salesCents) ||
+        !Number.isSafeInteger(refundCents) ||
+        !Number.isSafeInteger(netCents)
+      ) {
+        throw new TypeError("Daily close combined tender exceeds safe integer bounds.");
+      }
+      return Object.freeze({ method, salesCents, refundCents, netCents });
+    }),
+  );
 }
 
 /**

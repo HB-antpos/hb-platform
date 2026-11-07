@@ -1,4 +1,5 @@
 import {
+  emptyDailyCloseTenders,
   normalizeDailyCloseCounts,
   type DailyCloseArchive,
 } from "@hb/pos-domain/core/contracts/daily-close";
@@ -37,10 +38,15 @@ export function archiveFixture(
     { method: "card", salesCents: 435, refundCents: 0, netCents: 435 },
     { method: "voucher", salesCents: 0, refundCents: -115, netCents: -115 },
   ];
-  // 应有现金 = 现金净额 + 现金进位（默认 0，与未进位的旧口径一致）。
+  // 分期默认没有（与分期计入日结之前的旧口径一致）。
+  const installmentPayments =
+    rest.installmentPayments ?? emptyDailyCloseTenders();
+  // 应有现金 = 订单现金净额 + 分期现金净额 + 现金进位（默认 0，与未进位的旧口径一致）。
   const cashRoundingCents = rest.cashRoundingCents ?? 0;
   const expectedCashCents =
     (tenders.find((entry) => entry.method === "cash")?.netCents ?? 0) +
+    (installmentPayments.find((entry) => entry.method === "cash")?.netCents ??
+      0) +
     cashRoundingCents;
   return {
     businessDate: "2026-10-07",
@@ -50,6 +56,8 @@ export function archiveFixture(
     deviceCode: DAILY_CLOSE_FIXTURE_SCOPE.deviceCode,
     orderCount: 7,
     returnQuantity: "1.75",
+    installmentPayments,
+    installmentPaymentCount: 0,
     cashRoundingCents,
     expectedCashCents,
     closeId: DAILY_CLOSE_FIXTURE_GUID,

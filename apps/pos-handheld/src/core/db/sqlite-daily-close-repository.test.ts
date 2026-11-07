@@ -351,7 +351,7 @@ test("带现金进位的日结可以归档，读回一致；应有现金与净�
           ...base,
           archive: { ...base.archive, expectedCashCents: 800 },
         }),
-      /expected cash does not match cash net plus rounding/,
+      /expected cash does not match cash net plus installment cash plus rounding/,
     );
 
     // 订单数 2 单，进位最多 ±4 分：5 分一定是数据有问题。
@@ -579,6 +579,487 @@ test("真实 SQLite：日结非订单审计冻结归档 scope，且只由相同�
   });
 });
 
+test("summarize 把本机分期的现金 / 刷卡 / 代金券收退款计入，应有现金含分期现金与逐笔进位，其它范围与未 Approved 的不计", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    // 订单现金 1003 → 收 1005，进位 +2。
+    await seedOrder(connection, {
+      orderGuid: "order-with-installments",
+      sequence: 1,
+      soldAtIso: T0,
+      state: "PendingSync",
+      deviceCode: "DEVICE-1",
+      lineKind: "sale",
+      quantity: "1",
+      tenders: [["cash", 1003]],
+    });
+    const inside = "2026-07-28T05:00:00.000Z";
+    // 分期现金：5001 → 5000（-1）、2003 → 2005（+2）、退款 1003 → 付出 1005（-2）。
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "purchase", amountCents: 5001, updatedAtIso: inside });
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "purchase", amountCents: 2003, updatedAtIso: inside });
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "refund", amountCents: 1003, updatedAtIso: inside });
+    await seedInstallmentPayment(connection, { kind: "provider", provider: "square", operation: "purchase", amountCents: 4000, updatedAtIso: inside });
+    await seedInstallmentPayment(connection, { kind: "provider", provider: "voucher", operation: "purchase", amountCents: 300, updatedAtIso: inside });
+    await seedInstallmentPayment(connection, { kind: "provider", provider: "voucher", operation: "refund", amountCents: 700, updatedAtIso: inside });
+    // 下面这些都不能计入：别的终端 / 别的门店 / 营业窗口之外（含恰好等于 to 的开区间端点）/ 没有 Approved。
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "purchase", amountCents: 999, updatedAtIso: inside, deviceCode: "DEVICE-2" });
+    await seedInstallmentPayment(connection, { kind: "provider", provider: "square", operation: "purchase", amountCents: 888, updatedAtIso: inside, storeCode: "STORE-2" });
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "purchase", amountCents: 777, updatedAtIso: "2026-07-27T23:59:59.999Z" });
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "purchase", amountCents: 555, updatedAtIso: "2026-07-29T00:00:00.000Z" });
+    await seedInstallmentPayment(connection, { kind: "provider", provider: "linkly-cloud", operation: "purchase", amountCents: 666, updatedAtIso: inside, providerState: "Pending" });
+    await seedInstallmentPayment(connection, { kind: "cash", operation: "purchase", amountCents: 444, updatedAtIso: inside, cashState: "Prepared" });
+
+    const summary = await new SqliteDailyCloseRepository(connection).summarize(scope);
+    const tender = (list: typeof summary.tenders, method: string) =>
+      list.find((entry) => entry.method === method);
+
+    // 订单口径不变：分期不混进 tenders。
+    assert.deepEqual(tender(summary.tenders, "cash"), { method: "cash", salesCents: 1003, refundCents: 0, netCents: 1003 });
+    assert.deepEqual(tender(summary.installmentPayments, "cash"), { method: "cash", salesCents: 7004, refundCents: -1003, netCents: 6001 });
+    assert.deepEqual(tender(summary.installmentPayments, "card"), { method: "card", salesCents: 4000, refundCents: 0, netCents: 4000 });
+    assert.deepEqual(tender(summary.installmentPayments, "voucher"), { method: "voucher", salesCents: 300, refundCents: -700, netCents: -400 });
+    assert.equal(summary.installmentPaymentCount, 6);
+    // 进位：订单 +2，分期 -1 +2 -2 = -1，合计 +1。
+    assert.equal(summary.cashRoundingCents, 1);
+    // 应有现金 = 订单现金 1003 + 分期现金净额 6001 + 进位 1。
+    assert.equal(summary.expectedCashCents, 7005);
+  });
+});
+
+test("没有分期时 summarize 的分期汇总全为 0，应有现金口径与之前一致", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const summary = await new SqliteDailyCloseRepository(connection).summarize(scope);
+    assert.equal(summary.installmentPaymentCount, 0);
+    assert.deepEqual(
+      summary.installmentPayments.map((entry) => [entry.method, entry.salesCents, entry.refundCents, entry.netCents]),
+      [["cash", 0, 0, 0], ["card", 0, 0, 0], ["voucher", 0, 0, 0]],
+    );
+    assert.equal(summary.expectedCashCents, 0);
+  });
+});
+
+test("带分期的日结可以归档读回；应有现金漏掉分期现金、笔数为 0 却有金额、进位超出 (订单数+分期笔数)×2 都被拒绝", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const repository = new SqliteDailyCloseRepository(connection);
+    const installments = [
+      { method: "cash", salesCents: 1000, refundCents: -200, netCents: 800 },
+      { method: "card", salesCents: 500, refundCents: 0, netCents: 500 },
+      { method: "voucher", salesCents: 0, refundCents: -300, netCents: -300 },
+    ] as const;
+
+    // 订单现金净额 800 + 分期现金净额 800 + 进位 2 = 1602。
+    const saved = await repository.saveArchive(
+      archiveWithInstallments("close-installments", "audit-close-installments", {
+        installments,
+        count: 4,
+        rounding: 2,
+      }),
+    );
+    assert.equal(saved.archive.expectedCashCents, 1602);
+    assert.equal(saved.archive.installmentPaymentCount, 4);
+    const readBack = await repository.getArchive("close-installments");
+    assert.deepEqual(readBack?.installmentPayments, installments);
+    assert.equal(readBack?.installmentPaymentCount, 4);
+    assert.equal(readBack?.expectedCashCents, 1602);
+    assert.equal(
+      await scalar(
+        connection,
+        `SELECT installment_cash_sales_cents + installment_card_sales_cents
+                + installment_voucher_refund_cents AS count
+         FROM local_daily_closes WHERE close_id = 'close-installments'`,
+      ),
+      1000 + 500 - 300,
+    );
+
+    // 应有现金没把分期现金 800 算进去（仍是旧口径 800 + 2）：被拒绝。
+    const legacyStyle = archiveWithInstallments("close-forgot", "audit-close-forgot", {
+      installments,
+      count: 4,
+      rounding: 2,
+    });
+    await assert.rejects(
+      async () =>
+        repository.saveArchive({
+          ...legacyStyle,
+          archive: { ...legacyStyle.archive, expectedCashCents: 802 },
+        }),
+      /expected cash does not match cash net plus installment cash plus rounding/,
+    );
+
+    // 分期有金额但笔数为 0：汇总被改过，也会让服务端的进位上限算错。
+    await assert.rejects(
+      async () =>
+        repository.saveArchive(
+          archiveWithInstallments("close-no-count", "audit-close-no-count", {
+            installments,
+            count: 0,
+            rounding: 0,
+          }),
+        ),
+      /installment amounts require a payment count/,
+    );
+
+    // 订单 2 单 + 分期 1 笔：进位上限 ±6 分；7 分被拒绝，6 分通过。
+    await assert.rejects(
+      async () =>
+        repository.saveArchive(
+          archiveWithInstallments("close-too-much", "audit-close-too-much", {
+            installments,
+            count: 1,
+            rounding: 7,
+          }),
+        ),
+      /cash rounding exceeds/,
+    );
+    const atLimit = await repository.saveArchive(
+      archiveWithInstallments("close-at-limit", "audit-close-at-limit", {
+        installments,
+        count: 1,
+        rounding: 6,
+      }),
+    );
+    assert.equal(atLimit.archive.cashRoundingCents, 6);
+    assert.equal(await repository.getArchive("close-forgot"), null);
+    assert.equal(await repository.getArchive("close-no-count"), null);
+    assert.equal(await repository.getArchive("close-too-much"), null);
+  });
+});
+
+test("M56 归档转换触发器：应有现金必须等于 订单现金净额 + 分期现金净额 + 进位，漏掉分期现金的归档被数据库拒绝", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const prepare = async (closeId: string, expectedCashCents: number) => {
+      await connection.run(
+        `INSERT INTO audit_events (
+          event_id, event_type, occurred_at_iso, order_guid,
+          correlation_id, payload_json, uploaded_at_iso
+        ) VALUES (?, 'DAILY_CLOSE_SAVE', ?, NULL, ?, '{}', NULL)`,
+        [`audit-${closeId}`, T1, closeId],
+      );
+      await connection.run(
+        `INSERT INTO local_daily_closes (
+          close_id, business_date, period_from_iso, period_to_iso,
+          store_code, device_code, saved_cashier_id, saved_cashier_name,
+          order_count, return_quantity, expected_cash_cents,
+          counted_cash_cents, notes_subtotal_cents, coins_subtotal_cents,
+          variance_cents, terminal_audit_event_id, saved_at_iso,
+          cash_rounding_cents, installment_payment_count,
+          installment_cash_sales_cents, installment_cash_refund_cents,
+          source_kind, state
+        ) VALUES (?, ?, ?, ?, 'STORE-1', 'DEVICE-1', 'cashier-1',
+          'Cashier One', 1, '0', ?, 0, 0, 0, ?, ?, ?, 3, 2, 600, -100,
+          'native', 'Preparing')`,
+        [
+          closeId, scope.businessDate, scope.periodFromIso, scope.periodToIso,
+          expectedCashCents, -expectedCashCents, `audit-${closeId}`, T1,
+        ],
+      );
+      for (const [method, net] of [["cash", 800], ["card", 0], ["voucher", 0]] as const) {
+        await connection.run(
+          `INSERT INTO daily_close_totals (
+            close_id, tender_method, sales_cents, refund_cents, net_cents
+          ) VALUES (?, ?, ?, 0, ?)`,
+          [closeId, method, net, net],
+        );
+      }
+      for (const denomination of AUD_CASH_DENOMINATIONS_CENTS) {
+        await connection.run(
+          `INSERT INTO cash_denominations (
+            close_id, denomination_cents, quantity, subtotal_cents
+          ) VALUES (?, ?, 0, 0)`,
+          [closeId, denomination],
+        );
+      }
+    };
+    // 订单现金 800 + 分期现金 (600 - 100) + 进位 3 = 1303；漏掉分期现金的 803 不行。
+    await prepare("close-trigger-bad", 803);
+    await assert.rejects(
+      connection.run(
+        `UPDATE local_daily_closes SET state = 'Archived' WHERE close_id = 'close-trigger-bad'`,
+      ),
+      /DAILY_CLOSE_ARCHIVE_INCOMPLETE/,
+    );
+    await prepare("close-trigger-good", 1303);
+    await connection.run(
+      `UPDATE local_daily_closes SET state = 'Archived' WHERE close_id = 'close-trigger-good'`,
+    );
+    // 已归档后分期列同样不可变。
+    await assert.rejects(
+      connection.run(
+        `UPDATE local_daily_closes SET installment_cash_sales_cents = 0 WHERE close_id = 'close-trigger-good'`,
+      ),
+      /DAILY_CLOSE_ARCHIVE_IMMUTABLE/,
+    );
+    await assert.rejects(
+      connection.run(
+        `UPDATE local_daily_closes SET installment_payment_count = 9 WHERE close_id = 'close-trigger-good'`,
+      ),
+      /DAILY_CLOSE_ARCHIVE_IMMUTABLE/,
+    );
+  });
+});
+
+test("M56 升级：旧存档的分期列补 0，读回与应有现金口径不变，且不能事后改分期列", async () => {
+  await withDatabase(async (connection) => {
+    const previous = POS_DATABASE_MIGRATIONS.filter(
+      (migration) => migration.version <= 55,
+    );
+    await applyMigrations(connection, () => T0, previous);
+    await connection.run(
+      `INSERT INTO audit_events (
+        event_id, event_type, occurred_at_iso, order_guid,
+        correlation_id, payload_json, uploaded_at_iso
+      ) VALUES (
+        'audit-pre-m56', 'DAILY_CLOSE_SAVE', ?, NULL, 'close-pre-m56', '{}', NULL
+      )`,
+      [T1],
+    );
+    await connection.run(
+      `INSERT INTO local_daily_closes (
+        close_id, business_date, period_from_iso, period_to_iso,
+        store_code, device_code, saved_cashier_id, saved_cashier_name,
+        order_count, return_quantity, expected_cash_cents,
+        counted_cash_cents, notes_subtotal_cents, coins_subtotal_cents,
+        variance_cents, terminal_audit_event_id, saved_at_iso,
+        cash_rounding_cents, source_kind, state
+      ) VALUES (
+        'close-pre-m56', ?, ?, ?, 'STORE-1', 'DEVICE-1', 'cashier-1',
+        'Cashier One', 1, '0', 802, 800, 0, 800, -2, 'audit-pre-m56', ?,
+        2, 'native', 'Preparing'
+      )`,
+      [scope.businessDate, scope.periodFromIso, scope.periodToIso, T1],
+    );
+    for (const [method, net] of [["cash", 800], ["card", 0], ["voucher", 0]] as const) {
+      await connection.run(
+        `INSERT INTO daily_close_totals (
+          close_id, tender_method, sales_cents, refund_cents, net_cents
+        ) VALUES ('close-pre-m56', ?, ?, 0, ?)`,
+        [method, net, net],
+      );
+    }
+    for (const denomination of AUD_CASH_DENOMINATIONS_CENTS) {
+      const quantity = denomination === 200 ? 4 : 0;
+      await connection.run(
+        `INSERT INTO cash_denominations (
+          close_id, denomination_cents, quantity, subtotal_cents
+        ) VALUES ('close-pre-m56', ?, ?, ?)`,
+        [denomination, quantity, denomination * quantity],
+      );
+    }
+    await connection.run(
+      `UPDATE local_daily_closes SET state = 'Archived' WHERE close_id = 'close-pre-m56'`,
+    );
+
+    await applyMigrations(connection, () => T1);
+    assert.equal(
+      await schemaVersion(connection),
+      POS_DATABASE_MIGRATIONS.at(-1)?.version,
+    );
+    assert.equal(
+      await scalar(
+        connection,
+        `SELECT installment_payment_count + installment_cash_sales_cents
+                + installment_cash_refund_cents + installment_card_sales_cents
+                + installment_card_refund_cents + installment_voucher_sales_cents
+                + installment_voucher_refund_cents AS count
+         FROM local_daily_closes WHERE close_id = 'close-pre-m56'`,
+      ),
+      0,
+    );
+    const readBack = await new SqliteDailyCloseRepository(connection).getArchive("close-pre-m56");
+    assert.equal(readBack?.installmentPaymentCount, 0);
+    assert.equal(readBack?.expectedCashCents, 802);
+    assert.equal(readBack?.cashRoundingCents, 2);
+    assert.equal(
+      readBack?.installmentPayments.every(
+        (entry) => entry.salesCents === 0 && entry.refundCents === 0 && entry.netCents === 0,
+      ),
+      true,
+    );
+    await assert.rejects(
+      connection.run(
+        `UPDATE local_daily_closes SET installment_card_sales_cents = 5 WHERE close_id = 'close-pre-m56'`,
+      ),
+      /DAILY_CLOSE_ARCHIVE_IMMUTABLE/,
+    );
+  });
+});
+
+/** 带分期的待保存日结：订单现金净额固定 800，应有现金 = 800 + 分期现金净额 + 进位。 */
+function archiveWithInstallments(
+  closeId: string,
+  auditId: string,
+  options: Readonly<{
+    installments: readonly {
+      method: "cash" | "card" | "voucher";
+      salesCents: number;
+      refundCents: number;
+      netCents: number;
+    }[];
+    count: number;
+    rounding: number;
+  }>,
+): Parameters<SqliteDailyCloseRepository["saveArchive"]>[0] {
+  const base = archive(closeId, auditId, options.rounding);
+  const installmentCashNet =
+    options.installments.find((entry) => entry.method === "cash")?.netCents ?? 0;
+  const expectedCashCents = 800 + installmentCashNet + options.rounding;
+  return {
+    ...base,
+    archive: {
+      ...base.archive,
+      installmentPayments: options.installments,
+      installmentPaymentCount: options.count,
+      expectedCashCents,
+      varianceCents: base.archive.countedCashCents - expectedCashCents,
+    },
+  };
+}
+
+type SeedInstallmentPayment = Readonly<{
+  kind: "cash" | "provider";
+  operation: "purchase" | "refund";
+  /** 金额绝对值（分）；退款在账本里：现金为正数 + operation=refund，尝试为负数。 */
+  amountCents: number;
+  updatedAtIso: string;
+  provider?: "square" | "linkly-cloud" | "voucher";
+  storeCode?: string;
+  deviceCode?: string;
+  /** 默认 Approved；Pending 表示款项还没确定，不能计入。 */
+  providerState?: "Approved" | "Pending";
+  /** 默认 Approved；Prepared 表示现金还没落账，不能计入。 */
+  cashState?: "Approved" | "Prepared";
+}>;
+
+let installmentSeedSequence = 0;
+
+/** 造一笔分期付款：按真实触发器要求走完 动作 → 计划 → 证据 → 尝试 / 结算 → Approved 的写入顺序。 */
+async function seedInstallmentPayment(
+  connection: SqliteConnectionPort,
+  input: SeedInstallmentPayment,
+): Promise<void> {
+  installmentSeedSequence += 1;
+  const n = installmentSeedSequence;
+  const guid = (offset: number): string =>
+    `00000000-0000-4000-8000-${String(offset + n).padStart(12, "0")}`;
+  const storeCode = input.storeCode ?? "STORE-1";
+  const deviceCode = input.deviceCode ?? "DEVICE-1";
+  const actionId = guid(100);
+  const paymentGuid = guid(300);
+  const evidenceId = guid(400);
+  const itemId = guid(500);
+  const created = "2026-07-27T00:00:00.000Z";
+  const isRefund = input.operation === "refund";
+  const method =
+    input.kind === "cash" ? "cash" : input.provider === "voucher" ? "voucher" : "card";
+  const approved =
+    input.kind === "cash"
+      ? (input.cashState ?? "Approved") === "Approved"
+      : (input.providerState ?? "Approved") === "Approved";
+
+  // 每个终端同一时刻只能有一个未结案动作（唯一索引），所以动作一律造成已结案：
+  // Approved 的用 BackendPending + Completed，没有 Approved 的用 ProviderPending + Declined。
+  // 汇总只看付款行本身的状态，不看动作状态。
+  await connection.run(
+    `INSERT INTO installment_actions (
+      action_id, store_code, device_code, installment_guid, action_kind,
+      idempotency_key, payment_guid, payment_method, amount_cents,
+      state, resolution, payload_revision, command_ciphertext,
+      created_at_iso, updated_at_iso, resolved_at_iso
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, x'01', ?, ?, ?)`,
+    [
+      actionId, storeCode, deviceCode, guid(200),
+      isRefund ? "cancel-refund" : "repayment",
+      actionId,
+      isRefund ? null : paymentGuid,
+      isRefund ? null : method,
+      isRefund ? null : input.amountCents,
+      approved ? "BackendPending" : "ProviderPending",
+      approved ? "Completed" : "Declined",
+      created, created, created,
+    ],
+  );
+  await connection.run(
+    `INSERT INTO installment_provider_plans (action_id, created_at_iso) VALUES (?, ?)`,
+    [actionId, created],
+  );
+  if (!isRefund) {
+    await connection.run(
+      `INSERT INTO installment_original_tender_evidence (
+        evidence_id, origin_action_id, store_code, device_code,
+        installment_guid, payment_guid, source_attempt_id, method,
+        amount_cents, provider, provenance, payload_revision,
+        protected_payload_ciphertext, created_at_iso
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'local-approved-attempt', 1, x'01', ?)`,
+      [
+        evidenceId, actionId, storeCode, deviceCode, guid(200), paymentGuid,
+        itemId, method, input.amountCents,
+        method === "cash" ? null : method === "voucher" ? "voucher" : input.provider ?? "square",
+        created,
+      ],
+    );
+  }
+  // 退款必须带来源付款与来源尝试；购买两者都为空（账本 CHECK）。
+  const [sourcePaymentGuid, sourceAttemptId]: readonly [string | null, string | null] =
+    isRefund ? [guid(600), guid(700)] : [null, null];
+
+  if (input.kind === "cash") {
+    await connection.run(
+      `INSERT INTO installment_cash_settlements (
+        settlement_id, action_id, payment_guid, source_payment_guid,
+        original_tender_evidence_id, source_attempt_id, sequence,
+        operation, amount_cents, idempotency_key, state,
+        created_at_iso, updated_at_iso
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'Prepared', ?, ?)`,
+      [
+        itemId, actionId, paymentGuid, sourcePaymentGuid, evidenceId,
+        sourceAttemptId, input.operation, input.amountCents, itemId, created, created,
+      ],
+    );
+    if (approved) {
+      await connection.run(
+        `UPDATE installment_cash_settlements SET state = 'Approved', updated_at_iso = ?
+         WHERE settlement_id = ?`,
+        [input.updatedAtIso, itemId],
+      );
+    }
+    return;
+  }
+
+  await connection.run(
+    `INSERT INTO installment_provider_attempts (
+      attempt_id, action_id, payment_guid, source_payment_guid,
+      original_tender_evidence_id, source_attempt_id, sequence, provider,
+      operation, amount_cents, state, idempotency_key, payload_revision,
+      protected_payload_ciphertext, created_at_iso, updated_at_iso
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'Created', ?, 1, x'01', ?, ?)`,
+    [
+      itemId, actionId, paymentGuid, sourcePaymentGuid, evidenceId,
+      sourceAttemptId, input.provider ?? "square", input.operation,
+      isRefund ? -input.amountCents : input.amountCents, itemId, created, created,
+    ],
+  );
+  await connection.run(
+    `UPDATE installment_provider_attempts SET state = 'Submitted' WHERE attempt_id = ?`,
+    [itemId],
+  );
+  if (approved) {
+    await connection.run(
+      `INSERT INTO installment_approved_materials (
+        attempt_id, payload_revision, material_ciphertext, created_at_iso
+      ) VALUES (?, 1, x'01', ?)`,
+      [itemId, created],
+    );
+  }
+  await connection.run(
+    `UPDATE installment_provider_attempts SET state = ?, updated_at_iso = ?
+     WHERE attempt_id = ?`,
+    [approved ? "Approved" : "Pending", input.updatedAtIso, itemId],
+  );
+}
+
 function archive(
   closeId: string,
   auditId: string,
@@ -607,6 +1088,13 @@ function archive(
         : "2026-07-28T23:59:59.100Z",
     orderCount: 2,
     returnQuantity: "1.75",
+    // 分期默认没有：与分期计入日结之前的口径一致。
+    installmentPayments: [
+      { method: "cash", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "card", salesCents: 0, refundCents: 0, netCents: 0 },
+      { method: "voucher", salesCents: 0, refundCents: 0, netCents: 0 },
+    ],
+    installmentPaymentCount: 0,
     tenders: [
       {
         method: "cash",

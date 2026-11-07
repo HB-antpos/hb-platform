@@ -898,7 +898,10 @@ test("M55 升级：证据表重建保留历史行、索引、触发器与外键�
     );
 
     await applyMigrations(connection, () => NOW);
-    assert.equal(await schemaVersion(connection), 55);
+    assert.equal(
+      await schemaVersion(connection),
+      POS_DATABASE_MIGRATIONS.at(-1)?.version,
+    );
 
     // 历史行逐列原样保留（含密文字节），来源行也完整。
     assert.deepEqual(
