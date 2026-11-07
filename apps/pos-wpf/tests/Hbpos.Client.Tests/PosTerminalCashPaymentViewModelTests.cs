@@ -5267,6 +5267,148 @@ public sealed class PosTerminalCashPaymentViewModelTests
     }
 
     [Fact]
+    public async Task Payment_page_returns_to_cash_and_shows_quick_cash_after_card_terminal_cancel()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-QC-1", "Quick Cash Cancel Tea", "930QC1", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            AddTenderResult = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        workflow.AddTenderResult.SetResult(new PaymentTenderAttemptResult(
+            false,
+            "payment.status.cardDeclined",
+            StatusMessage: "CANCELLED (C0)",
+            CardResult: new CardPaymentResultDisposition(CardPaymentTerminalOutcome.Cancelled)));
+        var viewModel = new PaymentViewModel(cart, workflow, Session);
+        Assert.True(viewModel.IsQuickCashVisible);
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Cash, viewModel.SelectedPaymentMethod);
+        Assert.True(viewModel.IsCashSelected);
+        Assert.True(viewModel.IsQuickCashVisible);
+        Assert.True(viewModel.QuickCashCommand.CanExecute(viewModel.QuickCashAmounts[0]));
+    }
+
+    [Fact]
+    public async Task Payment_page_returns_to_cash_after_manual_card_cancel()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-QC-2", "Quick Cash Manual Cancel Tea", "930QC2", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            AddTenderStarted = new(TaskCreationOptions.RunContinuationsAsynchronously),
+            AddTenderResult = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        var viewModel = new PaymentViewModel(cart, workflow, Session);
+
+        var paymentTask = viewModel.SelectCardCommand.ExecuteAsync(null);
+        await workflow.AddTenderStarted.Task;
+        Assert.Equal(PaymentMethodKind.Card, viewModel.SelectedPaymentMethod);
+        Assert.False(viewModel.IsQuickCashVisible);
+
+        viewModel.CancelCommand.Execute(null);
+        await paymentTask;
+
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Cash, viewModel.SelectedPaymentMethod);
+        Assert.True(viewModel.IsQuickCashVisible);
+    }
+
+    [Fact]
+    public async Task Payment_page_returns_to_cash_after_card_declined()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-QC-3", "Quick Cash Declined Tea", "930QC3", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            AddTenderResult = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        workflow.AddTenderResult.SetResult(new PaymentTenderAttemptResult(
+            false,
+            "payment.status.cardDeclined",
+            StatusMessage: "DECLINED",
+            CardResult: new CardPaymentResultDisposition(CardPaymentTerminalOutcome.None, CardPaymentErrorKind.CardDeclined)));
+        var viewModel = new PaymentViewModel(cart, workflow, Session);
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal(PaymentMethodKind.Cash, viewModel.SelectedPaymentMethod);
+        Assert.True(viewModel.IsQuickCashVisible);
+    }
+
+    [Fact]
+    public async Task Payment_page_stays_on_card_while_the_card_result_is_unknown()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-QC-4", "Quick Cash Unknown Tea", "930QC4", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService
+        {
+            AddTenderResult = new(TaskCreationOptions.RunContinuationsAsynchronously)
+        };
+        workflow.AddTenderResult.SetResult(new PaymentTenderAttemptResult(
+            false,
+            "payment.card.resultUnknown",
+            StatusMessage: "Previous card result is unknown.",
+            CardResult: new CardPaymentResultDisposition(
+                CardPaymentTerminalOutcome.ResultUnknown,
+                CardPaymentErrorKind.ActiveSessionRequiresRecovery,
+                PreserveStatus: true)));
+        var viewModel = new PaymentViewModel(cart, workflow, Session);
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        // 中文注释：卡状态不明时保持原有锁定与恢复流程，不能偷偷切回现金。
+        Assert.True(viewModel.IsPaymentInteractionLocked);
+        Assert.Equal(PaymentMethodKind.Card, viewModel.SelectedPaymentMethod);
+        Assert.False(viewModel.IsQuickCashVisible);
+    }
+
+    [Fact]
+    public async Task Payment_page_returns_to_cash_when_card_is_blocked_because_it_must_be_the_final_tender()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-QC-5", "Quick Cash Final Tender Tea", "930QC5", PriceSourceKind.StoreRetailPrice, 10m));
+        var workflow = new FakeCashPaymentWorkflowService();
+        var viewModel = new PaymentViewModel(cart, workflow, Session);
+        // 中文注释：销售付款里卡必须是足额的最后一笔；输入的金额不够时点刷卡会被拦下，不应把收银员留在刷卡上。
+        viewModel.TenderAmountText = "4";
+
+        await viewModel.SelectCardCommand.ExecuteAsync(null);
+
+        Assert.Empty(viewModel.PaymentTenders);
+        Assert.Equal("payment.status.cardMustBeFinalTender", viewModel.StatusMessage);
+        Assert.Equal(PaymentMethodKind.Cash, viewModel.SelectedPaymentMethod);
+        Assert.True(viewModel.IsQuickCashVisible);
+        Assert.Equal("4", viewModel.TenderAmountText);
+    }
+
+    [Fact]
+    public void Payment_page_returns_to_cash_when_the_voucher_dialog_is_cancelled()
+    {
+        var cart = new PosCartService();
+        cart.AddItem(CreateItem("SKU-QC-6", "Quick Cash Voucher Tea", "930QC6", PriceSourceKind.StoreRetailPrice, 5m));
+        var viewModel = new PaymentViewModel(
+            cart,
+            new FakeCashPaymentWorkflowService(),
+            Session,
+            paymentMethodSettingsService: new MutablePaymentMethodSettingsService(new(VoucherEnabled: true)));
+
+        viewModel.OpenVoucherEntryCommand.Execute(null);
+        Assert.Equal(PaymentMethodKind.Voucher, viewModel.SelectedPaymentMethod);
+        Assert.False(viewModel.IsQuickCashVisible);
+
+        viewModel.CancelVoucherEntryCommand.Execute(null);
+
+        Assert.False(viewModel.IsVoucherEntryDialogOpen);
+        Assert.Equal(PaymentMethodKind.Cash, viewModel.SelectedPaymentMethod);
+        Assert.True(viewModel.IsQuickCashVisible);
+    }
+
+    [Fact]
     public async Task Payment_page_linkly_backend_cancel_result_allows_next_card_payment_without_recovery_prompt()
     {
         var cart = new PosCartService();

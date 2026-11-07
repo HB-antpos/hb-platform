@@ -1516,6 +1516,29 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
     {
         VoucherEntryText = string.Empty;
         IsVoucherEntryDialogOpen = false;
+        RestoreCashSelectionAfterUnpaidAttempt(PaymentMethodKind.Voucher);
+    }
+
+    /// <summary>
+    /// 刷卡 / 礼券入口没有收到款（取消、超时、失败、授权被拒、关闭礼券弹窗）后回到现金：
+    /// 快捷现金按钮只在选中现金时显示，付款方式停在刷卡或礼券上，收银员就看不到快捷金额了。
+    /// 只处理销售付款页；退款页、卡状态不明（需恢复）、卡任务仍在进行时保持原样，避免干扰锁定与恢复流程。
+    /// 不动金额输入框，收银员已输入的金额保留。
+    /// </summary>
+    private void RestoreCashSelectionAfterUnpaidAttempt(PaymentMethodKind attemptedMethod)
+    {
+        if (!IsPaymentMode ||
+            attemptedMethod == PaymentMethodKind.Cash ||
+            SelectedPaymentMethod != attemptedMethod ||
+            _cardSession.HasUnknownResult ||
+            _cardSession.IsActive ||
+            IsManualCardDialogOpen)
+        {
+            return;
+        }
+
+        SelectedPaymentMethod = PaymentMethodKind.Cash;
+        NotifyPaymentCommandStates();
     }
 
     private void OpenInstallmentCustomerDialog()
@@ -1690,12 +1713,14 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             !IsInstallmentTenderAmountAllowed(method, plannedAmount, GetPaymentTargetAmount()))
         {
             SetStatus("payment.installment.status.invalidAmount");
+            RestoreCashSelectionAfterUnpaidAttempt(method);
             NotifyPaymentCommandStates();
             return;
         }
 
         if (TrySetRegularPaymentTenderOrderStatus(method, amountText))
         {
+            RestoreCashSelectionAfterUnpaidAttempt(method);
             return;
         }
 
@@ -1719,6 +1744,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             attemptedPaymentAmount);
         if (tenderPermissionGrant is null)
         {
+            RestoreCashSelectionAfterUnpaidAttempt(method);
             return;
         }
 
@@ -1736,6 +1762,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             : null;
         if (willAutoCompleteCardPayment && confirmPermissionGrant is null)
         {
+            RestoreCashSelectionAfterUnpaidAttempt(method);
             return;
         }
 
@@ -1751,6 +1778,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
         var isCard = method == PaymentMethodKind.Card;
         var deferInstallmentRepaymentProvider = IsInstallmentRepaymentMode;
         var paymentEntryVersion = _paymentEntryVersion;
+        var restoreCashAfterUnpaidAttempt = false;
         try
         {
             if (isCard && !deferInstallmentRepaymentProvider)
@@ -1823,6 +1851,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
 
             _cardSession.HandleOperationCanceledException(cardPaymentCts, paymentEntryVersion);
             await ReleaseVoucherTendersAfterCardFailureAsync();
+            restoreCashAfterUnpaidAttempt = true;
             return;
         }
         // 中文注释：卡终端致命异常绕过普通失败处理，确保原异常实例继续向上传播。
@@ -1857,6 +1886,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                 ex);
             _cardSession.HandleUnexpectedException(ex, paymentEntryVersion);
             await ReleaseVoucherTendersAfterCardFailureAsync();
+            restoreCashAfterUnpaidAttempt = true;
             return;
         }
         catch (OperationCanceledException ex)
@@ -1932,6 +1962,12 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             {
                 _cardSession.EndCardPayment(cardPaymentCts);
             }
+
+            if (restoreCashAfterUnpaidAttempt)
+            {
+                // 中文注释：卡任务结束后才回到现金：此时 IsActive 已为 false；卡状态不明时 helper 自行跳过。
+                RestoreCashSelectionAfterUnpaidAttempt(method);
+            }
         }
 
         if (!IsCurrentPaymentEntry(paymentEntryVersion))
@@ -1947,6 +1983,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
             if (result.CardResult?.RequiresRecovery != true)
             {
                 await ReleaseVoucherTendersAfterCardFailureAsync();
+                RestoreCashSelectionAfterUnpaidAttempt(method);
             }
             return;
         }
@@ -1977,6 +2014,7 @@ public partial class PaymentViewModel : ObservableObject, IDisposable
                 if (!resultUnknown)
                 {
                     await ReleaseVoucherTendersAfterCardFailureAsync();
+                    RestoreCashSelectionAfterUnpaidAttempt(method);
                 }
 
                 return;
