@@ -540,6 +540,11 @@ export interface StoreOrderDynamicData {
   lastArrivalOrderDate?: string | null
   // 来货后销量的实际统计起点（来货日与日统计数据起点 2024-09-14 取较晚者）。
   salesStartDate?: string | null
+  // 去年同期（往前推 364 天、同星期几起算）窗口起点与未来 30 / 60 天本店销量；
+  // 分店未启用 POS、去年此时没数据或旧后端时为 null/undefined，卡片与工具栏开关据此隐藏。
+  lastYearWindowStartDate?: string | null
+  lastYearSalesQuantity30Days?: number | null
+  lastYearSalesQuantity60Days?: number | null
 }
 
 export interface StoreOrderDynamicDataRequest {
@@ -561,6 +566,9 @@ export interface StoreOrderProductSalesSummaryItem {
   lastArrivalOrderQuantity: number | null
   lastArrivalOrderDate: string | null
   salesStartDate: string | null
+  lastYearWindowStartDate: string | null
+  lastYearSalesQuantity30Days: number | null
+  lastYearSalesQuantity60Days: number | null
 }
 
 export interface StoreOrderCartItem {

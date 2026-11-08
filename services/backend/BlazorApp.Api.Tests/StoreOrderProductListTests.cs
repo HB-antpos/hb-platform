@@ -5,6 +5,7 @@ using System.Text.Json;
 using AutoMapper;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Features.StoreOrders.Cart.Domain;
+using BlazorApp.Api.Features.StoreOrders.ProductHistory.Domain;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.React;
@@ -4702,9 +4703,15 @@ public sealed class StoreOrderProductListTests : IDisposable
 
         Assert.True(result.Success, result.Message);
         Assert.Equal(500, result.Data!.Count);
-        var statsLogs = _sqlLogs
+        var allStatsLogs = _sqlLogs
             .Where(log => log.Contains("ProductStoreDailySalesStatistic", StringComparison.OrdinalIgnoreCase))
             .ToList();
+        // 去年同期另有两条：窗口开头的营业探测（无 GROUP BY）+ 500 个商品一批的条件求和（CASE）；不计入来货后销量的分批数。
+        static bool IsLastYearLog(string log) =>
+            !log.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase)
+            || log.Contains("CASE", StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, allStatsLogs.Count(IsLastYearLog));
+        var statsLogs = allStatsLogs.Where(log => !IsLastYearLog(log)).ToList();
         Assert.Equal(5, statsLogs.Count);
         Assert.All(statsLogs, log =>
         {
@@ -4817,6 +4824,122 @@ public sealed class StoreOrderProductListTests : IDisposable
                 Assert.Null(item.LastArrivalOrderQuantity);
                 Assert.Null(item.LastArrivalOrderDate);
             }
+        );
+    }
+
+    [Theory]
+    [InlineData(2026, 11, 8)]
+    [InlineData(2028, 3, 1)]
+    [InlineData(2027, 1, 3)]
+    public void GetLastYearWindowStartDate_往前推364天且同星期几(int year, int month, int day)
+    {
+        var today = new DateTime(year, month, day, 15, 30, 0);
+        var start = ProductHistoryRules.GetLastYearWindowStartDate(today);
+
+        Assert.Equal(today.Date.AddDays(-364), start);
+        Assert.Equal(today.DayOfWeek, start.DayOfWeek);
+        Assert.Equal(TimeSpan.Zero, start.TimeOfDay);
+    }
+
+    [Fact]
+    public async Task GetSalesSinceLastArrivalSummaryAsync_去年同期按星期几对齐返回30天与60天销量()
+    {
+        // 2026-11-08 是星期日，往前推 364 天 = 2025-11-09（也是星期日）；30 天窗口到 2025-12-08，60 天到 2026-01-07。
+        var today = new DateTime(2026, 11, 8);
+        var windowStart = new DateTime(2025, 11, 9);
+        await SeedStoreAsync("STORE-LAST-YEAR", "S001", "去年同期门店", isActive: true);
+        await SeedStoreAsync("STORE-LAST-YEAR-OTHER", "S002", "别的门店", isActive: true);
+        // 逐行插入：SQLite 批量插入的日期字面量与参数格式不同，边界比较会漏行。
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(-1), "S001", "SUP-1", "P-LY", 50, 50m);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart, "S001", "SUP-1", "P-LY", 5, 5m);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(29), "S001", "SUP-1", "P-LY", 3, 3m);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(30), "S001", "SUP-1", "P-LY", 4, 4m);
+        // 同一天另一家供应商口径的行也要合计进来（主键含 SupplierCode）。
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(30), "S001", "SUP-2", "P-LY", 1, 1m);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(59), "S001", "SUP-1", "P-LY", 2, 2m);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(60), "S001", "SUP-1", "P-LY", 100, 100m);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(3), "S002", "SUP-1", "P-LY", 70, 70m);
+
+        var result = await CreateServiceForSalesDate(today).GetSalesSinceLastArrivalSummaryAsync(
+            new StoreOrderSalesSinceLastArrivalSummaryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCodes = new List<string> { "P-LY", "P-NOT-SOLD" },
+            }
+        );
+
+        Assert.True(result.Success, result.Message);
+        Assert.Collection(
+            result.Data!,
+            item =>
+            {
+                Assert.Equal("P-LY", item.ProductCode);
+                Assert.Equal(windowStart, item.LastYearWindowStartDate);
+                Assert.Equal(today.DayOfWeek, item.LastYearWindowStartDate!.Value.DayOfWeek);
+                Assert.Equal(8, item.LastYearSalesQuantity30Days);
+                Assert.Equal(15, item.LastYearSalesQuantity60Days);
+            },
+            item =>
+            {
+                // 本店去年此时已营业但这个商品没卖：显示 0，不是隐藏。
+                Assert.Equal("P-NOT-SOLD", item.ProductCode);
+                Assert.Equal(windowStart, item.LastYearWindowStartDate);
+                Assert.Equal(0, item.LastYearSalesQuantity30Days);
+                Assert.Equal(0, item.LastYearSalesQuantity60Days);
+            }
+        );
+    }
+
+    [Fact]
+    public async Task GetSalesSinceLastArrivalSummaryAsync_窗口开头本店没有日统计时去年同期为空()
+    {
+        // 窗口开头 7 天（2025-11-09 ~ 2025-11-15）本店没有任何数据：视为去年此时还没营业或没覆盖，整段为 null。
+        var today = new DateTime(2026, 11, 8);
+        var windowStart = new DateTime(2025, 11, 9);
+        await SeedStoreAsync("STORE-LAST-YEAR-LATE", "S001", "去年中途开业", isActive: true);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart.AddDays(7), "S001", "SUP-1", "P-LATE", 9, 9m);
+
+        var result = await CreateServiceForSalesDate(today).GetSalesSinceLastArrivalSummaryAsync(
+            new StoreOrderSalesSinceLastArrivalSummaryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCodes = new List<string> { "P-LATE" },
+            }
+        );
+
+        Assert.True(result.Success, result.Message);
+        var item = Assert.Single(result.Data!);
+        Assert.Null(item.LastYearWindowStartDate);
+        Assert.Null(item.LastYearSalesQuantity30Days);
+        Assert.Null(item.LastYearSalesQuantity60Days);
+    }
+
+    [Fact]
+    public async Task GetSalesSinceLastArrivalSummaryAsync_非POS启用分店不查询去年同期()
+    {
+        var today = new DateTime(2026, 11, 8);
+        var windowStart = new DateTime(2025, 11, 9);
+        await SeedStoreAsync("STORE-LAST-YEAR-DISABLED", "S001", "停用门店", isActive: false);
+        await SeedProductStoreDailySalesStatisticAsync(windowStart, "S001", "SUP-1", "P-DISABLED", 6, 6m);
+
+        _sqlLogs.Clear();
+        var result = await CreateServiceForSalesDate(today).GetSalesSinceLastArrivalSummaryAsync(
+            new StoreOrderSalesSinceLastArrivalSummaryRequestDto
+            {
+                StoreCode = "S001",
+                ProductCodes = new List<string> { "P-DISABLED" },
+            }
+        );
+
+        Assert.True(result.Success, result.Message);
+        var item = Assert.Single(result.Data!);
+        Assert.Null(item.LastYearWindowStartDate);
+        Assert.Null(item.LastYearSalesQuantity30Days);
+        Assert.Null(item.LastYearSalesQuantity60Days);
+        // 停用分店在门店校验处短路：一条日统计 SQL 都不能发出。
+        Assert.DoesNotContain(
+            _sqlLogs,
+            log => log.Contains("ProductStoreDailySalesStatistic", StringComparison.OrdinalIgnoreCase)
         );
     }
 

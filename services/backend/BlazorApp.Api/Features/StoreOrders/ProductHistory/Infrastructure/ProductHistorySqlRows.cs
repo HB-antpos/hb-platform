@@ -84,6 +84,32 @@ internal sealed class ProductHistoryProductSalesStatisticRow
     public int TotalQuantity { get; set; }
 }
 
+/// <summary>
+/// 去年同期按商品聚合的一行：同一批日统计行里同时算出前 30 天与整段 60 天销量。
+/// </summary>
+internal sealed class ProductHistoryLastYearSalesRow
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public int Quantity30Days { get; set; }
+    public int Quantity60Days { get; set; }
+}
+
+internal sealed class ProductHistoryStatisticDateRow
+{
+    public DateTime Date { get; set; }
+}
+
+/// <summary>
+/// 去年同期销量结果：窗口可用时才有值；商品不在字典里表示窗口内没卖（按 0 显示）。
+/// </summary>
+internal sealed class ProductHistoryLastYearSalesResult
+{
+    public DateTime WindowStartDate { get; init; }
+    public Dictionary<string, ProductHistoryLastYearSalesRow> SalesMap { get; } = new(
+        StringComparer.OrdinalIgnoreCase
+    );
+}
+
 internal sealed class ProductHistorySalesCutoffGroup
 {
     public DateTime ArrivalDate { get; init; }

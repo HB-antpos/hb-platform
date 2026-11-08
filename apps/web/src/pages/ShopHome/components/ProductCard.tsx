@@ -10,6 +10,12 @@ import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { PRODUCT_GRADE_CONFIG } from '../../../types/productGrade'
 import type { StoreOrderDynamicData, StoreOrderProductItem } from '../../../types/storeOrder'
 import { formatOrderHistoryQuantity } from '../orderHistoryQuantity'
+import {
+  DEFAULT_LAST_YEAR_WINDOW_DAYS,
+  type LastYearWindowDays,
+  formatLastYearWindowRange,
+  pickLastYearSalesQuantity,
+} from '../lastYearSalesWindow'
 import { formatShopCardDate } from '../shopCardDate'
 
 import productCardMessagesEn from './productCardMessages.en.json'
@@ -23,6 +29,8 @@ const { Paragraph, Text, Title } = Typography
 interface ProductCardProps {
   product: StoreOrderProductItem
   dynamicData?: StoreOrderDynamicData
+  // 工具栏全局选择的去年同期窗口（30 / 60 天）。
+  lastYearWindowDays?: LastYearWindowDays
   categoryPath?: string
   onCategoryPathClick?: (product: StoreOrderProductItem) => void
   onAddToCart: (product: StoreOrderProductItem, quantity: number) => Promise<void> | void
@@ -36,6 +44,7 @@ interface ProductCardProps {
 function ProductCard({
   product,
   dynamicData,
+  lastYearWindowDays = DEFAULT_LAST_YEAR_WINDOW_DAYS,
   categoryPath,
   onCategoryPathClick,
   onAddToCart,
@@ -64,6 +73,13 @@ function ProductCard({
   // 最近来货日即「来货后销量」的起算日，与销量同批回填。
   const formattedLastArrivalDate = formatShopCardDate(dynamicData?.lastArrivalDate)
   const formattedSalesStartDate = formatShopCardDate(dynamicData?.salesStartDate)
+  // 去年同期：null 表示分店未启用 POS / 去年此时没数据 / 旧后端，整行隐藏；0 表示去年有数据但没卖，照常显示。
+  const lastYearSalesQuantity = pickLastYearSalesQuantity(dynamicData, lastYearWindowDays)
+  const hasLastYearSales = lastYearSalesQuantity !== null
+  const formattedLastYearRange = formatLastYearWindowRange(
+    dynamicData?.lastYearWindowStartDate,
+    lastYearWindowDays,
+  )
   const lastOrderDate = dynamicData?.lastOrderDate
   const hasLastOrder = Boolean(lastOrderDate)
     || dynamicData?.lastQuantity != null
@@ -203,7 +219,7 @@ function ProductCard({
               </Tooltip>
             ) : null}
 
-            {(hasLastOrder || hasSalesQuantity) ? (
+            {(hasLastOrder || hasSalesQuantity || hasLastYearSales) ? (
               <div
                 className="shop-product-last-order shop-product-activity-entry"
                 role="button"
@@ -275,6 +291,20 @@ function ProductCard({
                       ) : null}
                     </span>
                     <strong className="shop-product-activity-sales-value">{salesQuantity}</strong>
+                  </div>
+                ) : null}
+                {hasLastYearSales ? (
+                  <div className="shop-product-activity-sales shop-product-activity-last-year">
+                    {/* 去年同期按星期几对齐（往前推 364 天），日期范围写在标题下方，便于和来货后销量对照。 */}
+                    <span className="shop-product-activity-sales-heading">
+                      <span className="shop-product-activity-label">
+                        {t('shop.productActivityHistory.cardLastYearSales', { days: lastYearWindowDays })}
+                      </span>
+                      {formattedLastYearRange ? (
+                        <span className="shop-product-activity-sales-since">{formattedLastYearRange}</span>
+                      ) : null}
+                    </span>
+                    <strong className="shop-product-activity-sales-value">{lastYearSalesQuantity}</strong>
                   </div>
                 ) : null}
               </div>

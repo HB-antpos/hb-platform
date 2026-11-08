@@ -859,6 +859,13 @@ export async function getStoreOrderProductSalesSummary(query: StoreOrderProductS
         typeof item.lastArrivalOrderQuantity === 'number' ? item.lastArrivalOrderQuantity : null,
       lastArrivalOrderDate: typeof item.lastArrivalOrderDate === 'string' ? item.lastArrivalOrderDate : null,
       salesStartDate: typeof item.salesStartDate === 'string' ? item.salesStartDate : null,
+      // 去年同期：0 是有效值（去年有数据但没卖）；缺失（旧后端/分店未启用 POS）一律归一为 null 以隐藏。
+      lastYearWindowStartDate:
+        typeof item.lastYearWindowStartDate === 'string' ? item.lastYearWindowStartDate : null,
+      lastYearSalesQuantity30Days:
+        typeof item.lastYearSalesQuantity30Days === 'number' ? item.lastYearSalesQuantity30Days : null,
+      lastYearSalesQuantity60Days:
+        typeof item.lastYearSalesQuantity60Days === 'number' ? item.lastYearSalesQuantity60Days : null,
     })
     return items
   }, [])

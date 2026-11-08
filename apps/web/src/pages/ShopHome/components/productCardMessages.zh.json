@@ -6,7 +6,11 @@
       "cardOrdered": "订货",
       "cardDelivered": "送货",
       "cardSalesSinceArrival": "来货后累计销量",
-      "cardSalesSince": "自 {{date}} 起"
+      "cardSalesSince": "自 {{date}} 起",
+      "cardLastYearSales": "去年同期 {{days}} 天",
+      "lastYearToggleLabel": "去年同期",
+      "lastYearToggleDays": "{{days}} 天",
+      "lastYearToggleTooltip": "按星期几对齐：从去年同一星期几（往前推 364 天）起算，统计本店未来 30 / 60 天的销量"
     }
   }
 }

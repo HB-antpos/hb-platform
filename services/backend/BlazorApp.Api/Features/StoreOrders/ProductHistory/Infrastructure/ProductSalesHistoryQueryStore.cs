@@ -154,7 +154,138 @@ internal sealed class ProductSalesHistoryQueryStore(
                 : null;
         }
 
+        // 去年同期只在 POS 启用分店查询：上面 salesContext 为 null（停用/删除/不存在）时已提前返回，这里不会执行。
+        // 单独兜底异常：去年同期失败只让这几个字段保持 null，不能连累来货后销量。
+        try
+        {
+            var lastYearResult = await GetLastYearSameWeekdaySalesAsync(
+                salesContext.StoreCode,
+                input.ProductCodes,
+                salesContext.EndDate
+            );
+            if (lastYearResult != null)
+            {
+                foreach (var item in result)
+                {
+                    lastYearResult.SalesMap.TryGetValue(item.ProductCode, out var lastYearRow);
+                    item.LastYearWindowStartDate = lastYearResult.WindowStartDate;
+                    item.LastYearSalesQuantity30Days = lastYearRow?.Quantity30Days ?? 0;
+                    item.LastYearSalesQuantity60Days = lastYearRow?.Quantity60Days ?? 0;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "GetSalesSinceLastArrivalSummaryAsync fill last-year same-period sales failed; fields remain null"
+            );
+        }
+
         return result;
+    }
+
+    /// <summary>
+    /// 本店去年同期（往前推 364 天、同星期几起算）未来 30 / 60 天的商品销量。
+    /// 窗口开头 7 天本店没有任何日销统计（去年还没开店或数据未覆盖）时返回 null，前端整段隐藏而不是显示 0。
+    /// </summary>
+    internal async Task<ProductHistoryLastYearSalesResult?> GetLastYearSameWeekdaySalesAsync(
+        string storeCode,
+        IReadOnlyList<string> productCodes,
+        DateTime storeToday
+    )
+    {
+        var sw = Stopwatch.StartNew();
+        var statsQueryCount = 0;
+        var salesRows = 0;
+        var storeReady = false;
+        try
+        {
+            var normalizedProductCodes = productCodes
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (normalizedProductCodes.Count == 0)
+            {
+                return null;
+            }
+
+            var windowStart = ProductHistoryRules.GetLastYearWindowStartDate(storeToday);
+            var probeEnd = windowStart.AddDays(ProductHistoryRules.LastYearStoreReadyProbeDays);
+            var shortEnd = windowStart.AddDays(ProductHistoryRules.LastYearShortWindowDays);
+            var longEnd = windowStart.AddDays(ProductHistoryRules.LastYearLongWindowDays);
+
+            // 日统计 Date 恒为零点，统一用半开区间 [起点, 终点)，避免 SQLite/SQL Server 对「<= 当天」的文本/时间比较差异。
+            statsQueryCount++;
+            var probeRow = await _db.Queryable<ProductStoreDailySalesStatistic>()
+                .Where(item =>
+                    item.BranchCode == storeCode
+                    && item.Date >= windowStart
+                    && item.Date < probeEnd
+                )
+                .Select(item => new ProductHistoryStatisticDateRow { Date = item.Date })
+                .FirstAsync();
+            storeReady = probeRow != null;
+            if (!storeReady)
+            {
+                return null;
+            }
+
+            var result = new ProductHistoryLastYearSalesResult { WindowStartDate = windowStart };
+            foreach (var codes in normalizedProductCodes.Chunk(
+                         ProductHistoryRules.SalesStatisticsMaxProductCodesPerCutoffGroup
+                     ))
+            {
+                var chunkCodes = codes.ToList();
+                statsQueryCount++;
+                // 一次读出 60 天的行，前 30 天用条件求和，同一批行算两个数，切换 30/60 不用再查。
+                var rows = await _db.Queryable<ProductStoreDailySalesStatistic>()
+                    .Where(item =>
+                        item.BranchCode == storeCode
+                        && chunkCodes.Contains(item.ProductCode)
+                        && item.Date >= windowStart
+                        && item.Date < longEnd
+                    )
+                    .GroupBy(item => item.ProductCode)
+                    .Select(item => new ProductHistoryLastYearSalesRow
+                    {
+                        ProductCode = item.ProductCode,
+                        Quantity30Days = SqlFunc.AggregateSum(
+                            SqlFunc.IIF(item.Date < shortEnd, item.TotalQuantity, 0)
+                        ),
+                        Quantity60Days = SqlFunc.AggregateSum(item.TotalQuantity),
+                    })
+                    .ToListAsync();
+                foreach (var row in rows.Where(row => !string.IsNullOrWhiteSpace(row.ProductCode)))
+                {
+                    if (result.SalesMap.TryGetValue(row.ProductCode, out var existing))
+                    {
+                        existing.Quantity30Days += row.Quantity30Days;
+                        existing.Quantity60Days += row.Quantity60Days;
+                    }
+                    else
+                    {
+                        result.SalesMap[row.ProductCode] = row;
+                    }
+                }
+            }
+
+            salesRows = result.SalesMap.Count;
+            return result;
+        }
+        finally
+        {
+            sw.Stop();
+            logger.LogInformation(
+                "[shop-home-perf] stage=sales-summary.last-year requestCount={RequestCount} storeReady={StoreReady} statsQueryCount={StatsQueryCount} salesRows={SalesRows} elapsedMs={ElapsedMs}",
+                productCodes.Count,
+                storeReady,
+                statsQueryCount,
+                salesRows,
+                sw.ElapsedMilliseconds
+            );
+        }
     }
 
     internal async Task<ProductHistorySalesContext?> GetActiveStoreSalesContextAsync(
