@@ -933,7 +933,9 @@ th {
   font-weight: 600;
 }
 .last-year-toggle .period-buttons button.active {
-  color: #00695c;
+  border-color: #00695c;
+  background: #00695c;
+  color: #fff;
 }
 .item-stats {
   display: grid;
