@@ -943,6 +943,22 @@ namespace BlazorApp.Shared.DTOs
     /// 来货后销量的实际统计起点：来货日期与日统计数据起点（2024-09-14）取较晚者；无来货时为 null。
     /// </summary>
     public DateTime? SalesStartDate { get; set; }
+
+    /// <summary>
+    /// 去年同期窗口起点：门店当地今天往前推 364 天（与今天同星期几）。
+    /// 只有 POS 启用分店、且该分店在窗口开始时已有日销统计数据才返回；否则为 null，前端隐藏去年同期。
+    /// </summary>
+    public DateTime? LastYearWindowStartDate { get; set; }
+
+    /// <summary>
+    /// 去年同期未来 30 天（窗口起点起含当天共 30 天）本店该商品销量；窗口可用但没卖为 0，不可用为 null。
+    /// </summary>
+    public int? LastYearSalesQuantity30Days { get; set; }
+
+    /// <summary>
+    /// 去年同期未来 60 天（窗口起点起含当天共 60 天）本店该商品销量；窗口可用但没卖为 0，不可用为 null。
+    /// </summary>
+    public int? LastYearSalesQuantity60Days { get; set; }
   }
 
   /// <summary>

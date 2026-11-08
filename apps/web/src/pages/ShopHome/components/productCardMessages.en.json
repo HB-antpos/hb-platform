@@ -6,7 +6,11 @@
       "cardOrdered": "Ordered",
       "cardDelivered": "Delivered",
       "cardSalesSinceArrival": "Sold since arrival",
-      "cardSalesSince": "since {{date}}"
+      "cardSalesSince": "since {{date}}",
+      "cardLastYearSales": "Last year · next {{days}} days",
+      "lastYearToggleLabel": "Last year",
+      "lastYearToggleDays": "{{days}} days",
+      "lastYearToggleTooltip": "Aligned by weekday: starts on the same weekday last year (364 days ago) and totals this store's sales over the next 30 / 60 days"
     }
   }
 }

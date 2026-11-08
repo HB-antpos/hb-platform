@@ -4726,6 +4726,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 去年同期紧跟在来货后销量下面：虚线分隔，表示是参考数据而不是本次来货的结果。 */
+.shop-product-activity-sales + .shop-product-activity-last-year {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px dashed #d8e7f4;
+}
+
 .shop-product-card-purchase {
   grid-column: 1 / -1;
   padding-top: 10px;

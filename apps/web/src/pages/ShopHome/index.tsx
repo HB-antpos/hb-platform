@@ -18,6 +18,13 @@ import { useBarcodeScanner } from '../../hooks/useBarcodeScanner'
 import ProductCard from './components/ProductCard'
 import ProductActivityHistoryModal from './components/ProductActivityHistoryModal'
 import {
+  LAST_YEAR_WINDOW_DAYS_OPTIONS,
+  type LastYearWindowDays,
+  hasLastYearSalesWindow,
+  readStoredLastYearWindowDays,
+  storeLastYearWindowDays,
+} from './lastYearSalesWindow'
+import {
   buildShopHomeDynamicDataRequestIdentity,
   createShopHomeDynamicDataRequestCoordinator,
   createShopHomeDynamicDataStoreScopeCoordinator,
@@ -99,6 +106,8 @@ export default function ShopHomePage() {
   const [total, setTotal] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState(200)
+  // 去年同期窗口天数：工具栏全局切换，默认 30 天，本机记住上次选择。
+  const [lastYearWindowDays, setLastYearWindowDays] = useState<LastYearWindowDays>(readStoredLastYearWindowDays)
   const [categoryName, setCategoryName] = useState('')
   const [categoryTree, setCategoryTree] = useState<WarehouseCategoryNode[]>([])
   const [parentChain, setParentChain] = useState<WarehouseCategoryNode[]>([])
@@ -528,10 +537,13 @@ export default function ShopHomePage() {
                 lastArrivalOrderQuantity,
                 lastArrivalOrderDate,
                 salesStartDate,
+                lastYearWindowStartDate,
+                lastYearSalesQuantity30Days,
+                lastYearSalesQuantity60Days,
               },
             ]) => {
               const previousData = previousMap[productCode]
-              // 销量与来货日期、来货数量同批回填；都没变时保留原引用，商品卡才能跳过重渲染。
+              // 销量、来货日期、来货数量与去年同期同批回填；都没变时保留原引用，商品卡才能跳过重渲染。
               if (
                 !previousData
                 || (previousData.salesQuantitySinceLastArrival === salesQuantitySinceLastArrival
@@ -539,7 +551,10 @@ export default function ShopHomePage() {
                   && previousData.lastArrivalQuantity === lastArrivalQuantity
                   && previousData.lastArrivalOrderQuantity === lastArrivalOrderQuantity
                   && previousData.lastArrivalOrderDate === lastArrivalOrderDate
-                  && previousData.salesStartDate === salesStartDate)
+                  && previousData.salesStartDate === salesStartDate
+                  && previousData.lastYearWindowStartDate === lastYearWindowStartDate
+                  && previousData.lastYearSalesQuantity30Days === lastYearSalesQuantity30Days
+                  && previousData.lastYearSalesQuantity60Days === lastYearSalesQuantity60Days)
               ) {
                 return
               }
@@ -553,6 +568,9 @@ export default function ShopHomePage() {
                 lastArrivalOrderQuantity,
                 lastArrivalOrderDate,
                 salesStartDate,
+                lastYearWindowStartDate,
+                lastYearSalesQuantity30Days,
+                lastYearSalesQuantity60Days,
               }
             })
             return hasChanged ? nextMap : previousMap
@@ -1249,6 +1267,29 @@ export default function ShopHomePage() {
               </Button>
             </Space>
           </div>
+          {/* 只有后端带回了去年同期窗口（POS 启用分店且去年此时有数据）才显示开关；切换只换显示，不重新请求。 */}
+          {hasLastYearSalesWindow(dynamicDataMap) ? (
+            <div className="shop-home-filters">
+              <Tooltip title={t('shop.productActivityHistory.lastYearToggleTooltip')}>
+                <span className="shop-home-filter-label">{t('shop.productActivityHistory.lastYearToggleLabel')}:</span>
+              </Tooltip>
+              <Space size={4}>
+                {LAST_YEAR_WINDOW_DAYS_OPTIONS.map((days) => (
+                  <Tag.CheckableTag
+                    key={days}
+                    checked={lastYearWindowDays === days}
+                    onChange={() => {
+                      setLastYearWindowDays(days)
+                      storeLastYearWindowDays(days)
+                    }}
+                    style={{ padding: '2px 8px', borderRadius: 4 }}
+                  >
+                    {t('shop.productActivityHistory.lastYearToggleDays', { days })}
+                  </Tag.CheckableTag>
+                ))}
+              </Space>
+            </div>
+          ) : null}
           <div className="shop-home-filters">
             <span className="shop-home-filter-label">{t('shop.itemsPerPage')}:</span>
             <Select
@@ -1298,6 +1339,7 @@ export default function ShopHomePage() {
                   key={product.productCode}
                   product={product}
                   dynamicData={cardDynamicData}
+                  lastYearWindowDays={lastYearWindowDays}
                   categoryPath={categoryPathMap[product.productCode]}
                   onCategoryPathClick={
                     shouldShowCategoryPath && product.warehouseCategoryGUID
