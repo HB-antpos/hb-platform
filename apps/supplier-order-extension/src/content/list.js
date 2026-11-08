@@ -22,6 +22,7 @@
     recoveryMod,
     storageCompatMod,
     rankingMod,
+    lastYearMod,
   ] = await Promise.all([
     import(chrome.runtime.getURL('lib/profiles.js')),
     import(chrome.runtime.getURL('lib/batch.js')),
@@ -31,6 +32,7 @@
     import(chrome.runtime.getURL('lib/list-recovery.js')),
     import(chrome.runtime.getURL('lib/storage-compat.js')),
     import(chrome.runtime.getURL('lib/ranking.js')),
+    import(chrome.runtime.getURL('lib/last-year.js')),
   ]);
   const { matchProfile, normalizeCategoryConfig } = profilesMod;
   const { createBatchQueue } = batchMod;
@@ -52,6 +54,7 @@
   } = recoveryMod;
   const { matchesStorageArea } = storageCompatMod;
   const { formatSalesRankBand, normalizeRankingDays } = rankingMod;
+  const { formatLastYearRange, normalizeLastYearDays, pickLastYearQuantity } = lastYearMod;
 
   const origin = location.origin;
 
@@ -60,12 +63,15 @@
     'selectedStoreCode',
     'locale',
     'salesRankingDays',
+    'lastYearWindowDays',
     'categoryCaptureSettings',
   ]);
   const { supplierProfiles } = stored;
   let selectedStoreCode = stored.selectedStoreCode || null;
   let locale = normalizeLocale(stored.locale);
   let salesRankingDays = normalizeRankingDays(stored.salesRankingDays);
+  // 去年同期窗口（30 / 60 天）由侧栏选择；两个数一次随摘要返回，切换只重绘按钮，不重新请求。
+  let lastYearDays = normalizeLastYearDays(stored.lastYearWindowDays);
   const profiles = (supplierProfiles && supplierProfiles.profiles) || [];
   const profile = matchProfile(profiles, { origin, pathname: location.pathname });
   if (!profile) return;
@@ -499,6 +505,8 @@
       '.hb-order{color:#c62828;font-weight:600;}',
       '.hb-sales{color:#1565c0;font-weight:600;}',
       '.hb-muted{color:#757575;}',
+      '.hb-ly{display:block;margin-top:2px;color:#00695c;font-weight:500;}',
+      '.hb-ly b{font-weight:700;}',
       '.hb-rank-line{display:block;width:max-content;max-width:100%;box-sizing:border-box;margin-top:2px;padding:1px 6px;border:1px solid #b8d8ff;border-radius:999px;background:#eaf3ff;color:#1565c0;font-size:10px;font-weight:700;line-height:1.5;overflow-wrap:anywhere;white-space:normal;}',
       '.hb-rank-line-top-20{border-color:#c7e3ca;background:#eef7ef;color:#2e7d32;}',
       '.hb-rank-line-top-30{border-color:#ddd0ef;background:#f5f1fb;color:#6f3cc3;}',
@@ -536,6 +544,25 @@
       btn.appendChild(order);
       btn.appendChild(document.createTextNode(' · '));
       btn.appendChild(sales);
+    }
+    // 去年同期：窗口不可用（旧后端、分店未启用、去年没数据）时没有 lastYear，整行不显示；0 照常显示。
+    const lastYearQuantity = pickLastYearQuantity(state.lastYear, lastYearDays);
+    if ((state.kind === 'ok' || state.reason === 'noPurchase') && lastYearQuantity !== null) {
+      const lastYearLine = document.createElement('span');
+      lastYearLine.className = 'hb-ly';
+      lastYearLine.appendChild(
+        document.createTextNode(`${formatMessage('lastYearDays', { days: lastYearDays })} `),
+      );
+      const lastYearNumber = document.createElement('b');
+      lastYearNumber.textContent = String(lastYearQuantity);
+      lastYearLine.appendChild(lastYearNumber);
+      btn.appendChild(lastYearLine);
+      // 悬浮提示窗口日期范围，说明这一行统计的是哪一段。
+      btn.title = formatMessage('lastYearTooltip', {
+        range: formatLastYearRange(state.lastYear.windowStartDate, lastYearDays),
+      });
+    } else {
+      btn.removeAttribute('title');
     }
     const rankLabel = formatSalesRankBand(state.salesRankBand);
     if ((state.kind === 'ok' || state.reason === 'noPurchase') && rankLabel) {
@@ -871,6 +898,14 @@
           ? changes.salesRankingDays.newValue
           : salesRankingDays,
       });
+    }
+    if (changes.lastYearWindowDays) {
+      // 只换显示：数据已随摘要返回，不重新请求。
+      lastYearDays = normalizeLastYearDays(changes.lastYearWindowDays.newValue);
+      for (const card of trackedCards) {
+        const entry = registry.get(card);
+        if (entry) renderButton(entry, entry.state);
+      }
     }
     if (changes.locale) {
       locale = normalizeLocale(changes.locale.newValue);

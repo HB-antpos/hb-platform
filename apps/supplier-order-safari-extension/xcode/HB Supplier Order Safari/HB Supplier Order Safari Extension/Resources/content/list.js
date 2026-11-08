@@ -2236,6 +2236,90 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     }
   });
 
+  // src/lib/last-year.js
+  var last_year_exports = {};
+  __export(last_year_exports, {
+    DEFAULT_LAST_YEAR_DAYS: () => DEFAULT_LAST_YEAR_DAYS,
+    LAST_YEAR_DAYS_OPTIONS: () => LAST_YEAR_DAYS_OPTIONS,
+    LAST_YEAR_DAYS_STORAGE_KEY: () => LAST_YEAR_DAYS_STORAGE_KEY,
+    formatDayMonth: () => formatDayMonth,
+    formatDayMonthYear: () => formatDayMonthYear,
+    formatLastYearRange: () => formatLastYearRange,
+    lastYearWeekday: () => lastYearWeekday,
+    normalizeLastYear: () => normalizeLastYear,
+    normalizeLastYearDays: () => normalizeLastYearDays,
+    pickLastYearQuantity: () => pickLastYearQuantity
+  });
+  function normalizeLastYearDays(value) {
+    return Number(value) === 60 ? 60 : DEFAULT_LAST_YEAR_DAYS;
+  }
+  function parseDateOnly(value) {
+    const match = typeof value === "string" ? DATE_ONLY.exec(value.trim()) : null;
+    if (!match) return null;
+    const [, year, month, day] = match;
+    const time = Date.UTC(Number(year), Number(month) - 1, Number(day));
+    return Number.isFinite(time) ? { time, year, month: Number(month), day: Number(day) } : null;
+  }
+  function finiteNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+  function normalizeLastYear(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const start = parseDateOnly(raw.lastYearWindowStartDate);
+    const quantity30 = finiteNumber(raw.lastYearSalesQuantity30Days);
+    const quantity60 = finiteNumber(raw.lastYearSalesQuantity60Days);
+    if (!start || quantity30 === null || quantity60 === null) return null;
+    return {
+      windowStartDate: `${start.year}-${String(start.month).padStart(2, "0")}-${String(start.day).padStart(2, "0")}`,
+      quantity30,
+      quantity60
+    };
+  }
+  function pickLastYearQuantity(lastYear, days) {
+    if (!lastYear) return null;
+    return normalizeLastYearDays(days) === 60 ? lastYear.quantity60 : lastYear.quantity30;
+  }
+  function formatDay(time, withYear) {
+    const date = new Date(time);
+    const base = `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]}`;
+    return withYear ? `${base} ${date.getUTCFullYear()}` : base;
+  }
+  function formatLastYearRange(windowStartDate, days) {
+    const start = parseDateOnly(windowStartDate);
+    if (!start) return "";
+    const endTime = start.time + (normalizeLastYearDays(days) - 1) * 24 * 60 * 60 * 1e3;
+    const sameYear = new Date(endTime).getUTCFullYear() === Number(start.year);
+    return `${formatDay(start.time, !sameYear)} \u2013 ${formatDay(endTime, true)}`;
+  }
+  function lastYearWeekday(windowStartDate, locale = "zh") {
+    const start = parseDateOnly(windowStartDate);
+    if (!start) return "";
+    const names = WEEKDAYS[locale] || WEEKDAYS.zh;
+    return names[new Date(start.time).getUTCDay()];
+  }
+  function formatDayMonth(value) {
+    const date = parseDateOnly(value);
+    return date ? formatDay(date.time, false) : "";
+  }
+  function formatDayMonthYear(value) {
+    const date = parseDateOnly(value);
+    return date ? formatDay(date.time, true) : "";
+  }
+  var LAST_YEAR_DAYS_OPTIONS, DEFAULT_LAST_YEAR_DAYS, LAST_YEAR_DAYS_STORAGE_KEY, MONTHS, WEEKDAYS, DATE_ONLY;
+  var init_last_year = __esm({
+    "src/lib/last-year.js"() {
+      LAST_YEAR_DAYS_OPTIONS = [30, 60];
+      DEFAULT_LAST_YEAR_DAYS = 30;
+      LAST_YEAR_DAYS_STORAGE_KEY = "lastYearWindowDays";
+      MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      WEEKDAYS = {
+        zh: ["\u5468\u65E5", "\u5468\u4E00", "\u5468\u4E8C", "\u5468\u4E09", "\u5468\u56DB", "\u5468\u4E94", "\u5468\u516D"],
+        en: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+      };
+      DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})/;
+    }
+  });
+
   // src/lib/ranking.js
   var ranking_exports = {};
   __export(ranking_exports, {
@@ -2571,7 +2655,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       return {
         kind: "none",
         reason: "noPurchase",
-        ...salesRankBand ? { salesRankBand, salesRankingDays } : {}
+        ...salesRankBand ? { salesRankBand, salesRankingDays } : {},
+        ...item.lastYear ? { lastYear: item.lastYear } : {}
       };
     }
     return {
@@ -2579,7 +2664,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       lastOrderDate: item.lastOrderDate,
       lastOrderQuantity: item.lastOrderQuantity,
       salesToDate: item.salesToDate,
-      ...salesRankBand ? { salesRankBand, salesRankingDays } : {}
+      ...salesRankBand ? { salesRankBand, salesRankingDays } : {},
+      ...item.lastYear ? { lastYear: item.lastYear } : {}
     };
   }
   function buildSummaryCacheKey(storeCode, itemNumber, salesRankingDays) {
@@ -2604,6 +2690,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     if (salesRankingAvailable === true && hasMatch && salesRankBand) {
       normalized.salesRankBand = salesRankBand;
     }
+    const lastYear = hasMatch ? normalizeLastYear(raw) : null;
+    if (lastYear) normalized.lastYear = lastYear;
     return normalized;
   }
   function normalizeSummaryMap(rawData) {
@@ -2632,6 +2720,7 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   }
   var init_dats_state = __esm({
     "src/lib/dats-state.js"() {
+      init_last_year();
       init_profiles();
       init_ranking();
     }
@@ -2766,6 +2855,12 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
           lastOrder: "\u4E0A\u6B21\u8BA2\u8D27",
           salesToDate: "\u81F3\u4ECA\u9500\u91CF",
           salesRankBand: "\u8FD1 {days} \u5929\u9500\u91CF\uFF1A{band}",
+          lastYearDays: "\u53BB\u5E74\u540C\u671F {days} \u5929",
+          lastYearLabel: "\u53BB\u5E74\u540C\u671F",
+          lastYearTooltip: "\u53BB\u5E74\u540C\u671F {range}\uFF08\u6309\u661F\u671F\u51E0\u5BF9\u9F50\uFF0C\u5F80\u524D\u63A8 364 \u5929\uFF0C\u53EA\u7B97\u672C\u5E97\uFF09",
+          lastYearHint: "\u53BB\u5E74\u540C\u671F\u6309\u661F\u671F\u51E0\u5BF9\u9F50\uFF1A\u8D77\u70B9 {start} \u4E0E\u4ECA\u5929\u540C\u4E3A{weekday}\uFF08\u5F80\u524D\u63A8 364 \u5929\uFF09\u3002\u53EA\u7B97\u672C\u5E97\u3002",
+          salesSince: "\u81EA {date} \u8D77",
+          lastOrderTile: "\u4E0A\u6B21\u8BA2\u8D27",
           categoryTitle: "\u4F9B\u5E94\u5546\u5206\u7C7B\u91C7\u96C6",
           categoryPassiveLabel: "\u6D4F\u89C8\u5206\u7C7B\u9875\u65F6\u81EA\u52A8\u91C7\u96C6",
           categoryPassiveHint: "\u4EC5\u56DE\u4F20\u5206\u7C7B\u8DEF\u5F84\u4E0E\u9875\u9762\u4E0A\u7684\u5546\u54C1\u8D27\u53F7\u3002",
@@ -2893,6 +2988,12 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
           lastOrder: "Last order",
           salesToDate: "Sales to date",
           salesRankBand: "Sales in the last {days} days: {band}",
+          lastYearDays: "Last year \xB7 {days} days",
+          lastYearLabel: "Last year",
+          lastYearTooltip: "Last year {range} (aligned by weekday, 364 days back, this store only)",
+          lastYearHint: "Last year is aligned by weekday: the start {start} is the same weekday as today ({weekday}, 364 days back). This store only.",
+          salesSince: "since {date}",
+          lastOrderTile: "Last order",
           categoryTitle: "Supplier categories",
           categoryPassiveLabel: "Capture while browsing category pages",
           categoryPassiveHint: "Sends only the category path and the item numbers shown on the page.",
@@ -3019,7 +3120,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       i18nMod,
       recoveryMod,
       storageCompatMod,
-      rankingMod
+      rankingMod,
+      lastYearMod
     ] = await Promise.all([
       Promise.resolve().then(() => (init_profiles(), profiles_exports)),
       Promise.resolve().then(() => (init_batch(), batch_exports)),
@@ -3028,7 +3130,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       Promise.resolve().then(() => (init_i18n(), i18n_exports)),
       Promise.resolve().then(() => (init_list_recovery(), list_recovery_exports)),
       Promise.resolve().then(() => (init_storage_compat(), storage_compat_exports)),
-      Promise.resolve().then(() => (init_ranking(), ranking_exports))
+      Promise.resolve().then(() => (init_ranking(), ranking_exports)),
+      Promise.resolve().then(() => (init_last_year(), last_year_exports))
     ]);
     const { matchProfile: matchProfile2, normalizeCategoryConfig: normalizeCategoryConfig2 } = profilesMod;
     const { createBatchQueue: createBatchQueue2 } = batchMod;
@@ -3050,18 +3153,21 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     } = recoveryMod;
     const { matchesStorageArea: matchesStorageArea2 } = storageCompatMod;
     const { formatSalesRankBand: formatSalesRankBand2, normalizeRankingDays: normalizeRankingDays2 } = rankingMod;
+    const { formatLastYearRange: formatLastYearRange2, normalizeLastYearDays: normalizeLastYearDays2, pickLastYearQuantity: pickLastYearQuantity2 } = lastYearMod;
     const origin = location.origin;
     const stored = await chrome.storage.local.get([
       "supplierProfiles",
       "selectedStoreCode",
       "locale",
       "salesRankingDays",
+      "lastYearWindowDays",
       "categoryCaptureSettings"
     ]);
     const { supplierProfiles } = stored;
     let selectedStoreCode = stored.selectedStoreCode || null;
     let locale = normalizeLocale2(stored.locale);
     let salesRankingDays = normalizeRankingDays2(stored.salesRankingDays);
+    let lastYearDays = normalizeLastYearDays2(stored.lastYearWindowDays);
     const profiles = supplierProfiles && supplierProfiles.profiles || [];
     const profile = matchProfile2(profiles, { origin, pathname: location.pathname });
     if (!profile) return;
@@ -3436,6 +3542,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
         ".hb-order{color:#c62828;font-weight:600;}",
         ".hb-sales{color:#1565c0;font-weight:600;}",
         ".hb-muted{color:#757575;}",
+        ".hb-ly{display:block;margin-top:2px;color:#00695c;font-weight:500;}",
+        ".hb-ly b{font-weight:700;}",
         ".hb-rank-line{display:block;width:max-content;max-width:100%;box-sizing:border-box;margin-top:2px;padding:1px 6px;border:1px solid #b8d8ff;border-radius:999px;background:#eaf3ff;color:#1565c0;font-size:10px;font-weight:700;line-height:1.5;overflow-wrap:anywhere;white-space:normal;}",
         ".hb-rank-line-top-20{border-color:#c7e3ca;background:#eef7ef;color:#2e7d32;}",
         ".hb-rank-line-top-30{border-color:#ddd0ef;background:#f5f1fb;color:#6f3cc3;}"
@@ -3472,6 +3580,23 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
         btn.appendChild(order);
         btn.appendChild(document.createTextNode(" \xB7 "));
         btn.appendChild(sales);
+      }
+      const lastYearQuantity = pickLastYearQuantity2(state.lastYear, lastYearDays);
+      if ((state.kind === "ok" || state.reason === "noPurchase") && lastYearQuantity !== null) {
+        const lastYearLine = document.createElement("span");
+        lastYearLine.className = "hb-ly";
+        lastYearLine.appendChild(
+          document.createTextNode(`${formatMessage("lastYearDays", { days: lastYearDays })} `)
+        );
+        const lastYearNumber = document.createElement("b");
+        lastYearNumber.textContent = String(lastYearQuantity);
+        lastYearLine.appendChild(lastYearNumber);
+        btn.appendChild(lastYearLine);
+        btn.title = formatMessage("lastYearTooltip", {
+          range: formatLastYearRange2(state.lastYear.windowStartDate, lastYearDays)
+        });
+      } else {
+        btn.removeAttribute("title");
       }
       const rankLabel = formatSalesRankBand2(state.salesRankBand);
       if ((state.kind === "ok" || state.reason === "noPurchase") && rankLabel) {
@@ -3760,6 +3885,13 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
           storeCode: changes.selectedStoreCode ? changes.selectedStoreCode.newValue : selectedStoreCode,
           rankingDays: changes.salesRankingDays ? changes.salesRankingDays.newValue : salesRankingDays
         });
+      }
+      if (changes.lastYearWindowDays) {
+        lastYearDays = normalizeLastYearDays2(changes.lastYearWindowDays.newValue);
+        for (const card of trackedCards) {
+          const entry = registry.get(card);
+          if (entry) renderButton(entry, entry.state);
+        }
       }
       if (changes.locale) {
         locale = normalizeLocale2(changes.locale.newValue);

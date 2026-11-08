@@ -3,7 +3,16 @@ import { categoryErrorMessageKey, resolveInitialLocale, t } from '../lib/i18n.js
 import { BUILD_TARGET } from '../config.js';
 import { summarizeProgress } from '../lib/category-crawl.js';
 import { normalizeApiOrigin, toApiHostPattern } from '../lib/api-origin.js';
-import { createGenerationGuard } from '../lib/dats-state.js';
+import { createGenerationGuard, normalizeSummaryItem } from '../lib/dats-state.js';
+import {
+  LAST_YEAR_DAYS_STORAGE_KEY,
+  formatDayMonth,
+  formatDayMonthYear,
+  formatLastYearRange,
+  lastYearWeekday,
+  normalizeLastYearDays,
+  pickLastYearQuantity,
+} from '../lib/last-year.js';
 import { selectVisibleSupplierEntries } from '../lib/supplier-list.js';
 import { getPendingLocateChange, matchesStorageArea } from '../lib/storage-compat.js';
 import { createSingleFlight } from '../lib/session-handoff.js';
@@ -54,6 +63,9 @@ let profiles = [];
 let storeOptions = [];
 let selectedStoreCode = null;
 let timeline = [];
+// 当前商品的摘要（上次订货、至今销量、去年同期）；去年同期窗口天数由侧栏选择、记在本机，按钮同步跟随。
+let itemSummary = null;
+let lastYearDays = 30;
 let filter = 'all';
 let page = 1;
 let currentItem = null;
@@ -158,6 +170,12 @@ function applyI18n() {
   el('categoryRetryBtn').textContent = t(locale, 'categoryRetryFailed');
   el('categorySafariHint').textContent = t(locale, 'categorySafariHint');
   el('historyTab').textContent = t(locale, 'historyTab');
+  el('lastYearLabel').textContent = t(locale, 'lastYearLabel');
+  el('statOrderLabel').textContent = t(locale, 'lastOrderTile');
+  el('statSalesLabel').textContent = t(locale, 'salesToDate');
+  document.querySelectorAll('[data-last-year-days]').forEach((button) => {
+    button.textContent = `${button.dataset.lastYearDays} ${t(locale, 'days')}`;
+  });
   renderRankingPercentLabels();
   el('rankingSupplierLabel').textContent = t(locale, 'rankingSupplier');
   el('rankingPeriodLabel').textContent = t(locale, 'rankingPeriod');
@@ -981,7 +999,49 @@ async function refreshRankingAfterStaleStoreSales() {
   });
 }
 
+// 对照卡片与去年同期开关：窗口不可用（旧后端、分店未启用、去年没数据）时没有「去年同期」格与开关；
+// 上次订货 / 至今销量两格只要商品有采购就保留。
+function renderItemSummary() {
+  const visibleView = !!user && activeView === 'history' && !!currentItem;
+  const summary = visibleView ? itemSummary : null;
+  const lastYear = summary?.lastYear || null;
+  const lastYearQuantity = pickLastYearQuantity(lastYear, lastYearDays);
+  const hasOrder = !!summary && !!summary.lastOrderDate;
+  const hasLastYear = lastYearQuantity !== null;
+
+  el('lastYearSection').hidden = !hasLastYear;
+  document.querySelectorAll('[data-last-year-days]').forEach((button) => {
+    const active = Number(button.dataset.lastYearDays) === lastYearDays;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+
+  el('itemStats').hidden = !(hasOrder || hasLastYear);
+  el('statOrder').hidden = !hasOrder;
+  el('statSales').hidden = !hasOrder;
+  if (hasOrder) {
+    el('statOrderValue').textContent = `${formatDayMonth(summary.lastOrderDate)} × ${summary.lastOrderQuantity ?? 0}`;
+    el('statOrderSub').textContent = formatDayMonthYear(summary.lastOrderDate).slice(-4);
+    el('statSalesValue').textContent = String(summary.salesToDate ?? 0);
+    el('statSalesSub').textContent = formatMessage('salesSince', {
+      date: formatDayMonthYear(summary.lastOrderDate),
+    });
+  }
+  el('statLastYear').hidden = !hasLastYear;
+  el('lastYearHint').hidden = !hasLastYear;
+  if (hasLastYear) {
+    el('statLastYearLabel').textContent = formatMessage('lastYearDays', { days: lastYearDays });
+    el('statLastYearValue').textContent = String(lastYearQuantity);
+    el('statLastYearSub').textContent = formatLastYearRange(lastYear.windowStartDate, lastYearDays);
+    el('lastYearHint').textContent = formatMessage('lastYearHint', {
+      start: formatDayMonthYear(lastYear.windowStartDate),
+      weekday: lastYearWeekday(lastYear.windowStartDate, locale),
+    });
+  }
+}
+
 function renderItem() {
+  renderItemSummary();
   document.querySelectorAll('.filters button').forEach((button) => {
     button.classList.toggle('active', button.dataset.filter === filter);
     button.disabled = !currentItem;
@@ -1311,6 +1371,7 @@ async function loadItem(item) {
   selectSupplier(item.supplierCode);
   activeView = 'history';
   timeline = [];
+  itemSummary = null;
   filter = 'all';
   page = 1;
   // 只使用服务端筛选后的当前门店，避免沿用内容脚本或旧缓存中的停用 POS 门店。
@@ -1335,6 +1396,8 @@ async function loadItem(item) {
   }
   const { orders, sales } = normalizeCycles(resp.data);
   timeline = buildTimeline({ orders, sales });
+  // 摘要字段与按钮同一套归一化（上次订货、至今销量、去年同期），保留「汇总」对照卡片。
+  itemSummary = normalizeSummaryItem(resp.data);
   setStatus('');
   renderItem();
 }
@@ -1348,6 +1411,7 @@ function resetAuthenticatedData() {
   profiles = [];
   storeOptions = [];
   timeline = [];
+  itemSummary = null;
   rankingData = null;
   rankingLegacyItems = null;
   currentSupplier = null;
@@ -1404,8 +1468,10 @@ async function init() {
     'selectedStoreCode',
     'salesRankingDays',
     'salesRankingPageSize',
+    LAST_YEAR_DAYS_STORAGE_KEY,
   ]);
   locale = resolveInitialLocale(stored.locale, getPreferredLanguages());
+  lastYearDays = normalizeLastYearDays(stored[LAST_YEAR_DAYS_STORAGE_KEY]);
   rankingDays = normalizeRankingDays(stored.salesRankingDays);
   rankingPageSize = normalizeRankingPageSize(stored.salesRankingPageSize);
   const normalizedPreferences = {};
@@ -1616,6 +1682,17 @@ el('rankingSupplierSelect').addEventListener('change', async () => {
   await loadRanking();
 });
 
+document.querySelectorAll('[data-last-year-days]').forEach((button) => {
+  button.addEventListener('click', async () => {
+    const nextDays = normalizeLastYearDays(button.dataset.lastYearDays);
+    if (nextDays === lastYearDays) return;
+    // 两个窗口的销量已随摘要一起返回：只换显示、记在本机，列表页按钮经存储变更同步跟随，不重新请求。
+    lastYearDays = nextDays;
+    renderItemSummary();
+    await chrome.storage.local.set({ [LAST_YEAR_DAYS_STORAGE_KEY]: lastYearDays });
+  });
+});
+
 document.querySelectorAll('[data-ranking-days]').forEach((button) => {
   button.addEventListener('click', async () => {
     const nextDays = normalizeRankingDays(button.dataset.rankingDays);
@@ -1747,6 +1824,13 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (categoryChanged) renderCategory();
 
   if (matchesStorageArea(areaName, 'local')) {
+    if (changes[LAST_YEAR_DAYS_STORAGE_KEY]) {
+      const nextLastYearDays = normalizeLastYearDays(changes[LAST_YEAR_DAYS_STORAGE_KEY].newValue);
+      if (nextLastYearDays !== lastYearDays) {
+        lastYearDays = nextLastYearDays;
+        renderItemSummary();
+      }
+    }
     let rankingContextChanged = false;
     let rankingPageSizeChanged = false;
     if (changes.salesRankingDays) {
