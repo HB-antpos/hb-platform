@@ -1,3 +1,4 @@
+import { normalizeLastYear } from './last-year.js';
 import { matchesListPage } from './profiles.js';
 import { normalizeRankingDays, normalizeSalesRankBand } from './ranking.js';
 
@@ -49,6 +50,7 @@ export function computeButtonState(item) {
       kind: 'none',
       reason: 'noPurchase',
       ...(salesRankBand ? { salesRankBand, salesRankingDays } : {}),
+      ...(item.lastYear ? { lastYear: item.lastYear } : {}),
     };
   }
   return {
@@ -57,6 +59,7 @@ export function computeButtonState(item) {
     lastOrderQuantity: item.lastOrderQuantity,
     salesToDate: item.salesToDate,
     ...(salesRankBand ? { salesRankBand, salesRankingDays } : {}),
+    ...(item.lastYear ? { lastYear: item.lastYear } : {}),
   };
 }
 
@@ -94,6 +97,9 @@ export function normalizeSummaryItem(raw, { salesRankingAvailable = false } = {}
   if (salesRankingAvailable === true && hasMatch && salesRankBand) {
     normalized.salesRankBand = salesRankBand;
   }
+  // 去年同期：窗口不可用（旧后端、分店未启用、去年没数据）时没有这个键，按钮与改动前完全一样。
+  const lastYear = hasMatch ? normalizeLastYear(raw) : null;
+  if (lastYear) normalized.lastYear = lastYear;
   return normalized;
 }
 

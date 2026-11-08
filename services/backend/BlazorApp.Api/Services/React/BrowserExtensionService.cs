@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Features.StoreOrders.ProductHistory.Infrastructure;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Models;
 using BlazorApp.Api.Services.LocalSupplierCategories;
@@ -65,6 +66,7 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
         );
         var today = await ResolveStoreTodayAsync(storeCode);
         var items = await QuerySummariesAsync(storeCode, supplierCode, itemNumbers, today);
+        await ApplyLastYearSalesAsync(storeCode, today, items, cancellationToken);
         var rankingToday = ResolveRankingToday();
         var response = new BrowserExtensionProductSummaryBatchDto
         {
@@ -133,6 +135,7 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
         var summary = (
             await QuerySummariesAsync(storeCode, supplierCode, new[] { itemNumber }, today)
         ).Single();
+        await ApplyLastYearSalesAsync(storeCode, today, new[] { summary });
 
         var response = new BrowserExtensionPurchaseCyclesDto
         {
@@ -147,6 +150,9 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
             LatestPurchaseDate = summary.LatestPurchaseDate,
             LatestPurchaseQuantity = summary.LatestPurchaseQuantity,
             SalesSinceLatestPurchase = summary.SalesSinceLatestPurchase,
+            LastYearWindowStartDate = summary.LastYearWindowStartDate,
+            LastYearSalesQuantity30Days = summary.LastYearSalesQuantity30Days,
+            LastYearSalesQuantity60Days = summary.LastYearSalesQuantity60Days,
         };
 
         if (summary.MatchStatus != BrowserExtensionMatchStatuses.Matched)
@@ -804,6 +810,71 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
                 };
             })
             .ToList();
+    }
+
+    /// <summary>
+    /// 给已匹配到系统商品的摘要补「去年同期」：往前推 364 天（同星期几）起算的 30 / 60 天本店销量。
+    /// 分店已由 ResolveStoreTodayAsync 校验为启用且未删除；去年此时本店没有日销数据时全部保持 null，插件隐藏该行。
+    /// 单独兜底异常：去年同期失败只让这三个字段为 null，不连累原有采购记录与销量排名。
+    /// </summary>
+    internal async Task ApplyLastYearSalesAsync(
+        string storeCode,
+        DateOnly today,
+        IReadOnlyList<BrowserExtensionProductSummaryDto> items,
+        CancellationToken cancellationToken = default
+    )
+    {
+        try
+        {
+            var productCodes = items
+                .Where(item =>
+                    item.MatchStatus == BrowserExtensionMatchStatuses.Matched
+                    || !string.IsNullOrWhiteSpace(item.ProductCode)
+                )
+                .Select(item => item.ProductCode)
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Cast<string>()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (productCodes.Count == 0)
+            {
+                return;
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            var outcome = await LastYearSameWeekdaySalesQuery.QueryAsync(
+                _db,
+                storeCode,
+                productCodes,
+                today.ToDateTime(TimeOnly.MinValue)
+            );
+            if (outcome.Result is not { } lastYear)
+            {
+                return;
+            }
+
+            var windowStart = DateOnly.FromDateTime(lastYear.WindowStartDate);
+            foreach (var item in items)
+            {
+                if (string.IsNullOrWhiteSpace(item.ProductCode))
+                {
+                    continue;
+                }
+
+                lastYear.SalesMap.TryGetValue(item.ProductCode, out var row);
+                item.LastYearWindowStartDate = windowStart;
+                item.LastYearSalesQuantity30Days = row?.Quantity30Days ?? 0;
+                item.LastYearSalesQuantity60Days = row?.Quantity60Days ?? 0;
+            }
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, cancellationToken))
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "浏览器订货助手去年同期销量降级 StoreCode={StoreCode}", storeCode);
+        }
     }
 
     private async Task<DateOnly> ResolveStoreTodayAsync(string storeCode)

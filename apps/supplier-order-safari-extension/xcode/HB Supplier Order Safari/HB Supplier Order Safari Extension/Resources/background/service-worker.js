@@ -1104,7 +1104,7 @@
   }
 
   // hb-safari-config:config.js
-  var EXTENSION_VERSION = "1.5.0";
+  var EXTENSION_VERSION = "1.6.0";
   var HB_API_ORIGIN = "https://hotbargain.vip";
   var HB_WEB_ORIGIN = "https://hotbargain.vip";
   var BUILD_TARGET = "safari";

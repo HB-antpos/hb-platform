@@ -918,3 +918,87 @@ th {
     min-height: 44px;
   }
 }
+
+/* ---- 去年同期：窗口开关与对照卡片（青绿色，与订货红 / 销量蓝区分）---- */
+.last-year-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.last-year-toggle[hidden] {
+  display: none;
+}
+.last-year-toggle > span {
+  font-weight: 600;
+}
+.last-year-toggle .period-buttons button.active {
+  color: #00695c;
+}
+.item-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.5fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+.item-stats[hidden],
+.item-stats .stat[hidden],
+.last-year-hint[hidden] {
+  display: none;
+}
+.item-stats .stat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+}
+.stat-k,
+.stat-s {
+  color: #757575;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-k {
+  font-size: 11px;
+}
+.stat-s {
+  min-height: 14px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.stat-v {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.stat-order .stat-v {
+  padding-top: 4px;
+  font-size: 14px;
+  color: #c62828;
+}
+.stat-sales .stat-v {
+  color: #1565c0;
+}
+.stat-last-year {
+  border-color: #9fd2c9 !important;
+  background: #e6f4f1 !important;
+}
+.stat-last-year .stat-k,
+.stat-last-year .stat-v {
+  color: #00695c;
+}
+.stat-last-year .stat-k {
+  font-weight: 600;
+}
+.last-year-hint {
+  margin: 0 0 12px;
+  color: #5f6b69;
+  font-size: 11.5px;
+  line-height: 1.45;
+}

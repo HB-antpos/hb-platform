@@ -119,6 +119,18 @@ public sealed class BrowserExtensionProductSummaryDto
     public decimal SalesSinceLatestPurchase { get; set; }
     public DateTime? SalesStatisticLastUpdate { get; set; }
     public string? SalesRankBand { get; set; }
+
+    /// <summary>
+    /// 去年同期窗口起点：门店当地今天往前推 364 天（与今天同星期几）。
+    /// 分店不可用、去年此时本店没有日销数据，或商品没匹配到系统商品时为 null，插件据此隐藏「去年同期」。
+    /// </summary>
+    public DateOnly? LastYearWindowStartDate { get; set; }
+
+    /// <summary>去年同期窗口起 30 天本店该商品销量；窗口可用但没卖为 0，不可用为 null。</summary>
+    public int? LastYearSalesQuantity30Days { get; set; }
+
+    /// <summary>去年同期窗口起 60 天本店该商品销量；窗口可用但没卖为 0，不可用为 null。</summary>
+    public int? LastYearSalesQuantity60Days { get; set; }
 }
 
 public sealed class BrowserExtensionProductSummaryBatchDto
@@ -176,6 +188,18 @@ public sealed class BrowserExtensionPurchaseCyclesDto
     public DateOnly? LatestPurchaseDate { get; set; }
     public decimal? LatestPurchaseQuantity { get; set; }
     public decimal SalesSinceLatestPurchase { get; set; }
+
+    /// <summary>
+    /// 去年同期窗口起点：门店当地今天往前推 364 天（与今天同星期几）。
+    /// 分店不可用、去年此时本店没有日销数据，或商品没匹配到系统商品时为 null，插件据此隐藏「去年同期」。
+    /// </summary>
+    public DateOnly? LastYearWindowStartDate { get; set; }
+
+    /// <summary>去年同期窗口起 30 天本店该商品销量；窗口可用但没卖为 0，不可用为 null。</summary>
+    public int? LastYearSalesQuantity30Days { get; set; }
+
+    /// <summary>去年同期窗口起 60 天本店该商品销量；窗口可用但没卖为 0，不可用为 null。</summary>
+    public int? LastYearSalesQuantity60Days { get; set; }
     public List<BrowserExtensionPurchaseCycleDto> Cycles { get; set; } = new();
 }
 

@@ -59,6 +59,14 @@
         <button id="storeSaveBtn" type="button">保存</button>
       </section>
 
+      <section id="lastYearSection" class="last-year-toggle" hidden>
+        <span id="lastYearLabel">去年同期</span>
+        <div class="period-buttons" role="group" aria-labelledby="lastYearLabel">
+          <button type="button" data-last-year-days="30" class="active">30 天</button>
+          <button type="button" data-last-year-days="60">60 天</button>
+        </div>
+      </section>
+
       <section id="supplierSection" hidden>
         <div class="supplier-heading">
           <h2 id="supplierTitle">供应商</h2>
@@ -104,6 +112,24 @@
 
       <section id="itemSection" role="tabpanel" aria-labelledby="historyTab" hidden>
         <h2 id="itemTitle"></h2>
+        <div id="itemStats" class="item-stats" hidden>
+          <div id="statOrder" class="stat stat-order">
+            <span id="statOrderLabel" class="stat-k"></span>
+            <strong id="statOrderValue" class="stat-v"></strong>
+            <span id="statOrderSub" class="stat-s"></span>
+          </div>
+          <div id="statSales" class="stat stat-sales">
+            <span id="statSalesLabel" class="stat-k"></span>
+            <strong id="statSalesValue" class="stat-v"></strong>
+            <span id="statSalesSub" class="stat-s"></span>
+          </div>
+          <div id="statLastYear" class="stat stat-last-year" hidden>
+            <span id="statLastYearLabel" class="stat-k"></span>
+            <strong id="statLastYearValue" class="stat-v"></strong>
+            <span id="statLastYearSub" class="stat-s"></span>
+          </div>
+        </div>
+        <p id="lastYearHint" class="last-year-hint" hidden></p>
         <div class="filters">
           <button type="button" data-filter="all" class="active">全部</button>
           <button type="button" data-filter="order">订货</button>

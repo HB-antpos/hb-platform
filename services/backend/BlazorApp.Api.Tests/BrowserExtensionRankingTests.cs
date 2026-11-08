@@ -1059,6 +1059,81 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
         await _localDb.Insertable(statistics).ExecuteCommandAsync();
     }
 
+    [Fact]
+    public async Task ApplyLastYearSalesAsync_按星期几对齐并补齐30与60天销量()
+    {
+        // 2026-11-08 周日 → 窗口起点 2025-11-09（周日）；30 天到 12-08，60 天到 2026-01-07。
+        var today = new DateOnly(2026, 11, 8);
+        var windowStart = new DateTime(2025, 11, 9);
+        await SeedEnabledStoreAsync("S-LY", "去年同期门店", "LY-1");
+        // 逐行插入：边界日期用 < / >=，避开 SQLite 批量插入的日期字面量差异。
+        await SeedLastYearSalesAsync(windowStart.AddDays(-1), "S-LY", "P-LY", 50);
+        await SeedLastYearSalesAsync(windowStart, "S-LY", "P-LY", 5);
+        await SeedLastYearSalesAsync(windowStart.AddDays(29), "S-LY", "P-LY", 3);
+        await SeedLastYearSalesAsync(windowStart.AddDays(30), "S-LY", "P-LY", 4);
+        await SeedLastYearSalesAsync(windowStart.AddDays(59), "S-LY", "P-LY", 2);
+        await SeedLastYearSalesAsync(windowStart.AddDays(60), "S-LY", "P-LY", 100);
+        await SeedLastYearSalesAsync(windowStart.AddDays(3), "S-OTHER", "P-LY", 70);
+
+        var items = new List<BrowserExtensionProductSummaryDto>
+        {
+            new() { ItemNumber = "A", MatchStatus = BrowserExtensionMatchStatuses.Matched, ProductCode = "P-LY" },
+            // 本店去年有数据但这个商品没卖：显示 0。
+            new() { ItemNumber = "B", MatchStatus = BrowserExtensionMatchStatuses.NoPurchase, ProductCode = "P-NOT-SOLD" },
+            // 没匹配到系统商品：保持 null。
+            new() { ItemNumber = "C", MatchStatus = BrowserExtensionMatchStatuses.Unmatched },
+        };
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await CreateService(cache, new DateTime(2026, 11, 8)).ApplyLastYearSalesAsync("S-LY", today, items);
+
+        Assert.Equal(new DateOnly(2025, 11, 9), items[0].LastYearWindowStartDate);
+        Assert.Equal(today.DayOfWeek, items[0].LastYearWindowStartDate!.Value.DayOfWeek);
+        Assert.Equal(8, items[0].LastYearSalesQuantity30Days);
+        Assert.Equal(14, items[0].LastYearSalesQuantity60Days);
+        Assert.Equal(0, items[1].LastYearSalesQuantity30Days);
+        Assert.Equal(0, items[1].LastYearSalesQuantity60Days);
+        Assert.NotNull(items[1].LastYearWindowStartDate);
+        Assert.Null(items[2].LastYearWindowStartDate);
+        Assert.Null(items[2].LastYearSalesQuantity30Days);
+        Assert.Null(items[2].LastYearSalesQuantity60Days);
+    }
+
+    [Fact]
+    public async Task ApplyLastYearSalesAsync_窗口开头本店没有日销统计时全部保持为空()
+    {
+        var today = new DateOnly(2026, 11, 8);
+        await SeedEnabledStoreAsync("S-NEW", "去年中途开业", "LY-2");
+        // 窗口开头 7 天（2025-11-09 ~ 2025-11-15）没有数据，第 8 天才有：视为去年此时未营业或数据未覆盖。
+        await SeedLastYearSalesAsync(new DateTime(2025, 11, 16), "S-NEW", "P-LATE", 9);
+
+        var items = new List<BrowserExtensionProductSummaryDto>
+        {
+            new() { ItemNumber = "A", MatchStatus = BrowserExtensionMatchStatuses.Matched, ProductCode = "P-LATE" },
+        };
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        await CreateService(cache, new DateTime(2026, 11, 8)).ApplyLastYearSalesAsync("S-NEW", today, items);
+
+        Assert.Null(items[0].LastYearWindowStartDate);
+        Assert.Null(items[0].LastYearSalesQuantity30Days);
+        Assert.Null(items[0].LastYearSalesQuantity60Days);
+    }
+
+    private async Task SeedLastYearSalesAsync(DateTime date, string branchCode, string productCode, int quantity)
+    {
+        await _localDb.Insertable(new ProductStoreDailySalesStatistic
+        {
+            Date = date.Date,
+            BranchCode = branchCode,
+            SupplierCode = "240",
+            ProductCode = productCode,
+            TotalQuantity = quantity,
+            TotalAmount = quantity * 10m,
+            UpdateTime = date.Date,
+        }).ExecuteCommandAsync();
+    }
+
     private async Task SeedEnabledStoreAsync(string storeCode, string storeName, string deviceNumber)
     {
         await _localDb.Insertable(new Store

@@ -196,96 +196,23 @@ internal sealed class ProductSalesHistoryQueryStore(
     )
     {
         var sw = Stopwatch.StartNew();
-        var statsQueryCount = 0;
-        var salesRows = 0;
-        var storeReady = false;
-        try
-        {
-            var normalizedProductCodes = productCodes
-                .Where(code => !string.IsNullOrWhiteSpace(code))
-                .Select(code => code.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            if (normalizedProductCodes.Count == 0)
-            {
-                return null;
-            }
-
-            var windowStart = ProductHistoryRules.GetLastYearWindowStartDate(storeToday);
-            var probeEnd = windowStart.AddDays(ProductHistoryRules.LastYearStoreReadyProbeDays);
-            var shortEnd = windowStart.AddDays(ProductHistoryRules.LastYearShortWindowDays);
-            var longEnd = windowStart.AddDays(ProductHistoryRules.LastYearLongWindowDays);
-
-            // 日统计 Date 恒为零点，统一用半开区间 [起点, 终点)，避免 SQLite/SQL Server 对「<= 当天」的文本/时间比较差异。
-            statsQueryCount++;
-            var probeRow = await _db.Queryable<ProductStoreDailySalesStatistic>()
-                .Where(item =>
-                    item.BranchCode == storeCode
-                    && item.Date >= windowStart
-                    && item.Date < probeEnd
-                )
-                .Select(item => new ProductHistoryStatisticDateRow { Date = item.Date })
-                .FirstAsync();
-            storeReady = probeRow != null;
-            if (!storeReady)
-            {
-                return null;
-            }
-
-            var result = new ProductHistoryLastYearSalesResult { WindowStartDate = windowStart };
-            foreach (var codes in normalizedProductCodes.Chunk(
-                         ProductHistoryRules.SalesStatisticsMaxProductCodesPerCutoffGroup
-                     ))
-            {
-                var chunkCodes = codes.ToList();
-                statsQueryCount++;
-                // 一次读出 60 天的行，前 30 天用条件求和，同一批行算两个数，切换 30/60 不用再查。
-                var rows = await _db.Queryable<ProductStoreDailySalesStatistic>()
-                    .Where(item =>
-                        item.BranchCode == storeCode
-                        && chunkCodes.Contains(item.ProductCode)
-                        && item.Date >= windowStart
-                        && item.Date < longEnd
-                    )
-                    .GroupBy(item => item.ProductCode)
-                    .Select(item => new ProductHistoryLastYearSalesRow
-                    {
-                        ProductCode = item.ProductCode,
-                        Quantity30Days = SqlFunc.AggregateSum(
-                            SqlFunc.IIF(item.Date < shortEnd, item.TotalQuantity, 0)
-                        ),
-                        Quantity60Days = SqlFunc.AggregateSum(item.TotalQuantity),
-                    })
-                    .ToListAsync();
-                foreach (var row in rows.Where(row => !string.IsNullOrWhiteSpace(row.ProductCode)))
-                {
-                    if (result.SalesMap.TryGetValue(row.ProductCode, out var existing))
-                    {
-                        existing.Quantity30Days += row.Quantity30Days;
-                        existing.Quantity60Days += row.Quantity60Days;
-                    }
-                    else
-                    {
-                        result.SalesMap[row.ProductCode] = row;
-                    }
-                }
-            }
-
-            salesRows = result.SalesMap.Count;
-            return result;
-        }
-        finally
-        {
-            sw.Stop();
-            logger.LogInformation(
-                "[shop-home-perf] stage=sales-summary.last-year requestCount={RequestCount} storeReady={StoreReady} statsQueryCount={StatsQueryCount} salesRows={SalesRows} elapsedMs={ElapsedMs}",
-                productCodes.Count,
-                storeReady,
-                statsQueryCount,
-                salesRows,
-                sw.ElapsedMilliseconds
-            );
-        }
+        // 查询本体抽在 LastYearSameWeekdaySalesQuery，订货页与浏览器订货助手共用同一份口径。
+        var outcome = await LastYearSameWeekdaySalesQuery.QueryAsync(
+            _db,
+            storeCode,
+            productCodes,
+            storeToday
+        );
+        sw.Stop();
+        logger.LogInformation(
+            "[shop-home-perf] stage=sales-summary.last-year requestCount={RequestCount} storeReady={StoreReady} statsQueryCount={StatsQueryCount} salesRows={SalesRows} elapsedMs={ElapsedMs}",
+            productCodes.Count,
+            outcome.StoreReady,
+            outcome.StatsQueryCount,
+            outcome.Result?.SalesMap.Count ?? 0,
+            sw.ElapsedMilliseconds
+        );
+        return outcome.Result;
     }
 
     internal async Task<ProductHistorySalesContext?> GetActiveStoreSalesContextAsync(

@@ -63,6 +63,8 @@ Safari 使用相邻的独立 Xcode 宿主项目，构建、签名和启用步骤
    - 被动：打开公开分类页 `https://www.dats.com.au/office-stationery`，页面稳定约 1.5 秒后 DevTools Network 出现一条 `supplier-categories/captures` POST（路径 `Home > Office Stationery` → 单节点 `/office-stationery`）；翻页只回传新增货号，6 小时内重访同一页不重复回传；侧栏“浏览分类页时自动采集”关闭后不再回传。
    - 主动：保持 DATS 标签页为当前页，在侧栏“供应商分类采集”点击“采集全部分类”，先出现一次 `tree-snapshot`，随后约每 1.5 秒抓取一个分类页并回传 `captures`；关闭或跳转该标签页显示“已中断”并可“继续”，点击“中止”立即停止，失败分类可“重试失败”。
 
+1.6.0 起，按钮多一行「去年同期 30/60 天」销量（门店当地今天往前推 364 天、同星期几起算，只算本店；去年此时本店没有日销数据或后端未升级时整行隐藏，0 表示去年有数据但没卖），侧栏新增窗口开关与「上次订货 / 至今销量 / 去年同期」对照卡片；窗口天数记在 `chrome.storage.local` 的 `lastYearWindowDays`，切换只换显示、不重新请求。后端需先部署 `product-purchase-cycle-summary/batch` 与 `product-purchase-cycles` 的新字段，旧后端下该行自动隐藏。
+
 正式商店界面不再提供本地或自定义 API 切换，避免在无密码模式下进入无法同源授权的死路径。开发/测试构建如需其他环境，必须在构建时把 `HB_WEB_ORIGIN` 与 `HB_API_ORIGIN` 同时设为该环境的同一 origin。
 
 ## 权限边界
@@ -77,7 +79,7 @@ Safari 使用相邻的独立 Xcode 宿主项目，构建、签名和启用步骤
 
 ## 三浏览器构建
 
-`build.mjs` 生成 `dist/chrome`、`dist/edge` 与 `dist/safari`，三个 manifest 的 `version` 相同（当前 1.5.0）。Web 与 API 同源时只需设置 API 源；构建仍允许分别声明 Web/API 来源，但网站会话自动授权只在两者同源时启用：
+`build.mjs` 生成 `dist/chrome`、`dist/edge` 与 `dist/safari`，三个 manifest 的 `version` 相同（当前 1.6.0）。Web 与 API 同源时只需设置 API 源；构建仍允许分别声明 Web/API 来源，但网站会话自动授权只在两者同源时启用：
 
 ```bash
 HB_WEB_ORIGIN=https://staging.example.com HB_API_ORIGIN=https://staging.example.com npm run build
@@ -90,7 +92,7 @@ HB_WEB_ORIGIN=https://staging.example.com HB_API_ORIGIN=https://staging.example.
 参考 `services/backend/BlazorApp.Api/appsettings.BrowserExtension.example.json` 配置最新版、最低支持版、三个浏览器商店链接和声明式供应商 profile。部署时也可使用 ASP.NET Core 环境变量，例如：
 
 ```bash
-BrowserExtension__LatestVersion=1.5.0
+BrowserExtension__LatestVersion=1.6.0
 BrowserExtension__MinimumVersion=1.1.0
 BrowserExtension__ChromeStoreUrl=https://chromewebstore.google.com/detail/...
 BrowserExtension__EdgeStoreUrl=https://microsoftedge.microsoft.com/addons/detail/...
