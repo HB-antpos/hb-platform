@@ -705,6 +705,7 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
         _localDb.CodeFirst.InitTables(
             typeof(Store),
             typeof(Product),
+            typeof(HBLocalSupplier),
             typeof(ProductStoreDailySalesStatistic),
             typeof(SalesStatisticRefreshState)
         );
@@ -1057,6 +1058,188 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
             .ToList();
         await _localDb.Insertable(products).ExecuteCommandAsync();
         await _localDb.Insertable(statistics).ExecuteCommandAsync();
+    }
+
+    private async Task SeedBarcodeProductAsync(
+        string productCode,
+        string supplierCode,
+        string? itemNumber,
+        string barcode,
+        bool isActive = true,
+        bool isDeleted = false
+    )
+    {
+        await _localDb.Insertable(new Product
+        {
+            ProductCode = productCode,
+            LocalSupplierCode = supplierCode,
+            ItemNumber = itemNumber,
+            Barcode = barcode,
+            ProductName = $"商品{productCode}",
+            IsActive = isActive,
+            IsDeleted = isDeleted,
+        }).ExecuteCommandAsync();
+    }
+
+    private Task<BrowserExtensionBarcodeLookupResultDto> LookupBarcodeAsync(string barcode, string supplierCode = "240")
+    {
+        var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        return CreateService(memoryCache, new DateTime(2026, 11, 9)).LookupBarcodeAsync(
+            new BrowserExtensionBarcodeLookupRequestDto { SupplierCode = supplierCode, Barcode = barcode }
+        );
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_条码加供应商唯一命中时返回货号()
+    {
+        await SeedBarcodeProductAsync("P1", "240", "57383", "9311192573830");
+
+        var result = await LookupBarcodeAsync(" 9311192573830 ");
+
+        Assert.Equal(BrowserExtensionBarcodeLookupStatus.Matched, result.Status);
+        Assert.Equal("57383", result.ItemNumber);
+        Assert.Equal("商品P1", result.ProductName);
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_同条码跨供应商只取当前供应商的货号()
+    {
+        await SeedBarcodeProductAsync("P1", "240", "57383", "9311192573830");
+        await SeedBarcodeProductAsync("P2", "236", "GFA-1", "9311192573830");
+
+        var result = await LookupBarcodeAsync("9311192573830");
+
+        Assert.Equal(BrowserExtensionBarcodeLookupStatus.Matched, result.Status);
+        Assert.Equal("57383", result.ItemNumber);
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_属于别的供应商时只给供应商名不给货号()
+    {
+        await SeedBarcodeProductAsync("P2", "236", "GFA-1", "9311192573830");
+        await _localDb.Insertable(new HBLocalSupplier { Guid = "supplier-236", LocalSupplierCode = "236", Name = "GFA" }).ExecuteCommandAsync();
+
+        var result = await LookupBarcodeAsync("9311192573830");
+
+        Assert.Equal(BrowserExtensionBarcodeLookupStatus.OtherSupplier, result.Status);
+        Assert.Null(result.ItemNumber);
+        Assert.Empty(result.Candidates);
+        Assert.Equal(new[] { "GFA" }, result.OtherSuppliers);
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_一个组合多个货号时返回候选()
+    {
+        await SeedBarcodeProductAsync("P1", "240", "B-2", "9311192573830");
+        await SeedBarcodeProductAsync("P2", "240", "A-1", "9311192573830");
+
+        var result = await LookupBarcodeAsync("9311192573830");
+
+        Assert.Equal(BrowserExtensionBarcodeLookupStatus.Multiple, result.Status);
+        Assert.Null(result.ItemNumber);
+        Assert.Equal(new[] { "A-1", "B-2" }, result.Candidates.Select(item => item.ItemNumber));
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_有启用商品时忽略停用的旧货号()
+    {
+        await SeedBarcodeProductAsync("P1", "240", "NEW", "9311192573830");
+        await SeedBarcodeProductAsync("P2", "240", "OLD", "9311192573830", isActive: false);
+
+        var result = await LookupBarcodeAsync("9311192573830");
+
+        Assert.Equal(BrowserExtensionBarcodeLookupStatus.Matched, result.Status);
+        Assert.Equal("NEW", result.ItemNumber);
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_全部停用时仍可搜索_已删除的不算()
+    {
+        await SeedBarcodeProductAsync("P1", "240", "OLD", "9311192573830", isActive: false);
+        await SeedBarcodeProductAsync("P2", "240", "GONE", "9311192570000", isDeleted: true);
+
+        Assert.Equal("OLD", (await LookupBarcodeAsync("9311192573830")).ItemNumber);
+        Assert.Equal(
+            BrowserExtensionBarcodeLookupStatus.NotFound,
+            (await LookupBarcodeAsync("9311192570000")).Status
+        );
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_当前供应商缺货号时按未找到处理()
+    {
+        await SeedBarcodeProductAsync("P1", "240", " ", "9311192573830");
+
+        Assert.Equal(
+            BrowserExtensionBarcodeLookupStatus.NotFound,
+            (await LookupBarcodeAsync("9311192573830")).Status
+        );
+    }
+
+    [Theory]
+    [InlineData("0123456789012", "123456789012")]
+    [InlineData("123456789012", "0123456789012")]
+    public async Task LookupBarcodeAsync_UPC与EAN前导零差异都能命中(string stored, string scanned)
+    {
+        await SeedBarcodeProductAsync("P1", "240", "57383", stored);
+
+        Assert.Equal("57383", (await LookupBarcodeAsync(scanned)).ItemNumber);
+    }
+
+    [Fact]
+    public async Task LookupBarcodeAsync_未启用的供应商抛出未找到()
+    {
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => LookupBarcodeAsync("9311192573830", "NOPE"));
+    }
+
+    [Theory]
+    [InlineData("https://www.dats.com.au/search?ProductSearch={item}", true)]
+    [InlineData("https://evil.example.com/search?q={item}", false)]
+    [InlineData("https://www.dats.com.au/search", false)]
+    [InlineData("https://www.dats.com.au/{item}/{item}", false)]
+    [InlineData("https://{item}.dats.com.au/search", false)]
+    [InlineData("https://u:p@www.dats.com.au/search?q={item}", false)]
+    [InlineData(null, false)]
+    public void TryBuildSearch_只接受同源且单个占位符的网址(string? template, bool valid)
+    {
+        var search = BrowserExtensionProfileCatalog.TryBuildSearch(
+            template,
+            new[] { "https://www.dats.com.au/*" }
+        );
+
+        Assert.Equal(valid, search != null);
+    }
+
+    [Theory]
+    [InlineData("240", "https://www.dats.com.au/search?ProductSearch={item}")]
+    [InlineData("227", "https://www.malmar.com.au/Products.aspx?&searchtext={item}")]
+    [InlineData("226", "https://www.meteorparty.com.au/search?keywords={item}")]
+    [InlineData("201", "https://www.yatsal.com.au/search?ProductSearch={item}")]
+    [InlineData("SP2502280001", "http://txkorders.inzantsales.com/shop?Search={item}")]
+    public void 已核实的供应商下发搜索网址_未核实的不下发(string supplierCode, string expected)
+    {
+        var profiles = new[] { BrowserExtensionSupplierProfileOptions.CreateDatsDefault() }
+            .Concat(BrowserExtensionSupplierProfileOptions.CreateSupplierDefaults())
+            .ToList();
+        var profile = Assert.Single(profiles, item => item.SupplierCode == supplierCode);
+
+        Assert.Equal(expected, BrowserExtensionProfileCatalog.TryBuildSearch(profile.SearchUrlTemplate, profile.Origins)?.UrlTemplate);
+        // 未用真实货号核实的网站不下发，避免扫码后跳错页面。
+        Assert.Equal(
+            new[] { "201", "226", "227", "240", "SP2502280001" },
+            profiles.Where(item => item.SearchUrlTemplate != null).Select(item => item.SupplierCode).OrderBy(code => code, StringComparer.Ordinal)
+        );
+    }
+
+    [Fact]
+    public void DATS默认配置下发按货号搜索网址()
+    {
+        var search = BrowserExtensionProfileCatalog.TryBuildSearch(
+            BrowserExtensionSupplierProfileOptions.CreateDatsDefault().SearchUrlTemplate,
+            new[] { "https://www.dats.com.au/*" }
+        );
+
+        Assert.Equal("https://www.dats.com.au/search?ProductSearch={item}", search?.UrlTemplate);
     }
 
     [Fact]

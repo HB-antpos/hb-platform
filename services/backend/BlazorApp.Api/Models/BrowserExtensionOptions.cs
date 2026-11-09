@@ -107,6 +107,11 @@ public sealed class BrowserExtensionSupplierProfileOptions
     /// </summary>
     public BrowserExtensionSupplierCategoryOptions? Category { get; set; }
 
+    /// <summary>
+    /// 扫码后按货号搜索的网址模板（须含一个 {item} 且与 Origins 同源）；为空表示该供应商不启用扫码搜索。
+    /// </summary>
+    public string? SearchUrlTemplate { get; set; }
+
     public static BrowserExtensionSupplierProfileOptions CreateDatsDefault() =>
         new()
         {
@@ -122,6 +127,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             MountSelector = ".widget-productlist-code",
             MountPosition = "afterend",
             Category = BrowserExtensionSupplierCategoryOptions.CreateDatsPlatformDefault(),
+            // 2026-11-09 登录后核实：按货号搜索结果页的卡片仍是 .product[data-product-code]。
+            SearchUrlTemplate = "https://www.dats.com.au/search?ProductSearch={item}",
         };
 
     public static IReadOnlyList<BrowserExtensionSupplierProfileOptions> CreateSupplierDefaults() =>
@@ -148,6 +155,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "227",
                 DisplayName = "Malmar",
+                // 2026-11-09 用真实货号核实。
+                SearchUrlTemplate = "https://www.malmar.com.au/Products.aspx?&searchtext={item}",
                 Origins = new List<string> { "https://www.malmar.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
@@ -173,9 +182,12 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "226",
                 DisplayName = "Meteor Party",
+                // 2026-11-09 用真实货号核实。
+                SearchUrlTemplate = "https://www.meteorparty.com.au/search?keywords={item}",
                 Origins = new List<string> { "https://www.meteorparty.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
+                    "https://www.meteorparty.com.au/search*",
                     "https://www.meteorparty.com.au/balloons/*",
                     "https://www.meteorparty.com.au/Party*",
                     "https://www.meteorparty.com.au/Events*",
@@ -203,6 +215,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "201",
                 DisplayName = "Yatsal",
+                // 2026-11-09 用真实货号核实；只有一个结果时网站直接跳商品详情页。
+                SearchUrlTemplate = "https://www.yatsal.com.au/search?ProductSearch={item}",
                 Origins = new List<string>
                 {
                     "https://yatsal.com.au/*",
@@ -331,6 +345,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "SP2502280001",
                 DisplayName = "TXK",
+                // 2026-11-09 用真实货号核实：搜索框最终跳到这个网址。
+                SearchUrlTemplate = "http://txkorders.inzantsales.com/shop?Search={item}",
                 Origins = new List<string> { "http://txkorders.inzantsales.com/*" },
                 ListPagePatterns = new List<string>
                 {

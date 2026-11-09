@@ -862,9 +862,240 @@
     }
   }
 
+  // ---------- 扫码搜索：条码 + 当前供应商 → 系统货号 → 供应商网站按货号搜索 ----------
+  // 模块单独加载：失败只停用扫码，不影响按钮注入。整个流程只读取和跳转搜索页，不碰加购、下单。
+  const barcodeModule = await import(chrome.runtime.getURL('lib/barcode-scan.js')).catch(() => null);
+  const BARCODE_PENDING_KEY = 'hb-sro-barcode-pending';
+  const BARCODE_PENDING_MAX_AGE_MS = 60_000;
+  const BARCODE_CARD_POLL_MS = 250;
+  const BARCODE_CARD_TIMEOUT_MS = 10_000;
+  const BARCODE_TOAST_MS = 6000;
+  let searchConfig = profile.search || null;
+  let barcodeToken = 0;
+  let barcodeToastHost = null;
+  let barcodeToastTimer = null;
+  let barcodeCardTimer = null;
+  let barcodeHighlightedCard = null;
+  let detachBarcodeScanner = null;
+  const barcodeRepeatGuard = barcodeModule?.createRepeatGuard();
+
+  function hideBarcodeToast() {
+    if (barcodeToastTimer !== null) clearTimeout(barcodeToastTimer);
+    barcodeToastTimer = null;
+    barcodeToastHost?.remove();
+    barcodeToastHost = null;
+  }
+
+  // 提示放在 shadow DOM 里，不受供应商页面样式影响；内容一律用 textContent 写入。
+  function showBarcodeToast(text, { tone = 'info', sticky = false, actions = [] } = {}) {
+    hideBarcodeToast();
+    const host = document.createElement('div');
+    host.setAttribute('data-hb-sro-barcode-toast', '');
+    host.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;';
+    const shadow = host.attachShadow({ mode: 'open' });
+    const style = document.createElement('style');
+    style.textContent = `
+.box{max-width:360px;padding:10px 14px;border-radius:8px;background:#fff;color:#1f2937;
+  font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  border-left:4px solid #00695c;box-shadow:0 4px 16px rgba(0,0,0,.25);}
+.box.warn{border-left-color:#c62828;}
+button{display:block;width:100%;margin-top:6px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;
+  background:#f8fafc;color:#1f2937;font:inherit;text-align:left;cursor:pointer;}
+button:hover{background:#e2e8f0;}`;
+    const box = document.createElement('div');
+    box.className = tone === 'warn' ? 'box warn' : 'box';
+    box.setAttribute('role', 'status');
+    box.append(document.createTextNode(text));
+    for (const action of actions) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', action.onClick);
+      box.append(button);
+    }
+    shadow.append(style, box);
+    document.documentElement.append(host);
+    barcodeToastHost = host;
+    if (!sticky) barcodeToastTimer = setTimeout(hideBarcodeToast, BARCODE_TOAST_MS);
+  }
+
+  // 只认看得见的卡片：轮播里隐藏的副本定位过去用户也看不到，应走搜索。
+  function findBarcodeCard(itemNumber) {
+    const target = barcodeModule.normalizeScanItemNumber(itemNumber);
+    return [...document.querySelectorAll(cardSelector)].find(
+      (card) =>
+        card.getClientRects().length > 0
+        && barcodeModule.normalizeScanItemNumber(readItemNumber(card)) === target,
+    ) || null;
+  }
+
+  function markBarcodeCard(card) {
+    // 同一页连续扫码时只保留最新一个高亮。
+    if (barcodeHighlightedCard && barcodeHighlightedCard !== card) {
+      barcodeHighlightedCard.style.outline = '';
+      barcodeHighlightedCard.style.outlineOffset = '';
+    }
+    barcodeHighlightedCard = card;
+    card.style.outline = '3px solid #00695c';
+    card.style.outlineOffset = '2px';
+    card.scrollIntoView({ block: 'center' });
+  }
+
+  function locateBarcodeItemInPanel(itemNumber) {
+    chrome.runtime.sendMessage({
+      type: 'SCAN_LOCATE_ITEM',
+      storeCode: selectedStoreCode || null,
+      supplierCode: profile.supplierCode,
+      itemNumber,
+    }).catch(() => {});
+  }
+
+  // 商品已在当前页就地高亮，保留用户正在看的列表；不在当前页才跳搜索。
+  function openBarcodeItem(itemNumber, barcode) {
+    const card = findBarcodeCard(itemNumber);
+    if (card) {
+      locateBarcodeItemInPanel(itemNumber);
+      markBarcodeCard(card);
+      showBarcodeToast(formatMessage('scanFound', { barcode, item: itemNumber }));
+      return;
+    }
+    showBarcodeToast(formatMessage('scanSearching', { barcode, item: itemNumber }), { sticky: true });
+    goToBarcodeSearch(itemNumber, barcode);
+  }
+
+  function goToBarcodeSearch(itemNumber, barcode) {
+    let url;
+    try {
+      url = barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber);
+    } catch {
+      return;
+    }
+    try {
+      // 搜索会整页跳转，把结果交给下一页的内容脚本继续高亮。
+      sessionStorage.setItem(
+        BARCODE_PENDING_KEY,
+        JSON.stringify({ itemNumber, barcode, searchUrl: url, at: Date.now() }),
+      );
+    } catch {
+      // 存不了只是少了跳转后的高亮，搜索照常进行。
+    }
+    locateBarcodeItemInPanel(itemNumber);
+    location.assign(url);
+  }
+
+  async function handleBarcodeScan(barcode) {
+    if (!active || !searchConfig || !barcodeRepeatGuard?.accept(barcode, performance.now())) return;
+    const token = ++barcodeToken;
+    // 新的扫码优先：上一次跳转后还在等待的结果卡片不再处理。
+    if (barcodeCardTimer !== null) clearTimeout(barcodeCardTimer);
+    barcodeCardTimer = null;
+    showBarcodeToast(formatMessage('scanLooking', { barcode }), { sticky: true });
+    let response;
+    try {
+      response = await chrome.runtime.sendMessage({
+        type: 'BARCODE_LOOKUP',
+        supplierCode: profile.supplierCode,
+        barcode,
+      });
+    } catch (error) {
+      response = { ok: false, error: String(error?.message || error) };
+    }
+    // 连续扫码时只认最后一次，迟到的结果直接丢弃。
+    if (token !== barcodeToken || !active) return;
+    if (!response?.ok) {
+      showBarcodeToast(formatMessage('scanFailed', { error: response?.error || '' }), { tone: 'warn' });
+      return;
+    }
+    const data = response.data || {};
+    if (data.status === 'matched' && data.itemNumber) {
+      openBarcodeItem(data.itemNumber, barcode);
+    } else if (data.status === 'multiple' && data.candidates?.length) {
+      showBarcodeToast(formatMessage('scanMultiple', { barcode }), {
+        sticky: true,
+        actions: data.candidates.map((candidate) => ({
+          label: `${candidate.itemNumber}  ${candidate.productName || ''}`.trim(),
+          onClick: () => openBarcodeItem(candidate.itemNumber, barcode),
+        })),
+      });
+    } else if (data.status === 'otherSupplier') {
+      showBarcodeToast(
+        formatMessage('scanOtherSupplier', { barcode, suppliers: (data.otherSuppliers || []).join(', ') }),
+        { tone: 'warn' },
+      );
+    } else {
+      showBarcodeToast(formatMessage('scanNotFound', { barcode }), { tone: 'warn' });
+    }
+  }
+
+  function readPendingBarcodeSearch() {
+    try {
+      const raw = sessionStorage.getItem(BARCODE_PENDING_KEY);
+      if (!raw) return null;
+      sessionStorage.removeItem(BARCODE_PENDING_KEY);
+      const pending = JSON.parse(raw);
+      return pending?.itemNumber && Date.now() - pending.at <= BARCODE_PENDING_MAX_AGE_MS ? pending : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // 结果页的卡片由供应商脚本异步渲染，限时轮询，找到后高亮；超时说明网站上搜不到这个货号。
+  function highlightPendingBarcodeSearch() {
+    const pending = barcodeModule && searchConfig ? readPendingBarcodeSearch() : null;
+    if (!pending) return;
+    const { itemNumber, barcode, searchUrl } = pending;
+    const deadline = Date.now() + BARCODE_CARD_TIMEOUT_MS;
+    showBarcodeToast(formatMessage('scanSearching', { barcode, item: itemNumber }), { sticky: true });
+    const poll = () => {
+      barcodeCardTimer = null;
+      if (!active) return;
+      const card = findBarcodeCard(itemNumber);
+      if (card) {
+        markBarcodeCard(card);
+        showBarcodeToast(formatMessage('scanFound', { barcode, item: itemNumber }));
+      } else if (barcodeModule.isRedirectedToItemPage({
+        currentPath: location.pathname,
+        searchUrl,
+        pageText: document.body?.innerText,
+        itemNumber,
+      })) {
+        showBarcodeToast(formatMessage('scanFound', { barcode, item: itemNumber }));
+      } else if (Date.now() >= deadline) {
+        showBarcodeToast(formatMessage('scanItemMissing', { barcode, item: itemNumber }), { tone: 'warn' });
+      } else {
+        barcodeCardTimer = setTimeout(poll, BARCODE_CARD_POLL_MS);
+      }
+    };
+    poll();
+  }
+
+  if (barcodeModule) {
+    detachBarcodeScanner = barcodeModule.attachBarcodeScanner(window, {
+      isEnabled: () => active && !!searchConfig,
+      onScan: (barcode) => void handleBarcodeScan(barcode),
+    });
+    // 焦点在侧栏时，后台把扫到的码转发到这里。
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (message?.type !== 'BARCODE_SCANNED') return false;
+      if (sender?.id !== chrome.runtime.id || sender?.tab) {
+        sendResponse({ ok: false, errorCode: 'FORBIDDEN' });
+      } else if (!active || !searchConfig) {
+        sendResponse({ ok: false, errorCode: 'SEARCH_NOT_CONFIGURED' });
+      } else {
+        void handleBarcodeScan(String(message.barcode || ''));
+        sendResponse({ ok: true });
+      }
+      return false;
+    });
+    highlightPendingBarcodeSearch();
+  }
+
   function teardown() {
     if (!active) return;
     active = false;
+    detachBarcodeScanner?.();
+    if (barcodeCardTimer !== null) clearTimeout(barcodeCardTimer);
+    hideBarcodeToast();
     cardObserver?.disconnect();
     visibilityObserver?.disconnect();
     if (scanTimer !== null) clearTimeout(scanTimer);
@@ -922,6 +1153,7 @@
       } else {
         // 后台热更新分类配置（selector 修正、停用等）立即生效，无需刷新页面。
         categoryConfig = resolveCategoryConfig(updatedProfile);
+        searchConfig = updatedProfile.search || null;
         if (!isCrawlEnabled()) crawlSession?.controller.abort();
         rebuildPassiveCapture();
       }

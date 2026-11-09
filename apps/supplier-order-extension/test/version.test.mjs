@@ -60,10 +60,10 @@ test('assertSameVersion 同版本双包', () => {
   assert.equal(assertSameVersion('1.0.0', '1.0.1'), false);
 });
 
-test('共享扩展版本升级为 1.6.0', () => {
+test('共享扩展版本升级为 1.7.0', () => {
   const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   const lock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
-  assert.equal(pkg.version, '1.6.0');
-  assert.equal(lock.version, '1.6.0');
-  assert.equal(lock.packages[''].version, '1.6.0');
+  assert.equal(pkg.version, '1.7.0');
+  assert.equal(lock.version, '1.7.0');
+  assert.equal(lock.packages[''].version, '1.7.0');
 });

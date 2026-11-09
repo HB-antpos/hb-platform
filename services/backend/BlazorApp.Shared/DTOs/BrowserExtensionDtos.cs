@@ -56,6 +56,67 @@ public sealed class BrowserExtensionSupplierProfileDto
     /// 供应商分类采集配置；仅 1.5.0 及以上客户端下发，缺省表示该供应商不采集分类。
     /// </summary>
     public BrowserExtensionSupplierCategoryProfileDto? Category { get; set; }
+
+    /// <summary>
+    /// 扫码后在供应商网站按货号搜索的配置；缺省表示该供应商不启用扫码搜索。
+    /// </summary>
+    public BrowserExtensionSupplierSearchProfileDto? Search { get; set; }
+}
+
+/// <summary>
+/// 供应商网站按货号搜索的声明式配置：只含带 {item} 占位符的同源网址，扩展不执行远程代码。
+/// </summary>
+public sealed class BrowserExtensionSupplierSearchProfileDto
+{
+    public string UrlTemplate { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 扫码查货号请求：用「条码 + 当前网站对应的供应商」查系统里的货号。
+/// </summary>
+public sealed class BrowserExtensionBarcodeLookupRequestDto
+{
+    [Required]
+    [StringLength(50)]
+    public string SupplierCode { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(50)]
+    public string Barcode { get; set; } = string.Empty;
+}
+
+public sealed class BrowserExtensionBarcodeLookupCandidateDto
+{
+    public string ItemNumber { get; set; } = string.Empty;
+    public string ProductName { get; set; } = string.Empty;
+}
+
+public sealed class BrowserExtensionBarcodeLookupResultDto
+{
+    public string SupplierCode { get; set; } = string.Empty;
+    public string Barcode { get; set; } = string.Empty;
+
+    /// <summary>
+    /// matched=唯一货号；multiple=多个货号需人工选择；otherSupplier=条码属于别的供应商；notFound=系统无此条码。
+    /// </summary>
+    public string Status { get; set; } = BrowserExtensionBarcodeLookupStatus.NotFound;
+
+    public string? ItemNumber { get; set; }
+    public string? ProductName { get; set; }
+    public List<BrowserExtensionBarcodeLookupCandidateDto> Candidates { get; set; } = new();
+
+    /// <summary>
+    /// 条码实际所属供应商的名称，仅 otherSupplier 时有值；绝不返回别家货号，避免被填进当前网站。
+    /// </summary>
+    public List<string> OtherSuppliers { get; set; } = new();
+}
+
+public static class BrowserExtensionBarcodeLookupStatus
+{
+    public const string Matched = "matched";
+    public const string Multiple = "multiple";
+    public const string OtherSupplier = "otherSupplier";
+    public const string NotFound = "notFound";
 }
 
 /// <summary>

@@ -13,6 +13,7 @@ import {
   normalizeLastYearDays,
   pickLastYearQuantity,
 } from '../lib/last-year.js';
+import { attachBarcodeScanner } from '../lib/barcode-scan.js';
 import { selectVisibleSupplierEntries } from '../lib/supplier-list.js';
 import { getPendingLocateChange, matchesStorageArea } from '../lib/storage-compat.js';
 import { createSingleFlight } from '../lib/session-handoff.js';
@@ -1886,6 +1887,22 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     .remove('pendingLocate')
     .then(() => loadItem(item))
     .catch((error) => setStatus(String((error && error.message) || error)));
+});
+
+// 焦点在侧栏时扫码：转给当前供应商页面处理，这里只提示转发失败的原因。
+async function forwardBarcodeScan(barcode) {
+  const response = await send({ type: 'BARCODE_SCAN_FORWARD', barcode });
+  if (response?.ok) return;
+  setStatus(
+    t(locale, response?.errorCode === 'SEARCH_NOT_CONFIGURED' ? 'scanNotConfigured' : 'scanNoSupplierPage'),
+  );
+}
+
+attachBarcodeScanner(window, {
+  isEnabled: () => !!user,
+  onScan: (barcode) => {
+    void forwardBarcodeScan(barcode).catch((error) => setStatus(String((error && error.message) || error)));
+  },
 });
 
 chrome.tabs.onActivated.addListener(() => {

@@ -15,7 +15,7 @@ test('iOS Safari 项目版本、bundle ID 与部署目标保持一致', () => {
 
   assert.equal(pkg.version, sharedPkg.version);
   assert.equal(project.match(new RegExp(`MARKETING_VERSION = ${pkg.version.replaceAll('.', '\\.')};`, 'g'))?.length, 4);
-  assert.equal(project.match(/CURRENT_PROJECT_VERSION = 6;/g)?.length, 4);
+  assert.equal(project.match(/CURRENT_PROJECT_VERSION = 7;/g)?.length, 4);
   assert.ok(!project.includes('MACOSX_DEPLOYMENT_TARGET'));
   assert.ok(!project.includes('SDKROOT = macosx'));
   assert.ok(!project.includes('IPHONEOS_DEPLOYMENT_TARGET = 15.0'));
@@ -114,12 +114,12 @@ test('TestFlight 发布配置包含宿主元数据、公开入口、更新说明
   assert.match(iconMetadata, /pixelHeight:\s+1024/);
   assert.match(iconMetadata, /hasAlpha:\s+no/);
   assert.ok(englishMetadata.includes(`## What's New in Version ${pkg.version}`));
-  assert.ok(englishWhatsNew?.includes('Last year'));
-  assert.ok(englishWhatsNew?.includes('30 / 60 days'));
+  assert.ok(englishWhatsNew?.includes('barcode'));
+  assert.ok(englishWhatsNew?.includes('item number'));
   assert.ok(englishWhatsNew.length <= 4000);
   assert.ok(simplifiedMetadata.includes(`## ${pkg.version} 更新内容`));
-  assert.ok(simplifiedWhatsNew?.includes('去年同期'));
-  assert.ok(simplifiedWhatsNew?.includes('30 / 60 天'));
+  assert.ok(simplifiedWhatsNew?.includes('扫码'));
+  assert.ok(simplifiedWhatsNew?.includes('货号'));
   assert.ok(simplifiedWhatsNew.length <= 4000);
   assert.equal(pkg.scripts.archive, 'npm test && bash script/archive.sh');
   assert.ok(archiveScript.includes('-configuration Release'));
@@ -135,8 +135,8 @@ test('TestFlight 发布配置包含宿主元数据、公开入口、更新说明
     bundleId: 'com.hotbargain.supplierorder.safari',
     extensionBundleId: 'com.hotbargain.supplierorder.safari.Extension',
     sku: 'HB-SUPPLIER-ORDER-IOS-2026',
-    version: '1.6.0',
-    buildNumber: 6,
+    version: '1.7.0',
+    buildNumber: 7,
     primaryLanguage: 'en-AU',
     category: 'BUSINESS',
     territories: ['AUS'],
