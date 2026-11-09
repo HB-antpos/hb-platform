@@ -433,6 +433,10 @@
   function normalizeSearchConfig(raw, profile) {
     if (raw == null) return { config: null, errors: [] };
     const template = raw && typeof raw === "object" ? raw.urlTemplate : null;
+    if (template == null && typeof raw?.inputSelector === "string") {
+      const selector = raw.inputSelector.trim();
+      return selector && selector.length <= 300 && !/[\r\n]/u.test(selector) ? { config: { inputSelector: selector }, errors: [] } : { config: null, errors: ["inputSelector \u975E\u6CD5"] };
+    }
     const invalid2 = { config: null, errors: ["urlTemplate \u975E\u6CD5"] };
     if (typeof template !== "string" || template.length > 300 || /\s/u.test(template) || template.split("{item}").length !== 2) {
       return invalid2;

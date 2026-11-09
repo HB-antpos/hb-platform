@@ -1389,7 +1389,7 @@ public static partial class BrowserExtensionProfileCatalog
             MountSelector = options.MountSelector.Trim(),
             MountPosition = mountPosition,
             Category = TryBuildCategory(options.Category, supplierCode, origins),
-            Search = TryBuildSearch(options.SearchUrlTemplate, origins),
+            Search = TryBuildSearch(options.SearchUrlTemplate, origins, options.SearchInputSelector),
         };
     }
 
@@ -1399,14 +1399,21 @@ public static partial class BrowserExtensionProfileCatalog
     /// </summary>
     internal static BrowserExtensionSupplierSearchProfileDto? TryBuildSearch(
         string? urlTemplate,
-        IReadOnlyList<string> origins
+        IReadOnlyList<string> origins,
+        string? inputSelector = null
     )
     {
         const string placeholder = "{item}";
         var template = urlTemplate?.Trim();
+        if (string.IsNullOrEmpty(template))
+        {
+            return IsSafeSelector(inputSelector)
+                ? new BrowserExtensionSupplierSearchProfileDto { InputSelector = inputSelector!.Trim() }
+                : null;
+        }
+
         if (
-            string.IsNullOrEmpty(template)
-            || template.Length > 300
+            template.Length > 300
             || template.Any(char.IsWhiteSpace)
             || template.Split(placeholder, StringSplitOptions.None).Length != 2
             || !Uri.TryCreate(template.Replace(placeholder, "0"), UriKind.Absolute, out var uri)

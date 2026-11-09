@@ -8,6 +8,7 @@ import {
   isRedirectedToItemPage,
   normalizeScanItemNumber,
   removeScannedText,
+  submitSupplierSearchForm,
 } from '../src/lib/barcode-scan.js';
 import { normalizeSearchConfig, validateProfiles } from '../src/lib/profiles.js';
 import { DEFAULT_PROFILES } from '../src/lib/profiles-default.js';
@@ -154,6 +155,45 @@ test('单结果跳详情页算找到，留在搜索页或跳登录页不算', ()
   assert.equal(isRedirectedToItemPage({ ...base, currentPath: '/search', pageText: 'Search HAR-909 returned no results' }), false);
   assert.equal(isRedirectedToItemPage({ ...base, currentPath: '/login', pageText: 'Please log in' }), false);
   assert.equal(isRedirectedToItemPage({ ...base, searchUrl: 'bad', currentPath: '/x', pageText: 'HAR-909' }), false);
+});
+
+function fakeSearchInput({ visible = true, form = true } = {}) {
+  const input = fakeInput('');
+  input.getClientRects = () => (visible ? [{}] : []);
+  input.submitted = 0;
+  input.form = form ? { requestSubmit: () => { input.submitted += 1; } } : null;
+  return input;
+}
+
+test('表单模式优先填看得见的搜索框并提交一次', () => {
+  const hidden = fakeSearchInput({ visible: false });
+  const shown = fakeSearchInput();
+  const doc = { querySelectorAll: () => [hidden, shown] };
+  assert.equal(submitSupplierSearchForm(doc, { inputSelector: 'x' }, 'GLA 349494'), true);
+  assert.equal(shown.value, 'GLA 349494');
+  assert.equal(shown.submitted, 1);
+  assert.equal(hidden.submitted, 0);
+});
+
+test('表单模式找不到搜索框、没有表单或选择器非法时返回 false', () => {
+  assert.equal(submitSupplierSearchForm({ querySelectorAll: () => [] }, { inputSelector: 'x' }, 'A'), false);
+  const orphan = fakeSearchInput({ form: false });
+  assert.equal(submitSupplierSearchForm({ querySelectorAll: () => [orphan] }, { inputSelector: 'x' }, 'A'), false);
+  const bad = { querySelectorAll: () => { throw new Error('bad selector'); } };
+  assert.equal(submitSupplierSearchForm(bad, { inputSelector: '[' }, 'A'), false);
+});
+
+test('搜索配置支持搜索框模式，网址模板优先', () => {
+  assert.deepEqual(
+    normalizeSearchConfig({ urlTemplate: null, inputSelector: ' input[name="k"] ' }, profile),
+    { config: { inputSelector: 'input[name="k"]' }, errors: [] },
+  );
+  assert.deepEqual(
+    normalizeSearchConfig({ urlTemplate: 'https://www.dats.com.au/s?q={item}', inputSelector: 'input' }, profile).config,
+    { urlTemplate: 'https://www.dats.com.au/s?q={item}' },
+  );
+  assert.equal(normalizeSearchConfig({ inputSelector: 'a\nb' }, profile).config, null);
+  assert.equal(normalizeSearchConfig({ inputSelector: '' }, profile).config, null);
 });
 
 test('货号比较忽略大小写和首尾空白', () => {

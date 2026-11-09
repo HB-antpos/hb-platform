@@ -2045,6 +2045,10 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   function normalizeSearchConfig(raw, profile) {
     if (raw == null) return { config: null, errors: [] };
     const template = raw && typeof raw === "object" ? raw.urlTemplate : null;
+    if (template == null && typeof raw?.inputSelector === "string") {
+      const selector = raw.inputSelector.trim();
+      return selector && selector.length <= 300 && !/[\r\n]/u.test(selector) ? { config: { inputSelector: selector }, errors: [] } : { config: null, errors: ["inputSelector \u975E\u6CD5"] };
+    }
     const invalid2 = { config: null, errors: ["urlTemplate \u975E\u6CD5"] };
     if (typeof template !== "string" || template.length > 300 || /\s/u.test(template) || template.split("{item}").length !== 2) {
       return invalid2;
@@ -3157,7 +3161,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     createScanDetector: () => createScanDetector,
     isRedirectedToItemPage: () => isRedirectedToItemPage,
     normalizeScanItemNumber: () => normalizeScanItemNumber,
-    removeScannedText: () => removeScannedText
+    removeScannedText: () => removeScannedText,
+    submitSupplierSearchForm: () => submitSupplierSearchForm
   });
   function createScanDetector({
     minLength = SCAN_MIN_LENGTH,
@@ -3200,11 +3205,26 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     if (tag !== "INPUT" && tag !== "TEXTAREA" || typeof element.value !== "string") return false;
     const index = element.value.lastIndexOf(code);
     if (index < 0) return false;
-    const next = element.value.slice(0, index) + element.value.slice(index + code.length);
+    setInputValue(element, element.value.slice(0, index) + element.value.slice(index + code.length));
+    return true;
+  }
+  function setInputValue(element, value) {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
-    if (setter) setter.call(element, next);
-    else element.value = next;
+    if (setter) setter.call(element, value);
+    else element.value = value;
     element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function submitSupplierSearchForm(doc, search, itemNumber) {
+    let inputs;
+    try {
+      inputs = [...doc.querySelectorAll(search.inputSelector)];
+    } catch {
+      return false;
+    }
+    const input = inputs.find((item) => item.getClientRects().length > 0) ?? inputs[0];
+    if (!input?.form) return false;
+    setInputValue(input, itemNumber);
+    input.form.requestSubmit();
     return true;
   }
   function attachBarcodeScanner(target, { onScan, isEnabled = () => true, detectorOptions } = {}) {
@@ -4104,12 +4124,7 @@ button:hover{background:#e2e8f0;}`;
       goToBarcodeSearch(itemNumber, barcode);
     }
     function goToBarcodeSearch(itemNumber, barcode) {
-      let url;
-      try {
-        url = barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber);
-      } catch {
-        return;
-      }
+      const url = searchConfig.urlTemplate ? barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber) : null;
       try {
         sessionStorage.setItem(
           BARCODE_PENDING_KEY,
@@ -4118,7 +4133,15 @@ button:hover{background:#e2e8f0;}`;
       } catch {
       }
       locateBarcodeItemInPanel(itemNumber);
-      location.assign(url);
+      if (url) {
+        location.assign(url);
+      } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, itemNumber)) {
+        try {
+          sessionStorage.removeItem(BARCODE_PENDING_KEY);
+        } catch {
+        }
+        showBarcodeToast(formatMessage("scanNotConfigured"), { tone: "warn" });
+      }
     }
     async function handleBarcodeScan(barcode) {
       if (!active || !searchConfig || !barcodeRepeatGuard?.accept(barcode, performance.now())) return;

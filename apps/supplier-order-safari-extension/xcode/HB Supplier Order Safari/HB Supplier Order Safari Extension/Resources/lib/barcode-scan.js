@@ -63,12 +63,31 @@ export function removeScannedText(element, code) {
   if ((tag !== 'INPUT' && tag !== 'TEXTAREA') || typeof element.value !== 'string') return false;
   const index = element.value.lastIndexOf(code);
   if (index < 0) return false;
-  const next = element.value.slice(0, index) + element.value.slice(index + code.length);
-  // 走原型上的 setter，让依赖 input 事件的页面框架能感知到还原。
+  setInputValue(element, element.value.slice(0, index) + element.value.slice(index + code.length));
+  return true;
+}
+
+// 走原型上的 setter 并派发 input，让依赖 input 事件的页面框架能感知到变化。
+function setInputValue(element, value) {
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set;
-  if (setter) setter.call(element, next);
-  else element.value = next;
+  if (setter) setter.call(element, value);
+  else element.value = value;
   element.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+// 表单模式：填入供应商网站自己的搜索框并提交，CSRF 等隐藏字段由表单自带。
+// 页面上可能有多个同样的搜索框（如手机版隐藏的那个），优先用看得见的。
+export function submitSupplierSearchForm(doc, search, itemNumber) {
+  let inputs;
+  try {
+    inputs = [...doc.querySelectorAll(search.inputSelector)];
+  } catch {
+    return false;
+  }
+  const input = inputs.find((item) => item.getClientRects().length > 0) ?? inputs[0];
+  if (!input?.form) return false;
+  setInputValue(input, itemNumber);
+  input.form.requestSubmit();
   return true;
 }
 

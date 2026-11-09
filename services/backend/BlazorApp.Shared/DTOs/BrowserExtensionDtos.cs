@@ -64,11 +64,13 @@ public sealed class BrowserExtensionSupplierProfileDto
 }
 
 /// <summary>
-/// 供应商网站按货号搜索的声明式配置：只含带 {item} 占位符的同源网址，扩展不执行远程代码。
+/// 供应商网站按货号搜索的声明式配置：带 {item} 占位符的同源网址，或搜索框选择器（网址拼不出来时填表单提交）。
+/// 扩展不执行远程代码。
 /// </summary>
 public sealed class BrowserExtensionSupplierSearchProfileDto
 {
-    public string UrlTemplate { get; set; } = string.Empty;
+    public string? UrlTemplate { get; set; }
+    public string? InputSelector { get; set; }
 }
 
 /// <summary>

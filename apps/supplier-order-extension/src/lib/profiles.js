@@ -279,6 +279,13 @@ export function normalizeCategoryConfig(raw, profile) {
 export function normalizeSearchConfig(raw, profile) {
   if (raw == null) return { config: null, errors: [] };
   const template = raw && typeof raw === 'object' ? raw.urlTemplate : null;
+  // 网址拼不出来的供应商改用搜索框；配置了网址模板时以模板为准。
+  if (template == null && typeof raw?.inputSelector === 'string') {
+    const selector = raw.inputSelector.trim();
+    return selector && selector.length <= 300 && !/[\r\n]/u.test(selector)
+      ? { config: { inputSelector: selector }, errors: [] }
+      : { config: null, errors: ['inputSelector 非法'] };
+  }
   const invalid = { config: null, errors: ['urlTemplate 非法'] };
   if (
     typeof template !== 'string'

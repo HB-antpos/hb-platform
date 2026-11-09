@@ -112,6 +112,11 @@ public sealed class BrowserExtensionSupplierProfileOptions
     /// </summary>
     public string? SearchUrlTemplate { get; set; }
 
+    /// <summary>
+    /// 搜索只能经表单 POST、网址拼不出来时使用：页面上搜索框的选择器。配置了网址模板时不生效。
+    /// </summary>
+    public string? SearchInputSelector { get; set; }
+
     public static BrowserExtensionSupplierProfileOptions CreateDatsDefault() =>
         new()
         {
@@ -239,10 +244,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "203",
                 DisplayName = "Windragon",
+                // 2026-11-09 登录后用真实货号核实；只有一个结果时网站直接跳商品详情页。
+                SearchUrlTemplate = "https://windragon.com.au/?s={item}&post_type=product",
                 Origins = new List<string> { "https://windragon.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://windragon.com.au/product-category/*",
+                    "https://windragon.com.au/?s=*",
                 },
                 CardSelector = "li.product",
                 ItemNumberSource = "text",
@@ -290,10 +298,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "267",
                 DisplayName = "Jemark",
+                // 2026-11-09 登录后核实：POST 带 CSRF，结果页地址一次性，只能填搜索框提交。
+                SearchInputSelector = "form[action$=\"/search\"] input[name=\"keywords\"]",
                 Origins = new List<string> { "https://www.jemark.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.jemark.com.au/category/*",
+                    "https://www.jemark.com.au/search/results/*",
                 },
                 CardSelector = "ul.products li.product",
                 ItemNumberSource = "text",
@@ -372,11 +383,14 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "SP0101",
                 DisplayName = "Boom Up",
+                // 2026-11-09 登录后核实：必须带 dgwt_wcas=1，否则网站不按货号搜。
+                SearchUrlTemplate = "https://boomup.com.au/?s={item}&post_type=product&dgwt_wcas=1",
                 Origins = new List<string> { "https://boomup.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://boomup.com.au/shop*",
                     "https://boomup.com.au/product-category/*",
+                    "https://boomup.com.au/?s=*",
                 },
                 CardSelector = "main ul.products li.product",
                 ItemNumberSource = "text",

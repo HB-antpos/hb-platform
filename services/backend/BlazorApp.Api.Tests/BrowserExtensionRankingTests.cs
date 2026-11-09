@@ -1216,6 +1216,8 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
     [InlineData("226", "https://www.meteorparty.com.au/search?keywords={item}")]
     [InlineData("201", "https://www.yatsal.com.au/search?ProductSearch={item}")]
     [InlineData("SP2502280001", "http://txkorders.inzantsales.com/shop?Search={item}")]
+    [InlineData("203", "https://windragon.com.au/?s={item}&post_type=product")]
+    [InlineData("SP0101", "https://boomup.com.au/?s={item}&post_type=product&dgwt_wcas=1")]
     public void 已核实的供应商下发搜索网址_未核实的不下发(string supplierCode, string expected)
     {
         var profiles = new[] { BrowserExtensionSupplierProfileOptions.CreateDatsDefault() }
@@ -1226,9 +1228,24 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
         Assert.Equal(expected, BrowserExtensionProfileCatalog.TryBuildSearch(profile.SearchUrlTemplate, profile.Origins)?.UrlTemplate);
         // 未用真实货号核实的网站不下发，避免扫码后跳错页面。
         Assert.Equal(
-            new[] { "201", "226", "227", "240", "SP2502280001" },
-            profiles.Where(item => item.SearchUrlTemplate != null).Select(item => item.SupplierCode).OrderBy(code => code, StringComparer.Ordinal)
+            new[] { "201", "203", "226", "227", "240", "267", "SP0101", "SP2502280001" },
+            profiles.Where(item => item.SearchUrlTemplate != null || item.SearchInputSelector != null).Select(item => item.SupplierCode).OrderBy(code => code, StringComparer.Ordinal)
         );
+    }
+
+    [Fact]
+    public void Jemark下发搜索框选择器_网址模板优先()
+    {
+        var jemark = BrowserExtensionSupplierProfileOptions.CreateSupplierDefaults().Single(item => item.SupplierCode == "267");
+        var search = BrowserExtensionProfileCatalog.TryBuildSearch(jemark.SearchUrlTemplate, jemark.Origins, jemark.SearchInputSelector);
+
+        Assert.Null(search?.UrlTemplate);
+        Assert.Equal("form[action$=\"/search\"] input[name=\"keywords\"]", search?.InputSelector);
+
+        var both = BrowserExtensionProfileCatalog.TryBuildSearch(
+            "https://www.jemark.com.au/search?q={item}", jemark.Origins, "input");
+        Assert.Null(both?.InputSelector);
+        Assert.Null(BrowserExtensionProfileCatalog.TryBuildSearch(null, jemark.Origins, "a\nb"));
     }
 
     [Fact]

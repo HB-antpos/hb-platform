@@ -964,12 +964,10 @@ button:hover{background:#e2e8f0;}`;
   }
 
   function goToBarcodeSearch(itemNumber, barcode) {
-    let url;
-    try {
-      url = barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber);
-    } catch {
-      return;
-    }
+    // 没有网址模板的供应商走表单提交，这时没有可预知的结果页地址。
+    const url = searchConfig.urlTemplate
+      ? barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber)
+      : null;
     try {
       // 搜索会整页跳转，把结果交给下一页的内容脚本继续高亮。
       sessionStorage.setItem(
@@ -980,7 +978,16 @@ button:hover{background:#e2e8f0;}`;
       // 存不了只是少了跳转后的高亮，搜索照常进行。
     }
     locateBarcodeItemInPanel(itemNumber);
-    location.assign(url);
+    if (url) {
+      location.assign(url);
+    } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, itemNumber)) {
+      try {
+        sessionStorage.removeItem(BARCODE_PENDING_KEY);
+      } catch {
+        // 忽略
+      }
+      showBarcodeToast(formatMessage('scanNotConfigured'), { tone: 'warn' });
+    }
   }
 
   async function handleBarcodeScan(barcode) {
