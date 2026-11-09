@@ -94,7 +94,7 @@ public sealed class ProductMaintenanceHqProjectionWriter : IProductMaintenanceHq
         _logger = logger;
     }
 
-    public async Task<ProductHqSyncOperationStatusDto> EnqueueAsync(
+    public async Task<ProductHqSyncOperationStatusDto?> EnqueueAsync(
         ISqlSugarClient transactionDb,
         ProductMaintenanceHqMutationRequest request,
         CancellationToken cancellationToken = default
@@ -102,6 +102,12 @@ public sealed class ProductMaintenanceHqProjectionWriter : IProductMaintenanceHq
     {
         ArgumentNullException.ThrowIfNull(transactionDb);
         ArgumentNullException.ThrowIfNull(request);
+
+        // HQ 断开后不再产生 outbox：返回 null 时手机端和 Web 都不显示 HQ 同步状态，也不会轮询。
+        if (!LegacyDatabaseGate.HqEnabled)
+        {
+            return null;
+        }
 
         var productCode = NormalizeRequired(request.ProductCode, nameof(request.ProductCode));
         var source = NormalizeRequired(request.Source, nameof(request.Source));

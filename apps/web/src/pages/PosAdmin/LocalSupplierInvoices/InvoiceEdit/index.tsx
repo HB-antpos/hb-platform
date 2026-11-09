@@ -256,6 +256,7 @@ import { publishLocalSupplierInvoiceChanged } from '../invoiceListSync'
 import invoiceMessagesEn from '../invoiceMessages.en.json'
 import invoiceMessagesZh from '../invoiceMessages.zh.json'
 import '../localSupplierInvoices.css'
+import { HQ_ACTIONS_ENABLED } from '../../../../utils/legacyDatabases'
 
 // 重设计新增的文案随页面代码块懒注册，不进首屏 i18n 包。
 registerPageMessages({ zh: invoiceMessagesZh, en: invoiceMessagesEn })
@@ -595,7 +596,7 @@ export default function InvoiceEditPage() {
   const { access, currentUser } = useAuthStore()
   const isAdmin = access.isAdmin
   const canManagePosProducts = access.canManagePosProducts
-  const canWriteLocalPurchaseToHq = access.canEditLocalPurchase && access.canPushLocalPurchaseToHq
+  const canWriteLocalPurchaseToHq = HQ_ACTIONS_ENABLED && access.canEditLocalPurchase && access.canPushLocalPurchaseToHq
   const canRunGlobalLocalPurchaseBatchActions = access.canEditLocalPurchase && (access.isAdmin || access.isWarehouseManager)
   // 「查看」页已并入本页：有编辑权限才能改表头（后端 PUT 要求 LocalPurchase.Edit）；
   // 明细行编辑、粘贴、检测、删除等沿用原页面的管理员口径；其余用户（如店长）看到同一页面的只读视图。
@@ -2660,7 +2661,7 @@ export default function InvoiceEditPage() {
               }}
             />
           )}
-          {isCreateMode && (
+          {HQ_ACTIONS_ENABLED && isCreateMode && (
             <div style={{ marginTop: 8 }}>
               <Checkbox
                 defaultChecked={canWriteLocalPurchaseToHq}
@@ -4829,7 +4830,8 @@ export default function InvoiceEditPage() {
           <Form.Item name="updateDiscountRate" valuePropName="checked">
             <Checkbox>{t('posAdmin.invoiceDetail.updateDiscountRate', '更新折扣率')}</Checkbox>
           </Form.Item>
-          <Form.Item
+          {HQ_ACTIONS_ENABLED && (
+            <Form.Item
             name="syncToHq"
             valuePropName="checked"
             extra={canWriteLocalPurchaseToHq
@@ -4838,6 +4840,7 @@ export default function InvoiceEditPage() {
           >
             <Checkbox disabled={!canWriteLocalPurchaseToHq}>{t('posAdmin.invoiceWorkbench.syncToHq')}</Checkbox>
           </Form.Item>
+          )}
         </Form>
       </Modal>
 

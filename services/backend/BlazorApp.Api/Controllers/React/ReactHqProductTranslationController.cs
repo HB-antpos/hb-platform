@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.Helper;
@@ -39,6 +40,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Roles = "Admin,WarehouseManager,WarehouseStaff")]
         public async Task<IActionResult> Translate([FromBody] TranslateRequest request)
         {
@@ -77,6 +79,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("by-container-number")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Roles = "Admin,WarehouseManager,WarehouseStaff")]
         public async Task<IActionResult> TranslateByContainerNumber(
             [FromBody] TranslateByNumberRequest request
@@ -145,6 +148,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("by-container-number/{containerNumber}")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Roles = "Admin,WarehouseManager,WarehouseStaff")]
         public async Task<IActionResult> TranslateByContainerNumberSingle(
             string containerNumber,

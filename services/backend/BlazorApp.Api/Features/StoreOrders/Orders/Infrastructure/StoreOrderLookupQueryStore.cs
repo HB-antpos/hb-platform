@@ -49,7 +49,19 @@ internal sealed class StoreOrderLookupQueryStore(
             .ToListAsync();
 
         var externalCustomers = new List<BranchDto>();
-        if (guidCodes.Count > 0)
+        if (!LegacyDatabaseGate.HqEnabled)
+        {
+            externalCustomers = guidCodes
+                .Where(StoreOrderExternalCustomerSnapshot.NamesByGuid.ContainsKey)
+                .Select(code => new BranchDto
+                {
+                    Guid = code,
+                    Code = code,
+                    Name = StoreOrderExternalCustomerSnapshot.NamesByGuid[code],
+                })
+                .ToList();
+        }
+        else if (guidCodes.Count > 0)
         {
             try
             {
@@ -182,6 +194,18 @@ internal sealed class StoreOrderLookupQueryStore(
         if (hqGuids.Count == 0)
         {
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (!LegacyDatabaseGate.HqEnabled)
+        {
+            return hqGuids
+                .Where(StoreOrderExternalCustomerSnapshot.NamesByGuid.ContainsKey)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    code => code,
+                    code => StoreOrderExternalCustomerSnapshot.NamesByGuid[code],
+                    StringComparer.OrdinalIgnoreCase
+                );
         }
 
         using var hqDb = hqConnectionFactory.Create();

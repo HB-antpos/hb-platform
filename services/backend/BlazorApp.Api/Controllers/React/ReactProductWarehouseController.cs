@@ -1,3 +1,4 @@
+using BlazorApp.Api.Data;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -413,7 +414,7 @@ namespace BlazorApp.Api.Controllers.React
                     };
                 }
 
-                if (options.SyncImageToHq)
+                if (options.SyncImageToHq && LegacyDatabaseGate.HqEnabled)
                 {
                     if (!resp.Success)
                     {

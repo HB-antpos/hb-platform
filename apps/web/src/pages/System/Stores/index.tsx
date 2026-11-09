@@ -89,6 +89,7 @@ import './stores.css'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import storesMessagesEn from './storesMessages.en.json'
 import storesMessagesZh from './storesMessages.zh.json'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 // 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
 registerPageMessages({ zh: storesMessagesZh, en: storesMessagesEn })
@@ -765,12 +766,12 @@ export default function SystemStoresPage() {
             menu={{
               items: [
                 ...(canEditStores
-                  ? [{
+                  ? [...(HQ_ACTIONS_ENABLED ? [{
                       key: 'sync',
                       label: t('system.stores.syncHq'),
                       icon: syncingStoreGuids.has(record.storeGUID) ? <LoadingOutlined /> : <CloudSyncOutlined />,
                       disabled: syncingStoreGuids.has(record.storeGUID),
-                    }, {
+                    }] : []), {
                       // 单店下发入口：与勾选后的批量下发共用同一个确认弹窗。
                       key: 'publishReceipt',
                       label: t('system.stores.receiptProfile.publishAction'),
@@ -1130,13 +1131,15 @@ export default function SystemStoresPage() {
           detailStore ? (
             <div className="sys-store-drawer-footer">
               <HasPermission code={P.Stores.Edit}>
-                <Button
+                {HQ_ACTIONS_ENABLED && (
+                  <Button
                   icon={<CloudSyncOutlined />}
                   loading={syncingStoreGuids.has(detailStore.storeGUID)}
                   onClick={() => void handleSyncStoreToHq(detailStore)}
                 >
                   {t('system.stores.syncHq')}
                 </Button>
+                )}
                 <Button icon={<TeamOutlined />} onClick={() => handleOpenStoreUsers(detailStore)}>
                   {t('system.stores.manageUsers')}
                 </Button>

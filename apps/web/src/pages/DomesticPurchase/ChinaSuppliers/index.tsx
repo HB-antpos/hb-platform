@@ -59,6 +59,7 @@ import './chinaSuppliers.css'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import chinaSuppliersMessagesEn from './chinaSuppliersMessages.en.json'
 import chinaSuppliersMessagesZh from './chinaSuppliersMessages.zh.json'
+import { HBSALES_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 // 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
 registerPageMessages({ zh: chinaSuppliersMessagesZh, en: chinaSuppliersMessagesEn })
@@ -570,7 +571,8 @@ export default function DomesticChinaSuppliersPage() {
         {selectedRowKeys.length > 0 ? (
           <div className="china-sup-bars" data-testid="china-suppliers-selection-bar">
             <SelectionActionBar selectedCount={selectedRowKeys.length} onClearSelection={clearSelection}>
-              <Popconfirm
+              {HBSALES_ACTIONS_ENABLED && (
+                <Popconfirm
                 title={t('chinaSuppliers.syncConfirm', { count: selectedRowKeys.length })}
                 okText={t('chinaSuppliers.confirmSync')}
                 cancelText={t('common.cancel')}
@@ -581,6 +583,7 @@ export default function DomesticChinaSuppliersPage() {
                   {t('chinaSuppliers.syncToSales')}
                 </Button>
               </Popconfirm>
+              )}
             </SelectionActionBar>
           </div>
         ) : null}

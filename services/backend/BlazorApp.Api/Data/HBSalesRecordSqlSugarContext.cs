@@ -11,8 +11,10 @@ namespace BlazorApp.Api.Data
 
         public HBSalesRecordSqlSugarContext(IConfiguration configuration)
         {
-            var connectionString = configuration.GetConnectionString("HBSalesRecord")
-                ?? throw new InvalidOperationException("HBSalesRecord 连接字符串未配置");
+            var connectionString = !LegacyDatabaseGate.HBSalesEnabled
+                ? LegacyDatabaseGate.DisabledConnectionString
+                : configuration.GetConnectionString("HBSalesRecord")
+                    ?? throw new InvalidOperationException("HBSalesRecord 连接字符串未配置");
 
             // 使用 Scoped 生命周期管理连接
             // IsAutoCloseConnection = true 自动管理连接的打开和关闭，避免连接泄露

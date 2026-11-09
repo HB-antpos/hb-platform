@@ -772,6 +772,12 @@ namespace BlazorApp.Api.Services.React
             string? productNo
         )
         {
+            // HBSales 断开后只用本地套装子项，本地没有时按无子项继续。
+            if (!LegacyDatabaseGate.HBSalesEnabled)
+            {
+                return new List<DomesticSetProduct>();
+            }
+
             var hqRows = await _hbSalesContext.Db.Queryable<CPT_DIC_商品套装信息表>()
                 .Where(row =>
                     row.商品编码 == productCode

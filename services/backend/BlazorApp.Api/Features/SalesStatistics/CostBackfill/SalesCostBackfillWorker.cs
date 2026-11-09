@@ -125,6 +125,8 @@ public sealed class SalesCostBackfillWorker(IServiceScopeFactory scopes, IConfig
         var uncheckedDates = gapDates
             .Select(date => date.Date)
             .Distinct()
+            // HBSales 断开后历史窗口内的日期无法回填，不能选中，否则每轮都会失败。
+            .Where(date => !SalesStatisticsHBSalesHistoryWindow.IsFrozen(date))
             .Where(date => !lastCheckedByDate.TryGetValue(date, out var checkedAt)
                 || checkedAt < utcDayStart)
             .ToList();

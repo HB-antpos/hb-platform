@@ -9,6 +9,7 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import type { CreateNewProductsResultView, ResultLine, ResultTone } from "./container-detail-job-results";
 import { formatContainerDetailNumber } from "./container-detail-table-columns";
 import type { MissingRetailPriceDetail } from "./types";
+import { HQ_ACTIONS_ENABLED } from "@/shared/utils/legacy-databases";
 
 /** 确认 → 执行中 → 结果 三段式；执行中不可关闭，避免用户误以为已取消。 */
 export type JobSheetPhase = "confirm" | "running" | "result";
@@ -119,7 +120,8 @@ export function ContainerDetailCreateProductsSheet({
       {phase === "confirm" ? (
         <>
           <Text style={styles.body}>{t("createProducts.warning", { count })}</Text>
-          <Pressable
+          {HQ_ACTIONS_ENABLED && (
+            <Pressable
             accessibilityRole="checkbox"
             accessibilityState={{ checked: syncToHq }}
             onPress={() => onSyncToHqChange(!syncToHq)}
@@ -132,6 +134,7 @@ export function ContainerDetailCreateProductsSheet({
             />
             <Text style={styles.checkboxLabel}>{t("createProducts.syncToHq")}</Text>
           </Pressable>
+          )}
           {blocked ? (
             <View style={styles.missingPanel}>
               <Text style={styles.missingTitle}>{t("createProducts.missingTitle", { count: missingRetailPrice.length })}</Text>

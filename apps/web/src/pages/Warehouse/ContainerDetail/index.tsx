@@ -384,6 +384,7 @@ import {
 } from './ContainerDetailColumns'
 import './index.css'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 type TextColumnFilterKey = 'itemNumber' | 'barcode' | 'productName' | 'englishName' | 'remark'
 type NumberColumnFilterKey = 'containerPieces' | 'middlePackQuantity' | 'containerQuantity' | 'packingQuantity' | 'unitVolume' | 'domesticPrice' | 'floatRate' | 'transportCost' | 'unitTransportCost' | 'warehouseImportPrice' | 'lastOEMPrice' | 'importPrice' | 'oemPrice'
@@ -5677,9 +5678,9 @@ export default function ContainerDetailPage() {
     }
     if (!ensureNoPendingDetails()) return
     // 「同时更新 HQ 数据库」每次打开确认框都默认勾选，不持久化；取消勾选时行为与原来完全一致。
-    let pushToHqAfterCreate = true
+    let pushToHqAfterCreate = HQ_ACTIONS_ENABLED
     const scopedRows = await confirmBatchRows(t('containers.actions.createNewProducts'), {
-      extra: (
+      extra: HQ_ACTIONS_ENABLED && (
         <Checkbox
           defaultChecked
           onChange={(event) => {
@@ -7721,7 +7722,7 @@ export default function ContainerDetailPage() {
   const headerMoreMenuItems = [
     ...(access.canEditContainer ? [
       { key: 'editInfo', icon: <EditOutlined />, label: t('warehouseUi.containerDetail.editInfo'), disabled: !container },
-      { key: 'translateHq', icon: <TranslationOutlined />, label: t('containers.actions.translateHqData'), disabled: hqTranslating },
+      ...(HQ_ACTIONS_ENABLED ? [{ key: 'translateHq', icon: <TranslationOutlined />, label: t('containers.actions.translateHqData'), disabled: hqTranslating }] : []),
     ] : []),
     ...(access.canManageWarehouseCategories
       ? [{ key: 'manageCategories', icon: <SettingOutlined />, label: t('containers.actions.manageCategories', '管理分类') }]
@@ -8299,7 +8300,7 @@ export default function ContainerDetailPage() {
                     ) : null}
                     <SelectionMenuButton label={t('warehouseUi.containerDetail.actionProductLibrary')} actions={productLibrarySelectionActions} />
                     <SelectionMenuButton label={t('warehouseUi.containerDetail.actionShelf')} actions={shelfSelectionActions} />
-                    {access.canManagePosProducts ? (
+                    {HQ_ACTIONS_ENABLED && access.canManagePosProducts ? (
                       <Tooltip title={!selectedRowKeys.length ? requiresRowSelectionHint || t('containers.messages.selectProducts') : ''}>
                         <Button
                           size="small"

@@ -5,7 +5,7 @@ namespace BlazorApp.Api.Interfaces.React;
 
 public interface IProductMaintenanceHqProjectionWriter
 {
-    Task<ProductHqSyncOperationStatusDto> EnqueueAsync(
+    Task<ProductHqSyncOperationStatusDto?> EnqueueAsync(
         ISqlSugarClient transactionDb,
         ProductMaintenanceHqMutationRequest request,
         CancellationToken cancellationToken = default

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("import-2025")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.HBSales)]
         public async Task<IActionResult> ImportAndStatistics2025()
         {
             try
@@ -56,6 +58,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpGet("status")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.HBSales)]
         public IActionResult GetImportStatus()
         {
             try

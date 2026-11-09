@@ -51,6 +51,8 @@ if (schemaCommand.Mode == SchemaCommandMode.Invalid)
 var builder = WebApplication.CreateBuilder(args);
 
 MapTencentCloudEnvironmentVariables(builder.Configuration);
+// 必须早于任何数据库上下文的创建。
+LegacyDatabaseGate.Configure(builder.Configuration);
 
 if (
     schemaCommand.Mode == SchemaCommandMode.Server

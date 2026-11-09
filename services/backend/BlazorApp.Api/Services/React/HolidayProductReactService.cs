@@ -648,6 +648,9 @@ namespace BlazorApp.Api.Services.React
           DateTime endDate
         )
         {
+            if (!LegacyDatabaseGate.HBSalesEnabled)
+                return await GetFrozenHistorySalesAsync(productCodes, storeCodes, startDate, endDate);
+
             try
             {
                 var data = await _hbSalesContext
@@ -695,6 +698,15 @@ namespace BlazorApp.Api.Services.React
           DateTime endDate
         )
         {
+            // 窗口内的 POSM 销售已包含在日统计里，这里再读会重复计算。
+            if (!LegacyDatabaseGate.HBSalesEnabled)
+            {
+                if (startDate < SalesStatisticsHBSalesHistoryWindow.EndExclusive)
+                    startDate = SalesStatisticsHBSalesHistoryWindow.EndExclusive;
+                if (startDate > endDate)
+                    return new List<SalesDataItem>();
+            }
+
             try
             {
                 var data = await _posmContext
@@ -748,6 +760,9 @@ namespace BlazorApp.Api.Services.React
           DateTime endDate
         )
         {
+            if (!LegacyDatabaseGate.HBSalesEnabled)
+                return await GetFrozenHistorySalesAsync(new List<string> { productCode }, storeCodes, startDate, endDate);
+
             try
             {
                 var data = await _hbSalesContext
@@ -796,6 +811,15 @@ namespace BlazorApp.Api.Services.React
           DateTime endDate
         )
         {
+            // 窗口内的 POSM 销售已包含在日统计里，这里再读会重复计算。
+            if (!LegacyDatabaseGate.HBSalesEnabled)
+            {
+                if (startDate < SalesStatisticsHBSalesHistoryWindow.EndExclusive)
+                    startDate = SalesStatisticsHBSalesHistoryWindow.EndExclusive;
+                if (startDate > endDate)
+                    return new List<SalesDataItem>();
+            }
+
             try
             {
                 var data = await _posmContext
@@ -861,6 +885,38 @@ namespace BlazorApp.Api.Services.React
         /// <summary>
         /// 销售数据内部类
         /// </summary>
+        /// <summary>
+        /// HBSales 断开后的历史销量来源：窗口内的商品分店日统计。
+        /// 日统计没有原价和折扣明细，这些字段按无折扣返回。
+        /// </summary>
+        private async Task<List<SalesDataItem>> GetFrozenHistorySalesAsync(
+          List<string> productCodes,
+          List<string> storeCodes,
+          DateTime startDate,
+          DateTime endDate
+        )
+        {
+            var windowEnd = SalesStatisticsHBSalesHistoryWindow.EndExclusive;
+            return await _context.Db.Queryable<ProductStoreDailySalesStatistic>()
+              .Where(s =>
+                storeCodes.Contains(s.BranchCode)
+                && productCodes.Contains(s.ProductCode)
+                && s.Date >= startDate.Date
+                && s.Date <= endDate
+                && s.Date < windowEnd
+              )
+              .Select(s => new SalesDataItem
+              {
+                  StoreCode = s.BranchCode,
+                  ProductCode = s.ProductCode,
+                  Date = s.Date,
+                  Quantity = s.TotalQuantity,
+                  Amount = s.TotalAmount,
+                  OriginalAmount = s.TotalAmount,
+              })
+              .ToListAsync();
+        }
+
         private class SalesDataItem
         {
             public string ProductCode { get; set; } = string.Empty;

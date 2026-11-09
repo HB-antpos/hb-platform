@@ -1777,7 +1777,7 @@ async function main() {
         selectionSection.includes('disabled={!selectedRowKeys.length || batchCategorySaving}') &&
         selectionSection.includes('onClick={() => void handlePushToHq()}') &&
         countOccurrences(selectionSection, '{access.canWriteProduct ?') === 4 &&
-        countOccurrences(selectionSection, '{access.canManagePosProducts ?') === 1,
+        countOccurrences(selectionSection, '{HQ_ACTIONS_ENABLED && access.canManagePosProducts ?') === 1,
       '勾选后操作条应包含批量修改、改分类、批量上架（带确认）、批量下架（经供货说明弹窗确认）和发送到HQ，且权限不变',
     )
     // 2026-10 重设计：按钮顺序按设计为 批量修改 → 改分类 → 上架 → 下架… → 发送到 HQ。

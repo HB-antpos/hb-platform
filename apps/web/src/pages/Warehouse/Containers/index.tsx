@@ -71,6 +71,7 @@ import {
 import './containers.css'
 import containersMessagesEn from './containersMessages.en.json'
 import containersMessagesZh from './containersMessages.zh.json'
+import { HBSALES_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 registerPageMessages({ zh: containersMessagesZh, en: containersMessagesEn })
 
@@ -1311,7 +1312,8 @@ export default function ContainersPage() {
                   volume: formatNumber(selectedTotals.volume, 2),
                 })}
               </span>
-              <Button
+              {HBSALES_ACTIONS_ENABLED && (
+                <Button
                 size="small"
                 icon={<CloudUploadOutlined />}
                 loading={pushing}
@@ -1320,6 +1322,7 @@ export default function ContainersPage() {
               >
                 {t('containers.actions.pushToHbSales')}
               </Button>
+              )}
             </SelectionActionBar>
           ) : null}
 

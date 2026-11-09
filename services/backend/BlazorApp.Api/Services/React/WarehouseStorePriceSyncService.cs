@@ -372,7 +372,8 @@ public sealed class WarehouseStorePriceSyncService : IWarehouseStorePriceSyncSer
             ApplyToAllProducts = request.ApplyToAllProducts,
             ProductCodes = NormalizeCodes(request.ProductCodes),
             TargetStoreCodes = NormalizeCodes(request.TargetStoreCodes),
-            SyncToHq = request.SyncToHq,
+            // HQ 断开后按“只写本地”执行，旧页面仍勾选同步 HQ 时也不会报错。
+            SyncToHq = request.SyncToHq && LegacyDatabaseGate.HqEnabled,
         };
     }
 

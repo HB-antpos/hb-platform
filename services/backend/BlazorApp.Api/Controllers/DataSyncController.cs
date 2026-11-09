@@ -1226,6 +1226,7 @@ namespace BlazorApp.Api.Controllers
         /// <param name="request">反向同步请求，包含最后更新日期</param>
         /// <returns>同步结果</returns>
         [HttpPost("domestic-products-to-hq")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         public async Task<IActionResult> SyncDomesticProductsToHq(
             [FromBody] ReverseSyncRequest request
         )

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.Constants;
@@ -636,6 +637,7 @@ namespace BlazorApp.Api.Controllers.React
         /// <param name="request">同步请求</param>
         /// <returns>同步结果</returns>
         [HttpPost("sync-to-hbsales")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.HBSales)]
         [Authorize(Policy = Permissions.DomesticPurchase.ManageProducts)]
         public async Task<IActionResult> SyncToHBSales([FromBody] SyncToHBSalesRequestDto request)
         {
@@ -819,6 +821,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("send-to-hq")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.DomesticPurchase.ManageProducts)]
         public async Task<IActionResult> SendToHq([FromBody] SyncToHBSalesRequestDto request)
         {

@@ -111,6 +111,22 @@ public sealed class BatchProductSalesDiscountWorker(
         try
         {
             await ValidateOwnershipAsync(store, leases, globalToken, claim, dayToken);
+            if (SalesStatisticsHBSalesHistoryWindow.IsFrozen(day))
+            {
+                // 已发布的快照继续有效；未完成的日期无法再计算，推迟 30 天避免反复领取。
+                if (claim.State.Status == "Fresh")
+                {
+                    await store.RecordCheckedAsync(claim, claim.State.StatisticsVersion, claim.State.SourceVersion,
+                        DateTime.UtcNow, dayToken);
+                }
+                else
+                {
+                    await store.WaitForCanonicalRefreshAsync(claim, DateTime.UtcNow, dayToken,
+                        "HBSales 已断开，历史折扣快照不再计算", DateTime.UtcNow.AddDays(30));
+                }
+                return;
+            }
+
             var canonical = new BatchProductSalesStatisticReader(services.GetRequiredService<SqlSugarContext>().Db);
             var canonicalStatus = await canonical.StatusAsync(day, day, dayToken);
             if (!canonicalStatus.IsFresh)
