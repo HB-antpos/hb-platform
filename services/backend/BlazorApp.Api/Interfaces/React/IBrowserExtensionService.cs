@@ -28,4 +28,8 @@ public interface IBrowserExtensionService
     Task<BrowserExtensionSupplierProductStoreSalesDto> GetSupplierProductStoreSalesAsync(
         BrowserExtensionSupplierProductStoreSalesRequestDto request
     );
+
+    Task<BrowserExtensionBarcodeLookupResultDto> LookupBarcodeAsync(
+        BrowserExtensionBarcodeLookupRequestDto request
+    );
 }

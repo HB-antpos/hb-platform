@@ -274,6 +274,45 @@ export function normalizeCategoryConfig(raw, profile) {
   return { config, errors };
 }
 
+// 扫码搜索配置归一化：未配置或非法都返回 null，只停用该供应商的扫码搜索。
+// {item} 只能在路径或查询串里，网址必须与供应商同源，防止货号被发往别的网站。
+export function normalizeSearchConfig(raw, profile) {
+  if (raw == null) return { config: null, errors: [] };
+  const template = raw && typeof raw === 'object' ? raw.urlTemplate : null;
+  // 网址拼不出来的供应商改用搜索框；配置了网址模板时以模板为准。
+  if (template == null && typeof raw?.inputSelector === 'string') {
+    const selector = raw.inputSelector.trim();
+    return selector && selector.length <= 300 && !/[\r\n]/u.test(selector)
+      ? { config: { inputSelector: selector }, errors: [] }
+      : { config: null, errors: ['inputSelector 非法'] };
+  }
+  const invalid = { config: null, errors: ['urlTemplate 非法'] };
+  if (
+    typeof template !== 'string'
+    || template.length > 500
+    || /\s/u.test(template)
+    || template.split('{item}').length !== 2
+  ) {
+    return invalid;
+  }
+  let url;
+  try {
+    url = new URL(template.replace('{item}', '0'));
+  } catch {
+    return invalid;
+  }
+  if (
+    !/^https?:$/u.test(url.protocol)
+    || url.username
+    || url.password
+    || !template.toLowerCase().startsWith(`${url.origin.toLowerCase()}/`)
+    || !originMatchesAny(profile?.origins, url.origin)
+  ) {
+    return invalid;
+  }
+  return { config: { urlTemplate: template }, errors: [] };
+}
+
 // 校验 profile 数据，拒绝任何非声明式 transform
 export function validateProfiles(raw) {
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.profiles)) {
@@ -334,7 +373,9 @@ export function validateProfiles(raw) {
     // 分类块单独归一化：非法只降级该供应商的分类采集并记 warnings，不进 errors。
     const category = normalizeCategoryConfig(p.category, p);
     warnings.push(...category.errors.map((e) => `${path}.category.${e}`));
-    out.push({ ...p, category: category.config });
+    const search = normalizeSearchConfig(p.search, p);
+    warnings.push(...search.errors.map((e) => `${path}.search.${e}`));
+    out.push({ ...p, category: category.config, search: search.config });
   });
   return { valid: errors.length === 0, profiles: out, errors, warnings };
 }

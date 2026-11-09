@@ -18,6 +18,10 @@ export const DEFAULT_PROFILES = {
       },
       mountSelector: '.widget-productlist-code',
       mountPosition: 'afterend',
+      // 扫码后按货号搜索（1.7.0+）；2026-11-09 登录后核实结果页卡片与列表页相同。
+      search: {
+        urlTemplate: 'https://www.dats.com.au/search?ProductSearch={item}',
+      },
       // 供应商分类采集（1.5.0+）：离线回退时使用；联网后以后端下发的 category 块为准。
       // 以下选择器已于 2026-09-23 对公开页 /、/office-stationery、/office-stationery/adhesives-and-tape 核实；
       // 登录后的页面结构待登录核实，若不同由后端配置热更新修正（递增 ConfigVersion，无需发版）。

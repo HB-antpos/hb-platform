@@ -17,10 +17,10 @@ The Safari extension is designed for iPhone and iPad and is available only to au
 
 Keywords: supplier,ordering,purchase,sales,inventory,business
 
-## What's New in Version 1.6.0
+## What's New in Version 1.7.0
 
-- Product buttons now show a "Last year" line: this store's sales over the next 30 days (or 60 days) starting on the same weekday last year, so you can compare before ordering. If there is no sales data for this store at that time, the line is simply hidden.
-- A new Last year 30 / 60 days switch in the assistant changes the window instantly, and a summary card shows last order, sales to date and last year side by side.
+- Scan a product barcode on a supported supplier website: the assistant finds the matching supplier item number in Hot Bargain and searches the supplier site for it. Requires a scanner or keyboard that types the barcode.
+- If the product is already on the current page, it is highlighted without leaving the page. The assistant only searches; it never adds items to a cart or places an order.
 
 Privacy URL: https://hotbargain.vip/privacy/browser-extension
 

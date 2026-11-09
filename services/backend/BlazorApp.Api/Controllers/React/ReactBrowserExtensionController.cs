@@ -294,6 +294,63 @@ public sealed class ReactBrowserExtensionController : ControllerBase
         }
     }
 
+    [HttpPost("barcode-lookup")]
+    [BrowserExtensionInvalidRequestFilter]
+    public async Task<IActionResult> LookupBarcode(
+        [FromBody] BrowserExtensionBarcodeLookupRequestDto request
+    )
+    {
+        if (request == null)
+        {
+            return BadRequest(
+                ApiResponse<BrowserExtensionBarcodeLookupResultDto>.Error(
+                    "请求参数不能为空。",
+                    "INVALID_REQUEST"
+                )
+            );
+        }
+
+        // 条码查货号是商品主档查询，与门店无关，只校验扩展基础权限。
+        if (!await _accessService.CanAccessAsync(User))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var data = await _service.LookupBarcodeAsync(request);
+            return Ok(ApiResponse<BrowserExtensionBarcodeLookupResultDto>.OK(data, "查询成功"));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(
+                ApiResponse<BrowserExtensionBarcodeLookupResultDto>.Error(ex.Message, "INVALID_REQUEST")
+            );
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(
+                ApiResponse<BrowserExtensionBarcodeLookupResultDto>.Error(ex.Message, "NOT_FOUND")
+            );
+        }
+        catch (Exception ex) when (ClientAbortDetector.IsClientAbort(ex, HttpContext.RequestAborted))
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "浏览器订货助手条码查货号失败 SupplierCode={SupplierCode}",
+                request.SupplierCode
+            );
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                ApiResponse<BrowserExtensionBarcodeLookupResultDto>.Error("条码查询失败。", "QUERY_ERROR")
+            );
+        }
+    }
+
     [HttpPost("product-purchase-cycles")]
     public async Task<IActionResult> GetPurchaseCycles(
         [FromBody] BrowserExtensionPurchaseCyclesRequestDto request

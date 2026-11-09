@@ -81,6 +81,10 @@
         },
         mountSelector: ".widget-productlist-code",
         mountPosition: "afterend",
+        // 扫码后按货号搜索（1.7.0+）；2026-11-09 登录后核实结果页卡片与列表页相同。
+        search: {
+          urlTemplate: "https://www.dats.com.au/search?ProductSearch={item}"
+        },
         // 供应商分类采集（1.5.0+）：离线回退时使用；联网后以后端下发的 category 块为准。
         // 以下选择器已于 2026-09-23 对公开页 /、/office-stationery、/office-stationery/adhesives-and-tape 核实；
         // 登录后的页面结构待登录核实，若不同由后端配置热更新修正（递增 ConfigVersion，无需发版）。
@@ -426,6 +430,28 @@
     config.enabled = input.enabled === true && capturable && errors.length === 0;
     return { config, errors };
   }
+  function normalizeSearchConfig(raw, profile) {
+    if (raw == null) return { config: null, errors: [] };
+    const template = raw && typeof raw === "object" ? raw.urlTemplate : null;
+    if (template == null && typeof raw?.inputSelector === "string") {
+      const selector = raw.inputSelector.trim();
+      return selector && selector.length <= 300 && !/[\r\n]/u.test(selector) ? { config: { inputSelector: selector }, errors: [] } : { config: null, errors: ["inputSelector \u975E\u6CD5"] };
+    }
+    const invalid2 = { config: null, errors: ["urlTemplate \u975E\u6CD5"] };
+    if (typeof template !== "string" || template.length > 500 || /\s/u.test(template) || template.split("{item}").length !== 2) {
+      return invalid2;
+    }
+    let url;
+    try {
+      url = new URL(template.replace("{item}", "0"));
+    } catch {
+      return invalid2;
+    }
+    if (!/^https?:$/u.test(url.protocol) || url.username || url.password || !template.toLowerCase().startsWith(`${url.origin.toLowerCase()}/`) || !originMatchesAny(profile?.origins, url.origin)) {
+      return invalid2;
+    }
+    return { config: { urlTemplate: template }, errors: [] };
+  }
   function validateProfiles(raw) {
     if (!raw || typeof raw !== "object" || !Array.isArray(raw.profiles)) {
       return {
@@ -484,7 +510,9 @@
       }
       const category = normalizeCategoryConfig(p.category, p);
       warnings.push(...category.errors.map((e) => `${path}.category.${e}`));
-      out.push({ ...p, category: category.config });
+      const search = normalizeSearchConfig(p.search, p);
+      warnings.push(...search.errors.map((e) => `${path}.search.${e}`));
+      out.push({ ...p, category: category.config, search: search.config });
     });
     return { valid: errors.length === 0, profiles: out, errors, warnings };
   }
@@ -1104,7 +1132,7 @@
   }
 
   // hb-safari-config:config.js
-  var EXTENSION_VERSION = "1.6.0";
+  var EXTENSION_VERSION = "1.7.0";
   var HB_API_ORIGIN = "https://hotbargain.vip";
   var HB_WEB_ORIGIN = "https://hotbargain.vip";
   var BUILD_TARGET = "safari";
@@ -1723,6 +1751,34 @@
     if (!res.success) return { ok: false, error: res.message || res.errorCode || "\u91C7\u8D2D\u5468\u671F\u83B7\u53D6\u5931\u8D25" };
     return { ok: true, data: res.data };
   }
+  async function handleBarcodeLookup({ supplierCode, barcode }) {
+    if (!supplierCode || !barcode) return { ok: false, error: "\u53C2\u6570\u7F3A\u5931" };
+    const res = await apiRequest("/api/react/v1/browser-extension/barcode-lookup", {
+      method: "POST",
+      body: JSON.stringify({ supplierCode, barcode })
+    });
+    if (!res.success) return { ok: false, error: res.message || res.errorCode || "\u6761\u7801\u67E5\u8BE2\u5931\u8D25" };
+    return { ok: true, data: res.data };
+  }
+  async function handleBarcodeScanForward({ barcode }) {
+    if (!barcode) return { ok: false, errorCode: "INVALID_REQUEST" };
+    try {
+      const tabs = await assistantPanel.queryActiveTabs();
+      const tabId = tabs[0] && tabs[0].id;
+      if (tabId == null) return { ok: false, errorCode: "NO_SUPPLIER_PAGE" };
+      const response = await chrome.tabs.sendMessage(tabId, { type: "BARCODE_SCANNED", barcode });
+      return response || { ok: false, errorCode: "NO_SUPPLIER_PAGE" };
+    } catch {
+      return { ok: false, errorCode: "NO_SUPPLIER_PAGE" };
+    }
+  }
+  async function handleScanLocateItem({ storeCode, supplierCode, itemNumber }) {
+    if (!supplierCode || !itemNumber) return { ok: false, error: "\u53C2\u6570\u7F3A\u5931" };
+    await chrome.storage.session.set({
+      pendingLocate: { storeCode: storeCode || null, supplierCode, itemNumber }
+    });
+    return { ok: true };
+  }
   async function handleStores() {
     const res = await apiRequest("/api/react/v1/browser-extension/stores", { method: "GET" });
     if (!res.success) return { ok: false, error: res.message || res.errorCode || "\u95E8\u5E97\u83B7\u53D6\u5931\u8D25" };
@@ -1962,6 +2018,12 @@
           return handleSummaryBatch(message);
         case "PURCHASE_CYCLES":
           return handlePurchaseCycles(message);
+        case "BARCODE_LOOKUP":
+          return handleBarcodeLookup(message);
+        case "BARCODE_SCAN_FORWARD":
+          return handleBarcodeScanForward(message);
+        case "SCAN_LOCATE_ITEM":
+          return handleScanLocateItem(message);
         case "GET_STORES":
           return handleStores();
         case "SUPPLIER_TOP_SALES":

@@ -940,6 +940,55 @@ public sealed class BrowserExtensionService : IBrowserExtensionService
         return DateOnly.FromDateTime(localNow.DateTime);
     }
 
+    public async Task<BrowserExtensionBarcodeLookupResultDto> LookupBarcodeAsync(
+        BrowserExtensionBarcodeLookupRequestDto request
+    )
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var supplierCode = NormalizeCode(request.SupplierCode, "供应商代码");
+        var barcode = NormalizeCode(request.Barcode, "条码");
+        EnsureSupplierEnabled(supplierCode);
+
+        var barcodes = BrowserExtensionBarcodeLookup.BuildBarcodeVariants(barcode);
+        // 走现有索引 IX_Product_Active_Barcode_Lookup；同一条码的商品极少，上限只防脏数据。
+        var rows = await _db.Queryable<Product>()
+            .Where(product =>
+                !product.IsDeleted
+                && product.Barcode != null
+                && barcodes.Contains(product.Barcode)
+            )
+            .Select(product => new BrowserExtensionBarcodeLookupRow
+            {
+                LocalSupplierCode = product.LocalSupplierCode,
+                ItemNumber = product.ItemNumber,
+                ProductName = product.ProductName,
+                IsActive = product.IsActive,
+            })
+            .Take(BrowserExtensionBarcodeLookup.MaxRows)
+            .ToListAsync();
+
+        var result = BrowserExtensionBarcodeLookup.Resolve(rows, supplierCode, barcode);
+        if (result.Status != BrowserExtensionBarcodeLookupStatus.OtherSupplier)
+        {
+            return result;
+        }
+
+        var otherCodes = BrowserExtensionBarcodeLookup.DistinctSupplierCodes(rows);
+        var names = await _db.Queryable<HBLocalSupplier>()
+            .Where(supplier => otherCodes.Contains(supplier.LocalSupplierCode))
+            .Select(supplier => new { supplier.LocalSupplierCode, supplier.Name })
+            .ToListAsync();
+        var nameByCode = names
+            .GroupBy(item => item.LocalSupplierCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Name, StringComparer.OrdinalIgnoreCase);
+        result.OtherSuppliers = otherCodes
+            .Select(code => nameByCode.TryGetValue(code, out var name) && !string.IsNullOrWhiteSpace(name)
+                ? name.Trim()
+                : code)
+            .ToList();
+        return result;
+    }
+
     private void EnsureSupplierEnabled(string supplierCode)
     {
         if (!BrowserExtensionProfileCatalog.IsSupplierEnabled(_options.Value, supplierCode))
@@ -1340,7 +1389,47 @@ public static partial class BrowserExtensionProfileCatalog
             MountSelector = options.MountSelector.Trim(),
             MountPosition = mountPosition,
             Category = TryBuildCategory(options.Category, supplierCode, origins),
+            Search = TryBuildSearch(options.SearchUrlTemplate, origins, options.SearchInputSelector),
         };
+    }
+
+    /// <summary>
+    /// 校验扫码搜索网址模板：非法只关闭该供应商的扫码搜索（返回 null），不影响按钮注入。
+    /// {item} 只能出现在路径或查询串，且网址必须落在该供应商已声明的 origin 内，防止货号被发往别的网站。
+    /// </summary>
+    internal static BrowserExtensionSupplierSearchProfileDto? TryBuildSearch(
+        string? urlTemplate,
+        IReadOnlyList<string> origins,
+        string? inputSelector = null
+    )
+    {
+        const string placeholder = "{item}";
+        var template = urlTemplate?.Trim();
+        if (string.IsNullOrEmpty(template))
+        {
+            return IsSafeSelector(inputSelector)
+                ? new BrowserExtensionSupplierSearchProfileDto { InputSelector = inputSelector!.Trim() }
+                : null;
+        }
+
+        if (
+            template.Length > 500
+            || template.Any(char.IsWhiteSpace)
+            || template.Split(placeholder, StringSplitOptions.None).Length != 2
+            || !Uri.TryCreate(template.Replace(placeholder, "0"), UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !template.StartsWith($"{uri.GetLeftPart(UriPartial.Authority)}/", StringComparison.OrdinalIgnoreCase)
+            || !UrlMatchesProfileOrigins(
+                new BrowserExtensionSupplierProfileDto { Origins = origins.ToList() },
+                uri.AbsoluteUri
+            )
+        )
+        {
+            return null;
+        }
+
+        return new BrowserExtensionSupplierSearchProfileDto { UrlTemplate = template };
     }
 
     /// <summary>

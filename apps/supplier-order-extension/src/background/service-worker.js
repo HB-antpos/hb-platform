@@ -781,6 +781,41 @@ async function handlePurchaseCycles({ storeCode, supplierCode, itemNumber }) {
   return { ok: true, data: res.data };
 }
 
+async function handleBarcodeLookup({ supplierCode, barcode }) {
+  if (!supplierCode || !barcode) return { ok: false, error: '参数缺失' };
+  const res = await apiRequest('/api/react/v1/browser-extension/barcode-lookup', {
+    method: 'POST',
+    body: JSON.stringify({ supplierCode, barcode }),
+  });
+  if (!res.success) return { ok: false, error: res.message || res.errorCode || '条码查询失败' };
+  return { ok: true, data: res.data };
+}
+
+// 焦点在侧栏时扫码：转给当前标签页的内容脚本，搜索和提示都由页面统一处理。
+async function handleBarcodeScanForward({ barcode }) {
+  if (!barcode) return { ok: false, errorCode: 'INVALID_REQUEST' };
+  try {
+    const tabs = await assistantPanel.queryActiveTabs();
+    const tabId = tabs[0] && tabs[0].id;
+    if (tabId == null) return { ok: false, errorCode: 'NO_SUPPLIER_PAGE' };
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'BARCODE_SCANNED', barcode });
+    return response || { ok: false, errorCode: 'NO_SUPPLIER_PAGE' };
+  } catch {
+    // 当前标签页没有内容脚本（不是已授权的供应商页面）时 sendMessage 会抛错。
+    return { ok: false, errorCode: 'NO_SUPPLIER_PAGE' };
+  }
+}
+
+// 扫码命中后让侧栏显示该商品。这里没有用户手势，不主动打开侧栏：
+// 侧栏已开时立即刷新，没开时下次打开直接显示最后扫到的商品。
+async function handleScanLocateItem({ storeCode, supplierCode, itemNumber }) {
+  if (!supplierCode || !itemNumber) return { ok: false, error: '参数缺失' };
+  await chrome.storage.session.set({
+    pendingLocate: { storeCode: storeCode || null, supplierCode, itemNumber },
+  });
+  return { ok: true };
+}
+
 async function handleStores() {
   const res = await apiRequest('/api/react/v1/browser-extension/stores', { method: 'GET' });
   if (!res.success) return { ok: false, error: res.message || res.errorCode || '门店获取失败' };
@@ -1063,6 +1098,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return handleSummaryBatch(message);
       case 'PURCHASE_CYCLES':
         return handlePurchaseCycles(message);
+      case 'BARCODE_LOOKUP':
+        return handleBarcodeLookup(message);
+      case 'BARCODE_SCAN_FORWARD':
+        return handleBarcodeScanForward(message);
+      case 'SCAN_LOCATE_ITEM':
+        return handleScanLocateItem(message);
       case 'GET_STORES':
         return handleStores();
       case 'SUPPLIER_TOP_SALES':

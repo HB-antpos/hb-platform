@@ -107,6 +107,16 @@ public sealed class BrowserExtensionSupplierProfileOptions
     /// </summary>
     public BrowserExtensionSupplierCategoryOptions? Category { get; set; }
 
+    /// <summary>
+    /// 扫码后按货号搜索的网址模板（须含一个 {item} 且与 Origins 同源）；为空表示该供应商不启用扫码搜索。
+    /// </summary>
+    public string? SearchUrlTemplate { get; set; }
+
+    /// <summary>
+    /// 搜索只能经表单 POST、网址拼不出来时使用：页面上搜索框的选择器。配置了网址模板时不生效。
+    /// </summary>
+    public string? SearchInputSelector { get; set; }
+
     public static BrowserExtensionSupplierProfileOptions CreateDatsDefault() =>
         new()
         {
@@ -122,6 +132,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             MountSelector = ".widget-productlist-code",
             MountPosition = "afterend",
             Category = BrowserExtensionSupplierCategoryOptions.CreateDatsPlatformDefault(),
+            // 2026-11-09 登录后核实：按货号搜索结果页的卡片仍是 .product[data-product-code]。
+            SearchUrlTemplate = "https://www.dats.com.au/search?ProductSearch={item}",
         };
 
     public static IReadOnlyList<BrowserExtensionSupplierProfileOptions> CreateSupplierDefaults() =>
@@ -131,10 +143,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "243",
                 DisplayName = "Brazco",
+                // 2026-11-09 登录后用真实货号核实：站内表单经脚本跳到这个 /view 地址，searchtype 与 inp_search_refer 缺一不可。
+                SearchUrlTemplate = "https://www.brazcoint.com.au/view?command=cman_view_webpage&pkey=brazco&webpage_id=14&inp_profile_id=1&input_Keywords_1_1={item}&input_H_Keywords_1_2=~~Keywords~~&input_H_Code_1_3=~~Keywords~~&input_H2_Code_1_9=~~Keywords~~&input_H_Metakeyword_1_13=~~Keywords~~&searchtype=advsch&inp_search_refer=Y",
                 Origins = new List<string> { "https://www.brazcoint.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.brazcoint.com.au/*.html*",
+                    "https://www.brazcoint.com.au/view?*",
                 },
                 CardSelector = ".product-listing-record",
                 ItemNumberSource = "text",
@@ -148,6 +163,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "227",
                 DisplayName = "Malmar",
+                // 2026-11-09 用真实货号核实。
+                SearchUrlTemplate = "https://www.malmar.com.au/Products.aspx?&searchtext={item}",
                 Origins = new List<string> { "https://www.malmar.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
@@ -173,9 +190,12 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "226",
                 DisplayName = "Meteor Party",
+                // 2026-11-09 用真实货号核实。
+                SearchUrlTemplate = "https://www.meteorparty.com.au/search?keywords={item}",
                 Origins = new List<string> { "https://www.meteorparty.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
+                    "https://www.meteorparty.com.au/search*",
                     "https://www.meteorparty.com.au/balloons/*",
                     "https://www.meteorparty.com.au/Party*",
                     "https://www.meteorparty.com.au/Events*",
@@ -203,6 +223,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "201",
                 DisplayName = "Yatsal",
+                // 2026-11-09 用真实货号核实；只有一个结果时网站直接跳商品详情页。
+                SearchUrlTemplate = "https://www.yatsal.com.au/search?ProductSearch={item}",
                 Origins = new List<string>
                 {
                     "https://yatsal.com.au/*",
@@ -225,10 +247,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "203",
                 DisplayName = "Windragon",
+                // 2026-11-09 登录后用真实货号核实；只有一个结果时网站直接跳商品详情页。
+                SearchUrlTemplate = "https://windragon.com.au/?s={item}&post_type=product",
                 Origins = new List<string> { "https://windragon.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://windragon.com.au/product-category/*",
+                    "https://windragon.com.au/?s=*",
                 },
                 CardSelector = "li.product",
                 ItemNumberSource = "text",
@@ -242,16 +267,19 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "225",
                 DisplayName = "MNB",
+                // 2026-11-09 登录后用真实货号核实：站内表单经脚本跳到这个 /view 地址，searchtype 与 inp_search_refer 缺一不可。
+                SearchUrlTemplate = "https://www.mnb.com.au/view?command=cman_view_webpage&pkey=mnb&webpage_id=539&inp_profile_id=2&input_Keywords_2_4={item}&input_H_Keywords_2_5=~~Keywords~~&input_H_Code_2_6=~~Keywords~~&input_H_Description3_2_24=~~Keywords~~&input_H_Description_2_42=~~Keywords~~&input_H_Barcode_2_53=~~Keywords~~&searchtype=advsch&inp_search_refer=Y",
                 Origins = new List<string> { "https://www.mnb.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.mnb.com.au/*.html*",
+                    "https://www.mnb.com.au/view?*",
                 },
                 CardSelector = ".product-listing-record",
                 ItemNumberSource = "text",
-                ItemNumberSelector = ".product-listing-code",
+                ItemNumberSelector = ".product-listing-code, .product-listing-item-code",
                 ItemNumberTransforms = new List<string> { "after-colon", "trim", "uppercase" },
-                MountSelector = ".product-listing-code",
+                MountSelector = ".product-listing-code, .product-listing-item-code",
                 MountPosition = "afterend",
                 Category = BrowserExtensionSupplierCategoryOptions.CreateListingHtmlDefault(),
             },
@@ -259,10 +287,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "218",
                 DisplayName = "PJ SAS",
+                // 2026-11-09 登录后用真实货号核实：站内表单经脚本跳到这个 /view 地址，searchtype 与 inp_search_refer 缺一不可。
+                SearchUrlTemplate = "https://www.pjsas.com.au/view?command=cman_view_webpage&pkey=pjsas&webpage_id=9&inp_profile_id=19&input_Keywords_19_112={item}&input_H3_Code_19_104=~~Keywords~~&input_H3_Description2_19_106=~~Keywords~~&input_H3_Name_19_108=~~Keywords~~&input_H3_Meta_Keywords_19_110=~~Keywords~~&searchtype=advsch&inp_search_refer=Y",
                 Origins = new List<string> { "https://www.pjsas.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.pjsas.com.au/*.html*",
+                    "https://www.pjsas.com.au/view?*",
                 },
                 CardSelector = ".product-listing-record",
                 ItemNumberSource = "text",
@@ -276,10 +307,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "267",
                 DisplayName = "Jemark",
+                // 2026-11-09 登录后核实：POST 带 CSRF，结果页地址一次性，只能填搜索框提交。
+                SearchInputSelector = "form[action$=\"/search\"] input[name=\"keywords\"]",
                 Origins = new List<string> { "https://www.jemark.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.jemark.com.au/category/*",
+                    "https://www.jemark.com.au/search/results/*",
                 },
                 CardSelector = "ul.products li.product",
                 ItemNumberSource = "text",
@@ -300,6 +334,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "236",
                 DisplayName = "GFA",
+                // 2026-11-09 登录后用真实货号核实：网站货号用下划线，插件搜索前会转回。
+                SearchUrlTemplate = "https://gfa.opmetrix.store/products/view?search_term={item}",
                 Origins = new List<string> { "https://gfa.opmetrix.store/*" },
                 ListPagePatterns = new List<string>
                 {
@@ -331,6 +367,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "SP2502280001",
                 DisplayName = "TXK",
+                // 2026-11-09 用真实货号核实：搜索框最终跳到这个网址。
+                SearchUrlTemplate = "http://txkorders.inzantsales.com/shop?Search={item}",
                 Origins = new List<string> { "http://txkorders.inzantsales.com/*" },
                 ListPagePatterns = new List<string>
                 {
@@ -356,11 +394,14 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "SP0101",
                 DisplayName = "Boom Up",
+                // 2026-11-09 登录后核实：必须带 dgwt_wcas=1，否则网站不按货号搜。
+                SearchUrlTemplate = "https://boomup.com.au/?s={item}&post_type=product&dgwt_wcas=1",
                 Origins = new List<string> { "https://boomup.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://boomup.com.au/shop*",
                     "https://boomup.com.au/product-category/*",
+                    "https://boomup.com.au/?s=*",
                 },
                 CardSelector = "main ul.products li.product",
                 ItemNumberSource = "text",

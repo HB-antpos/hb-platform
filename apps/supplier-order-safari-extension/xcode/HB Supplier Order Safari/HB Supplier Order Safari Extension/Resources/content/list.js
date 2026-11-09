@@ -1838,6 +1838,7 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     matchUrlPattern: () => matchUrlPattern,
     matchesListPage: () => matchesListPage,
     normalizeCategoryConfig: () => normalizeCategoryConfig,
+    normalizeSearchConfig: () => normalizeSearchConfig,
     originMatchesAny: () => originMatchesAny,
     validateProfiles: () => validateProfiles
   });
@@ -2041,6 +2042,28 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     config.enabled = input.enabled === true && capturable && errors.length === 0;
     return { config, errors };
   }
+  function normalizeSearchConfig(raw, profile) {
+    if (raw == null) return { config: null, errors: [] };
+    const template = raw && typeof raw === "object" ? raw.urlTemplate : null;
+    if (template == null && typeof raw?.inputSelector === "string") {
+      const selector = raw.inputSelector.trim();
+      return selector && selector.length <= 300 && !/[\r\n]/u.test(selector) ? { config: { inputSelector: selector }, errors: [] } : { config: null, errors: ["inputSelector \u975E\u6CD5"] };
+    }
+    const invalid2 = { config: null, errors: ["urlTemplate \u975E\u6CD5"] };
+    if (typeof template !== "string" || template.length > 500 || /\s/u.test(template) || template.split("{item}").length !== 2) {
+      return invalid2;
+    }
+    let url;
+    try {
+      url = new URL(template.replace("{item}", "0"));
+    } catch {
+      return invalid2;
+    }
+    if (!/^https?:$/u.test(url.protocol) || url.username || url.password || !template.toLowerCase().startsWith(`${url.origin.toLowerCase()}/`) || !originMatchesAny(profile?.origins, url.origin)) {
+      return invalid2;
+    }
+    return { config: { urlTemplate: template }, errors: [] };
+  }
   function validateProfiles(raw) {
     if (!raw || typeof raw !== "object" || !Array.isArray(raw.profiles)) {
       return {
@@ -2099,7 +2122,9 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       }
       const category = normalizeCategoryConfig(p.category, p);
       warnings.push(...category.errors.map((e) => `${path}.category.${e}`));
-      out.push({ ...p, category: category.config });
+      const search = normalizeSearchConfig(p.search, p);
+      warnings.push(...search.errors.map((e) => `${path}.search.${e}`));
+      out.push({ ...p, category: category.config, search: search.config });
     });
     return { valid: errors.length === 0, profiles: out, errors, warnings };
   }
@@ -2859,6 +2884,16 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
           lastYearLabel: "\u53BB\u5E74\u540C\u671F",
           lastYearTooltip: "\u53BB\u5E74\u540C\u671F {range}\uFF08\u6309\u661F\u671F\u51E0\u5BF9\u9F50\uFF0C\u5F80\u524D\u63A8 364 \u5929\uFF0C\u53EA\u7B97\u672C\u5E97\uFF09",
           lastYearHint: "\u53BB\u5E74\u540C\u671F\u6309\u661F\u671F\u51E0\u5BF9\u9F50\uFF1A\u8D77\u70B9 {start} \u4E0E\u4ECA\u5929\u540C\u4E3A{weekday}\uFF08\u5F80\u524D\u63A8 364 \u5929\uFF09\u3002\u53EA\u7B97\u672C\u5E97\u3002",
+          scanLooking: "\u6B63\u5728\u67E5\u8BE2\u6761\u7801 {barcode}\u2026",
+          scanFound: "\u6761\u7801 {barcode} \u2192 \u8D27\u53F7 {item}",
+          scanSearching: "\u8D27\u53F7 {item}\uFF0C\u6B63\u5728\u67E5\u627E\u2026",
+          scanItemMissing: "\u4F9B\u5E94\u5546\u7F51\u7AD9\u6CA1\u6709\u641C\u5230\u8D27\u53F7 {item}\uFF08\u6761\u7801 {barcode}\uFF09",
+          scanMultiple: "\u6761\u7801 {barcode} \u5BF9\u5E94\u591A\u4E2A\u8D27\u53F7\uFF0C\u8BF7\u9009\u62E9\uFF1A",
+          scanOtherSupplier: "\u6761\u7801 {barcode} \u4E0D\u662F\u5F53\u524D\u4F9B\u5E94\u5546\u7684\u5546\u54C1\uFF08\u5C5E\u4E8E\uFF1A{suppliers}\uFF09",
+          scanNotFound: "\u6761\u7801 {barcode} \u5728\u7CFB\u7EDF\u91CC\u6CA1\u6709\u5F53\u524D\u4F9B\u5E94\u5546\u7684\u8D27\u53F7",
+          scanFailed: "\u6761\u7801\u67E5\u8BE2\u5931\u8D25\uFF1A{error}",
+          scanNoSupplierPage: "\u8BF7\u5148\u6253\u5F00\u5DF2\u6388\u6743\u7684\u4F9B\u5E94\u5546\u9875\u9762\u518D\u626B\u7801",
+          scanNotConfigured: "\u5F53\u524D\u4F9B\u5E94\u5546\u8FD8\u6CA1\u6709\u914D\u7F6E\u626B\u7801\u641C\u7D22",
           salesSince: "\u81EA {date} \u8D77",
           lastOrderTile: "\u4E0A\u6B21\u8BA2\u8D27",
           categoryTitle: "\u4F9B\u5E94\u5546\u5206\u7C7B\u91C7\u96C6",
@@ -2992,6 +3027,16 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
           lastYearLabel: "Last year",
           lastYearTooltip: "Last year {range} (aligned by weekday, 364 days back, this store only)",
           lastYearHint: "Last year is aligned by weekday: the start {start} is the same weekday as today ({weekday}, 364 days back). This store only.",
+          scanLooking: "Looking up barcode {barcode}\u2026",
+          scanFound: "Barcode {barcode} \u2192 item {item}",
+          scanSearching: "Searching for item {item}\u2026",
+          scanItemMissing: "The supplier website has no result for item {item} (barcode {barcode})",
+          scanMultiple: "Barcode {barcode} matches several items. Choose one:",
+          scanOtherSupplier: "Barcode {barcode} is not from this supplier (belongs to: {suppliers})",
+          scanNotFound: "No item number for barcode {barcode} under this supplier",
+          scanFailed: "Barcode lookup failed: {error}",
+          scanNoSupplierPage: "Open an authorised supplier page before scanning",
+          scanNotConfigured: "Barcode search is not set up for this supplier",
           salesSince: "since {date}",
           lastOrderTile: "Last order",
           categoryTitle: "Supplier categories",
@@ -3101,6 +3146,146 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   }
   var init_storage_compat = __esm({
     "src/lib/storage-compat.js"() {
+    }
+  });
+
+  // src/lib/barcode-scan.js
+  var barcode_scan_exports = {};
+  __export(barcode_scan_exports, {
+    SCAN_MAX_KEY_GAP_MS: () => SCAN_MAX_KEY_GAP_MS,
+    SCAN_MIN_LENGTH: () => SCAN_MIN_LENGTH,
+    SCAN_REPEAT_WINDOW_MS: () => SCAN_REPEAT_WINDOW_MS,
+    attachBarcodeScanner: () => attachBarcodeScanner,
+    buildSupplierSearchUrl: () => buildSupplierSearchUrl,
+    createRepeatGuard: () => createRepeatGuard,
+    createScanDetector: () => createScanDetector,
+    isRedirectedToItemPage: () => isRedirectedToItemPage,
+    normalizeScanItemNumber: () => normalizeScanItemNumber,
+    removeScannedText: () => removeScannedText,
+    submitSupplierSearchForm: () => submitSupplierSearchForm,
+    toSupplierItemNumber: () => toSupplierItemNumber
+  });
+  function createScanDetector({
+    minLength = SCAN_MIN_LENGTH,
+    maxKeyGapMs = SCAN_MAX_KEY_GAP_MS,
+    terminatorGapMs = SCAN_TERMINATOR_GAP_MS
+  } = {}) {
+    let buffer = "";
+    let lastAt = 0;
+    function reset() {
+      buffer = "";
+      lastAt = 0;
+    }
+    function handle(event) {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.repeat) {
+        reset();
+        return null;
+      }
+      if (event.key === "Shift") return null;
+      if (TERMINATOR_KEYS.has(event.key)) {
+        const code = buffer;
+        const gap = event.timeStamp - lastAt;
+        reset();
+        if (code.length < minLength || code.length > SCAN_MAX_LENGTH) return null;
+        if (gap > terminatorGapMs || !SCAN_CODE_PATTERN.test(code)) return null;
+        return code;
+      }
+      if (typeof event.key !== "string" || event.key.length !== 1) {
+        reset();
+        return null;
+      }
+      if (buffer && event.timeStamp - lastAt > maxKeyGapMs) buffer = "";
+      buffer += event.key;
+      lastAt = event.timeStamp;
+      return null;
+    }
+    return { handle, reset };
+  }
+  function removeScannedText(element, code) {
+    const tag = typeof element?.tagName === "string" ? element.tagName.toUpperCase() : "";
+    if (tag !== "INPUT" && tag !== "TEXTAREA" || typeof element.value !== "string") return false;
+    const index = element.value.lastIndexOf(code);
+    if (index < 0) return false;
+    setInputValue(element, element.value.slice(0, index) + element.value.slice(index + code.length));
+    return true;
+  }
+  function setInputValue(element, value) {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set;
+    if (setter) setter.call(element, value);
+    else element.value = value;
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  function submitSupplierSearchForm(doc, search, itemNumber) {
+    let inputs;
+    try {
+      inputs = [...doc.querySelectorAll(search.inputSelector)];
+    } catch {
+      return false;
+    }
+    const input = inputs.find((item) => item.getClientRects().length > 0) ?? inputs[0];
+    if (!input?.form) return false;
+    setInputValue(input, itemNumber);
+    input.form.requestSubmit();
+    return true;
+  }
+  function attachBarcodeScanner(target, { onScan, isEnabled = () => true, detectorOptions } = {}) {
+    const detector = createScanDetector(detectorOptions);
+    const handler = (event) => {
+      if (!isEnabled()) {
+        detector.reset();
+        return;
+      }
+      const code = detector.handle(event);
+      if (!code) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      removeScannedText(event.composedPath?.()[0] ?? event.target, code);
+      onScan(code);
+    };
+    target.addEventListener("keydown", handler, true);
+    return () => target.removeEventListener("keydown", handler, true);
+  }
+  function createRepeatGuard(windowMs = SCAN_REPEAT_WINDOW_MS) {
+    let lastCode = null;
+    let lastAt = 0;
+    return {
+      accept(code, now) {
+        const repeated = code === lastCode && now - lastAt < windowMs;
+        lastCode = code;
+        lastAt = now;
+        return !repeated;
+      }
+    };
+  }
+  function buildSupplierSearchUrl(search, itemNumber) {
+    return search.urlTemplate.replace("{item}", () => encodeURIComponent(itemNumber));
+  }
+  function isRedirectedToItemPage({ currentPath, searchUrl, pageText, itemNumber }) {
+    let searchPath;
+    try {
+      searchPath = new URL(searchUrl).pathname;
+    } catch {
+      return false;
+    }
+    if (currentPath === searchPath) return false;
+    return String(pageText ?? "").toUpperCase().includes(normalizeScanItemNumber(itemNumber));
+  }
+  function toSupplierItemNumber(itemNumber, transforms) {
+    return Array.isArray(transforms) && transforms.includes("underscore-to-slash") ? String(itemNumber).replaceAll("/", "_") : String(itemNumber);
+  }
+  function normalizeScanItemNumber(value) {
+    return String(value ?? "").trim().toUpperCase();
+  }
+  var SCAN_MAX_KEY_GAP_MS, SCAN_MIN_LENGTH, SCAN_MAX_LENGTH, SCAN_TERMINATOR_GAP_MS, SCAN_CODE_PATTERN, TERMINATOR_KEYS, SCAN_REPEAT_WINDOW_MS;
+  var init_barcode_scan = __esm({
+    "src/lib/barcode-scan.js"() {
+      SCAN_MAX_KEY_GAP_MS = 80;
+      SCAN_MIN_LENGTH = 8;
+      SCAN_MAX_LENGTH = 50;
+      SCAN_TERMINATOR_GAP_MS = 200;
+      SCAN_CODE_PATTERN = /^[0-9A-Za-z._-]+$/;
+      TERMINATOR_KEYS = /* @__PURE__ */ new Set(["Enter", "Tab"]);
+      SCAN_REPEAT_WINDOW_MS = 1500;
     }
   });
 
@@ -3855,9 +4040,219 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
         if (entry.isVisible) requestSummary(entry);
       }
     }
+    const barcodeModule = await Promise.resolve().then(() => (init_barcode_scan(), barcode_scan_exports)).catch(() => null);
+    const BARCODE_PENDING_KEY = "hb-sro-barcode-pending";
+    const BARCODE_PENDING_MAX_AGE_MS = 6e4;
+    const BARCODE_CARD_POLL_MS = 250;
+    const BARCODE_CARD_TIMEOUT_MS = 1e4;
+    const BARCODE_TOAST_MS = 6e3;
+    let searchConfig = profile.search || null;
+    let barcodeToken = 0;
+    let barcodeToastHost = null;
+    let barcodeToastTimer = null;
+    let barcodeCardTimer = null;
+    let barcodeHighlightedCard = null;
+    let detachBarcodeScanner = null;
+    const barcodeRepeatGuard = barcodeModule?.createRepeatGuard();
+    function hideBarcodeToast() {
+      if (barcodeToastTimer !== null) clearTimeout(barcodeToastTimer);
+      barcodeToastTimer = null;
+      barcodeToastHost?.remove();
+      barcodeToastHost = null;
+    }
+    function showBarcodeToast(text, { tone = "info", sticky = false, actions = [] } = {}) {
+      hideBarcodeToast();
+      const host = document.createElement("div");
+      host.setAttribute("data-hb-sro-barcode-toast", "");
+      host.style.cssText = "position:fixed;right:16px;bottom:16px;z-index:2147483647;";
+      const shadow = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `
+.box{max-width:360px;padding:10px 14px;border-radius:8px;background:#fff;color:#1f2937;
+  font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  border-left:4px solid #00695c;box-shadow:0 4px 16px rgba(0,0,0,.25);}
+.box.warn{border-left-color:#c62828;}
+button{display:block;width:100%;margin-top:6px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;
+  background:#f8fafc;color:#1f2937;font:inherit;text-align:left;cursor:pointer;}
+button:hover{background:#e2e8f0;}`;
+      const box = document.createElement("div");
+      box.className = tone === "warn" ? "box warn" : "box";
+      box.setAttribute("role", "status");
+      box.append(document.createTextNode(text));
+      for (const action of actions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = action.label;
+        button.addEventListener("click", action.onClick);
+        box.append(button);
+      }
+      shadow.append(style, box);
+      document.documentElement.append(host);
+      barcodeToastHost = host;
+      if (!sticky) barcodeToastTimer = setTimeout(hideBarcodeToast, BARCODE_TOAST_MS);
+    }
+    function findBarcodeCard(itemNumber) {
+      const target = barcodeModule.normalizeScanItemNumber(itemNumber);
+      return [...document.querySelectorAll(cardSelector)].find(
+        (card) => card.getClientRects().length > 0 && barcodeModule.normalizeScanItemNumber(readItemNumber(card)) === target
+      ) || null;
+    }
+    function markBarcodeCard(card) {
+      if (barcodeHighlightedCard && barcodeHighlightedCard !== card) {
+        barcodeHighlightedCard.style.outline = "";
+        barcodeHighlightedCard.style.outlineOffset = "";
+      }
+      barcodeHighlightedCard = card;
+      card.style.outline = "3px solid #00695c";
+      card.style.outlineOffset = "2px";
+      card.scrollIntoView({ block: "center" });
+    }
+    function locateBarcodeItemInPanel(itemNumber) {
+      chrome.runtime.sendMessage({
+        type: "SCAN_LOCATE_ITEM",
+        storeCode: selectedStoreCode || null,
+        supplierCode: profile.supplierCode,
+        itemNumber
+      }).catch(() => {
+      });
+    }
+    function openBarcodeItem(itemNumber, barcode) {
+      const card = findBarcodeCard(itemNumber);
+      if (card) {
+        locateBarcodeItemInPanel(itemNumber);
+        markBarcodeCard(card);
+        showBarcodeToast(formatMessage("scanFound", { barcode, item: itemNumber }));
+        return;
+      }
+      showBarcodeToast(formatMessage("scanSearching", { barcode, item: itemNumber }), { sticky: true });
+      goToBarcodeSearch(itemNumber, barcode);
+    }
+    function goToBarcodeSearch(itemNumber, barcode) {
+      const supplierItem = barcodeModule.toSupplierItemNumber(itemNumber, itemCfg.transforms);
+      const url = searchConfig.urlTemplate ? barcodeModule.buildSupplierSearchUrl(searchConfig, supplierItem) : null;
+      try {
+        sessionStorage.setItem(
+          BARCODE_PENDING_KEY,
+          JSON.stringify({ itemNumber, barcode, searchUrl: url, at: Date.now() })
+        );
+      } catch {
+      }
+      locateBarcodeItemInPanel(itemNumber);
+      if (url) {
+        location.assign(url);
+      } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, supplierItem)) {
+        try {
+          sessionStorage.removeItem(BARCODE_PENDING_KEY);
+        } catch {
+        }
+        showBarcodeToast(formatMessage("scanNotConfigured"), { tone: "warn" });
+      }
+    }
+    async function handleBarcodeScan(barcode) {
+      if (!active || !searchConfig || !barcodeRepeatGuard?.accept(barcode, performance.now())) return;
+      const token = ++barcodeToken;
+      if (barcodeCardTimer !== null) clearTimeout(barcodeCardTimer);
+      barcodeCardTimer = null;
+      showBarcodeToast(formatMessage("scanLooking", { barcode }), { sticky: true });
+      let response;
+      try {
+        response = await chrome.runtime.sendMessage({
+          type: "BARCODE_LOOKUP",
+          supplierCode: profile.supplierCode,
+          barcode
+        });
+      } catch (error) {
+        response = { ok: false, error: String(error?.message || error) };
+      }
+      if (token !== barcodeToken || !active) return;
+      if (!response?.ok) {
+        showBarcodeToast(formatMessage("scanFailed", { error: response?.error || "" }), { tone: "warn" });
+        return;
+      }
+      const data = response.data || {};
+      if (data.status === "matched" && data.itemNumber) {
+        openBarcodeItem(data.itemNumber, barcode);
+      } else if (data.status === "multiple" && data.candidates?.length) {
+        showBarcodeToast(formatMessage("scanMultiple", { barcode }), {
+          sticky: true,
+          actions: data.candidates.map((candidate) => ({
+            label: `${candidate.itemNumber}  ${candidate.productName || ""}`.trim(),
+            onClick: () => openBarcodeItem(candidate.itemNumber, barcode)
+          }))
+        });
+      } else if (data.status === "otherSupplier") {
+        showBarcodeToast(
+          formatMessage("scanOtherSupplier", { barcode, suppliers: (data.otherSuppliers || []).join(", ") }),
+          { tone: "warn" }
+        );
+      } else {
+        showBarcodeToast(formatMessage("scanNotFound", { barcode }), { tone: "warn" });
+      }
+    }
+    function readPendingBarcodeSearch() {
+      try {
+        const raw = sessionStorage.getItem(BARCODE_PENDING_KEY);
+        if (!raw) return null;
+        sessionStorage.removeItem(BARCODE_PENDING_KEY);
+        const pending = JSON.parse(raw);
+        return pending?.itemNumber && Date.now() - pending.at <= BARCODE_PENDING_MAX_AGE_MS ? pending : null;
+      } catch {
+        return null;
+      }
+    }
+    function highlightPendingBarcodeSearch() {
+      const pending = barcodeModule && searchConfig ? readPendingBarcodeSearch() : null;
+      if (!pending) return;
+      const { itemNumber, barcode, searchUrl } = pending;
+      const deadline = Date.now() + BARCODE_CARD_TIMEOUT_MS;
+      showBarcodeToast(formatMessage("scanSearching", { barcode, item: itemNumber }), { sticky: true });
+      const poll = () => {
+        barcodeCardTimer = null;
+        if (!active) return;
+        const card = findBarcodeCard(itemNumber);
+        if (card) {
+          markBarcodeCard(card);
+          showBarcodeToast(formatMessage("scanFound", { barcode, item: itemNumber }));
+        } else if (barcodeModule.isRedirectedToItemPage({
+          currentPath: location.pathname,
+          searchUrl,
+          pageText: document.body?.innerText,
+          itemNumber
+        })) {
+          showBarcodeToast(formatMessage("scanFound", { barcode, item: itemNumber }));
+        } else if (Date.now() >= deadline) {
+          showBarcodeToast(formatMessage("scanItemMissing", { barcode, item: itemNumber }), { tone: "warn" });
+        } else {
+          barcodeCardTimer = setTimeout(poll, BARCODE_CARD_POLL_MS);
+        }
+      };
+      poll();
+    }
+    if (barcodeModule) {
+      detachBarcodeScanner = barcodeModule.attachBarcodeScanner(window, {
+        isEnabled: () => active && !!searchConfig,
+        onScan: (barcode) => void handleBarcodeScan(barcode)
+      });
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message?.type !== "BARCODE_SCANNED") return false;
+        if (sender?.id !== chrome.runtime.id || sender?.tab) {
+          sendResponse({ ok: false, errorCode: "FORBIDDEN" });
+        } else if (!active || !searchConfig) {
+          sendResponse({ ok: false, errorCode: "SEARCH_NOT_CONFIGURED" });
+        } else {
+          void handleBarcodeScan(String(message.barcode || ""));
+          sendResponse({ ok: true });
+        }
+        return false;
+      });
+      highlightPendingBarcodeSearch();
+    }
     function teardown() {
       if (!active) return;
       active = false;
+      detachBarcodeScanner?.();
+      if (barcodeCardTimer !== null) clearTimeout(barcodeCardTimer);
+      hideBarcodeToast();
       cardObserver?.disconnect();
       visibilityObserver?.disconnect();
       if (scanTimer !== null) clearTimeout(scanTimer);
@@ -3907,6 +4302,7 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
           teardown();
         } else {
           categoryConfig = resolveCategoryConfig(updatedProfile);
+          searchConfig = updatedProfile.search || null;
           if (!isCrawlEnabled()) crawlSession?.controller.abort();
           rebuildPassiveCapture();
         }
