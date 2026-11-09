@@ -14,6 +14,7 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Models;
 using BlazorApp.Api.Services.Sms;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SqlSugar;
@@ -492,10 +493,12 @@ public sealed class ClickSendSmsGatewayTests
         ApiBaseUrl = "https://sms.example.test/",
     };
 
-    private static (ClickSendSmsGateway Gateway, StubHandler Handler) Create(Func<HttpRequestMessage, HttpResponseMessage> respond)
+    private static (ClickSendSmsGateway Gateway, StubHandler Handler) Create(
+        Func<HttpRequestMessage, HttpResponseMessage> respond,
+        ILogger<ClickSendSmsGateway>? logger = null)
     {
         var handler = new StubHandler(respond);
-        var gateway = new ClickSendSmsGateway(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(Options()), NullLogger<ClickSendSmsGateway>.Instance);
+        var gateway = new ClickSendSmsGateway(new HttpClient(handler), Microsoft.Extensions.Options.Options.Create(Options()), logger ?? NullLogger<ClickSendSmsGateway>.Instance);
         return (gateway, handler);
     }
 
@@ -630,6 +633,105 @@ public sealed class ClickSendSmsGatewayTests
 
         Assert.False(result.Success);
         Assert.Equal("GATEWAY_EXCEPTION", result.ErrorCode);
+    }
+
+    // ───────────── 失败原因进日志（2026-11-09：400 的真正原因 "not safe to send websites" 曾只能靠手工重放请求才看到）─────────────
+
+    [Fact]
+    public async Task ClickSend返回400_日志记下服务商说明和被拒网址_但不含号码正文和凭据()
+    {
+        var logger = new ListLogger();
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.BadRequest,
+            """{"http_code":400,"response_code":"BAD_REQUEST","response_msg":"The message/s contains not safe to send websites.","data":{"rejected_websites":["hotbargain.vip"]}}"""), logger);
+
+        var result = await gateway.SendAsync("+61412345678", "Get the app: https://hotbargain.vip/app", "ANTPOS", CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("CLICKSEND_BAD_REQUEST", result.ErrorCode); // 入库的错误码不变
+        var warning = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning).Message;
+        Assert.Contains("HTTP 400", warning);
+        Assert.Contains("CLICKSEND_BAD_REQUEST", warning);
+        Assert.Contains("The message/s contains not safe to send websites.", warning);
+        Assert.Contains("被拒网址：hotbargain.vip", warning);
+        Assert.DoesNotContain("412345678", warning);
+        Assert.DoesNotContain("Get the app", warning);
+        Assert.DoesNotContain("secret-key", warning);
+        Assert.DoesNotContain("ops@example.test", warning);
+    }
+
+    [Fact]
+    public async Task 服务商说明回显号码邮箱和换行_日志里被遮蔽压成一行并截断()
+    {
+        var logger = new ListLogger();
+        var noisy = "Invalid number +61 412 345 678 / 0412345678 for ops@example.test\\r\\nsecond line " + new string('x', 400);
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.BadRequest,
+            "{\"http_code\":400,\"response_code\":\"BAD_REQUEST\",\"response_msg\":\"" + noisy + "\"}"), logger);
+
+        await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning).Message;
+        Assert.DoesNotContain("412", warning);
+        Assert.DoesNotContain("345", warning);
+        Assert.DoesNotContain("ops@example.test", warning);
+        Assert.DoesNotContain('\r', warning);
+        Assert.DoesNotContain('\n', warning);
+        Assert.Contains("***", warning);
+        Assert.Contains("second line", warning);
+        Assert.EndsWith("...，被拒网址：-", warning); // 说明被截断（200 字符 + "..."），没有被拒网址时记 "-"
+    }
+
+    [Fact]
+    public async Task 被拒网址只留主机名_路径令牌和非法项被丢弃_最多5项()
+    {
+        var logger = new ListLogger();
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.BadRequest,
+            """{"http_code":400,"response_code":"BAD_REQUEST","response_msg":"blocked","data":{"rejected_websites":["https://HotBargain.vip/sign/secret-token-123?x=1","bad host!","a.example.com","b.example.com","c.example.com","d.example.com","e.example.com","f.example.com",42]}}"""), logger);
+
+        await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning).Message;
+        Assert.EndsWith("被拒网址：hotbargain.vip, a.example.com, b.example.com, c.example.com, d.example.com", warning);
+        Assert.DoesNotContain("secret-token-123", warning);
+        Assert.DoesNotContain("bad host", warning);
+        Assert.DoesNotContain("e.example.com", warning);
+    }
+
+    [Fact]
+    public async Task 响应不是JSON_日志说明与被拒网址都记横杠()
+    {
+        var logger = new ListLogger();
+        var (gateway, _) = Create(_ => new HttpResponseMessage(HttpStatusCode.BadGateway) { Content = new StringContent("<html>bad gateway</html>") }, logger);
+
+        await gateway.SendAsync("+61412345678", "body", "HotBargain", CancellationToken.None);
+
+        var warning = Assert.Single(logger.Entries, e => e.Level == LogLevel.Warning).Message;
+        Assert.Contains("HTTP_502", warning);
+        Assert.Contains("服务商说明：-，被拒网址：-", warning);
+        Assert.DoesNotContain("bad gateway", warning); // 非 JSON 响应的正文不进日志
+    }
+
+    [Fact]
+    public async Task 发送成功_不写失败日志()
+    {
+        var logger = new ListLogger();
+        var (gateway, _) = Create(_ => Json(HttpStatusCode.OK, Accepted("SUCCESS")), logger);
+
+        var result = await gateway.SendAsync("+61412345678", "body", "ANTPOS", CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.DoesNotContain(logger.Entries, e => e.Level >= LogLevel.Warning);
+    }
+
+    private sealed class ListLogger : ILogger<ClickSendSmsGateway>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
     }
 
     private sealed record CapturedRequest(HttpMethod Method, string Uri, string? AuthScheme, string? AuthParameter, string Body);
