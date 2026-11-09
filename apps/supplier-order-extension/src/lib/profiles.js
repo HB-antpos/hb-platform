@@ -289,7 +289,7 @@ export function normalizeSearchConfig(raw, profile) {
   const invalid = { config: null, errors: ['urlTemplate 非法'] };
   if (
     typeof template !== 'string'
-    || template.length > 300
+    || template.length > 500
     || /\s/u.test(template)
     || template.split('{item}').length !== 2
   ) {

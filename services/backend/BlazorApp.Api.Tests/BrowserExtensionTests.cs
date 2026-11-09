@@ -472,7 +472,7 @@ public sealed class BrowserExtensionProfileCatalogTests
             ("226", ".facets-item-cell-grid[data-sku]", "attribute", null, "data-sku", ".facets-item-cell-grid-title", "https://www.meteorparty.com.au/balloons/*"),
             ("201", ".product[data-product-code]", "attribute", null, "data-product-code", ".widget-productlist-code", "https://yatsal.com.au/*"),
             ("203", "li.product", "text", ".sku", null, ".sku", "https://windragon.com.au/product-category/*"),
-            ("225", ".product-listing-record", "text", ".product-listing-code", null, ".product-listing-code", "https://www.mnb.com.au/*.html*"),
+            ("225", ".product-listing-record", "text", ".product-listing-code, .product-listing-item-code", null, ".product-listing-code, .product-listing-item-code", "https://www.mnb.com.au/*.html*"),
             ("218", ".product-listing-record", "text", ".product-listing-code", null, ".product-listing-code", "https://www.pjsas.com.au/*.html*"),
             ("267", "ul.products li.product", "text", ".model", null, ".model", "https://www.jemark.com.au/category/*"),
             ("236", ".list-row[data-product]", "attribute", null, "data-product", ".content > a[href*='/product/view?id=']", "https://gfa.opmetrix.store/products/view*"),

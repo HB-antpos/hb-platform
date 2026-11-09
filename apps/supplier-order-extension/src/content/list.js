@@ -964,9 +964,10 @@ button:hover{background:#e2e8f0;}`;
   }
 
   function goToBarcodeSearch(itemNumber, barcode) {
+    const supplierItem = barcodeModule.toSupplierItemNumber(itemNumber, itemCfg.transforms);
     // 没有网址模板的供应商走表单提交，这时没有可预知的结果页地址。
     const url = searchConfig.urlTemplate
-      ? barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber)
+      ? barcodeModule.buildSupplierSearchUrl(searchConfig, supplierItem)
       : null;
     try {
       // 搜索会整页跳转，把结果交给下一页的内容脚本继续高亮。
@@ -980,7 +981,7 @@ button:hover{background:#e2e8f0;}`;
     locateBarcodeItemInPanel(itemNumber);
     if (url) {
       location.assign(url);
-    } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, itemNumber)) {
+    } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, supplierItem)) {
       try {
         sessionStorage.removeItem(BARCODE_PENDING_KEY);
       } catch {

@@ -143,10 +143,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "243",
                 DisplayName = "Brazco",
+                // 2026-11-09 登录后用真实货号核实：站内表单经脚本跳到这个 /view 地址，searchtype 与 inp_search_refer 缺一不可。
+                SearchUrlTemplate = "https://www.brazcoint.com.au/view?command=cman_view_webpage&pkey=brazco&webpage_id=14&inp_profile_id=1&input_Keywords_1_1={item}&input_H_Keywords_1_2=~~Keywords~~&input_H_Code_1_3=~~Keywords~~&input_H2_Code_1_9=~~Keywords~~&input_H_Metakeyword_1_13=~~Keywords~~&searchtype=advsch&inp_search_refer=Y",
                 Origins = new List<string> { "https://www.brazcoint.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.brazcoint.com.au/*.html*",
+                    "https://www.brazcoint.com.au/view?*",
                 },
                 CardSelector = ".product-listing-record",
                 ItemNumberSource = "text",
@@ -264,16 +267,19 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "225",
                 DisplayName = "MNB",
+                // 2026-11-09 登录后用真实货号核实：站内表单经脚本跳到这个 /view 地址，searchtype 与 inp_search_refer 缺一不可。
+                SearchUrlTemplate = "https://www.mnb.com.au/view?command=cman_view_webpage&pkey=mnb&webpage_id=539&inp_profile_id=2&input_Keywords_2_4={item}&input_H_Keywords_2_5=~~Keywords~~&input_H_Code_2_6=~~Keywords~~&input_H_Description3_2_24=~~Keywords~~&input_H_Description_2_42=~~Keywords~~&input_H_Barcode_2_53=~~Keywords~~&searchtype=advsch&inp_search_refer=Y",
                 Origins = new List<string> { "https://www.mnb.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.mnb.com.au/*.html*",
+                    "https://www.mnb.com.au/view?*",
                 },
                 CardSelector = ".product-listing-record",
                 ItemNumberSource = "text",
-                ItemNumberSelector = ".product-listing-code",
+                ItemNumberSelector = ".product-listing-code, .product-listing-item-code",
                 ItemNumberTransforms = new List<string> { "after-colon", "trim", "uppercase" },
-                MountSelector = ".product-listing-code",
+                MountSelector = ".product-listing-code, .product-listing-item-code",
                 MountPosition = "afterend",
                 Category = BrowserExtensionSupplierCategoryOptions.CreateListingHtmlDefault(),
             },
@@ -281,10 +287,13 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "218",
                 DisplayName = "PJ SAS",
+                // 2026-11-09 登录后用真实货号核实：站内表单经脚本跳到这个 /view 地址，searchtype 与 inp_search_refer 缺一不可。
+                SearchUrlTemplate = "https://www.pjsas.com.au/view?command=cman_view_webpage&pkey=pjsas&webpage_id=9&inp_profile_id=19&input_Keywords_19_112={item}&input_H3_Code_19_104=~~Keywords~~&input_H3_Description2_19_106=~~Keywords~~&input_H3_Name_19_108=~~Keywords~~&input_H3_Meta_Keywords_19_110=~~Keywords~~&searchtype=advsch&inp_search_refer=Y",
                 Origins = new List<string> { "https://www.pjsas.com.au/*" },
                 ListPagePatterns = new List<string>
                 {
                     "https://www.pjsas.com.au/*.html*",
+                    "https://www.pjsas.com.au/view?*",
                 },
                 CardSelector = ".product-listing-record",
                 ItemNumberSource = "text",
@@ -325,6 +334,8 @@ public sealed class BrowserExtensionSupplierProfileOptions
             {
                 SupplierCode = "236",
                 DisplayName = "GFA",
+                // 2026-11-09 登录后用真实货号核实：网站货号用下划线，插件搜索前会转回。
+                SearchUrlTemplate = "https://gfa.opmetrix.store/products/view?search_term={item}",
                 Origins = new List<string> { "https://gfa.opmetrix.store/*" },
                 ListPagePatterns = new List<string>
                 {

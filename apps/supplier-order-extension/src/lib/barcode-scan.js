@@ -142,6 +142,14 @@ export function isRedirectedToItemPage({ currentPath, searchUrl, pageText, itemN
   return String(pageText ?? '').toUpperCase().includes(normalizeScanItemNumber(itemNumber));
 }
 
+// 系统货号是按 itemNumber 转换规则从网站写法转来的（GFA：网站 BB_X → 系统 BB/X），
+// 去网站搜索时要转回去，否则搜不到。
+export function toSupplierItemNumber(itemNumber, transforms) {
+  return Array.isArray(transforms) && transforms.includes('underscore-to-slash')
+    ? String(itemNumber).replaceAll('/', '_')
+    : String(itemNumber);
+}
+
 export function normalizeScanItemNumber(value) {
   return String(value ?? '').trim().toUpperCase();
 }

@@ -2050,7 +2050,7 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       return selector && selector.length <= 300 && !/[\r\n]/u.test(selector) ? { config: { inputSelector: selector }, errors: [] } : { config: null, errors: ["inputSelector \u975E\u6CD5"] };
     }
     const invalid2 = { config: null, errors: ["urlTemplate \u975E\u6CD5"] };
-    if (typeof template !== "string" || template.length > 300 || /\s/u.test(template) || template.split("{item}").length !== 2) {
+    if (typeof template !== "string" || template.length > 500 || /\s/u.test(template) || template.split("{item}").length !== 2) {
       return invalid2;
     }
     let url;
@@ -3162,7 +3162,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     isRedirectedToItemPage: () => isRedirectedToItemPage,
     normalizeScanItemNumber: () => normalizeScanItemNumber,
     removeScannedText: () => removeScannedText,
-    submitSupplierSearchForm: () => submitSupplierSearchForm
+    submitSupplierSearchForm: () => submitSupplierSearchForm,
+    toSupplierItemNumber: () => toSupplierItemNumber
   });
   function createScanDetector({
     minLength = SCAN_MIN_LENGTH,
@@ -3268,6 +3269,9 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
     }
     if (currentPath === searchPath) return false;
     return String(pageText ?? "").toUpperCase().includes(normalizeScanItemNumber(itemNumber));
+  }
+  function toSupplierItemNumber(itemNumber, transforms) {
+    return Array.isArray(transforms) && transforms.includes("underscore-to-slash") ? String(itemNumber).replaceAll("/", "_") : String(itemNumber);
   }
   function normalizeScanItemNumber(value) {
     return String(value ?? "").trim().toUpperCase();
@@ -4124,7 +4128,8 @@ button:hover{background:#e2e8f0;}`;
       goToBarcodeSearch(itemNumber, barcode);
     }
     function goToBarcodeSearch(itemNumber, barcode) {
-      const url = searchConfig.urlTemplate ? barcodeModule.buildSupplierSearchUrl(searchConfig, itemNumber) : null;
+      const supplierItem = barcodeModule.toSupplierItemNumber(itemNumber, itemCfg.transforms);
+      const url = searchConfig.urlTemplate ? barcodeModule.buildSupplierSearchUrl(searchConfig, supplierItem) : null;
       try {
         sessionStorage.setItem(
           BARCODE_PENDING_KEY,
@@ -4135,7 +4140,7 @@ button:hover{background:#e2e8f0;}`;
       locateBarcodeItemInPanel(itemNumber);
       if (url) {
         location.assign(url);
-      } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, itemNumber)) {
+      } else if (!barcodeModule.submitSupplierSearchForm(document, searchConfig, supplierItem)) {
         try {
           sessionStorage.removeItem(BARCODE_PENDING_KEY);
         } catch {

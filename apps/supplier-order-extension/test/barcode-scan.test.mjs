@@ -9,6 +9,7 @@ import {
   normalizeScanItemNumber,
   removeScannedText,
   submitSupplierSearchForm,
+  toSupplierItemNumber,
 } from '../src/lib/barcode-scan.js';
 import { normalizeSearchConfig, validateProfiles } from '../src/lib/profiles.js';
 import { DEFAULT_PROFILES } from '../src/lib/profiles-default.js';
@@ -194,6 +195,17 @@ test('搜索配置支持搜索框模式，网址模板优先', () => {
   );
   assert.equal(normalizeSearchConfig({ inputSelector: 'a\nb' }, profile).config, null);
   assert.equal(normalizeSearchConfig({ inputSelector: '' }, profile).config, null);
+});
+
+test('下划线转斜线的供应商搜索前转回网站写法，其余不变', () => {
+  assert.equal(toSupplierItemNumber('BB/MKNUNI', ['trim', 'uppercase', 'underscore-to-slash']), 'BB_MKNUNI');
+  assert.equal(toSupplierItemNumber('BAG045-AUS/RS', ['trim', 'uppercase']), 'BAG045-AUS/RS');
+  assert.equal(toSupplierItemNumber('74817', undefined), '74817');
+});
+
+test('长度接近上限的真实搜索网址模板通过校验', () => {
+  const urlTemplate = `https://www.dats.com.au/view?a=${'x'.repeat(400)}&k={item}`;
+  assert.deepEqual(normalizeSearchConfig({ urlTemplate }, profile).config, { urlTemplate });
 });
 
 test('货号比较忽略大小写和首尾空白', () => {

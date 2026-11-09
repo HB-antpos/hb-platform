@@ -438,7 +438,7 @@
       return selector && selector.length <= 300 && !/[\r\n]/u.test(selector) ? { config: { inputSelector: selector }, errors: [] } : { config: null, errors: ["inputSelector \u975E\u6CD5"] };
     }
     const invalid2 = { config: null, errors: ["urlTemplate \u975E\u6CD5"] };
-    if (typeof template !== "string" || template.length > 300 || /\s/u.test(template) || template.split("{item}").length !== 2) {
+    if (typeof template !== "string" || template.length > 500 || /\s/u.test(template) || template.split("{item}").length !== 2) {
       return invalid2;
     }
     let url;

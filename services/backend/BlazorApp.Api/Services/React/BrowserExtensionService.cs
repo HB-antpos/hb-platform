@@ -1413,7 +1413,7 @@ public static partial class BrowserExtensionProfileCatalog
         }
 
         if (
-            template.Length > 300
+            template.Length > 500
             || template.Any(char.IsWhiteSpace)
             || template.Split(placeholder, StringSplitOptions.None).Length != 2
             || !Uri.TryCreate(template.Replace(placeholder, "0"), UriKind.Absolute, out var uri)

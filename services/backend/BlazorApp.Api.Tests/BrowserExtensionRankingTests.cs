@@ -1218,7 +1218,11 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
     [InlineData("SP2502280001", "http://txkorders.inzantsales.com/shop?Search={item}")]
     [InlineData("203", "https://windragon.com.au/?s={item}&post_type=product")]
     [InlineData("SP0101", "https://boomup.com.au/?s={item}&post_type=product&dgwt_wcas=1")]
-    public void 已核实的供应商下发搜索网址_未核实的不下发(string supplierCode, string expected)
+    [InlineData("243", "https://www.brazcoint.com.au/view?command=cman_view_webpage&pkey=brazco&webpage_id=14&inp_profile_id=1&input_Keywords_1_1={item}&input_H_Keywords_1_2=~~Keywords~~&input_H_Code_1_3=~~Keywords~~&input_H2_Code_1_9=~~Keywords~~&input_H_Metakeyword_1_13=~~Keywords~~&searchtype=advsch&inp_search_refer=Y")]
+    [InlineData("225", "https://www.mnb.com.au/view?command=cman_view_webpage&pkey=mnb&webpage_id=539&inp_profile_id=2&input_Keywords_2_4={item}&input_H_Keywords_2_5=~~Keywords~~&input_H_Code_2_6=~~Keywords~~&input_H_Description3_2_24=~~Keywords~~&input_H_Description_2_42=~~Keywords~~&input_H_Barcode_2_53=~~Keywords~~&searchtype=advsch&inp_search_refer=Y")]
+    [InlineData("218", "https://www.pjsas.com.au/view?command=cman_view_webpage&pkey=pjsas&webpage_id=9&inp_profile_id=19&input_Keywords_19_112={item}&input_H3_Code_19_104=~~Keywords~~&input_H3_Description2_19_106=~~Keywords~~&input_H3_Name_19_108=~~Keywords~~&input_H3_Meta_Keywords_19_110=~~Keywords~~&searchtype=advsch&inp_search_refer=Y")]
+    [InlineData("236", "https://gfa.opmetrix.store/products/view?search_term={item}")]
+    public void 全部供应商都下发已核实的搜索方式(string supplierCode, string expected)
     {
         var profiles = new[] { BrowserExtensionSupplierProfileOptions.CreateDatsDefault() }
             .Concat(BrowserExtensionSupplierProfileOptions.CreateSupplierDefaults())
@@ -1226,9 +1230,9 @@ public sealed class BrowserExtensionServiceRankingContractTests : IDisposable
         var profile = Assert.Single(profiles, item => item.SupplierCode == supplierCode);
 
         Assert.Equal(expected, BrowserExtensionProfileCatalog.TryBuildSearch(profile.SearchUrlTemplate, profile.Origins)?.UrlTemplate);
-        // 未用真实货号核实的网站不下发，避免扫码后跳错页面。
+        // 新增供应商必须先用真实货号核实搜索方式，再加入这份名单。
         Assert.Equal(
-            new[] { "201", "203", "226", "227", "240", "267", "SP0101", "SP2502280001" },
+            new[] { "201", "203", "218", "225", "226", "227", "236", "240", "243", "267", "SP0101", "SP2502280001" },
             profiles.Where(item => item.SearchUrlTemplate != null || item.SearchInputSelector != null).Select(item => item.SupplierCode).OrderBy(code => code, StringComparer.Ordinal)
         );
     }
