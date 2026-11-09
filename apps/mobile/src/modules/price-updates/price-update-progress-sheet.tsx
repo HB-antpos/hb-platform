@@ -3,6 +3,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ActivityIndicator, Button, ProgressBar, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { HQ_ACTIONS_ENABLED } from "@/shared/utils/legacy-databases";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { summarizePrintProgress, type PriceUpdatePrintItem, type PriceUpdateRunState } from "./batch-runner";
 
@@ -140,7 +141,7 @@ export function PriceUpdateProgressSheet({
           {t("progress.targetChanged", { count: state.apply.targetChanged })}
         </Text>
       ) : null}
-      {state.hqSyncEnabled && state.apply.total > 0 && state.phase !== "applying" ? (
+      {HQ_ACTIONS_ENABLED && state.hqSyncEnabled && state.apply.total > 0 && state.phase !== "applying" ? (
         <SummaryRow
           icon="cloud-sync-outline"
           label={t("progress.hqSyncRow")}

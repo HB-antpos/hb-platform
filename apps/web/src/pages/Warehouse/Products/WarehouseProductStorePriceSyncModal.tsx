@@ -105,15 +105,20 @@ function ResultSummary({
         <Descriptions.Item label={t('warehouse.storePriceSync.localUpdated', '本地更新')}>
           {summary.localUpdatedCount}
         </Descriptions.Item>
-        <Descriptions.Item label={t('warehouse.storePriceSync.hqCreated', 'HQ 新增')}>
-          {summary.hqCreatedCount}
-        </Descriptions.Item>
-        <Descriptions.Item label={t('warehouse.storePriceSync.hqUpdated', 'HQ 更新')}>
-          {summary.hqUpdatedCount}
-        </Descriptions.Item>
-        <Descriptions.Item label={t('warehouse.storePriceSync.hqProvisionedProducts', 'HQ 补齐商品数')}>
-          {summary.hqProvisionedProductCount}
-        </Descriptions.Item>
+        {/* HQ 旧库已断开，HQ 计数恒为 0，不再显示（Descriptions 会展开 Fragment 子项）。 */}
+        {HQ_ACTIONS_ENABLED ? (
+          <>
+            <Descriptions.Item label={t('warehouse.storePriceSync.hqCreated', 'HQ 新增')}>
+              {summary.hqCreatedCount}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('warehouse.storePriceSync.hqUpdated', 'HQ 更新')}>
+              {summary.hqUpdatedCount}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('warehouse.storePriceSync.hqProvisionedProducts', 'HQ 补齐商品数')}>
+              {summary.hqProvisionedProductCount}
+            </Descriptions.Item>
+          </>
+        ) : null}
       </Descriptions>
       {summary.errors.length ? (
         <Alert

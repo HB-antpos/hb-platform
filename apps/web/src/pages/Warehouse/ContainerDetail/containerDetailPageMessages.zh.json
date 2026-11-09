@@ -91,7 +91,7 @@
         "syncStoreRetailPrices": "同步分店零售价",
         "syncStoreRetailPricesHint": "勾选后直接把各分店零售价改成新价；不勾选则不动分店价。是否通知分店、是否换标签，由下面的「生成价格任务」决定",
         "generateTasks": "生成价格任务",
-        "generateTasksHint": "勾选后给分店生成价格更新任务（同时勾选「同步分店零售价」是「待换标签」任务，否则是「改价格」任务）；不勾选则不通知分店、不发任何任务，已同步的分店价会立即同步总部 HQ（价签不会换）"
+        "generateTasksHint": "勾选后给分店生成价格更新任务（同时勾选「同步分店零售价」是「待换标签」任务，否则是「改价格」任务）；不勾选则不通知分店、不发任何任务，已同步的分店价立即生效（价签不会换）"
       },
       "savePendingSummary": "本次涉及 {{total}} 条明细：已有进口价 {{warehouseImportPriceCount}} 条、已有零售价 {{warehouseRetailPriceCount}} 条、本次进口价 {{importPriceCount}} 条、本次零售价 {{retailPriceCount}} 条、英文名称 {{englishNameCount}} 条、清除英文名称 {{clearEnglishNameCount}} 条。",
       "savePendingWarehouseImportHint": "已有进口价会回写仓库商品进货价、商品主档进货价和各分店进货价，并重算套装子项成本；不会改本货柜明细的「本次进口价」。",

@@ -3,6 +3,7 @@ import { Alert, Form, InputNumber, Modal, Radio, message } from 'antd'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { batchUpdateGradePrices } from '../../../services/productGradeService'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 interface Props {
   open: boolean
@@ -74,8 +75,10 @@ export default function BatchPriceModal({ open, selectedCount, productCodes, onC
         layout="vertical"
         initialValues={{ targetDatabase: 'HBweb' }}
       >
+        {/* HQ 旧库已断开：只剩 HBweb 一个目标库，隐藏选择但保留字段，提交时仍带 targetDatabase=HBweb。 */}
         <Form.Item
           name="targetDatabase"
+          hidden={!HQ_ACTIONS_ENABLED}
           label={t('productGrade.targetDatabase')}
           rules={[{ required: true, message: t('productGrade.selectTargetDatabase') }]}
         >
@@ -83,9 +86,11 @@ export default function BatchPriceModal({ open, selectedCount, productCodes, onC
             <Radio value="HBweb">
               {t('productGrade.hbwebDbDesc')}
             </Radio>
-            <Radio value="HQ">
-              {t('productGrade.hqDbDesc')}
-            </Radio>
+            {HQ_ACTIONS_ENABLED && (
+              <Radio value="HQ">
+                {t('productGrade.hqDbDesc')}
+              </Radio>
+            )}
           </Radio.Group>
         </Form.Item>
 

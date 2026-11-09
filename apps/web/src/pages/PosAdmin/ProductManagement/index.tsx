@@ -1104,11 +1104,12 @@ export default function ProductManagementPage() {
         {(job.message || result.message || job.errorMessage) ? <div>{job.message || result.message || job.errorMessage}</div> : null}
         <div>{t('posAdmin.products.batchImageTotal', '供应商商品: {{count}} 个', { count: result.totalCount ?? 0 })}</div>
         <div>{t('posAdmin.products.batchImageHbwebUpdated', 'Hbweb 更新: {{count}} 个', { count: result.hbwebUpdatedCount ?? 0 })}</div>
-        <div>{t('posAdmin.products.batchImageHqUpdated', 'HQ 更新: {{count}} 个', { count: result.hqUpdatedCount ?? 0 })}</div>
+        {/* HQ 旧库已断开，HQ 计数恒为 0，不再显示。 */}
+        {HQ_ACTIONS_ENABLED ? <div>{t('posAdmin.products.batchImageHqUpdated', 'HQ 更新: {{count}} 个', { count: result.hqUpdatedCount ?? 0 })}</div> : null}
         <div>{t('posAdmin.products.batchImageHbwebSkippedExistingImage', 'Hbweb 已有图片跳过: {{count}} 个', { count: result.hbwebSkippedExistingImageCount ?? 0 })}</div>
-        <div>{t('posAdmin.products.batchImageHqSkippedExistingImage', 'HQ 已有图片跳过: {{count}} 个', { count: result.hqSkippedExistingImageCount ?? 0 })}</div>
+        {HQ_ACTIONS_ENABLED ? <div>{t('posAdmin.products.batchImageHqSkippedExistingImage', 'HQ 已有图片跳过: {{count}} 个', { count: result.hqSkippedExistingImageCount ?? 0 })}</div> : null}
         <div>{t('posAdmin.products.batchImageSkipped', '跳过: {{count}} 个', { count: result.skippedCount ?? 0 })}</div>
-        {result.hqFailedCount ? <div>{t('posAdmin.products.batchImageHqFailed', 'HQ 缺失或失败: {{count}} 个', { count: result.hqFailedCount })}</div> : null}
+        {HQ_ACTIONS_ENABLED && result.hqFailedCount ? <div>{t('posAdmin.products.batchImageHqFailed', 'HQ 缺失或失败: {{count}} 个', { count: result.hqFailedCount })}</div> : null}
         {errors.length ? <div style={{ whiteSpace: 'pre-wrap' }}>{errors.join('\n')}</div> : null}
       </Space>
     )

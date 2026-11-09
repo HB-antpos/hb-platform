@@ -55,7 +55,7 @@
     "retailSyncStoresLabel": "Sync store retail prices",
     "retailSyncStoresHelper": "On: set every active store's retail price to the new price. Off: store prices stay unchanged. Whether stores are notified or need to relabel depends on \"Generate price tasks\" below.",
     "retailGenerateTasksLabel": "Generate price tasks",
-    "retailGenerateTasksHelper": "On: create price tasks for stores (a Relabel task if \"Sync store retail prices\" is also on, otherwise a Price change task). Off: stores aren't notified and no tasks are created; synced store prices are still pushed to HQ straight away, and shelf labels aren't changed.",
+    "retailGenerateTasksHelper": "On: create price tasks for stores (a Relabel task if \"Sync store retail prices\" is also on, otherwise a Price change task). Off: stores aren't notified and no tasks are created; synced store prices take effect straight away, and shelf labels aren't changed.",
     "stockStates": {
       "inStock": "In stock",
       "lowStock": "Low stock",
