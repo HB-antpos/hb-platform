@@ -201,6 +201,13 @@ services:
       - ${ATTENDANCE_QR_DATA_PROTECTION_KEYS_HOST_PATH:?required}:/app/App_Data/AttendanceQrDataProtectionKeys
       - ${LINKLY_CLOUD_CREDENTIAL_DATA_PROTECTION_KEYS_HOST_PATH:?required}:/app/App_Data/LinklyCloudCredentialDataProtectionKeys
     restart: unless-stopped
+    # Docker 默认 json-file 驱动不轮转：设备心跳等信息级日志约 1.2GB/天，只有重建容器才归零。
+    # 与 POS（hbpos-api）同口径：单文件 50MB、最多 5 个，单容器上限约 250MB；`docker logs` 仍可看最近日志。
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks: &hb-api-networks
       - hb-network
     healthcheck:
