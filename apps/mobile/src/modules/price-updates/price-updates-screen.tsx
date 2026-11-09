@@ -65,6 +65,7 @@ import { isStoreOverdueFlagged } from "./overview";
 import { PriceUpdateProgressSheet } from "./price-update-progress-sheet";
 import { loadAllTasks, resolveSelectAllState, resolveSelectedTasks } from "./selection";
 import { PriceUpdateStoreStrip, type PriceUpdateStoreStripItem } from "./store-strip";
+import { HQ_ACTIONS_ENABLED } from "@/shared/utils/legacy-databases";
 import { CompletedTaskCard, PendingTaskCard } from "./price-update-task-cards";
 import { priceUpdateCountQueryKey, priceUpdateTasksQueryKey } from "./query-keys";
 import type {
@@ -265,7 +266,8 @@ export function PriceUpdatesScreen() {
   useEffect(() => {
     if (firstPage) setSummary(firstPage);
   }, [firstPage]);
-  const hqSyncEnabled = summary?.hqSyncEnabled ?? false;
+  // 后端配置 StorePriceUpdateTasks:SyncToHq 仍默认开启；HQ 旧库断开后不再显示 HQ 同步状态、筛选和重试。
+  const hqSyncEnabled = HQ_ACTIONS_ENABLED && (summary?.hqSyncEnabled ?? false);
   const tasks = useMemo(() => mergeUniqueTasks(tasksQuery.data?.pages ?? []), [tasksQuery.data?.pages]);
   const rows = useMemo<ListRow[]>(() => {
     if (tab === "pending") {
@@ -886,7 +888,7 @@ export function PriceUpdatesScreen() {
             <Chip compact selected={!hqSyncFailedOnly} showSelectedOverlay onPress={() => setHqSyncFailedOnly(false)}>
               {t("filters.all")}
             </Chip>
-            {hqSyncEnabled || hqSyncFailedOnly ? (
+            {HQ_ACTIONS_ENABLED && (hqSyncEnabled || hqSyncFailedOnly) ? (
               <Chip compact selected={hqSyncFailedOnly} showSelectedOverlay onPress={() => setHqSyncFailedOnly(true)}>
                 {t("filters.hqSyncFailed")}
               </Chip>

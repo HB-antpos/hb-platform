@@ -15,6 +15,7 @@ import {
   type NewProductType,
 } from "@/modules/local-supplier-invoices/detail";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { HQ_ACTIONS_ENABLED } from "@/shared/utils/legacy-databases";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
@@ -335,7 +336,8 @@ export function BatchExecuteSheet({
         ) : null}
 
         <View style={styles.note}>
-          {createChosen ? <Text style={styles.noteText}>{t("detail.batch.execNoHq")}</Text> : null}
+          {/* HQ 旧库已断开，「之后在 Web 推送 HQ」的提示不再适用。 */}
+          {HQ_ACTIONS_ENABLED && createChosen ? <Text style={styles.noteText}>{t("detail.batch.execNoHq")}</Text> : null}
           {(choice.includeUp || choice.includeDown || choice.includeFlat)
             && groups.upGuids.length + groups.downGuids.length + groups.flatGuids.length > 0 ? (
               <Text style={styles.noteText}>{t("detail.batch.execStoreOnly")}</Text>

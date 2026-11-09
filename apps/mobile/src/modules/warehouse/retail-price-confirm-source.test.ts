@@ -69,7 +69,7 @@ assert.equal(
 );
 assert.equal(
   zh.retailGenerateTasksHelper,
-  "开启后给分店生成价格更新任务（同时开启「同步分店零售价」是「待换标签」任务，否则是「改价格」任务）；关闭则不通知分店、不发任何任务，已同步的分店价会立即同步总部 HQ（价签不会换）"
+  "开启后给分店生成价格更新任务（同时开启「同步分店零售价」是「待换标签」任务，否则是「改价格」任务）；关闭则不通知分店、不发任何任务，已同步的分店价立即生效（价签不会换）"
 );
 
 console.log("retail-price-confirm-source.test.ts: ok");

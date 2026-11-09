@@ -510,7 +510,7 @@
     "inputLabel": "新名称",
     "placeholder": "输入新的商品名称",
     "counter": "{{count}}/{{max}}",
-    "globalWarning": "这是商品主档的中文名称。修改后所有分店、POS 小票和标签都会使用新名称，并同步到 HQ。",
+    "globalWarning": "这是商品主档的中文名称。修改后所有分店、POS 小票和标签都会使用新名称。",
     "save": "保存名称",
     "unchanged": "名称没有变化",
     "history": "修改记录",
