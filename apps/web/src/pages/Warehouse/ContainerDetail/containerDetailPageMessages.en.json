@@ -91,7 +91,7 @@
         "syncStoreRetailPrices": "Sync store retail prices",
         "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away; when unchecked, store prices stay as they are. Whether stores are notified or asked to swap labels is decided by \"Create price tasks\" below.",
         "generateTasks": "Create price tasks",
-        "generateTasksHint": "When checked, price update tasks are created for stores (a \"swap labels\" task if \"Sync store retail prices\" is also checked, otherwise a \"change price\" task). When unchecked, stores are not notified and no task is created; synced store prices are still pushed to HQ immediately, and shelf labels are not changed."
+        "generateTasksHint": "When checked, price update tasks are created for stores (a \"swap labels\" task if \"Sync store retail prices\" is also checked, otherwise a \"change price\" task). When unchecked, stores are not notified and no task is created; synced store prices take effect immediately, and shelf labels are not changed."
       },
       "savePendingSummary": "This affects {{total}} lines: {{warehouseImportPriceCount}} current import prices, {{warehouseRetailPriceCount}} current retail prices, {{importPriceCount}} this-container import prices, {{retailPriceCount}} this-container retail prices, {{englishNameCount}} English names, {{clearEnglishNameCount}} English-name clears.",
       "savePendingWarehouseImportHint": "Current import prices are written back to the warehouse purchase price, the product master purchase price and every store's purchase price, and set-child costs are recalculated. The \"This import price\" stored on this container line is not changed.",

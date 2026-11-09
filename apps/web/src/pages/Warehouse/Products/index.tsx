@@ -2127,7 +2127,7 @@ export default function WarehouseProductsPage() {
             {generateImageUrls ? (<>
               <div>{t('warehouse.batchImageConfirmBaseUrl', '基础图片地址：{{url}}', { url: imageBaseUrl })}</div>
               <div>{t('warehouse.batchImageConfirmOverwrite', '本地覆盖：是（将覆盖选中商品现有图片地址）')}</div>
-              <div>{t('warehouse.batchImageConfirmHq', '同步 HQ：{{value}}', { value: syncImageToHq ? t('common.yes') : t('common.no') })}</div>
+              {HQ_ACTIONS_ENABLED ? (<div>{t('warehouse.batchImageConfirmHq', '同步 HQ：{{value}}', { value: syncImageToHq ? t('common.yes') : t('common.no') })}</div>) : null}
             </>) : null}
             {suggestedDiscount ? (<div>{t('warehouse.priceNotification.batchSuggestedDiscountConfirm', {
                 value: suggestedDiscount.rate === null ? t('warehouse.priceNotification.notSet') : `${suggestedDiscountRateToPercent(suggestedDiscount.rate)}%`,

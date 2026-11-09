@@ -22,6 +22,7 @@ import {
   type StorePriceUpdateTaskStoreRow,
   type StorePriceUpdateTaskSummary,
 } from '../../../services/storePriceUpdateTaskService'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 import { PRICE_UPDATE_TASKS_PATH } from '../../../utils/priceNotification'
 import CancelTasksModal from './CancelTasksModal'
 import {
@@ -147,8 +148,10 @@ export default function PriceUpdateTasksPage() {
   const [productRows, setProductRows] = useState<StorePriceUpdateTaskProductRow[]>([])
   const [productTotal, setProductTotal] = useState(0)
 
-  const [taskStatus, setTaskStatus] = useState<PriceUpdateTaskStatusFilter>(initialState.hqSyncFailedOnly ? 'All' : 'Pending')
-  const [hqSyncFailedOnly, setHqSyncFailedOnly] = useState(initialState.hqSyncFailedOnly)
+  // HQ 旧库已断开：旧链接里的 hqSyncFailedOnly 一并忽略，避免隐藏的筛选条件仍然生效。
+  const initialHqSyncFailedOnly = HQ_ACTIONS_ENABLED && initialState.hqSyncFailedOnly
+  const [taskStatus, setTaskStatus] = useState<PriceUpdateTaskStatusFilter>(initialHqSyncFailedOnly ? 'All' : 'Pending')
+  const [hqSyncFailedOnly, setHqSyncFailedOnly] = useState(initialHqSyncFailedOnly)
   const [taskPaging, setTaskPaging] = useState({ page: 1, pageSize: 50 })
   const [taskRows, setTaskRows] = useState<StorePriceUpdateTask[]>([])
   const [taskTotal, setTaskTotal] = useState(0)
@@ -199,7 +202,8 @@ export default function PriceUpdateTasksPage() {
         // 列表重新加载后，旧勾选可能指向已不在当前页/已变状态的任务，直接清空。
         setSelectedTaskIds([])
         setTaskTotal(result.total)
-        setTaskHqSyncEnabled(result.hqSyncEnabled)
+        // 后端配置 StorePriceUpdateTasks:SyncToHq 仍默认开启；HQ 断开后前端不再显示 HQ 同步列。
+        setTaskHqSyncEnabled(HQ_ACTIONS_ENABLED && result.hqSyncEnabled)
       }
     } catch (loadError) {
       if (isAbortError(loadError) || !coordinatorRef.current.isLatest(requestId)) return
@@ -228,8 +232,9 @@ export default function PriceUpdateTasksPage() {
     if (!location.search) return
     const linked = parsePriceUpdateTasksSearch(location.search)
     setTab(linked.tab)
-    setHqSyncFailedOnly(linked.hqSyncFailedOnly)
-    if (linked.hqSyncFailedOnly) setTaskStatus('All')
+    const linkedHqSyncFailedOnly = HQ_ACTIONS_ENABLED && linked.hqSyncFailedOnly
+    setHqSyncFailedOnly(linkedHqSyncFailedOnly)
+    if (linkedHqSyncFailedOnly) setTaskStatus('All')
     applyFilters({ ...createDefaultPriceUpdateTasksFilters(), keyword: linked.keyword, storeCodes: storeCodeToSelection(linked.storeCode) })
   }, [active, applyFilters, location.key, location.pathname, location.search])
 
@@ -566,7 +571,7 @@ export default function PriceUpdateTasksPage() {
           <Typography.Text type="secondary">{t(`${I18N}.summary.overdueHint`, { count: summary.overdueStoreCount })}</Typography.Text>
         </Card>
       </Col>
-      {summary.hqSyncEnabled ? (
+      {HQ_ACTIONS_ENABLED && summary.hqSyncEnabled ? (
         <Col flex="1 1 200px">
           <Card size="small" hoverable onClick={() => openTasksTab({ hqSyncFailedOnly: true })}>
             <Statistic title={t(`${I18N}.summary.hqSyncFailed`)} value={summary.hqSyncFailedCount} valueStyle={{ color: token.colorWarning }} />
@@ -691,7 +696,7 @@ export default function PriceUpdateTasksPage() {
                       { value: 'PriceUpdate', label: <Space size={4}><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: token.colorWarning }} />{t(`${I18N}.kind.PriceUpdate`)}</Space> },
                       { value: 'LabelOnly', label: <Space size={4}><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: token.colorInfo }} />{t(`${I18N}.kind.LabelOnly`)}</Space> },
                     ]} onChange={(value) => applyFilters({ ...draftFilters, kind: value as PriceUpdateTaskKindFilter })} />
-                    {taskHqSyncEnabled || hqSyncFailedOnly ? (
+                    {HQ_ACTIONS_ENABLED && (taskHqSyncEnabled || hqSyncFailedOnly) ? (
                       <Checkbox checked={hqSyncFailedOnly} onChange={(event) => { setHqSyncFailedOnly(event.target.checked); setTaskPaging((current) => ({ ...current, page: 1 })) }}>
                         {t(`${I18N}.filters.hqSyncFailedOnly`)}
                       </Checkbox>

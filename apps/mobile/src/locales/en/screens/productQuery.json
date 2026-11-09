@@ -510,7 +510,7 @@
     "inputLabel": "New name",
     "placeholder": "Enter the new product name",
     "counter": "{{count}}/{{max}}",
-    "globalWarning": "This is the product's master Chinese name. Once saved, the new name is used in all stores and on POS receipts and labels, and is synced to HQ.",
+    "globalWarning": "This is the product's master Chinese name. Once saved, the new name is used in all stores and on POS receipts and labels.",
     "save": "Save name",
     "unchanged": "The name is unchanged",
     "history": "Edit history",

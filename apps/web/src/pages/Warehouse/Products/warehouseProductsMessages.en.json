@@ -28,7 +28,7 @@
         "syncStoreRetailPrices": "Sync store retail prices",
         "syncStoreRetailPricesHint": "When checked, store retail prices are changed to the new price right away; when unchecked, store prices stay as they are. Whether stores are notified or asked to swap labels is decided by \"Create price tasks\" below.",
         "generateTasks": "Create price tasks",
-        "generateTasksHint": "When checked, price update tasks are created for stores (a \"swap labels\" task if \"Sync store retail prices\" is also checked, otherwise a \"change price\" task). When unchecked, stores are not notified and no task is created; synced store prices are still pushed to HQ immediately, and shelf labels are not changed.",
+        "generateTasksHint": "When checked, price update tasks are created for stores (a \"swap labels\" task if \"Sync store retail prices\" is also checked, otherwise a \"change price\" task). When unchecked, stores are not notified and no task is created; synced store prices take effect immediately, and shelf labels are not changed.",
         "inlineConfirmTitle": "Change retail price"
       }
     }
