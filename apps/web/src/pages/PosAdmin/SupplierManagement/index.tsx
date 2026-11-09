@@ -40,6 +40,7 @@ import {
 import supplierMessagesEn from './supplierMessages.en.json'
 import supplierMessagesZh from './supplierMessages.zh.json'
 import './supplierManagement.css'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 registerPageMessages({ zh: supplierMessagesZh, en: supplierMessagesEn })
 
@@ -507,7 +508,8 @@ export default function SupplierManagementPage() {
                 <span className="supplier-selection-hint">{t('posAdmin.supplierPage.selection.hint')}</span>
               </Space>
               <Space size={8}>
-                <Button
+                {HQ_ACTIONS_ENABLED && (
+                  <Button
                   type="primary"
                   icon={<CloudUploadOutlined />}
                   loading={syncingToHq}
@@ -516,6 +518,7 @@ export default function SupplierManagementPage() {
                 >
                   {t('posAdmin.supplierPage.selection.sync')}
                 </Button>
+                )}
                 <Button type="link" onClick={() => setSelectedRowKeys([])}>
                   {t('posAdmin.supplierPage.selection.clear')}
                 </Button>

@@ -206,6 +206,7 @@ import {
 } from './duplicateProductConflict'
 import messagesEn from './messages.en.json'
 import messagesZh from './messages.zh.json'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 // 供应商分类等本页新增文案随页面代码块懒注册，不进入首屏 i18n 包。
 registerPageMessages({ zh: messagesZh, en: messagesEn })
@@ -2359,7 +2360,7 @@ export default function ProductManagementPage() {
       localSupplierCode: defaultSupplierCode,
       mode: defaultMode,
       scope: defaultScope,
-      updateTargets: ['hbweb', 'hq'],
+      updateTargets: HQ_ACTIONS_ENABLED ? ['hbweb', 'hq'] : ['hbweb'],
       saveSupplierImageBaseUrl: false,
     })
     setImageBatchTemplate(defaultSupplierCode, defaultMode)
@@ -3757,7 +3758,7 @@ export default function ProductManagementPage() {
                 </Button>
               </>
             )}
-            {canManagePosProducts && (
+            {HQ_ACTIONS_ENABLED && canManagePosProducts && (
               <Button
                 size="small"
                 icon={<CloudUploadOutlined />}
@@ -4299,7 +4300,7 @@ export default function ProductManagementPage() {
             <Checkbox.Group
               options={[
                 { label: 'Hbweb', value: 'hbweb' },
-                { label: 'HQ', value: 'hq' },
+                ...(HQ_ACTIONS_ENABLED ? [{ label: 'HQ', value: 'hq' }] : []),
               ]}
             />
           </Form.Item>

@@ -3987,12 +3987,12 @@ assertEqual(createProductsJobSource.includes('Modal.'), false, '批量创建新�
     pageSource.indexOf('const renderCreateProductResultItems = (items: ContainerProductCreationResultItem[]) => {'),
   )
   assertEqual(
-    createNewProductsHandlerSource.includes('let pushToHqAfterCreate = true') &&
+    createNewProductsHandlerSource.includes('let pushToHqAfterCreate = HQ_ACTIONS_ENABLED') &&
       createNewProductsHandlerSource.includes('<Checkbox') &&
       createNewProductsHandlerSource.includes('defaultChecked') &&
       createNewProductsHandlerSource.includes('pushToHqAfterCreate = event.target.checked') &&
       createNewProductsHandlerSource.includes("t('containers.text.createProductsPushToHqAfterCreate'") &&
-      createNewProductsHandlerSource.indexOf('let pushToHqAfterCreate = true') < createNewProductsHandlerSource.indexOf('const scopedRows = await confirmBatchRows'),
+      createNewProductsHandlerSource.indexOf('let pushToHqAfterCreate = HQ_ACTIONS_ENABLED') < createNewProductsHandlerSource.indexOf('const scopedRows = await confirmBatchRows'),
     true,
     '创建新商品确认框应带「同时更新 HQ 数据库」复选框，每次打开默认勾选且不持久化',
   )

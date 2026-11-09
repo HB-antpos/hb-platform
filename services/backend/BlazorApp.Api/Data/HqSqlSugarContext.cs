@@ -24,9 +24,11 @@ namespace BlazorApp.Api.Data
         {
             Configuration = configuration;
             // 确保HQ连接字符串包含MARS支持
-            var connectionString =
-                configuration.GetConnectionString("StoreHzgHQConnection")
-                ?? throw new InvalidOperationException("StoreHzgHQConnection 连接字符串未配置");
+            // HQ 断开后不读真实连接串，后续下线配置时这里也不会抛异常。
+            var connectionString = !LegacyDatabaseGate.HqEnabled
+                ? LegacyDatabaseGate.DisabledConnectionString
+                : configuration.GetConnectionString("StoreHzgHQConnection")
+                    ?? throw new InvalidOperationException("StoreHzgHQConnection 连接字符串未配置");
             if (
                 !connectionString.Contains(
                     "MultipleActiveResultSets",
@@ -190,9 +192,11 @@ namespace BlazorApp.Api.Data
         public static ISqlSugarClient CreateConcurrentConnection(IConfiguration configuration)
         {
             // 确保HQ连接字符串包含MARS支持
-            var connectionString =
-                configuration.GetConnectionString("StoreHzgHQConnection")
-                ?? throw new InvalidOperationException("StoreHzgHQConnection 连接字符串未配置");
+            // HQ 断开后不读真实连接串，后续下线配置时这里也不会抛异常。
+            var connectionString = !LegacyDatabaseGate.HqEnabled
+                ? LegacyDatabaseGate.DisabledConnectionString
+                : configuration.GetConnectionString("StoreHzgHQConnection")
+                    ?? throw new InvalidOperationException("StoreHzgHQConnection 连接字符串未配置");
             if (
                 !connectionString.Contains(
                     "MultipleActiveResultSets",

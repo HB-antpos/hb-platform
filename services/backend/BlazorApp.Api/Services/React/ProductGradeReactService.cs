@@ -779,6 +779,14 @@ namespace BlazorApp.Api.Services.React
 
                 if (dto.TargetDatabase.Equals("HQ", StringComparison.OrdinalIgnoreCase))
                 {
+                    if (!LegacyDatabaseGate.HqEnabled)
+                    {
+                        return ApiResponse<BatchUpdateGradePriceResult>.Error(
+                            "HQ 数据库已断开，不能再按 HQ 更新价格",
+                            "LEGACY_DATABASE_DISCONNECTED"
+                        );
+                    }
+
                     var hqDb = _hqContext.Db;
                     var now = DateTime.Now;
 

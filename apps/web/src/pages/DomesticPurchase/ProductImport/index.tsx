@@ -31,6 +31,7 @@ import './productImport.css'
 import productImportMessagesEn from './productImportMessages.en.json'
 import productImportMessagesZh from './productImportMessages.zh.json'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import { HBSALES_ACTIONS_ENABLED, HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 // 页面级文案随页面代码块懒加载，不进首屏 i18n 包（首屏 gzip 预算很紧，见仓库约定）。
 registerPageMessages({ zh: productImportMessagesZh, en: productImportMessagesEn })
@@ -1297,8 +1298,8 @@ export default function ProductImportPage() {
       title: t('productImport.updateHbwebProductNamesTooltip', '把已选行英文名称写入 HBweb 商品主表 Product.ProductName'),
       disabled: state.selectedIds.length === 0 || busy,
     },
-    { key: 'syncHbSales', label: t('productImport.syncToHBSales', '同步到HBSales'), disabled: state.selectedIds.length === 0 || busy },
-    { key: 'sendHq', label: t('productImport.menuSendToHq', '发送到 HQ'), disabled: state.selectedIds.length === 0 || busy },
+    ...(HBSALES_ACTIONS_ENABLED ? [{ key: 'syncHbSales', label: t('productImport.syncToHBSales', '同步到HBSales'), disabled: state.selectedIds.length === 0 || busy }] : []),
+    ...(HQ_ACTIONS_ENABLED ? [{ key: 'sendHq', label: t('productImport.menuSendToHq', '发送到 HQ'), disabled: state.selectedIds.length === 0 || busy }] : []),
     { type: 'divider' },
     { key: 'deleteSelected', danger: true, icon: <DeleteOutlined />, label: t('productImport.menuDeleteSelected', '删除选中行（{{count}}）', { count: state.selectedIds.length }), disabled: state.selectedIds.length === 0 || busy },
     {
@@ -1358,7 +1359,8 @@ export default function ProductImportPage() {
 
             <span className="pi-spacer" />
 
-            <Tooltip title={t('productImport.syncHqNamesTooltip', '勾选后，「更多操作」里的「更新主表名称」会把英文名同时写入总部（HQ）商品字典；不影响「更新 / 新建」。')}>
+            {HQ_ACTIONS_ENABLED && (
+              <Tooltip title={t('productImport.syncHqNamesTooltip', '勾选后，「更多操作」里的「更新主表名称」会把英文名同时写入总部（HQ）商品字典；不影响「更新 / 新建」。')}>
               <span className="pi-hq-check">
                 <Space size="small" wrap={false}>
                   <Checkbox
@@ -1371,6 +1373,7 @@ export default function ProductImportPage() {
                 </Space>
               </span>
             </Tooltip>
+            )}
             <Tooltip title={commitBlockedReason || undefined}>
               <div className="pi-group">
                 <Button size="small" icon={<UploadOutlined />} onClick={() => void handleBatchUpdate()} loading={busyAction === 'update'} disabled={Boolean(commitBlockedReason) || counts.updated === 0 || (busy && busyAction !== 'update')}>

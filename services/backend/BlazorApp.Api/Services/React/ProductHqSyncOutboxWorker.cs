@@ -38,7 +38,7 @@ public sealed class ProductHqSyncOutboxWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.Enabled)
+        if (!_options.Enabled || !LegacyDatabaseGate.HqEnabled)
         {
             _logger.LogInformation("商品 HQ outbox worker 已由配置关闭");
             return;

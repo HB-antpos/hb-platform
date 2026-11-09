@@ -26,6 +26,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("list")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Roles = "Admin,WarehouseManager,User")]
         public async Task<IActionResult> List([FromBody] ContainerQueryRequest request)
         {
@@ -42,6 +43,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpGet("{containerGuid}")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Roles = "Admin,WarehouseManager,User")]
         public async Task<IActionResult> Detail(string containerGuid)
         {

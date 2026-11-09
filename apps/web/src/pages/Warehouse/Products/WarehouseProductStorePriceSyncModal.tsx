@@ -24,6 +24,7 @@ import type {
   WarehouseStorePriceSyncJobStatus,
 } from './warehouseStorePriceSync.logic'
 import { WAREHOUSE_STORE_PRICE_SYNC_FIELD_MAPPINGS } from './warehouseStorePriceSync.logic'
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 interface WarehouseProductStorePriceSyncModalProps {
   open: boolean
@@ -453,9 +454,11 @@ export default function WarehouseProductStorePriceSyncModal({
           </Space>
         </div>
 
-        <Checkbox checked={syncToHq} disabled={busy || jobInProgress} onChange={(event) => setSyncToHq(event.target.checked)}>
+        {HQ_ACTIONS_ENABLED && (
+          <Checkbox checked={syncToHq} disabled={busy || jobInProgress} onChange={(event) => setSyncToHq(event.target.checked)}>
           {t('warehouse.storePriceSync.syncToHq', '同时更新 HQ 对应分店价格表')}
         </Checkbox>
+        )}
         {syncToHq ? (
           <Alert
             type="warning"

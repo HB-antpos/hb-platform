@@ -129,9 +129,9 @@ assert.match(screen, /Promise\.allSettled\(\[headerQuery\.refetch\(\), productsQ
 // ---------------------------------------------------------------------------
 // 3. 创建新商品确认
 // ---------------------------------------------------------------------------
-assert.match(screen, /const \[createSyncToHq, setCreateSyncToHq\] = useState\(true\)/, "同步 HQ 默认勾选，且不持久化");
+assert.match(screen, /const \[createSyncToHq, setCreateSyncToHq\] = useState\(HQ_ACTIONS_ENABLED\)/, "同步 HQ 默认勾选，且不持久化");
 assert.doesNotMatch(screen, /AsyncStorage|Storage\.set.*[Ss]yncToHq/, "同步 HQ 勾选不得持久化");
-assert.match(screen, /const openCreateSheet = \(\) => \{[\s\S]*setCreateSyncToHq\(true\);[\s\S]*setCreateSheetOpen\(true\);/, "每次打开确认框都重置为勾选");
+assert.match(screen, /const openCreateSheet = \(\) => \{[\s\S]*setCreateSyncToHq\(HQ_ACTIONS_ENABLED\);[\s\S]*setCreateSheetOpen\(true\);/, "每次打开确认框都重置为勾选");
 assert.equal(screen.split("createProductsMutation.mutate()").length - 1, 1, "创建新商品只能从确认框的确认键触发");
 assert.match(screen, /onConfirm=\{\(\) => createProductsMutation\.mutate\(\)\}/);
 assert.match(screen, /onPress=\{openCreateSheet\}/, "底部「创建新商品」只打开确认框");

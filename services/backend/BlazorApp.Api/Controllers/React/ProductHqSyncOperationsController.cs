@@ -1,3 +1,4 @@
+using BlazorApp.Api.Filters;
 using System.Security.Claims;
 using AutoMapper;
 using BlazorApp.Api.Data;
@@ -72,6 +73,7 @@ public sealed class ProductHqSyncOperationsController : ControllerBase
     }
 
     [HttpPost("{operationId}/retry")]
+    [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
     public async Task<ActionResult<ApiResponse<ProductHqSyncOperationStatusDto>>> Retry(
         string operationId,
         CancellationToken cancellationToken

@@ -5397,7 +5397,8 @@ namespace BlazorApp.Api.Services.React
             var hbSalesEnd = endDate < historyEndDate
                 ? endDate
                 : historyEndDate;
-            if (hbSalesStart <= hbSalesEnd)
+            // HBSales 断开后窗口内以已沉淀的日统计为准，不再核对来源覆盖。
+            if (LegacyDatabaseGate.HBSalesEnabled && hbSalesStart <= hbSalesEnd)
             {
                 var hbSalesCoverage = await GetHbSalesStoreSalesBranchCodesByDateAsync(
                     hbSalesStart,

@@ -16,4 +16,11 @@ internal static class SalesStatisticsHBSalesHistoryWindow
         var day = date.Date;
         return day >= StartDate && day < EndExclusive;
     }
+
+    /// <summary>
+    /// HBSales 断开后，窗口内的日统计是唯一留存的完整数据，不能再重算，
+    /// 否则会被只含 POSM 的结果覆盖。
+    /// </summary>
+    internal static bool IsFrozen(DateTime date) =>
+        !BlazorApp.Api.Data.LegacyDatabaseGate.HBSalesEnabled && Includes(date);
 }

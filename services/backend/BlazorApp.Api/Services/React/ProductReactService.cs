@@ -2358,7 +2358,7 @@ namespace BlazorApp.Api.Services.React
                 }
             }
 
-            if (request.UpdateHq && validProducts.Count > 0)
+            if (request.UpdateHq && LegacyDatabaseGate.HqEnabled && validProducts.Count > 0)
             {
                 var hqDb = _hqContext.Db;
                 try

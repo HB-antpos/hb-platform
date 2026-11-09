@@ -418,6 +418,7 @@ namespace BlazorApp.Api.Controllers
         /// 同步选中的供应商到HBSales数据库
         /// </summary>
         [HttpPost("sync-to-hbsales")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.HBSales)]
         [Authorize(Roles = "Admin,WarehouseManager")]
         public async Task<IActionResult> SyncToHbSales([FromBody] List<string> guids)
         {

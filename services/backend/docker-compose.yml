@@ -25,6 +25,9 @@ services:
       - LegacyEmployeeLogRisk__Enabled=${LEGACY_EMPLOYEE_LOG_RISK_ENABLED:-false}
       - LegacyEmployeeLogRisk__DeepLookbackDays=${LEGACY_EMPLOYEE_LOG_RISK_DEEP_LOOKBACK_DAYS:-7}
       - LegacyEmployeeLogRisk__DeepScanUtcHour=${LEGACY_EMPLOYEE_LOG_RISK_DEEP_SCAN_UTC_HOUR:-17}
+      # HQ / HBSales 旧库已断开；回滚时在 .env 里设为 true。
+      - LegacyDatabases__HqEnabled=${LEGACY_HQ_ENABLED:-false}
+      - LegacyDatabases__HBSalesEnabled=${LEGACY_HBSALES_ENABLED:-false}
       # 生产连接字符串只从服务器 .env 注入，避免把敏感值写入 compose。
       - ConnectionStrings__DefaultConnection=${CONNECTION_STRING_DEFAULT}
       - ConnectionStrings__StoreHzgHQConnection=${CONNECTION_STRING_STORE_HQ}

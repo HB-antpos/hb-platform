@@ -1173,6 +1173,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("{invoiceGuid}/details/ensure-hq-products")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.LocalPurchase.Edit)]
         public async Task<IActionResult> EnsureHqProducts(
             [FromRoute] string invoiceGuid,
@@ -1210,6 +1211,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("{invoiceGuid}/details/update-hq-products")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.LocalPurchase.Edit)]
         [Authorize(Policy = Permissions.LocalPurchase.PushToHq)]
         public async Task<IActionResult> UpdateHqProducts(
@@ -1248,6 +1250,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("{invoiceGuid}/details/update-hq-products/jobs")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.LocalPurchase.Edit)]
         [Authorize(Policy = Permissions.LocalPurchase.PushToHq)]
         public async Task<IActionResult> StartUpdateHqProductsJob(
@@ -1647,6 +1650,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("push-to-hq")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.LocalPurchase.PushToHq)]
         public async Task<IActionResult> PushInvoicesToHq([FromBody] PushToHqRequest request)
         {

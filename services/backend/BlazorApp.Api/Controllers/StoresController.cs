@@ -377,6 +377,7 @@ namespace BlazorApp.Api.Controllers
         /// 将当前分店资料同步到HQ分店信息表
         /// </summary>
         [HttpPost("guid/{guid}/sync-hq")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.Stores.Edit)]
         public async Task<IActionResult> SyncStoreToHq(string guid)
         {

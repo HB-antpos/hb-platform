@@ -28,6 +28,8 @@ public sealed class SalesCostBackfillService(
             || end.Date < start.Date
             || end.Date > SalesStatisticsBusinessDate.Today())
             throw new ArgumentException($"日期必须在 {SalesStatisticsHBSalesHistoryWindow.StartDate:yyyy-MM-dd} 至当前业务日之间");
+        if (start.Date < SalesStatisticsHBSalesHistoryWindow.EndExclusive && !LegacyDatabaseGate.HBSalesEnabled)
+            throw new ArgumentException($"HBSales 已断开，只能回填 {SalesStatisticsHBSalesHistoryWindow.EndExclusive:yyyy-MM-dd} 及之后的日期");
         var now = DateTime.UtcNow;
         var batch = new SalesCostBackfillBatch { Id = Guid.NewGuid(), StartDate = start.Date,
             EndDate = end.Date, RequestedBy = actor, Automatic = automatic,

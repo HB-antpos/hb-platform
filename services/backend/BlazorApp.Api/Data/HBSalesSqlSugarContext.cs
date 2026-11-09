@@ -15,7 +15,9 @@ namespace BlazorApp.Api.Data
 
         public HBSalesSqlSugarContext(IConfiguration configuration)
         {
-            var connectionString = configuration.GetConnectionString("HBSalesConnection");
+            var connectionString = LegacyDatabaseGate.HBSalesEnabled
+                ? configuration.GetConnectionString("HBSalesConnection")
+                : LegacyDatabaseGate.DisabledConnectionString;
 
             // 使用 Scoped 生命周期管理连接
             // IsAutoCloseConnection = true 自动管理连接的打开和关闭，避免连接泄露

@@ -1991,6 +1991,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("push-to-hbsales")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.HBSales)]
         [Authorize(Policy = Permissions.Container.Edit)]
         public async Task<IActionResult> PushContainersToHbSales(
             [FromBody] PushToHbSalesRequestDto request

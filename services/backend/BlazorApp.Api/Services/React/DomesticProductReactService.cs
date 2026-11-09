@@ -2206,7 +2206,7 @@ namespace BlazorApp.Api.Services.React
                     );
                 }
 
-                if (dto.SyncToHq)
+                if (dto.SyncToHq && LegacyDatabaseGate.HqEnabled)
                 {
                     var hqRequestConflicts = normalizedItems
                         .GroupBy(item => item.ItemNumber, StringComparer.OrdinalIgnoreCase)
@@ -2334,7 +2334,7 @@ namespace BlazorApp.Api.Services.React
 
                 result.UpdatedCount = productsToUpdate.Count;
 
-                if (dto.SyncToHq)
+                if (dto.SyncToHq && LegacyDatabaseGate.HqEnabled)
                 {
                     var hqResult = new HqProductNameSyncResultDto { Success = true };
                     result.HqSyncResult = hqResult;

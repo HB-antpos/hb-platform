@@ -399,6 +399,13 @@ namespace BlazorApp.Api.Services
             for (var date = startDate; date <= endDate; date = date.AddDays(1))
             {
                 var dateStr = date.ToString("yyyy-MM-dd");
+                if (SalesStatisticsHBSalesHistoryWindow.IsFrozen(date))
+                {
+                    result.SkippedDates.Add(dateStr);
+                    logger.LogInformation("HBSales 已断开，{Date} 的历史统计已冻结，本次完整刷新跳过", dateStr);
+                    continue;
+                }
+
                 var leaseTaskType = SalesStatisticsAlignmentService.DailyFullRefreshLeaseTaskType;
                 var leaseDuration = TimeSpan.FromHours(2);
                 string? leaseToken = null;
@@ -799,6 +806,12 @@ internal async Task UpdateStoreStatisticsWithContext(
     Func<Task>? validateSourceWatermarkBeforeCommitAsync = null
 )
 {
+    if (SalesStatisticsHBSalesHistoryWindow.IsFrozen(date))
+    {
+        logger.LogInformation("HBSales 已断开，{Date} 的历史分店统计已冻结，跳过重算", date);
+        return;
+    }
+
     try
     {
         var targetDate = date.Date;

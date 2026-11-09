@@ -177,6 +177,12 @@ namespace BlazorApp.Api.Services
     )
     {
         var targetDate = date.Date;
+        if (SalesStatisticsHBSalesHistoryWindow.IsFrozen(targetDate))
+        {
+            logger.LogInformation("HBSales 已断开，{Date} 的历史统计已冻结，跳过重算", targetDate);
+            return new ProductStoreDailyBatchFence(targetDate, Array.Empty<ProductStoreDailyStateFence>());
+        }
+
         var initialProductStateFence = await CaptureProductStatisticFailureFenceAsync(context, targetDate);
         DateTime? effectiveSourceWatermark = null;
         try

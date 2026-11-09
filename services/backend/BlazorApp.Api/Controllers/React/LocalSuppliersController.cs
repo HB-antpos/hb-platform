@@ -95,6 +95,7 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         [HttpPost("sync-to-hq")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.AustralianSuppliers.Edit)]
         public async Task<IActionResult> SyncToHq([FromBody] SyncToHqRequest? body)
         {

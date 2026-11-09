@@ -73,6 +73,7 @@ import priceNotificationMessagesZh from './priceNotificationMessages.zh.json';
 import warehouseProductsMessagesEn from './warehouseProductsMessages.en.json';
 import warehouseProductsMessagesZh from './warehouseProductsMessages.zh.json';
 import './warehouseProducts.css';
+import { HQ_ACTIONS_ENABLED } from '../../../utils/legacyDatabases'
 
 // 分店价格通知文案只在仓库商品页使用，随本页代码块懒注册，不进入首屏 i18n 包。
 registerPageMessages({ zh: priceNotificationMessagesZh, en: priceNotificationMessagesEn });
@@ -3085,7 +3086,7 @@ export default function WarehouseProductsPage() {
             {access.canWriteProduct ? (<Button size="small" loading={batchActionLoading} disabled={!selectedRowKeys.length || batchActionLoading} onClick={() => void handleBatchToggleActive(false)}>
                 {t('warehouseUi.products.deactivate')}
               </Button>) : null}
-            {access.canManagePosProducts ? (<Button size="small" loading={pushToHqLoading} disabled={!selectedRowKeys.length || pushToHqLoading || pushToHqModalOpen} onClick={() => void handlePushToHq()}>
+            {HQ_ACTIONS_ENABLED && access.canManagePosProducts ? (<Button size="small" loading={pushToHqLoading} disabled={!selectedRowKeys.length || pushToHqLoading || pushToHqModalOpen} onClick={() => void handlePushToHq()}>
                 {t('warehouseUi.products.pushToHq')}
               </Button>) : null}
           </SelectionActionBar>
@@ -3268,7 +3269,7 @@ export default function WarehouseProductsPage() {
                   baseUrl: normalizeWarehouseProductImageBaseUrl(batchImageBaseUrl) ?? WAREHOUSE_PRODUCT_IMAGE_DEFAULT_BASE_URL,
               })}
             </Typography.Text>
-            {access.isAdmin || access.isWarehouseManager ? (<Form.Item name="syncImageToHq" label={t('warehouse.batchImageSyncHq', '同步 HQ 数据库（仅 H商品图片）')} valuePropName="checked" style={{ marginBottom: 0 }}>
+            {HQ_ACTIONS_ENABLED && (access.isAdmin || access.isWarehouseManager) ? (<Form.Item name="syncImageToHq" label={t('warehouse.batchImageSyncHq', '同步 HQ 数据库（仅 H商品图片）')} valuePropName="checked" style={{ marginBottom: 0 }}>
               <Switch disabled={!batchGenerateImageUrls}/>
             </Form.Item>) : null}
           </Space>) : null}

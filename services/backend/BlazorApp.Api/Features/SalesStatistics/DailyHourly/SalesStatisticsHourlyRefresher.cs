@@ -24,6 +24,12 @@ internal static class SalesStatisticsHourlyRefresher
         int? hour
     )
     {
+        if (SalesStatisticsHBSalesHistoryWindow.IsFrozen(date))
+        {
+            logger.LogInformation("HBSales 已断开，{Date} 的历史分时统计已冻结，跳过重算", date);
+            return;
+        }
+
         try
         {
             // 确定要更新的小时列表

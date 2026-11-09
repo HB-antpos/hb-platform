@@ -812,6 +812,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 将选中的 POS 商品推送到 HQ，只执行 upsert，不删除 HQ 旧记录。
         /// </summary>
         [HttpPost("push-to-hq")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.PosProducts.Manage)]
         public async Task<IActionResult> PushToHq([FromBody] PushProductsToHqRequest request)
         {
@@ -879,6 +880,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 加载商品推送到 HQ 的分店选项，直接来自 HQ 分店表。
         /// </summary>
         [HttpGet("push-to-hq/store-options")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.PosProducts.Manage)]
         public async Task<IActionResult> GetPushToHqStoreOptions()
         {
@@ -901,6 +903,7 @@ namespace BlazorApp.Api.Controllers.React
         /// 创建商品推送到 HQ 的后台任务，HTTP 请求立即返回。
         /// </summary>
         [HttpPost("push-to-hq/jobs")]
+        [LegacyDatabaseDisabled(LegacyDatabaseKind.Hq)]
         [Authorize(Policy = Permissions.PosProducts.Manage)]
         public async Task<IActionResult> StartPushToHqJob(
             [FromBody] PushProductsToHqRequest request,
