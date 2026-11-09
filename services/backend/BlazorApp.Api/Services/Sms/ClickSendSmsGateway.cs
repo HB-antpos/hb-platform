@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
 
 namespace BlazorApp.Api.Services.Sms;
@@ -62,21 +63,27 @@ internal sealed class ClickSendSmsGateway : ISmsGateway
             string? topCode = null;
             string? messageStatus = null;
             string? messageId = null;
+            string? responseMessage = null;
+            IReadOnlyList<string> rejectedWebsites = Array.Empty<string>();
             try
             {
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Object)
                 {
                     topCode = ReadString(doc.RootElement, "response_code");
-                    if (doc.RootElement.TryGetProperty("data", out var data)
-                        && data.ValueKind == JsonValueKind.Object
-                        && data.TryGetProperty("messages", out var messages)
-                        && messages.ValueKind == JsonValueKind.Array
-                        && messages.GetArrayLength() > 0
-                        && messages[0].ValueKind == JsonValueKind.Object)
+                    // response_msg 是服务商给的失败原因（例如 2026-11-09 的 "contains not safe to send websites"），只用于日志。
+                    responseMessage = ReadString(doc.RootElement, "response_msg");
+                    if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Object)
                     {
-                        messageStatus = ReadString(messages[0], "status");
-                        messageId = ReadString(messages[0], "message_id");
+                        rejectedWebsites = ReadRejectedWebsites(data);
+                        if (data.TryGetProperty("messages", out var messages)
+                            && messages.ValueKind == JsonValueKind.Array
+                            && messages.GetArrayLength() > 0
+                            && messages[0].ValueKind == JsonValueKind.Object)
+                        {
+                            messageStatus = ReadString(messages[0], "status");
+                            messageId = ReadString(messages[0], "message_id");
+                        }
                     }
                 }
             }
@@ -100,7 +107,16 @@ internal sealed class ClickSendSmsGateway : ISmsGateway
                     : topCode is not null && !string.Equals(topCode, SuccessCode, StringComparison.OrdinalIgnoreCase)
                         ? $"CLICKSEND_{Sanitize(topCode)}"
                         : "CLICKSEND_NO_MESSAGE";
-            _logger.LogWarning("短信服务商返回失败，HTTP {Status}，错误码 {ErrorCode}", (int)response.StatusCode, errorCode);
+            // 失败原因必须进日志：只记错误码无法区分 400 的真正原因（2026-11-09 排查靠手工重放请求才看到
+            // "not safe to send websites"）。服务商说明经 SanitizeReason 清洗（遮蔽长数字 / 邮箱、去控制字符、截断），
+            // 被拒网址只留主机名；仍不记号码、正文与凭据。
+            _logger.LogWarning(
+                "短信服务商返回失败，HTTP {Status}，错误码 {ErrorCode}，服务商说明：{Reason}，被拒网址：{RejectedWebsites}",
+                (int)response.StatusCode,
+                errorCode,
+                SanitizeReason(responseMessage),
+                rejectedWebsites.Count == 0 ? "-" : string.Join(", ", rejectedWebsites)
+            );
             return new SmsGatewayResult(false, null, errorCode);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -113,6 +129,69 @@ internal sealed class ClickSendSmsGateway : ISmsGateway
 
     private static string? ReadString(JsonElement element, string name) =>
         element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private const int MaxReasonLength = 200;
+    private const int MaxLoggedWebsites = 5;
+    private const int MaxHostLength = 100;
+
+    // 5 位以上数字（允许夹单个空格 / 连字符，覆盖 "0412 345 678"、"+61 412-345-678"）：手机号、消息 ID 之类，日志里一律遮蔽。
+    private static readonly Regex DigitRun = new(@"\+?\d(?:[\s-]?\d){4,}", RegexOptions.Compiled);
+    private static readonly Regex EmailLike = new(@"[^\s@]+@[^\s@]+", RegexOptions.Compiled);
+
+    /// <summary>
+    /// 服务商 response_msg 进日志前的清洗：服务商返回的是自由文本，可能回显号码 / 邮箱，也可能带换行（日志注入）。
+    /// 先遮蔽再截断，避免截断点把半个号码留在日志里；空值返回 "-"。
+    /// </summary>
+    private static string SanitizeReason(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return "-";
+
+        var masked = DigitRun.Replace(EmailLike.Replace(value, "***"), "***");
+        var builder = new StringBuilder(Math.Min(masked.Length, MaxReasonLength + 3));
+        var lastWasSpace = false;
+        foreach (var ch in masked.Trim())
+        {
+            // 控制字符（含换行）与连续空白统一压成一个空格，保证一条日志只占一行。
+            var isSpace = char.IsControl(ch) || char.IsWhiteSpace(ch);
+            if (isSpace && lastWasSpace) continue;
+            builder.Append(isSpace ? ' ' : ch);
+            lastWasSpace = isSpace;
+            if (builder.Length >= MaxReasonLength)
+            {
+                builder.Append("...");
+                break;
+            }
+        }
+
+        return builder.Length == 0 ? "-" : builder.ToString();
+    }
+
+    /// <summary>
+    /// 读取 data.rejected_websites（被判为不安全的网址）：只留主机名——路径和 query 里可能带签字链接令牌，
+    /// 不是合法主机名字符的项直接丢弃，最多 5 项。
+    /// </summary>
+    private static IReadOnlyList<string> ReadRejectedWebsites(JsonElement data)
+    {
+        if (!data.TryGetProperty("rejected_websites", out var list) || list.ValueKind != JsonValueKind.Array)
+            return Array.Empty<string>();
+
+        var hosts = new List<string>();
+        foreach (var item in list.EnumerateArray())
+        {
+            if (hosts.Count >= MaxLoggedWebsites) break;
+            if (item.ValueKind != JsonValueKind.String) continue;
+
+            var raw = item.GetString()?.Trim() ?? string.Empty;
+            var schemeEnd = raw.IndexOf("://", StringComparison.Ordinal);
+            if (schemeEnd >= 0) raw = raw[(schemeEnd + 3)..];
+            var hostEnd = raw.IndexOfAny(new[] { '/', '?', '#' });
+            var host = hostEnd >= 0 ? raw[..hostEnd] : raw;
+            if (host.Length is 0 or > MaxHostLength || !host.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-')) continue;
+            hosts.Add(host.ToLowerInvariant());
+        }
+
+        return hosts;
+    }
 
     /// <summary>
     /// 服务商状态文本进入日志与记录表前只保留大写字母、数字和下划线并截断：
