@@ -37,6 +37,7 @@ import type {
   ContainerDetailSearchField,
   ContainerDetailSort,
 } from "./types";
+import { HQ_ACTIONS_ENABLED } from "@/shared/utils/legacy-databases";
 
 function formatPrice(value?: number | null) {
   return value == null || !Number.isFinite(value) ? "--" : value.toFixed(2);
@@ -345,8 +346,12 @@ export function ContainerDetailBulkActionsSheet({
       ) : null}
       {canRunProductJobs ? (
         <>
-          <Text style={styles.sectionLabel}>{t("bulk.groups.hq")}</Text>
-          {item("pushHq", "cloud-upload-outline", { needsSelection: true, hint: noSelection ? t("bulk.needsSelection") : undefined })}
+          {HQ_ACTIONS_ENABLED ? (
+            <>
+              <Text style={styles.sectionLabel}>{t("bulk.groups.hq")}</Text>
+              {item("pushHq", "cloud-upload-outline", { needsSelection: true, hint: noSelection ? t("bulk.needsSelection") : undefined })}
+            </>
+          ) : null}
           <Text style={styles.sectionLabel}>{t("bulk.groups.container")}</Text>
           {item("submitContainer", "check-decagram-outline", { hint: t("bulk.submitContainerHint") })}
         </>

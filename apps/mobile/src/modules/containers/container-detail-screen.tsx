@@ -132,6 +132,7 @@ import type {
   CreateNewProductsRunResult,
   UpdateContainerDetailRequest,
 } from "./types";
+import { HQ_ACTIONS_ENABLED } from "@/shared/utils/legacy-databases";
 
 type BulkModalType = "float" | "prices" | null;
 type BatchAction = "delete" | "float" | "prices" | "recalculate" | "backfill";
@@ -268,7 +269,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
   const [createSheetOpen, setCreateSheetOpen] = useState(false);
   const [createPhase, setCreatePhase] = useState<JobSheetPhase>("confirm");
   // 「创建完成后同时更新 HQ 数据库」每次打开确认框都默认勾选，不持久化
-  const [createSyncToHq, setCreateSyncToHq] = useState(true);
+  const [createSyncToHq, setCreateSyncToHq] = useState(HQ_ACTIONS_ENABLED);
   const [createResult, setCreateResult] = useState<CreateNewProductsRunResult | null>(null);
   const [createError, setCreateError] = useState("");
   const [submitSheetOpen, setSubmitSheetOpen] = useState(false);
@@ -961,7 +962,7 @@ export function ContainerDetailScreen({ containerGuid }: { containerGuid: string
       return;
     }
     // 每次打开都默认勾选「同时更新 HQ」，不记忆上一次的选择
-    setCreateSyncToHq(true);
+    setCreateSyncToHq(HQ_ACTIONS_ENABLED);
     setCreateResult(null);
     setCreateError("");
     setCreatePhase("confirm");
