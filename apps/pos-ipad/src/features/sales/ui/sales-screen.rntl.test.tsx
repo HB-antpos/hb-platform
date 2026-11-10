@@ -3007,6 +3007,9 @@ describe("SalesScreen", () => {
     ).toBe(true);
 
     const swipeSurface = screen.getByTestId("sales-line-line-1-swipe-surface");
+    // 手势壳铺满整行：向左滑开后空出的区域里是「删除」按钮，壳自己不能接触摸，
+    // 否则真机上点「删除」会被壳截走（只在子视图 / 滑动面上触发手势）。
+    expect(swipeSurface.props.pointerEvents).toBe("box-none");
     const startEvent = cartLinePanEvent(240, 240, 1);
     const activationEvent = cartLinePanEvent(240, 220, 20);
     const dragEvent = cartLinePanEvent(220, 100, 80);

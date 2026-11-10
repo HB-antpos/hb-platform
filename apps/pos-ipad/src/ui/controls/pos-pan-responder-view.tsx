@@ -23,7 +23,7 @@ const PanResponderHost = View as unknown as ComponentType<
 
 export type PosPanResponderViewProps = Pick<
   ViewProps,
-  "children" | "onLayout" | "style" | "testID"
+  "children" | "onLayout" | "pointerEvents" | "style" | "testID"
 > &
   Readonly<{
     panHandlers: PanResponderInstance["panHandlers"];
@@ -37,6 +37,7 @@ export function PosPanResponderView({
   children,
   onLayout,
   panHandlers,
+  pointerEvents,
   style,
   testID,
 }: PosPanResponderViewProps) {
@@ -66,6 +67,7 @@ export function PosPanResponderView({
       onStartShouldSetResponderCapture={
         handlers.onStartShouldSetResponderCapture
       }
+      pointerEvents={pointerEvents}
       style={style}
       testID={testID}
     >
