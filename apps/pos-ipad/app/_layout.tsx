@@ -5,6 +5,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { AppProviders } from "@/app-providers";
 import "@/core/peripherals/customer-display/native";
 import { PosNavigationBridge } from "@/features/navigation/pos-navigation-bridge";
+import { ZellerAppBoundary } from "@/features/zeller-terminal/zeller-app-boundary";
 import { ScannerRouteProvider } from "@/ui/scanner/scanner-route-bridge";
 import { usePosThemeVersion } from "@/ui/theme";
 
@@ -20,9 +21,13 @@ export default function RootLayout() {
   return (
     <AppProviders>
       <ScannerRouteProvider>
-        <PosNavigationBridge>
-          <Stack screenOptions={{ headerShown: false }} />
-        </PosNavigationBridge>
+        {/* 全 App 唯一的 Zeller SDK 挂载点：默认不加载，设置里用到或运行时需要时才加载。 */}
+        <ZellerAppBoundary>
+          {/* 侧栏 / 面板导航桥：收银页 push，其他页 replace。 */}
+          <PosNavigationBridge>
+            <Stack screenOptions={{ headerShown: false }} />
+          </PosNavigationBridge>
+        </ZellerAppBoundary>
       </ScannerRouteProvider>
     </AppProviders>
   );

@@ -336,8 +336,10 @@ function assertNewCommitState(truth: ManualPaymentTruthRow): void {
     text(truth.case_state, "manual case state") !== "manual-paid" ||
     integer(truth.is_parked, "manual case parked state") !== 1 ||
     text(truth.finding, "manual finding") !== "paid" ||
+    // 与恢复中心可移交的刷卡通道保持一致：主管结论已经落库，这里漏掉一个通道，订单就永远完成不了。
     text(truth.provider, "manual provider") !== "square" &&
-      text(truth.provider, "manual provider") !== "linkly-cloud" ||
+      text(truth.provider, "manual provider") !== "linkly-cloud" &&
+      text(truth.provider, "manual provider") !== "zeller" ||
     text(truth.operation, "manual operation") !== "purchase" ||
     !["Created", "Submitted", "Pending", "Unknown"].includes(attemptState) ||
     !["Created", "Submitted", "Pending", "Unknown"].includes(

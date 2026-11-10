@@ -26,12 +26,16 @@ import type {
 } from "@/features/installments/installment-models";
 import type { PaymentProviderRegistryPort } from "@hb/pos-payments-core/features/payments/payment-attempt-service";
 import type { PaymentProviderAvailability } from "@/features/payments/runtime/payment-provider-registry";
+import {
+  deriveZellerAttemptReference,
+  formatZellerPayment,
+} from "@hb/pos-payments-core/features/payments/zeller/zeller-payment-reference";
 
 export type { InstallmentCancelRefundMode };
 
 export type InstallmentCardProvider = Extract<
   PaymentProvider,
-  "square" | "linkly-cloud" | "manual-card"
+  "square" | "linkly-cloud" | "manual-card" | "zeller"
 >;
 
 export interface InstallmentCardProviderSelectionPort {
@@ -43,13 +47,12 @@ export interface InstallmentCardProviderSelectionPort {
 }
 
 /**
- * 分期原付款证据里的 provider：本机能执行的 PaymentProvider，外加 WPF 等其他端收的 Zeller。
+ * 分期原付款证据里的 provider。
  *
- * 中文注释：Zeller 只出现在「原付款描述」里，本机目前没有 Zeller 通道，所以它不属于 PaymentProvider，
- * 也不会产生 provider attempt；这类原付款在取消时只能走「退代金券」，原路退由 requiredEvidenceProvider 失败关闭。
- * 线 B 接入 Zeller 通道后再把它并入 PaymentProvider。
+ * 中文注释：Zeller 可以收分期首付和续付，但分期取消时的原路退还没有接：
+ * Zeller 原付款在取消时只能走「退代金券」，原路退由 requiredEvidenceProvider 失败关闭。
  */
-export type InstallmentTenderProvider = PaymentProvider | "zeller";
+export type InstallmentTenderProvider = PaymentProvider;
 
 export type InstallmentOriginalTenderEvidence = Readonly<{
   evidenceId: string;
@@ -362,7 +365,8 @@ export class ProductionInstallmentPaymentAdapter
       !record ||
       record.attempt.operation !== "purchase" ||
       (record.attempt.provider !== "square" &&
-        record.attempt.provider !== "linkly-cloud")
+        record.attempt.provider !== "linkly-cloud" &&
+        record.attempt.provider !== "zeller")
     ) {
       // 手动刷卡 / 代金券没有“通道取消”这回事（手动刷卡走准备-确认两阶段）。
       throw planConflict();
@@ -578,7 +582,7 @@ export class ProductionInstallmentPaymentAdapter
       // 配置读取失败时三种在线方式全部失败关闭；UI 不得猜测默认卡通道。
     }
     return Object.freeze(
-      (["square", "linkly-cloud", "manual-card", "voucher"] as const).map((provider) => {
+      (["square", "linkly-cloud", "zeller", "manual-card", "voucher"] as const).map((provider) => {
         const configured =
           provider === "voucher" || enabledCards.includes(provider);
         const available = configured && this.providerExists(provider);
@@ -861,10 +865,17 @@ export class ProductionInstallmentPaymentAdapter
         state: "Created",
         // 中文注释：手动刷卡没有刷卡机，引用就是本尝试号；适配器只在 txnRef 正好等于它时才认账，
         // 预置后再由收银员确认才会 Approved，绝不会因恢复而凭空批准。
+        // Zeller 发给刷卡机的 reference（HBZ-…）由尝试号派生，必须在这里随 Created 一起落库：
+        // 分期不经过 PaymentAttemptService，没有别处替它预置；它也是崩溃后查回这笔交易的唯一线索。
         references:
           input.provider === "manual-card"
             ? Object.freeze({ ...emptyReferences(), txnRef: `MANUAL:${attemptId}` })
-            : emptyReferences(),
+            : input.provider === "zeller"
+              ? Object.freeze({
+                  ...emptyReferences(),
+                  txnRef: requiredZellerReference(attemptId, input.operation),
+                })
+              : emptyReferences(),
         createdAtIso: nowIso,
         updatedAtIso: nowIso,
         lastErrorCode: null,
@@ -882,7 +893,8 @@ export class ProductionInstallmentPaymentAdapter
       if (
         (selected !== "square" &&
           selected !== "linkly-cloud" &&
-          selected !== "manual-card") ||
+          selected !== "manual-card" &&
+          selected !== "zeller") ||
         !this.providerExists(selected)
       ) {
         throw adapterError(
@@ -910,7 +922,8 @@ export class ProductionInstallmentPaymentAdapter
           (value): value is InstallmentCardProvider =>
             value === "square" ||
             value === "linkly-cloud" ||
-            value === "manual-card",
+            value === "manual-card" ||
+            value === "zeller",
         ),
       ),
     ];
@@ -1108,10 +1121,15 @@ export class ProductionInstallmentPaymentAdapter
     let execute: (attempt: PaymentAttempt) => Promise<PaymentProviderResult>;
     if (record.attempt.state === "Created") {
       record = await this.transitionAttempt(record, "Submitted");
+      // 中文注释：分期页提交后不会轮询等待中的付款。通道提供「等到有结果再返回」的扣款入口时用它
+      // （目前只有 Zeller），否则顾客还在刷卡，这笔就已经被记成结果未知、要收银员手动点恢复。
+      const settle = (provider as SettlingPurchasePort).submitAndSettle;
       execute =
         record.attempt.operation === "refund"
           ? (attempt) => provider.refund(attempt)
-          : (attempt) => provider.submit(attempt);
+          : typeof settle === "function"
+            ? (attempt) => settle.call(provider, attempt)
+            : (attempt) => provider.submit(attempt);
     } else if (
       record.attempt.state === "Submitted" ||
       record.attempt.state === "Pending" ||
@@ -1253,7 +1271,8 @@ export class ProductionInstallmentPaymentAdapter
     if (
       nextAttempt.provider === "square" ||
       nextAttempt.provider === "linkly-cloud" ||
-      nextAttempt.provider === "manual-card"
+      nextAttempt.provider === "manual-card" ||
+      nextAttempt.provider === "zeller"
     ) {
       if (!result.protectedSyncEvidence) {
         throw adapterError(
@@ -1861,7 +1880,10 @@ function paymentCommand(
     paymentGuid: record.paymentGuid,
     method: "card" as const,
     amountCents: positiveCents(record.attempt.amount.cents),
-    reference: cardReference(material.evidence),
+    reference:
+      record.attempt.provider === "zeller"
+        ? zellerPaymentReference(record.attempt)
+        : cardReference(material.evidence),
     reservationToken: null,
     cardTransactions: Object.freeze([
       cardTransaction(material.evidence, material.receiptText),
@@ -1979,7 +2001,8 @@ function validateStoredMaterial(
     if (
       attempt.provider !== "square" &&
       attempt.provider !== "linkly-cloud" &&
-      attempt.provider !== "manual-card"
+      attempt.provider !== "manual-card" &&
+      attempt.provider !== "zeller"
     ) {
       throw materialInvalid();
     }
@@ -2051,6 +2074,48 @@ function cardTransaction(
     receiptText,
     refundReference: evidence.refundReference,
   });
+}
+
+/** 通道可选提供的「扣款并等到有结果再返回」入口；没有的通道照常 submit 后由人工恢复。 */
+type SettlingPurchasePort = OnlinePaymentPort & {
+  submitAndSettle?: (attempt: PaymentAttempt) => Promise<PaymentProviderResult>;
+};
+
+/** Zeller 尝试的 reference 由尝试号派生；尝试号不是标准 GUID 时派生不出来，不建这笔尝试。 */
+function requiredZellerReference(
+  attemptId: string,
+  operation: "purchase" | "refund",
+): string {
+  const reference = deriveZellerAttemptReference({ attemptId, operation });
+  if (reference === null) {
+    throw adapterError(
+      "INSTALLMENT_ATTEMPT_PLAN_CONFLICT",
+      "Zeller installment attempt id cannot derive a terminal reference.",
+    );
+  }
+  return reference;
+}
+
+/**
+ * Zeller 分期付款上传服务端的引用：ZELLER:{reference}:{transactionUuid}，与 WPF 和普通销售同格式。
+ *
+ * 中文注释：别家通道在分期里上传的是裸交易号，Zeller 不能照做——WPF 取消分期、以后做原路退时，
+ * 都要从这个格式里取原交易号。reference 必须就是本尝试派生的那一个，transactionUuid 是批准时落库的 paymentId。
+ */
+function zellerPaymentReference(attempt: PaymentAttempt): string {
+  const { txnRef, paymentId } = attempt.references;
+  if (
+    txnRef === null ||
+    paymentId === null ||
+    txnRef !== deriveZellerAttemptReference(attempt)
+  ) {
+    throw materialInvalid();
+  }
+  try {
+    return formatZellerPayment(txnRef, paymentId);
+  } catch {
+    throw materialInvalid();
+  }
 }
 
 function cardReference(evidence: CardSyncEvidenceV1): string | null {

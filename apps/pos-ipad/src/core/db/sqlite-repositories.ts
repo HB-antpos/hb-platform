@@ -1648,11 +1648,10 @@ function approvedCardReference(row: TenderRow, tenderAmountCents: number): strin
   if (operation === "purchase" && tenderAmountCents > 0 && paymentId) {
     return `SQ:${paymentId}`;
   }
-  if (operation === "refund" && tenderAmountCents < 0 && paymentId) {
-    const refundId = providerReferencePart(row.attempt_response_code);
-    if (!refundId) return null;
-    return `CARD_REFUND|refund=${encodeURIComponent(`SQRF:${refundId}`)}|original=${encodeURIComponent(`SQ:${paymentId}`)}`;
-  }
+  // 中文注释：退款的引用这里不给。Square 的退款号只在加密的卡证据里，这里读不到；
+  // attempt 的响应码不是退款号（结算中的退款是固定的 SQUARE_REFUND_PENDING，当场完成的为空）。
+  // 上传前由订单同步解析器（SqliteOrderSyncMaterialResolver）从卡证据生成完整的退款引用；
+  // 没有解析器时刷卡支付缺引用会被同步映射拒绝，不会带着假退款号上传。
   // Linkly 的 WPF 等价引用还需要 environment 和可能独立于 txnRef 的 RFN；
   // 当前 payment_attempts 未持久化完整字段，不能在订单同步前猜造 ANZBACKEND 引用。
   return null;

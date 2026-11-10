@@ -191,6 +191,71 @@ test("支付配置缺少显式 provider 或试图同时持久化两种卡终端�
   );
 });
 
+test("选中 Zeller 只保存通道本身；切回 Linkly 时 Zeller 的选择被替换，礼品卡开关保留", async () => {
+  const secureStore = new InMemorySecureStore();
+  const subject = new PosPublicRuntimeConfigurationStore(
+    secureStore,
+    ["https://pos.example.test"],
+  );
+  await subject.save({ payments: { voucher: { enabled: true } } });
+
+  await subject.savePayments({ provider: "zeller", square: null, linkly: null });
+  assert.deepEqual((await subject.load()).payments, {
+    provider: "zeller",
+    voucher: { enabled: true },
+  });
+  // 下一次启动创建的新仓库读到同样的选择。
+  const nextLaunch = new PosPublicRuntimeConfigurationStore(secureStore, ["https://pos.example.test"]);
+  assert.equal((await nextLaunch.load()).payments?.provider, "zeller");
+  // 运行时合并：本机保存的 zeller 覆盖构建默认的通道。
+  assert.equal(
+    mergePosPaymentPublicConfiguration(
+      { provider: "linkly", linkly: { environment: "Production" } },
+      (await subject.load()).payments,
+    ).provider,
+    "zeller",
+  );
+
+  await subject.savePayments({
+    provider: "linkly",
+    square: null,
+    linkly: { environment: "Production" },
+  });
+  assert.deepEqual((await subject.load()).payments, {
+    provider: "linkly",
+    linkly: { environment: "Production" },
+    voucher: { enabled: true },
+  });
+});
+
+test("选中 Zeller 时不能同时保存 Square 或 Linkly 的配置；不认识的通道失败关闭", async () => {
+  const subject = new PosPublicRuntimeConfigurationStore(
+    new InMemorySecureStore(),
+    ["https://pos.example.test"],
+  );
+  await assert.rejects(
+    () =>
+      subject.save({
+        payments: { provider: "zeller", linkly: { environment: "Production" } } as never,
+      }),
+    /selected/i,
+  );
+  await assert.rejects(
+    () =>
+      subject.save({
+        payments: {
+          provider: "zeller",
+          square: { environment: "Sandbox", deviceId: "SQ-DEVICE", locationId: "SQ-LOCATION" },
+        } as never,
+      }),
+    /selected/i,
+  );
+  await assert.rejects(
+    () => subject.save({ payments: { provider: "stripe" } as never }),
+    /provider/i,
+  );
+});
+
 test("API 地址只能保存和加载构建签名内声明的可信 origin", async () => {
   const secureStore = new InMemorySecureStore();
   const subject = new PosPublicRuntimeConfigurationStore(

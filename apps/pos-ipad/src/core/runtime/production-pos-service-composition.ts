@@ -1745,7 +1745,8 @@ export function createProductionPosRuntimeServices(
                     ): provider is InstallmentCardProvider =>
                       provider === "square" ||
                       provider === "linkly-cloud" ||
-                      provider === "manual-card",
+                      provider === "manual-card" ||
+                      provider === "zeller",
                   );
               },
             },
@@ -3218,6 +3219,11 @@ function createAvailableReturnRuntime(input: Readonly<{
     ...(input.supervisorAcknowledgements
       ? { supervisorAcknowledgements: input.supervisorAcknowledgements }
       : {}),
+    // 中文注释：Zeller 原付款默认退回原卡，前提是本机此刻选的刷卡通道就是 Zeller（每次查单时现读）。
+    // 选的是别家通道、改用手动刷卡，或这个构建不开放 Zeller 时，Zeller 原付款只能现金 / 代金券代替退款。
+    zellerOriginalRefundAvailable: () =>
+      input.input.payments?.bootstrap.providers.getAvailability("zeller")
+        .available === true,
     fulfilment: {
       materializeAction: (actionId) =>
         fulfilment.materializeAction(actionId),

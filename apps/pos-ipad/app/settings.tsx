@@ -16,7 +16,6 @@ import {
   SettingsUnavailableScreen,
   type SettingsPresenter,
 } from "@/features/settings";
-import { ZellerSettingsBoundary } from "@/features/zeller-terminal/zeller-settings-boundary";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
@@ -150,8 +149,6 @@ export default function SettingsRoute() {
   }
 
   return (
-    // 提供了 Zeller 终端，设置页的「支付设置」才会出现 Zeller 页签（正式版暂不提供）。
-    <ZellerSettingsBoundary onOpenNetworkCheck={openNetworkCheck}>
     <SettingsScreen
       // 收银入口（线路）设置：与运行时共用同一个进程内协调器，手动覆盖才能压过后台下发值。
       apiEntry={getApiEntryModeCoordinator()}
@@ -165,6 +162,5 @@ export default function SettingsRoute() {
         ? { scanner: runtime.services.scanner.router }
         : {})}
     />
-    </ZellerSettingsBoundary>
   );
 }

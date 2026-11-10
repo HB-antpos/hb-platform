@@ -103,6 +103,7 @@ const PAYMENT_METHODS = Object.freeze([
   "cash",
   "square",
   "linkly-cloud",
+  "zeller",
   "manual-card",
   "voucher",
 ] as const satisfies readonly PaymentUiMethod[]);

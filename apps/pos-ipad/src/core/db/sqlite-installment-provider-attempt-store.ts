@@ -100,6 +100,8 @@ type OriginalTenderEnvelopeV1 = Readonly<{
     | Readonly<{ kind: "square"; paymentId: string }>
     | Readonly<{ kind: "linkly-cloud"; rfn: string }>
     | Readonly<{ kind: "manual-card"; txnRef: string }>
+    // zeller：txnRef 是发给刷卡机的 reference（HBZ-…），paymentId 是 Zeller 的 transactionUuid。
+    | Readonly<{ kind: "zeller"; txnRef: string; paymentId: string }>
     | Readonly<{
         kind: "voucher";
         reference: string;
@@ -904,7 +906,8 @@ function normalizeApprovedMaterial(
       !exactKeys(input, ["kind", "evidence", "receiptText"]) ||
       (attempt.provider !== "square" &&
         attempt.provider !== "linkly-cloud" &&
-        attempt.provider !== "manual-card")
+        attempt.provider !== "manual-card" &&
+        attempt.provider !== "zeller")
     ) {
       throw new TypeError("Approved card material is invalid.");
     }
@@ -1173,6 +1176,19 @@ function localEvidenceSeed(
     return Object.freeze({
       kind: "manual-card",
       txnRef: strictText(attempt.references.txnRef, "Manual card reference", 2_048),
+    });
+  }
+  if (attempt.provider === "zeller") {
+    // 中文注释：两项都留底。分期取消时 Zeller 目前只能退代金券（原路退没有接），
+    // 但以后要原路退、或要在 Zeller 后台对账，靠的就是这里的 transactionUuid。
+    return Object.freeze({
+      kind: "zeller",
+      txnRef: strictText(attempt.references.txnRef, "Zeller reference", 2_048),
+      paymentId: strictText(
+        attempt.references.paymentId,
+        "Zeller transaction UUID",
+        2_048,
+      ),
     });
   }
   if (
@@ -1678,6 +1694,7 @@ function paymentProvider(value: unknown): PaymentAttempt["provider"] {
     value === "square" ||
     value === "linkly-cloud" ||
     value === "manual-card" ||
+    value === "zeller" ||
     value === "voucher"
   ) {
     return value;

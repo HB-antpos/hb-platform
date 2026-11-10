@@ -246,8 +246,8 @@ public sealed class StaffNotificationServiceTests : IDisposable
         Assert.Contains("Hi Mia Chen,", preview.EmailText);
         Assert.Contains("••••", preview.EmailText);
         Assert.DoesNotContain("<", preview.EmailText);
-        Assert.DoesNotContain("hotbargain.vip", preview.SmsText); // 短信里不放链接（ClickSend 拒收该域名）
-        Assert.Equal(125, preview.SmsLength);
+        Assert.EndsWith("Get the app: https://hotbargain.vip/app", preview.SmsText); // 默认短信末尾带下载短链
+        Assert.Equal(139, preview.SmsLength);
         Assert.Equal(1, preview.SmsSegments);
         Assert.True(preview.SmsValid);
         // 预览不改密码、不发信、不写记录。
@@ -414,7 +414,7 @@ public sealed class StaffNotificationServiceTests : IDisposable
         Assert.Equal(SmsPurposes.StaffNotification, smsRequest.Purpose);
         Assert.Equal("+61491570156", smsRequest.ToPhone); // 发给服务商的是规范化后的 E.164
         Assert.Equal(sent.Data!.BatchId, smsRequest.RelatedKey);
-        Assert.DoesNotContain("hotbargain.vip", smsRequest.Body); // 默认模板的短信不带链接
+        Assert.EndsWith("Get the app: https://hotbargain.vip/app", smsRequest.Body); // 默认模板的短信末尾带下载短链
         Assert.DoesNotContain(password, smsRequest.Body);
 
         var detail = (await CreateService().GetBatchAsync(sent.Data.BatchId)).Data!;

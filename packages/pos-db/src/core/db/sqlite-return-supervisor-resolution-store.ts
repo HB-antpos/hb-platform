@@ -121,7 +121,9 @@ implements ReturnSupervisorResolutionPort {
       if (
         !attempt ||
         attempt.operation !== "refund" ||
-        (attempt.provider !== "linkly-cloud" && attempt.provider !== "square") ||
+        (attempt.provider !== "linkly-cloud" &&
+          attempt.provider !== "square" &&
+          attempt.provider !== "zeller") ||
         !["Created", "Submitted", "Pending", "Unknown"].includes(String(attempt.state))
       ) {
         throw feature("RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED");

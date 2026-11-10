@@ -82,7 +82,8 @@ export type TrustedRefundSeedIdentity = Readonly<{
 
 export type TrustedOriginalTenderRefundProvider =
   | "square"
-  | "linkly-cloud";
+  | "linkly-cloud"
+  | "zeller";
 
 /**
  * 该范围只包含已纳入耐久 action 签名的 opaque capacityId 与不可变交易身份；
@@ -117,6 +118,12 @@ export type TrustedRefundReferenceSeed =
   | Readonly<{
       provider: "linkly-cloud";
       rfn: string;
+    }>
+  // 中文注释：zeller 的种子是原交易的 transactionUuid，放在 paymentId。
+  // 本次退款发给 Zeller 的 reference（HBZR-…）不是种子，由 attemptId 派生后存 txnRef。
+  | Readonly<{
+      provider: "zeller";
+      paymentId: string;
     }>;
 
 export type TrustedRefundReferenceSeedHook = (
@@ -1091,8 +1098,7 @@ function trustedRefundSeedInput(
 ): TrustedRefundReferenceSeedInput {
   if (
     attempt.operation !== "refund" ||
-    // zeller 的原路退款还没有接入：没有可信的原交易引用种子格式，一律失败关闭。
-    (attempt.provider === "voucher" || attempt.provider === "manual-card" || attempt.provider === "zeller")
+    (attempt.provider === "voucher" || attempt.provider === "manual-card")
   ) {
     throw new PaymentAttemptReferenceSeedError(
       "TRUSTED_REFUND_REFERENCE_SEED_INVALID",
@@ -1129,8 +1135,7 @@ function applyTrustedRefundReferenceSeed(
 ): PaymentAttempt {
   if (
     attempt.operation !== "refund" ||
-    // zeller 的原路退款还没有接入：没有可信的原交易引用种子格式，一律失败关闭。
-    (attempt.provider === "voucher" || attempt.provider === "manual-card" || attempt.provider === "zeller")
+    (attempt.provider === "voucher" || attempt.provider === "manual-card")
   ) {
     throw new PaymentAttemptReferenceSeedError(
       "TRUSTED_REFUND_REFERENCE_SEED_INVALID",
@@ -1170,6 +1175,8 @@ function trustedRefundReferenceKey(
       return "paymentId";
     case "linkly-cloud":
       return "rfn";
+    case "zeller":
+      return "paymentId";
   }
 }
 
@@ -1187,6 +1194,11 @@ function referencesWithTrustedRefundSeed(
       return {
         ...emptyReferences(),
         rfn: protectedReference,
+      };
+    case "zeller":
+      return {
+        ...emptyReferences(),
+        paymentId: protectedReference,
       };
   }
 }

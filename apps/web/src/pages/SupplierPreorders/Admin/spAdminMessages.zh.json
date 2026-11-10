@@ -201,6 +201,7 @@
       "notes": "备注"
     },
     "detail": {
+      "invalidAddress": "订单表地址不完整，无法加载详情，请从列表重新打开。",
       "backToList": "返回列表",
       "stats": "{{items}} 款 · 开启 {{enabled}} 家分店 · 已提交 {{submitted}} · 草稿 {{draft}} · 未开始 {{notStarted}}",
       "totals": "合计 {{cartons}} 箱 · {{amount}} · {{cbm}} m³",

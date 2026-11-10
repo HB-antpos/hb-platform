@@ -268,6 +268,18 @@ function providerFromContext(
   if (matchesContext(context, { version: 1, provider: "voucher" })) {
     return "voucher";
   }
+  // 中文注释：只有带原交易号的 Zeller 上下文才能原路退。不带原交易号的那种（只登记代替退款额度）
+  // 键集合不同，会落到下面失败关闭。
+  if (matchesContext(context, {
+    version: 1,
+    provider: "zeller",
+    transactionUuid: "",
+    originalReference: "",
+  })) {
+    requireTextField(context, "transactionUuid");
+    requireTextField(context, "originalReference");
+    return "zeller";
+  }
   throw new ReturnRefundAdapterError("REFUND_CONTEXT_INVALID");
 }
 
@@ -282,9 +294,12 @@ function seedFromContext(
       return { provider, rfn: requireTextField(context, "rfn") };
     case "manual-card":
       throw new ReturnRefundAdapterError("REFUND_CONTEXT_INVALID");
-    // Zeller 原路退款还没有接入：退货时 Zeller 原付款只登记代替退款额度，不会走到这里；走到了就失败关闭。
+    // Zeller 的种子是原交易号；本次退款发给 Zeller 的 reference 由 attemptId 派生，不在这里给。
     case "zeller":
-      throw new ReturnRefundAdapterError("REFUND_CONTEXT_INVALID");
+      return {
+        provider,
+        paymentId: requireTextField(context, "transactionUuid"),
+      };
   }
 }
 

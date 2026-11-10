@@ -66,6 +66,45 @@ test("手工刷卡额度（manual-card context）原卡退款在创建 attempt �
   assert.equal(payments.prepareInputs.length, 0);
 });
 
+test("Zeller 原路退款：带原交易号的额度走 zeller，种子只交付原交易号；不带原交易号的额度在创建 attempt 前拒绝", async () => {
+  const transactionUuid = "3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f";
+  const context = {
+    version: 1,
+    provider: "zeller",
+    transactionUuid,
+    originalReference: `ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:${transactionUuid}`,
+  };
+  const payments = new FakePayments(attempt("Created", "zeller"));
+  const adapter = createAdapter({ payments, context });
+
+  await adapter.prepareAttempt(input());
+  assert.deepEqual(payments.prepareInputs, [{
+    actionId: "external-1", orderGuid: returnOrderGuid, provider: "zeller", operation: "refund",
+    amount: { currency: "AUD", cents: -500 }, actor: auditActor(),
+    refundCapacityId: "capacity-1",
+  }]);
+  // 种子只有原交易号；原付款引用留在 Vault 里，等退货单上传时再用。
+  assert.deepEqual(await adapter.trustedRefundReferenceSeed(seedInput("zeller")), {
+    provider: "zeller", paymentId: transactionUuid,
+  });
+  await assert.rejects(() => adapter.trustedRefundReferenceSeed(seedInput("square")));
+
+  // 只登记代替退款额度的 Zeller 上下文（没有原交易号）：原卡退款失败关闭，不创建 attempt。
+  for (const substituteOnly of [
+    { version: 1, provider: "zeller" },
+    { version: 1, provider: "zeller", transactionUuid },
+    { ...context, transactionUuid: "" },
+  ]) {
+    const rejected = new FakePayments(attempt("Created", "zeller"));
+    await assert.rejects(
+      () => createAdapter({ payments: rejected, context: substituteOnly }).prepareAttempt(input()),
+      (error: unknown) =>
+        ["REFUND_CONTEXT_INVALID", "REFUND_INPUT_INVALID"].includes(String((error as { code?: unknown }).code)),
+    );
+    assert.equal(rejected.prepareInputs.length, 0);
+  }
+});
+
 test("Voucher 先耐久 prepareRefund，再以空 provider reference 创建退款 attempt", async () => {
   const payments = new FakePayments(attempt("Created", "voucher"));
   const voucher = new FakeVoucherPreparation();
@@ -204,7 +243,7 @@ function providers(): PaymentProviderRegistryPort {
 
 function input() { return { actionId: "return-action-1", allocationId: "allocation-1", externalAttemptId: "external-1", returnOrderGuid, actor: auditActor(), method: "card" as const, signedAmountCents: -500, capacityId: "capacity-1", originalOrderGuid }; }
 function boundInput() { return { ...input(), attemptKind: "payment-provider" as const, externalActionId: "external-1", durableAttemptId: "attempt-1" }; }
-function seedInput(provider: "square" | "linkly-cloud") { return { identity: { attemptId: "attempt-1", idempotencyKey: "idempotency-1", orderGuid: returnOrderGuid, createdAtIso: "2026-07-28T00:00:00.000Z" }, provider, operation: "refund" as const, action: { orderGuid: returnOrderGuid, actionId: "external-1", requestSignature: "signature", attemptId: "attempt-1", idempotencyKey: "idempotency-1", createdAtIso: "2026-07-28T00:00:00.000Z", actor: auditActor() }, capacity: { capacityId: "capacity-1", actionId: "external-1", orderGuid: returnOrderGuid, provider, operation: "refund" as const, amount: { currency: "AUD" as const, cents: -500 } } }; }
+function seedInput(provider: "square" | "linkly-cloud" | "zeller") { return { identity: { attemptId: "attempt-1", idempotencyKey: "idempotency-1", orderGuid: returnOrderGuid, createdAtIso: "2026-07-28T00:00:00.000Z" }, provider, operation: "refund" as const, action: { orderGuid: returnOrderGuid, actionId: "external-1", requestSignature: "signature", attemptId: "attempt-1", idempotencyKey: "idempotency-1", createdAtIso: "2026-07-28T00:00:00.000Z", actor: auditActor() }, capacity: { capacityId: "capacity-1", actionId: "external-1", orderGuid: returnOrderGuid, provider, operation: "refund" as const, amount: { currency: "AUD" as const, cents: -500 } } }; }
 function auditActor() { return { cashierId: "cashier-alice", cashierName: "Alice", userGuid: "user-alice" } as const; }
 function attempt(state: PaymentAttempt["state"], provider: PaymentAttempt["provider"]): PaymentAttempt { return { attemptId: "attempt-1", idempotencyKey: "idempotency-1", orderGuid: returnOrderGuid, provider, operation: "refund", amount: { currency: "AUD", cents: -500 }, state, references: { checkoutId: null, paymentId: null, sessionId: null, txnRef: null, rfn: null, voucherReservationToken: null }, createdAtIso: "2026-07-28T00:00:00.000Z", updatedAtIso: "2026-07-28T00:00:00.000Z", lastErrorCode: null }; }
 function result(value: PaymentAttempt): PaymentAttemptExecutionResult { return { attempt: value, receiptText: null, responseCode: null }; }

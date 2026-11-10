@@ -441,9 +441,12 @@ export function createProductionPaymentRuntime(
           if (attempt.operation !== "purchase") {
             throw new Error("PAYMENT_RECOVERY_QUERY_ONLY_IDENTITY_REQUIRED");
           }
-          const canQuery = Boolean(attempt.providerEnvironment?.trim()) &&
-            Boolean(attempt.provider === "square" ? attempt.references.checkoutId?.trim()
-              : attempt.provider === "linkly-cloud" ? attempt.references.sessionId?.trim() : false);
+          // Zeller 没有环境之分，按提交前落库的 reference（txnRef）查询原交易。
+          const canQuery = attempt.provider === "zeller"
+            ? Boolean(attempt.references.txnRef?.trim())
+            : Boolean(attempt.providerEnvironment?.trim()) &&
+              Boolean(attempt.provider === "square" ? attempt.references.checkoutId?.trim()
+                : attempt.provider === "linkly-cloud" ? attempt.references.sessionId?.trim() : false);
           let queryCompleted = false;
           let queryUnresolved = false;
           if (canQuery) {

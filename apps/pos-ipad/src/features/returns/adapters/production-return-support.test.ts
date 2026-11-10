@@ -245,13 +245,37 @@ test("手动刷卡原付款只登记代替退款额度，不生成集成刷卡�
   assert.equal(JSON.stringify(seeded[0]).includes("attempt-1"), false);
 });
 
-test("Zeller 原付款（WPF 收的单）只登记代替退款额度，不会让整张原单查不出来", async () => {
+test("Zeller 原付款带原交易号时，把原交易号和原付款引用存进 Vault 供原路退款使用", async () => {
+  const transactionUuid = "3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f";
+  // 服务端给的写法原样保留（只去首尾空白）：退货单上传时服务端按它找原付款。
+  const reference = `zeller:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:${transactionUuid.toUpperCase()}`;
+  const seeded: unknown[] = [];
+  const handles = await createVault(seeded).protect({
+    storeCode: "S01", originalOrderGuid: orderGuid, loadedFrom: "remote", capacities: [{
+      sourceKey: "zeller-remote", method: "card", originalOrderGuid: orderGuid, remainingCents: 400,
+      protectedProviderMaterial: { reference: ` ${reference} `, cardTransactions: [{ ...linklyTransaction(null), processor: "Zeller" }] },
+    }],
+  });
+  assert.equal(handles.length, 1);
+  assert.equal(handles[0]?.remainingCents, 400);
+  // 上下文只由原单决定：原交易号统一成小写标准格式，原付款引用原样。
+  assert.deepEqual((seeded[0] as { protectedContext: unknown }).protectedContext, {
+    version: 1,
+    provider: "zeller",
+    transactionUuid,
+    originalReference: reference,
+  });
+});
+
+test("Zeller 原付款取不出原交易号时只登记代替退款额度，不会让整张原单查不出来", async () => {
   const transactionUuid = "3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f";
   const references = [
-    // 已核实：ZELLER:{reference}:{transactionUuid}
-    `ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:${transactionUuid}`,
     // 主管确认、没有交易号的未核实格式
     "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00",
+    // 退款引用不是原付款，不能当成可退的原交易
+    `ZELLERRF:HBZR-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:${transactionUuid}`,
+    // reference 部分不是我们派生的格式
+    `ZELLER:OTHER-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:${transactionUuid}`,
     // 小写前缀与损坏的 Zeller 引用都要拦在 Zeller 分支，不能回退成别的刷卡通道
     "zeller:broken",
   ];

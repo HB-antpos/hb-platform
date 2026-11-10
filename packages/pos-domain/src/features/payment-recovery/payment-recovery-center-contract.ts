@@ -54,7 +54,7 @@ export type PaymentRecoveryCenterRecord = Readonly<{
   terminalName: string | null;
   occurredAtIso: string;
   amountCents: number;
-  provider: "square" | "linkly-cloud";
+  provider: "square" | "linkly-cloud" | "zeller";
   attemptState: PaymentAttempt["state"];
   orderState: string;
   isParked: boolean;

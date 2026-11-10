@@ -233,6 +233,45 @@ test("还款顾客只读，银行卡拒绝超付并冻结所选 Linkly provider"
   assert.equal(repaymentInputs[0]?.cashTenderedCents, undefined);
 });
 
+test("Zeller 可用于首付和续付：冻结所选通道为 zeller；低于 1.00 澳元在调用 workflow 之前拦下", async () => {
+  const repaymentInputs: InstallmentWorkflowRepaymentInput[] = [];
+  const presenter = new InstallmentCheckoutPresenter({
+    entry: installmentRepaymentPaymentEntry(INSTALLMENT_ID),
+    createDrafts: {
+      getSnapshot: () => null,
+      subscribe: () => () => undefined,
+    },
+    initialOnline: true,
+    permissions: repaymentPermissions(),
+    workflow: workflowStub({
+      listPaymentProviderAvailability: async () => [
+        { provider: "zeller", available: true, blocker: null },
+      ],
+      addRepayment: async (input) => {
+        repaymentInputs.push(input);
+        return details({ balanceCents: 2_000 });
+      },
+    }),
+    createTenderId: () => "tender-zeller",
+  });
+
+  assert.equal(await presenter.initialize(), true);
+  assert.equal(presenter.selectMethod("zeller"), true);
+  presenter.setAmountText("0.99");
+  assert.equal(await presenter.submitSelected(), false);
+  assert.equal(presenter.getState().fieldIssue, "zeller-amount-below-minimum");
+  assert.equal(presenter.getState().tenders.length, 0);
+
+  presenter.setAmountText("1.00");
+  assert.equal(await presenter.submitSelected(), true);
+  assert.equal(presenter.getState().tenders[0]?.provider, "zeller");
+  assert.equal(await presenter.confirm(), true);
+  assert.equal(repaymentInputs.length, 1);
+  assert.equal(repaymentInputs[0]?.method, "card");
+  assert.equal(repaymentInputs[0]?.cardProvider, "zeller");
+  assert.equal(repaymentInputs[0]?.amountCents, 100);
+});
+
 test("续付遇到占用 / 服务端未放开通道：支付页给出可区分的「本次未收款」提示，其余失败仍是通用提示", async () => {
   const cases: ReadonlyArray<readonly [InstallmentWorkflowError, string]> = [
     [new InstallmentWorkflowError("claim-busy", "busy"), "INSTALLMENT_REPAYMENT_BUSY"],

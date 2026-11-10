@@ -115,6 +115,7 @@ export type SettingsScreenPresenter = Pick<
   | "requestDeviceReregistration"
   | "previewDeviceReregistration"
   | "requestDeviceRegistrationReset"
+  | "requestEnableZeller"
   | "requestLinklyPair"
   | "requestLinklyTerminalAssignment"
   | "refreshLinklySetup"
@@ -1066,12 +1067,14 @@ function PaymentsPane({
   const [providerPanel, setProviderPanel] = useState<PaymentProviderPanel>(
     state.paymentProviderDraft ?? "linkly",
   );
-  // Zeller 页签只在页面外层提供了 Zeller 终端时出现（设置路由决定，正式版暂不提供），并且只接进页签式布局。
-  const zeller = useZellerTerminalBoundary();
+  // Zeller 页签只在 App 根上提供了 Zeller 终端、并且当前构建开放时出现（正式版暂不开放），只接进页签式布局。
+  const zellerBoundary = useZellerTerminalBoundary();
+  const zeller = zellerBoundary?.settingsTabAvailable ? zellerBoundary : null;
   const zellerPanelOpen = zeller !== null && modernLayout && providerPanel === "zeller";
   const providerTabs: readonly PaymentProviderPanel[] =
     zeller !== null ? ["square", "linkly", "zeller"] : ["square", "linkly"];
   // Square / Linkly 的环境切换与启用按钮只认这两家；停在 Zeller 页签时这些控件不显示。
+  // Zeller 页签不可用（例如正式版）而当前通道是 zeller 时，回落到 Linkly 面板，不留空白。
   const cardProviderPanel: "square" | "linkly" = providerPanel === "zeller" ? "linkly" : providerPanel;
   // Zeller SDK 只在第一次打开 Zeller 页签时才加载，不打开的人不受影响。
   const activateZeller = zeller?.activate;
@@ -1227,9 +1230,7 @@ function PaymentsPane({
             >
               {state.paymentProviderDraft === null
                 ? t("payments.noneSelected")
-                : state.paymentProviderDraft === "square"
-                  ? t("payments.squareSelected")
-                  : t("payments.linklySelected")}
+                : t(PAYMENT_PROVIDER_SELECTED_COPY[state.paymentProviderDraft])}
             </Text>
           </SectionCard>
         ) : null}
@@ -1279,7 +1280,7 @@ function PaymentsPane({
                   );
                 })}
               </View>
-              {providerPanel === "zeller" ? (
+              {zellerPanelOpen ? (
                 // Zeller 没有测试环境：原来放环境切换的位置改成一句说明，不留空也不让人找「环境去哪了」。
                 <Text style={styles.paymentEnvironmentNote} testID="settings-zeller-environment-note">
                   {zellerSettingsText(locale, "tab.environmentNote")}
@@ -1299,7 +1300,7 @@ function PaymentsPane({
             </View>
           ) : null}
 
-          {!modernLayout || providerPanel === "square" ? (
+          {!modernLayout || (!zellerPanelOpen && cardProviderPanel === "square") ? (
             <ProviderPanelShell modern={modernLayout} title="Square">
               {!squareNeedsInitialSetup ? (
                 <Availability
@@ -1484,7 +1485,7 @@ function PaymentsPane({
             </ProviderPanelShell>
           ) : null}
 
-          {!modernLayout || providerPanel === "linkly" ? (
+          {!modernLayout || (!zellerPanelOpen && cardProviderPanel === "linkly") ? (
             <ProviderPanelShell modern={modernLayout} title="Linkly">
               {(!modernLayout || !linklyAvailable) && (!linklyNeedsInitialSetup || !state.linklySetup) ? (
                 <Availability
@@ -1528,12 +1529,16 @@ function PaymentsPane({
 
           {zellerPanelOpen && zeller ? (
             <ZellerSettingsPanel
+              // 「现在用哪家」和「是否已启用」都看已保存的通道，不看还没保存的草稿选择。
               activeProviderLabel={
-                state.paymentProviderDraft ? PAYMENT_PROVIDER_PANEL_LABELS[state.paymentProviderDraft] : null
+                state.paymentProvider ? PAYMENT_PROVIDER_PANEL_LABELS[state.paymentProvider] : null
               }
-              disabled={disabled}
-              // Zeller 收款还没有接进收银流程：先只做配对，启用留给后续接入时再放开。
-              enable={null}
+              disabled={disabled || catalogRefreshRunning}
+              enable={{
+                active: state.paymentProvider === "zeller",
+                // 与保存 Square / Linkly 设置同一套流程：危险操作确认 → 写本机配置 → 重载运行时。
+                onEnable: () => void presenter.requestEnableZeller(),
+              }}
               locale={locale}
               sdk={zeller.state}
               {...(zeller.onOpenNetworkCheck ? { onOpenNetworkCheck: zeller.onOpenNetworkCheck } : {})}
@@ -1611,7 +1616,7 @@ function PaymentsPane({
             <>
               <Text style={styles.paneFooterNote} testID="settings-payment-provider-state">
                 {state.paymentProviderDraft === null ? t("payments.noneSelected")
-                  : t(state.paymentProviderDraft === "square" ? "payments.squareSelected" : "payments.linklySelected")}
+                  : t(PAYMENT_PROVIDER_SELECTED_COPY[state.paymentProviderDraft])}
               </Text>
               <ActionButton
                 disabled={disabled || (cardProviderPanel === "linkly" ? !linklySelectable : !squareAvailable && !state.squareSetup.available)}
@@ -1672,8 +1677,15 @@ function ProviderPanelShell({
   );
 }
 
-/** 「支付设置」里可以查看的刷卡终端页签。zeller 只是页签，还不是可启用的 paymentProvider。 */
+/** 「支付设置」里可以查看的刷卡终端页签。 */
 type PaymentProviderPanel = "square" | "linkly" | "zeller";
+
+/** 每家通道被选中时的提示文案；用查表而不是二选一，新增通道时漏写会直接编译不过。 */
+const PAYMENT_PROVIDER_SELECTED_COPY: Record<PaymentProviderPanel, SettingsCopyKey> = {
+  square: "payments.squareSelected",
+  linkly: "payments.linklySelected",
+  zeller: "payments.zellerSelected",
+};
 
 const PAYMENT_PROVIDER_PANEL_LABELS: Record<PaymentProviderPanel, string> = {
   square: "Square",

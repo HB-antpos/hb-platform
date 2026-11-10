@@ -518,17 +518,37 @@ test("video advert becomes reusable only when healthy and tears down runtime fai
   assert.match(source, /private var pendingVideoIdentity: AdvertIdentity\?/);
   assert.match(source, /private var videoStartupTimeoutWorkItem: DispatchWorkItem\?/);
   assert.match(source, /private var videoRetryWorkItem: DispatchWorkItem\?/);
+  // looper 轮流播放多个副本：必须观察播放器的“当前播放项状态”，不能只盯某一个播放项。
   assert.match(
     source,
-    /item\.observe\(\s*\\\.status,[\s\S]*options:\s*\[\.initial,\s*\.new\]/,
+    /player\.observe\(\s*\\\.currentItem\?\.status,[\s\S]*options:\s*\[\.initial,\s*\.new\]/,
   );
+  assert.doesNotMatch(source, /item\.observe\(\s*\\\.status/);
   assert.match(source, /\.AVPlayerItemFailedToPlayToEndTime/);
   assert.match(source, /\.AVPlayerItemPlaybackStalled/);
   assert.match(source, /queue:\s*\.main/);
   assert.match(source, /DispatchQueue\.main\.async/);
   assert.match(
     source,
-    /let templateItem\s*=\s*AVPlayerItem\(asset:\s*asset\)[\s\S]*AVPlayerLooper\(player:\s*player,\s*templateItem:\s*templateItem\)[\s\S]*guard let playbackItem\s*=\s*player\.currentItem[\s\S]*observeVideoPlayback\([\s\S]*item:\s*playbackItem,[\s\S]*advert:\s*advert,[\s\S]*identity:\s*identity/,
+    /let templateItem\s*=\s*AVPlayerItem\(asset:\s*asset\)[\s\S]*AVPlayerLooper\(player:\s*player,\s*templateItem:\s*templateItem\)[\s\S]*observeVideoPlayback\([\s\S]*player:\s*player,[\s\S]*advert:\s*advert,[\s\S]*identity:\s*identity/,
+  );
+  // AVPlayerLooper 异步入队，刚建好时 player.currentItem 必为 nil；
+  // 建好后立刻读取它会让每条视频都被当场判失败（真机外屏广告从不播放的根因）。
+  assert.doesNotMatch(
+    source,
+    /AVPlayerLooper\(player:\s*player,\s*templateItem:\s*templateItem\)\s*guard let \w+\s*=\s*player\.currentItem/,
+  );
+  assert.doesNotMatch(source, /guard let playbackItem\s*=\s*player\.currentItem/);
+  // 客显广告静音，与 WPF 客显一致。
+  assert.match(source, /player\.isMuted\s*=\s*true/);
+  // 失败通知可能来自任何一个副本，归属判断必须覆盖 looper 的全部副本。
+  assert.match(
+    source,
+    /private func ownsVideoItem\([\s\S]*videoPlayer\?\.currentItem === item[\s\S]*videoLooper\?\.loopingPlayerItems\.contains/,
+  );
+  assert.match(
+    source,
+    /private func handleVideoStatusChange\([\s\S]*guard videoPlayer === player,\s*let item\s*=\s*player\.currentItem else \{ return \}/,
   );
   assert.match(
     source,
@@ -540,7 +560,7 @@ test("video advert becomes reusable only when healthy and tears down runtime fai
   );
   assert.match(
     source,
-    /private func handleVideoPlaybackFailure[\s\S]*guard[\s\S]*!isHandlingVideoFailure[\s\S]*videoPlayerItem === item \|\| videoPlayer\?\.currentItem === item[\s\S]*recordVideoFailure\(for:\s*identity\)[\s\S]*clearAdvert\(\)[\s\S]*HBExternalDisplayCoordinator\.shared\.reportFailure\("advert-video-playback-failed"\)[\s\S]*scheduleVideoRetry\(advert:\s*advert,\s*identity:\s*identity\)/,
+    /private func handleVideoPlaybackFailure[\s\S]*guard[\s\S]*!isHandlingVideoFailure[\s\S]*item\.map\(\{ ownsVideoItem\(\$0\) \}\) \?\? true[\s\S]*recordVideoFailure\(for:\s*identity\)[\s\S]*clearAdvert\(\)[\s\S]*HBExternalDisplayCoordinator\.shared\.reportFailure\("advert-video-playback-failed"\)[\s\S]*scheduleVideoRetry\(advert:\s*advert,\s*identity:\s*identity\)/,
   );
   assert.match(
     source,

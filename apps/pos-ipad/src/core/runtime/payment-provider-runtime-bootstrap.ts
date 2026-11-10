@@ -41,8 +41,14 @@ import {
   configuredCardProvider,
   configuredLinklyEnvironment,
   createPaymentConfigurationSources,
+  type ConfiguredCardProvider,
   type PosPaymentPublicExtra,
 } from "./payment-runtime-config";
+
+import {
+  zellerTerminalRegistry,
+  type ZellerTerminalSource,
+} from "@/features/payments/zeller/zeller-terminal-registry";
 
 export interface RuntimePaymentProviderRegistry
   extends PaymentProviderRegistryPort,
@@ -87,6 +93,8 @@ export async function createPaymentProviderRuntimeBootstrap(input: Readonly<{
   readPaymentMethods?: () => PaymentMethodSettings;
   /** 分期沿用独立账本，不能开放手动刷卡。 */
   allowManualCard?: boolean;
+  /** Zeller 终端来源；缺省用界面层登记的进程内登记处。测试可注入。 */
+  zellerTerminals?: ZellerTerminalSource;
 }>): Promise<PaymentProviderRuntimeBootstrapWithVoucherRelease> {
   const sources = createPaymentConfigurationSources(input.extra);
   const methods = () => input.readPaymentMethods?.() ?? input.paymentMethods ?? DEFAULT_PAYMENT_METHOD_SETTINGS;
@@ -110,7 +118,14 @@ export async function createPaymentProviderRuntimeBootstrap(input: Readonly<{
     ...(linklySelectionCandidate
       ? { linklyTerminalSelection: linklySelectionCandidate }
       : {}),
+    ...(input.zellerTerminals ? { zellerTerminals: input.zellerTerminals } : {}),
   });
+  const selectedCardProvider = configuredCardProvider(input.extra);
+  // 设置里选中了 Zeller：启动时就让界面层去加载 Zeller SDK，收银员第一次刷卡时终端已经就绪。
+  // 没选中的门店不会走到这里，SDK 不加载。
+  if (selectedCardProvider === "zeller") {
+    (input.zellerTerminals ?? zellerTerminalRegistry).request?.();
+  }
   const linklyApi =
     linklyEnvironment && providers.getAvailability("linkly-cloud").available
       ? linklyApiCandidate
@@ -120,7 +135,7 @@ export async function createPaymentProviderRuntimeBootstrap(input: Readonly<{
     : null;
   const runtimeProviders = new SelectedCardProviderRegistry(
     providers,
-    configuredCardProvider(input.extra),
+    selectedCardProvider,
     methods,
     input.allowManualCard !== false,
   );
@@ -169,7 +184,7 @@ class SelectedCardProviderRegistry
 {
   public constructor(
     private readonly configured: ConfiguredPaymentProviderRegistry,
-    private readonly selected: "square" | "linkly-cloud" | null,
+    private readonly selected: ConfiguredCardProvider | null,
     private readonly readMethods: () => PaymentMethodSettings,
     private readonly allowManualCard: boolean,
   ) {}
@@ -199,7 +214,7 @@ class SelectedCardProviderRegistry
       });
     }
     if (
-      (provider === "square" || provider === "linkly-cloud") &&
+      (provider === "square" || provider === "linkly-cloud" || provider === "zeller") &&
       (methods.useManualCard || provider !== this.selected)
     ) {
       return Object.freeze({

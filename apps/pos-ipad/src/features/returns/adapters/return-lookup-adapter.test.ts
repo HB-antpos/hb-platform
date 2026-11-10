@@ -277,6 +277,71 @@ test("公开退款上下文使用 Vault 复用后余额及现金证明余额", a
   assert.equal(context?.tenderCapacities[0]?.offlineCashProof?.remainingCents, 0);
 });
 
+test("Zeller 原付款：本机启用着 Zeller 且有原交易号时默认退回原卡，否则只允许现金或代金券代替", async () => {
+  const zellerCapacities = async (
+    zellerOriginalRefundAvailable: (() => boolean) | undefined,
+  ) => {
+    const remote = new FakeHistoryApi();
+    const base = remoteContext();
+    remote.contextResult = {
+      ...base,
+      paymentCapacities: [
+        {
+          method: 2,
+          originalAmount: 2.5,
+          refundedAmount: 0,
+          remainingAmount: 2.5,
+          originalOrderGuid: orderGuid,
+          reference:
+            "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f00:3f2b8c1e-5d4a-4b7e-9c10-0a1b2c3d4e5f",
+          cardTransactions: [{ processor: "Zeller" }],
+        },
+        {
+          // 主管确认、没有交易号的未核实格式：没有原交易号，永远只能代替。
+          method: 2,
+          originalAmount: 1.5,
+          refundedAmount: 0,
+          remainingAmount: 1.5,
+          originalOrderGuid: orderGuid,
+          reference: "ZELLER:HBZ-0d4c2c7e9a8b4f7c8e6a5b4c3d2e1f01",
+          cardTransactions: [],
+        },
+      ],
+    };
+    const adapter = createAdapter({
+      historyApi: remote,
+      zellerOriginalRefundAvailable,
+      capacityVault: {
+        async protect(input) {
+          return input.capacities.map((capacity) => ({
+            sourceKey: capacity.sourceKey,
+            capacityId: `opaque-${capacity.sourceKey}`,
+            remainingCents: capacity.remainingCents,
+            offlineCashEvidenceId: null,
+          }));
+        },
+      },
+    });
+    const context = await adapter.lookupReceipt(orderGuid);
+    return context?.tenderCapacities.map((capacity) => [
+      capacity.remainingCents,
+      capacity.substituteOnly === true,
+    ]);
+  };
+
+  // 本机启用着 Zeller：有原交易号的那笔可以原路退（不标 substituteOnly，退货页默认原路退）。
+  assert.deepEqual(await zellerCapacities(() => true), [[250, false], [150, true]]);
+  // 本机没有启用 Zeller、没接这个判断，或读状态时出错：都只能代替。
+  assert.deepEqual(await zellerCapacities(() => false), [[250, true], [150, true]]);
+  assert.deepEqual(await zellerCapacities(undefined), [[250, true], [150, true]]);
+  assert.deepEqual(
+    await zellerCapacities(() => {
+      throw new Error("settings unavailable");
+    }),
+    [[250, true], [150, true]],
+  );
+});
+
 test("Zeller 原付款可查出，额度只允许现金或代金券代替；Square 与现金额度不受影响", async () => {
   const remote = new FakeHistoryApi();
   const base = remoteContext();
@@ -692,6 +757,7 @@ function createAdapter(
     localCatalog: LocalReturnCatalogPort;
     capacityVault: ReturnCapacityVaultPort;
     localReturnRecords: LocalReturnRecordReader;
+    zellerOriginalRefundAvailable: (() => boolean) | undefined;
     createOpaqueId(kind: "selection" | "source"): string;
   }> = {},
 ): ReturnLookupAdapter {
@@ -702,6 +768,7 @@ function createAdapter(
     localCatalog: overrides.localCatalog ?? new FakeCatalog(),
     capacityVault: overrides.capacityVault ?? new RecordingVault(),
     localReturnRecords: overrides.localReturnRecords,
+    zellerOriginalRefundAvailable: overrides.zellerOriginalRefundAvailable,
     createOpaqueId:
       overrides.createOpaqueId ?? ((kind) => `${kind}-opaque-default`),
   });

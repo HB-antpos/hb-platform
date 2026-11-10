@@ -38,6 +38,8 @@ export type ZellerTerminalBoundaryValue = Readonly<{
   activate(): void;
   /** 打开网络检测页；页面没有提供时为 undefined。 */
   onOpenNetworkCheck?: () => void;
+  /** 设置页是否显示 Zeller 页签（配对与启用）。正式构建暂不显示。 */
+  settingsTabAvailable: boolean;
 }>;
 
 const ZellerTerminalContext = createContext<ZellerTerminalBoundaryValue | null>(null);
@@ -56,12 +58,14 @@ export function useZellerTerminalBoundary(): ZellerTerminalBoundaryValue | null 
 export type ZellerTerminalBoundaryProps = Readonly<{
   vendor: ZellerSdkVendor;
   onOpenNetworkCheck?: () => void;
+  settingsTabAvailable: boolean;
   children: ReactNode;
 }>;
 
 export function ZellerTerminalBoundary({
   vendor,
   onOpenNetworkCheck,
+  settingsTabAvailable,
   children,
 }: ZellerTerminalBoundaryProps) {
   usePosThemeVersion();
@@ -69,8 +73,13 @@ export function ZellerTerminalBoundary({
   const [state, setState] = useState<ZellerTerminalBoundaryState>({ status: "idle" });
   const activate = useCallback(() => setActive(true), []);
   const value = useMemo<ZellerTerminalBoundaryValue>(
-    () => ({ state, activate, ...(onOpenNetworkCheck ? { onOpenNetworkCheck } : {}) }),
-    [activate, onOpenNetworkCheck, state],
+    () => ({
+      state,
+      activate,
+      settingsTabAvailable,
+      ...(onOpenNetworkCheck ? { onOpenNetworkCheck } : {}),
+    }),
+    [activate, onOpenNetworkCheck, settingsTabAvailable, state],
   );
 
   return (

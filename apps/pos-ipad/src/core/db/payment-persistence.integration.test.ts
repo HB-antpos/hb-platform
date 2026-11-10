@@ -1389,6 +1389,164 @@ test("真实 SQLite：异常刷卡移交恢复中心后不阻断新订单，人�
   });
 });
 
+test("真实 SQLite：Zeller 的结果未知交易能移交恢复中心、解除对下一单的阻塞，并由主管确认未扣款或已扣款", async () => {
+  await withDatabase("payment-recovery-center-zeller", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("zeller-recovery-order", "zeller-recovery-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const firstInput = draftInput({ draftId: "zeller-recovery-draft-1" });
+    const first = await drafts.createOrReuseDraft(firstInput);
+    const amountCents = firstInput.cart.actualAmount.cents;
+    await insertAttempt(connection, {
+      attemptId: "zeller-recovery-attempt-1",
+      idempotencyKey: "zeller-recovery-key-1",
+      orderGuid: first.orderGuid,
+      provider: "zeller",
+      operation: "purchase",
+      amountCents,
+      state: "Unknown",
+    });
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `zeller-recovery-record-${++value}`; })(),
+      (() => { let value = 0; return () => `zeller-recovery-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const actor = { cashierId: "supervisor-1", cashierName: "Supervisor", userGuid: "user-supervisor-1" };
+    const requestingActor = { cashierId: "cashier-requester-1", cashierName: "Cashier Requester", userGuid: "user-requester-1" };
+
+    // 移交之前，这笔结果未知的 Zeller 付款挡着这台设备的下一单。
+    assert.equal(
+      (await drafts.findBlockingRecovery(firstInput.identity))?.orderGuid,
+      first.orderGuid,
+    );
+    // 恢复中心认得出它是当前要处理的那一笔。
+    assert.equal(
+      (await center.findCurrentCandidate(firstInput.identity))?.attemptId,
+      "zeller-recovery-attempt-1",
+    );
+    const parked = await center.parkExact({
+      ...firstInput.identity,
+      orderGuid: first.orderGuid,
+      attemptId: "zeller-recovery-attempt-1",
+      actionId: "zeller-park-action-1",
+      actor,
+    });
+    assert.equal(parked.status, "result-unknown");
+    assert.equal(parked.provider, "zeller");
+    // 列表能正常打开（读投影认识 zeller），阻塞解除。
+    assert.deepEqual((await center.list(firstInput.identity)).map((record) => record.provider), ["zeller"]);
+    assert.equal(await drafts.findBlockingRecovery(firstInput.identity), null);
+
+    // 下一单可以正常发起刷卡，不管是 Zeller 还是别的通道。
+    const second = await drafts.createOrReuseDraft(draftInput({ draftId: "zeller-recovery-draft-2" }));
+    assert.notEqual(second.orderGuid, first.orderGuid);
+    await insertAttempt(connection, {
+      attemptId: "zeller-recovery-attempt-next",
+      idempotencyKey: "zeller-recovery-key-next",
+      orderGuid: second.orderGuid,
+      provider: "zeller",
+      operation: "purchase",
+      amountCents,
+      state: "Created",
+    });
+
+    // 主管确认「已扣款」：先登记对原交易的对账（M59 之前这一步会被 CHECK 拒绝），再落结论。
+    const reconciliationId = await center.recordProviderReconciliation({
+      ...firstInput.identity,
+      recordId: parked.recordId,
+      reconciliationId: "zeller-reconciliation-1",
+    });
+    assert.equal(
+      await scalar(
+        connection,
+        "SELECT COUNT(*) AS count FROM payment_recovery_reconciliations WHERE provider = 'zeller'",
+      ),
+      1,
+    );
+    const resolved = await center.recordManualFinding({
+      ...firstInput.identity,
+      recordId: parked.recordId,
+      actionId: "zeller-manual-action-1",
+      finding: "paid" as const,
+      verifiedAmountCents: amountCents,
+      evidenceReference: "zeller-dashboard-receipt",
+      note: "Checked in the Zeller dashboard",
+      authorizationId: "zeller-supervisor-auth-1",
+      supervisorActor: actor,
+      requestingActor,
+      reconciliationId,
+    });
+    assert.equal(resolved.record.status, "charged-order-incomplete");
+    assert.equal(resolved.record.provider, "zeller");
+  });
+});
+
+test("真实 SQLite：Zeller 的结果未知交易可由主管确认未扣款结案，不需要对账记录", async () => {
+  await withDatabase("payment-recovery-center-zeller-unpaid", async (connection) => {
+    await migrateFresh(connection);
+    const ids = sequenceIds("zeller-unpaid-order", "zeller-unpaid-audit");
+    const drafts = new SqlitePaymentDraftRecoveryStore(connection, ids, () => T2);
+    const input = draftInput({ draftId: "zeller-unpaid-draft-1" });
+    const draft = await drafts.createOrReuseDraft(input);
+    await insertAttempt(connection, {
+      attemptId: "zeller-unpaid-attempt-1",
+      idempotencyKey: "zeller-unpaid-key-1",
+      orderGuid: draft.orderGuid,
+      provider: "zeller",
+      operation: "purchase",
+      amountCents: input.cart.actualAmount.cents,
+      state: "Unknown",
+    });
+    const center = new SqlitePaymentRecoveryCenterStore(
+      connection,
+      (() => { let value = 0; return () => `zeller-unpaid-record-${++value}`; })(),
+      (() => { let value = 0; return () => `zeller-unpaid-center-audit-${++value}`; })(),
+      () => T2,
+    );
+    const actor = { cashierId: "supervisor-1", cashierName: "Supervisor", userGuid: "user-supervisor-1" };
+    const parked = await center.parkExact({
+      ...input.identity,
+      orderGuid: draft.orderGuid,
+      attemptId: "zeller-unpaid-attempt-1",
+      actionId: "zeller-unpaid-park-1",
+      actor,
+    });
+
+    const resolved = await center.recordManualFinding({
+      ...input.identity,
+      recordId: parked.recordId,
+      actionId: "zeller-unpaid-action-1",
+      finding: "unpaid" as const,
+      verifiedAmountCents: null,
+      evidenceReference: "zeller-dashboard-no-transaction",
+      note: "No transaction in the Zeller dashboard",
+      authorizationId: "zeller-unpaid-auth-1",
+      supervisorActor: actor,
+      requestingActor: { cashierId: "cashier-requester-1", cashierName: "Cashier Requester", userGuid: "user-requester-1" },
+    });
+    assert.equal(resolved.record.provider, "zeller");
+    assert.equal(
+      (await connection.getFirst<{ state: string }>(
+        "SELECT state FROM payment_recovery_cases WHERE record_id = ?",
+        [parked.recordId],
+      ))?.state,
+      "manual-unpaid",
+    );
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM payment_recovery_reconciliations"),
+      0,
+    );
+    // 原 attempt 的状态不被主管结论改写：以后 Zeller 查到批准时还能转人工复核。
+    assert.equal(
+      (await connection.getFirst<{ state: string }>(
+        "SELECT state FROM payment_attempts WHERE attempt_id = 'zeller-unpaid-attempt-1'",
+      ))?.state,
+      "Unknown",
+    );
+  });
+});
+
 test("真实 SQLite：人工未扣款保留 provider 状态并允许原单重付，迟到 Approved 转人工复核", async () => {
   await withDatabase("payment-recovery-manual-unpaid", async (connection) => {
     await migrateFresh(connection);
@@ -1769,6 +1927,96 @@ test("真实 SQLite：退款结果未知经主管确认未退款，作废 action
       })),
     });
     assert.equal(retry.status, "processing");
+  });
+});
+
+test("真实 SQLite：Zeller 原路退款的 attempt 可以绑定到退货额度；结果未知时主管可确认未退款，且不登记 Linkly 会话 ACK", async () => {
+  await withDatabase("return-supervisor-resolution-zeller", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: {
+        version: 1,
+        provider: "zeller",
+        transactionUuid: "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+        originalReference: "ZELLER:HBZ-3b241101e2bb42558caf4136c566a962:65c4b343-03e6-49ef-a54d-012e3f2c222c",
+      },
+      observedAtIso: T0,
+    });
+    let tenderId = 0;
+    let auditId = 0;
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      { createTenderGuid: () => `rz-tender-${++tenderId}`, createAuditEventId: () => `rz-audit-${++auditId}` },
+      () => T2,
+    );
+    const base = durableReturnDraft();
+    const cardAllocation = { ...base.allocations[1]!, index: 0, signedAmountCents: -500 };
+    const cardOnly = {
+      ...base,
+      allocations: [cardAllocation],
+      plan: {
+        ...base.plan,
+        allocations: [{
+          method: "card" as const,
+          signedAmountCents: -500,
+          originalCapacityId: "return-capacity-card",
+          originalOrderGuid: "original-return-order",
+          offlineCashProof: null,
+        }],
+      },
+    };
+    await ledger.prepareOrLoad(cardOnly);
+    await ledger.markAllocationSubmitted({ actionId: cardOnly.actionId, allocationId: "return-allocation-card" });
+    await insertActionBinding(
+      connection, cardOnly.returnOrderGuid, "rz-provider-action", "rz-attempt", "rz-idempotency",
+      ["zeller", "refund", "AUD", -500],
+    );
+    await insertAttempt(connection, {
+      attemptId: "rz-attempt", idempotencyKey: "rz-idempotency", orderGuid: cardOnly.returnOrderGuid,
+      provider: "zeller", operation: "refund", amountCents: -500, state: "Unknown",
+    });
+    // 退货账本认 zeller 的退款 attempt：绑定不再因通道不在名单里被拒。
+    await ledger.bindAllocationAttempt({
+      actionId: cardOnly.actionId, allocationId: "return-allocation-card",
+      attemptKind: "payment-provider", externalActionId: "rz-provider-action", durableAttemptId: "rz-attempt",
+    });
+    await ledger.recordAllocationOutcome({
+      actionId: cardOnly.actionId, allocationId: "return-allocation-card",
+      expectedStatuses: ["submitted"], status: "unknown", protectedRecoveryKey: null,
+    });
+    await ledger.markActionUnknown({ actionId: cardOnly.actionId });
+
+    const store = new SqliteReturnSupervisorResolutionStore(
+      connection,
+      { createResolutionId: () => "rz-resolution-1", createAuditEventId: () => "rz-resolution-audit-1" },
+      () => T2,
+    );
+    assert.equal(
+      await store.resolve({
+        actionId: cardOnly.actionId,
+        finding: "not-refunded",
+        evidenceReference: "Zeller dashboard",
+        note: "Zeller dashboard shows no refund for this reference",
+        authorizationId: "rz-auth-1",
+        supervisorActor: { cashierId: "SUP-RETURN", cashierName: "Supervisor", userGuid: "user-sup" },
+        requestingActor: { cashierId: "C-RETURN", cashierName: "Return Cashier", userGuid: "user-cash" },
+        scope: { storeCode: "S-RETURN", deviceCode: "D-RETURN" },
+      }),
+      "declined",
+    );
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM return_action_allocations WHERE status = 'declined' AND capacity_reservation_state = 'Released'"),
+      1,
+    );
+    // Zeller 没有后端会话，不需要也不能登记 Linkly 的会话 ACK。
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_supervisor_session_acks"), 0);
   });
 });
 

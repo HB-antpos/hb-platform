@@ -1052,7 +1052,7 @@ describe("SettingsScreen", () => {
     await presenter.load();
     const activate = jest.fn();
     const screen = await render(
-      <ZellerTerminalBoundaryContext.Provider value={{ state: { status: "idle" }, activate }}>
+      <ZellerTerminalBoundaryContext.Provider value={{ state: { status: "idle" }, activate, settingsTabAvailable: true }}>
         <SettingsScreen locale="zh" presenter={presenter} />
       </ZellerTerminalBoundaryContext.Provider>,
     );
@@ -1067,7 +1067,7 @@ describe("SettingsScreen", () => {
     expect(screen.getByTestId("settings-zeller-panel")).toBeTruthy();
   });
 
-  it("Zeller 页签：不显示环境切换和 Square / Linkly 的启用与保存，当前启用的通道不变", async () => {
+  it("Zeller 页签：不显示环境切换和 Square / Linkly 的启用与保存；配对后经确认才启用", async () => {
     const port = new ScreenSettingsPort();
     port.linklySetup.lineManagementSupported = true;
     const presenter = createPresenter(port);
@@ -1081,7 +1081,7 @@ describe("SettingsScreen", () => {
     };
     const screen = await render(
       <ZellerTerminalBoundaryContext.Provider
-        value={{ state: { status: "ready", terminal: terminal as never }, activate: jest.fn() }}
+        value={{ state: { status: "ready", terminal: terminal as never }, activate: jest.fn(), settingsTabAvailable: true }}
       >
         <SettingsScreen locale="zh" presenter={presenter} />
       </ZellerTerminalBoundaryContext.Provider>,
@@ -1099,17 +1099,38 @@ describe("SettingsScreen", () => {
     expect(screen.queryByTestId("settings-payment-provider-linkly")).toBeNull();
     expect(screen.queryByTestId("settings-square-location-load")).toBeNull();
 
-    // 打开页签自动查一次配对；已配对但收款未接入，所以不能启用，通道保持 Square。
+    // 打开页签自动查一次配对；已配对后可以启用，但配对本身不会切换通道。
     await waitFor(() =>
       expect(screen.getByTestId("settings-zeller-status").props.children).toBe("已配对"),
     );
     expect(terminal.initialise).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("settings-zeller-active-provider").props.children).toBe("Square");
+    expect(presenter.getState().paymentProvider).toBe("square");
+    expect(screen.getByTestId("settings-payment-tab-square-active")).toBeTruthy();
+
+    // 点「启用 Zeller」先弹危险操作确认；确认之前不保存、不切换。
     expect(
       screen.getByTestId("settings-zeller-enable").props.accessibilityState.disabled,
-    ).toBe(true);
-    expect(presenter.getState().paymentProviderDraft).toBe("square");
-    expect(screen.getByTestId("settings-payment-tab-square-active")).toBeTruthy();
+    ).toBe(false);
+    await fireEvent.press(screen.getByTestId("settings-zeller-enable"));
+    await waitFor(() =>
+      expect(presenter.getState().confirmation?.kind).toBe("change-payment-settings"),
+    );
+    expect(port.savedPayments).toEqual([]);
+    expect(presenter.getState().paymentProvider).toBe("square");
+
+    // 确认后保存的只有通道本身，绿点移到 Zeller，面板显示已启用。
+    await fireEvent.press(await screen.findByTestId("settings-confirm"));
+    await waitFor(() =>
+      expect(port.savedPayments).toEqual([{ provider: "zeller", square: null, linkly: null }]),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-zeller-banner-title").props.children).toBe("已启用 Zeller"),
+    );
+    expect(screen.getByTestId("settings-payment-tab-zeller-active")).toBeTruthy();
+    expect(screen.queryByTestId("settings-payment-tab-square-active")).toBeNull();
+    expect(screen.getByTestId("settings-zeller-active-provider").props.children).toBe("Zeller");
+    expect(screen.queryByTestId("settings-zeller-enable")).toBeNull();
 
     // 切回 Square：原有的环境切换、保存按钮都回来。
     await fireEvent.press(screen.getByTestId("settings-payment-tab-square"));

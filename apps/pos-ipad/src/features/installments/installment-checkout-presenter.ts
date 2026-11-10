@@ -16,6 +16,7 @@ import type { Money, PaymentProvider } from "@/core/contracts";
 import type { LinklySafeOperatorKey } from "@/features/payments/runtime/linkly-operator-runtime";
 import { PAYMENT_PERMISSION } from "@/features/payments/runtime/payment-checkout-runtime";
 import type { PaymentProviderAvailability } from "@/features/payments/runtime/payment-provider-registry";
+import { ZELLER_MINIMUM_PURCHASE_CENTS } from "@/features/payments/zeller/zeller-payment-adapter";
 import {
   parseAudInput,
   type PaymentCheckoutPresentation,
@@ -58,6 +59,7 @@ const ZERO_AUD: Money = Object.freeze({ currency: "AUD", cents: 0 });
 const EMPTY_PROVIDERS = Object.freeze([
   unavailable("square"),
   unavailable("linkly-cloud"),
+  unavailable("zeller"),
   unavailable("manual-card"),
   unavailable("voucher"),
 ]);
@@ -325,6 +327,11 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
       });
       return Promise.resolve(false);
     }
+    // Zeller 不收低于 1.00 澳元的款：在登记续付占用之前就拦下，让收银员换一种方式或改金额。
+    if (method === "zeller" && appliedCents < ZELLER_MINIMUM_PURCHASE_CENTS) {
+      this.patch({ fieldIssue: "zeller-amount-below-minimum" });
+      return Promise.resolve(false);
+    }
 
     if (
       this.state.checkout.flow === "installment-repayment" &&
@@ -344,7 +351,9 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
           amount: aud(appliedCents),
           reversible: true,
           provider:
-            method === "square" || method === "linkly-cloud" ? method : null,
+            method === "square" || method === "linkly-cloud" || method === "zeller"
+              ? method
+              : null,
         }),
       ]),
       remaining: aud(Math.max(0, this.state.total.cents - appliedCents)),
@@ -389,7 +398,9 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
     }
     const method = tender.method;
     const cardProvider =
-      tender.provider === "square" || tender.provider === "linkly-cloud"
+      tender.provider === "square" ||
+      tender.provider === "linkly-cloud" ||
+      tender.provider === "zeller"
         ? tender.provider
         : undefined;
     const paymentSelection =

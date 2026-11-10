@@ -19,7 +19,7 @@ export type PosPaymentPublicExtra = Readonly<{
   }>;
 }>;
 
-export type ConfiguredCardProvider = "square" | "linkly-cloud";
+export type ConfiguredCardProvider = "square" | "linkly-cloud" | "zeller";
 
 export type PosPaymentConfigurationSources = Readonly<{
   square: SquareRuntimeConfigurationPort;
@@ -80,6 +80,7 @@ export function configuredCardProvider(
 ): ConfiguredCardProvider | null {
   if (extra?.provider === "square") return "square";
   if (extra?.provider === "linkly") return "linkly-cloud";
+  if (extra?.provider === "zeller") return "zeller";
   return null;
 }
 

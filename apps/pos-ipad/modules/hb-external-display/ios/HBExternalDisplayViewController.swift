@@ -108,7 +108,6 @@ final class HBExternalDisplayViewController: UIViewController {
   private var videoPlayer: AVQueuePlayer?
   private var videoLooper: AVPlayerLooper?
   private var videoLayer: AVPlayerLayer?
-  private var videoPlayerItem: AVPlayerItem?
   private var videoStatusObservation: NSKeyValueObservation?
   private var videoFailureObserver: NSObjectProtocol?
   private var videoStalledObserver: NSObjectProtocol?
@@ -198,7 +197,6 @@ final class HBExternalDisplayViewController: UIViewController {
       NotificationCenter.default.removeObserver(videoStalledObserver)
     }
     videoStalledObserver = nil
-    videoPlayerItem = nil
     pendingVideoIdentity = nil
     videoPlayer?.pause()
     videoLayer?.removeFromSuperlayer()
@@ -1086,20 +1084,20 @@ final class HBExternalDisplayViewController: UIViewController {
       }
       advertImageView.isHidden = true
       let player = AVQueuePlayer()
+      // 客显广告一律静音，与 WPF 客显（IsMuted = true）一致。
+      player.isMuted = true
       let templateItem = AVPlayerItem(asset: asset)
+      // AVPlayerLooper 是异步把模板的副本放进播放队列的，刚建好时队列还是空的，
+      // 这里不能读取播放器的当前播放项（必为 nil，曾导致每条视频都被当场判失败）。
+      // 就绪与失败统一交给 observeVideoPlayback 观察播放器得到。
       videoLooper = AVPlayerLooper(player: player, templateItem: templateItem)
-      guard let playbackItem = player.currentItem else {
-        recordVideoFailure(for: identity)
-        clearAdvert()
-        return "advert-video-unavailable"
-      }
       let layer = AVPlayerLayer(player: player)
       layer.videoGravity = .resizeAspect
       advertContainer.layer.insertSublayer(layer, at: 0)
       videoPlayer = player
       videoLayer = layer
       observeVideoPlayback(
-        item: playbackItem,
+        player: player,
         advert: advert,
         identity: identity
       )
@@ -1126,20 +1124,21 @@ final class HBExternalDisplayViewController: UIViewController {
   }
 
   private func observeVideoPlayback(
-    item: AVPlayerItem,
+    player: AVQueuePlayer,
     advert: HBExternalDisplayAdvert,
     identity: AdvertIdentity
   ) {
-    videoPlayerItem = item
     pendingVideoIdentity = identity
-    videoStatusObservation = item.observe(
-      \.status,
+    // 观察“当前播放项的状态”，而不是某一个固定的播放项：looper 轮流播放多个副本，
+    // 副本入队、切到下一个副本、副本状态变化都会触发这里。
+    videoStatusObservation = player.observe(
+      \.currentItem?.status,
       options: [.initial, .new]
-    ) { [weak self, weak item] _, _ in
+    ) { [weak self, weak player] _, _ in
       DispatchQueue.main.async {
-        guard let self, let item else { return }
+        guard let self, let player else { return }
         self.handleVideoStatusChange(
-          item: item,
+          player: player,
           advert: advert,
           identity: identity
         )
@@ -1170,19 +1169,19 @@ final class HBExternalDisplayViewController: UIViewController {
       )
     }
     scheduleVideoStartupTimeout(
-      item: item,
       advert: advert,
       identity: identity
     )
   }
 
   private func handleVideoStatusChange(
-    item: AVPlayerItem,
+    player: AVQueuePlayer,
     advert: HBExternalDisplayAdvert,
     identity: AdvertIdentity
   ) {
     precondition(Thread.isMainThread)
-    guard videoPlayerItem === item else { return }
+    // 旧播放器晚到的回调直接丢弃；队列里还没有播放项时继续等，由启动超时兜底。
+    guard videoPlayer === player, let item = player.currentItem else { return }
 
     switch item.status {
     case .readyToPlay:
@@ -1202,8 +1201,16 @@ final class HBExternalDisplayViewController: UIViewController {
     }
   }
 
+  // looper 轮流播放模板的多个副本，失败通知可能来自其中任何一个。
+  private func ownsVideoItem(_ item: AVPlayerItem) -> Bool {
+    if videoPlayer?.currentItem === item { return true }
+    return videoLooper?.loopingPlayerItems.contains { $0 === item } ?? false
+  }
+
+  // item 为 nil 表示启动超时（此时队列里可能还没有任何播放项）；
+  // 否则必须是当前广告播放器名下的播放项，其他播放器发出的通知一律忽略。
   private func handleVideoPlaybackFailure(
-    item: AVPlayerItem,
+    item: AVPlayerItem?,
     advert: HBExternalDisplayAdvert,
     identity: AdvertIdentity
   ) {
@@ -1211,7 +1218,7 @@ final class HBExternalDisplayViewController: UIViewController {
     guard
       !isHandlingVideoFailure,
       pendingVideoIdentity == identity || currentAdvertIdentity == identity,
-      videoPlayerItem === item || videoPlayer?.currentItem === item
+      item.map({ ownsVideoItem($0) }) ?? true
     else {
       return
     }
@@ -1226,17 +1233,15 @@ final class HBExternalDisplayViewController: UIViewController {
   }
 
   private func scheduleVideoStartupTimeout(
-    item: AVPlayerItem,
     advert: HBExternalDisplayAdvert,
     identity: AdvertIdentity
   ) {
     cancelVideoStartupTimeout()
     let token = UUID()
     videoStartupTimeoutToken = token
-    let workItem = DispatchWorkItem { [weak self, weak item] in
+    let workItem = DispatchWorkItem { [weak self] in
       guard
         let self,
-        let item,
         self.videoStartupTimeoutToken == token,
         self.pendingVideoIdentity == identity,
         self.lastRequestedAdvertIdentity == identity
@@ -1247,7 +1252,7 @@ final class HBExternalDisplayViewController: UIViewController {
       self.videoStartupTimeoutWorkItem = nil
       self.videoStartupTimeoutToken = nil
       self.handleVideoPlaybackFailure(
-        item: item,
+        item: nil,
         advert: advert,
         identity: identity
       )
