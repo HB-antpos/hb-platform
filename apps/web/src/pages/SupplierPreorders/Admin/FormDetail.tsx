@@ -26,10 +26,10 @@ import {
 } from '../../../services/supplierPreorderService'
 import type { SupplierPreorderFormDetail, SupplierPreorderFormStatus } from '../../../types/supplierPreorder'
 
-import AuthLogsTable from './AuthLogsTable'
 import FormHeaderFields from './FormHeaderFields'
 import { buildHeaderValuesFromDetail, toHeaderPayload, type FormHeaderValues } from './formHeaderValues'
 import FormItemsTab from './FormItemsTab'
+import FormLogsPanel from './FormLogsPanel'
 import FormMatrixPanel from './FormMatrixPanel'
 import FormStoresPanel from './FormStoresPanel'
 import { HISTORY_POLL_INTERVAL_MS, canRecomputeHistory, getHistoryWindow, shouldPollHistory } from './refPicker.logic'
@@ -451,11 +451,7 @@ export default function SupplierPreorderFormDetailPage() {
           {
             key: 'logs',
             label: t('spAdmin.detail.tabLogs'),
-            children: (
-              <div className="sp-admin-card">
-                <AuthLogsTable formGuid={formGuid} refreshKey={logsRefreshKey} />
-              </div>
-            ),
+            children: <FormLogsPanel formGuid={formGuid} refreshKey={logsRefreshKey} />,
           },
         ]}
       />

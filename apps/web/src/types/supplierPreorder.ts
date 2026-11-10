@@ -368,7 +368,7 @@ export interface SupplierPreorderUserCandidate {
 
 export interface SupplierPreorderAuthLog {
   logGuid: string
-  scope: 'Orderer' | 'FormStore'
+  scope: 'Orderer' | 'FormStore' | 'Order'
   targetUserName?: string | null
   formGuid?: string | null
   action: string
@@ -382,6 +382,10 @@ export interface SupplierPreorderAuthLogQuery {
   pageSize?: number
   userGuid?: string
   formGuid?: string
+  /** 不传 = 管理类记录（授权、开关分店、发布等）；'Order' = 只看订货数量变更与提交订单（量大，单独查看） */
+  scope?: 'Order'
+  /** 在内容（分店 / 货号 / 商品名 / 箱数）和操作账号里模糊匹配 */
+  keyword?: string
 }
 
 // ---------- 下单 ----------

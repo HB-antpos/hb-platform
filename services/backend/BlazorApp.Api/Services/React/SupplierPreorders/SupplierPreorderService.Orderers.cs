@@ -206,9 +206,15 @@ public sealed partial class SupplierPreorderService
     {
         var size = NormalizePageSize(query.PageSize);
         var page = Math.Max(query.Page, 1);
+        // 订货数量变更量大（每次步进 / 失焦保存都可能有一条），默认不混进管理类记录，只有显式 Scope = Order 才返回
+        var orderScope = string.Equals(query.Scope?.Trim(), SupplierPreorderLogScopes.Order, StringComparison.OrdinalIgnoreCase);
+        var keyword = query.Keyword?.Trim();
         var source = _db.Queryable<SupplierPreorderAuthLog>()
             .WhereIF(!string.IsNullOrWhiteSpace(query.UserGuid), l => l.TargetUserGuid == query.UserGuid)
-            .WhereIF(!string.IsNullOrWhiteSpace(query.FormGuid), l => l.FormGuid == query.FormGuid);
+            .WhereIF(!string.IsNullOrWhiteSpace(query.FormGuid), l => l.FormGuid == query.FormGuid)
+            .WhereIF(orderScope, l => l.Scope == SupplierPreorderLogScopes.Order)
+            .WhereIF(!orderScope, l => l.Scope != SupplierPreorderLogScopes.Order)
+            .WhereIF(!string.IsNullOrEmpty(keyword), l => (l.Detail != null && l.Detail.Contains(keyword!)) || (l.OperatorName != null && l.OperatorName.Contains(keyword!)));
         var total = await source.CountAsync();
         var rows = await source.OrderByDescending(l => l.CreatedAtUtc).ToPageListAsync(page, size);
         return new PagedResult<SupplierPreorderAuthLogDto>

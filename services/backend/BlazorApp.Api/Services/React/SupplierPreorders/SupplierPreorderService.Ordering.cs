@@ -335,9 +335,23 @@ public sealed partial class SupplierPreorderService
         // 订单先在事务外建好（并发首笔时撞唯一索引会重读已建的那条）；行保存失败（同一行两处同时首次写入）重试一次，
         // 保存的是绝对箱数，重试不会重复累加
         var order = await EnsureStoreOrderAsync(snapshot.Form.FormGuid, store, now);
+        // 提交状态在重试包装之外取一次：失败重试时 order.Status 可能已被上一次尝试改成草稿，记录里「已提交改回草稿」会判错
+        var wasSubmitted = order.Status == SupplierPreorderStoreOrderStatuses.Submitted;
         await RetryOnceAsync(() => RunInTransactionAsync(async () =>
         {
             var line = await _db.Queryable<SupplierPreorderStoreOrderLine>().FirstAsync(l => l.OrderGuid == order.OrderGuid && l.ItemGuid == itemGuid);
+            // 订货数量变更记录：箱数真的变了才记（同值重复保存不记）。与保存在同一个事务里，改成功记录一定在、回滚则一起回滚；
+            // 外层失败重试时上一次事务已回滚，不会写出两条。重试时重新读行，旧箱数取的是库里的当前值
+            var beforeCartons = line?.Cartons ?? 0;
+            if (beforeCartons != request.Cartons)
+            {
+                await WriteAuthLogAsync(
+                    SupplierPreorderLogScopes.Order,
+                    SupplierPreorderLogActions.LineChanged,
+                    BuildLineChangeDetail(store.StoreName, item, beforeCartons, request.Cartons, wasSubmitted),
+                    snapshot.Form.FormGuid);
+            }
+
             if (request.Cartons == 0)
             {
                 if (line is not null)
@@ -379,6 +393,24 @@ public sealed partial class SupplierPreorderService
             Cartons = request.Cartons,
             Summary = BuildOrderingSummary(fresh, identity, store.StoreGuid),
         };
+    }
+
+    /// <summary>
+    /// 订货数量变更记录的详情：「分店 · 货号 商品名 · 旧 → 新 箱（+/−差值）」；已提交的订单被改会回到草稿，在末尾注明。
+    /// 商品名过长时截断，整条不超过操作记录详情的 1000 字上限。
+    /// </summary>
+    internal static string BuildLineChangeDetail(string storeName, SupplierPreorderFormItem item, int beforeCartons, int afterCartons, bool orderWasSubmitted)
+    {
+        var name = item.Name?.Trim() ?? string.Empty;
+        if (name.Length > 60)
+        {
+            name = name[..60] + "…";
+        }
+
+        var delta = afterCartons - beforeCartons;
+        var sign = delta > 0 ? "+" : "−";
+        var text = $"{storeName} · {item.SupplierItemCode} {name} · {beforeCartons} → {afterCartons} 箱（{sign}{Math.Abs(delta)}）";
+        return orderWasSubmitted ? text + " · 已提交的订单改回草稿" : text;
     }
 
     private static async Task RetryOnceAsync(Func<Task> action)
@@ -453,6 +485,14 @@ public sealed partial class SupplierPreorderService
             order.SubmittedAtUtc = now;
             order.SubmittedBy = CurrentUserName;
             await _db.Updateable(order).UpdateColumns(o => new { o.Status, o.SubmittedAtUtc, o.SubmittedBy }).ExecuteCommandAsync();
+
+            // 提交订单记录：款数 / 箱数 / 金额取提交这一刻本店的合计（只算上架商品）
+            var submittedSummary = BuildOrderingSummary(await LoadSnapshotAsync(snapshot.Form), identity, store.StoreGuid);
+            await WriteAuthLogAsync(
+                SupplierPreorderLogScopes.Order,
+                SupplierPreorderLogActions.OrderSubmitted,
+                $"{store.StoreName} · 提交订单：{submittedSummary.ItemCount} 款 · {submittedSummary.Cartons} 箱 · ${submittedSummary.Amount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)}",
+                snapshot.Form.FormGuid);
         });
 
         var fresh = await LoadSnapshotAsync(snapshot.Form);
