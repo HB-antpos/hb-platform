@@ -567,18 +567,58 @@ export class SqliteOrderSyncMaterialResolver {
       !isExactContext(context, ["version", "provider", "paymentId"]) ||
       context.version !== 1 ||
       context.provider !== "square" ||
-      context.paymentId !== attempt.paymentId ||
-      attempt.responseCode === null
+      context.paymentId !== attempt.paymentId
     ) {
       throw materialError("ORDER_SYNC_RETURN_CONTEXT_MISMATCH");
+    }
+    // 中文注释：Square 的退款号只在批准时加密保存的卡证据里（refundReference），不在 attempt 的响应码里。
+    // 响应码对退款只有两种取值：Square 当场完成时为空，已受理、结算中时是固定的 SQUARE_REFUND_PENDING
+    // （结算跟踪靠它登记）。以前这里把响应码当退款号用，结果是结算中的退款上传了一个假退款号，
+    // 当场完成的退款则因为响应码为空而永远同步不上。
+    const evidence = await this.readApprovedCardEvidence(attempt, order, tender);
+    // 证据里的 txnRef 是被退的那笔原付款，必须就是这份额度对应的付款。
+    if (
+      evidence === null ||
+      evidence.refundReference === null ||
+      evidence.txnRef !== context.paymentId
+    ) {
+      throw materialError("ORDER_SYNC_CARD_EVIDENCE_MISMATCH");
     }
     return frozenTender(
       tender,
       formatCardRefundReference(
-        `SQRF:${attempt.responseCode}`,
+        `SQRF:${evidence.refundReference}`,
         `SQ:${context.paymentId}`,
       ),
       null,
+    );
+  }
+
+  /** 读取这笔已批准刷卡 attempt 加密保存的卡证据（按 attempt、订单、通道、操作和金额逐项核对）。 */
+  private async readApprovedCardEvidence(
+    attempt: ApprovedAttempt,
+    order: LocalOrder,
+    tender: OrderTender,
+  ): Promise<CardSyncEvidenceV1 | null> {
+    const reader = this.options.paymentProtectedMaterials;
+    if (!reader) {
+      throw new Error(
+        "Payment protected material reader is not configured.",
+      );
+    }
+    const provider = attempt.provider;
+    if (provider === "voucher") {
+      throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+    }
+    return resolveProtectedMaterial(
+      () => reader.read({
+        attemptId: attempt.attemptId,
+        orderGuid: order.orderGuid,
+        provider,
+        operation: attempt.operation,
+        amountCents: tender.amount.cents,
+      }),
+      "ORDER_SYNC_CARD_EVIDENCE_MISMATCH",
     );
   }
 
@@ -728,22 +768,7 @@ export class SqliteOrderSyncMaterialResolver {
     ) {
       throw materialError("ORDER_SYNC_RETURN_CONTEXT_MISMATCH");
     }
-    const reader = this.options.paymentProtectedMaterials;
-    if (!reader) {
-      throw new Error(
-        "Payment protected material reader is not configured.",
-      );
-    }
-    const evidence = await resolveProtectedMaterial(
-      () => reader.read({
-        attemptId: attempt.attemptId,
-        orderGuid: order.orderGuid,
-        provider: "zeller",
-        operation: "refund",
-        amountCents: tender.amount.cents,
-      }),
-      "ORDER_SYNC_CARD_EVIDENCE_MISMATCH",
-    );
+    const evidence = await this.readApprovedCardEvidence(attempt, order, tender);
     let refundReference: string;
     try {
       // 卡证据缺失，或里面的退款交易号格式不对，formatZellerRefund 都会抛错：不上传。

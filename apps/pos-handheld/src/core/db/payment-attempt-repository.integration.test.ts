@@ -496,9 +496,11 @@ test("真实 SQLite：订单读取只从同订单 Approved attempt 恢复可证�
       responseCode: "refund-1",
     });
     await insertTender(connection, "tender-square-refund", "order-square-refund", "card", -500, "attempt-square-refund");
+    // 退款的引用不在这里给：Square 的退款号只在加密的卡证据里，响应码不是退款号。
+    // 上传前由订单同步解析器从卡证据生成（见 sqlite-order-sync-material 的测试）。
     assert.equal(
       (await repositories.orders.getByGuid("order-square-refund"))?.tenders[0]?.reference,
-      "CARD_REFUND|refund=SQRF%3Arefund-1|original=SQ%3Apayment-original",
+      null,
     );
 
     await insertDraftOrder(connection, "order-missing-reference", 12, 500);
