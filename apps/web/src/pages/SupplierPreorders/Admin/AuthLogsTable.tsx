@@ -8,30 +8,26 @@ import { getSupplierPreorderAuthLogs } from '../../../services/supplierPreorderS
 import type { SupplierPreorderAuthLog } from '../../../types/supplierPreorder'
 
 import './registerSpAdminMessages'
-import { formatSydneyDateTime, getErrorText, isAbortError } from './supplierPreorderAdmin.logic'
+import { AUTH_LOG_ACTIONS, formatSydneyDateTime, getErrorText, isAbortError } from './supplierPreorderAdmin.logic'
 
-const KNOWN_ACTIONS = new Set([
-  'StatusChanged',
-  'FormDeleted',
-  'StoresUpdated',
-  'StoresCopied',
-  'OrdererAdded',
-  'OrdererUpdated',
-  'OrdererRemoved',
-])
+const KNOWN_ACTIONS: ReadonlySet<string> = new Set(AUTH_LOG_ACTIONS)
 
 interface AuthLogsTableProps {
   /** 只看某张订单表的记录（详情页「操作记录」） */
   formGuid?: string
   /** 只看某个人的记录 */
   userGuid?: string
+  /** 'Order' = 只看订货数量变更与提交订单；不传 = 管理类记录（与原来一致） */
+  scope?: 'Order'
+  /** 在内容和操作账号里模糊匹配（一般配合 scope = 'Order' 用） */
+  keyword?: string
   /** 变化时重新拉第一页（如保存授权后） */
   refreshKey?: number
   pageSize?: number
 }
 
 /** 授权与订单表操作记录：服务端分页。 */
-export default function AuthLogsTable({ formGuid, userGuid, refreshKey = 0, pageSize: initialPageSize = 20 }: AuthLogsTableProps) {
+export default function AuthLogsTable({ formGuid, userGuid, scope, keyword, refreshKey = 0, pageSize: initialPageSize = 20 }: AuthLogsTableProps) {
   const { t } = useTranslation()
   const { message } = App.useApp()
   const [page, setPage] = useState(1)
@@ -40,11 +36,14 @@ export default function AuthLogsTable({ formGuid, userGuid, refreshKey = 0, page
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const lastRefreshKeyRef = useRef(refreshKey)
+  const lastFilterRef = useRef(`${scope ?? ''}|${keyword ?? ''}`)
 
   useEffect(() => {
-    // 外部触发刷新时回到第一页
-    if (lastRefreshKeyRef.current !== refreshKey) {
+    // 外部触发刷新、切换范围或关键字时回到第一页
+    const filterKey = `${scope ?? ''}|${keyword ?? ''}`
+    if (lastRefreshKeyRef.current !== refreshKey || lastFilterRef.current !== filterKey) {
       lastRefreshKeyRef.current = refreshKey
+      lastFilterRef.current = filterKey
       if (page !== 1) {
         setPage(1)
         return undefined
@@ -52,7 +51,7 @@ export default function AuthLogsTable({ formGuid, userGuid, refreshKey = 0, page
     }
     const controller = new AbortController()
     setLoading(true)
-    getSupplierPreorderAuthLogs({ page, pageSize, formGuid, userGuid }, controller.signal)
+    getSupplierPreorderAuthLogs({ page, pageSize, formGuid, userGuid, scope, keyword: keyword?.trim() || undefined }, controller.signal)
       .then((result) => {
         setItems(result.items)
         setTotal(result.total)
@@ -65,7 +64,7 @@ export default function AuthLogsTable({ formGuid, userGuid, refreshKey = 0, page
         if (!controller.signal.aborted) setLoading(false)
       })
     return () => controller.abort()
-  }, [formGuid, message, page, pageSize, refreshKey, t, userGuid])
+  }, [formGuid, keyword, message, page, pageSize, refreshKey, scope, t, userGuid])
 
   const columns = useMemo<ColumnsType<SupplierPreorderAuthLog>>(
     () => [
@@ -108,7 +107,7 @@ export default function AuthLogsTable({ formGuid, userGuid, refreshKey = 0, page
       columns={columns}
       dataSource={items}
       scroll={{ x: 720 }}
-      locale={{ emptyText: t('spAdmin.logs.empty') }}
+      locale={{ emptyText: scope === 'Order' ? t('spAdmin.logs.emptyOrders') : t('spAdmin.logs.empty') }}
       pagination={{
         current: page,
         pageSize,

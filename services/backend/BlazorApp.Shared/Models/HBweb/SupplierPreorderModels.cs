@@ -17,6 +17,25 @@ public static class SupplierPreorderStoreOrderStatuses
     public const string Submitted = "Submitted";
 }
 
+/// <summary>操作记录（SupplierPreorderAuthLog）的范围与订货相关动作名；动作名也是前端的文案键，改名要同步 Web。</summary>
+public static class SupplierPreorderLogScopes
+{
+    public const string Orderer = "Orderer";
+    public const string FormStore = "FormStore";
+
+    /// <summary>分店订货：数量变更、提交订单。量大，查询时默认不混进管理类记录。</summary>
+    public const string Order = "Order";
+}
+
+public static class SupplierPreorderLogActions
+{
+    /// <summary>某分店某商品的订货箱数发生变化（旧 → 新）。</summary>
+    public const string LineChanged = "LineChanged";
+
+    /// <summary>分店提交订单（提交后再改会回到草稿，需重新提交）。</summary>
+    public const string OrderSubmitted = "OrderSubmitted";
+}
+
 /// <summary>订单表商品与我方商品的匹配方式。</summary>
 public static class SupplierPreorderMatchMethods
 {
@@ -304,14 +323,17 @@ public class SupplierPreorderOrdererStore
     public string? CreatedBy { get; set; }
 }
 
-/// <summary>授权变更记录：下单人员加/减分店、开关查看其他分店，订单表开启/关闭分店。</summary>
+/// <summary>
+/// 操作记录：下单人员加/减分店、开关查看其他分店，订单表开启/关闭分店、发布 / 截止；
+/// Scope = Order 时记录分店订货数量的每次变化（谁、哪家店、哪个商品、旧→新箱数）和提交订单。
+/// </summary>
 [SugarTable("SupplierPreorderAuthLog")]
 public class SupplierPreorderAuthLog
 {
     [SugarColumn(IsPrimaryKey = true, Length = 50)]
     public string LogGuid { get; set; } = Guid.NewGuid().ToString("N");
 
-    /// <summary>Orderer / FormStore。</summary>
+    /// <summary>Orderer / FormStore / Order（订货数量变更与提交订单）。</summary>
     [SugarColumn(Length = 20)]
     public string Scope { get; set; } = string.Empty;
 

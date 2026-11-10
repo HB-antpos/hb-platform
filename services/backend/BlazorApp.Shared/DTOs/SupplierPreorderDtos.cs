@@ -470,6 +470,15 @@ public sealed class SupplierPreorderAuthLogQueryDto
     public int PageSize { get; set; } = 50;
     public string? UserGuid { get; set; }
     public string? FormGuid { get; set; }
+
+    /// <summary>
+    /// 记录范围。空 = 管理类记录（授权、开关分店、发布 / 截止等，不含订货数量，保持老页面不变）；
+    /// "Order" = 只看订货数量变更与提交订单记录（量大，单独查看）。
+    /// </summary>
+    public string? Scope { get; set; }
+
+    /// <summary>关键字：在详情（分店 / 货号 / 商品名 / 箱数）和操作账号里模糊匹配。</summary>
+    public string? Keyword { get; set; }
 }
 
 #endregion

@@ -16,6 +16,24 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 export const HOLIDAY_TYPES: SupplierPreorderHolidayType[] = ['Christmas', 'Halloween', 'Easter', 'Diaries', 'Custom']
 
+/**
+ * 操作记录里有文案的动作名（后端 WriteAuthLogAsync / SupplierPreorderLogActions 写入的动作名；新增动作要同步中英文案）。
+ * LineChanged / OrderSubmitted 属于「订货数量」范围（Scope = Order），其余是管理类记录。
+ */
+export const AUTH_LOG_ACTIONS = [
+  'StatusChanged',
+  'FormDeleted',
+  'StoresUpdated',
+  'StoresCopied',
+  'FormRevised',
+  'Reminded',
+  'OrdererAdded',
+  'OrdererUpdated',
+  'OrdererRemoved',
+  'LineChanged',
+  'OrderSubmitted',
+] as const
+
 // ---------- 粘贴与文件 ----------
 
 /**

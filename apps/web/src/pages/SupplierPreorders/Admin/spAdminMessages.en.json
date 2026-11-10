@@ -297,6 +297,10 @@
       "colDetail": "Details",
       "empty": "No activity yet",
       "total": "{{count}} records",
+      "viewAdmin": "Admin actions",
+      "viewOrders": "Order quantities",
+      "searchPlaceholder": "Search store / item / user",
+      "emptyOrders": "No order activity yet",
       "action": {
         "StatusChanged": "Status changed",
         "FormDeleted": "Form deleted",
@@ -304,7 +308,11 @@
         "StoresCopied": "Stores copied",
         "OrdererAdded": "Orderer added",
         "OrdererUpdated": "Access changed",
-        "OrdererRemoved": "Orderer removed"
+        "OrdererRemoved": "Orderer removed",
+        "FormRevised": "Revision uploaded",
+        "Reminded": "Reminder sent",
+        "LineChanged": "Quantity changed",
+        "OrderSubmitted": "Order submitted"
       }
     },
     "ref": {

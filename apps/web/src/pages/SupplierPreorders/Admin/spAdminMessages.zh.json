@@ -297,6 +297,10 @@
       "colDetail": "内容",
       "empty": "暂无操作记录",
       "total": "共 {{count}} 条",
+      "viewAdmin": "管理操作",
+      "viewOrders": "订货数量",
+      "searchPlaceholder": "搜索 分店 / 货号 / 账号",
+      "emptyOrders": "暂无订货数量记录",
       "action": {
         "StatusChanged": "状态变更",
         "FormDeleted": "删除订单表",
@@ -304,7 +308,11 @@
         "StoresCopied": "复制开启分店",
         "OrdererAdded": "添加下单人员",
         "OrdererUpdated": "修改下单授权",
-        "OrdererRemoved": "移除下单人员"
+        "OrdererRemoved": "移除下单人员",
+        "FormRevised": "上传修订版",
+        "Reminded": "提醒未提交分店",
+        "LineChanged": "订货数量变更",
+        "OrderSubmitted": "提交订单"
       }
     },
     "ref": {

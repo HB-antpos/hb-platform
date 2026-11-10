@@ -206,6 +206,79 @@ public sealed class SupplierPreorderServiceSqliteTests : IDisposable
     }
 
     [Fact]
+    public async Task 订货数量变更与提交_写入操作记录_默认不混进管理记录_可按范围和关键字查询()
+    {
+        var admin = CreateService("admin-1", Permissions.SupplierPreorder.Manage, Permissions.SupplierPreorder.Order);
+        var formGuid = await CreateOpenFormAsync(admin);
+        await admin.SaveOrdererAsync("user-1", new SupplierPreorderSaveOrdererDto { StoreGuids = new() { "S1" }, CanViewOtherStores = false });
+        var orderer = CreateService("user-1", Permissions.SupplierPreorder.Order);
+        var items = await orderer.GetOrderingItemsAsync(formGuid, new SupplierPreorderOrderingItemQueryDto { StoreGuid = "S1", PageSize = 50 });
+        var itemA = items.Items!.Single(i => i.SupplierItemCode == "XD0001815");
+        var itemB = items.Items!.Single(i => i.SupplierItemCode == "XD0001817");
+        // 记录按时间倒序，手动时钟每步走一分钟，顺序才确定
+        void Tick() => _clock.UtcNow = _clock.UtcNow.AddMinutes(1);
+
+        await orderer.SaveLineAsync(formGuid, "S1", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 3 }); Tick();   // 0 → 3
+        await orderer.SaveLineAsync(formGuid, "S1", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 3 }); Tick();   // 同值重复保存：不记
+        await orderer.SaveLineAsync(formGuid, "S1", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 1 }); Tick();   // 3 → 1
+        await orderer.SubmitStoreOrderAsync(formGuid, "S1"); Tick();                                                              // 提交：1 款 1 箱 $26.40
+        await orderer.SaveLineAsync(formGuid, "S1", itemB.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 2 }); Tick();   // 提交后再改：0 → 2，订单回到草稿
+        await admin.SaveLineAsync(formGuid, "S2", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 4 }); Tick();      // 管理员替 S2：0 → 4
+        await admin.SaveLineAsync(formGuid, "S2", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 0 }); Tick();      // 4 → 0（整行删除）
+        await admin.SaveLineAsync(formGuid, "S2", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 0 });              // 本来就是 0：不记
+
+        var orderLogs = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, Scope = "Order", PageSize = 50 });
+        Assert.Equal(6, orderLogs.Total);
+        Assert.All(orderLogs.Items!, l => Assert.Equal("Order", l.Scope));
+        // 时间倒序：最新的在前
+        Assert.Equal(
+            new[]
+            {
+                ("LineChanged", "admin-1-name", "Kawana · XD0001815 Flocked Rib Glitter Bauble · 4 → 0 箱（−4）"),
+                ("LineChanged", "admin-1-name", "Kawana · XD0001815 Flocked Rib Glitter Bauble · 0 → 4 箱（+4）"),
+                ("LineChanged", "user-1-name", "Orion · XD0001817 Lantern Flocked Bauble · 0 → 2 箱（+2） · 已提交的订单改回草稿"),
+                ("OrderSubmitted", "user-1-name", "Orion · 提交订单：1 款 · 1 箱 · $26.40"),
+                ("LineChanged", "user-1-name", "Orion · XD0001815 Flocked Rib Glitter Bauble · 3 → 1 箱（−2）"),
+                ("LineChanged", "user-1-name", "Orion · XD0001815 Flocked Rib Glitter Bauble · 0 → 3 箱（+3）"),
+            },
+            orderLogs.Items!.Select(l => (l.Action, l.OperatorName ?? string.Empty, l.Detail ?? string.Empty)).ToArray());
+
+        // 默认（不带 Scope）只返回管理类记录：开启分店、发布等，不混进订货数量，老页面不变
+        var adminLogs = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, PageSize = 50 });
+        Assert.NotEmpty(adminLogs.Items!);
+        Assert.DoesNotContain(adminLogs.Items!, l => l.Scope == "Order");
+        Assert.Contains(adminLogs.Items!, l => l.Action == "StatusChanged");
+
+        // 关键字：分店名、货号、操作账号都能搜
+        var kawana = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, Scope = "Order", Keyword = "Kawana" });
+        Assert.Equal(2, kawana.Total);
+        var byItem = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, Scope = "Order", Keyword = "XD0001817" });
+        Assert.Equal(1, byItem.Total);
+        var byUser = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, Scope = "Order", Keyword = "user-1-name" });
+        Assert.Equal(4, byUser.Total);
+        // Scope 大小写不敏感；关键字只在订货范围内生效，不影响管理类记录的查询
+        var lower = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, Scope = "order" });
+        Assert.Equal(6, lower.Total);
+
+        // 被拒绝的保存（只读 / 未授权）不记
+        _clock.UtcNow = new DateTime(2026, 3, 7, 0, 0, 0, DateTimeKind.Utc);
+        await Assert.ThrowsAsync<SupplierPreorderException>(() =>
+            orderer.SaveLineAsync(formGuid, "S1", itemA.ItemGuid, new SupplierPreorderSaveLineDto { Cartons = 9 }));
+        Assert.Equal(6, (await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, Scope = "Order" })).Total);
+    }
+
+    [Fact]
+    public void 订货数量变更详情_商品名过长截断_增减符号正确()
+    {
+        var item = new SupplierPreorderFormItem { SupplierItemCode = "XD1", Name = new string('A', 100) };
+        var up = SupplierPreorderService.BuildLineChangeDetail("Orion", item, 2, 5, false);
+        Assert.Equal($"Orion · XD1 {new string('A', 60)}… · 2 → 5 箱（+3）", up);
+        var down = SupplierPreorderService.BuildLineChangeDetail("Orion", new SupplierPreorderFormItem { SupplierItemCode = "XD1", Name = " Short " }, 5, 0, true);
+        Assert.Equal("Orion · XD1 Short · 5 → 0 箱（−5） · 已提交的订单改回草稿", down);
+        Assert.True(up.Length < 1000);
+    }
+
+    [Fact]
     public async Task 可查看其他分店的人看到其他店箱数与各店体积()
     {
         var admin = CreateService("admin-1", Permissions.SupplierPreorder.Manage);
