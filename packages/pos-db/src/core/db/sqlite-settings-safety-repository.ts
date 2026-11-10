@@ -71,7 +71,7 @@ export class SqliteSettingsSafetyRepository {
                  AND tenders.amount_cents = attempts.amount_cents
                  AND (
                    (
-                     attempts.provider IN ('square', 'linkly-cloud', 'manual-card')
+                     attempts.provider IN ('square', 'linkly-cloud', 'manual-card', 'zeller')
                      AND tenders.method = 'card'
                    )
                    OR (
@@ -409,12 +409,13 @@ function paymentState(
 // provider 会让含该支付记录的设备在所有危险设置操作上永久失败关闭。
 function paymentProvider(
   value: unknown,
-): "square" | "linkly-cloud" | "voucher" | "manual-card" {
+): "square" | "linkly-cloud" | "voucher" | "manual-card" | "zeller" {
   if (
     value === "square" ||
     value === "linkly-cloud" ||
     value === "voucher" ||
-    value === "manual-card"
+    value === "manual-card" ||
+    value === "zeller"
   ) {
     return value;
   }

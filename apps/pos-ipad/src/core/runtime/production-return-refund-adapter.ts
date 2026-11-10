@@ -282,6 +282,9 @@ function seedFromContext(
       return { provider, rfn: requireTextField(context, "rfn") };
     case "manual-card":
       throw new ReturnRefundAdapterError("REFUND_CONTEXT_INVALID");
+    // Zeller 原路退款还没有接入：退货时 Zeller 原付款只登记代替退款额度，不会走到这里；走到了就失败关闭。
+    case "zeller":
+      throw new ReturnRefundAdapterError("REFUND_CONTEXT_INVALID");
   }
 }
 

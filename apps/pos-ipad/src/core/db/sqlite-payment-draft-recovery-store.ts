@@ -637,7 +637,7 @@ implements PersistedOrderDraftPort {
                    AND consumed.order_guid = candidate.order_guid
                    AND consumed.amount_cents = candidate.amount_cents
                    AND (
-                     (candidate.provider IN ('square', 'linkly-cloud', 'manual-card')
+                     (candidate.provider IN ('square', 'linkly-cloud', 'manual-card', 'zeller')
                        AND consumed.method = 'card')
                      OR (candidate.provider = 'voucher'
                        AND consumed.method = 'voucher')
@@ -1601,7 +1601,7 @@ async function findBlockingRecoveryInTransaction(
                AND t.order_guid = p.order_guid
                AND t.amount_cents = p.amount_cents
                AND (
-                 (p.provider IN ('square', 'linkly-cloud', 'manual-card') AND t.method = 'card')
+                 (p.provider IN ('square', 'linkly-cloud', 'manual-card', 'zeller') AND t.method = 'card')
                  OR (p.provider = 'voucher' AND t.method = 'voucher')
                )
            )
@@ -1822,7 +1822,7 @@ async function readBoundAction(
            AND tender.order_guid = attempt.order_guid
            AND tender.amount_cents = attempt.amount_cents
            AND (
-             (attempt.provider IN ('square', 'linkly-cloud', 'manual-card') AND tender.method = 'card')
+             (attempt.provider IN ('square', 'linkly-cloud', 'manual-card', 'zeller') AND tender.method = 'card')
              OR (attempt.provider = 'voucher' AND tender.method = 'voucher')
            )
        ) AS matching_tender_count
@@ -2222,7 +2222,8 @@ function paymentProvider(value: unknown): PaymentProvider {
   if (
     provider === "square" ||
     provider === "linkly-cloud" ||
-    (provider === "voucher" || provider === "manual-card")
+    (provider === "voucher" || provider === "manual-card") ||
+    provider === "zeller"
   ) {
     return provider;
   }

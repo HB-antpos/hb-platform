@@ -1,0 +1,138 @@
+{
+  "description": "Zeller 引用格式跨语言黄金向量：C#（Hbpos.Contracts.Orders.ZellerPaymentReference）与 TS（pos-payments-core zeller-payment-reference）必须得到相同结果。parse 的 parts 为 null 表示解析失败。",
+  "attempts": [
+    {
+      "attemptGuid": "799287a3-3dc2-4df1-bca3-d33eea19b35a",
+      "purchaseReference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+      "refundReference": "HBZR-799287a33dc24df1bca3d33eea19b35a"
+    },
+    {
+      "attemptGuid": "799287A3-3DC2-4DF1-BCA3-D33EEA19B35A",
+      "purchaseReference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+      "refundReference": "HBZR-799287a33dc24df1bca3d33eea19b35a"
+    },
+    {
+      "attemptGuid": "3b241101-e2bb-4255-8caf-4136c566a962",
+      "purchaseReference": "HBZ-3b241101e2bb42558caf4136c566a962",
+      "refundReference": "HBZR-3b241101e2bb42558caf4136c566a962"
+    },
+    {
+      "attemptGuid": "00000000-0000-0000-0000-000000000001",
+      "purchaseReference": "HBZ-00000000000000000000000000000001",
+      "refundReference": "HBZR-00000000000000000000000000000001"
+    }
+  ],
+  "format": [
+    {
+      "kind": "payment",
+      "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+      "transactionUuid": "65C4B343-03E6-49EF-A54D-012E3F2C222C",
+      "formatted": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c"
+    },
+    {
+      "kind": "payment",
+      "reference": "  HBZ-799287a33dc24df1bca3d33eea19b35a ",
+      "transactionUuid": "65c4b34303e649efa54d012e3f2c222c",
+      "formatted": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c"
+    },
+    {
+      "kind": "refund",
+      "reference": "HBZR-799287a33dc24df1bca3d33eea19b35a",
+      "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+      "formatted": "ZELLERRF:HBZR-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c"
+    },
+    {
+      "kind": "unverifiedPayment",
+      "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+      "transactionUuid": null,
+      "formatted": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a"
+    },
+    {
+      "kind": "unverifiedRefund",
+      "reference": "HBZR-799287a33dc24df1bca3d33eea19b35a",
+      "transactionUuid": null,
+      "formatted": "ZELLERRF:HBZR-799287a33dc24df1bca3d33eea19b35a"
+    }
+  ],
+  "formatRejects": [
+    { "kind": "payment", "reference": "HBZR-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "payment", "reference": "799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "payment", "reference": "HBZ-not-a-guid", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "payment", "reference": "hbz-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "payment", "reference": "HBZ-00000000000000000000000000000000", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "payment", "reference": "", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "payment", "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "" },
+    { "kind": "payment", "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "not-a-uuid" },
+    { "kind": "payment", "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "00000000-0000-0000-0000-000000000000" },
+    { "kind": "refund", "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" },
+    { "kind": "unverifiedPayment", "reference": "HBZR-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": null },
+    { "kind": "unverifiedRefund", "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": null }
+  ],
+  "parse": [
+    {
+      "kind": "payment",
+      "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c",
+      "parts": { "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" }
+    },
+    {
+      "kind": "payment",
+      "input": "  zeller:HBZ-799287A33DC24DF1BCA3D33EEA19B35A:65C4B343-03E6-49EF-A54D-012E3F2C222C  ",
+      "parts": { "reference": "HBZ-799287A33DC24DF1BCA3D33EEA19B35A", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" }
+    },
+    {
+      "kind": "payment",
+      "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b34303e649efa54d012e3f2c222c",
+      "parts": { "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" }
+    },
+    {
+      "kind": "payment",
+      "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:{65c4b343-03e6-49ef-a54d-012e3f2c222c}",
+      "parts": { "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" }
+    },
+    {
+      "kind": "refund",
+      "input": "ZELLERRF:HBZR-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c",
+      "parts": { "reference": "HBZR-799287a33dc24df1bca3d33eea19b35a", "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c" }
+    },
+    { "kind": "payment", "input": "ZELLERRF:HBZR-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "parts": null },
+    { "kind": "refund", "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "parts": null },
+    { "kind": "payment", "input": null, "parts": null },
+    { "kind": "payment", "input": "", "parts": null },
+    { "kind": "payment", "input": "ZELLER:", "parts": null },
+    { "kind": "payment", "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a", "parts": null },
+    { "kind": "payment", "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:not-a-uuid", "parts": null },
+    { "kind": "payment", "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:00000000-0000-0000-0000-000000000000", "parts": null },
+    { "kind": "payment", "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c:extra", "parts": null },
+    { "kind": "payment", "input": "ZELLER:OTHER-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "parts": null },
+    { "kind": "payment", "input": "ZELLER:hbz-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "parts": null },
+    { "kind": "payment", "input": "ZELLER:HBZ-799287a3-3dc2-4df1-bca3-d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "parts": null },
+    { "kind": "payment", "input": "ZELLER:HBZ-00000000000000000000000000000000:65c4b343-03e6-49ef-a54d-012e3f2c222c", "parts": null },
+    { "kind": "payment", "input": "SQ:payment-1", "parts": null },
+    { "kind": "payment", "input": "ANZ:TXN-1", "parts": null }
+  ],
+  "isZeller": [
+    { "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "expected": true },
+    { "input": "  zeller:broken  ", "expected": true },
+    { "input": "ZELLERRF:HBZR-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "expected": true },
+    { "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a", "expected": true },
+    { "input": "ZELLER", "expected": false },
+    { "input": "SQ:payment-1", "expected": false },
+    { "input": "SQRF:refund-1", "expected": false },
+    { "input": "ANZ:TXN-1", "expected": false },
+    { "input": "ANZCLOUD:TXN:RFN", "expected": false },
+    { "input": "MANUAL:799287a33dc24df1bca3d33eea19b35a", "expected": false },
+    { "input": "", "expected": false },
+    { "input": null, "expected": false }
+  ],
+  "isUnverified": [
+    { "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a", "expected": true },
+    { "input": "ZELLERRF:HBZR-799287a33dc24df1bca3d33eea19b35a", "expected": true },
+    { "input": " zeller:HBZ-799287a33dc24df1bca3d33eea19b35a ", "expected": true },
+    { "input": "ZELLER:HBZ-799287a33dc24df1bca3d33eea19b35a:65c4b343-03e6-49ef-a54d-012e3f2c222c", "expected": false },
+    { "input": "ZELLER:HBZR-799287a33dc24df1bca3d33eea19b35a", "expected": false },
+    { "input": "ZELLERRF:HBZ-799287a33dc24df1bca3d33eea19b35a", "expected": false },
+    { "input": "ZELLER:broken", "expected": false },
+    { "input": "SQ:payment-1", "expected": false },
+    { "input": null, "expected": false }
+  ]
+}

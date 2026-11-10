@@ -1,0 +1,3457 @@
+{
+  "description": "Zeller 结果分类器跨语言黄金向量：C#（Hbpos.Client.Wpf.Services.Zeller.ZellerResultClassifier）与 TS（pos-payments-core zeller-result-classifier）必须得到相同结论。期望值来自 2026-11-05 真机验证后定下的规则表，取值字符串与 C# 枚举成员名相同。verification / lateRecheck 的 transactionIndex 指结论带出的是 query.transactions 里的第几笔（null 表示不带交易）。",
+  "call": [
+    {
+      "name": "Purchase 返回错误 OperationRequestInvalid（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationRequestInvalid",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "InvalidRequest",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationBusy（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationBusy",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "Busy",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": true,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 SetupRequired（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "SetupRequired",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 FeatureNotAvailable（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "FeatureNotAvailable",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 PermissionsMissing（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PermissionsMissing",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 Cancelled（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Cancelled",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Cancelled",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 InactivityTimeout（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "InactivityTimeout",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Timeout",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 ConnectionFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "ConnectionFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "TerminalUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 PairedDeviceBusy（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceBusy",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "TerminalUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 PairedDeviceNotAvailable（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceNotAvailable",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "TerminalUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardDeclined（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardDeclined",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionDeclined（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionDeclined",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardBlocked（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardBlocked",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardNotSupported（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardNotSupported",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardReadFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardReadFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardInsertRequired（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardInsertRequired",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 NetworkFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "NetworkFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationInterrupted（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationInterrupted",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationResponseInvalid（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationResponseInvalid",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionNotFound（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNotFound",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionResponseTimeout（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseTimeout",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionResponseInvalid（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseInvalid",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionNetworkFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNetworkFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionSystemFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionSystemFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 Unrecognised（未到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Unrecognised",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationRequestInvalid（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationRequestInvalid",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "InvalidRequest",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationBusy（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationBusy",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "Busy",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": true,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 SetupRequired（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "SetupRequired",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 FeatureNotAvailable（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "FeatureNotAvailable",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 PermissionsMissing（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PermissionsMissing",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 Cancelled（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Cancelled",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Cancelled",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 InactivityTimeout（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "InactivityTimeout",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Timeout",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 ConnectionFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "ConnectionFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "TerminalConnectionLost",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 PairedDeviceBusy（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceBusy",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "TerminalConnectionLost",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 PairedDeviceNotAvailable（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceNotAvailable",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "TerminalConnectionLost",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardDeclined（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardDeclined",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionDeclined（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionDeclined",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardBlocked（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardBlocked",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardNotSupported（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardNotSupported",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardReadFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardReadFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 CardInsertRequired（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardInsertRequired",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 NetworkFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "NetworkFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationInterrupted（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationInterrupted",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 OperationResponseInvalid（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationResponseInvalid",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionNotFound（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNotFound",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionResponseTimeout（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseTimeout",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionResponseInvalid（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseInvalid",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionNetworkFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNetworkFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionSystemFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionSystemFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 TransactionFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Purchase 返回错误 Unrecognised（已到刷卡机）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Unrecognised",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationRequestInvalid（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationRequestInvalid",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "InvalidRequest",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationBusy（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationBusy",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "Busy",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": true,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 SetupRequired（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "SetupRequired",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 FeatureNotAvailable（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "FeatureNotAvailable",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 PermissionsMissing（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PermissionsMissing",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 Cancelled（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Cancelled",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Cancelled",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 InactivityTimeout（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "InactivityTimeout",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Timeout",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 ConnectionFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "ConnectionFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "TerminalUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 PairedDeviceBusy（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceBusy",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "TerminalUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 PairedDeviceNotAvailable（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceNotAvailable",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "TerminalUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardDeclined（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardDeclined",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionDeclined（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionDeclined",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardBlocked（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardBlocked",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardNotSupported（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardNotSupported",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardReadFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardReadFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardInsertRequired（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardInsertRequired",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 NetworkFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "NetworkFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationInterrupted（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationInterrupted",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationResponseInvalid（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationResponseInvalid",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionNotFound（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNotFound",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "OriginalTransactionNotFound",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionResponseTimeout（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseTimeout",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionResponseInvalid（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseInvalid",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionNetworkFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNetworkFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionSystemFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionSystemFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionFailure（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionFailure",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 Unrecognised（未到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Unrecognised",
+        "reachedTerminal": false
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationRequestInvalid（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationRequestInvalid",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "InvalidRequest",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationBusy（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationBusy",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "Busy",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": true,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 SetupRequired（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "SetupRequired",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 FeatureNotAvailable（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "FeatureNotAvailable",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 PermissionsMissing（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PermissionsMissing",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "SetupRequired",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 Cancelled（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Cancelled",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Cancelled",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 InactivityTimeout（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "InactivityTimeout",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenNotPaid",
+        "failureKind": "Timeout",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 ConnectionFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "ConnectionFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "TerminalConnectionLost",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 PairedDeviceBusy（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceBusy",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "TerminalConnectionLost",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 PairedDeviceNotAvailable（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "PairedDeviceNotAvailable",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "TerminalConnectionLost",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardDeclined（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardDeclined",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionDeclined（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionDeclined",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardBlocked（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardBlocked",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardNotSupported（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardNotSupported",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardReadFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardReadFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 CardInsertRequired（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "CardInsertRequired",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "VerifyThenDeclined",
+        "failureKind": "CardProblem",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 NetworkFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "NetworkFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationInterrupted（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationInterrupted",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 OperationResponseInvalid（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "OperationResponseInvalid",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionNotFound（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNotFound",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "OriginalTransactionNotFound",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionResponseTimeout（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseTimeout",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionResponseInvalid（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionResponseInvalid",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionNetworkFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionNetworkFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionSystemFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionSystemFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 TransactionFailure（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "TransactionFailure",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "Refund 返回错误 Unrecognised（已到刷卡机）",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error",
+        "errorType": "Unrecognised",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "错误但没有错误类型：按不认识的错误处理",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Error"
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "批准且金额、reference 都对得上",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Approved",
+        "failureKind": "None",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "reference 首尾有空白仍算对得上",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "  HBZ-799287a33dc24df1bca3d33eea19b35a "
+        }
+      },
+      "expected": {
+        "decision": "Approved",
+        "failureKind": "None",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "退款批准",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Refund",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Approved",
+        "failureKind": "None",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "被拒的交易以成交类响应返回（Declined）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Declined",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Declined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "被拒的交易以成交类响应返回（Failed）",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Failed",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Declined",
+        "failureKind": "BankDeclined",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "批准但金额不同",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 1000,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "AmountMismatch",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "别的 reference 的交易：先重建",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-00000000000000000000000000000001"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "ReferenceMismatch",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "reference 为空（null）：先重建",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": null
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "ReferenceMismatch",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "reference 为空字符串：先重建",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": ""
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "ReferenceMismatch",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "reference 只差大小写也算不匹配",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287A33DC24DF1BCA3D33EEA19B35A"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "ReferenceMismatch",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "扣款收到退款交易",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Refund",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "ReferenceMismatch",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "批准但 transactionUuid 是空白",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": " ",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "MissingTransactionUuid",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "批准但没有 transactionUuid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Approved",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": null,
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "MissingTransactionUuid",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "不认识的交易状态",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction",
+        "transaction": {
+          "status": "Unknown",
+          "type": "Purchase",
+          "amountCents": 100,
+          "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+          "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+        }
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "UnrecognisedStatus",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": true
+      }
+    },
+    {
+      "name": "说返回了交易但没有交易",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Transaction"
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkError",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "看门狗放弃：先重建再查",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Abandoned",
+        "reachedTerminal": true
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "WatchdogTimeout",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "SDK 抛异常：先重建再查",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "Faulted"
+      },
+      "expected": {
+        "decision": "Unknown",
+        "failureKind": "ResultUnknown",
+        "unknownReason": "SdkException",
+        "rebuildTerminalFirst": true,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "排队时被取消：没有发出",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "NotStarted",
+        "errorType": "Cancelled"
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "Cancelled",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "SDK 起不来：没有发出",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "NotStarted"
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "SdkUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    },
+    {
+      "name": "没进 SDK 且带别的错误类型：仍按 SDK 不可用",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "result": {
+        "outcome": "NotStarted",
+        "errorType": "NetworkFailure"
+      },
+      "expected": {
+        "decision": "NotSubmitted",
+        "failureKind": "SdkUnavailable",
+        "unknownReason": "None",
+        "rebuildTerminalFirst": false,
+        "serialGateBreached": false,
+        "returnsTransaction": false
+      }
+    }
+  ],
+  "verification": [
+    {
+      "name": "0 笔 + 明确未付款 → 未付款",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "decision": "NotPaid",
+        "unknownReason": "None",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "0 笔 + 卡片类错误 → 拒付",
+      "pending": "VerifyThenDeclined",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "decision": "Declined",
+        "unknownReason": "None",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "0 笔 + 结果未知 → 继续未知",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "None",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "查到一笔批准（VerifyThenNotPaid）→ 批准",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Approved",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "查到一笔批准（VerifyThenDeclined）→ 批准",
+      "pending": "VerifyThenDeclined",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Approved",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "查到一笔批准（Unknown）→ 批准",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Approved",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "查到被拒 → 拒付",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Declined",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Declined",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "多笔被拒 → 取最后一笔",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Declined",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          },
+          {
+            "status": "Failed",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Declined",
+        "unknownReason": "None",
+        "transactionIndex": 1
+      }
+    },
+    {
+      "name": "先拒后批（Try Again）→ 算一笔批准",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          },
+          {
+            "status": "Declined",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Approved",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "同一 reference 两笔批准（无时间戳）→ 未知，带出第一笔",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          },
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "MultipleApproved",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "两笔批准 → 带出时间最早的一笔",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+            "timestampIso": "2026-11-05T11:24:48+10:00"
+          },
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+            "timestampIso": "2026-11-05T11:24:28+10:00"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "MultipleApproved",
+        "transactionIndex": 1
+      }
+    },
+    {
+      "name": "两笔批准 → 有时间戳的排在没有时间戳的前面",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          },
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a",
+            "timestampIso": "2026-11-05T11:24:28+10:00"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "MultipleApproved",
+        "transactionIndex": 1
+      }
+    },
+    {
+      "name": "查到批准但金额不同 → 未知",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 99,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "AmountMismatch",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "查到批准但没有 transactionUuid → 未知",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": null,
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "MissingTransactionUuid",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "查询失败不是未付款的证据",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": false,
+        "transactions": [],
+        "errorType": "NetworkFailure"
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "VerificationFailed",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "别的 reference、别的类型的交易不算",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-00000000000000000000000000000001"
+          },
+          {
+            "status": "Approved",
+            "type": "Refund",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "NotPaid",
+        "unknownReason": "None",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "同 reference 下有不认识的状态 → 未知",
+      "pending": "VerifyThenNotPaid",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Unknown",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "UnrecognisedStatus",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "同 reference 下有不认识的类型 → 未知（即使另有批准）",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          },
+          {
+            "status": "Approved",
+            "type": "Unknown",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "UnrecognisedStatus",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "退款只看退款交易",
+      "pending": "Unknown",
+      "expectation": {
+        "type": "Refund",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Refund",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Approved",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "已有定论的决定（Approved）不能再查询分类",
+      "pending": "Approved",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "throws": true
+      }
+    },
+    {
+      "name": "已有定论的决定（Declined）不能再查询分类",
+      "pending": "Declined",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "throws": true
+      }
+    },
+    {
+      "name": "已有定论的决定（NotSubmitted）不能再查询分类",
+      "pending": "NotSubmitted",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "throws": true
+      }
+    }
+  ],
+  "lateRecheck": [
+    {
+      "name": "复核 0 笔 → 维持未付款",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": []
+      },
+      "expected": {
+        "decision": "NotPaid",
+        "unknownReason": "None",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "复核查到批准 → 重新打开",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "LateApproval",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "复核查询失败 → 维持未付款但标记失败",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": false,
+        "transactions": [],
+        "errorType": "NetworkFailure"
+      },
+      "expected": {
+        "decision": "NotPaid",
+        "unknownReason": "VerificationFailed",
+        "transactionIndex": null
+      }
+    },
+    {
+      "name": "复核查到两笔批准 → 重新打开",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          },
+          {
+            "status": "Approved",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "98b690b7-5eaa-41ec-8ff8-168c60364aac",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "KeepUnknown",
+        "unknownReason": "MultipleApproved",
+        "transactionIndex": 0
+      }
+    },
+    {
+      "name": "复核查到被拒 → 拒付",
+      "expectation": {
+        "type": "Purchase",
+        "amountCents": 100,
+        "reference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+      },
+      "query": {
+        "succeeded": true,
+        "transactions": [
+          {
+            "status": "Declined",
+            "type": "Purchase",
+            "amountCents": 100,
+            "transactionUuid": "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+            "externalReference": "HBZ-799287a33dc24df1bca3d33eea19b35a"
+          }
+        ]
+      },
+      "expected": {
+        "decision": "Declined",
+        "unknownReason": "None",
+        "transactionIndex": 0
+      }
+    }
+  ]
+}

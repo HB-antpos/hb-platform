@@ -59,6 +59,9 @@ import {
 } from "@hb/pos-domain/core/security/pos-api-addresses";
 import type { CatalogRefreshState } from "@/features/catalog/catalog-refresh-coordinator";
 import { CameraScannerModal } from "@/features/scanner-camera/camera-scanner-modal";
+import { zellerSettingsText } from "@/features/zeller-terminal/zeller-settings-copy";
+import { ZellerSettingsPanel } from "@/features/zeller-terminal/zeller-settings-panel";
+import { useZellerTerminalBoundary } from "@/features/zeller-terminal/zeller-terminal-boundary";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
@@ -962,9 +965,21 @@ function PaymentsPane({
   >(null);
   const modernLayout = state.linklySetup?.terminals.value?.lineManagementSupported === true;
   // 查看配置与启用支付分开，未配对线路也能进入管理页。
-  const [providerPanel, setProviderPanel] = useState<"square" | "linkly">(
+  const [providerPanel, setProviderPanel] = useState<PaymentProviderPanel>(
     state.paymentProviderDraft ?? "linkly",
   );
+  // Zeller 页签只在页面外层提供了 Zeller 终端时出现（设置路由决定，正式版暂不提供），并且只接进页签式布局。
+  const zeller = useZellerTerminalBoundary();
+  const zellerPanelOpen = zeller !== null && modernLayout && providerPanel === "zeller";
+  const providerTabs: readonly PaymentProviderPanel[] =
+    zeller !== null ? ["square", "linkly", "zeller"] : ["square", "linkly"];
+  // Square / Linkly 的环境切换与启用按钮只认这两家；停在 Zeller 页签时这些控件不显示。
+  const cardProviderPanel: "square" | "linkly" = providerPanel === "zeller" ? "linkly" : providerPanel;
+  // Zeller SDK 只在第一次打开 Zeller 页签时才加载，不打开的人不受影响。
+  const activateZeller = zeller?.activate;
+  useEffect(() => {
+    if (zellerPanelOpen) activateZeller?.();
+  }, [activateZeller, zellerPanelOpen]);
   const t = (
     key: SettingsCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -1112,11 +1127,11 @@ function PaymentsPane({
       </SectionCard> : (
         <View style={styles.paymentToolbar} testID="settings-payment-toolbar">
           <View style={styles.paymentTabs}>
-            {(["square", "linkly"] as const).map((provider) => (
+            {providerTabs.map((provider) => (
               <PosPressable
                 key={provider}
                 accessibilityRole="tab"
-                accessibilityLabel={t("payments.manageProvider", { provider: provider === "square" ? "Square" : "Linkly" })}
+                accessibilityLabel={t("payments.manageProvider", { provider: PAYMENT_PROVIDER_PANEL_LABELS[provider] })}
                 accessibilityState={{ selected: providerPanel === provider, disabled }}
                 disabled={disabled}
                 onPress={() => setProviderPanel(provider)}
@@ -1124,21 +1139,35 @@ function PaymentsPane({
                 style={[styles.paymentTab, providerPanel === provider && styles.paymentTabSelected]}
                 testID={`settings-payment-tab-${provider}`}
               >
+                {/* 小圆点标出这台 iPad 当前启用的是哪一家，和正在查看哪个页签无关。 */}
+                {state.paymentProviderDraft === provider ? (
+                  <View
+                    style={[styles.paymentTabDot, providerPanel === provider && styles.paymentTabDotSelected]}
+                    testID={`settings-payment-tab-${provider}-active`}
+                  />
+                ) : null}
                 <Text style={[styles.paymentTabLabel, providerPanel === provider && styles.paymentTabSelectedLabel]}>
-                  {provider === "square" ? "Square" : "Linkly"}
+                  {PAYMENT_PROVIDER_PANEL_LABELS[provider]}
                 </Text>
               </PosPressable>
             ))}
           </View>
+          {providerPanel === "zeller" ? (
+            // Zeller 没有测试环境：原来放环境切换的位置改成一句说明，不留空也不让人找「环境去哪了」。
+            <Text style={styles.paymentEnvironmentNote} testID="settings-zeller-environment-note">
+              {zellerSettingsText(locale, "tab.environmentNote")}
+            </Text>
+          ) : (
           <EnvironmentSelector
             disabled={disabled}
-            environment={providerPanel === "square" ? state.squareDraft.environment : state.linklyDraft.environment}
+            environment={cardProviderPanel === "square" ? state.squareDraft.environment : state.linklyDraft.environment}
             locale={locale}
-            onSelect={(environment) => providerPanel === "square"
+            onSelect={(environment) => cardProviderPanel === "square"
               ? presenter.setSquareEnvironment(environment)
               : presenter.setLinklyEnvironment(environment)}
-            prefix={`settings-${providerPanel}`}
+            prefix={`settings-${cardProviderPanel}`}
           />
+          )}
         </View>
       )}
       <View style={modernLayout ? styles.paymentPanels : styles.twoColumn}>
@@ -1426,6 +1455,19 @@ function PaymentsPane({
         }
         visible={squarePicker !== null}
       />
+      {zellerPanelOpen && zeller ? (
+        <ZellerSettingsPanel
+          activeProviderLabel={
+            state.paymentProviderDraft ? PAYMENT_PROVIDER_PANEL_LABELS[state.paymentProviderDraft] : null
+          }
+          disabled={disabled}
+          // Zeller 收款还没有接进收银流程：先只做配对，启用留给后续接入时再放开。
+          enable={null}
+          locale={locale}
+          sdk={zeller.state}
+          {...(zeller.onOpenNetworkCheck ? { onOpenNetworkCheck: zeller.onOpenNetworkCheck } : {})}
+        />
+      ) : (
       <View style={modernLayout ? styles.paymentFooter : undefined}>
         {modernLayout ? (
           <>
@@ -1435,11 +1477,11 @@ function PaymentsPane({
             </Text>
             <ActionButton
               compact
-              disabled={disabled || (providerPanel === "linkly" ? !linklySelectable : !squareAvailable && !state.squareSetup.available)}
-              label={t(state.paymentProviderDraft === providerPanel ? "payments.enabledProvider" : "payments.enableProvider", { provider: providerPanel === "square" ? "Square" : "Linkly" })}
-              onPress={() => presenter.setPaymentProvider(providerPanel)}
-              selected={state.paymentProviderDraft === providerPanel}
-              testID={`settings-payment-provider-${providerPanel}`}
+              disabled={disabled || (cardProviderPanel === "linkly" ? !linklySelectable : !squareAvailable && !state.squareSetup.available)}
+              label={t(state.paymentProviderDraft === cardProviderPanel ? "payments.enabledProvider" : "payments.enableProvider", { provider: PAYMENT_PROVIDER_PANEL_LABELS[cardProviderPanel] })}
+              onPress={() => presenter.setPaymentProvider(cardProviderPanel)}
+              selected={state.paymentProviderDraft === cardProviderPanel}
+              testID={`settings-payment-provider-${cardProviderPanel}`}
               tone="secondary"
             />
           </>
@@ -1451,9 +1493,19 @@ function PaymentsPane({
           testID="settings-payment-save"
         />
       </View>
+      )}
     </View>
   );
 }
+
+/** 「支付设置」里可以查看的刷卡终端页签。zeller 只是页签，还不是可启用的 paymentProvider。 */
+type PaymentProviderPanel = "square" | "linkly" | "zeller";
+
+const PAYMENT_PROVIDER_PANEL_LABELS: Record<PaymentProviderPanel, string> = {
+  square: "Square",
+  linkly: "Linkly",
+  zeller: "Zeller",
+};
 
 type SquareSetupResourceKind =
   SettingsState["squareSetup"]["locations"]["kind"];
@@ -4074,7 +4126,10 @@ const styles = StyleSheet.create({
   navigationCompact: { width: 184, padding: 10 },
   paymentToolbar: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 16, justifyContent: "space-between", marginBottom: 18 },
   paymentTabs: { flexDirection: "row", borderWidth: 1, borderColor: posColors.border, borderRadius: 8, padding: 3, backgroundColor: posColors.surface },
-  paymentTab: { alignItems: "center", justifyContent: "center", minHeight: SETTINGS_MIN_TOUCH_TARGET, minWidth: 120, paddingHorizontal: 18, borderRadius: 5 },
+  paymentTab: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "center", minHeight: SETTINGS_MIN_TOUCH_TARGET, minWidth: 120, paddingHorizontal: 18, borderRadius: 5 },
+  paymentTabDot: { backgroundColor: posColors.green, borderRadius: 4, height: 8, width: 8 },
+  paymentTabDotSelected: { backgroundColor: "#FFFFFF" },
+  paymentEnvironmentNote: { color: posColors.mutedInk, fontSize: 13, fontWeight: "700" },
   paymentTabSelected: { backgroundColor: posColors.blue },
   paymentTabLabel: { color: posColors.ink, fontSize: 16, fontWeight: "700" },
   paymentTabSelectedLabel: { color: "#FFFFFF" },

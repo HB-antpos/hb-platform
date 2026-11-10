@@ -134,6 +134,10 @@ jobs:
           --state '.artifacts/quality-baseline/${{ matrix.component }}.state.json'
       - name: 执行 Node 组件门禁
         id: verify
+        env:
+          # @zeller-public/*（Zeller 刷卡 SDK）只在 Zeller 私有 npm 源上，根 .npmrc 从这个变量取令牌。
+          # 值是 Zeller 开发者文档公开的只读令牌，存在仓库 Secret 里不进代码；npm 缓存命中时不会访问私有源。
+          ZELLER_NPM_TOKEN: ${{ secrets.ZELLER_NPM_TOKEN }}
         run: ./scripts/ci/run-node-component.sh '${{ matrix.component }}'
       - name: 复用 Web 构建采集包体
         if: matrix.component == 'web'
@@ -200,6 +204,9 @@ jobs:
           --lane backend --state .artifacts/quality-baseline/backend.state.json
       - name: 执行 .NET 组件门禁
         id: verify
+        env:
+          # pos-contract 会在仓库根 npm ci，需要 Zeller 私有 npm 源的令牌（见 Node 组件门禁的说明）。
+          ZELLER_NPM_TOKEN: ${{ secrets.ZELLER_NPM_TOKEN }}
         run: ./scripts/ci/run-dotnet-component.sh '${{ matrix.component }}'
       - name: 记录 Backend 质量结果
         if: always() && matrix.component == 'backend'
@@ -337,6 +344,9 @@ jobs:
             apps/supplier-order-extension/package-lock.json
       - name: 构建并测试 Apple 原生组件
         shell: bash
+        env:
+          # 仓库根 npm ci 需要 Zeller 私有 npm 源的令牌（见 Node 组件门禁的说明）。
+          ZELLER_NPM_TOKEN: ${{ secrets.ZELLER_NPM_TOKEN }}
         run: |
           xcodebuild() {
             local argument
@@ -392,6 +402,9 @@ jobs:
           cache-read-only: ${{ github.ref_name != 'main' }}
       - name: 构建并测试 Android 原生模块
         shell: bash
+        env:
+          # 仓库根 npm ci 需要 Zeller 私有 npm 源的令牌（见 Node 组件门禁的说明）。
+          ZELLER_NPM_TOKEN: ${{ secrets.ZELLER_NPM_TOKEN }}
         run: |
           bash() {
             if [[ "${1:-}" == 'apps/pos-handheld/android/gradlew' ||

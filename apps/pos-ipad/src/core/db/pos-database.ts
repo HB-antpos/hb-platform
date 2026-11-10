@@ -1100,7 +1100,15 @@ async function appendScopedAuditEvent(
 }
 
 function tenderMethodForProvider(provider: string): "card" | "voucher" {
-  if (provider === "square" || provider === "linkly-cloud" || provider === "manual-card") return "card";
+  // 与单终端阻塞触发器（M58）和各处「已消费」判断的刷卡通道列表保持一致。
+  if (
+    provider === "square" ||
+    provider === "linkly-cloud" ||
+    provider === "manual-card" ||
+    provider === "zeller"
+  ) {
+    return "card";
+  }
   if (provider === "voucher") return "voucher";
   throw new Error("Approved payment provider is unsupported.");
 }

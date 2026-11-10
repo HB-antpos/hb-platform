@@ -1072,6 +1072,127 @@ test("真实 SQLite：M52 已移交的异常刷卡不再挡任何 provider 的�
   }
 });
 
+test("真实 SQLite：M58 已完成的 Zeller 销售不再挡下一单，批准了却没入单的仍挡", async () => {
+  const folder = mkdtempSync(join(tmpdir(), "hb-pos-m58-zeller-blocking-"));
+  const databasePath = join(folder, "payment.db");
+  const connection = new SystemSqliteConnection(databasePath);
+  try {
+    // 先停在 M57，确认问题确实存在：正常完成的 Zeller 销售被当成「批准了但没入单」，挡住下一单。
+    await connection.exec(
+      POS_DATABASE_MIGRATIONS
+        .filter((migration) => migration.version <= 57)
+        .map((migration) => migration.sql)
+        .join("\n"),
+    );
+    const orders = ["m58-zeller-done", "m58-next", "m58-zeller-orphan", "m58-after-orphan"];
+    for (const [index, orderGuid] of orders.entries()) {
+      await insertDraftOrder(connection, orderGuid, index + 1, 500);
+      // 订单完成后草稿绑定仍是 Active，这正是「已消费」判断不可缺少的原因。
+      await connection.run(
+        `INSERT INTO payment_order_draft_bindings (
+          draft_id, request_fingerprint, pricing_state_json, order_guid,
+          store_code, device_code, state, created_at_iso
+        ) VALUES (?, ?, ?, ?, 'S1', 'IPAD1', 'Active', ?)`,
+        [`draft-${orderGuid}`, `fingerprint-${orderGuid}`, "{}", orderGuid, "2026-07-28T00:00:00.000Z"],
+      );
+    }
+    await insertPaymentAttemptRow(connection, {
+      attemptId: "m58-zeller-done-attempt",
+      orderGuid: "m58-zeller-done",
+      provider: "zeller",
+      operation: "purchase",
+      amountCents: 500,
+      state: "Approved",
+      txnRef: "HBZ-799287a33dc24df1bca3d33eea19b35a",
+      paymentId: "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+    });
+    await connection.run(
+      "INSERT INTO order_tenders (tender_guid, order_guid, method, amount_cents, payment_attempt_id, created_at_iso) VALUES (?, ?, ?, ?, ?, ?)",
+      ["m58-zeller-done-tender", "m58-zeller-done", "card", 500, "m58-zeller-done-attempt", "2026-07-28T00:01:00.000Z"],
+    );
+    const nextSquare = {
+      attemptId: "m58-next-square",
+      orderGuid: "m58-next",
+      provider: "square" as const,
+      operation: "purchase" as const,
+      amountCents: 500,
+      state: "Created" as const,
+    };
+    await assert.rejects(() => insertPaymentAttemptRow(connection, nextSquare), /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/);
+
+    const M52 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 52);
+    const M58 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 58);
+    assert.ok(M52);
+    assert.ok(M58);
+    // M58 与 M52 只差刷卡通道列表里的 zeller，其余逐字相同。
+    assert.equal(M58.sql.replaceAll(", 'zeller'", ""), M52.sql);
+    assert.equal(M58.sql.split("'zeller'").length - 1, 2);
+    await connection.exec(M58.sql);
+    assert.deepEqual(
+      (await connection.getAll<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_payment_attempts_single_terminal_blocking_%' ORDER BY name",
+      )).map((row) => row.name),
+      [
+        "trg_payment_attempts_single_terminal_blocking_insert",
+        "trg_payment_attempts_single_terminal_blocking_update",
+      ],
+    );
+
+    // M58：已入单的 Zeller 销售不再挡下一单；insert 和 update 两个触发器都要放行。
+    await insertPaymentAttemptRow(connection, nextSquare);
+    await connection.run("UPDATE payment_attempts SET state = 'Submitted' WHERE attempt_id = 'm58-next-square'");
+    await connection.run("UPDATE payment_attempts SET state = 'Cancelled' WHERE attempt_id = 'm58-next-square'");
+
+    // 仓储层的同一条判断（发起付款前先查有没有阻塞）也要认识 zeller。
+    const repositories = createSqliteRepositories(connection, {
+      nowIso: () => "2026-07-28T00:00:00.000Z",
+      createLeaseId: () => "lease-m58",
+      encryptor: {
+        async encrypt(plaintext: string) { return new TextEncoder().encode(plaintext); },
+        async decrypt(ciphertext: Uint8Array) { return new TextDecoder().decode(ciphertext); },
+      },
+    });
+    assert.equal(await repositories.payments.findBlocking("m58-zeller-done"), null);
+
+    // 批准了却没有入单的 Zeller 付款（钱收了、单没建）必须继续挡住下一单，不能因为认识了 zeller 就放过。
+    await insertPaymentAttemptRow(connection, {
+      attemptId: "m58-zeller-orphan-attempt",
+      orderGuid: "m58-zeller-orphan",
+      provider: "zeller",
+      operation: "purchase",
+      amountCents: 500,
+      state: "Approved",
+    });
+    assert.equal(
+      (await repositories.payments.findBlocking("m58-zeller-orphan"))?.attemptId,
+      "m58-zeller-orphan-attempt",
+    );
+    await assert.rejects(
+      () => insertPaymentAttemptRow(connection, {
+        attemptId: "m58-after-orphan-attempt",
+        orderGuid: "m58-after-orphan",
+        provider: "zeller",
+        operation: "purchase",
+        amountCents: 500,
+        state: "Created",
+      }),
+      /PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS/,
+    );
+    // 金额对不上的入单记录不算已消费。
+    await connection.run(
+      "INSERT INTO order_tenders (tender_guid, order_guid, method, amount_cents, payment_attempt_id, created_at_iso) VALUES (?, ?, ?, ?, ?, ?)",
+      ["m58-zeller-orphan-wrong", "m58-zeller-orphan", "card", 499, "m58-zeller-orphan-attempt", "2026-07-28T00:02:00.000Z"],
+    );
+    assert.equal(
+      (await repositories.payments.findBlocking("m58-zeller-orphan"))?.attemptId,
+      "m58-zeller-orphan-attempt",
+    );
+  } finally {
+    await connection.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
 test("真实 SQLite：M53 Square 退款 PENDING 批准时同事务登记结算跟踪，按状态机推进且不可删除", async () => {
   const folder = mkdtempSync(join(tmpdir(), "hb-pos-m53-refund-settlement-"));
   const databasePath = join(folder, "payment.db");

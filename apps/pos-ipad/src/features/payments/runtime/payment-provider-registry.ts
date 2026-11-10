@@ -1,4 +1,6 @@
 import { ManualCardPaymentAdapter } from "../manual/manual-card-payment-adapter";
+import { ZellerPaymentAdapter } from "../zeller/zeller-payment-adapter";
+import { zellerTerminalRegistry, type ZellerTerminalSource } from "../zeller/zeller-terminal-registry";
 import type { HbposTransport } from "@/core/api";
 import type {
   OnlinePaymentPort,
@@ -71,6 +73,8 @@ export type PaymentProviderConfigurationBlocker =
   | "VOUCHER_CONFIGURATION_LOAD_FAILED"
   | "MANUAL_CARD_CONFIGURATION_DISABLED"
   | "MANUAL_CARD_CONFIGURATION_LOAD_FAILED"
+  /** Zeller 收款还不能在设置里启用：适配器已注册（供恢复已有交易），但不接受新付款。 */
+  | "ZELLER_NOT_ENABLED"
   | "PAYMENT_PROVIDER_UNKNOWN";
 
 export type PaymentProviderAvailability = Readonly<{
@@ -210,6 +214,8 @@ export type PaymentProviderRegistryDependencies = Readonly<{
   voucherProtectedTokens: VoucherProtectedTokenPort;
   voucherContextProvider: VoucherPaymentContextProvider;
   linklyTerminalSelection?: LinklyTerminalSelectionPort;
+  /** Zeller 终端来源；缺省用界面层登记的进程内登记处。测试可注入。 */
+  zellerTerminals?: ZellerTerminalSource;
 }>;
 
 export async function createConfiguredPaymentProviderRegistry(
@@ -287,6 +293,14 @@ export async function createConfiguredPaymentProviderRegistry(
     port: new ManualCardPaymentAdapter(),
     availability: { provider: "manual-card", available: manual.kind === "loaded" && manual.value.enabled === true,
       blocker: manual.kind === "failed" ? "MANUAL_CARD_CONFIGURATION_LOAD_FAILED" : manual.value.enabled === true ? null : "MANUAL_CARD_CONFIGURATION_DISABLED" },
+  });
+  // 中文注释：Zeller 适配器先注册、但不可用。注册是为了让已经存在的 zeller 付款能被 recover 找回原通道核实；
+  // 不可用是因为设置里还不能启用 Zeller（恢复中心尚未支持 Zeller 的结果未知交易），新付款一律被门禁拦下。
+  entries.set("zeller", {
+    port: new ZellerPaymentAdapter({
+      terminals: dependencies.zellerTerminals ?? zellerTerminalRegistry,
+    }),
+    availability: { provider: "zeller", available: false, blocker: "ZELLER_NOT_ENABLED" },
   });
   return new ConfiguredPaymentProviderRegistry(entries);
 }
@@ -434,4 +448,5 @@ const PAYMENT_PROVIDERS = [
   "linkly-cloud",
   "voucher",
   "manual-card",
+  "zeller",
 ] as const satisfies readonly PaymentProvider[];

@@ -67,6 +67,10 @@ const SQUARE_AUTO_RECOVERY_WINDOW_MS = 90_000;
 const LINKLY_AUTO_RECOVERY_INTERVAL_MS = 2_000;
 const LINKLY_AUTO_RECOVERY_MAX_ATTEMPTS = 89;
 const LINKLY_AUTO_RECOVERY_WINDOW_MS = 180_000;
+// Zeller 的扣款交给 SDK 后立刻返回等待中，结果靠轮询收。读到卡后被取消的要等 60 秒才能收尾，窗口留够 5 分钟。
+const ZELLER_AUTO_RECOVERY_INTERVAL_MS = 2_000;
+const ZELLER_AUTO_RECOVERY_MAX_ATTEMPTS = 149;
+const ZELLER_AUTO_RECOVERY_WINDOW_MS = 300_000;
 
 export type PaymentInstallmentModeIssue = "unavailable";
 
@@ -2362,6 +2366,13 @@ function autoRecoveryPolicy(
       intervalMs: LINKLY_AUTO_RECOVERY_INTERVAL_MS,
       maxAttempts: LINKLY_AUTO_RECOVERY_MAX_ATTEMPTS,
       windowMs: LINKLY_AUTO_RECOVERY_WINDOW_MS,
+    };
+  }
+  if (provider === "zeller") {
+    return {
+      intervalMs: ZELLER_AUTO_RECOVERY_INTERVAL_MS,
+      maxAttempts: ZELLER_AUTO_RECOVERY_MAX_ATTEMPTS,
+      windowMs: ZELLER_AUTO_RECOVERY_WINDOW_MS,
     };
   }
   return null;

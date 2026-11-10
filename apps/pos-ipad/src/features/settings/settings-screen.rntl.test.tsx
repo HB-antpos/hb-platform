@@ -49,6 +49,7 @@ import {
   DEFAULT_RECEIPT_PRINTER_SETTINGS,
   type ReceiptPrinterSettings,
 } from "@/core/db/pos-settings-repository";
+import { ZellerTerminalBoundaryContext } from "@/features/zeller-terminal/zeller-terminal-boundary";
 import { usePosSound } from "@/ui/feedback/pos-sound-context";
 import { posColors } from "@/ui/theme";
 
@@ -1024,6 +1025,89 @@ describe("SettingsScreen", () => {
         pairCode: "654321",
       },
     ]);
+  });
+
+  it("没有提供 Zeller 终端时不出现 Zeller 页签", async () => {
+    const port = new ScreenSettingsPort();
+    port.linklySetup.lineManagementSupported = true;
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(<SettingsScreen locale="zh" presenter={presenter} />);
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    expect(screen.getByTestId("settings-payment-tab-linkly")).toBeTruthy();
+    expect(screen.queryByTestId("settings-payment-tab-zeller")).toBeNull();
+  });
+
+  it("提供 Zeller 终端后出现 Zeller 页签，点开才加载 SDK", async () => {
+    const port = new ScreenSettingsPort();
+    port.linklySetup.lineManagementSupported = true;
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const activate = jest.fn();
+    const screen = await render(
+      <ZellerTerminalBoundaryContext.Provider value={{ state: { status: "idle" }, activate }}>
+        <SettingsScreen locale="zh" presenter={presenter} />
+      </ZellerTerminalBoundaryContext.Provider>,
+    );
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    expect(screen.getByTestId("settings-payment-tab-zeller")).toBeTruthy();
+    // 只是看到页签，还没点开：不加载 SDK。
+    expect(activate).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("settings-zeller-panel")).toBeNull();
+
+    await fireEvent.press(screen.getByTestId("settings-payment-tab-zeller"));
+    await waitFor(() => expect(activate).toHaveBeenCalled());
+    expect(screen.getByTestId("settings-zeller-panel")).toBeTruthy();
+  });
+
+  it("Zeller 页签：不显示环境切换和 Square / Linkly 的启用与保存，当前启用的通道不变", async () => {
+    const port = new ScreenSettingsPort();
+    port.linklySetup.lineManagementSupported = true;
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const terminal = {
+      initialise: jest.fn(() => Promise.resolve(true)),
+      setup: jest.fn(() => Promise.resolve(true)),
+      purchase: jest.fn(),
+      refund: jest.fn(),
+      getTransactions: jest.fn(),
+    };
+    const screen = await render(
+      <ZellerTerminalBoundaryContext.Provider
+        value={{ state: { status: "ready", terminal: terminal as never }, activate: jest.fn() }}
+      >
+        <SettingsScreen locale="zh" presenter={presenter} />
+      </ZellerTerminalBoundaryContext.Provider>,
+    );
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    // 小圆点标在当前启用的 Square 上。
+    expect(screen.getByTestId("settings-payment-tab-square-active")).toBeTruthy();
+    expect(screen.queryByTestId("settings-payment-tab-zeller-active")).toBeNull();
+
+    await fireEvent.press(screen.getByTestId("settings-payment-tab-zeller"));
+    expect(screen.getByTestId("settings-zeller-environment-note").props.children).toBe(
+      "Zeller 只有正式环境，没有测试环境",
+    );
+    expect(screen.queryByTestId("settings-payment-save")).toBeNull();
+    expect(screen.queryByTestId("settings-payment-provider-linkly")).toBeNull();
+    expect(screen.queryByTestId("settings-square-location-load")).toBeNull();
+
+    // 打开页签自动查一次配对；已配对但收款未接入，所以不能启用，通道保持 Square。
+    await waitFor(() =>
+      expect(screen.getByTestId("settings-zeller-status").props.children).toBe("已配对"),
+    );
+    expect(terminal.initialise).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("settings-zeller-active-provider").props.children).toBe("Square");
+    expect(
+      screen.getByTestId("settings-zeller-enable").props.accessibilityState.disabled,
+    ).toBe(true);
+    expect(presenter.getState().paymentProviderDraft).toBe("square");
+    expect(screen.getByTestId("settings-payment-tab-square-active")).toBeTruthy();
+
+    // 切回 Square：原有的环境切换、保存按钮都回来。
+    await fireEvent.press(screen.getByTestId("settings-payment-tab-square"));
+    expect(screen.queryByTestId("settings-zeller-panel")).toBeNull();
+    expect(screen.getByTestId("settings-payment-save")).toBeTruthy();
   });
 
   it("管理标签不启用支付；每条线路独立重新配对，切换清空输入", async () => {

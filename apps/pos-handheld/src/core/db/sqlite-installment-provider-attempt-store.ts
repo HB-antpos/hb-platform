@@ -118,7 +118,8 @@ type PreparedOriginalTenderEvidence = Readonly<{
   sourceAttemptId: string;
   method: "cash" | "card" | "voucher";
   amountCents: number;
-  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | null;
+  // 与 installment_original_tender_evidence 的 CHECK（M55）一致，zeller 在那里已经放行。
+  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | "zeller" | null;
   provenance: "local-approved-attempt" | "hbpos-protected-details";
   ciphertext: Uint8Array;
   createdAtIso: string;

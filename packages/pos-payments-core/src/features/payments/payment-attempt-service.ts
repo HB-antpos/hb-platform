@@ -1,4 +1,5 @@
 import { deriveLinklyAttemptTxnRef } from "./linkly-attempt-txn-ref";
+import { deriveZellerAttemptReference } from "./zeller/zeller-payment-reference";
 import { paymentProviderAmountCents } from "./payment-amount";
 
 import { normalizeCardSyncEvidence, type CardSyncEvidenceV1, type OnlinePaymentPort, type PaymentAttempt, type PaymentOperation, type PaymentProvider, type PaymentProviderReferences, type PaymentProviderResult } from "@hb/pos-domain/core/contracts/payment";
@@ -587,7 +588,9 @@ export class PaymentAttemptService {
       // Created → Submitted 的 CAS 成功后才能第一次越过 provider 边界。
       // 中文注释：Linkly 的 TxnRef 由 attempt 身份派生，必须随这次 CAS 一起耐久化——此后 create 响应丢失
       // （断网、App 被挂起或被杀）时，恢复只能靠这个顶层 TxnRef 认领后端会话（对齐 WPF #260）。
-      const submitted = withLinklyAttemptTxnRef(
+      // Zeller 同理：发给 Zeller 的 reference（HBZ-…）也由 attempt 身份派生并随这次 CAS 落库，
+      // 它是崩溃后按 reference 查回交易的唯一线索（Zeller 不对 reference 去重，绝不能事后再补）。
+      const submitted = withDerivedAttemptReference(
         transition(
           attempt,
           "Submitted",
@@ -1041,14 +1044,20 @@ function referencesBeforeProviderMerge(
 }
 
 /**
- * linkly-cloud 的 attempt 在越过 provider 边界前预置由 attemptId 派生的 TxnRef；
+ * linkly-cloud 与 zeller 的 attempt 在越过 provider 边界前预置由 attemptId 派生的引用；
+ * 下面这句是 linkly-cloud 的说明：
  * attemptId 不是标准 GUID（历史数据/测试替身）或已带引用时原样返回，沿用旧的 UID 认领路径。
  */
-function withLinklyAttemptTxnRef(attempt: PaymentAttempt): PaymentAttempt {
-  if (attempt.provider !== "linkly-cloud" || attempt.references.txnRef !== null) {
-    return attempt;
-  }
-  const txnRef = deriveLinklyAttemptTxnRef(attempt);
+function withDerivedAttemptReference(attempt: PaymentAttempt): PaymentAttempt {
+  if (attempt.references.txnRef !== null) return attempt;
+  const txnRef =
+    attempt.provider === "linkly-cloud"
+      ? deriveLinklyAttemptTxnRef(attempt)
+      : attempt.provider === "zeller"
+        ? // 中文注释：zeller 的 txnRef 存发给 Zeller 的 reference；Zeller 返回的 transactionUuid 批准后存 paymentId。
+          // attemptId 不是标准 GUID 时派生不出来，保持为空，由 Zeller 适配器拒绝提交（不向刷卡机发请求）。
+          deriveZellerAttemptReference(attempt)
+        : null;
   return txnRef === null
     ? attempt
     : { ...attempt, references: { ...attempt.references, txnRef } };
@@ -1082,7 +1091,8 @@ function trustedRefundSeedInput(
 ): TrustedRefundReferenceSeedInput {
   if (
     attempt.operation !== "refund" ||
-    (attempt.provider === "voucher" || attempt.provider === "manual-card")
+    // zeller 的原路退款还没有接入：没有可信的原交易引用种子格式，一律失败关闭。
+    (attempt.provider === "voucher" || attempt.provider === "manual-card" || attempt.provider === "zeller")
   ) {
     throw new PaymentAttemptReferenceSeedError(
       "TRUSTED_REFUND_REFERENCE_SEED_INVALID",
@@ -1119,7 +1129,8 @@ function applyTrustedRefundReferenceSeed(
 ): PaymentAttempt {
   if (
     attempt.operation !== "refund" ||
-    (attempt.provider === "voucher" || attempt.provider === "manual-card")
+    // zeller 的原路退款还没有接入：没有可信的原交易引用种子格式，一律失败关闭。
+    (attempt.provider === "voucher" || attempt.provider === "manual-card" || attempt.provider === "zeller")
   ) {
     throw new PaymentAttemptReferenceSeedError(
       "TRUSTED_REFUND_REFERENCE_SEED_INVALID",

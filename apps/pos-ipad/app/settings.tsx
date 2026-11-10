@@ -1,6 +1,6 @@
 import { resolveSyncHistoryAccess } from "@hb/pos-sync";
 import { Redirect, type Href, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { getApiEntryModeCoordinator } from "@/core/api/api-entry-mode-store";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
@@ -16,6 +16,7 @@ import {
   SettingsUnavailableScreen,
   type SettingsPresenter,
 } from "@/features/settings";
+import { ZellerSettingsBoundary } from "@/features/zeller-terminal/zeller-settings-boundary";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 
 type SettingsBinding = Readonly<{
@@ -52,6 +53,10 @@ export default function SettingsRoute() {
     : null;
   const [binding, setBinding] = useState<SettingsBinding | null>(null);
   const [runtimeUnavailable, setRuntimeUnavailable] = useState(false);
+  const openNetworkCheck = useMemo(
+    () => () => router.push("/network-check" as Href),
+    [router],
+  );
   const presenter =
     binding?.services === runtime.services &&
     binding.cashier === activeCashier
@@ -143,11 +148,13 @@ export default function SettingsRoute() {
   }
 
   return (
+    // 提供了 Zeller 终端，设置页的「支付设置」才会出现 Zeller 页签（正式版暂不提供）。
+    <ZellerSettingsBoundary onOpenNetworkCheck={openNetworkCheck}>
     <SettingsScreen
       // 收银入口（线路）设置：与运行时共用同一个进程内协调器，手动覆盖才能压过后台下发值。
       apiEntry={getApiEntryModeCoordinator()}
       onBack={() => router.dismissTo("/sales" as Href)}
-      onOpenNetworkCheck={() => router.push("/network-check" as Href)}
+      onOpenNetworkCheck={openNetworkCheck}
       {...(syncHistoryAccess.canView
         ? { onOpenSyncHistory: () => router.push("/sync-history" as Href) }
         : {})}
@@ -156,5 +163,6 @@ export default function SettingsRoute() {
         ? { scanner: runtime.services.scanner.router }
         : {})}
     />
+    </ZellerSettingsBoundary>
   );
 }
