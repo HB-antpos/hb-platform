@@ -12,6 +12,11 @@ React Native 0.81 的 `RCTRootViewFactory` 提供
 `ExpoAppDelegate.factory.rootViewFactory` 创建 `HBExternalDisplay` root view，
 并用 registration/rendered 两阶段 handshake 消除 scene 早于 JavaScript 注册的竞态。
 
+注意：必须调用 `ExpoReactRootViewFactory.superView(withModuleName:...)`，不能调用
+`view(withModuleName:...)`。后者会重新进入 Expo ReactDelegate handler 链，
+expo-updates 会把它当成“主 root 启动”再次执行 `AppController.start()`，
+release 包里触发 `precondition` 闪退（0.2.0 (13) 真机接外屏即崩溃的根因）。
+
 ## 后续挂载点
 
 1. 用 iPad 真机和 USB-C/HDMI 外屏验证冷启动、热插拔、分辨率变化和断线。
