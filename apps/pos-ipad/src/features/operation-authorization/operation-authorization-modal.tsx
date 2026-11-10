@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   useCallback,
   useEffect,
@@ -6,14 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import {
-  ActivityIndicator,
-  Modal,
-  StyleSheet,
-  Text,
-  View,
-  type TextInput,
-} from "react-native";
+import { Modal, StyleSheet, Text, View, type TextInput } from "react-native";
 
 import {
   operationAuthorizationActionCopyKey,
@@ -27,12 +21,13 @@ import type {
   OperationAuthorizationService,
 } from "./operation-authorization-service";
 
+import { PosButton } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 export const OPERATION_AUTHORIZATION_MIN_TOUCH_TARGET = 44;
 
@@ -48,6 +43,7 @@ export function OperationAuthorizationModal({
   locale?: string;
   service: OperationAuthorizationModalService;
 }>) {
+  usePosThemeVersion();
   const subscribe = useCallback(
     (notify: () => void) => service.subscribe(() => notify()),
     [service],
@@ -298,110 +294,142 @@ export function OperationAuthorizationModal({
           style={styles.backdropDismissArea}
           testID="operation-authorization-backdrop"
         />
-        <PosKeyboardAwareScrollView
-          contentContainerStyle={styles.panelContent}
-          showsVerticalScrollIndicator={false}
-          style={styles.panel}
-          testID="operation-authorization-keyboard-scroll"
-        >
-          <View style={styles.accent} />
-          <Text style={styles.eyebrow}>{t("eyebrow")}</Text>
-          <Text style={styles.title}>{t("title")}</Text>
-          <Text style={styles.description}>{t("description")}</Text>
-          <Text numberOfLines={2} style={styles.requestedAction}>
-            {t("requestedAction", { action: actionLabel })}
-          </Text>
-
-          <Text style={styles.inputLabel}>{t("inputLabel")}</Text>
-          <View style={styles.inputRow}>
-            <PosKeyboardAwareTextInput
-              ref={inputRef}
-              accessibilityLabel={t("inputLabel")}
-              autoCapitalize="none"
-              autoComplete="off"
-              autoCorrect={false}
-              autoFocus
-              blurOnSubmit={false}
-              editable={!verifying}
-              onBlur={resetToScannerMode}
-              onChangeText={handleChangeText}
-              onSubmitEditing={(event) =>
-                void submitBarcode(event.nativeEvent.text || barcode)
-              }
-              placeholder={t("inputHint")}
-              returnKeyType="done"
-              secureTextEntry
-              selectTextOnFocus={false}
-              showSoftInputOnFocus={showSoftInputOnFocus}
-              style={[styles.input, verifying && styles.inputDisabled]}
-              testID="operation-authorization-barcode"
-              textContentType="none"
-              value={barcode}
-            />
-            <PosPressable
-              accessibilityLabel={t("keyboard")}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: verifying }}
-              disabled={verifying}
-              onPress={requestManualKeyboard}
-              sound="navigate"
-              style={({ pressed }) => [
-                styles.keyboardButton,
-                (pressed || verifying) && styles.buttonPressed,
-              ]}
-              testID="operation-authorization-show-keyboard"
-            >
-              <Text style={styles.keyboardLabel}>{t("keyboard")}</Text>
-            </PosPressable>
-          </View>
-
-          {feedbackKey ? (
-            <View
-              accessibilityLiveRegion="polite"
-              accessibilityRole="alert"
-              style={styles.feedback}
-              testID="operation-authorization-feedback"
-            >
-              <Text style={styles.feedbackText}>{t(feedbackKey)}</Text>
-            </View>
-          ) : null}
-
-          <Text style={styles.privacy}>{t("privacy")}</Text>
-          <View style={styles.actions}>
-            <PosPressable
-              accessibilityRole="button"
-              onPress={cancel}
-              sound="navigate"
-              style={({ pressed }) => [
-                styles.button,
-                styles.cancelButton,
-                pressed && styles.buttonPressed,
-              ]}
-              testID="operation-authorization-cancel"
-            >
-              <Text style={styles.cancelLabel}>{t("cancel")}</Text>
-            </PosPressable>
-            <PosPressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: verifying }}
-              disabled={verifying}
-              onPress={() => void submitBarcode(barcode)}
-              style={({ pressed }) => [
-                styles.button,
-                styles.submitButton,
-                (pressed || verifying) && styles.buttonPressed,
-              ]}
-              testID="operation-authorization-submit"
-            >
-              {verifying ? (
-                <ActivityIndicator color="#FFFFFF" size="small" />
-              ) : null}
-              <Text style={styles.submitLabel}>
-                {t(verifying ? "verifying" : "submit")}
+        {/* 居中弹窗：外层只负责圆角与投影，输入仍在键盘感知滚动容器里。 */}
+        <View style={styles.panelFrame}>
+          <PosKeyboardAwareScrollView
+            contentContainerStyle={styles.panelContent}
+            showsVerticalScrollIndicator={false}
+            style={styles.panel}
+            testID="operation-authorization-keyboard-scroll"
+          >
+            <Text style={styles.eyebrow}>{t("eyebrow")}</Text>
+            <Text accessibilityRole="header" style={styles.title}>
+              {t("title")}
+            </Text>
+            <Text style={styles.description}>{t("description")}</Text>
+            {/* 黄色条写明在批准哪一项，主管扫码前先看清。 */}
+            <View style={styles.requestedAction}>
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.yellowInk}
+                name="shield-account-outline"
+                size={24}
+              />
+              <Text numberOfLines={2} style={styles.requestedActionText}>
+                {t("requestedAction", { action: actionLabel })}
               </Text>
-            </PosPressable>
-          </View>
-        </PosKeyboardAwareScrollView>
+            </View>
+
+            <View>
+              <Text style={styles.inputLabel}>{t("inputLabel")}</Text>
+              <View style={styles.inputRow}>
+                <View style={styles.inputContainer}>
+                  <PosKeyboardAwareTextInput
+                    ref={inputRef}
+                    accessibilityLabel={t("inputLabel")}
+                    autoCapitalize="none"
+                    autoComplete="off"
+                    autoCorrect={false}
+                    autoFocus
+                    blurOnSubmit={false}
+                    editable={!verifying}
+                    onBlur={resetToScannerMode}
+                    onChangeText={handleChangeText}
+                    onSubmitEditing={(event) =>
+                      void submitBarcode(event.nativeEvent.text || barcode)
+                    }
+                    placeholder={t("inputHint")}
+                    placeholderTextColor={posColors.placeholder}
+                    returnKeyType="done"
+                    secureTextEntry
+                    selectTextOnFocus={false}
+                    showSoftInputOnFocus={showSoftInputOnFocus}
+                    style={[
+                      styles.input,
+                      // 占位提示用正文字号；有内容后放大遮罩圆点并拉开间距。
+                      barcode.length > 0 && styles.inputFilled,
+                      verifying && styles.inputDisabled,
+                    ]}
+                    testID="operation-authorization-barcode"
+                    textContentType="none"
+                    value={barcode}
+                  />
+                  <View pointerEvents="none" style={styles.inputIcon}>
+                    <MaterialCommunityIcons
+                      accessible={false}
+                      color={verifying ? posColors.disabledInk : posColors.ink}
+                      name="barcode-scan"
+                      size={32}
+                    />
+                  </View>
+                </View>
+                <PosPressable
+                  accessibilityLabel={t("keyboard")}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: verifying }}
+                  disabled={verifying}
+                  onPress={requestManualKeyboard}
+                  sound="navigate"
+                  style={({ pressed }) => [
+                    styles.keyboardButton,
+                    verifying && styles.keyboardButtonDisabled,
+                    pressed && !verifying && styles.pressed,
+                  ]}
+                  testID="operation-authorization-show-keyboard"
+                >
+                  <MaterialCommunityIcons
+                    accessible={false}
+                    color={verifying ? posColors.disabledInk : posColors.ink}
+                    name="keyboard-outline"
+                    size={32}
+                  />
+                </PosPressable>
+              </View>
+
+              {feedbackKey ? (
+                <View
+                  accessibilityLiveRegion="polite"
+                  accessibilityRole="alert"
+                  style={styles.feedback}
+                  testID="operation-authorization-feedback"
+                >
+                  <MaterialCommunityIcons
+                    accessible={false}
+                    color={posColors.red}
+                    name="alert-circle-outline"
+                    size={24}
+                  />
+                  <Text style={styles.feedbackText}>{t(feedbackKey)}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <Text style={styles.privacy}>{t("privacy")}</Text>
+            <View style={styles.actions}>
+              {/* 核验期间「取消」保持可点，随时可以放弃本次授权。 */}
+              <PosButton
+                label={t("cancel")}
+                onPress={cancel}
+                size="large"
+                sound="navigate"
+                style={styles.cancelButton}
+                testID="operation-authorization-cancel"
+              />
+              <PosButton
+                // loading 只负责转圈；无障碍状态沿用原来的 { disabled }。
+                accessibilityState={{ disabled: verifying }}
+                fill
+                icon="shield-check-outline"
+                label={t(verifying ? "verifying" : "submit")}
+                loading={verifying}
+                onPress={() => void submitBarcode(barcode)}
+                size="large"
+                testID="operation-authorization-submit"
+                tone="primary"
+              />
+            </View>
+          </PosKeyboardAwareScrollView>
+        </View>
       </View>
     </Modal>
   );
@@ -433,10 +461,13 @@ function samePublicState(
   );
 }
 
-const styles = StyleSheet.create({
+/** 主管条码输入框与键盘方键的统一高度。 */
+const BARCODE_FIELD_HEIGHT = 76;
+
+const styles = createPosStyles((colors) => ({
   overlay: {
     alignItems: "center",
-    backgroundColor: "rgba(16, 37, 58, 0.74)",
+    backgroundColor: colors.overlay,
     flex: 1,
     justifyContent: "center",
     padding: 32,
@@ -444,126 +475,138 @@ const styles = StyleSheet.create({
   backdropDismissArea: {
     ...StyleSheet.absoluteFillObject,
   },
-  panel: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderWidth: 1,
+  panelFrame: {
+    backgroundColor: colors.canvas,
+    borderRadius: 16,
+    // 键盘弹出、可用高度不够时整体收缩，由内部滚动容器滚动。
+    flexShrink: 1,
     maxWidth: 640,
+    shadowColor: colors.shadow,
+    shadowOffset: { height: 24, width: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 30,
     width: "100%",
   },
-  panelContent: {
-    padding: 36,
+  panel: {
+    borderRadius: 16,
+    // 弹窗高度跟随内容，不撑满整屏。
+    flexGrow: 0,
   },
-  accent: {
-    backgroundColor: posColors.orange,
-    height: 5,
-    left: 0,
-    position: "absolute",
-    right: 0,
-    top: 0,
+  panelContent: {
+    gap: 14,
+    padding: 22,
   },
   eyebrow: {
-    color: posColors.orange,
+    color: colors.accent,
     fontSize: 13,
     fontWeight: "900",
-    letterSpacing: 1.4,
-    marginBottom: 10,
+    letterSpacing: 2,
   },
-  title: { color: posColors.ink, fontSize: 29, fontWeight: "800" },
+  title: { color: colors.ink, fontSize: 26, fontWeight: "900" },
   description: {
-    color: posColors.mutedInk,
-    fontSize: 17,
-    lineHeight: 25,
-    marginTop: 10,
+    color: colors.mutedInk,
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 23,
   },
   requestedAction: {
-    backgroundColor: posColors.blueSoft,
-    color: posColors.blue,
-    fontSize: 15,
-    fontWeight: "700",
-    lineHeight: 21,
-    marginTop: 20,
+    alignItems: "center",
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
   },
-  inputLabel: {
-    color: posColors.ink,
+  requestedActionText: {
+    color: colors.yellowInk,
+    flex: 1,
     fontSize: 15,
     fontWeight: "800",
-    marginBottom: 8,
-    marginTop: 24,
+    lineHeight: 21,
   },
-  input: {
-    backgroundColor: "#FFFDF8",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    color: posColors.ink,
-    flex: 1,
-    fontSize: 22,
-    minHeight: 56,
-    paddingHorizontal: 16,
+  inputLabel: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 5,
   },
   inputRow: {
-    alignItems: "stretch",
     flexDirection: "row",
     gap: 10,
   },
-  inputDisabled: { backgroundColor: "#F1F0EC", color: posColors.mutedInk },
+  inputContainer: { flex: 1, minWidth: 0 },
+  input: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "600",
+    minHeight: BARCODE_FIELD_HEIGHT,
+    paddingLeft: 62,
+    paddingRight: 18,
+  },
+  inputFilled: { fontSize: 26, fontWeight: "900", letterSpacing: 6 },
+  inputDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+    color: colors.disabledInk,
+  },
+  inputIcon: {
+    bottom: 0,
+    justifyContent: "center",
+    left: 18,
+    position: "absolute",
+    top: 0,
+  },
   keyboardButton: {
     alignItems: "center",
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.border,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 1.5,
     justifyContent: "center",
-    minHeight: 56,
-    minWidth: 124,
-    paddingHorizontal: 16,
+    minHeight: BARCODE_FIELD_HEIGHT,
+    minWidth: BARCODE_FIELD_HEIGHT,
   },
-  keyboardLabel: {
-    color: posColors.blue,
-    fontSize: 15,
-    fontWeight: "800",
+  keyboardButtonDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
   },
+  pressed: { opacity: 0.72 },
   feedback: {
-    backgroundColor: posColors.redSoft,
-    borderLeftColor: posColors.red,
-    borderLeftWidth: 3,
-    marginTop: 14,
-    padding: 12,
+    alignItems: "center",
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   feedbackText: {
-    color: posColors.red,
+    color: colors.red,
+    flex: 1,
     fontSize: 15,
     fontWeight: "700",
     lineHeight: 21,
   },
   privacy: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 16,
+    color: colors.mutedInk,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 18,
   },
   actions: {
     flexDirection: "row",
     gap: 12,
-    justifyContent: "flex-end",
-    marginTop: 26,
+    marginTop: 4,
   },
-  button: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "center",
-    minHeight: 50,
-    minWidth: 150,
-    paddingHorizontal: 20,
-  },
-  cancelButton: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderWidth: 1,
-  },
-  submitButton: { backgroundColor: posColors.orange, gap: 9 },
-  buttonPressed: { opacity: 0.62 },
-  cancelLabel: { color: posColors.ink, fontSize: 16, fontWeight: "800" },
-  submitLabel: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
-});
+  cancelButton: { width: 180 },
+}));

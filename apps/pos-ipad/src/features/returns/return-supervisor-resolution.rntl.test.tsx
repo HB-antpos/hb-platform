@@ -12,9 +12,11 @@ import {
 } from "@hb/pos-domain/features/returns/return-workflow";
 import { ReturnScreen } from "./return-screen";
 
+// 页面外壳的顶栏通过 t() 取全局文案，这里原样返回键名即可。
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "en", resolvedLanguage: "en" },
+    t: (key: string) => key,
   }),
 }));
 

@@ -23,7 +23,6 @@ import {
   type ViewStyle,
   type TextInput as NativeTextInput,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   drawerWarningCopyKey,
@@ -53,11 +52,6 @@ import {
   SalesSearchKeyboard,
   type SalesSearchKey,
 } from "./sales-search-keyboard";
-import { SalesToolbar, type SalesToolbarAction } from "./sales-toolbar";
-import {
-  DEFAULT_SALES_TOOLBAR_ORDER,
-  type SalesToolbarActionId,
-} from "./sales-toolbar-order";
 
 import type { CartLine, CartSnapshot } from "@/core/contracts";
 import type { NewTransactionGate } from "@/core/contracts/app-updates";
@@ -68,6 +62,7 @@ import {
   CameraScannerModal,
   type CameraScannerPort,
 } from "@/features/scanner-camera";
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
@@ -75,9 +70,17 @@ import {
 import { PosPanResponderView } from "@/ui/controls/pos-pan-responder-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { PosSwitch } from "@/ui/controls/pos-switch";
+import {
+  type PosNavEntry,
+  type PosNavModel,
+} from "@/ui/shell/pos-app-rail";
+import {
+  DEFAULT_PINNED_DESTINATIONS,
+  type PosDestinationId,
+} from "@/ui/shell/pos-navigation";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { PosStatusStrip } from "@/ui/shell/status-strip";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 const QUICK_DISCOUNTS = [0, 1_000, 2_000, 3_000, 4_000, 5_000] as const;
 const QUICK_ORDER_DISCOUNTS = [1_000, 2_000, 3_000, 4_000, 5_000] as const;
@@ -152,12 +155,14 @@ export type SalesScreenProps = Readonly<{
   onOpenSpecialProducts?: () => void;
   onOpenSyncHistory?: () => void;
   onSwitchLanguage?: () => void;
-  onToolbarOrderChange?: (order: readonly SalesToolbarActionId[]) => void;
+  /** 固定到左侧栏的入口发生变化（在「全部功能」面板里点了图钉）。 */
+  onPinnedDestinationsChange?: (pinned: PosDestinationId[]) => void;
   onManualInputFocusChange?: (focused: boolean) => void;
   /** 原生版本号与 build 号（路由层读取），显示在头部，便于门店报告问题时核对安装的包。 */
   appVersionLabel?: string;
   showStatusStrip?: boolean;
-  toolbarOrder?: readonly SalesToolbarActionId[];
+  /** 固定到左侧栏的入口；不传用默认的五个常用入口。 */
+  pinnedDestinations?: readonly PosDestinationId[];
 }>;
 
 type ActionButtonProps = Readonly<{
@@ -169,6 +174,9 @@ type ActionButtonProps = Readonly<{
   testID?: string;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
+  icon?: PosIconName;
+  /** 对应 posTouch：primary 88 / large 72 / button 64 / medium 56（默认）/ small 48。 */
+  size?: "primary" | "large" | "button" | "medium" | "small";
 }>;
 
 type NumericValueDisplayProps = Readonly<{
@@ -204,11 +212,12 @@ export function SalesScreen({
   onOpenSpecialProducts,
   onOpenSyncHistory,
   onSwitchLanguage,
-  onToolbarOrderChange = () => undefined,
+  onPinnedDestinationsChange,
   onManualInputFocusChange,
   showStatusStrip = true,
-  toolbarOrder = DEFAULT_SALES_TOOLBAR_ORDER,
+  pinnedDestinations = DEFAULT_PINNED_DESTINATIONS,
 }: SalesScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -230,7 +239,6 @@ export function SalesScreen({
     quick50: t("keypad.quick50"),
     quick99: t("keypad.quick99"),
   };
-  const [discountLineId, setDiscountLineId] = useState<string | null>(null);
   const [openItemVisible, setOpenItemVisible] = useState(false);
   const [openItemPrice, setOpenItemPrice] = useState("");
   const [lineEdit, setLineEdit] = useState<LineEditState | null>(null);
@@ -872,7 +880,6 @@ export function SalesScreen({
         item={item}
         locale={locale}
         onDecrease={handleDecreaseCartLine}
-        onDiscount={setDiscountLineId}
         onEdit={openLineEditor}
         onIncrease={handleIncreaseCartLine}
         onRemove={handleRemoveCartLine}
@@ -904,19 +911,37 @@ export function SalesScreen({
 
   if (state.phase === "success" && state.success) {
     return (
-      <SafeAreaView style={styles.safeArea} testID="sales-screen">
+      <PosScreenFrame
+        appVersionLabel={appVersionLabel ?? null}
+        language={locale}
+        {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
+        rail="none"
+        testID="sales-screen"
+        topBar={showStatusStrip ? undefined : false}
+      >
         <View style={styles.successScreen} testID="sales-success">
-          <View style={styles.successMark}>
-            <Text style={styles.successMarkText}>✓</Text>
+          <View style={styles.successBanner}>
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.green}
+              name="check-circle"
+              size={76}
+            />
+            <View style={styles.successCopy}>
+              <Text style={styles.successEyebrow}>{t("success.eyebrow")}</Text>
+              <Text style={styles.successTitle}>{t("success.title")}</Text>
+              <Text numberOfLines={1} style={styles.successOrder}>
+                {t("success.order", { orderGuid: state.success.orderGuid })}
+              </Text>
+            </View>
           </View>
-          <Text style={styles.successEyebrow}>{t("success.eyebrow")}</Text>
-          <Text style={styles.successTitle}>{t("success.title")}</Text>
-          <Text style={styles.successOrder}>
-            {t("success.order", { orderGuid: state.success.orderGuid })}
-          </Text>
           <View style={styles.changeCard}>
             <Text style={styles.changeLabel}>{t("success.change")}</Text>
-            <Text style={styles.changeAmount}>
+            <Text
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              style={styles.changeAmount}
+            >
               {formatAud(state.success.changeCents, locale)}
             </Text>
           </View>
@@ -939,29 +964,36 @@ export function SalesScreen({
           ) : null}
           <ActionButton
             disabled={!state.success.clearCartSignalled}
+            icon="arrow-right-circle"
             label={t("success.newSale")}
             onPress={() => presenter.startNewSale()}
+            size="primary"
             style={styles.successAction}
             testID="sales-new-sale"
           />
         </View>
-        {showStatusStrip ? (
-          <PosStatusStrip
-            language={locale}
-            {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
-            showTerminalIdentity
-          />
-        ) : null}
-      </SafeAreaView>
+      </PosScreenFrame>
     );
   }
 
   if (state.phase === "locked") {
     return (
-      <SafeAreaView style={styles.safeArea} testID="sales-screen">
+      <PosScreenFrame
+        appVersionLabel={appVersionLabel ?? null}
+        language={locale}
+        {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
+        rail="none"
+        testID="sales-screen"
+        topBar={showStatusStrip ? undefined : false}
+      >
         <View style={styles.lockedScreen} testID="sales-locked">
           <View style={styles.lockIcon}>
-            <Text style={styles.lockIconText}>●</Text>
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.onInverse}
+              name="lock-outline"
+              size={68}
+            />
           </View>
           <Text style={styles.lockedTitle}>{t("locked.title")}</Text>
           <Text style={styles.lockedHint}>{t("locked.hint")}</Text>
@@ -971,14 +1003,7 @@ export function SalesScreen({
             </Text>
           </View>
         </View>
-        {showStatusStrip ? (
-          <PosStatusStrip
-            language={locale}
-            {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
-            showTerminalIdentity
-          />
-        ) : null}
-      </SafeAreaView>
+      </PosScreenFrame>
     );
   }
 
@@ -987,136 +1012,138 @@ export function SalesScreen({
     !state.capabilities.cartEditing ||
     !state.capabilities.cashCheckout;
   const cashDraft = deriveCashDraft(state.cart, state.cashTenderedText);
-  const toolbarActions: readonly SalesToolbarAction[] = [
-    ...(onOpenDailyClose
-      ? [
-          {
-            id: "daily-close" as const,
-            label: t("header.dailyClose"),
-            onPress: onOpenDailyClose,
-            testID: "sales-open-daily-close",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    ...(onOpenRemoteHistory
-      ? [
-          {
-            id: "remote-history" as const,
-            label: t("header.remoteHistory"),
-            onPress: onOpenRemoteHistory,
-            testID: "sales-open-remote-history",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    ...(onOpenInstallments
-      ? [
-          {
-            id: "installments" as const,
-            label: t("header.installments"),
-            onPress: onOpenInstallments,
-            testID: "sales-open-installments",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    ...(onOpenSettings
-      ? [
-          {
-            id: "settings" as const,
-            label: t("header.settings"),
-            onPress: onOpenSettings,
-            testID: "sales-open-settings",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    ...(onOpenAttendanceAudit
-      ? [
-          {
-            id: "attendance-audit" as const,
-            label: t("header.attendanceAudit"),
-            onPress: onOpenAttendanceAudit,
-            testID: "sales-open-attendance-audit",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    ...(onOpenSyncHistory
-      ? [
-          {
-            id: "sync-history" as const,
-            label: t("header.syncHistory"),
-            onPress: onOpenSyncHistory,
-            testID: "sales-open-sync-history",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    ...(onOpenCatalogMaintenance
-      ? [
-          {
-            id: "catalog-maintenance" as const,
-            label: t("header.catalogMaintenance"),
-            onPress: onOpenCatalogMaintenance,
-            testID: "sales-open-catalog-maintenance",
-            tone: "quiet" as const,
-          },
-        ]
-      : []),
-    {
-      disabled: !state.capabilities.lock,
-      id: "lock",
-      label: t("header.lock"),
-      onPress: () => {
-        void presenter.lockTerminal();
-      },
-      testID: "sales-lock",
-      tone: "quiet",
+  // 左侧栏与「全部功能」面板的入口：路由层没给回调（没权限）的入口不出现。
+  const navEntries: PosNavEntry[] = [];
+  const addNavEntry = (
+    id: PosDestinationId,
+    labelKey: SalesCopyKey,
+    descriptionKey: SalesCopyKey,
+    onPress: (() => void) | undefined,
+    testID: string,
+  ): void => {
+    if (!onPress) return;
+    navEntries.push({
+      description: t(descriptionKey),
+      id,
+      label: t(labelKey),
+      onPress,
+      testID,
+    });
+  };
+  addNavEntry(
+    "held-orders",
+    "header.heldOrders",
+    "navDesc.heldOrders",
+    onOpenHeldOrders
+      ? () => {
+          // 取单会替换当前购物车：有一码多商品待选时先拦下并展开待选。
+          if (presenter.requireNoPendingLookupSelections()) onOpenHeldOrders();
+        }
+      : undefined,
+    "sales-open-held-orders",
+  );
+  addNavEntry(
+    "returns",
+    "header.returns",
+    "navDesc.returns",
+    onOpenReturns,
+    "sales-open-returns",
+  );
+  addNavEntry(
+    "installments",
+    "header.installments",
+    "navDesc.installments",
+    onOpenInstallments,
+    "sales-open-installments",
+  );
+  addNavEntry(
+    "payment-recovery",
+    "functions.paymentRecovery",
+    "navDesc.paymentRecovery",
+    onOpenPaymentRecovery,
+    "sales-open-payment-recovery",
+  );
+  addNavEntry(
+    "local-history",
+    "functions.localHistory",
+    "navDesc.localHistory",
+    onOpenLocalHistory,
+    "sales-open-local-history",
+  );
+  addNavEntry(
+    "remote-history",
+    "header.remoteHistory",
+    "navDesc.remoteHistory",
+    onOpenRemoteHistory,
+    "sales-open-remote-history",
+  );
+  addNavEntry(
+    "sync-history",
+    "header.syncHistory",
+    "navDesc.syncHistory",
+    onOpenSyncHistory,
+    "sales-open-sync-history",
+  );
+  addNavEntry(
+    "daily-close",
+    "header.dailyClose",
+    "navDesc.dailyClose",
+    onOpenDailyClose,
+    "sales-open-daily-close",
+  );
+  addNavEntry(
+    "attendance-audit",
+    "header.attendanceAudit",
+    "navDesc.attendanceAudit",
+    onOpenAttendanceAudit,
+    "sales-open-attendance-audit",
+  );
+  addNavEntry(
+    "catalog-maintenance",
+    "header.catalogMaintenance",
+    "navDesc.catalogMaintenance",
+    onOpenCatalogMaintenance,
+    "sales-open-catalog-maintenance",
+  );
+  addNavEntry(
+    "settings",
+    "header.settings",
+    "navDesc.settings",
+    onOpenSettings,
+    "sales-open-settings",
+  );
+  const navModel: PosNavModel = {
+    entries: navEntries,
+    lockDisabled: !state.capabilities.lock,
+    lockTestID: "sales-lock",
+    onLock: () => {
+      void presenter.lockTerminal();
     },
-  ];
+    pinned: pinnedDestinations,
+    ...(onPinnedDestinationsChange
+      ? { onPinnedChange: onPinnedDestinationsChange }
+      : {}),
+    ...(onSwitchLanguage ? { onSwitchLanguage } : {}),
+  };
+  const cartEditingDisabled =
+    cartEmpty || !state.capabilities.cartEditing || transactionActionsDisabled;
+  const editingLine = lineEdit
+    ? (state.cart.lines.find((line) => line.lineId === lineEdit.lineId) ?? null)
+    : null;
+  const editingLineNumber = editingLine
+    ? state.cart.lines.indexOf(editingLine) + 1
+    : 0;
 
   return (
-    <SafeAreaView style={styles.safeArea} testID="sales-screen">
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.brand}>{t("app.title")}</Text>
-          <Text style={styles.workspace}>{t("app.workspace")}</Text>
-          {appVersionLabel ? (
-            <Text
-              numberOfLines={1}
-              selectable={false}
-              style={styles.appVersion}
-              testID="sales-app-version"
-            >
-              {appVersionLabel}
-            </Text>
-          ) : null}
-        </View>
-        <SalesToolbar
-          accessibilityCopy={{
-            moveEarlier: t("toolbar.moveEarlier"),
-            moveLater: t("toolbar.moveLater"),
-            reorderHint: t("toolbar.reorderHint"),
-            positionChanged: (label, position, total) =>
-              t("toolbar.positionChanged", { label, position, total }),
-          }}
-          actions={toolbarActions}
-          canonicalOrder={toolbarOrder}
-          onOrderChange={onToolbarOrderChange}
-          style={styles.headerActions}
-        />
-      </View>
-
-      {showStatusStrip ? (
-        <PosStatusStrip
-          language={locale}
-          {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
-          showTerminalIdentity
-        />
-      ) : null}
-
+    <PosScreenFrame
+      active="sales"
+      appVersionLabel={appVersionLabel ?? null}
+      language={locale}
+      {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
+      rail={navModel}
+      testID="sales-screen"
+      topBar={showStatusStrip ? undefined : false}
+    >
       {runtimeUnavailable ? (
         <View
           accessibilityRole="alert"
@@ -1186,95 +1213,63 @@ export function SalesScreen({
       ) : null}
 
       <View style={styles.workspaceRow}>
-        <View style={styles.transactionPane} testID="sales-transaction-pane">
-          <View style={styles.cartPane}>
-            <View style={styles.cartHeader}>
-              <Text style={styles.paneTitle}>{t("cart.title")}</Text>
-              <Text style={styles.cartCount}>
-                {t("cart.items", { count: state.cart.lines.length })}
-              </Text>
-            </View>
-            {cartEmpty ? (
-              <View style={styles.emptyCart} testID="sales-cart-empty">
-                <Text style={styles.emptyCartIcon}>＋</Text>
-                <Text style={styles.emptyCartTitle}>
-                  {t("cart.emptyTitle")}
-                </Text>
-                <Text style={styles.emptyCartHint}>{t("cart.emptyHint")}</Text>
-              </View>
-            ) : (
-              <FlatList
-                contentContainerStyle={styles.cartList}
-                data={state.cart.lines}
-                initialNumToRender={10}
-                keyExtractor={cartLineKeyExtractor}
-                maxToRenderPerBatch={8}
-                onScrollToIndexFailed={retryCartReveal}
-                ref={cartListRef}
-                removeClippedSubviews
-                renderItem={renderCartLine}
-                style={styles.cartListViewport}
-                testID="sales-cart-list"
-                updateCellsBatchingPeriod={32}
-                windowSize={7}
-              />
-            )}
-          </View>
-
-          <View style={styles.summaryPane} testID="sales-summary-pane">
-            <View style={styles.summaryMetrics}>
-              <Text style={styles.summaryTitle}>{t("summary.title")}</Text>
-              <SummaryRow
-                amount={formatAud(state.cart.subtotal.cents, locale)}
-                label={t("summary.subtotal")}
-              />
-              <SummaryRow
-                amount={`−${formatAud(state.cart.discount.cents, locale)}`}
-                amountTestID="sales-summary-discount-amount"
-                amountTone="danger"
-                label={t("summary.discount")}
-                muted
-              />
-            </View>
-            <View style={styles.summaryTotal}>
-              <Text style={styles.totalLabel}>{t("summary.total")}</Text>
-              <Text
-                adjustsFontSizeToFit
-                minimumFontScale={0.72}
-                numberOfLines={1}
-                style={styles.totalAmount}
-              >
-                {formatAud(state.cart.actualAmount.cents, locale)}
-              </Text>
-            </View>
-            <View style={styles.summaryEditActions}>
+        <View style={styles.cartPane} testID="sales-transaction-pane">
+          <View style={styles.cartHeader}>
+            <Text style={styles.paneTitle}>{t("cart.title")}</Text>
+            <Text style={styles.cartCount}>
+              {t("cart.items", { count: state.cart.lines.length })}
+            </Text>
+            <View style={styles.cartHeaderActions}>
               <ActionButton
-                disabled={
-                  cartEmpty ||
-                  !state.capabilities.cartEditing ||
-                  transactionActionsDisabled
-                }
-                label={t("summary.orderDiscount")}
-                onPress={() => setOrderDiscountVisible(true)}
-                sound="navigate"
-                style={styles.summaryEditAction}
-                testID="sales-order-discount"
-                tone="secondary"
+                disabled={mergeCartDisabled}
+                icon="call-merge"
+                label={t("functions.mergeCart")}
+                onPress={() => {
+                  void presenter.mergeCompatibleLines();
+                }}
+                size="small"
+                testID="sales-merge-cart"
+                tone="quiet"
               />
               <ActionButton
-                disabled={
-                  cartEmpty ||
-                  !state.capabilities.cartEditing ||
-                  transactionActionsDisabled
-                }
+                disabled={cartEditingDisabled}
+                icon="trash-can-outline"
                 label={t("summary.clearCart")}
                 onPress={() => setClearCartVisible(true)}
-                style={styles.summaryEditAction}
+                size="small"
                 testID="sales-clear-cart"
                 tone="danger"
               />
             </View>
           </View>
+          {cartEmpty ? (
+            <View style={styles.emptyCart} testID="sales-cart-empty">
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.mutedInk}
+                name="barcode-scan"
+                size={56}
+              />
+              <Text style={styles.emptyCartTitle}>{t("cart.emptyTitle")}</Text>
+              <Text style={styles.emptyCartHint}>{t("cart.emptyHint")}</Text>
+            </View>
+          ) : (
+            <FlatList
+              contentContainerStyle={styles.cartList}
+              data={state.cart.lines}
+              initialNumToRender={10}
+              keyExtractor={cartLineKeyExtractor}
+              maxToRenderPerBatch={8}
+              onScrollToIndexFailed={retryCartReveal}
+              ref={cartListRef}
+              removeClippedSubviews
+              renderItem={renderCartLine}
+              style={styles.cartListViewport}
+              testID="sales-cart-list"
+              updateCellsBatchingPeriod={32}
+              windowSize={7}
+            />
+          )}
         </View>
 
         <View style={styles.functionPane} testID="sales-function-pane">
@@ -1284,10 +1279,6 @@ export function SalesScreen({
             style={styles.functionScroll}
             testID="sales-function-scroll"
           >
-            <Text style={styles.paneTitle}>{t("functions.title")}</Text>
-            <Text style={styles.functionSectionTitle}>
-              {t("functions.productEntry")}
-            </Text>
             {cameraScanner?.active && cameraScanner.mode === "continuous" ? (
               <CameraScannerInline
                 context="product"
@@ -1313,9 +1304,9 @@ export function SalesScreen({
                   void presenter.addLookupCode();
                 }}
                 placeholder={t("catalog.searchPlaceholder")}
-                placeholderTextColor="#7B8793"
+                placeholderTextColor={posColors.placeholder}
                 returnKeyType="done"
-                selectionColor={posColors.orange}
+                selectionColor={posColors.accent}
                 showSoftInputOnFocus={searchSoftInputOnFocus}
                 style={styles.searchInput}
                 submitBehavior="blurAndSubmit"
@@ -1340,15 +1331,20 @@ export function SalesScreen({
                 testID="sales-show-keyboard"
               />
             </View>
+            <Text style={styles.functionSectionTitle}>
+              {t("functions.productEntry")}
+            </Text>
             <View style={styles.searchActions}>
               <ActionButton
                 disabled={catalogActionsDisabled}
+                icon="tag-plus-outline"
                 label={t("catalog.openItem")}
                 onPress={() => {
                   setOpenItemPrice("");
                   setOpenItemVisible(true);
                   beginNumericInput();
                 }}
+                size="large"
                 sound="navigate"
                 style={styles.searchAction}
                 testID="sales-open-item-button"
@@ -1357,8 +1353,10 @@ export function SalesScreen({
               {onOpenSpecialProducts ? (
                 <ActionButton
                   disabled={catalogActionsDisabled}
+                  icon="star-box-outline"
                   label={t("catalog.specialProducts")}
                   onPress={onOpenSpecialProducts}
+                  size="large"
                   sound="navigate"
                   style={styles.searchAction}
                   testID="sales-open-special-products"
@@ -1373,8 +1371,10 @@ export function SalesScreen({
               >
                 <ActionButton
                   disabled={catalogActionsDisabled}
+                  icon="camera-outline"
                   label={t("catalog.cameraScanner")}
                   onPress={openCameraScanner}
+                  size="button"
                   sound="navigate"
                   style={styles.cameraScannerAction}
                   testID="sales-open-camera-scanner"
@@ -1407,12 +1407,12 @@ export function SalesScreen({
                     testID="sales-camera-mode-toggle"
                     thumbColor={
                       cameraScanner.mode === "continuous"
-                        ? posColors.orange
+                        ? posColors.accent
                         : posColors.surface
                     }
                     trackColor={{
                       false: posColors.border,
-                      true: posColors.orangeSoft,
+                      true: posColors.accentSoft,
                     }}
                     value={cameraScanner.mode === "continuous"}
                   />
@@ -1445,7 +1445,6 @@ export function SalesScreen({
               </>
             )}
 
-            <View style={styles.functionDivider} />
             <Text style={styles.functionSectionTitle}>
               {t("functions.saleActions")}
             </Text>
@@ -1459,78 +1458,41 @@ export function SalesScreen({
                   cartEmpty ||
                   transactionActionsDisabled
                 }
+                icon="pause-circle-outline"
                 label={t("functions.hold")}
                 onPress={() => {
                   void presenter.holdCart();
                 }}
+                size="large"
                 style={styles.functionAction}
                 testID="sales-hold"
                 tone="secondary"
               />
               <ActionButton
-                disabled={mergeCartDisabled}
-                label={t("functions.mergeCart")}
-                onPress={() => {
-                  void presenter.mergeCompatibleLines();
-                }}
+                disabled={cartEditingDisabled}
+                icon="percent-outline"
+                label={t("summary.orderDiscount")}
+                onPress={() => setOrderDiscountVisible(true)}
+                size="large"
+                sound="navigate"
                 style={styles.functionAction}
-                testID="sales-merge-cart"
+                testID="sales-order-discount"
                 tone="secondary"
               />
-              {onOpenReturns ? (
-                <ActionButton
-                  label={t("functions.returns")}
-                  onPress={onOpenReturns}
-                  sound="navigate"
-                  style={styles.functionAction}
-                  testID="sales-open-returns"
-                  tone="secondary"
-                />
-              ) : null}
-              {onOpenPaymentRecovery ? (
-                <ActionButton
-                  label={t("functions.paymentRecovery")}
-                  onPress={onOpenPaymentRecovery}
-                  testID="sales-open-payment-recovery"
-                />
-              ) : null}
-              {onOpenLocalHistory ? (
-                <ActionButton
-                  label={t("functions.localHistory")}
-                  onPress={onOpenLocalHistory}
-                  sound="navigate"
-                  style={styles.functionAction}
-                  testID="sales-open-local-history"
-                  tone="secondary"
-                />
-              ) : null}
-              {onOpenHeldOrders ? (
-                <ActionButton
-                  label={t("functions.heldSales")}
-                  // 取单会替换当前购物车：有一码多商品待选时先拦下并展开待选。
-                  onPress={() => {
-                    if (presenter.requireNoPendingLookupSelections()) {
-                      onOpenHeldOrders();
-                    }
-                  }}
-                  sound="navigate"
-                  style={styles.functionAction}
-                  testID="sales-open-held-orders"
-                  tone="secondary"
-                />
-              ) : null}
               <ActionButton
                 disabled={
                   transactionActionsDisabled ||
                   !onReprintReceipt ||
                   utilityActionPending !== null
                 }
+                icon="printer-outline"
                 label={
                   utilityActionPending === "reprint"
                     ? t("functions.reprinting")
                     : t("functions.reprintReceipt")
                 }
                 onPress={() => runUtilityAction("reprint", onReprintReceipt)}
+                size="large"
                 style={styles.functionAction}
                 testID="sales-reprint-receipt"
                 tone="quiet"
@@ -1541,12 +1503,14 @@ export function SalesScreen({
                   !onOpenCashDrawer ||
                   utilityActionPending !== null
                 }
+                icon="archive-arrow-up-outline"
                 label={
                   utilityActionPending === "drawer"
                     ? t("functions.openingDrawer")
                     : t("functions.openDrawer")
                 }
                 onPress={() => runUtilityAction("drawer", onOpenCashDrawer)}
+                size="large"
                 style={styles.functionAction}
                 testID="sales-open-cash-drawer"
                 tone="quiet"
@@ -1584,6 +1548,31 @@ export function SalesScreen({
               </Text>
             </View>
           ) : null}
+          {/* 应收紧贴收款按钮：眼睛看完金额，手直接落在下面的按钮上。 */}
+          <View style={styles.summaryPane} testID="sales-summary-pane">
+            <SummaryRow
+              amount={formatAud(state.cart.subtotal.cents, locale)}
+              label={t("summary.subtotal")}
+            />
+            <SummaryRow
+              amount={`−${formatAud(state.cart.discount.cents, locale)}`}
+              amountTestID="sales-summary-discount-amount"
+              amountTone="danger"
+              label={t("summary.discount")}
+              muted
+            />
+            <View style={styles.summaryTotal}>
+              <Text style={styles.totalLabel}>{t("summary.total")}</Text>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
+                numberOfLines={1}
+                style={styles.totalAmount}
+              >
+                {formatAud(state.cart.actualAmount.cents, locale)}
+              </Text>
+            </View>
+          </View>
           <ActionButton
             disabled={
               cartEmpty ||
@@ -1591,6 +1580,7 @@ export function SalesScreen({
               !state.capabilities.cartEditing ||
               transactionActionsDisabled
             }
+            icon="arrow-right-circle"
             label={
               cartEmpty
                 ? t("summary.checkoutDisabled")
@@ -1605,6 +1595,7 @@ export function SalesScreen({
                 if (preparedCart) onOpenPayment(preparedCart);
               });
             }}
+            size="primary"
             sound="navigate"
             style={styles.checkoutButton}
             testID="sales-open-payment"
@@ -2024,105 +2015,7 @@ export function SalesScreen({
         </View>
       </Modal>
 
-      <Modal
-        animationType="fade"
-        onRequestClose={() => setDiscountLineId(null)}
-        presentationStyle="overFullScreen"
-        supportedOrientations={["landscape-left", "landscape-right"]}
-        transparent
-        visible={discountLineId !== null}
-      >
-        <View style={styles.modalBackdrop}>
-          <PosPressable
-            accessible={false}
-            onPress={() => setDiscountLineId(null)}
-            sound="navigate"
-            style={styles.modalDismissArea}
-            testID="sales-discount-backdrop"
-          />
-          <View
-            accessibilityViewIsModal
-            style={styles.discountModal}
-            testID="sales-discount-modal"
-          >
-            <Text style={styles.modalTitle}>{t("discount.title")}</Text>
-            <Text style={styles.discountHint}>{t("discount.hint")}</Text>
-            <View style={styles.discountGrid}>
-              {QUICK_DISCOUNTS.map((basisPoints) => (
-                <ActionButton
-                  key={basisPoints}
-                  label={
-                    basisPoints === 0
-                      ? t("discount.none")
-                      : `${basisPoints / 100}%`
-                  }
-                  onPress={() => {
-                    const lineId = discountLineId;
-                    setDiscountLineId(null);
-                    if (lineId) {
-                      void presenter.applyLineDiscount(lineId, basisPoints);
-                    }
-                  }}
-                  style={styles.discountButton}
-                  testID={`sales-discount-${basisPoints}`}
-                  tone={basisPoints === 0 ? "quiet" : "secondary"}
-                />
-              ))}
-            </View>
-            <View style={styles.modalActions}>
-              <ActionButton
-                label={t("discount.amount")}
-                onPress={() => {
-                  const lineId = discountLineId;
-                  setDiscountLineId(null);
-                  if (lineId) {
-                    setLineEdit({
-                      lineId,
-                      mode: "discount-amount",
-                      replaceOnNextDigit: false,
-                      value: "",
-                    });
-                    beginNumericInput();
-                  }
-                }}
-                sound="navigate"
-                style={styles.modalAction}
-                testID="sales-line-discount-amount"
-                tone="secondary"
-              />
-              <ActionButton
-                label={t("discount.percent")}
-                onPress={() => {
-                  const lineId = discountLineId;
-                  setDiscountLineId(null);
-                  if (lineId) {
-                    setLineEdit({
-                      lineId,
-                      mode: "discount-percent",
-                      replaceOnNextDigit: false,
-                      value: "",
-                    });
-                    beginNumericInput();
-                  }
-                }}
-                sound="navigate"
-                style={styles.modalAction}
-                testID="sales-line-discount-percent"
-                tone="secondary"
-              />
-            </View>
-            <ActionButton
-              label={t("discount.cancel")}
-              onPress={() => setDiscountLineId(null)}
-              sound="navigate"
-              style={styles.modalCancelAction}
-              testID="sales-discount-cancel"
-              tone="quiet"
-            />
-          </View>
-        </View>
-      </Modal>
-
+      {/* 点商品行直接打开：数量 / 单价 / 折扣 / 删除都在这一个弹窗里。 */}
       <Modal
         animationType="fade"
         onRequestClose={closeLineEditInput}
@@ -2141,67 +2034,153 @@ export function SalesScreen({
           />
           <View
             accessibilityViewIsModal
-            style={styles.numericModal}
+            style={styles.lineEditModal}
             testID="sales-line-edit-modal"
           >
-            <Text style={styles.modalTitle}>{t("editLine.title")}</Text>
-            <View style={styles.editModeGrid}>
-              <ActionButton
-                label={t("editLine.quantity")}
-                onPress={() => selectLineEditMode("quantity")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-quantity"
-                tone={lineEdit?.mode === "quantity" ? "primary" : "secondary"}
-              />
-              <ActionButton
-                label={t("editLine.price")}
-                onPress={() => selectLineEditMode("price")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-price"
-                tone={lineEdit?.mode === "price" ? "primary" : "secondary"}
-              />
-              <ActionButton
-                label={t("editLine.discountAmount")}
-                onPress={() => selectLineEditMode("discount-amount")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-discount-amount"
-                tone={
-                  lineEdit?.mode === "discount-amount" ? "primary" : "secondary"
-                }
-              />
-              <ActionButton
-                label={t("editLine.discountPercent")}
-                onPress={() => selectLineEditMode("discount-percent")}
-                style={styles.editModeButton}
-                testID="sales-line-edit-discount-percent"
-                tone={
-                  lineEdit?.mode === "discount-percent"
-                    ? "primary"
-                    : "secondary"
-                }
-              />
-            </View>
-            <View style={styles.numericEditorBody}>
-              <View style={styles.numericEditorSummary}>
-                <Text style={styles.fieldLabel}>{t("editLine.value")}</Text>
-                <NumericValueDisplay
-                  accessibilityLabel={t("editLine.value")}
-                  placeholder={lineEdit?.mode === "quantity" ? "0" : "0.00"}
-                  testID="sales-line-edit-value"
-                  value={lineEdit?.value ?? ""}
-                />
-                {lineEdit?.mode === "price" &&
-                state.errorCode === "price-too-high" ? (
-                  <Text
-                    accessibilityRole="alert"
-                    style={styles.cashError}
-                    testID="sales-line-edit-price-error"
-                  >
-                    {t("error.priceTooHigh", ERROR_COPY_VALUES)}
-                  </Text>
-                ) : null}
+            <View style={styles.lineEditHeader}>
+              <View style={styles.lineEditHeading}>
+                <Text numberOfLines={1} style={styles.modalTitle}>
+                  {editingLine?.displayName ?? t("editLine.title")}
+                </Text>
+                <Text numberOfLines={1} style={styles.lineEditSubtitle}>
+                  {editingLine
+                    ? `${t("editLine.title")} · ${t("cart.lineNumber", {
+                        number: editingLineNumber,
+                      })}`
+                    : t("editLine.title")}
+                </Text>
               </View>
-              <View style={styles.numericKeypadColumn}>
+              {editingLine ? (
+                <View style={styles.lineEditTotal}>
+                  <Text style={styles.lineEditTotalLabel}>
+                    {t("editLine.lineTotal")}
+                  </Text>
+                  <Text style={styles.lineEditTotalAmount}>
+                    {formatAud(editingLine.actualAmount.cents, locale)}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+            <View style={styles.lineEditBody}>
+              <View style={styles.lineEditModes}>
+                <View style={styles.editModeGrid}>
+                  <View style={styles.editModeRow}>
+                  <LineEditModeTile
+                    label={t("editLine.quantity")}
+                    onPress={() => selectLineEditMode("quantity")}
+                    selected={lineEdit?.mode === "quantity"}
+                    testID="sales-line-edit-quantity"
+                    value={editingLine?.quantity ?? "—"}
+                  />
+                  <LineEditModeTile
+                    label={t("editLine.price")}
+                    onPress={() => selectLineEditMode("price")}
+                    selected={lineEdit?.mode === "price"}
+                    testID="sales-line-edit-price"
+                    value={
+                      editingLine
+                        ? formatAud(editingLine.unitPrice.cents, locale)
+                        : "—"
+                    }
+                  />
+                  </View>
+                  <View style={styles.editModeRow}>
+                  <LineEditModeTile
+                    label={t("editLine.discountAmount")}
+                    onPress={() => selectLineEditMode("discount-amount")}
+                    selected={lineEdit?.mode === "discount-amount"}
+                    testID="sales-line-edit-discount-amount"
+                    tone={
+                      editingLine && editingLine.discount.cents > 0
+                        ? "danger"
+                        : "default"
+                    }
+                    value={
+                      editingLine && editingLine.discount.cents > 0
+                        ? `−${formatAud(editingLine.discount.cents, locale)}`
+                        : "—"
+                    }
+                  />
+                  <LineEditModeTile
+                    label={t("editLine.discountPercent")}
+                    onPress={() => selectLineEditMode("discount-percent")}
+                    selected={lineEdit?.mode === "discount-percent"}
+                    testID="sales-line-edit-discount-percent"
+                    value="%"
+                  />
+                  </View>
+                </View>
+                <Text style={styles.functionSectionTitle}>
+                  {t("editLine.quickDiscount")}
+                </Text>
+                <View style={styles.discountGrid}>
+                  <View style={styles.editModeRow}>
+                  {QUICK_DISCOUNTS.slice(0, 3).map((basisPoints) => (
+                    <ActionButton
+                      key={basisPoints}
+                      label={
+                        basisPoints === 0
+                          ? t("discount.none")
+                          : `${basisPoints / 100}%`
+                      }
+                      onPress={() => {
+                        const lineId = lineEdit?.lineId;
+                        closeLineEditInput();
+                        if (lineId) {
+                          void presenter.applyLineDiscount(lineId, basisPoints);
+                        }
+                      }}
+                      style={styles.discountButton}
+                      testID={`sales-discount-${basisPoints}`}
+                      tone={basisPoints === 0 ? "quiet" : "secondary"}
+                    />
+                  ))}
+                  </View>
+                  <View style={styles.editModeRow}>
+                  {QUICK_DISCOUNTS.slice(3).map((basisPoints) => (
+                    <ActionButton
+                      key={basisPoints}
+                      label={
+                        basisPoints === 0
+                          ? t("discount.none")
+                          : `${basisPoints / 100}%`
+                      }
+                      onPress={() => {
+                        const lineId = lineEdit?.lineId;
+                        closeLineEditInput();
+                        if (lineId) {
+                          void presenter.applyLineDiscount(lineId, basisPoints);
+                        }
+                      }}
+                      style={styles.discountButton}
+                      testID={`sales-discount-${basisPoints}`}
+                      tone={basisPoints === 0 ? "quiet" : "secondary"}
+                    />
+                  ))}
+                  </View>
+                </View>
+                <Text style={styles.discountHint}>{t("discount.hint")}</Text>
+              </View>
+              <View style={styles.lineEditKeypad}>
+                <View style={styles.lineEditValue}>
+                  <Text style={styles.fieldLabel}>{t("editLine.value")}</Text>
+                  <NumericValueDisplay
+                    accessibilityLabel={t("editLine.value")}
+                    placeholder={lineEdit?.mode === "quantity" ? "0" : "0.00"}
+                    testID="sales-line-edit-value"
+                    value={lineEdit?.value ?? ""}
+                  />
+                  {lineEdit?.mode === "price" &&
+                  state.errorCode === "price-too-high" ? (
+                    <Text
+                      accessibilityRole="alert"
+                      style={styles.cashError}
+                      testID="sales-line-edit-price-error"
+                    >
+                      {t("error.priceTooHigh", ERROR_COPY_VALUES)}
+                    </Text>
+                  ) : null}
+                </View>
                 <SalesNumberKeypad
                   labels={keypadLabels}
                   mode={lineEdit?.mode === "quantity" ? "integer" : "decimal"}
@@ -2210,18 +2189,35 @@ export function SalesScreen({
                 />
               </View>
             </View>
-            <View style={styles.modalActions}>
+            <View style={styles.lineEditFooter}>
+              <ActionButton
+                icon="trash-can-outline"
+                label={t("editLine.remove")}
+                onPress={() => {
+                  const lineId = lineEdit?.lineId;
+                  closeLineEditInput();
+                  if (lineId) void presenter.removeLine(lineId);
+                }}
+                size="button"
+                testID="sales-line-edit-remove"
+                tone="danger"
+              />
+              <View style={styles.lineEditFooterSpacer} />
               <ActionButton
                 label={t("discount.cancel")}
                 onPress={closeLineEditInput}
+                size="button"
                 sound="navigate"
-                style={styles.modalAction}
+                style={styles.lineEditCancel}
+                testID="sales-line-edit-cancel"
                 tone="secondary"
               />
               <ActionButton
+                icon="check"
                 label={t("editLine.confirm")}
                 onPress={submitLineEdit}
-                style={styles.modalAction}
+                size="button"
+                style={styles.lineEditConfirm}
                 testID="sales-line-edit-confirm"
               />
             </View>
@@ -2420,7 +2416,7 @@ export function SalesScreen({
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -2470,6 +2466,7 @@ function ProductSearchRow({
     values?: Readonly<Record<string, string | number>>,
   ): string;
 }>) {
+  usePosThemeVersion();
   const [imageUri, setImageUri] = useState<string | null | undefined>();
   useEffect(() => {
     setImageUri(undefined);
@@ -2585,6 +2582,7 @@ function LookupCandidateRow({
     values?: Readonly<Record<string, string | number>>,
   ): string;
 }>) {
+  usePosThemeVersion();
   const [imageUri, setImageUri] = useState<string | null | undefined>();
   useEffect(() => {
     setImageUri(undefined);
@@ -2684,7 +2682,6 @@ type CartLineRowProps = Readonly<{
   item: CartLine;
   locale: SalesLocale;
   onDecrease(lineId: string): void;
-  onDiscount(lineId: string): void;
   onEdit(lineId: string): void;
   onIncrease(lineId: string): void;
   onRemove(lineId: string): void;
@@ -2710,7 +2707,6 @@ const CartLineRow = memo(function CartLineRow({
   item,
   locale,
   onDecrease,
-  onDiscount,
   onEdit,
   onIncrease,
   onRemove,
@@ -2719,6 +2715,7 @@ const CartLineRow = memo(function CartLineRow({
   resolveProductImage,
   t,
 }: CartLineRowProps) {
+  usePosThemeVersion();
   const [imageUri, setImageUri] = useState<string | null | undefined>();
   const [resolvedBarcode, setResolvedBarcode] = useState<
     string | null | undefined
@@ -2869,6 +2866,7 @@ const CartLineRow = memo(function CartLineRow({
             accessibilityActions={[
               { label: t("cart.remove"), name: "delete" },
             ]}
+            accessibilityHint={t("cart.editHint")}
             accessibilityRole="button"
             accessibilityState={{ selected: isSelected }}
             onAccessibilityAction={(event) => {
@@ -2882,7 +2880,10 @@ const CartLineRow = memo(function CartLineRow({
                 return;
               }
               onSelect(item.lineId);
+              // 点商品行直接进入编辑；购物车不可编辑时只保留选中高亮。
+              if (!disabled) onEdit(item.lineId);
             }}
+            sound="navigate"
             style={({ pressed }) => [
               styles.cartLine,
               item.actualAmount.cents < 0 && styles.cartLineNegative,
@@ -2892,92 +2893,85 @@ const CartLineRow = memo(function CartLineRow({
             ]}
             testID={`sales-line-${item.lineId}`}
           >
-            <View style={styles.cartLineTop}>
-        <Text
-          accessibilityLabel={t("cart.lineNumber", {
-            number: index + 1,
-          })}
-          style={styles.cartLineNumber}
-          testID={`sales-line-${item.lineId}-line-number`}
-        >
-          {index + 1}
-        </Text>
-        <CartProductThumbnail
-          accessibilityLabel={t("cart.productImage", {
-            product: item.displayName,
-          })}
-          imageUri={imageUri}
-          placeholderLabel={t("cart.imagePlaceholder")}
-          testID={`sales-line-${item.lineId}-image`}
-        />
-        <View style={styles.cartLineIdentity}>
-          <Text numberOfLines={2} style={styles.cartLineName}>
-            {item.displayName}
-          </Text>
-          <Text
-            numberOfLines={2}
-            style={styles.cartLineCode}
-            testID={`sales-line-${item.lineId}-identifiers`}
-          >
-            {`${formatCatalogField(t("catalog.itemNumber"), itemNumber, locale)} · ${formatCatalogField(t("catalog.barcode"), barcode, locale)}`}
-          </Text>
-          <Text style={styles.cartLineUnitPrice}>
-            {formatAud(item.unitPrice.cents, locale)}
-            {item.discount.cents > 0 ? (
-              <Text
-                style={styles.discountAmountText}
-                testID={`sales-line-${item.lineId}-discount-amount`}
-              >
-                {`  −${formatAud(item.discount.cents, locale)}`}
+            <Text
+              accessibilityLabel={t("cart.lineNumber", {
+                number: index + 1,
+              })}
+              style={styles.cartLineNumber}
+              testID={`sales-line-${item.lineId}-line-number`}
+            >
+              {index + 1}
+            </Text>
+            <CartProductThumbnail
+              accessibilityLabel={t("cart.productImage", {
+                product: item.displayName,
+              })}
+              imageUri={imageUri}
+              placeholderLabel={t("cart.imagePlaceholder")}
+              testID={`sales-line-${item.lineId}-image`}
+            />
+            <View style={styles.cartLineIdentity}>
+              <Text numberOfLines={2} style={styles.cartLineName}>
+                {item.displayName}
               </Text>
-            ) : null}
-          </Text>
-        </View>
-        <Text style={styles.cartLineTotal}>
-          {formatAud(item.actualAmount.cents, locale)}
-        </Text>
-      </View>
-          <View
-            style={styles.lineControls}
-            testID={`sales-line-${item.lineId}-controls`}
-          >
-        <ActionButton
-          accessibilityLabel={t("cart.decrease")}
-          disabled={disabled}
-          label="−"
-          onPress={() => onDecrease(item.lineId)}
-          testID={`sales-line-${item.lineId}-decrease`}
-          tone="quiet"
-        />
-        <View
-          accessibilityLabel={`${t("cart.quantity")}: ${item.quantity}`}
-          style={styles.quantityValue}
-        >
-          <Text style={styles.quantityText}>{item.quantity}</Text>
-        </View>
-        <ActionButton
-          accessibilityLabel={t("cart.increase")}
-          disabled={disabled}
-          label="+"
-          onPress={() => onIncrease(item.lineId)}
-          testID={`sales-line-${item.lineId}-increase`}
-          tone="quiet"
-        />
-        <ActionButton
-          disabled={disabled}
-          label={t("cart.edit")}
-          onPress={() => onEdit(item.lineId)}
-          testID={`sales-line-${item.lineId}-edit`}
-          tone="quiet"
-        />
-        <ActionButton
-          disabled={disabled}
-          label={t("cart.discount")}
-          onPress={() => onDiscount(item.lineId)}
-          testID={`sales-line-${item.lineId}-discount`}
-          tone="secondary"
-        />
+              <Text
+                numberOfLines={2}
+                style={styles.cartLineCode}
+                testID={`sales-line-${item.lineId}-identifiers`}
+              >
+                {`${formatCatalogField(t("catalog.itemNumber"), itemNumber, locale)} · ${formatCatalogField(t("catalog.barcode"), barcode, locale)}`}
+              </Text>
+              <Text style={styles.cartLineUnitPrice}>
+                {formatAud(item.unitPrice.cents, locale)}
+                {item.discount.cents > 0 ? (
+                  <Text
+                    style={styles.discountAmountText}
+                    testID={`sales-line-${item.lineId}-discount-amount`}
+                  >
+                    {`  −${formatAud(item.discount.cents, locale)}`}
+                  </Text>
+                ) : null}
+              </Text>
             </View>
+            <View
+              style={styles.lineControls}
+              testID={`sales-line-${item.lineId}-controls`}
+            >
+              <ActionButton
+                accessibilityLabel={t("cart.decrease")}
+                disabled={disabled}
+                label="−"
+                onPress={() => onDecrease(item.lineId)}
+                size="small"
+                style={styles.lineStepButton}
+                testID={`sales-line-${item.lineId}-decrease`}
+                tone="secondary"
+              />
+              <View
+                accessibilityLabel={`${t("cart.quantity")}: ${item.quantity}`}
+                style={styles.quantityValue}
+              >
+                <Text style={styles.quantityText}>{item.quantity}</Text>
+              </View>
+              <ActionButton
+                accessibilityLabel={t("cart.increase")}
+                disabled={disabled}
+                label="+"
+                onPress={() => onIncrease(item.lineId)}
+                size="small"
+                style={styles.lineStepButton}
+                testID={`sales-line-${item.lineId}-increase`}
+                tone="secondary"
+              />
+            </View>
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+              numberOfLines={1}
+              style={styles.cartLineTotal}
+            >
+              {formatAud(item.actualAmount.cents, locale)}
+            </Text>
           </PosPressable>
         </Animated.View>
       </PosPanResponderView>
@@ -2997,7 +2991,6 @@ function cartLineRowPropsEqual(
     previous.isSelected === next.isSelected &&
     previous.locale === next.locale &&
     previous.onDecrease === next.onDecrease &&
-    previous.onDiscount === next.onDiscount &&
     previous.onEdit === next.onEdit &&
     previous.onIncrease === next.onIncrease &&
     previous.onRemove === next.onRemove &&
@@ -3029,6 +3022,7 @@ function CartProductThumbnail({
   placeholderLabel: string;
   testID: string;
 }>) {
+  usePosThemeVersion();
   const [failedUri, setFailedUri] = useState<string | null>(null);
   const showImage = Boolean(imageUri) && failedUri !== imageUri;
   return (
@@ -3067,6 +3061,7 @@ function NumericValueDisplay({
   testID,
   value,
 }: NumericValueDisplayProps) {
+  usePosThemeVersion();
   const displayValue = value || placeholder;
   return (
     <View
@@ -3108,6 +3103,7 @@ function SummaryRow({
   label: string;
   muted?: boolean;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.summaryRow}>
       <Text style={[styles.summaryLabel, muted && styles.mutedText]}>
@@ -3136,6 +3132,7 @@ function ErrorBanner({
   message: string;
   onDismiss(): void;
 }>) {
+  usePosThemeVersion();
   return (
     <View accessibilityRole="alert" style={styles.errorBanner}>
       <Text style={styles.errorBannerText}>{message}</Text>
@@ -3171,6 +3168,7 @@ function LookupSelectionActions({
     values?: Readonly<Record<string, string | number>>,
   ): string;
 }>) {
+  usePosThemeVersion();
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
   return (
     <View style={styles.lookupSelectionActions}>
@@ -3207,44 +3205,85 @@ function LookupSelectionActions({
   );
 }
 
+/** 收银页内的按钮：尺寸与配色走通用 PosButton，保留「危险操作用警示音」的约定。 */
 function ActionButton({
   accessibilityLabel,
   disabled = false,
+  icon,
   label,
   onPress,
+  size = "medium",
   sound,
   style,
   testID,
   tone = "primary",
 }: ActionButtonProps) {
   return (
-    <PosPressable
-      accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
+    <PosButton
+      {...(accessibilityLabel ? { accessibilityLabel } : {})}
       disabled={disabled}
+      {...(icon ? { icon } : {})}
+      label={label}
       onPress={onPress}
+      size={size}
       sound={sound ?? (tone === "danger" ? "danger" : "tap")}
+      style={style}
+      {...(testID ? { testID } : {})}
+      tone={tone}
+    />
+  );
+}
+
+type LineEditModeTileProps = Readonly<{
+  label: string;
+  onPress(): void;
+  selected: boolean;
+  testID: string;
+  tone?: "default" | "danger";
+  value: string;
+}>;
+
+/** 行编辑弹窗里的编辑项：大块按钮，直接显示这一项现在的值。 */
+function LineEditModeTile({
+  label,
+  onPress,
+  selected,
+  testID,
+  tone = "default",
+  value,
+}: LineEditModeTileProps) {
+  return (
+    <PosPressable
+      accessibilityLabel={`${label}: ${value}`}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
       style={({ pressed }) => [
-        styles.actionButton,
-        actionToneStyles[tone],
-        disabled && styles.actionButtonDisabled,
-        pressed && !disabled && styles.actionButtonPressed,
-        style,
+        styles.editModeButton,
+        selected && styles.editModeButtonSelected,
+        pressed && styles.actionButtonPressed,
       ]}
       testID={testID}
     >
       <Text
+        numberOfLines={1}
         style={[
-          styles.actionButtonText,
-          (tone === "quiet" || tone === "secondary") && styles.quietButtonText,
-          tone === "danger" && styles.dangerButtonText,
-          tone === "info" && styles.infoButtonText,
-          tone === "warning" && styles.warningButtonText,
-          disabled && styles.actionButtonTextDisabled,
+          styles.editModeLabel,
+          selected && styles.editModeLabelSelected,
         ]}
       >
         {label}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        numberOfLines={1}
+        style={[
+          styles.editModeValue,
+          tone === "danger" && styles.discountAmountText,
+        ]}
+      >
+        {value}
       </Text>
     </PosPressable>
   );
@@ -3267,6 +3306,7 @@ function CatalogIconButton({
   onPress(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityLabel={accessibilityLabel}
@@ -3276,8 +3316,6 @@ function CatalogIconButton({
       onPress={onPress}
       sound="navigate"
       style={({ pressed }) => [
-        styles.actionButton,
-        actionToneStyles.secondary,
         styles.searchIconAction,
         disabled && styles.actionButtonDisabled,
         pressed && !disabled && styles.actionButtonPressed,
@@ -3294,7 +3332,7 @@ function CatalogIconButton({
         <MaterialCommunityIcons
           color={posColors.ink}
           name={icon}
-          size={24}
+          size={30}
           testID={iconTestID}
         />
       )}
@@ -3410,87 +3448,45 @@ function formatEditorMoney(cents: number): string {
   return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
 }
 
-const actionToneStyles = StyleSheet.create({
-  danger: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
-  },
-  info: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
-  },
-  primary: {
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
-  },
-  quiet: {
-    backgroundColor: "transparent",
-    borderColor: posColors.border,
-  },
-  secondary: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.ink,
-  },
-  warning: {
-    backgroundColor: posColors.yellowSoft,
-    borderColor: posColors.yellow,
-  },
-});
-
-const styles = StyleSheet.create({
-  actionButton: {
-    alignItems: "center",
-    borderRadius: 4,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: MIN_TOUCH_TARGET,
-    minWidth: MIN_TOUCH_TARGET,
-    paddingHorizontal: 14,
-  },
+const styles = createPosStyles((colors) => ({
   actionButtonDisabled: {
-    backgroundColor: "#E4E1DA",
-    borderColor: "#D0CCC2",
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
     opacity: 0.72,
   },
   actionButtonPressed: {
     opacity: 0.72,
     transform: [{ scale: 0.99 }],
   },
-  actionButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
-  },
   actionButtonTextDisabled: {
-    color: "#7C8287",
-  },
-  brand: {
-    color: posColors.ink,
-    fontSize: 19,
-    fontWeight: "900",
-    letterSpacing: 0.4,
+    color: colors.disabledInk,
   },
   cartCount: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
+    color: colors.mutedInk,
+    fontSize: 14,
     fontWeight: "700",
   },
   cartHeader: {
     alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: 1,
     flexDirection: "row",
-    justifyContent: "space-between",
+    gap: 10,
+    minHeight: 64,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   cartLine: {
-    alignItems: "stretch",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 4,
-    borderWidth: 1,
-    gap: 8,
-    minHeight: 120,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 86,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   cartLineRemoveAction: {
     bottom: 0,
@@ -3510,83 +3506,80 @@ const styles = StyleSheet.create({
     position: "relative",
   },
   cartLineSwipeSurface: {
-    backgroundColor: posColors.surface,
+    backgroundColor: colors.surface,
   },
   cartLineNegative: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
   },
   cartLinePressed: {
     opacity: 0.82,
   },
   cartLineSelected: {
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.green,
   },
   cartLineZero: {
-    backgroundColor: posColors.yellowSoft,
-    borderColor: posColors.yellow,
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellow,
   },
   cartLineCode: {
-    color: posColors.mutedInk,
-    fontSize: 11,
+    color: colors.mutedInk,
+    fontSize: 12,
     fontVariant: ["tabular-nums"],
+    marginTop: 2,
   },
   cartLineIdentity: {
     flex: 1,
-    minWidth: 120,
+    minWidth: 0,
   },
   cartLineName: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 15,
     fontWeight: "800",
-    lineHeight: 19,
+    lineHeight: 18,
   },
   cartLineNumber: {
-    color: posColors.mutedInk,
-    fontSize: 13,
+    color: colors.mutedInk,
+    fontSize: 14,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
     textAlign: "center",
     width: 24,
   },
   cartLineTotal: {
-    color: posColors.ink,
-    fontSize: 17,
+    color: colors.ink,
+    flexShrink: 0,
+    fontSize: 19,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
-    minWidth: 80,
     textAlign: "right",
-  },
-  cartLineTop: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 12,
+    width: 92,
   },
   cartLineUnitPrice: {
-    color: posColors.mutedInk,
-    fontSize: 12,
+    color: colors.ink,
+    fontSize: 13.5,
     fontVariant: ["tabular-nums"],
-    marginTop: 4,
+    fontWeight: "700",
+    marginTop: 1,
   },
   cartList: {
-    gap: 8,
-    paddingBottom: 12,
+    gap: 6,
+    padding: 8,
   },
   cartListViewport: {
+    backgroundColor: colors.surfaceAlt,
     flex: 1,
-    minHeight: 0,
   },
   cartPane: {
-    backgroundColor: "#F8F6F1",
-    borderColor: posColors.border,
-    borderRadius: 5,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
     borderWidth: 1,
     flex: 1,
-    gap: 12,
     minHeight: 0,
     minWidth: 0,
-    padding: 14,
+    overflow: "hidden",
   },
   cartProductImage: {
     height: "100%",
@@ -3594,46 +3587,41 @@ const styles = StyleSheet.create({
   },
   cartProductImageFrame: {
     alignItems: "center",
-    backgroundColor: "#EEECE6",
-    borderColor: posColors.border,
-    borderRadius: 4,
-    borderWidth: 1,
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: 8,
     height: 54,
     justifyContent: "center",
     overflow: "hidden",
     width: 54,
   },
   cartProductImagePlaceholder: {
-    color: "#8B9399",
+    color: colors.placeholder,
     fontSize: 10,
     fontWeight: "900",
     letterSpacing: 0.4,
   },
   cameraModeControl: {
     alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 4,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1.5,
     flexBasis: "47%",
     flexDirection: "row",
     flexGrow: 1,
     flexShrink: 1,
-    gap: 4,
+    gap: 8,
     justifyContent: "center",
-    minHeight: MIN_TOUCH_TARGET,
-    minWidth: 100,
-    paddingHorizontal: 6,
+    minHeight: 64,
+    paddingHorizontal: 12,
   },
   cameraModeLabel: {
-    color: posColors.mutedInk,
-    flexShrink: 1,
-    fontSize: 11,
-    fontWeight: "700",
-    textAlign: "center",
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "800",
   },
   cameraModeLabelSelected: {
-    color: posColors.orange,
+    color: colors.orange,
     fontWeight: "900",
   },
   cameraModeSwitch: {
@@ -3643,24 +3631,14 @@ const styles = StyleSheet.create({
   cameraScannerAction: {
     flexBasis: "47%",
     flexGrow: 1,
-    paddingHorizontal: 7,
   },
   cameraScannerRow: {
     alignItems: "stretch",
     flexDirection: "row",
     gap: 8,
   },
-  catalogPane: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 5,
-    borderWidth: 1,
-    gap: 10,
-    padding: 14,
-    width: 252,
-  },
   cashDueAmount: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 42,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
@@ -3668,14 +3646,14 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   cashDueLabel: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 12,
     fontWeight: "800",
     marginTop: 18,
     textTransform: "uppercase",
   },
   cashError: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 13,
     fontWeight: "700",
     marginTop: 12,
@@ -3685,32 +3663,32 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   changeAmount: {
-    color: posColors.green,
-    fontSize: 52,
+    color: colors.accent,
+    fontSize: 72,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
-    letterSpacing: -1.5,
+    letterSpacing: -2,
+    lineHeight: 80,
   },
   changeCard: {
     alignItems: "center",
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
-    borderRadius: 6,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 14,
     borderWidth: 1,
-    marginTop: 28,
-    minWidth: 360,
+    maxWidth: 720,
     paddingHorizontal: 36,
-    paddingVertical: 20,
+    paddingVertical: 14,
+    width: "100%",
   },
   changeLabel: {
-    color: posColors.green,
-    fontSize: 13,
-    fontWeight: "800",
-    textTransform: "uppercase",
+    color: colors.accent,
+    fontSize: 18,
+    fontWeight: "900",
   },
   changePreview: {
     alignItems: "center",
-    backgroundColor: posColors.greenSoft,
+    backgroundColor: colors.greenSoft,
     borderRadius: 4,
     flexDirection: "row",
     justifyContent: "space-between",
@@ -3719,18 +3697,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   changePreviewAmount: {
-    color: posColors.green,
+    color: colors.green,
     fontSize: 26,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
   },
   changePreviewLabel: {
-    color: posColors.green,
+    color: colors.green,
     fontSize: 14,
     fontWeight: "800",
   },
   checkoutButton: {
-    minHeight: 64,
     width: "100%",
   },
   onlineCheckoutButton: {
@@ -3738,54 +3715,40 @@ const styles = StyleSheet.create({
     minHeight: 64,
     width: "100%",
   },
-  dangerButtonText: {
-    color: posColors.red,
-  },
   discountAmountText: {
-    color: posColors.red,
+    color: colors.red,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
   },
   discountButton: {
-    flexBasis: "29%",
-    flexGrow: 1,
+    flex: 1,
   },
   discountGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-    marginBottom: 18,
-    marginTop: 18,
+    gap: 8,
   },
   discountHint: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
-  },
-  discountModal: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 6,
-    borderWidth: 1,
-    maxWidth: 520,
-    padding: 26,
-    width: "65%",
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
   },
   editModeButton: {
-    flexBasis: "47%",
-    flexGrow: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 88,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   editModeGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
     gap: 10,
-    marginBottom: 18,
-    marginTop: 18,
   },
   editorModal: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 6,
     borderWidth: 1,
     maxWidth: 560,
@@ -3794,40 +3757,39 @@ const styles = StyleSheet.create({
   },
   emptyCart: {
     alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
     flex: 1,
+    gap: 8,
     justifyContent: "center",
     padding: 24,
   },
   emptyCartHint: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 6,
-    maxWidth: 280,
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
     textAlign: "center",
   },
   emptyCartIcon: {
-    color: "#A7AFB5",
+    color: colors.chromeMuted,
     fontSize: 38,
     fontWeight: "300",
   },
   emptyCartTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-    marginTop: 8,
+    color: colors.ink,
+    fontSize: 22,
+    fontWeight: "900",
   },
   errorBanner: {
     alignItems: "center",
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
     borderTopWidth: 1,
     flexDirection: "row",
     minHeight: 48,
     paddingLeft: 18,
   },
   errorBannerText: {
-    color: posColors.red,
+    color: colors.red,
     flex: 1,
     fontSize: 13,
     fontWeight: "700",
@@ -3839,15 +3801,12 @@ const styles = StyleSheet.create({
     width: MIN_TOUCH_TARGET,
   },
   errorDismissText: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 24,
     fontWeight: "700",
   },
-  infoButtonText: {
-    color: posColors.blue,
-  },
   fieldLabel: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 13,
     fontWeight: "800",
     marginBottom: 7,
@@ -3855,12 +3814,7 @@ const styles = StyleSheet.create({
   functionAction: {
     flexBasis: "47%",
     flexGrow: 1,
-    paddingHorizontal: 8,
-  },
-  functionDivider: {
-    backgroundColor: posColors.border,
-    height: 1,
-    marginVertical: 4,
+    minHeight: 76,
   },
   functionGrid: {
     flexDirection: "row",
@@ -3868,16 +3822,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   functionPane: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 5,
-    borderWidth: 1,
-    flexBasis: 336,
+    flexBasis: 404,
     flexGrow: 0,
     flexShrink: 0,
-    maxWidth: 380,
-    minWidth: 312,
-    padding: 14,
+    gap: 10,
+    maxWidth: 420,
+    minWidth: 340,
   },
   functionScroll: {
     flex: 1,
@@ -3885,60 +3835,35 @@ const styles = StyleSheet.create({
   },
   functionScrollContent: {
     gap: 10,
-    paddingBottom: 12,
+    paddingBottom: 4,
   },
   functionSectionTitle: {
-    color: posColors.mutedInk,
-    fontSize: 11,
+    color: colors.mutedInk,
+    fontSize: 12.5,
     fontWeight: "900",
-    letterSpacing: 0.5,
-    marginTop: 2,
-    textTransform: "uppercase",
-  },
-  header: {
-    alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderBottomColor: posColors.border,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: 60,
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-  },
-  headerActions: {
-    flex: 1,
-    marginLeft: 20,
-    minWidth: 0,
+    letterSpacing: 1,
   },
   lineControls: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 5,
-    justifyContent: "flex-end",
+    flexShrink: 0,
   },
   lockIcon: {
     alignItems: "center",
-    backgroundColor: posColors.redSoft,
-    borderRadius: 32,
-    height: 64,
+    backgroundColor: colors.inverseSurface,
+    borderRadius: 64,
+    height: 128,
     justifyContent: "center",
-    width: 64,
-  },
-  lockIconText: {
-    color: posColors.red,
-    fontSize: 24,
+    width: 128,
   },
   lockedHint: {
-    color: posColors.mutedInk,
-    fontSize: 16,
-    lineHeight: 24,
-    maxWidth: 520,
-    textAlign: "center",
+    color: colors.mutedInk,
+    fontSize: 18,
+    fontWeight: "700",
   },
   lockedNotice: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 4,
     borderWidth: 1,
     marginTop: 24,
@@ -3946,30 +3871,29 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   lockedNoticeText: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 14,
   },
   lockedScreen: {
     alignItems: "center",
-    backgroundColor: posColors.canvas,
     flex: 1,
+    gap: 12,
     justifyContent: "center",
     padding: 32,
   },
   lockedTitle: {
-    color: posColors.ink,
-    fontSize: 30,
+    color: colors.ink,
+    fontSize: 36,
     fontWeight: "900",
-    marginBottom: 10,
-    marginTop: 20,
+    marginTop: 8,
   },
   lookupCandidateChoose: {
-    color: posColors.blue,
+    color: colors.blue,
     fontSize: 13,
     fontWeight: "900",
   },
   lookupCandidatePrice: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 18,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
@@ -3982,7 +3906,7 @@ const styles = StyleSheet.create({
   },
   lookupCandidateRow: {
     alignItems: "center",
-    borderBottomColor: posColors.border,
+    borderBottomColor: colors.border,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 10,
@@ -3990,9 +3914,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   lookupCandidateSource: {
-    backgroundColor: posColors.orangeSoft,
+    backgroundColor: colors.orangeSoft,
     borderRadius: 3,
-    color: posColors.orange,
+    color: colors.orange,
     fontSize: 11,
     fontWeight: "900",
     overflow: "hidden",
@@ -4007,15 +3931,15 @@ const styles = StyleSheet.create({
     marginTop: 5,
   },
   lookupSelectionHint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 13,
     lineHeight: 18,
     marginTop: 4,
   },
   lookupPendingBar: {
     alignItems: "center",
-    backgroundColor: "#FFF4D8",
-    borderBottomColor: posColors.orange,
+    backgroundColor: colors.yellowSoft,
+    borderBottomColor: colors.orange,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 16,
@@ -4025,12 +3949,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   lookupPendingBarAction: {
-    color: posColors.orange,
+    color: colors.orange,
     fontSize: 14,
     fontWeight: "900",
   },
   lookupPendingBarTitle: {
-    color: posColors.ink,
+    color: colors.ink,
     flex: 1,
     fontSize: 15,
     fontWeight: "900",
@@ -4040,7 +3964,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   lookupSelectionQueue: {
-    color: posColors.orange,
+    color: colors.orange,
     fontSize: 13,
     fontWeight: "800",
     marginTop: 4,
@@ -4058,7 +3982,7 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     alignItems: "center",
-    backgroundColor: "rgba(16, 37, 58, 0.55)",
+    backgroundColor: colors.overlay,
     flex: 1,
     justifyContent: "center",
     padding: 28,
@@ -4067,7 +3991,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   modalTitle: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 24,
     fontWeight: "900",
   },
@@ -4090,8 +4014,8 @@ const styles = StyleSheet.create({
     minWidth: 292,
   },
   numericModal: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 6,
     borderWidth: 1,
     maxWidth: 820,
@@ -4100,25 +4024,25 @@ const styles = StyleSheet.create({
   },
   numericValueDisplay: {
     alignItems: "center",
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.ink,
-    borderRadius: 4,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 2,
     flexDirection: "row",
-    minHeight: 64,
+    minHeight: 72,
     paddingHorizontal: 16,
   },
   numericValuePlaceholder: {
-    color: "#7B8793",
+    color: colors.placeholder,
   },
   numericValuePrefix: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 24,
     fontWeight: "800",
     marginRight: 8,
   },
   numericValueText: {
-    color: posColors.ink,
+    color: colors.ink,
     flex: 1,
     fontSize: 30,
     fontVariant: ["tabular-nums"],
@@ -4126,11 +4050,11 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
   mutedText: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
   },
   offlineCard: {
-    backgroundColor: posColors.orangeSoft,
-    borderColor: posColors.orange,
+    backgroundColor: colors.orangeSoft,
+    borderColor: colors.orange,
     borderRadius: 4,
     borderWidth: 1,
     marginBottom: 10,
@@ -4138,23 +4062,23 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   offlineHint: {
-    color: "#744024",
+    color: colors.yellowInk,
     fontSize: 12,
     lineHeight: 17,
     marginTop: 4,
   },
   offlineTitle: {
-    color: "#743A20",
+    color: colors.yellowInk,
     fontSize: 13,
     fontWeight: "900",
   },
   paneTitle: {
-    color: posColors.ink,
-    fontSize: 16,
+    color: colors.ink,
+    fontSize: 20,
     fontWeight: "900",
   },
   productCode: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 11,
     fontVariant: ["tabular-nums"],
     marginTop: 3,
@@ -4164,19 +4088,19 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   productName: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 13,
     fontWeight: "800",
     lineHeight: 17,
   },
   productPrice: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 13,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
   },
   productDiscount: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 12,
     fontWeight: "800",
   },
@@ -4186,7 +4110,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   productRow: {
-    borderBottomColor: posColors.border,
+    borderBottomColor: colors.border,
     borderBottomWidth: 1,
     minHeight: 116,
     paddingVertical: 10,
@@ -4204,40 +4128,33 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   quantityText: {
-    color: posColors.ink,
-    fontSize: 15,
+    color: colors.ink,
+    fontSize: 22,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
   },
   quantityValue: {
     alignItems: "center",
-    height: MIN_TOUCH_TARGET,
     justifyContent: "center",
-    minWidth: MIN_TOUCH_TARGET,
-  },
-  quietButtonText: {
-    color: posColors.ink,
-  },
-  warningButtonText: {
-    color: posColors.ink,
+    width: 52,
   },
   runtimeBanner: {
-    backgroundColor: posColors.blueSoft,
-    borderBottomColor: posColors.blue,
+    backgroundColor: colors.blueSoft,
+    borderBottomColor: colors.blue,
     borderBottomWidth: 1,
     minHeight: 38,
     paddingHorizontal: 20,
     paddingVertical: 9,
   },
   runtimeBannerText: {
-    color: posColors.blue,
+    color: colors.blue,
     fontSize: 12,
     fontWeight: "800",
   },
   updateGateBanner: {
     alignItems: "center",
-    backgroundColor: "#FFF4D8",
-    borderBottomColor: posColors.orange,
+    backgroundColor: colors.yellowSoft,
+    borderBottomColor: colors.orange,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 16,
@@ -4251,32 +4168,26 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   updateGateHint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 12,
     lineHeight: 17,
   },
   updateGateTitle: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 14,
     fontWeight: "900",
   },
-  safeArea: {
-    backgroundColor: posColors.canvas,
-    flex: 1,
-  },
   searchAction: {
-    flexBasis: "47%",
-    flexGrow: 1,
-    paddingHorizontal: 7,
+    flex: 1,
+    minHeight: 76,
   },
   searchActions: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 8,
   },
   searchDrawer: {
-    backgroundColor: posColors.surface,
-    borderLeftColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderLeftColor: colors.border,
     borderLeftWidth: 1,
     flexBasis: "38%",
     height: "100%",
@@ -4287,7 +4198,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   searchDrawerBackdrop: {
-    backgroundColor: "rgba(16, 37, 58, 0.42)",
+    backgroundColor: colors.overlay,
     flex: 1,
     flexDirection: "row",
     justifyContent: "flex-end",
@@ -4296,8 +4207,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   searchDrawerError: {
-    backgroundColor: posColors.redSoft,
-    color: posColors.red,
+    backgroundColor: colors.redSoft,
+    color: colors.red,
     fontSize: 13,
     fontWeight: "700",
     marginVertical: 8,
@@ -4305,7 +4216,7 @@ const styles = StyleSheet.create({
   },
   searchDrawerHeader: {
     alignItems: "center",
-    borderBottomColor: posColors.border,
+    borderBottomColor: colors.border,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 12,
@@ -4321,20 +4232,21 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   searchDrawerQuery: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 12,
     marginTop: 4,
   },
   searchInput: {
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.ink,
-    borderRadius: 4,
-    borderWidth: 1,
-    color: posColors.ink,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 10,
+    borderWidth: 2,
+    color: colors.ink,
     flex: 1,
-    fontSize: 15,
-    height: 48,
-    paddingHorizontal: 12,
+    fontSize: 17,
+    fontWeight: "600",
+    height: 64,
+    paddingHorizontal: 14,
   },
   searchInputRow: {
     alignItems: "stretch",
@@ -4343,8 +4255,8 @@ const styles = StyleSheet.create({
   },
   // 贴底整宽面板，位置与系统键盘一致；底部多留空间避开 Home 指示条。
   searchKeyboardDock: {
-    backgroundColor: posColors.canvas,
-    borderTopColor: posColors.border,
+    backgroundColor: colors.canvas,
+    borderTopColor: colors.border,
     borderTopWidth: 1,
     bottom: 0,
     left: 0,
@@ -4355,12 +4267,19 @@ const styles = StyleSheet.create({
     right: 0,
   },
   searchIconAction: {
-    height: 48,
-    paddingHorizontal: 0,
-    width: 48,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    height: 64,
+    justifyContent: "center",
+    minHeight: 64,
+    minWidth: 64,
+    width: 64,
   },
   searchMessage: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 13,
     paddingVertical: 16,
     textAlign: "center",
@@ -4369,44 +4288,32 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   successAction: {
-    marginTop: 28,
-    minWidth: 240,
+    marginTop: 6,
+    maxWidth: 720,
+    width: "100%",
   },
   successEyebrow: {
-    color: posColors.green,
+    color: colors.green,
     fontSize: 12,
     fontWeight: "900",
     letterSpacing: 1.5,
     marginTop: 18,
   },
-  successMark: {
-    alignItems: "center",
-    backgroundColor: posColors.green,
-    borderRadius: 38,
-    height: 76,
-    justifyContent: "center",
-    width: 76,
-  },
-  successMarkText: {
-    color: "#FFFFFF",
-    fontSize: 38,
-    fontWeight: "900",
-  },
   successOrder: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 13,
     fontVariant: ["tabular-nums"],
     marginTop: 8,
   },
   successScreen: {
     alignItems: "center",
-    backgroundColor: posColors.canvas,
     flex: 1,
+    gap: 14,
     justifyContent: "center",
-    padding: 30,
+    padding: 24,
   },
   successSync: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 16,
@@ -4414,17 +4321,16 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   successTitle: {
-    color: posColors.ink,
-    fontSize: 31,
+    color: colors.green,
+    fontSize: 32,
     fontWeight: "900",
-    marginTop: 8,
   },
   successWarning: {
-    backgroundColor: "#FFF4D8",
-    borderColor: "#DFA321",
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
     borderRadius: 6,
     borderWidth: 1,
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 14,
     lineHeight: 20,
     marginTop: 14,
@@ -4434,40 +4340,22 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   summaryAmount: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 14,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
   },
   summaryLabel: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 14,
   },
   summaryPane: {
-    alignItems: "stretch",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 5,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
     borderWidth: 1,
-    flexDirection: "row",
-    gap: 14,
-    minHeight: 132,
-    padding: 14,
-  },
-  summaryEditAction: {
-    flex: 1,
-    paddingHorizontal: 8,
-  },
-  summaryEditActions: {
-    flexBasis: 184,
-    flexDirection: "column",
-    gap: 8,
-    minWidth: 164,
-  },
-  summaryMetrics: {
-    flex: 1,
-    justifyContent: "center",
-    minWidth: 148,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   summaryRow: {
     alignItems: "center",
@@ -4481,88 +4369,196 @@ const styles = StyleSheet.create({
   summarySpacer: {
     flex: 1,
   },
-  summaryTitle: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "900",
-    marginBottom: 4,
-  },
   summaryTotal: {
-    borderLeftColor: posColors.border,
-    borderLeftWidth: 1,
-    flexBasis: 186,
-    justifyContent: "center",
-    minWidth: 166,
-    paddingLeft: 14,
+    alignItems: "baseline",
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    marginTop: 6,
+    paddingTop: 6,
   },
   totalAmount: {
-    color: posColors.ink,
-    fontSize: 31,
+    color: colors.ink,
+    flexShrink: 1,
+    fontSize: 46,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
-    letterSpacing: -0.8,
+    letterSpacing: -1,
+    lineHeight: 52,
+    textAlign: "right",
   },
   totalLabel: {
-    color: posColors.ink,
-    fontSize: 14,
+    color: colors.ink,
+    fontSize: 18,
     fontWeight: "900",
-    textTransform: "uppercase",
   },
   totalRow: {
     alignItems: "flex-end",
     flexDirection: "row",
     justifyContent: "space-between",
   },
-  transactionPane: {
-    flex: 1,
-    gap: 10,
-    minWidth: 0,
-  },
   utilityResult: {
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.green,
     borderRadius: 4,
     borderWidth: 1,
-    color: posColors.green,
+    color: colors.green,
     fontSize: 12,
     fontWeight: "700",
     lineHeight: 17,
     padding: 10,
   },
   utilityResultWarning: {
-    backgroundColor: "#FFF4D8",
-    borderColor: posColors.orange,
-    color: "#744024",
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.orange,
+    color: colors.yellowInk,
   },
   verifyingMessage: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 12,
     paddingVertical: 4,
     textAlign: "center",
   },
   totalRule: {
-    backgroundColor: posColors.ink,
+    backgroundColor: colors.inverseSurface,
     height: 2,
     marginBottom: 14,
     marginTop: 10,
   },
-  workspace: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    fontWeight: "700",
-    marginTop: 1,
-  },
-  appVersion: {
-    color: posColors.mutedInk,
-    fontSize: 10,
-    fontVariant: ["tabular-nums"],
-    marginTop: 1,
-  },
   workspaceRow: {
     flex: 1,
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
     minHeight: 0,
-    padding: 10,
+    padding: 12,
   },
-});
+  cartHeaderActions: {
+    flexDirection: "row",
+    gap: 8,
+    marginLeft: "auto",
+  },
+  lineStepButton: {
+    minHeight: 52,
+    paddingHorizontal: 0,
+    width: 52,
+  },
+  lineEditModal: {
+    backgroundColor: colors.canvas,
+    borderRadius: 16,
+    gap: 14,
+    maxWidth: 840,
+    padding: 20,
+    width: "90%",
+  },
+  lineEditHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 14,
+  },
+  lineEditHeading: {
+    flex: 1,
+    minWidth: 0,
+  },
+  lineEditSubtitle: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 3,
+  },
+  lineEditTotal: {
+    alignItems: "flex-end",
+  },
+  lineEditTotalLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  lineEditTotalAmount: {
+    color: colors.ink,
+    fontSize: 24,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  lineEditBody: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    gap: 18,
+  },
+  lineEditModes: {
+    flex: 1,
+    gap: 8,
+    minWidth: 0,
+  },
+  lineEditKeypad: {
+    gap: 10,
+    width: 356,
+  },
+  lineEditValue: {
+    gap: 6,
+  },
+  lineEditFooter: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+  },
+  lineEditFooterSpacer: {
+    flex: 1,
+  },
+  lineEditCancel: {
+    minWidth: 150,
+  },
+  lineEditConfirm: {
+    minWidth: 220,
+  },
+  editModeButtonSelected: {
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
+    paddingHorizontal: 15,
+  },
+  editModeLabel: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  editModeLabelSelected: {
+    color: colors.accent,
+  },
+  editModeValue: {
+    color: colors.ink,
+    fontSize: 26,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  successBanner: {
+    alignItems: "center",
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 18,
+    maxWidth: 720,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    width: "100%",
+  },
+  successCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  discountModal: {
+    backgroundColor: colors.canvas,
+    borderRadius: 16,
+    gap: 12,
+    maxWidth: 620,
+    padding: 22,
+    width: "70%",
+  },
+  editModeRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+}));

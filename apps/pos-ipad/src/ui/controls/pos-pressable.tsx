@@ -10,6 +10,7 @@ import {
   type TouchSoundKind,
   usePosSound,
 } from "@/ui/feedback/pos-sound-context";
+import { usePosThemeVersion } from "@/ui/theme";
 
 export type PosPressableProps = PressableProps &
   Readonly<{
@@ -31,6 +32,7 @@ export const PosPressable = forwardRef<View, PosPressableProps>(
     },
     ref,
   ) {
+    usePosThemeVersion();
     const { play } = usePosSound();
     const longPressTriggered = useRef(false);
     const handlesLongPress =

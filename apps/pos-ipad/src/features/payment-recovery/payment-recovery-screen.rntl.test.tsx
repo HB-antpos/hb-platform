@@ -1,5 +1,5 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { fireEvent, render, waitFor, within } from "@testing-library/react-native";
 import { Dimensions, StyleSheet } from "react-native";
 
 import {
@@ -17,6 +17,8 @@ let mockLanguage = "en";
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: mockLanguage, resolvedLanguage: mockLanguage },
+    // 页面外壳的顶栏用 t() 取状态文案；这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -50,6 +52,7 @@ test("已有付款待补订单时保留恢复入口，不允许再次人工改�
 function createService(
   record: PaymentRecoveryRecord = pendingRecord,
   refundSettlements: PaymentRecoveryCenterState["refundSettlements"] = [],
+  action: PaymentRecoveryCenterState["action"] = "idle",
 ) {
   let state: PaymentRecoveryCenterState = {
     filter: "pending",
@@ -59,7 +62,7 @@ function createService(
     refundSettlements,
     loading: false,
     refreshing: false,
-    action: "idle",
+    action,
     errorCode: null,
   };
   const listeners = new Set<() => void>();
@@ -139,17 +142,103 @@ test("恢复中心按设计展示双栏、原支付证据、历史和不阻断�
   }
 });
 
-test("较窄横屏收紧双栏间距并保留可触达的恢复操作", async () => {
+test("新布局：左栏固定 410 宽，分段与按钮 56 高，记录行 92 高，底部两个动作 72 高", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  const minHeightOf = (testID: string) =>
+    StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight;
+
+  expect(StyleSheet.flatten(screen.getByTestId("payment-recovery-list-pane").props.style).width).toBe(410);
+  for (const testID of [
+    "payment-recovery-back-to-sale",
+    "payment-recovery-filter-pending",
+    "payment-recovery-filter-failed",
+    "payment-recovery-filter-resolved",
+    "payment-recovery-refresh",
+  ]) {
+    expect(minHeightOf(testID)).toBeGreaterThanOrEqual(56);
+  }
+  expect(minHeightOf(`payment-recovery-record-${pendingRecord.id}`)).toBeGreaterThanOrEqual(92);
+  // 详情底部：恢复原支付是唯一的主按钮，人工核实在它右边，同为 72 高。
+  expect(minHeightOf("payment-recovery-recover-original")).toBe(72);
+  expect(minHeightOf("payment-recovery-open-manual")).toBe(72);
+  // 动作固定在详情底部，不在可滚动的明细里。
+  const scroll = screen.getByTestId("payment-recovery-details-scroll");
+  expect(within(scroll).queryByTestId("payment-recovery-recover-original")).toBeNull();
+  expect(within(scroll).queryByTestId("payment-recovery-open-manual")).toBeNull();
+  expect(within(scroll).getByText("Card payment attempt saved")).toBeTruthy();
+});
+
+test("待恢复分段带数量角标，只统计尚未处理且不是明确失败的记录", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  expect(within(screen.getByTestId("payment-recovery-filter-pending")).getByText("1")).toBeTruthy();
+  expect(within(screen.getByTestId("payment-recovery-filter-failed")).queryByText("1")).toBeNull();
+  await screen.unmount();
+
+  const failed = createService({ ...pendingRecord, status: "payment-failed" });
+  const failedScreen = await render(<PaymentRecoveryScreen service={failed.service} />);
+  expect(within(failedScreen.getByTestId("payment-recovery-filter-pending")).queryByText("1")).toBeNull();
+});
+
+test("三类分段切换仍然调用筛选并刷新", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await waitFor(() => expect(service.refresh).toHaveBeenCalledTimes(1));
+  await fireEvent.press(screen.getByTestId("payment-recovery-filter-failed"));
+  expect(service.getState().filter).toBe("failed");
+  expect(service.refresh).toHaveBeenCalledTimes(2);
+  await fireEvent.press(screen.getByTestId("payment-recovery-filter-resolved"));
+  expect(service.getState().filter).toBe("resolved");
+  expect(service.refresh).toHaveBeenCalledTimes(3);
+});
+
+test("有操作进行中时返回键与两个处理动作一起禁用", async () => {
+  const onBack = jest.fn();
+  const { service, recoveries } = createService(pendingRecord, [], "recovering");
+  const screen = await render(<PaymentRecoveryScreen onBack={onBack} service={service} />);
+
+  const back = screen.getByTestId("payment-recovery-back-to-sale");
+  expect(back.props.accessibilityState.disabled).toBe(true);
+  await fireEvent.press(back);
+  expect(onBack).not.toHaveBeenCalled();
+
+  const recover = screen.getByTestId("payment-recovery-recover-original");
+  expect(recover.props.accessibilityState.disabled).toBe(true);
+  expect(recover).toHaveTextContent("Checking original payment…");
+  await fireEvent.press(recover);
+  expect(recoveries).toEqual([]);
+  expect(screen.getByTestId("payment-recovery-open-manual").props.accessibilityState.disabled).toBe(true);
+});
+
+test("较窄横屏收窄左栏并保留可触达的恢复操作", async () => {
   Dimensions.set({
     window: { width: 834, height: 1_194, scale: 2, fontScale: 1 },
     screen: { width: 834, height: 1_194, scale: 2, fontScale: 1 },
   });
   const { service } = createService();
   const screen = await render(<PaymentRecoveryScreen service={service} />);
-  expect(StyleSheet.flatten(screen.getByTestId("payment-recovery-list-pane").props.style))
-    .toEqual(expect.objectContaining({ minWidth: 310, width: "42%" }));
+  expect(StyleSheet.flatten(screen.getByTestId("payment-recovery-list-pane").props.style).width).toBe(330);
   expect(screen.getByTestId("payment-recovery-recover-original")).toBeTruthy();
   expect(screen.getByTestId("payment-recovery-open-manual")).toBeTruthy();
+});
+
+test("人工核实弹窗的选项卡片、输入、预设、勾选和提交按钮按新尺寸放大", async () => {
+  const { service } = createService();
+  const screen = await render(<PaymentRecoveryScreen service={service} />);
+  await fireEvent.press(screen.getByTestId("payment-recovery-open-manual"));
+  await fireEvent.press(screen.getByTestId("payment-recovery-finding-paid"));
+  const minHeightOf = (testID: string) =>
+    StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight;
+
+  expect(screen.getByTestId("payment-recovery-manual-modal")).toBeTruthy();
+  expect(minHeightOf("payment-recovery-finding-paid")).toBeGreaterThanOrEqual(96);
+  expect(minHeightOf("payment-recovery-manual-amount")).toBeGreaterThanOrEqual(56);
+  expect(minHeightOf("payment-recovery-manual-note")).toBeGreaterThanOrEqual(56);
+  expect(minHeightOf("payment-recovery-manual-preset-paidTerminalSuccess")).toBeGreaterThanOrEqual(48);
+  expect(minHeightOf("payment-recovery-manual-confirmation")).toBeGreaterThanOrEqual(56);
+  expect(minHeightOf("payment-recovery-manual-cancel")).toBeGreaterThanOrEqual(64);
+  expect(minHeightOf("payment-recovery-manual-submit")).toBe(72);
 });
 
 test("人工核实默认三项未选且未确认，不需要证据，选好结果并确认后即可提交（已扣款还须等额金额）", async () => {

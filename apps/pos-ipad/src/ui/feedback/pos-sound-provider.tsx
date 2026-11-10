@@ -17,6 +17,7 @@ import {
   saveButtonSoundEnabled,
   saveSpecialNodeSoundEnabled,
 } from "@/ui/preferences/terminal-ui-preferences";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type PosSoundGroup = "button" | "special-node";
 
@@ -64,6 +65,7 @@ type ActivePlayback = Readonly<{
 export function PosSoundProvider({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  usePosThemeVersion();
   const [buttonSoundEnabled, setButtonSoundEnabledState] = useState(
     readButtonSoundEnabled,
   );

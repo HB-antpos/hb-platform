@@ -5,6 +5,7 @@ import { useMemo } from "react";
 
 import { describeNetworkCheckApp, describeNetworkCheckDevice } from "@/features/network-check";
 import { ZellerProbeScreen, ZellerSdkHost, type ZellerSdkVendor } from "@/features/zeller-probe";
+import { usePosThemeVersion } from "@/ui/theme";
 
 /**
  * Zeller 真机验证页（开发工具），用地址 hbpos-ipad://zeller-probe 打开，收银界面里没有入口。
@@ -22,6 +23,7 @@ const PROBE_PORTS = {
 };
 
 export default function ZellerProbeRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const onBack = () => (router.canGoBack() ? router.back() : router.replace("/" as Href));
   const vendor = useMemo<ZellerSdkVendor>(

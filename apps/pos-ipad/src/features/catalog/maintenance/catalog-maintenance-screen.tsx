@@ -1,14 +1,13 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   ScrollView,
-  StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import type {
   CatalogRefreshStep,
@@ -28,8 +27,15 @@ import type {
   CatalogRefreshWarningCode,
 } from "./catalog-maintenance-presenter";
 
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
+import { PosPill } from "@/ui/controls/pos-pill";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 export const CATALOG_MAINTENANCE_MIN_TOUCH_TARGET = 44;
 const CATALOG_MAINTENANCE_COMPACT_WIDTH = 900;
@@ -40,12 +46,18 @@ type CatalogMaintenanceScreenProps = Readonly<{
   onBack?(): void;
 }>;
 
-/** 横屏保持并排工作台；窄屏以可滚动的顺序堆叠，避免进度步骤被截断。 */
+type StepStatus = "Pending" | "Current" | "Complete";
+
+/**
+ * 目录更新页：左侧大卡片看当前目录与刷新进度，右侧是安全说明和唯一的主按钮。
+ * 横屏并排；窄屏以可滚动的顺序堆叠，避免进度步骤被截断。
+ */
 export function CatalogMaintenanceScreen({
   locale: localeOverride,
   presenter,
   onBack,
 }: CatalogMaintenanceScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -65,64 +77,79 @@ export function CatalogMaintenanceScreen({
   const catalogLoading = state.catalog.kind === "loading";
 
   return (
-    <SafeAreaView style={styles.safeArea} testID="catalog-maintenance-screen">
+    // 刷新在应用内后台继续，离开本页不会中断，所以不锁侧栏和返回键。
+    <PosScreenFrame
+      active="catalog-maintenance"
+      header={
+        <PosPageHeader
+          backLabel={t("action.back")}
+          backTestID="catalog-maintenance-back"
+          onBack={onBack}
+          subtitle={t("header.subtitle")}
+          title={t("header.title")}
+        />
+      }
+      testID="catalog-maintenance-screen"
+    >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         style={styles.scrollView}
       >
-        <View style={[styles.page, compact && styles.pageCompact]}>
-          <View style={[styles.header, compact && styles.headerCompact]}>
-            <View style={styles.titleGroup}>
-              <Text style={styles.eyebrow}>{t("header.eyebrow")}</Text>
-              <Text style={styles.title}>{t("header.title")}</Text>
-              <Text style={styles.subtitle}>{t("header.subtitle")}</Text>
-            </View>
-            {onBack ? (
-              <CatalogMaintenanceButton
-                label={t("action.back")}
-                onPress={onBack}
-                sound="navigate"
-                testID="catalog-maintenance-back"
-                tone="secondary"
-              />
-            ) : null}
+        <View
+          style={[styles.page, compact && styles.pageCompact]}
+          testID="catalog-maintenance-workspace"
+        >
+          <View style={[styles.statusPanel, compact && styles.panelCompact]}>
+            <Text style={styles.panelTitle}>{t("status.panelLabel")}</Text>
+            <StatusContent locale={locale} state={state} />
           </View>
-
-          <View style={[styles.workspace, compact && styles.workspaceCompact]}>
-            <View style={[styles.statusPanel, compact && styles.panelCompact]}>
-              <Text style={styles.panelLabel}>{t("status.panelLabel")}</Text>
-              <StatusContent locale={locale} state={state} compact={compact} />
-            </View>
+          <View
+            style={[styles.sideColumn, compact && styles.sideColumnCompact]}
+            testID="catalog-maintenance-side-panel"
+          >
             <View style={[styles.actionPanel, compact && styles.panelCompact]}>
-              <Text style={styles.actionTitle}>{t("action.title")}</Text>
+              <Text style={styles.panelTitle}>{t("action.title")}</Text>
               <Text style={styles.actionCopy}>{t("action.copy")}</Text>
-              <Text style={styles.backgroundHint}>{t("action.background")}</Text>
-              <CatalogMaintenanceButton
-                disabled={catalogLoading || refreshInProgress}
-                label={t(
-                  refreshInProgress ? "action.refreshing" : "action.refresh",
-                )}
-                onPress={() => void presenter.refresh()}
-                testID="catalog-maintenance-refresh"
-              />
+              <View style={styles.backgroundHint}>
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={posColors.blue}
+                  name="information-outline"
+                  size={24}
+                />
+                <Text style={styles.backgroundHintText}>
+                  {t("action.background")}
+                </Text>
+              </View>
               <Text style={styles.safetyFootnote}>{t("action.footnote")}</Text>
             </View>
+            {/* 本页唯一的主按钮；刷新中禁用并换成「正在刷新目录…」。 */}
+            <PosButton
+              disabled={catalogLoading || refreshInProgress}
+              icon={refreshInProgress ? "loading" : "refresh"}
+              label={t(
+                refreshInProgress ? "action.refreshing" : "action.refresh",
+              )}
+              onPress={() => void presenter.refresh()}
+              size="primary"
+              testID="catalog-maintenance-refresh"
+              tone="primary"
+            />
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
 function StatusContent({
-  compact,
   locale,
   state,
 }: Readonly<{
-  compact: boolean;
   locale: CatalogMaintenanceLocale;
   state: CatalogMaintenanceState;
 }>) {
+  usePosThemeVersion();
   const refreshTestId =
     state.refresh.kind === "running"
       ? "catalog-maintenance-downloading"
@@ -131,11 +158,9 @@ function StatusContent({
     state.refresh.kind === "idle" ? null : state.refresh.progress;
 
   return (
-    <View
-      style={[styles.statusBody, compact && styles.statusBodyCompact]}
-      testID={refreshTestId}
-    >
+    <View style={styles.statusBody} testID={refreshTestId}>
       <LocalCatalogSummary catalog={state.catalog} locale={locale} />
+      <View style={styles.divider} />
       <RefreshStatus
         locale={locale}
         progress={progress}
@@ -155,13 +180,14 @@ function LocalCatalogSummary({
   catalog: CatalogMaintenanceState["catalog"];
   locale: CatalogMaintenanceLocale;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: CatalogMaintenanceCopyKey,
     values?: Readonly<Record<string, string | number>>,
   ) => catalogMaintenanceText(locale, key, values);
   if (catalog.kind === "loading") {
     return (
-      <View style={styles.catalogLoading} testID="catalog-maintenance-catalog-loading">
+      <View style={styles.catalogNotice} testID="catalog-maintenance-catalog-loading">
         <ActivityIndicator color={posColors.blue} size="small" />
         <Text style={styles.catalogLoadingText}>{t("status.catalogLoading")}</Text>
       </View>
@@ -170,7 +196,7 @@ function LocalCatalogSummary({
   if (catalog.summary === null) {
     return (
       <View
-        style={styles.catalogUnavailable}
+        style={[styles.catalogNotice, styles.catalogUnavailable]}
         testID="catalog-maintenance-catalog-unavailable"
       >
         <Text
@@ -204,6 +230,7 @@ function CatalogSummaryGrid({
   locale: CatalogMaintenanceLocale;
   summary: CatalogSummary;
 }>) {
+  usePosThemeVersion();
   const t = (key: CatalogMaintenanceCopyKey) =>
     catalogMaintenanceText(locale, key);
   return (
@@ -214,9 +241,10 @@ function CatalogSummaryGrid({
         label={t("metric.activated")}
         value={formatCatalogTimestamp(summary.activatedAt)}
       />
+      {/* 快照 ID 很长：放不下时从中间省略，首尾都留着方便核对。 */}
       <Metric
+        ellipsizeMiddle
         label={t("metric.snapshot")}
-        secondary
         value={summary.snapshotId}
       />
     </View>
@@ -232,6 +260,7 @@ function RefreshStatus({
   progress: CatalogRefreshProgress | null;
   refresh: CatalogMaintenanceState["refresh"];
 }>) {
+  usePosThemeVersion();
   const t = (
     key: CatalogMaintenanceCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -254,6 +283,11 @@ function RefreshStatus({
       : refresh.kind === "failed"
         ? t("status.failed")
         : t("status.downloading");
+  // 准备阶段还没有真实百分比：只显示等待提示和已用时，不画进度条。
+  const preparing =
+    progress !== null &&
+    progress.currentStep === "prepare" &&
+    progress.steps[0]?.percent === 0;
   return (
     <View
       accessibilityRole={
@@ -263,26 +297,68 @@ function RefreshStatus({
       }
       style={styles.refreshStatus}
     >
-      <Text
-        style={[
-          styles.statusTitle,
-          refresh.kind === "success" && styles.successTitle,
-          refresh.kind === "warning" && styles.warningTitle,
-          refresh.kind === "failed" && styles.failedTitle,
-        ]}
-      >
-        {title}
-      </Text>
-      {progress ? <RefreshProgress locale={locale} progress={progress} /> : null}
-      {refresh.kind === "failed" ? (
-        <Text style={styles.errorCode}>
-          {t("status.safeError", { errorCode: refresh.errorCode })}
+      <View style={styles.statusHeader}>
+        <Text
+          style={[
+            styles.statusTitle,
+            styles.statusTitleInRow,
+            refresh.kind === "success" && styles.successTitle,
+            refresh.kind === "warning" && styles.warningTitle,
+            refresh.kind === "failed" && styles.failedTitle,
+          ]}
+        >
+          {title}
         </Text>
+        {progress && !preparing ? (
+          <View accessibilityLiveRegion="polite" style={styles.currentStepPill}>
+            <PosPill
+              label={t("progress.currentStep", {
+                step: t(stepCopyKey(progress.currentStep)),
+              })}
+              tone="accent"
+            />
+          </View>
+        ) : null}
+        {progress ? (
+          <Text style={styles.progressElapsed} testID="catalog-maintenance-elapsed">
+            {t("progress.elapsed", {
+              elapsed: formatElapsedMilliseconds(progress.elapsedMilliseconds),
+            })}
+          </Text>
+        ) : null}
+      </View>
+      {progress ? (
+        <RefreshProgress
+          locale={locale}
+          preparing={preparing}
+          progress={progress}
+        />
+      ) : null}
+      {refresh.kind === "failed" ? (
+        <View style={[styles.resultNote, styles.resultNoteFailed]}>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.red}
+            name="alert-circle-outline"
+            size={24}
+          />
+          <Text style={styles.errorCode}>
+            {t("status.safeError", { errorCode: refresh.errorCode })}
+          </Text>
+        </View>
       ) : null}
       {refresh.kind === "warning" ? (
-        <Text style={styles.warningCopy}>
-          {t(warningCopyKey(refresh.warningCode))}
-        </Text>
+        <View style={[styles.resultNote, styles.resultNoteWarning]}>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.yellowInk}
+            name="alert-outline"
+            size={24}
+          />
+          <Text style={styles.warningCopy}>
+            {t(warningCopyKey(refresh.warningCode))}
+          </Text>
+        </View>
       ) : null}
     </View>
   );
@@ -290,18 +366,19 @@ function RefreshStatus({
 
 function RefreshProgress({
   locale,
+  preparing,
   progress,
 }: Readonly<{
   locale: CatalogMaintenanceLocale;
+  preparing: boolean;
   progress: CatalogRefreshProgress;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: CatalogMaintenanceCopyKey,
     values?: Readonly<Record<string, string | number>>,
   ) => catalogMaintenanceText(locale, key, values);
   const overallPercent = formatPercent(progress.overallPercent);
-  const currentStep = t(stepCopyKey(progress.currentStep));
-  const preparing = progress.currentStep === "prepare" && progress.steps[0]?.percent === 0;
 
   if (preparing) {
     return (
@@ -313,47 +390,45 @@ function RefreshProgress({
         >
           <ActivityIndicator
             accessibilityLabel={t("progress.preparing")}
-            color={posColors.orange}
+            color={posColors.accent}
             size="small"
           />
           <Text style={styles.progressPreparingText}>{t("progress.preparing")}</Text>
         </View>
-        <Text style={styles.progressElapsed} testID="catalog-maintenance-elapsed">
-          {t("progress.elapsed", { elapsed: formatElapsedMilliseconds(progress.elapsedMilliseconds) })}
-        </Text>
       </View>
     );
   }
 
   return (
     <View style={styles.progressSection} testID="catalog-maintenance-progress">
-      <Text accessibilityLiveRegion="polite" style={styles.progressCurrentStep}>
-        {t("progress.currentStep", { step: currentStep })}
-      </Text>
-      <View
-        accessibilityLabel={t("progress.accessibility", {
-          percent: overallPercent,
-        })}
-        accessibilityRole="progressbar"
-        accessibilityValue={{ max: 100, min: 0, now: progress.overallPercent }}
-        style={styles.progressTrack}
-        testID="catalog-maintenance-overall-progress"
-      >
+      <View style={styles.progressRow}>
         <View
-          style={[
-            styles.progressFill,
-            { width: `${progress.overallPercent}%` },
-          ]}
-        />
+          accessibilityLabel={t("progress.accessibility", {
+            percent: overallPercent,
+          })}
+          accessibilityRole="progressbar"
+          accessibilityValue={{ max: 100, min: 0, now: progress.overallPercent }}
+          style={styles.progressTrack}
+          testID="catalog-maintenance-overall-progress"
+        >
+          <View
+            style={[
+              styles.progressFill,
+              { width: `${progress.overallPercent}%` },
+            ]}
+          />
+        </View>
+        {/* 大字只显示百分比；完整的「总进度：x%」留给读屏。 */}
+        <Text
+          accessibilityLabel={t("progress.total", { percent: overallPercent })}
+          style={styles.progressTotal}
+          testID="catalog-maintenance-overall-percent"
+        >
+          {overallPercent}%
+        </Text>
       </View>
-      <Text style={styles.progressTotal}>
-        {t("progress.total", { percent: overallPercent })}
-      </Text>
-      <Text style={styles.progressElapsed} testID="catalog-maintenance-elapsed">
-        {t("progress.elapsed", { elapsed: formatElapsedMilliseconds(progress.elapsedMilliseconds) })}
-      </Text>
-      <View style={styles.stepList}>
-        {progress.steps.map((step) => {
+      <View>
+        {progress.steps.map((step, index) => {
           const percent = formatPercent(step.percent);
           const title = t(stepCopyKey(step.step));
           const status = stepStatus(progress, step.step, step.percent);
@@ -367,17 +442,25 @@ function RefreshProgress({
                 step: title,
               })}
               key={step.step}
-              style={styles.stepRow}
+              style={[styles.stepRow, index > 0 && styles.stepRowDivider]}
               testID={`catalog-maintenance-step-${step.step}`}
             >
-              <View style={[styles.stepMarker, styles[`stepMarker${status}`]]} />
-              <View style={styles.stepTextGroup}>
-                <Text style={[styles.stepLabel, styles[`stepLabel${status}`]]}>
-                  {title}
-                </Text>
-                {detail ? <Text style={styles.stepDetail}>{detail}</Text> : null}
-              </View>
-              <Text style={[styles.stepPercent, styles[`stepLabel${status}`]]}>
+              <MaterialCommunityIcons
+                accessible={false}
+                color={stepIconColor(status)}
+                name={STEP_ICON[status]}
+                size={24}
+              />
+              <Text
+                numberOfLines={1}
+                style={[styles.stepLabel, styles[`stepLabel${status}`]]}
+              >
+                {title}
+              </Text>
+              <Text numberOfLines={1} style={styles.stepDetail}>
+                {detail ?? "—"}
+              </Text>
+              <Text style={[styles.stepPercent, styles[`stepPercent${status}`]]}>
                 {percent}%
               </Text>
             </View>
@@ -391,68 +474,64 @@ function RefreshProgress({
 function CatalogContinuityNote({
   locale,
 }: Readonly<{ locale: CatalogMaintenanceLocale }>) {
+  usePosThemeVersion();
   return (
-    <Text style={styles.continuityNote}>
-      {catalogMaintenanceText(locale, "continuity")}
-    </Text>
+    <View style={styles.continuityNote}>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors.green}
+        name="shield-check-outline"
+        size={24}
+      />
+      <Text style={styles.continuityNoteText}>
+        {catalogMaintenanceText(locale, "continuity")}
+      </Text>
+    </View>
   );
 }
 
 function Metric({
+  ellipsizeMiddle = false,
   label,
-  secondary = false,
   value,
-}: Readonly<{ label: string; secondary?: boolean; value: string }>) {
+}: Readonly<{ ellipsizeMiddle?: boolean; label: string; value: string }>) {
+  usePosThemeVersion();
   return (
-    <View style={[styles.metric, secondary && styles.secondaryMetric]}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text numberOfLines={1} style={[styles.metricValue, secondary && styles.secondaryMetricValue]}>
+    <View style={styles.metric}>
+      <Text numberOfLines={1} style={styles.metricLabel}>
+        {label}
+      </Text>
+      {/* 四张卡并排后每张较窄：长值先缩字号，再省略，文本内容保持完整。 */}
+      <Text
+        adjustsFontSizeToFit
+        ellipsizeMode={ellipsizeMiddle ? "middle" : "tail"}
+        minimumFontScale={0.6}
+        numberOfLines={1}
+        style={styles.metricValue}
+      >
         {value}
       </Text>
     </View>
   );
 }
 
-function CatalogMaintenanceButton({
-  disabled = false,
-  label,
-  onPress,
-  sound = "tap",
-  testID,
-  tone = "primary",
-}: Readonly<{
-  disabled?: boolean;
-  label: string;
-  onPress(): void;
-  sound?: "tap" | "navigate";
-  testID: string;
-  tone?: "primary" | "secondary";
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
-      style={({ pressed }) => [
-        styles.button,
-        tone === "secondary" && styles.secondaryButton,
-        disabled && styles.disabledButton,
-        pressed && !disabled && styles.pressedButton,
-      ]}
-      testID={testID}
-    >
-      <Text
-        style={[
-          styles.buttonLabel,
-          tone === "secondary" && styles.secondaryButtonLabel,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
-  );
+// 步骤图标：做完打绿勾，进行中是下载进度，未开始是空心圆。
+const STEP_ICON: Readonly<Record<StepStatus, PosIconName>> = {
+  Complete: "check-circle",
+  Current: "progress-download",
+  Pending: "circle-outline",
+};
+
+// 颜色在渲染时才从当前主题取，换主题后步骤图标跟着变。
+function stepIconColor(status: StepStatus): string {
+  switch (status) {
+    case "Complete":
+      return posColors.green;
+    case "Current":
+      return posColors.accent;
+    case "Pending":
+      return posColors.mutedInk;
+  }
 }
 
 function stepCopyKey(step: CatalogRefreshStep): CatalogMaintenanceCopyKey {
@@ -511,136 +590,223 @@ function formatCatalogTimestamp(value: string): string {
   return value.replace(/:\d{2}(?:\.\d+)?Z$/, "Z");
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: posColors.canvas },
+const styles = createPosStyles((colors) => ({
   scrollView: { flex: 1 },
   scrollContent: { flexGrow: 1 },
-  page: { flex: 1, paddingHorizontal: 40, paddingVertical: 28 },
-  pageCompact: { paddingHorizontal: 20, paddingVertical: 20 },
-  header: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 24,
-    justifyContent: "space-between",
-    marginBottom: 28,
-  },
-  headerCompact: { gap: 16, marginBottom: 20 },
-  titleGroup: { flex: 1, maxWidth: 880 },
-  eyebrow: {
-    color: posColors.blue,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 32,
-    fontWeight: "800",
-    marginTop: 8,
-  },
-  subtitle: {
-    color: posColors.mutedInk,
-    fontSize: 17,
-    lineHeight: 25,
-    marginTop: 8,
-  },
-  workspace: { flex: 1, flexDirection: "row", gap: 24, minHeight: 330 },
-  workspaceCompact: { flexDirection: "column", gap: 16, minHeight: 0 },
+  page: { flexDirection: "row", flexGrow: 1, gap: 12, padding: 12 },
+  pageCompact: { flexDirection: "column" },
   statusPanel: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
     borderWidth: 1,
-    flex: 1.25,
-    padding: 28,
-  },
-  panelCompact: { flexGrow: 0, padding: 20 },
-  panelLabel: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 0.9,
-  },
-  statusBody: { flex: 1, justifyContent: "center", paddingVertical: 24 },
-  statusBodyCompact: { justifyContent: "flex-start", paddingVertical: 20 },
-  catalogLoading: { alignItems: "center", flexDirection: "row", gap: 10 },
-  catalogLoadingText: { color: posColors.mutedInk, fontSize: 16, fontWeight: "700" },
-  catalogUnavailable: { paddingTop: 16 },
-  catalogUnavailableTitle: { color: posColors.ink, fontSize: 20, fontWeight: "800" },
-  summaryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12, marginTop: 16 },
-  metric: {
-    backgroundColor: posColors.greenSoft,
-    borderRadius: 8,
+    // 横屏占满右侧说明栏以外的宽度；窄屏堆叠时由 panelCompact 改回按内容高度。
+    flexBasis: 0,
     flexGrow: 1,
-    minWidth: 168,
-    padding: 14,
+    flexShrink: 1,
+    gap: 10,
+    minWidth: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  secondaryMetric: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1 },
-  metricLabel: { color: posColors.mutedInk, fontSize: 13, fontWeight: "700" },
-  metricValue: { color: posColors.ink, fontSize: 18, fontWeight: "800", marginTop: 4 },
-  secondaryMetricValue: { fontSize: 15 },
-  refreshStatus: { marginTop: 24 },
-  statusTitle: { color: posColors.ink, fontSize: 23, fontWeight: "800", lineHeight: 31 },
-  successTitle: { color: posColors.green },
-  warningTitle: { color: posColors.orange },
-  failedTitle: { color: posColors.red },
-  statusHint: { color: posColors.mutedInk, fontSize: 17, lineHeight: 25, marginTop: 8 },
-  errorCode: { color: posColors.red, fontFamily: "Courier", fontSize: 15, fontWeight: "700", marginTop: 10 },
-  warningCopy: { color: posColors.ink, fontSize: 16, lineHeight: 23, marginTop: 10 },
-  progressSection: { marginTop: 14 },
-  progressCurrentStep: { color: posColors.mutedInk, fontSize: 15, fontWeight: "700" },
-  progressPreparing: { alignItems: "center", flexDirection: "row", gap: 8, marginTop: 8 },
-  progressPreparingText: { color: posColors.mutedInk, fontSize: 14, fontWeight: "700" },
-  progressTrack: { backgroundColor: posColors.border, borderRadius: 99, height: 10, marginTop: 10, overflow: "hidden" },
-  progressFill: { backgroundColor: posColors.orange, borderRadius: 99, height: "100%" },
-  progressTotal: { color: posColors.ink, fontSize: 15, fontWeight: "800", marginTop: 8 },
-  progressElapsed: { color: posColors.mutedInk, fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "700", marginTop: 4 },
-  stepList: { gap: 8, marginTop: 14 },
-  stepRow: { alignItems: "center", flexDirection: "row", gap: 9, minHeight: 24 },
-  stepMarker: { borderRadius: 5, height: 10, width: 10 },
-  stepMarkerPending: { backgroundColor: posColors.border },
-  stepMarkerCurrent: { backgroundColor: posColors.orange },
-  stepMarkerComplete: { backgroundColor: posColors.green },
-  stepTextGroup: { flex: 1 },
-  stepLabel: { fontSize: 16, lineHeight: 22 },
-  stepDetail: { color: posColors.mutedInk, fontSize: 13, fontVariant: ["tabular-nums"], marginTop: 1 },
-  stepPercent: { fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "800" },
-  stepLabelPending: { color: posColors.mutedInk },
-  stepLabelCurrent: { color: posColors.ink, fontWeight: "800" },
-  stepLabelComplete: { color: posColors.green, fontWeight: "700" },
-  continuityNote: { color: posColors.green, fontSize: 17, fontWeight: "700", lineHeight: 25, marginTop: 22 },
-  actionPanel: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: "#C7D9E8",
-    borderRadius: 12,
+  panelCompact: { flexBasis: "auto", flexGrow: 0 },
+  panelTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+  statusBody: { flexGrow: 1, gap: 10 },
+  divider: { backgroundColor: colors.border, height: 1, marginVertical: 4 },
+  catalogNotice: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
     borderWidth: 1,
-    flex: 0.9,
-    justifyContent: "center",
-    padding: 28,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 72,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
-  actionTitle: { color: posColors.ink, fontSize: 23, fontWeight: "800" },
-  actionCopy: { color: posColors.mutedInk, fontSize: 17, lineHeight: 25, marginTop: 12 },
+  catalogLoadingText: { color: colors.mutedInk, fontSize: 16, fontWeight: "700" },
+  catalogUnavailable: {
+    alignItems: "flex-start",
+    flexDirection: "column",
+    gap: 4,
+    justifyContent: "center",
+  },
+  catalogUnavailableTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+  summaryGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  metric: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    // 四张等宽并排；宽度不够（窄屏）时自动换行。
+    flexBasis: 0,
+    flexGrow: 1,
+    minWidth: 140,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  metricLabel: { color: colors.mutedInk, fontSize: 13, fontWeight: "800" },
+  metricValue: {
+    color: colors.ink,
+    fontSize: 19,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    marginTop: 2,
+  },
+  refreshStatus: { gap: 10 },
+  statusHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  statusTitle: { color: colors.ink, fontSize: 18, fontWeight: "900", lineHeight: 26 },
+  statusTitleInRow: { flexShrink: 1 },
+  successTitle: { color: colors.green },
+  warningTitle: { color: colors.yellowInk },
+  failedTitle: { color: colors.red },
+  statusHint: { color: colors.mutedInk, fontSize: 15, fontWeight: "600", lineHeight: 22 },
+  currentStepPill: { flexShrink: 1 },
+  progressElapsed: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+    marginLeft: "auto",
+  },
+  progressSection: { gap: 6 },
+  progressPreparing: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: CATALOG_MAINTENANCE_MIN_TOUCH_TARGET,
+  },
+  progressPreparingText: { color: colors.mutedInk, fontSize: 15, fontWeight: "700" },
+  progressRow: { alignItems: "center", flexDirection: "row", gap: 14 },
+  progressTrack: {
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: 11,
+    flex: 1,
+    height: 22,
+    overflow: "hidden",
+  },
+  progressFill: { backgroundColor: colors.accent, borderRadius: 11, height: "100%" },
+  progressTotal: {
+    color: colors.ink,
+    fontSize: 26,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    minWidth: 64,
+    textAlign: "right",
+  },
+  stepRow: { alignItems: "center", flexDirection: "row", gap: 10, minHeight: 50 },
+  stepRowDivider: { borderTopColor: colors.surfaceSunken, borderTopWidth: 1 },
+  stepLabel: { flex: 1, fontSize: 15.5, fontWeight: "800" },
+  stepLabelPending: { color: colors.mutedInk },
+  stepLabelCurrent: { color: colors.ink },
+  stepLabelComplete: { color: colors.ink },
+  stepDetail: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+    minWidth: 96,
+    textAlign: "right",
+  },
+  stepPercent: {
+    fontSize: 15.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+    minWidth: 62,
+    textAlign: "right",
+  },
+  stepPercentPending: { color: colors.mutedInk },
+  stepPercentCurrent: { color: colors.accent },
+  stepPercentComplete: { color: colors.ink },
+  resultNote: {
+    alignItems: "center",
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  resultNoteFailed: { backgroundColor: colors.redSoft, borderColor: colors.redBorder },
+  resultNoteWarning: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+  },
+  errorCode: {
+    color: colors.red,
+    flexShrink: 1,
+    fontFamily: "Courier",
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  warningCopy: {
+    color: colors.yellowInk,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  continuityNote: {
+    alignItems: "center",
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    // 贴在左侧卡片底部，刷新过程中一直看得到。
+    marginTop: "auto",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  continuityNoteText: {
+    color: colors.green,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 21,
+  },
+  sideColumn: { gap: 12, width: 380 },
+  sideColumnCompact: { width: "100%" },
+  actionPanel: {
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    flexGrow: 1,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  actionCopy: { color: colors.ink, fontSize: 15, fontWeight: "700", lineHeight: 23 },
   backgroundHint: {
-    color: posColors.blue,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.blueBorder,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  backgroundHintText: {
+    color: colors.blue,
+    flex: 1,
     fontSize: 14,
     fontWeight: "700",
     lineHeight: 21,
-    marginTop: 8,
   },
-  button: {
-    alignItems: "center",
-    backgroundColor: posColors.orange,
-    borderRadius: 8,
-    justifyContent: "center",
-    marginTop: 24,
-    minHeight: CATALOG_MAINTENANCE_MIN_TOUCH_TARGET,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+  safetyFootnote: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    lineHeight: 18,
+    marginTop: "auto",
   },
-  buttonLabel: { color: "#FFFFFF", fontSize: 16, fontWeight: "800", textAlign: "center" },
-  secondaryButton: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, marginTop: 0 },
-  secondaryButtonLabel: { color: posColors.ink },
-  disabledButton: { backgroundColor: "#C9B6AF" },
-  pressedButton: { opacity: 0.82 },
-  safetyFootnote: { color: posColors.mutedInk, fontSize: 14, lineHeight: 20, marginTop: 16 },
-});
+}));

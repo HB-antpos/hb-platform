@@ -16,6 +16,7 @@ import {
   type LocalHistoryPresenter,
 } from "@/features/local-history";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type LocalHistoryBinding = Readonly<{
   services: object;
@@ -28,6 +29,7 @@ type LocalHistoryBinding = Readonly<{
  * 生产组合根绑定，离线状态不会降级为未受保护的数据访问。
  */
 export default function LocalHistoryRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);

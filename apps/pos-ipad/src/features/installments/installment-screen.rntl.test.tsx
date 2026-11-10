@@ -3,6 +3,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react-native";
 import { Dimensions, StyleSheet } from "react-native";
 
@@ -21,6 +22,8 @@ let mockLanguage = "en";
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: mockLanguage, resolvedLanguage: mockLanguage },
+    // 页面外壳的顶栏用 t() 取状态文案；这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -32,15 +35,15 @@ beforeEach(() => {
   setWindowWidth(1_024);
 });
 
-test("宽屏采用 43/57 双栏和 76pt 顶栏，主要触控区不少于 44pt", async () => {
+test("宽屏采用 400 宽列表 + 占满的详情，页头与筛选按钮不少于 56pt", async () => {
   expect(installmentLayoutForWidth(1_024)).toEqual({
     compact: false,
-    listFlex: 0.43,
-    detailsFlex: 0.57,
-    pagePadding: 14,
+    listWidth: 400,
+    pagePadding: 12,
     workspaceGap: 12,
   });
   expect(installmentLayoutForWidth(899).compact).toBe(true);
+  expect(installmentLayoutForWidth(899).listWidth).toBeNull();
 
   const onBack = jest.fn();
   const { presenter, spies } = createPresenter({
@@ -57,38 +60,211 @@ test("宽屏采用 43/57 双栏和 76pt 顶栏，主要触控区不少于 44pt",
       presenter={presenter}
     />,
   );
+  const minHeightOf = (testID: string) =>
+    StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight;
 
   await waitFor(() => expect(spies.load).toHaveBeenCalledTimes(1));
   expect(screen.getByTestId("installments-list")).toBeTruthy();
   expect(screen.getByTestId("installments-details-pane")).toBeTruthy();
   expect(
     StyleSheet.flatten(screen.getByTestId("installments-history-pane").props.style)
-      .flex,
-  ).toBe(0.43);
+      .width,
+  ).toBe(400);
   expect(
     StyleSheet.flatten(screen.getByTestId("installments-details-pane").props.style)
       .flex,
-  ).toBe(0.57);
-  const headerStyle = StyleSheet.flatten(
-    screen.getByTestId("installments-header").props.style,
-  );
-  expect(headerStyle.minHeight).toBe(76);
-  expect(headerStyle.maxHeight).toBe(80);
+  ).toBe(1);
+  // 页头换成统一外壳：标题、副标题和联网状态都在页头里。
+  const header = screen.getByTestId("installments-header");
+  expect(within(header).getByText("Lay-bys")).toBeTruthy();
+  expect(
+    within(header).getByText(
+      "Lay-by queries and operations require a live backend.",
+    ),
+  ).toBeTruthy();
+  expect(within(header).getByText("Online")).toBeTruthy();
 
   for (const testID of [
     "installments-back",
     "installments-refresh",
     "installments-primary-action",
     "installments-search-submit",
+    "installments-filter-all",
+    "installments-date-last30",
+    "installments-scope-store",
   ]) {
-    expect(StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight).toBe(
-      INSTALLMENTS_MIN_TOUCH_TARGET,
-    );
+    expect(minHeightOf(testID)).toBeGreaterThanOrEqual(56);
   }
+  expect(minHeightOf("installments-search")).toBeGreaterThanOrEqual(
+    INSTALLMENTS_MIN_TOUCH_TARGET,
+  );
+  expect(minHeightOf(`installment-row-${GUID}`)).toBeGreaterThanOrEqual(84);
   await fireEvent.press(screen.getByTestId("installments-back"));
   await fireEvent.press(screen.getByTestId("installments-refresh"));
   expect(onBack).toHaveBeenCalledTimes(1);
   expect(spies.load).toHaveBeenCalledTimes(2);
+  await screen.unmount();
+});
+
+test("筛选两行排在列表和详情上方，状态、日期、范围都是分段按钮", async () => {
+  const { presenter } = createPresenter({
+    dateFilter: { preset: "last30", fromDate: null, toDate: null },
+    details: details("Active"),
+    orders: [summary()],
+    selectedGuid: GUID,
+    statusFilter: "PaidOff",
+  });
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+
+  const filters = screen.getByTestId("installments-filters");
+  for (const testID of [
+    "installments-search",
+    "installments-search-submit",
+    "installments-filter-Active",
+    "installments-date-custom",
+    "installments-scope-device",
+  ]) {
+    expect(within(filters).getByTestId(testID)).toBeTruthy();
+  }
+  // 筛选不再挤在左栏里。
+  expect(
+    within(screen.getByTestId("installments-history-pane")).queryByTestId(
+      "installments-search",
+    ),
+  ).toBeNull();
+  expect(
+    screen.getByTestId("installments-filter-PaidOff").props.accessibilityState
+      .checked,
+  ).toBe(true);
+  expect(
+    screen.getByTestId("installments-filter-all").props.accessibilityState
+      .checked,
+  ).toBe(false);
+  expect(
+    screen.getByTestId("installments-date-last30").props.accessibilityState
+      .checked,
+  ).toBe(true);
+  expect(
+    screen.getByTestId("installments-scope-store").props.accessibilityState
+      .checked,
+  ).toBe(true);
+  await screen.unmount();
+});
+
+test("展开自定义日期后再点其它预设会收起日期选择并立即筛选", async () => {
+  const { presenter, spies } = createPresenter({ orders: [summary()] });
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+
+  await fireEvent.press(screen.getByTestId("installments-date-custom"));
+  expect(screen.getByTestId("installments-custom-dates")).toBeTruthy();
+  // 只展开、还没点「应用」时不触发筛选，「自定义」先高亮。
+  expect(spies.setDateFilter).not.toHaveBeenCalled();
+  expect(
+    screen.getByTestId("installments-date-custom").props.accessibilityState
+      .checked,
+  ).toBe(true);
+
+  // 当前生效的预设仍是「全部」，再点它也要能收起并重新筛选。
+  await fireEvent.press(screen.getByTestId("installments-date-all"));
+  expect(screen.queryByTestId("installments-custom-dates")).toBeNull();
+  expect(spies.setDateFilter).toHaveBeenLastCalledWith({
+    preset: "all",
+    fromDate: null,
+    toDate: null,
+  });
+  await screen.unmount();
+});
+
+test("四个金额卡并排，继续付款是详情底部固定的 72pt 主按钮", async () => {
+  const { presenter } = createPresenter({
+    details: details("Active"),
+    orders: [summary()],
+    selectedGuid: GUID,
+  });
+  const screen = await render(
+    <InstallmentScreen onStartRepayment={() => true} presenter={presenter} />,
+  );
+  const scroll = screen.getByTestId("installment-details");
+  for (const label of ["Total", "Down payment", "Paid", "Balance"]) {
+    expect(within(scroll).getAllByText(label).length).toBeGreaterThan(0);
+  }
+
+  // 主按钮栏在滚动区之外，内容再长也一直可见。
+  const dock = screen.getByTestId("installment-action-dock");
+  expect(within(scroll).queryByTestId("installment-action-dock")).toBeNull();
+  const primary = within(dock).getByTestId("installment-continue-to-payment");
+  const more = within(dock).getByTestId("installment-more-actions");
+  expect(StyleSheet.flatten(primary.props.style).minHeight).toBe(72);
+  expect(StyleSheet.flatten(more.props.style).minHeight).toBe(72);
+  expect(primary).toHaveTextContent("Continue payment");
+
+  // 更多操作展开后，两个危险入口 64pt 高，仍在底部按钮栏里；选定后表单进入滚动区。
+  await fireEvent.press(more);
+  const menu = within(dock).getByTestId("installment-more-menu");
+  for (const testID of ["installment-more-cancel", "installment-more-void"]) {
+    expect(
+      StyleSheet.flatten(within(menu).getByTestId(testID).props.style).minHeight,
+    ).toBe(64);
+  }
+  expect(more).toHaveTextContent("Close more actions");
+  await fireEvent.press(screen.getByTestId("installment-more-cancel"));
+  expect(screen.queryByTestId("installment-more-menu")).toBeNull();
+  expect(within(scroll).getByTestId("installment-cancel-panel")).toBeTruthy();
+  expect(within(scroll).getByTestId("installment-cancel-reason")).toBeTruthy();
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("installment-cancel-refund").props.style,
+    ).minHeight,
+  ).toBe(64);
+  // 主按钮此时仍固定在底部。
+  expect(within(dock).getByTestId("installment-continue-to-payment")).toBeTruthy();
+  await screen.unmount();
+}, 15_000);
+
+test("已付清时底部主按钮换成确认已取货，取货备注留在键盘感知滚动区里", async () => {
+  const { presenter, spies } = createPresenter({
+    details: details("PaidOff"),
+    orders: [summary()],
+    selectedGuid: GUID,
+  });
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+  const scroll = screen.getByTestId("installment-details");
+  const dock = screen.getByTestId("installment-action-dock");
+
+  expect(screen.queryByTestId("installment-continue-to-payment")).toBeNull();
+  const confirm = within(dock).getByTestId("installment-confirm-pickup");
+  expect(StyleSheet.flatten(confirm.props.style).minHeight).toBe(72);
+  expect(within(scroll).getByTestId("installment-pickup-note")).toBeTruthy();
+  expect(within(scroll).getByText("Confirm pickup")).toBeTruthy();
+
+  // 二次确认条出现在底部按钮栏里，确认后才调用 presenter。
+  await fireEvent.press(confirm);
+  expect(within(dock).getByTestId("installment-confirm-operation-submit")).toBeTruthy();
+  expect(within(scroll).queryByTestId("installment-confirm-operation-submit")).toBeNull();
+  await fireEvent.press(
+    within(dock).getByTestId("installment-confirm-operation-cancel"),
+  );
+  expect(screen.queryByTestId("installment-confirm-operation-submit")).toBeNull();
+  expect(spies.confirmPickup).not.toHaveBeenCalled();
+  await screen.unmount();
+});
+
+test("加载更多固定在列表下方", async () => {
+  const { presenter, spies } = createPresenter({
+    hasMore: true,
+    orders: [summary()],
+  });
+  const screen = await render(<InstallmentScreen presenter={presenter} />);
+  const pane = screen.getByTestId("installments-history-pane");
+  const loadMore = within(pane).getByTestId("installments-load-more");
+  expect(
+    within(screen.getByTestId("installments-list")).queryByTestId(
+      "installments-load-more",
+    ),
+  ).toBeNull();
+  expect(StyleSheet.flatten(loadMore.props.style).minHeight).toBeGreaterThanOrEqual(48);
+  await fireEvent.press(loadMore);
+  expect(spies.loadMore).toHaveBeenCalledTimes(1);
   await screen.unmount();
 });
 
@@ -521,9 +697,12 @@ test("窄屏列表优先，选中后详情接管并可返回列表", async () =>
   await fireEvent.press(screen.getByTestId(`installment-row-${GUID}`));
   expect(spies.select).toHaveBeenCalledWith(GUID);
   expect(screen.queryByTestId("installments-list")).toBeNull();
+  // 单栏时筛选区跟着列表一起让位给详情。
+  expect(screen.queryByTestId("installments-filters")).toBeNull();
   expect(screen.getByTestId("installments-details-pane")).toBeTruthy();
   await fireEvent.press(screen.getByTestId("installments-details-back"));
   expect(screen.getByTestId("installments-list")).toBeTruthy();
+  expect(screen.getByTestId("installments-filters")).toBeTruthy();
   await screen.unmount();
 });
 
@@ -574,7 +753,7 @@ test("已取货和已取消只显示完成信息，不显示动作区", async ()
   }
 });
 
-test("已完成与已取消详情仍可在标题工具区重打，按钮满足 44pt 与无障碍合同", async () => {
+test("已完成与已取消详情仍可在标题工具区重打，按钮 48pt 高并满足无障碍合同", async () => {
   for (const status of ["PickedUp", "Cancelled"] as const) {
     const { presenter, spies } = createPresenter(
       {
@@ -587,9 +766,7 @@ test("已完成与已取消详情仍可在标题工具区重打，按钮满足 4
     const screen = await render(<InstallmentScreen presenter={presenter} />);
     const button = screen.getByTestId("installment-reprint");
 
-    expect(StyleSheet.flatten(button.props.style).minHeight).toBe(
-      INSTALLMENTS_MIN_TOUCH_TARGET,
-    );
+    expect(StyleSheet.flatten(button.props.style).minHeight).toBe(48);
     expect(button.props.accessibilityLabel).toBe(
       "Reprint receipt for IP-0001",
     );

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import {
   cameraScannerContextCopyKey,
@@ -9,6 +9,8 @@ import {
 } from "./camera-scanner-copy";
 import {
   CAMERA_SCANNER_MIN_TOUCH_TARGET,
+  CAMERA_SCANNER_PREVIEW_BACKGROUND,
+  CAMERA_SCANNER_TARGET_BORDER,
   type CameraScannerBarcodeResult,
   CameraScannerCameraView,
   type CameraScannerPort,
@@ -21,8 +23,8 @@ import {
   normalizeScanValue,
   type ScannerCaptureContext,
 } from "@/core/peripherals/scanner";
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton } from "@/ui/controls/pos-button";
+import { createPosStyles, posRadius, usePosThemeVersion } from "@/ui/theme";
 
 export const CAMERA_SCANNER_DUPLICATE_UNLOCK_MS = 1200;
 
@@ -43,6 +45,7 @@ export function CameraScannerInline({
   scanner,
   visible,
 }: CameraScannerInlineProps) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale = resolveCameraScannerLocale(
     i18n.resolvedLanguage ?? i18n.language,
@@ -229,19 +232,16 @@ export function CameraScannerInline({
             {contextLabel(context, t)}
           </Text>
         </View>
-        <PosPressable
+        <PosButton
           accessibilityLabel={t("inline.action.closeLabel")}
-          accessibilityRole="button"
+          icon="close"
+          label={t("action.cancel")}
           onPress={close}
+          size="medium"
           sound="navigate"
-          style={({ pressed }) => [
-            styles.closeButton,
-            pressed && styles.buttonPressed,
-          ]}
+          style={styles.closeButton}
           testID="camera-scanner-inline-close"
-        >
-          <Text style={styles.closeButtonLabel}>{t("action.cancel")}</Text>
-        </PosPressable>
+        />
       </View>
 
       <View style={styles.previewFrame}>
@@ -332,37 +332,26 @@ function statusTextStyle(state: InlineSubmissionState) {
   }
 }
 
-const styles = StyleSheet.create({
-  buttonPressed: { opacity: 0.8 },
-  closeButton: {
-    alignItems: "center",
-    borderColor: posColors.border,
-    borderRadius: 2,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: CAMERA_SCANNER_MIN_TOUCH_TARGET,
-    minWidth: CAMERA_SCANNER_MIN_TOUCH_TARGET,
-    paddingHorizontal: 12,
-  },
-  closeButtonLabel: { color: posColors.ink, fontSize: 15, fontWeight: "700" },
+const styles = createPosStyles((colors) => ({
+  closeButton: { flexShrink: 0 },
   container: {
     alignSelf: "stretch",
-    backgroundColor: posColors.surface,
-    borderLeftColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderLeftColor: colors.border,
     borderLeftWidth: 1,
     gap: 12,
     maxWidth: "100%",
-    padding: 14,
+    padding: 12,
     width: "100%",
   },
   eyebrow: {
-    color: posColors.orange,
-    fontSize: 12,
-    fontWeight: "800",
+    color: colors.accent,
+    fontSize: 12.5,
+    fontWeight: "900",
     letterSpacing: 0,
   },
   header: {
-    alignItems: "flex-start",
+    alignItems: "center",
     flexDirection: "row",
     gap: 10,
     justifyContent: "space-between",
@@ -370,7 +359,9 @@ const styles = StyleSheet.create({
   headerText: { flex: 1, minWidth: 0 },
   preview: { flex: 1 },
   previewFrame: {
-    backgroundColor: "#0A1723",
+    // 取景框固定深色底，不跟主题。
+    backgroundColor: CAMERA_SCANNER_PREVIEW_BACKGROUND,
+    borderRadius: posRadius.medium,
     height: 210,
     overflow: "hidden",
     position: "relative",
@@ -381,40 +372,40 @@ const styles = StyleSheet.create({
   },
   status: {
     alignItems: "center",
-    borderRadius: 2,
+    borderRadius: posRadius.medium,
     borderWidth: 1,
     justifyContent: "center",
     minHeight: CAMERA_SCANNER_MIN_TOUCH_TARGET,
     paddingHorizontal: 12,
   },
   statusFailed: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
   },
   statusIdle: {
-    backgroundColor: posColors.canvas,
-    borderColor: posColors.border,
+    backgroundColor: colors.canvas,
+    borderColor: colors.border,
   },
   statusSubmitted: {
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
   },
   statusText: {
-    fontSize: 15,
-    fontWeight: "800",
+    fontSize: 16,
+    fontWeight: "900",
     textAlign: "center",
   },
-  statusTextFailed: { color: posColors.red },
-  statusTextIdle: { color: posColors.mutedInk },
-  statusTextSubmitted: { color: posColors.green },
-  statusTextVerifying: { color: posColors.blue },
+  statusTextFailed: { color: colors.red },
+  statusTextIdle: { color: colors.mutedInk },
+  statusTextSubmitted: { color: colors.green },
+  statusTextVerifying: { color: colors.blue },
   statusVerifying: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
   },
   target: {
-    borderColor: "#FFFFFF",
-    borderRadius: 2,
+    borderColor: CAMERA_SCANNER_TARGET_BORDER,
+    borderRadius: 6,
     borderWidth: 2,
     bottom: "32%",
     left: "10%",
@@ -423,10 +414,10 @@ const styles = StyleSheet.create({
     top: "32%",
   },
   title: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 20,
-    fontWeight: "800",
+    fontWeight: "900",
     lineHeight: 25,
     marginTop: 2,
   },
-});
+}));

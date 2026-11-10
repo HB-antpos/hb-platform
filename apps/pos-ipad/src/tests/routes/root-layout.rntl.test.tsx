@@ -31,6 +31,12 @@ jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
     children,
 }));
 
+// 导航桥依赖路由、收银员会话和各页面权限；这里只验证根布局的装配顺序。
+jest.mock("@/features/navigation/pos-navigation-bridge", () => ({
+  PosNavigationBridge: ({ children }: { children: React.ReactNode }) =>
+    children,
+}));
+
 const mockedKeepAwake = jest.requireMock<{ useKeepAwake: jest.Mock }>(
   "expo-keep-awake",
 );

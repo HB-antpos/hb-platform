@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react-native";
 import Storage from "expo-sqlite/kv-store";
+import { StyleSheet } from "react-native";
 
 import { DeviceRegistrationScreen } from "./device-registration-screen";
 
@@ -15,6 +16,7 @@ import type {
 } from "@/core/api/hbpos-api";
 import type { DeviceSessionState } from "@/core/security/device-session";
 import i18n from "@/i18n";
+import { posColors } from "@/ui/theme";
 
 jest.mock("expo-sqlite/kv-store", () => ({
   __esModule: true,
@@ -61,6 +63,10 @@ const mockServerChange = jest.fn<
   >
 >();
 let mockRuntimeValue: unknown;
+let mockStatusStripProps: Readonly<{
+  language?: string;
+  onSwitchLanguage?: () => void;
+}> | null = null;
 let mockLatestCameraProps: Readonly<{
   context: string;
   onScan(value: string): void;
@@ -84,7 +90,10 @@ jest.mock("expo-status-bar", () => ({
 }));
 
 jest.mock("@/ui/shell/status-strip", () => ({
-  PosStatusStrip: () => null,
+  PosStatusStrip: (props: typeof mockStatusStripProps) => {
+    mockStatusStripProps = props;
+    return null;
+  },
 }));
 
 jest.mock("@/features/scanner-camera/camera-scanner-modal", () => ({
@@ -170,6 +179,7 @@ beforeEach(async () => {
   };
   await i18n.changeLanguage("zh");
   mockLatestCameraProps = null;
+  mockStatusStripProps = null;
 });
 
 test("注册页提供网络检测入口", async () => {
@@ -255,7 +265,12 @@ test("中英文切换保留已经输入的设备开通码", async () => {
     screen.getByTestId("registration-activation-code"),
     activationCode,
   );
-  await fireEvent.press(screen.getByTestId("registration-language-switch"));
+  // 新布局：语言切换并入外壳顶栏，页面不再有自己的语言按钮。
+  expect(screen.queryByTestId("registration-language-switch")).toBeNull();
+  expect(mockStatusStripProps?.onSwitchLanguage).toEqual(expect.any(Function));
+  await act(async () => {
+    mockStatusStripProps?.onSwitchLanguage?.();
+  });
 
   await waitFor(() =>
     expect(screen.getByText("Register device")).toBeTruthy(),
@@ -486,4 +501,88 @@ test("旧 pending 页面不显示统一注册码入口", async () => {
   expect(screen.queryByTestId("registration-activation-code")).toBeNull();
   expect(screen.queryByTestId("registration-preview")).toBeNull();
   expect(mockListRegistrationStores).not.toHaveBeenCalled();
+});
+
+test("注册页按新布局放大：扫码主按钮 88、注册码框与继续 76、服务器连接收成一条", async () => {
+  const screen = await render(
+    <DeviceRegistrationScreen onOpenNetworkCheck={jest.fn()} />,
+  );
+
+  const scan = screen.getByTestId("registration-scan");
+  expect(StyleSheet.flatten(scan.props.style)).toMatchObject({
+    backgroundColor: posColors.accent,
+    minHeight: 88,
+  });
+  expect(screen.getByText("或手动输入")).toBeTruthy();
+  const input = screen.getByTestId("registration-activation-code");
+  expect(input.props.secureTextEntry).toBe(true);
+  expect(StyleSheet.flatten(input.props.style)).toMatchObject({ height: 76 });
+  expect(
+    StyleSheet.flatten(screen.getByTestId("registration-preview").props.style),
+  ).toMatchObject({ minHeight: 76 });
+
+  // 收起时只有一条：当前地址常显，地址输入要点「修改 / 检查」才展开。
+  expect(
+    screen.getByTestId("server-connection-current").props.children,
+  ).toBe("https://hotbargain.vip/pos-api");
+  expect(screen.queryByTestId("server-connection-input")).toBeNull();
+  for (const testID of [
+    "server-connection-edit",
+    "registration-network-check",
+  ]) {
+    expect(
+      StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight,
+    ).toBeGreaterThanOrEqual(56);
+  }
+  await screen.unmount();
+});
+
+test("服务端确认分店后主按钮让给「确认并开通设备」，扫描降为普通按钮", async () => {
+  const screen = await render(<DeviceRegistrationScreen />);
+
+  await fireEvent.changeText(
+    screen.getByTestId("registration-activation-code"),
+    activationCode,
+  );
+  await fireEvent.press(screen.getByTestId("registration-preview"));
+
+  const redeem = await screen.findByTestId("registration-redeem");
+  expect(StyleSheet.flatten(redeem.props.style)).toMatchObject({
+    backgroundColor: posColors.accent,
+    minHeight: 88,
+  });
+  expect(
+    StyleSheet.flatten(screen.getByTestId("registration-scan").props.style)
+      .backgroundColor,
+  ).not.toBe(posColors.accent);
+  expect(screen.queryByTestId("registration-preview")).toBeNull();
+  // 注册码输入框仍在，编辑即可回到未识别状态重新来过。
+  expect(screen.getByTestId("registration-activation-code")).toBeTruthy();
+  await screen.unmount();
+});
+
+test("需要恢复时网络检测入口单独保留，重试按钮与其他状态同尺寸", async () => {
+  mockRuntimeValue = {
+    ...(mockRuntimeValue as Record<string, unknown>),
+    state: {
+      backend: "offline",
+      database: "ready",
+      device: "locked",
+      phase: "locked",
+    },
+  };
+  const onOpenNetworkCheck = jest.fn();
+  const screen = await render(
+    <DeviceRegistrationScreen onOpenNetworkCheck={onOpenNetworkCheck} />,
+  );
+
+  expect(screen.queryByTestId("server-connection-panel")).toBeNull();
+  await fireEvent.press(screen.getByTestId("registration-network-check"));
+  expect(onOpenNetworkCheck).toHaveBeenCalledTimes(1);
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("registration-recovery-retry").props.style,
+    ),
+  ).toMatchObject({ minHeight: 88 });
+  await screen.unmount();
 });

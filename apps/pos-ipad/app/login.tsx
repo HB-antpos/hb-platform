@@ -17,8 +17,10 @@ import {
 } from "@/features/cashier-login";
 import { toggleAppLanguage } from "@/i18n";
 import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
+import { usePosThemeVersion } from "@/ui/theme";
 
 export default function LoginRoute() {
+  usePosThemeVersion();
   const runtime = usePosRuntime();
   const versionInfo = toCashierLoginVersionInfo(
     runtime.services?.updateIdentity,

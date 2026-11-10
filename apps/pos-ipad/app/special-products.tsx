@@ -17,6 +17,7 @@ import {
 import { usePosSound } from "@/ui/feedback/pos-sound-context";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type SpecialProductsBinding = Readonly<{
   cashier: object;
@@ -29,6 +30,7 @@ type SpecialProductsBinding = Readonly<{
  * 的窄桥接点，真实权限、门店、cart lease 必须继续由 factory 内部复核。
  */
 export default function SpecialProductsRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);

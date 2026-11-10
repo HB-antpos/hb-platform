@@ -1,20 +1,27 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   UPDATE_RECOVERY_SNAPSHOT_UNAVAILABLE,
   type AppUpdateRecoverySnapshot,
 } from "./app-update-recovery-contract";
 
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+  type PosPalette,
+} from "@/ui/theme";
 
 export type AppUpdateRecoverySection = "settings" | "support";
 
@@ -56,6 +63,7 @@ const copy = {
     unavailable: "Diagnostics are temporarily unavailable.",
     unavailableCode: "Error code",
     supportTitle: "Update support",
+    detailsTitle: "Diagnostics",
     supportBody:
       "This export contains only version, connection and masked device details. It does not include credentials, orders, payments or audit records.",
     labels: {
@@ -82,6 +90,7 @@ const copy = {
     unavailable: "诊断信息暂不可用。",
     unavailableCode: "错误代码",
     supportTitle: "更新支持",
+    detailsTitle: "诊断信息",
     supportBody:
       "导出内容仅包含版本、连接状态和脱敏设备信息，不包含凭据、订单、支付或审计记录。",
     labels: {
@@ -106,6 +115,28 @@ const SNAPSHOT_FIELDS = [
   "deviceState",
 ] as const satisfies readonly (keyof AppUpdateRecoverySnapshot)[];
 
+const SECTION_ICONS: Record<AppUpdateRecoverySection, PosIconName> = {
+  settings: "cog-outline",
+  support: "lifebuoy",
+};
+
+// 后台 / 设备状态按好坏着色。只存色名，渲染时再按当前主题取色；没列出的状态用普通文字色。
+const STATE_INK: Readonly<Record<string, keyof PosPalette>> = {
+  reachable: "green",
+  "authorized-online": "green",
+  "authorized-local": "green",
+  offline: "red",
+  rejected: "red",
+  locked: "red",
+};
+const STATE_FIELDS: ReadonlySet<string> = new Set(["backendState", "deviceState"]);
+
+/**
+ * 更新恢复页：强制更新锁住业务页面时仍可打开的只读页面。
+ * 页头没有返回键（业务页面被锁，没有可返回的地方），右侧是「设备注册」；
+ * 左侧两个分区按钮「设置 / 支持」，右侧是导出卡（仅「支持」分区）和 7 行只读诊断信息。
+ * 这一页不显示左侧功能栏（rail="none"）。
+ */
 export function AppUpdateRecoveryScreen({
   section,
   state,
@@ -116,6 +147,7 @@ export function AppUpdateRecoveryScreen({
   onRetry,
   onExport,
 }: AppUpdateRecoveryScreenProps) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const text = (i18n.resolvedLanguage ?? i18n.language)
     .toLowerCase()
@@ -124,96 +156,96 @@ export function AppUpdateRecoveryScreen({
     : copy.en;
 
   return (
-    <SafeAreaView
-      style={styles.safeArea}
+    <PosScreenFrame
+      header={
+        <PosPageHeader
+          actions={
+            <PosButton
+              icon="tablet"
+              label={text.registration}
+              onPress={onOpenRegistration}
+              size="medium"
+              sound="navigate"
+              testID="app-update-recovery-registration"
+            />
+          }
+          subtitle={text.subtitle}
+          title={text.title}
+        />
+      }
+      rail="none"
       testID="app-update-recovery-screen"
     >
-      <View style={styles.page}>
-        <View style={styles.header}>
-          <View style={styles.titleGroup}>
-            <Text style={styles.eyebrow}>{text.eyebrow}</Text>
-            <Text style={styles.title}>{text.title}</Text>
-            <Text style={styles.subtitle}>{text.subtitle}</Text>
-          </View>
-          <PosPressable
-            accessibilityRole="button"
-            onPress={onOpenRegistration}
-            sound="navigate"
-            style={styles.registrationButton}
-            testID="app-update-recovery-registration"
-          >
-            <Text style={styles.registrationButtonText}>
-              {text.registration}
-            </Text>
-          </PosPressable>
-        </View>
-
-        <View style={styles.workspace}>
-          <View style={styles.navigation}>
-            {(["settings", "support"] as const).map((item) => (
+      <View style={styles.workspace}>
+        <View accessibilityRole="tablist" style={styles.navigation}>
+          {(["settings", "support"] as const).map((item) => {
+            const selected = section === item;
+            // 当前分区用深色块填充，文字换成深色块上的浅色。
+            const foreground = selected ? posColors.onInverse : posColors.ink;
+            return (
               <PosPressable
+                accessibilityLabel={text[item]}
                 accessibilityRole="tab"
-                accessibilityState={{ selected: section === item }}
+                accessibilityState={{ selected }}
                 key={item}
                 onPress={() => onSelectSection(item)}
                 sound="navigate"
-                style={[
+                style={({ pressed }) => [
                   styles.navigationButton,
-                  section === item
-                    ? styles.navigationButtonSelected
-                    : null,
+                  selected && styles.navigationButtonSelected,
+                  pressed && !selected && styles.pressed,
                 ]}
                 testID={`app-update-recovery-nav-${item}`}
               >
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={foreground}
+                  name={SECTION_ICONS[item]}
+                  size={24}
+                />
                 <Text
-                  style={[
-                    styles.navigationButtonText,
-                    section === item
-                      ? styles.navigationButtonTextSelected
-                      : null,
-                  ]}
+                  numberOfLines={1}
+                  style={[styles.navigationButtonText, { color: foreground }]}
                 >
                   {text[item]}
                 </Text>
               </PosPressable>
-            ))}
-          </View>
+            );
+          })}
+        </View>
 
-          <ScrollView
-            contentContainerStyle={styles.content}
-            showsVerticalScrollIndicator={false}
-          >
-            {state.kind === "loading" ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator color={posColors.orange} size="large" />
-              </View>
-            ) : state.kind === "error" ? (
-              <View style={styles.errorCard}>
-                <Text style={styles.errorTitle}>{text.unavailable}</Text>
-                <Text style={styles.errorCode}>
-                  {text.unavailableCode}: {state.errorCode}
-                </Text>
-                <PosPressable
-                  accessibilityRole="button"
-                  onPress={onRetry}
-                  style={styles.secondaryButton}
-                  testID="app-update-recovery-retry"
-                >
-                  <Text style={styles.secondaryButtonText}>
-                    {text.retry}
-                  </Text>
-                </PosPressable>
-              </View>
-            ) : (
-              <>
-                {section === "support" ? (
-                  <View style={styles.supportCard}>
-                    <Text style={styles.supportTitle}>
-                      {text.supportTitle}
-                    </Text>
-                    <Text style={styles.supportBody}>
-                      {text.supportBody}
-                    </Text>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          style={styles.contentColumn}
+        >
+          {state.kind === "loading" ? (
+            <View style={[styles.card, styles.centerState]}>
+              <ActivityIndicator color={posColors.accent} size="large" />
+            </View>
+          ) : state.kind === "error" ? (
+            <View style={styles.errorCard}>
+              <Text style={styles.errorTitle}>{text.unavailable}</Text>
+              <Text selectable style={styles.errorCode}>
+                {text.unavailableCode}: {state.errorCode}
+              </Text>
+              <PosButton
+                icon="refresh"
+                label={text.retry}
+                onPress={onRetry}
+                size="medium"
+                style={styles.retryButton}
+                testID="app-update-recovery-retry"
+                tone="danger"
+              />
+            </View>
+          ) : (
+            <>
+              {section === "support" ? (
+                <View style={[styles.card, styles.supportCard]}>
+                  <View style={styles.supportCopy}>
+                    <Text style={styles.cardTitle}>{text.supportTitle}</Text>
+                    <Text style={styles.supportBody}>{text.supportBody}</Text>
                     {exportError ? (
                       <Text
                         accessibilityRole="alert"
@@ -223,217 +255,145 @@ export function AppUpdateRecoveryScreen({
                         {text.exportFailed}
                       </Text>
                     ) : null}
-                    <PosPressable
-                      accessibilityRole="button"
-                      disabled={exporting}
-                      onPress={onExport}
-                      style={[
-                        styles.primaryButton,
-                        exporting ? styles.disabledButton : null,
-                      ]}
-                      testID="app-update-recovery-export"
-                    >
-                      <Text style={styles.primaryButtonText}>
-                        {exporting ? text.exporting : text.export}
-                      </Text>
-                    </PosPressable>
                   </View>
-                ) : null}
-                <View style={styles.detailsCard}>
-                  {SNAPSHOT_FIELDS.map((field) => (
+                  <PosButton
+                    disabled={exporting}
+                    icon="export-variant"
+                    label={exporting ? text.exporting : text.export}
+                    onPress={onExport}
+                    style={styles.exportButton}
+                    testID="app-update-recovery-export"
+                  />
+                </View>
+              ) : null}
+              <View style={[styles.card, styles.detailsCard]}>
+                <Text style={[styles.cardTitle, styles.detailsTitle]}>
+                  {text.detailsTitle}
+                </Text>
+                {SNAPSHOT_FIELDS.map((field) => {
+                  const value = state.snapshot[field];
+                  const ink = STATE_FIELDS.has(field)
+                    ? (STATE_INK[value] ?? "ink")
+                    : "ink";
+                  return (
                     <View key={field} style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>
-                        {text.labels[field]}
-                      </Text>
+                      <Text style={styles.detailLabel}>{text.labels[field]}</Text>
                       <Text
                         selectable
-                        style={styles.detailValue}
+                        style={[styles.detailValue, { color: posColors[ink] }]}
                         testID={`app-update-recovery-${field}`}
                       >
-                        {state.snapshot[field]}
+                        {value}
                       </Text>
                     </View>
-                  ))}
-                </View>
-              </>
-            )}
-          </ScrollView>
-        </View>
+                  );
+                })}
+              </View>
+            </>
+          )}
+        </ScrollView>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: posColors.canvas },
-  page: { flex: 1, paddingHorizontal: 28, paddingVertical: 24 },
-  header: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 24,
-    justifyContent: "space-between",
-    marginBottom: 22,
-  },
-  titleGroup: { flex: 1, maxWidth: 760 },
-  eyebrow: {
-    color: posColors.orange,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 30,
-    fontWeight: "800",
-    marginTop: 7,
-  },
-  subtitle: {
-    color: posColors.mutedInk,
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: 8,
-  },
-  registrationButton: {
-    alignItems: "center",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: 20,
-  },
-  registrationButtonText: {
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "700",
-  },
+const styles = createPosStyles((colors) => ({
   workspace: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderWidth: 1,
     flex: 1,
     flexDirection: "row",
+    gap: 12,
     minHeight: 0,
+    padding: 12,
   },
-  navigation: {
-    borderRightColor: posColors.border,
-    borderRightWidth: 1,
-    gap: 8,
-    padding: 16,
-    width: 190,
-  },
+  navigation: { gap: 10, width: 218 },
   navigationButton: {
-    justifyContent: "center",
-    minHeight: 52,
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 66,
     paddingHorizontal: 16,
   },
   navigationButtonSelected: {
-    backgroundColor: posColors.orangeSoft,
-    borderLeftColor: posColors.orange,
-    borderLeftWidth: 4,
+    backgroundColor: colors.inverseSurface,
+    borderColor: colors.inverseSurface,
   },
-  navigationButtonText: {
-    color: posColors.mutedInk,
-    fontSize: 16,
-    fontWeight: "700",
+  navigationButtonText: { flexShrink: 1, fontSize: 17, fontWeight: "900" },
+  pressed: { opacity: 0.72 },
+  contentColumn: { flex: 1, minWidth: 0 },
+  content: { flexGrow: 1, gap: 12 },
+  card: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    padding: 16,
   },
-  navigationButtonTextSelected: { color: posColors.ink },
-  content: { gap: 16, padding: 22 },
+  cardTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
   centerState: {
     alignItems: "center",
+    flexGrow: 1,
     justifyContent: "center",
     minHeight: 280,
   },
-  detailsCard: {
-    borderColor: posColors.border,
-    borderWidth: 1,
+  supportCard: { alignItems: "center", flexDirection: "row", gap: 16 },
+  supportCopy: { flex: 1, minWidth: 0 },
+  supportBody: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 20,
+    marginTop: 4,
   },
+  exportButton: { flexShrink: 0, width: 210 },
+  exportError: {
+    color: colors.red,
+    fontSize: 15,
+    fontWeight: "800",
+    lineHeight: 22,
+    marginTop: 8,
+  },
+  detailsCard: { flexGrow: 1 },
+  detailsTitle: { marginBottom: 6 },
   detailRow: {
-    alignItems: "center",
-    borderBottomColor: posColors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    alignItems: "flex-start",
     flexDirection: "row",
-    minHeight: 52,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: 34,
+    paddingVertical: 5,
   },
   detailLabel: {
-    color: posColors.mutedInk,
-    fontSize: 14,
+    color: colors.mutedInk,
+    flexShrink: 0,
+    fontSize: 17,
     fontWeight: "700",
-    width: 160,
+    lineHeight: 24,
   },
   detailValue: {
-    color: posColors.ink,
-    flex: 1,
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  supportCard: {
-    backgroundColor: posColors.blueSoft,
-    padding: 20,
-  },
-  supportTitle: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "800",
-  },
-  supportBody: {
-    color: posColors.mutedInk,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 8,
-    maxWidth: 680,
-  },
-  exportError: {
-    color: posColors.red,
-    fontSize: 15,
+    flexShrink: 1,
+    fontSize: 17,
+    fontVariant: ["tabular-nums"],
     fontWeight: "700",
-    lineHeight: 22,
-    marginTop: 12,
-  },
-  primaryButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: posColors.orange,
-    justifyContent: "center",
-    marginTop: 16,
-    minHeight: 48,
-    minWidth: 160,
-    paddingHorizontal: 20,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  secondaryButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    borderColor: posColors.red,
-    borderWidth: 1,
-    justifyContent: "center",
-    marginTop: 16,
-    minHeight: 48,
-    paddingHorizontal: 18,
-  },
-  secondaryButtonText: {
-    color: posColors.red,
-    fontSize: 15,
-    fontWeight: "800",
+    lineHeight: 24,
+    textAlign: "right",
   },
   errorCard: {
-    backgroundColor: posColors.redSoft,
-    padding: 20,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    padding: 16,
   },
-  errorTitle: {
-    color: posColors.red,
-    fontSize: 19,
-    fontWeight: "800",
-  },
+  errorTitle: { color: colors.red, fontSize: 19, fontWeight: "900" },
   errorCode: {
-    color: posColors.ink,
-    fontSize: 14,
-    marginTop: 8,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "600",
+    marginTop: 6,
   },
-  disabledButton: { opacity: 0.55 },
-});
+  retryButton: { alignSelf: "flex-start", marginTop: 14 },
+}));

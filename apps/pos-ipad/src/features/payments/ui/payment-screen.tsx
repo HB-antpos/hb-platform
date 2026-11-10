@@ -1,9 +1,12 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
+  Fragment,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -17,7 +20,6 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   linklyKeyCopyKey,
@@ -37,6 +39,7 @@ import {
   canSubmitPaymentMethod,
   isQuickCashSufficient,
   nextQuickCashAmountText,
+  parseAudInput,
   type PaymentPresenterState,
   type PaymentPresenterTender,
   type PaymentScreenPresenter,
@@ -51,13 +54,24 @@ import type {
   LinklySafeOperatorKey,
 } from "@/features/payments/runtime/linkly-operator-runtime";
 import {
+  PosButton,
+  type PosButtonSize,
+  type PosButtonTone,
+  type PosIconName,
+} from "@/ui/controls/pos-button";
+import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { PosTextInput } from "@/ui/controls/pos-text-input";
-import { PosStatusStrip } from "@/ui/shell/status-strip";
-import { posColors } from "@/ui/theme";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  usePosThemeVersion,
+  type PosPalette,
+} from "@/ui/theme";
 
 export const PAYMENT_MIN_TOUCH_TARGET = 44;
 
@@ -93,6 +107,51 @@ const PAYMENT_METHODS = Object.freeze([
   "voucher",
 ] as const satisfies readonly PaymentUiMethod[]);
 
+/** 付款方式大块的图标、图标颜色（存色名，渲染时再取当前主题色）和一句话说明。 */
+const PAYMENT_METHOD_VISUALS: Readonly<
+  Record<
+    PaymentUiMethod,
+    Readonly<{
+      icon: PosIconName;
+      color: keyof PosPalette;
+      hintKey: PaymentCopyKey;
+    }>
+  >
+> = Object.freeze({
+  cash: { icon: "cash", color: "green", hintKey: "method.cash.hint" },
+  square: {
+    icon: "square-rounded-outline",
+    color: "ink",
+    hintKey: "method.square.hint",
+  },
+  "linkly-cloud": {
+    icon: "credit-card-outline",
+    color: "blue",
+    hintKey: "method.linkly-cloud.hint",
+  },
+  zeller: {
+    icon: "contactless-payment",
+    color: "ink",
+    hintKey: "method.zeller.hint",
+  },
+  "manual-card": {
+    icon: "credit-card-check-outline",
+    color: "ink",
+    hintKey: "method.manual-card.hint",
+  },
+  voucher: {
+    icon: "wallet-giftcard",
+    color: "yellow",
+    hintKey: "method.voucher.hint",
+  },
+});
+
+/** 纸币快捷键面额（澳元纸币）。 */
+const QUICK_CASH_NOTES = [5, 10, 20, 50, 100] as const;
+
+/** 成功页交易号二维码的目标边长（pt）。 */
+const PAYMENT_QR_TARGET_SIZE = 140;
+
 type PaymentScreenProps = Readonly<{
   installmentModeControl?: PaymentInstallmentModeControl;
   presenter: PaymentScreenPresenter;
@@ -119,6 +178,7 @@ export function PaymentScreen({
   onPrintReceipt,
   showStatusStrip = true,
 }: PaymentScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -129,9 +189,11 @@ export function PaymentScreen({
     localeOverride ??
     resolvePaymentLocale(i18n.resolvedLanguage ?? i18n.language);
   const t: Translate = (key, values) => paymentText(locale, key, values);
-  const { height, width } = useWindowDimensions();
+  const { width } = useWindowDimensions();
+  // 应用只支持横屏 iPad；宽度不足 900 时退回单列（分屏、测试夹具），三栏整体可滚动。
   const compact = width < 900;
-  const shortLandscape = !compact && height < 900;
+  // 1024 宽的旧款 iPad：左右两栏收窄一点，给中间的付款方式留出两列。
+  const narrowLandscape = !compact && width < 1100;
   const [
     fullInstallmentConfirmationOpen,
     setFullInstallmentConfirmationOpen,
@@ -336,64 +398,50 @@ export function PaymentScreen({
     }
   }, [showEntry, state.selectedMethod]);
 
+  // 右栏金额录入是否“已点选付款方式、可以输入”。
+  // 开合条件与原金额弹窗完全一致：点付款方式且 presenter 接受后打开；提交成功、取消录入、
+  // 或当前状态不再允许录入时关闭。键盘常驻右栏只是换了显示位置，没有改变任何业务调用顺序。
+  const entryArmed = paymentEntryOpen && showEntry;
+
   return (
-    <SafeAreaView style={styles.safeArea} testID="payment-screen">
-      <View style={styles.header}>
-        <View style={styles.headerIdentity}>
-          <Text style={styles.title}>{t("title")}</Text>
-          <Text style={styles.subtitle}>{t("subtitle")}</Text>
-        </View>
-        <View style={styles.headerActions}>
-          {state.orderGuid ? (
-            <Text numberOfLines={1} style={styles.orderReference}>
-              {t("summary.order", {
-                order: shortIdentifier(state.orderGuid),
-              })}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-
-      {showStatusStrip ? <PosStatusStrip /> : null}
-
+    <PosScreenFrame
+      rail="none"
+      testID="payment-screen"
+      topBar={showStatusStrip ? undefined : false}
+    >
       <PosKeyboardAwareScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          !compact && state.phase !== "success" && styles.scrollContentBounded,
-          shortLandscape && styles.scrollContentShort,
+          !compact && styles.scrollContentBounded,
         ]}
-        scrollEnabled={compact || state.phase === "success"}
+        scrollEnabled={compact}
         style={styles.contentScroll}
         testID="payment-content-scroll"
       >
-        {showStatusPanel ? (
-          <PaymentStatusPanel state={state} t={t} />
-        ) : null}
-
         {state.runtimeErrorCode ? (
           <View
             accessibilityRole="alert"
             style={styles.errorBanner}
             testID="payment-runtime-error"
           >
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.red}
+              name="alert-circle-outline"
+              size={26}
+            />
             <Text style={styles.errorText}>
               {t(paymentRuntimeErrorCopyKey(state.runtimeErrorCode))}
             </Text>
             {!state.busy ? (
-              <PosPressable
-                accessibilityRole="button"
+              <ActionButton
+                label={t("action.dismiss")}
                 onPress={() => presenter.dismissError()}
+                size="small"
                 sound="navigate"
-                style={({ pressed }) => [
-                  styles.errorDismiss,
-                  pressed && styles.pressed,
-                ]}
                 testID="payment-error-dismiss"
-              >
-                <Text style={styles.errorDismissText}>
-                  {t("action.dismiss")}
-                </Text>
-              </PosPressable>
+                tone="danger"
+              />
             ) : null}
           </View>
         ) : null}
@@ -420,283 +468,37 @@ export function PaymentScreen({
             <PaymentContextPane
               canLeave={canLeave}
               compact={compact}
-              installmentModeControl={installmentModeControl}
               locale={locale}
+              narrow={narrowLandscape}
               onBack={onBack}
               onOpenRecoveryCenter={onOpenRecoveryCenter}
               presenter={presenter}
               state={state}
               t={t}
             />
-            <Modal
-              animationType="fade"
-              onRequestClose={closePaymentEntry}
-              // iPad 应用仅支持横屏；默认竖屏弹窗会被 UIKit 直接终止。
-              supportedOrientations={["landscape-left", "landscape-right"]}
-              testID="payment-entry-native-modal"
-              transparent
-              visible={paymentEntryOpen && showEntry}
-            >
-              <View
-                accessibilityViewIsModal
-                style={styles.entryModalBackdrop}
-                testID="payment-entry-modal"
-              >
-                <PosPressable
-                  accessible={false}
-                  onPress={closePaymentEntry}
-                  sound="navigate"
-                  style={styles.backdropDismissArea}
-                  testID="payment-entry-backdrop"
-                />
-                <View
-                  style={[
-                    styles.entryPane,
-                    shortLandscape && styles.entryPaneShort,
-                    compact && styles.entryPaneCompact,
-                    styles.entryModalCard,
-                  ]}
-                  testID="payment-entry-pane"
-                >
-                  <View style={styles.entryModalHeader}>
-                    <Text style={styles.entryModalTitle}>
-                      {state.selectedMethod
-                        ? t(paymentMethodCopyKey(state.selectedMethod))
-                        : t("method.title")}
-                    </Text>
-                    <Text style={styles.entryModalRemaining}>
-                      {`${t("summary.remaining")} · ${formatAud(
-                        state.remaining.cents,
-                        locale,
-                      )}`}
-                    </Text>
-                  </View>
-              <PosKeyboardAwareScrollView
-                contentContainerStyle={[
-                  styles.entryScrollContent,
-                  compact && styles.entryScrollContentCompact,
-                ]}
-                nestedScrollEnabled
-                scrollEnabled
-                style={[
-                  styles.entryScroll,
-                  compact && styles.entryScrollCompact,
-                  styles.entryModalScroll,
-                ]}
-                testID="payment-entry-scroll"
-              >
-                {showEntry ? (
-                  <View
-                    style={[
-                      styles.form,
-                      shortLandscape && styles.formShort,
-                    ]}
-                    testID="payment-entry-form"
-                  >
-                    <Text style={styles.inputLabel}>{t("amount.label")}</Text>
-                    <PosTextInput
-                      accessibilityLabel={t("amount.label")}
-                      editable={!state.busy && !isSalesManualCard(state)}
-                      keyboardType="decimal-pad"
-                      onChangeText={(value) => presenter.setAmountText(value)}
-                      placeholder="0.00"
-                      placeholderTextColor="#7B8793"
-                      selectionColor={posColors.blue}
-                      showSoftInputOnFocus={false}
-                      style={[
-                        styles.amountInput,
-                        shortLandscape && styles.amountInputShort,
-                      ]}
-                      testID="payment-amount"
-                      value={isSalesManualCard(state)
-                        ? (state.remaining.cents / 100).toFixed(2)
-                        : state.amountText}
-                    />
-                    <Text
-                      style={[
-                        styles.inputHint,
-                        shortLandscape && styles.inputHintShort,
-                      ]}
-                    >
-                      {t(isSalesManualCard(state) ? "manualCard.amountHint" : "amount.hint")}
-                    </Text>
-                    {isSalesManualCard(state) ? (
-                      <View style={styles.manualCardConfirmation} testID="payment-manual-card-confirmation">
-                        <Text style={styles.manualCardInstructions}>{t("manualCard.instructions")}</Text>
-                        <PosPressable
-                          accessibilityRole="checkbox"
-                          accessibilityLabel={t("manualCard.checked")}
-                          accessibilityState={{ checked: state.manualCardConfirmed === true, disabled: state.busy }}
-                          disabled={state.busy}
-                          onPress={() => presenter.setManualCardConfirmed?.(state.manualCardConfirmed !== true)}
-                          sound="key"
-                          style={({ pressed }) => [styles.manualCardCheckRow, pressed && styles.pressed]}
-                          testID="payment-manual-card-check"
-                        >
-                          <View style={[styles.manualCardCheckbox, state.manualCardConfirmed === true && styles.manualCardCheckboxChecked]}>
-                            {state.manualCardConfirmed === true ? <Text style={styles.manualCardCheckmark}>✓</Text> : null}
-                          </View>
-                          <Text style={styles.manualCardCheckLabel}>{t("manualCard.checked")}</Text>
-                        </PosPressable>
-                        <Text style={styles.inputHint}>{t("manualCard.uncertain")}</Text>
-                      </View>
-                    ) : (
-                    <PaymentKeypad
-                      amountText={state.amountText}
-                      dense={shortLandscape}
-                      disabled={state.busy}
-                      onChange={(value) => presenter.setAmountText(value)}
-                    />
-                    )}
-
-                    {state.selectedMethod === "cash" ? (
-                      <View
-                        style={[
-                          styles.quickCashRow,
-                          shortLandscape && styles.quickCashRowShort,
-                        ]}
-                        testID="payment-cash-quick"
-                      >
-                        {(
-                          [
-                            [5, styles.quickCashNote5],
-                            [10, styles.quickCashNote10],
-                            [20, styles.quickCashNote20],
-                            [50, styles.quickCashNote50],
-                            [100, styles.quickCashNote100],
-                          ] as const
-                        ).map(([amount, noteStyle]) => (
-                          <ActionButton
-                            key={amount}
-                            label={`$${amount}`}
-                            disabled={isQuickCashSufficient(
-                              state.amountText,
-                              lastQuickCashText.current,
-                              state.remaining,
-                            )}
-                            onPress={() => {
-                              const next = nextQuickCashAmountText(
-                                state.amountText,
-                                lastQuickCashText.current,
-                                amount,
-                              );
-                              lastQuickCashText.current = next;
-                              presenter.setAmountText(next);
-                            }}
-                            sound="key"
-                            style={[styles.quickCashButton, noteStyle]}
-                            testID={`payment-cash-quick-${amount}`}
-                            tone="quiet"
-                          />
-                        ))}
-                      </View>
-                    ) : null}
-
-                    {state.selectedMethod === "voucher" ? (
-                      <View
-                        key={state.sensitiveInputRevision}
-                        style={styles.voucherInputGroup}
-                      >
-                        <Text style={styles.inputLabel}>
-                          {t("voucher.label")}
-                        </Text>
-                        <PosKeyboardAwareTextInput
-                          accessibilityLabel={t("voucher.label")}
-                          autoCapitalize="characters"
-                          autoCorrect={false}
-                          editable={!state.busy}
-                          onChangeText={(value) =>
-                            presenter.setVoucherCode(value)
-                          }
-                          placeholder={t("voucher.placeholder")}
-                          placeholderTextColor="#7B8793"
-                          secureTextEntry
-                          selectionColor={posColors.blue}
-                          style={styles.voucherInput}
-                          testID="payment-voucher-code"
-                        />
-                        {state.voucherCaptured ? (
-                          <Text
-                            style={styles.secureCapture}
-                            testID="payment-voucher-captured"
-                          >
-                            {t("voucher.captured")}
-                          </Text>
-                        ) : null}
-                      </View>
-                    ) : null}
-                  </View>
-                ) : null}
-                {state.fieldIssue ? (
-                  <Text
-                    accessibilityRole="alert"
-                    style={styles.fieldError}
-                    testID="payment-field-error"
-                  >
-                    {t(paymentFieldIssueCopyKey(state.fieldIssue))}
-                  </Text>
-                ) : null}
-              </PosKeyboardAwareScrollView>
-              {showEntry ? (
-                <View
-                  style={[
-                    styles.formActions,
-                    shortLandscape && styles.formActionsShort,
-                  ]}
-                  testID="payment-entry-actions"
-                >
-                  <ActionButton
-                    disabled={state.busy}
-                    label={t("action.cancel")}
-                    onPress={closePaymentEntry}
-                    style={styles.formAction}
-                    sound="danger"
-                    testID="payment-entry-cancel"
-                    tone="quiet"
-                  />
-                  <ActionButton
-                    disabled={
-                      state.busy ||
-                      !state.selectedMethod ||
-                      !canSubmitPaymentMethod(state, state.selectedMethod)
-                    }
-                    label={
-                      isSalesManualCard(state)
-                        ? t("manualCard.confirm")
-                        : state.checkout.flow === "installment-repayment" &&
-                      state.selectedMethod === "cash"
-                        ? t("action.prepareCashRepayment")
-                        : state.orderGuid
-                        ? t("action.addTender")
-                        : t("action.pay")
-                    }
-                    onPress={() => {
-                      void presenter.submitSelected().then((submitted) => {
-                        if (submitted) setPaymentEntryOpen(false);
-                      });
-                    }}
-                    style={styles.formAction}
-                    testID="payment-submit"
-                  />
-                </View>
-              ) : null}
-                </View>
-              </View>
-            </Modal>
-
-            {!paymentEntryOpen && state.fieldIssue ? (
-              <Text
-                accessibilityRole="alert"
-                style={styles.fieldError}
-                testID="payment-field-error"
-              >
-                {t(paymentFieldIssueCopyKey(state.fieldIssue))}
-              </Text>
-            ) : null}
-
             <PaymentSummary
               compact={compact}
+              entryArmed={entryArmed}
+              installmentModeControl={installmentModeControl}
               locale={locale}
+              onSelectMethod={(method) => {
+                // 只有 presenter 接受了这次选择，右栏才进入可输入状态。
+                if (presenter.selectMethod(method)) {
+                  setPaymentEntryOpen(true);
+                }
+              }}
+              presenter={presenter}
+              showStatusPanel={showStatusPanel}
+              state={state}
+              t={t}
+            />
+            <PaymentEntryPane
+              compact={compact}
+              entryArmed={entryArmed}
+              lastQuickCashText={lastQuickCashText}
+              locale={locale}
+              narrow={narrowLandscape}
+              onCancelEntry={closePaymentEntry}
               onCancelPreparedCash={() => {
                 setPreparedCashCancellationOpen(true);
               }}
@@ -716,13 +518,14 @@ export function PaymentScreen({
                 }
                 void presenter.confirm?.();
               }}
-              onSelectMethod={(method) => {
-                if (presenter.selectMethod(method)) {
-                  setPaymentEntryOpen(true);
-                }
+              onSubmit={() => {
+                void presenter.submitSelected().then((submitted) => {
+                  // 提交成功后退出录入状态，下一笔必须重新点选付款方式。
+                  if (submitted) setPaymentEntryOpen(false);
+                });
               }}
               presenter={presenter}
-              shortLandscape={shortLandscape}
+              showEntry={showEntry}
               state={state}
               t={t}
             />
@@ -735,6 +538,7 @@ export function PaymentScreen({
         onRequestClose={() =>
           setFullInstallmentConfirmationOpen(false)
         }
+        // iPad 应用仅支持横屏；默认竖屏弹窗会被 UIKit 直接终止。
         supportedOrientations={["landscape-left", "landscape-right"]}
         testID="payment-full-installment-native-modal"
         transparent
@@ -768,7 +572,7 @@ export function PaymentScreen({
                 style={styles.confirmationAction}
                 sound="navigate"
                 testID="payment-full-installment-cancel"
-                tone="quiet"
+                tone="secondary"
               />
               <ActionButton
                 label={t("installment.fullPayment.confirm")}
@@ -781,6 +585,7 @@ export function PaymentScreen({
                 style={styles.confirmationAction}
                 sound="danger"
                 testID="payment-full-installment-confirm"
+                tone="primary"
               />
             </View>
           </View>
@@ -824,7 +629,7 @@ export function PaymentScreen({
                 style={styles.confirmationAction}
                 sound="navigate"
                 testID="payment-installment-minimum-dismiss"
-                tone="quiet"
+                tone="secondary"
               />
               {installmentModeControl && !installmentModeControl.locked ? (
                 <ActionButton
@@ -836,6 +641,7 @@ export function PaymentScreen({
                   style={styles.confirmationAction}
                   sound="navigate"
                   testID="payment-installment-minimum-regular"
+                  tone="primary"
                 />
               ) : null}
             </View>
@@ -878,7 +684,7 @@ export function PaymentScreen({
                 style={styles.confirmationAction}
                 sound="navigate"
                 testID="payment-cancel-prepared-cash-dismiss"
-                tone="quiet"
+                tone="secondary"
               />
               <ActionButton
                 disabled={state.busy}
@@ -896,7 +702,7 @@ export function PaymentScreen({
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -921,6 +727,7 @@ function PaymentSuccessLayout({
   state: PaymentPresenterState;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   const paidCents = Math.max(
     0,
     state.total.cents - state.remaining.cents,
@@ -970,7 +777,11 @@ function PaymentSuccessLayout({
       ]}
       testID="payment-success-layout"
     >
-      <View
+      {/* 左栏：结果条、找零、交易号与终端操作；内容多时自己滚动，右栏按钮不跟着走。 */}
+      <ScrollView
+        contentContainerStyle={styles.successMainContent}
+        nestedScrollEnabled
+        scrollEnabled={!compact}
         style={[
           styles.successMain,
           compact && styles.successMainCompact,
@@ -982,9 +793,12 @@ function PaymentSuccessLayout({
           style={styles.successHero}
           testID="payment-status-success"
         >
-          <View style={styles.successIcon}>
-            <Text style={styles.successIconText}>✓</Text>
-          </View>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.green}
+            name="check-circle"
+            size={76}
+          />
           <View style={styles.successHeroCopy}>
             <Text style={styles.successTitle}>
               {t("status.success.title")}
@@ -993,34 +807,17 @@ function PaymentSuccessLayout({
               {t("status.success.hint")}
             </Text>
           </View>
-        </View>
-
-        <View style={styles.successSummary}>
           <View style={styles.successTotal}>
             <Text style={styles.successLabel}>
               {t("success.paidTotal")}
             </Text>
-            <Text style={styles.successTotalAmount}>
+            <Text
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              style={styles.successTotalAmount}
+            >
               {formatAud(paidCents, locale)}
             </Text>
-          </View>
-          <View style={styles.successSummaryRule} />
-          <View style={styles.successTransaction}>
-            <View style={styles.successTransactionCopy}>
-              <Text style={styles.successLabel}>
-                {t("success.orderReference")}
-              </Text>
-              <Text
-                selectable
-                style={styles.successOrderReference}
-              >
-                {orderGuid}
-              </Text>
-            </View>
-            <PaymentTransactionQrCode
-              label={t("success.orderReference")}
-              value={orderGuid}
-            />
           </View>
         </View>
 
@@ -1029,29 +826,27 @@ function PaymentSuccessLayout({
             style={styles.successSettlement}
             testID="payment-success-settlement"
           >
-            <View style={styles.successCashIdentity}>
-              <View style={styles.successCashIcon}>
-                <Text style={styles.successCashIconText}>$</Text>
-              </View>
-              <View>
-                <Text style={styles.successCashTitle}>
-                  {t("success.cashSettlement")}
-                </Text>
-                <View style={styles.successCashTenderedRow}>
-                  <Text style={styles.successCashTenderedLabel}>
-                    {t("success.cashTendered")}
-                  </Text>
-                  <Text style={styles.successCashTenderedAmount}>
-                    {formatAud(cash.tenderedCents, locale)}
-                  </Text>
-                </View>
-              </View>
+            <View style={styles.successCashTendered}>
+              <Text style={styles.successCashTenderedLabel}>
+                {t("success.cashTendered")}
+              </Text>
+              <Text
+                adjustsFontSizeToFit
+                numberOfLines={1}
+                style={styles.successCashTenderedAmount}
+              >
+                {formatAud(cash.tenderedCents, locale)}
+              </Text>
             </View>
+            <View style={styles.successSettlementRule} />
             <View style={styles.successChange}>
               <Text style={styles.successChangeLabel}>
                 {t("success.changeDue")}
               </Text>
+              {/* 找零是这一屏最大的数字，收银员低头找钱时不用找。 */}
               <Text
+                adjustsFontSizeToFit
+                numberOfLines={1}
                 style={styles.successChangeAmount}
                 testID="payment-success-change"
               >
@@ -1061,15 +856,37 @@ function PaymentSuccessLayout({
           </View>
         ) : null}
 
-        <View style={styles.successSync}>
-          <View style={styles.successSyncDot} />
-          <Text style={styles.successSyncText}>
-            {t("success.syncQueued")}
-          </Text>
+        <View style={styles.successTransaction}>
+          <PaymentTransactionQrCode
+            label={t("success.orderReference")}
+            value={orderGuid}
+          />
+          <View style={styles.successTransactionCopy}>
+            <Text style={styles.successLabel}>
+              {t("success.orderReference")}
+            </Text>
+            <Text
+              selectable
+              style={styles.successOrderReference}
+            >
+              {orderGuid}
+            </Text>
+            <View style={styles.successSync}>
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.green}
+                name="cloud-check-outline"
+                size={22}
+              />
+              <Text style={styles.successSyncText}>
+                {t("success.syncQueued")}
+              </Text>
+            </View>
+          </View>
         </View>
 
         <LinklyControls presenter={presenter} state={state} t={t} />
-      </View>
+      </ScrollView>
 
       <View
         style={[
@@ -1081,15 +898,24 @@ function PaymentSuccessLayout({
           style={styles.successReceipt}
           testID="payment-success-receipt-preview"
         >
-          <Text style={styles.successReceiptTitle}>
-            {t("success.receiptPreview")}
-          </Text>
-          <Text selectable style={styles.successReceiptOrder}>
-            {orderGuid}
-          </Text>
-          <View style={styles.successReceiptRule} />
+          <View style={styles.successReceiptHeader}>
+            <Text style={styles.successReceiptTitle}>
+              {t("success.receiptPreview")}
+            </Text>
+            <Text
+              numberOfLines={1}
+              selectable
+              style={styles.successReceiptOrder}
+            >
+              {orderGuid}
+            </Text>
+          </View>
 
-          <View style={styles.successReceiptLines}>
+          <ScrollView
+            nestedScrollEnabled
+            scrollEnabled={!compact}
+            style={styles.successReceiptLines}
+          >
             {state.checkout.lines.length ? (
               state.checkout.lines.map((line) => (
                 <View key={line.lineKey} style={styles.successReceiptLine}>
@@ -1114,46 +940,37 @@ function PaymentSuccessLayout({
                 {t("success.noItems")}
               </Text>
             )}
-          </View>
+          </ScrollView>
 
-          <View style={styles.successReceiptRule} />
-          {state.tenders.map((tender) => (
-            <View
-              key={tender.tenderGuid}
-              style={styles.successReceiptTender}
-            >
-              <Text style={styles.successReceiptTenderLabel}>
-                {t(
-                  tender.method === "card"
-                    ? "method.card"
-                    : paymentMethodCopyKey(tender.method),
-                )}
+          <View style={styles.successReceiptTotals}>
+            {state.tenders.map((tender) => (
+              <View
+                key={tender.tenderGuid}
+                style={styles.successReceiptTender}
+              >
+                <Text style={styles.successReceiptTenderLabel}>
+                  {t(
+                    tender.method === "card"
+                      ? "method.card"
+                      : paymentMethodCopyKey(tender.method),
+                  )}
+                </Text>
+                <Text style={styles.successReceiptTenderAmount}>
+                  {formatAud(tender.amount.cents, locale)}
+                </Text>
+              </View>
+            ))}
+            <View style={styles.successReceiptTender}>
+              <Text style={styles.successReceiptTotalLabel}>
+                {t("summary.total")}
               </Text>
-              <Text style={styles.successReceiptTenderAmount}>
-                {formatAud(tender.amount.cents, locale)}
+              <Text style={styles.successReceiptTotalAmount}>
+                {formatAud(state.total.cents, locale)}
               </Text>
             </View>
-          ))}
-          <View style={styles.successReceiptTotal}>
-            <Text style={styles.successReceiptTotalLabel}>
-              {t("summary.total")}
-            </Text>
-            <Text style={styles.successReceiptTotalAmount}>
-              {formatAud(state.total.cents, locale)}
-            </Text>
           </View>
         </View>
 
-        <ActionButton
-          disabled={!onPrintReceipt || printState === "printing"}
-          label={t("action.printReceipt")}
-          onPress={() => {
-            void handlePrintReceipt();
-          }}
-          style={styles.successPrintAction}
-          testID="payment-success-print"
-          tone="quiet"
-        />
         {printState !== "idle" ? (
           <Text
             accessibilityLiveRegion="polite"
@@ -1169,13 +986,27 @@ function PaymentSuccessLayout({
             {t(`success.print.${printState}`)}
           </Text>
         ) : null}
+        <ActionButton
+          disabled={!onPrintReceipt || printState === "printing"}
+          icon="printer-outline"
+          label={t("action.printReceipt")}
+          onPress={() => {
+            void handlePrintReceipt();
+          }}
+          size="large"
+          testID="payment-success-print"
+          tone="secondary"
+        />
         {onComplete ? (
+          // 成功页唯一的主按钮，位置与收银页的收款按钮相同。
           <ActionButton
+            icon="arrow-right-circle"
             label={t("action.newSale")}
             onPress={() => onComplete(orderGuid)}
+            size="primary"
             sound="navigate"
-            style={styles.successCompleteAction}
             testID="payment-complete"
+            tone="primary"
           />
         ) : null}
       </View>
@@ -1190,11 +1021,12 @@ function PaymentTransactionQrCode({
   label: string;
   value: string;
 }>) {
+  usePosThemeVersion();
   const matrix = useMemo(() => receiptQrMatrix(value), [value]);
-  // 2.5pt 模块在 Retina 屏幕对应整数像素，兼顾扫码清晰度与摘要卡空间。
+  // 模块边长取 0.5pt 的整数倍，在 Retina 屏幕对应整数像素，保证扫码清晰。
   const moduleSize = Math.max(
     2,
-    Math.floor((96 / (matrix.length + 8)) * 2) / 2,
+    Math.floor((PAYMENT_QR_TARGET_SIZE / (matrix.length + 8)) * 2) / 2,
   );
 
   return (
@@ -1236,11 +1068,12 @@ function PaymentTransactionQrCode({
   );
 }
 
+/** 左栏：返回收银、订单明细与合计、取消支付。返回和取消上下分开放，避免误触。 */
 function PaymentContextPane({
   canLeave,
   compact,
-  installmentModeControl,
   locale,
+  narrow,
   onBack,
   onOpenRecoveryCenter,
   presenter,
@@ -1249,15 +1082,21 @@ function PaymentContextPane({
 }: Readonly<{
   canLeave: boolean;
   compact: boolean;
-  installmentModeControl: PaymentInstallmentModeControl | undefined;
   locale: PaymentLocale;
+  narrow: boolean;
   onBack: (() => void) | undefined;
   onOpenRecoveryCenter: (() => void) | undefined;
   presenter: PaymentScreenPresenter;
   state: PaymentPresenterState;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   const customer = state.checkout.installmentCustomer;
+  const paidCents = Math.max(
+    0,
+    state.total.cents - state.remaining.cents,
+  );
+  const recovery = recoveryActionFlags(state, presenter);
   const flowLabel =
     state.checkout.flow === "installment-create"
       ? locale === "zh"
@@ -1278,176 +1117,216 @@ function PaymentContextPane({
     <View
       style={[
         styles.contextPane,
+        narrow && styles.contextPaneNarrow,
         compact && styles.contextPaneCompact,
       ]}
       testID="payment-context-pane"
     >
-      <View style={styles.contextControls}>
-        {onBack ? (
-          <ActionButton
-            disabled={!canLeave}
-            label={locale === "zh" ? "返回收银" : "Back to sale"}
-            onPress={onBack}
-            sound="navigate"
-            style={styles.contextBack}
-            testID="payment-back"
-            tone="quiet"
-          />
-        ) : null}
-        {onOpenRecoveryCenter && ["recovery-required", "declined", "cancelled"].includes(state.phase) ? (
-          <ActionButton
-            disabled={state.busy || state.recoveryInFlight === true}
-            label={locale === "zh" ? "支付恢复中心" : "Payment recovery"}
-            onPress={onOpenRecoveryCenter}
-            sound="navigate"
-            testID="payment-open-recovery-center"
-            tone="quiet"
-          />
-        ) : null}
-        {installmentModeControl ? (
-          <PaymentInstallmentToggle
-            control={installmentModeControl}
-            t={t}
-          />
-        ) : null}
-      </View>
-      <Text style={styles.contextEyebrow}>{flowLabel}</Text>
-
-      {customer ? (
-        <PosKeyboardAwareScrollView
-          contentContainerStyle={styles.customerScrollContent}
-          nestedScrollEnabled
-          scrollEnabled={customer.editorOpen}
-          style={styles.customerScroll}
-          testID="payment-customer-scroll"
-        >
-          <View
-            style={styles.customerCard}
-            testID="payment-installment-customer"
-          >
-            <View style={styles.customerHeading}>
-              <Text style={styles.customerTitle}>
-                {locale === "zh" ? "分期顾客" : "Lay-by customer"}
-              </Text>
-              {customer.editable &&
-              presenter.openInstallmentCustomerEditor ? (
-                <PosPressable
-                  accessibilityRole="button"
-                  disabled={state.busy}
-                  onPress={() =>
-                    presenter.openInstallmentCustomerEditor?.()
-                  }
-                  sound="navigate"
-                  style={({ pressed }) => [
-                    styles.customerEdit,
-                    pressed && styles.pressed,
-                  ]}
-                  testID="payment-customer-edit"
-                >
-                  <Text style={styles.customerEditText}>
-                    {locale === "zh" ? "编辑" : "Edit"}
-                  </Text>
-                </PosPressable>
-              ) : null}
-            </View>
-            {customer.installmentNumber ? (
-              <Text style={styles.customerNumber}>
-                {customer.installmentNumber}
-              </Text>
-            ) : null}
-            <Text style={styles.customerValue}>
-              {customer.name ||
-                (locale === "zh" ? "未填写姓名" : "Name required")}
-            </Text>
-            <Text style={styles.customerValue}>
-              {customer.phone ||
-                (locale === "zh" ? "未填写电话" : "Phone required")}
-            </Text>
-            {customer.editorOpen ? (
-              <View
-                style={styles.customerEditor}
-                testID="payment-customer-editor"
-              >
-                <PosKeyboardAwareTextInput
-                  autoCorrect={false}
-                  editable={!state.busy}
-                  onChangeText={(value) =>
-                    presenter.setInstallmentCustomerDraftName?.(value)
-                  }
-                  placeholder={locale === "zh" ? "顾客姓名" : "Customer name"}
-                  style={styles.customerInput}
-                  testID="payment-customer-name"
-                  value={customer.draftName}
-                />
-                <PosKeyboardAwareTextInput
-                  autoCorrect={false}
-                  editable={!state.busy}
-                  keyboardType="phone-pad"
-                  onChangeText={(value) =>
-                    presenter.setInstallmentCustomerDraftPhone?.(value)
-                  }
-                  placeholder={locale === "zh" ? "联系电话" : "Phone"}
-                  style={styles.customerInput}
-                  testID="payment-customer-phone"
-                  value={customer.draftPhone}
-                />
-                <View style={styles.customerEditorActions}>
-                  <ActionButton
-                    label={locale === "zh" ? "取消" : "Cancel"}
-                    onPress={() =>
-                      presenter.cancelInstallmentCustomerEditor?.()
-                    }
-                    style={styles.customerEditorButton}
-                    sound="navigate"
-                    testID="payment-customer-cancel"
-                    tone="quiet"
-                  />
-                  <ActionButton
-                    label={locale === "zh" ? "保存" : "Save"}
-                    onPress={() => presenter.saveInstallmentCustomer?.()}
-                    style={styles.customerEditorButton}
-                    testID="payment-customer-save"
-                  />
-                </View>
-              </View>
-            ) : null}
-          </View>
-        </PosKeyboardAwareScrollView>
+      {onBack ? (
+        <ActionButton
+          disabled={!canLeave}
+          icon="arrow-left"
+          label={locale === "zh" ? "返回收银" : "Back to sale"}
+          onPress={onBack}
+          size="button"
+          sound="navigate"
+          testID="payment-back"
+          tone="secondary"
+        />
+      ) : null}
+      {onOpenRecoveryCenter && ["recovery-required", "declined", "cancelled"].includes(state.phase) ? (
+        <ActionButton
+          disabled={state.busy || state.recoveryInFlight === true}
+          icon="backup-restore"
+          label={locale === "zh" ? "支付恢复中心" : "Payment recovery"}
+          onPress={onOpenRecoveryCenter}
+          size="medium"
+          sound="navigate"
+          testID="payment-open-recovery-center"
+          tone="warning"
+        />
       ) : null}
 
-      <Text style={styles.contextListTitle}>
-        {locale === "zh" ? "商品明细" : "Items"}
-      </Text>
-      <ScrollView
-        nestedScrollEnabled
-        scrollEnabled
-        style={styles.contextLines}
-        testID="payment-context-lines"
-      >
-        {state.checkout.lines.length ? (
-          state.checkout.lines.map((line) => (
-            <View key={line.lineKey} style={styles.contextLine}>
-              <View style={styles.contextLineCopy}>
-                <Text numberOfLines={2} style={styles.contextLineName}>
-                  {line.displayName}
+      <View style={styles.contextCard}>
+        <View style={styles.contextCardHeader}>
+          <View style={styles.contextCardHeading}>
+            <Text style={styles.contextEyebrow}>{flowLabel}</Text>
+            <Text style={styles.contextListTitle}>
+              {locale === "zh" ? "商品明细" : "Items"}
+            </Text>
+          </View>
+          {state.orderGuid ? (
+            <Text numberOfLines={1} style={styles.orderReference}>
+              {t("summary.order", {
+                order: shortIdentifier(state.orderGuid),
+              })}
+            </Text>
+          ) : null}
+        </View>
+
+        {customer ? (
+          <PosKeyboardAwareScrollView
+            contentContainerStyle={styles.customerScrollContent}
+            nestedScrollEnabled
+            scrollEnabled={customer.editorOpen}
+            style={styles.customerScroll}
+            testID="payment-customer-scroll"
+          >
+            <View
+              style={styles.customerCard}
+              testID="payment-installment-customer"
+            >
+              <View style={styles.customerHeading}>
+                <Text style={styles.customerTitle}>
+                  {locale === "zh" ? "分期顾客" : "Lay-by customer"}
                 </Text>
-                <Text style={styles.contextLineQuantity}>× {line.quantity}</Text>
+                {customer.editable &&
+                presenter.openInstallmentCustomerEditor ? (
+                  <ActionButton
+                    disabled={state.busy}
+                    icon="pencil-outline"
+                    label={locale === "zh" ? "编辑" : "Edit"}
+                    onPress={() =>
+                      presenter.openInstallmentCustomerEditor?.()
+                    }
+                    size="small"
+                    sound="navigate"
+                    testID="payment-customer-edit"
+                    tone="quiet"
+                  />
+                ) : null}
               </View>
-              <Text style={styles.contextLineAmount}>
-                {formatAud(line.actualAmountCents, locale)}
+              {customer.installmentNumber ? (
+                <Text style={styles.customerNumber}>
+                  {customer.installmentNumber}
+                </Text>
+              ) : null}
+              <Text style={styles.customerValue}>
+                {customer.name ||
+                  (locale === "zh" ? "未填写姓名" : "Name required")}
               </Text>
+              <Text style={styles.customerValue}>
+                {customer.phone ||
+                  (locale === "zh" ? "未填写电话" : "Phone required")}
+              </Text>
+              {customer.editorOpen ? (
+                <View
+                  style={styles.customerEditor}
+                  testID="payment-customer-editor"
+                >
+                  <PosKeyboardAwareTextInput
+                    autoCorrect={false}
+                    editable={!state.busy}
+                    onChangeText={(value) =>
+                      presenter.setInstallmentCustomerDraftName?.(value)
+                    }
+                    placeholder={locale === "zh" ? "顾客姓名" : "Customer name"}
+                    placeholderTextColor={posColors.placeholder}
+                    style={styles.customerInput}
+                    testID="payment-customer-name"
+                    value={customer.draftName}
+                  />
+                  <PosKeyboardAwareTextInput
+                    autoCorrect={false}
+                    editable={!state.busy}
+                    keyboardType="phone-pad"
+                    onChangeText={(value) =>
+                      presenter.setInstallmentCustomerDraftPhone?.(value)
+                    }
+                    placeholder={locale === "zh" ? "联系电话" : "Phone"}
+                    placeholderTextColor={posColors.placeholder}
+                    style={styles.customerInput}
+                    testID="payment-customer-phone"
+                    value={customer.draftPhone}
+                  />
+                  <View style={styles.customerEditorActions}>
+                    <ActionButton
+                      label={locale === "zh" ? "取消" : "Cancel"}
+                      onPress={() =>
+                        presenter.cancelInstallmentCustomerEditor?.()
+                      }
+                      size="medium"
+                      style={styles.customerEditorButton}
+                      sound="navigate"
+                      testID="payment-customer-cancel"
+                      tone="quiet"
+                    />
+                    <ActionButton
+                      label={locale === "zh" ? "保存" : "Save"}
+                      onPress={() => presenter.saveInstallmentCustomer?.()}
+                      size="medium"
+                      style={styles.customerEditorButton}
+                      testID="payment-customer-save"
+                      tone="inverse"
+                    />
+                  </View>
+                </View>
+              ) : null}
             </View>
-          ))
-        ) : (
-          <Text style={styles.contextEmpty}>
-            {locale === "zh" ? "交易商品由收银页确认" : "Items confirmed at checkout"}
-          </Text>
-        )}
-      </ScrollView>
+          </PosKeyboardAwareScrollView>
+        ) : null}
+
+        <ScrollView
+          nestedScrollEnabled
+          scrollEnabled
+          style={styles.contextLines}
+          testID="payment-context-lines"
+        >
+          {state.checkout.lines.length ? (
+            state.checkout.lines.map((line) => (
+              <View key={line.lineKey} style={styles.contextLine}>
+                <View style={styles.contextLineCopy}>
+                  <Text numberOfLines={2} style={styles.contextLineName}>
+                    {line.displayName}
+                  </Text>
+                  <Text style={styles.contextLineQuantity}>× {line.quantity}</Text>
+                </View>
+                <Text style={styles.contextLineAmount}>
+                  {formatAud(line.actualAmountCents, locale)}
+                </Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.contextEmpty}>
+              {locale === "zh" ? "交易商品由收银页确认" : "Items confirmed at checkout"}
+            </Text>
+          )}
+        </ScrollView>
+
+        <View style={styles.contextTotals}>
+          <SummaryAmount
+            label={t("summary.total")}
+            locale={locale}
+            strong
+            value={state.total.cents}
+          />
+          <SummaryAmount
+            label={t("summary.paid")}
+            locale={locale}
+            value={paidCents}
+          />
+        </View>
+      </View>
+
+      {recovery.showGenericCancellation ? (
+        // 取消支付固定在左下角，离右下角的主按钮最远。
+        <ActionButton
+          disabled={state.busy || state.recoveryInFlight === true}
+          icon="close-circle-outline"
+          label={t("action.cancel")}
+          onPress={() => {
+            void presenter.cancel();
+          }}
+          size="button"
+          testID="payment-cancel"
+          tone="danger"
+        />
+      ) : null}
     </View>
   );
 }
 
+/** 支付状态说明：并入「剩余应付」卡片，等待、未知、被拒等状态用卡片底色区分。 */
 function PaymentStatusPanel({
   state,
   t,
@@ -1455,20 +1334,23 @@ function PaymentStatusPanel({
   state: PaymentPresenterState;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   const tone = statusTone(state.phase);
   return (
     <View
       accessibilityRole="summary"
-      style={[
-        styles.statusPanel,
-        tone === "warning" && styles.statusWarning,
-        tone === "danger" && styles.statusDanger,
-        tone === "success" && styles.statusSuccess,
-      ]}
+      style={styles.statusPanel}
       testID={`payment-status-${state.phase}`}
     >
       <View style={styles.statusCopy}>
-        <Text style={styles.statusTitle}>
+        <Text
+          style={[
+            styles.statusTitle,
+            tone === "warning" && styles.statusTitleWarning,
+            tone === "danger" && styles.statusTitleDanger,
+            tone === "success" && styles.statusTitleSuccess,
+          ]}
+        >
           {t(paymentPhaseTitleKey(state.phase))}
         </Text>
         <Text style={styles.statusHint}>
@@ -1500,6 +1382,7 @@ function LinklyTerminalSelector({
   state: PaymentPresenterState;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   const configured = state.providers.some(
     (provider) => provider.provider === "linkly-cloud" && provider.available,
   );
@@ -1552,57 +1435,46 @@ function LinklyTerminalSelector({
   );
 }
 
+/**
+ * 右栏动作区里的恢复类操作：恢复支付 / 确认已收 / 主管作废礼品卡 / 尚未收现取消续付。
+ * 「取消支付」单独放在左栏底部（见 PaymentContextPane），显示条件由 recoveryActionFlags 统一给出。
+ */
 function RecoveryActions({
   onCancelPreparedCash,
   presenter,
+  primary,
   state,
   t,
 }: Readonly<{
   onCancelPreparedCash(): void;
   presenter: PaymentScreenPresenter;
+  /** 这一组是否承担本屏唯一的主按钮（没有录入区和确认按钮时）。 */
+  primary: boolean;
   state: PaymentPresenterState;
   t: Translate;
 }>) {
-  const preparedCashCancellation = canCancelPreparedCash(state);
-  const cashConfirmationRecovery =
-    state.checkout.flow === "installment-repayment" &&
-    state.phase === "recovery-required" &&
-    state.checkout.cashRepaymentStatus === "ready";
-  const showPreparedCashCancellation =
-    preparedCashCancellation && state.phase === "recovery-required";
-  const showGenericCancellation =
-    state.allowedActions.cancel && !preparedCashCancellation;
-  // Blocked 礼券撤券只能由主管授权作废；没有授权能力时不显示任何可点按钮。
-  const showVoidBlockedTenderReversal =
-    state.tenderReversalRecovery?.status === "blocked" &&
-    state.tenderReversalRecovery.voidAvailable === true &&
-    typeof presenter.voidBlockedTenderReversal === "function";
-  if (
-    !state.allowedActions.recover &&
-    !showGenericCancellation &&
-    !showPreparedCashCancellation &&
-    !cashConfirmationRecovery &&
-    !showVoidBlockedTenderReversal
-  ) {
-    return null;
-  }
+  usePosThemeVersion();
+  const flags = recoveryActionFlags(state, presenter);
+  if (!flags.hasDockActions) return null;
   const actionDisabled = state.busy || state.recoveryInFlight === true;
   return (
     <View style={styles.recoveryActions} testID="payment-recovery-actions">
-      {cashConfirmationRecovery ? (
+      {flags.cashConfirmationRecovery ? (
         <ActionButton
           disabled={actionDisabled}
+          icon="check-circle"
           label={t(confirmCollectionLabelKey(state))}
           onPress={() => {
             void presenter.confirm?.();
           }}
-          style={styles.recoveryAction}
+          size={primary ? "large" : "button"}
           testID="payment-confirm-cash-recovery"
-          tone="primary"
+          tone={primary ? "primary" : "info"}
         />
       ) : state.allowedActions.recover ? (
         <ActionButton
           disabled={actionDisabled}
+          icon="backup-restore"
           label={
             state.recoveryInFlight
               ? t("action.recovering")
@@ -1611,41 +1483,31 @@ function RecoveryActions({
           onPress={() => {
             void presenter.recover();
           }}
-          style={styles.recoveryAction}
+          size={primary ? "large" : "button"}
           testID="payment-recover"
-          tone="primary"
+          tone={primary ? "primary" : "info"}
         />
       ) : null}
-      {showVoidBlockedTenderReversal ? (
+      {flags.showVoidBlockedTenderReversal ? (
         <ActionButton
           disabled={actionDisabled}
+          icon="shield-key-outline"
           label={t("action.voidBlockedTenderReversal")}
           onPress={() => {
             void presenter.voidBlockedTenderReversal?.();
           }}
+          size="button"
           testID="payment-void-blocked-tender-reversal"
           tone="danger"
         />
       ) : null}
-      {showGenericCancellation ? (
-        <ActionButton
-          disabled={actionDisabled}
-          label={t("action.cancel")}
-          onPress={() => {
-            void presenter.cancel();
-          }}
-          style={styles.recoveryAction}
-          testID="payment-cancel"
-          tone="danger"
-        />
-      ) : null}
-      {showPreparedCashCancellation ? (
+      {flags.showPreparedCashCancellation ? (
         <ActionButton
           disabled={actionDisabled}
           label={t(cancelPreparedLabelKey(state))}
           onPress={onCancelPreparedCash}
+          size="button"
           sound="danger"
-          style={styles.recoveryAction}
           testID="payment-cancel-prepared-cash"
           tone="danger"
         />
@@ -1663,6 +1525,7 @@ function LinklyControls({
   state: PaymentPresenterState;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   if (state.provider !== "linkly-cloud" || !state.attemptId) {
     return null;
   }
@@ -1677,31 +1540,31 @@ function LinklyControls({
       <Text style={styles.sectionTitle}>{t("terminal.title")}</Text>
       <Text style={styles.inputHint}>{t("terminal.safeOnly")}</Text>
       {interaction?.displayText ? (
-        <Text style={styles.linklyTerminalHint} testID="payment-linkly-display-text">
+        <Text style={styles.linklyDisplayText} testID="payment-linkly-display-text">
           {interaction.displayText}
         </Text>
       ) : null}
       {interaction?.displayLines.map((line, index) => (
         <Text
           key={`${index}-${line}`}
-          style={styles.linklyTerminalHint}
+          style={styles.linklyDisplayText}
           testID={`payment-linkly-display-line-${index}`}
         >
           {line}
         </Text>
       ))}
       {interaction?.inputType ? (
-        <Text style={styles.linklyTerminalHint} testID="payment-linkly-input-type">
+        <Text style={styles.linklyPromptText} testID="payment-linkly-input-type">
           {t("terminal.inputRequired")}
         </Text>
       ) : null}
       {interaction?.graphicCode ? (
-        <Text style={styles.linklyTerminalHint} testID="payment-linkly-graphic-code">
+        <Text style={styles.linklyPromptText} testID="payment-linkly-graphic-code">
           {t(linklyGraphicCopyKey(interaction.graphicCode))}
         </Text>
       ) : null}
       {interaction?.recoveryAction ? (
-        <Text style={styles.linklyTerminalHint} testID="payment-linkly-recovery-action">
+        <Text style={styles.linklyPromptText} testID="payment-linkly-recovery-action">
           {t("terminal.recoveryRequired")}
         </Text>
       ) : null}
@@ -1716,7 +1579,9 @@ function LinklyControls({
               onPress={() => {
                 void presenter.sendLinklyKey(key);
               }}
+              size="button"
               sound="key"
+              style={styles.linklyKey}
               testID={`payment-linkly-${key}`}
               tone={key === "cancel" || key === "no" ? "danger" : "secondary"}
             />
@@ -1733,6 +1598,9 @@ function LinklyControls({
             onPress={() => {
               void presenter.markLinklyReceiptPrinted();
             }}
+            size="button"
+            sound="tap"
+            style={styles.linklyKey}
             testID="payment-linkly-receipt-printed"
             tone="secondary"
           />
@@ -1742,6 +1610,9 @@ function LinklyControls({
             onPress={() => {
               void presenter.acknowledgeLinkly();
             }}
+            size="button"
+            sound="tap"
+            style={styles.linklyKey}
             testID="payment-linkly-acknowledge"
             tone="secondary"
           />
@@ -1751,55 +1622,65 @@ function LinklyControls({
   );
 }
 
+/** 中栏：剩余应付大数字（含支付状态）+ 付款方式大块 + 当前付款列表。 */
 function PaymentSummary({
   compact,
+  entryArmed,
+  installmentModeControl,
   locale,
-  onCancelPreparedCash,
-  onConfirm,
   onSelectMethod,
   presenter,
-  shortLandscape,
+  showStatusPanel,
   state,
   t,
 }: Readonly<{
   compact: boolean;
+  entryArmed: boolean;
+  installmentModeControl: PaymentInstallmentModeControl | undefined;
   locale: PaymentLocale;
-  onCancelPreparedCash(): void;
-  onConfirm(): void;
   onSelectMethod(method: PaymentUiMethod): void;
   presenter: PaymentScreenPresenter;
-  shortLandscape: boolean;
+  showStatusPanel: boolean;
   state: PaymentPresenterState;
   t: Translate;
 }>) {
-  const paidCents = Math.max(
-    0,
-    state.total.cents - state.remaining.cents,
-  );
-  const preparedCashCancellation = canCancelPreparedCash(state);
-  const showPreparedCashCancellationInFooter =
-    preparedCashCancellation && state.phase !== "recovery-required";
-  const showConfirmation =
-    Boolean(presenter.confirm) &&
-    state.checkout.canConfirm &&
-    !(
-      state.phase === "recovery-required" &&
-      state.checkout.cashRepaymentStatus === "ready"
-    );
+  usePosThemeVersion();
+  const tone = showStatusPanel ? statusTone(state.phase) : "neutral";
   return (
     <View
       style={[
         styles.summaryPane,
-        shortLandscape && styles.summaryPaneShort,
         compact && styles.summaryPaneCompact,
       ]}
       testID="payment-summary"
     >
-      <ScrollView
-        contentContainerStyle={[
-          styles.summaryScrollContent,
-          compact && styles.summaryScrollContentCompact,
+      <View
+        style={[
+          styles.dueCard,
+          tone === "warning" && styles.dueCardWarning,
+          tone === "danger" && styles.dueCardDanger,
+          tone === "success" && styles.dueCardSuccess,
         ]}
+        testID="payment-due-card"
+      >
+        <View style={styles.dueRow}>
+          <Text style={styles.dueLabel}>{t("summary.remaining")}</Text>
+          <Text
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            style={styles.dueAmount}
+            testID="payment-remaining"
+          >
+            {formatAud(state.remaining.cents, locale)}
+          </Text>
+        </View>
+        {showStatusPanel ? (
+          <PaymentStatusPanel state={state} t={t} />
+        ) : null}
+      </View>
+
+      <ScrollView
+        contentContainerStyle={styles.summaryScrollContent}
         nestedScrollEnabled
         scrollEnabled={!compact}
         style={[
@@ -1808,7 +1689,7 @@ function PaymentSummary({
         ]}
         testID="payment-summary-scroll"
       >
-        <Text style={styles.sectionTitle}>{t("method.title")}</Text>
+        <Text style={styles.sectionLabel}>{t("method.title")}</Text>
         <View style={styles.methodGrid}>
           {PAYMENT_METHODS.filter((method) =>
             // 运行时已按设置限制唯一银行卡通道；付款中暂时禁用不影响展示。
@@ -1821,39 +1702,342 @@ function PaymentSummary({
               : state.providers.some(
                   (entry) => entry.provider === method && entry.available,
                 ),
-          ).map((method) => (
-            <PaymentMethodButton
-              active={state.selectedMethod === method}
-              disabled={!canSelectPaymentMethod(state, method)}
-              key={method}
-              label={t(paymentMethodCopyKey(method))}
-              onPress={() => onSelectMethod(method)}
-              testID={`payment-method-${method}`}
+          ).map((method) => {
+            const active = state.selectedMethod === method;
+            const disabled = !canSelectPaymentMethod(state, method);
+            return (
+              <PaymentMethodButton
+                active={active}
+                disabled={disabled}
+                // 橙框只在右栏正在为这个方式录入金额时出现，和“可以输入”保持同一个含义。
+                highlighted={active && entryArmed}
+                hint={t(
+                  disabled && !state.busy
+                    ? "method.unavailable"
+                    : PAYMENT_METHOD_VISUALS[method].hintKey,
+                )}
+                icon={PAYMENT_METHOD_VISUALS[method].icon}
+                iconColor={PAYMENT_METHOD_VISUALS[method].color}
+                key={method}
+                label={t(paymentMethodCopyKey(method))}
+                onPress={() => onSelectMethod(method)}
+                testID={`payment-method-${method}`}
+              />
+            );
+          })}
+          {installmentModeControl ? (
+            <PaymentInstallmentToggle
+              control={installmentModeControl}
+              t={t}
             />
-          ))}
+          ) : null}
         </View>
         <LinklyTerminalSelector state={state} t={t} />
-        <View style={styles.summarySectionRule} />
-        <Text style={styles.sectionTitle}>{t("summary.title")}</Text>
-        <SummaryAmount
-          label={t("summary.total")}
-          locale={locale}
-          value={state.total.cents}
-        />
-        <SummaryAmount
-          label={t("summary.paid")}
-          locale={locale}
-          value={paidCents}
-        />
-        <View style={styles.remainingRule} />
-        <SummaryAmount
-          emphasis
-          label={t("summary.remaining")}
-          locale={locale}
-          testID="payment-remaining"
-          value={state.remaining.cents}
-        />
+
+        <Text style={styles.sectionLabel}>{t("summary.tenders")}</Text>
+        {state.tenders.length ? (
+          <View style={styles.tenderList}>
+            {state.tenders.map((tender) => (
+              <TenderRow
+                key={tender.tenderGuid}
+                locale={locale}
+                onRemove={() => {
+                  void presenter.removeTender(tender.tenderGuid);
+                }}
+                state={state}
+                tender={tender}
+                t={t}
+              />
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyTenders}>
+            <Text style={styles.emptyTendersText}>
+              {t("summary.noTenders")}
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * 右栏：本次金额 + 纸币快捷键 + 数字键盘常驻显示，底部是唯一的橙色主按钮。
+ * 没有点选付款方式时键盘置灰；只有 entryArmed 为真才接受输入和提交。
+ */
+function PaymentEntryPane({
+  compact,
+  entryArmed,
+  lastQuickCashText,
+  locale,
+  narrow,
+  onCancelEntry,
+  onCancelPreparedCash,
+  onConfirm,
+  onSubmit,
+  presenter,
+  showEntry,
+  state,
+  t,
+}: Readonly<{
+  compact: boolean;
+  entryArmed: boolean;
+  lastQuickCashText: RefObject<string | null>;
+  locale: PaymentLocale;
+  narrow: boolean;
+  onCancelEntry(): void;
+  onCancelPreparedCash(): void;
+  onConfirm(): void;
+  onSubmit(): void;
+  presenter: PaymentScreenPresenter;
+  showEntry: boolean;
+  state: PaymentPresenterState;
+  t: Translate;
+}>) {
+  usePosThemeVersion();
+  const flags = recoveryActionFlags(state, presenter);
+  const preparedCashCancellation = canCancelPreparedCash(state);
+  const showPreparedCashCancellationInFooter =
+    preparedCashCancellation && state.phase !== "recovery-required";
+  const showConfirmation =
+    Boolean(presenter.confirm) &&
+    state.checkout.canConfirm &&
+    !(
+      state.phase === "recovery-required" &&
+      state.checkout.cashRepaymentStatus === "ready"
+    );
+  const showFooter = showConfirmation || showPreparedCashCancellationInFooter;
+  // 每屏只有一个橙色主按钮：有待确认的收款时是「确认」，否则是右下角的提交，
+  // 两者都没有时（等待终端、需要恢复等）才轮到恢复类操作。
+  const primaryOwner: "confirm" | "submit" | "recovery" = showConfirmation
+    ? "confirm"
+    : showEntry
+      ? "submit"
+      : "recovery";
+  const salesManualCard = isSalesManualCard(state);
+  const manualCardEntry = entryArmed && salesManualCard;
+  // 纸币快捷键：录入现金时可用；尚未点选付款方式时只要有现金权限就置灰占位，保持右栏布局稳定。
+  const showQuickCash = entryArmed
+    ? state.selectedMethod === "cash"
+    : state.cashAvailable === true;
+  // 主按钮上带本次金额，按之前再确认一眼；手动刷卡固定为全部剩余应付。
+  const submitAmountCents = !entryArmed
+    ? null
+    : salesManualCard
+      ? state.remaining.cents
+      : (parseAudInput(state.amountText)?.cents ?? null);
+  // 未点选付款方式时按钮文案不跟随 presenter 的默认选择，避免暗示已经选好了方式。
+  const submitBaseLabel =
+    entryArmed && salesManualCard
+      ? t("manualCard.confirm")
+      : entryArmed &&
+          state.checkout.flow === "installment-repayment" &&
+          state.selectedMethod === "cash"
+        ? t("action.prepareCashRepayment")
+        : state.orderGuid
+          ? t("action.addTender")
+          : t("action.pay");
+  const submitLabel =
+    submitAmountCents === null
+      ? submitBaseLabel
+      : `${submitBaseLabel} · ${formatAud(submitAmountCents, locale)}`;
+
+  return (
+    <View
+      style={[
+        styles.entryPane,
+        narrow && styles.entryPaneNarrow,
+        compact && styles.entryPaneCompact,
+      ]}
+      testID="payment-entry-pane"
+    >
+      <PosKeyboardAwareScrollView
+        contentContainerStyle={styles.entryScrollContent}
+        nestedScrollEnabled
+        scrollEnabled
+        style={[
+          styles.entryScroll,
+          compact && styles.entryScrollCompact,
+        ]}
+        testID="payment-entry-scroll"
+      >
+        {showEntry ? (
+          <View style={styles.form} testID="payment-entry-form">
+            <View
+              style={[
+                styles.amountBox,
+                entryArmed && styles.amountBoxArmed,
+              ]}
+            >
+              <View style={styles.amountBoxMeta}>
+                <Text numberOfLines={1} style={styles.amountBoxLabel}>
+                  {entryArmed && state.selectedMethod
+                    ? `${t("amount.label")} · ${t(
+                        paymentMethodCopyKey(state.selectedMethod),
+                      )}`
+                    : t("amount.label")}
+                </Text>
+                {entryArmed ? (
+                  // 退出本次录入（等同原金额弹窗的关闭）：不发起付款，也不取消订单。
+                  <ActionButton
+                    disabled={state.busy}
+                    icon="close"
+                    label={t("entry.cancel")}
+                    onPress={onCancelEntry}
+                    size="small"
+                    sound="danger"
+                    testID="payment-entry-cancel"
+                    tone="quiet"
+                  />
+                ) : null}
+              </View>
+              <View style={styles.amountValueRow}>
+                <Text
+                  style={[
+                    styles.amountCurrency,
+                    !entryArmed && styles.amountCurrencyIdle,
+                  ]}
+                >
+                  $
+                </Text>
+                <PosTextInput
+                  accessibilityLabel={t("amount.label")}
+                  editable={entryArmed && !state.busy && !salesManualCard}
+                  keyboardType="decimal-pad"
+                  onChangeText={(value) => presenter.setAmountText(value)}
+                  placeholder="0.00"
+                  placeholderTextColor={posColors.placeholder}
+                  selectionColor={posColors.blue}
+                  showSoftInputOnFocus={false}
+                  style={styles.amountInput}
+                  testID="payment-amount"
+                  value={
+                    !entryArmed
+                      ? ""
+                      : salesManualCard
+                        ? (state.remaining.cents / 100).toFixed(2)
+                        : state.amountText
+                  }
+                />
+              </View>
+            </View>
+            <Text style={styles.inputHint}>
+              {t(
+                !entryArmed
+                  ? "entry.selectMethodFirst"
+                  : salesManualCard
+                    ? "manualCard.amountHint"
+                    : "amount.hint",
+              )}
+            </Text>
+
+            {entryArmed && state.selectedMethod === "voucher" ? (
+              <View
+                key={state.sensitiveInputRevision}
+                style={styles.voucherInputGroup}
+              >
+                <Text style={styles.inputLabel}>
+                  {t("voucher.label")}
+                </Text>
+                <PosKeyboardAwareTextInput
+                  accessibilityLabel={t("voucher.label")}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!state.busy}
+                  onChangeText={(value) =>
+                    presenter.setVoucherCode(value)
+                  }
+                  placeholder={t("voucher.placeholder")}
+                  placeholderTextColor={posColors.placeholder}
+                  secureTextEntry
+                  selectionColor={posColors.blue}
+                  style={styles.voucherInput}
+                  testID="payment-voucher-code"
+                />
+                {state.voucherCaptured ? (
+                  <Text
+                    style={styles.secureCapture}
+                    testID="payment-voucher-captured"
+                  >
+                    {t("voucher.captured")}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
+            {manualCardEntry ? (
+              <View style={styles.manualCardConfirmation} testID="payment-manual-card-confirmation">
+                <Text style={styles.manualCardInstructions}>{t("manualCard.instructions")}</Text>
+                <PosPressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel={t("manualCard.checked")}
+                  accessibilityState={{ checked: state.manualCardConfirmed === true, disabled: state.busy }}
+                  disabled={state.busy}
+                  onPress={() => presenter.setManualCardConfirmed?.(state.manualCardConfirmed !== true)}
+                  sound="key"
+                  style={({ pressed }) => [
+                    styles.manualCardCheckRow,
+                    state.manualCardConfirmed === true && styles.manualCardCheckRowChecked,
+                    pressed && styles.pressed,
+                  ]}
+                  testID="payment-manual-card-check"
+                >
+                  <MaterialCommunityIcons
+                    accessible={false}
+                    color={state.manualCardConfirmed === true ? posColors.green : posColors.mutedInk}
+                    name={state.manualCardConfirmed === true ? "checkbox-marked" : "checkbox-blank-outline"}
+                    size={34}
+                  />
+                  <Text style={styles.manualCardCheckLabel}>{t("manualCard.checked")}</Text>
+                </PosPressable>
+                <Text style={styles.inputHint}>{t("manualCard.uncertain")}</Text>
+              </View>
+            ) : (
+              <Fragment>
+                {showQuickCash ? (
+                  <View
+                    style={styles.quickCashRow}
+                    testID="payment-cash-quick"
+                  >
+                    {QUICK_CASH_NOTES.map((amount) => (
+                      <QuickCashButton
+                        amount={amount}
+                        disabled={
+                          !entryArmed ||
+                          state.busy ||
+                          isQuickCashSufficient(
+                            state.amountText,
+                            lastQuickCashText.current,
+                            state.remaining,
+                          )
+                        }
+                        key={amount}
+                        onPress={() => {
+                          const next = nextQuickCashAmountText(
+                            state.amountText,
+                            lastQuickCashText.current,
+                            amount,
+                          );
+                          lastQuickCashText.current = next;
+                          presenter.setAmountText(next);
+                        }}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+                <PaymentKeypad
+                  amountText={state.amountText}
+                  disabled={!entryArmed || state.busy}
+                  onChange={(value) => presenter.setAmountText(value)}
+                />
+              </Fragment>
+            )}
+          </View>
+        ) : null}
+
         {state.checkout.cash.tenderedCents > 0 ? (
+          // 实收与找零只显示 presenter 给出的结算结果，界面不自己估算（普通销售按五分取整，分期不取整）。
           <View style={styles.cashSettlement} testID="payment-cash-settlement">
             <SummaryAmount
               label={locale === "zh" ? "实收现金" : "Cash tendered"}
@@ -1876,77 +2060,96 @@ function PaymentSummary({
           </View>
         ) : null}
 
-        <Text style={styles.tenderTitle}>{t("summary.tenders")}</Text>
-        {state.tenders.length ? (
-          state.tenders.map((tender) => (
-            <TenderRow
-              key={tender.tenderGuid}
-              locale={locale}
-              onRemove={() => {
-                void presenter.removeTender(tender.tenderGuid);
-              }}
-              state={state}
-              tender={tender}
-              t={t}
-            />
-          ))
-        ) : (
-          <Text style={styles.emptyTenders}>{t("summary.noTenders")}</Text>
-        )}
-      </ScrollView>
-      <View
-        style={styles.summaryActionDock}
-        testID="payment-summary-action-dock"
-      >
-        <RecoveryActions
-          onCancelPreparedCash={onCancelPreparedCash}
-          presenter={presenter}
-          state={state}
-          t={t}
-        />
-        {showConfirmation || showPreparedCashCancellationInFooter ? (
-          <View style={styles.summaryFooter} testID="payment-summary-footer">
-            {state.checkout.preparedCollection === "manual-card" ? (
-              <Text style={styles.inputHint} testID="payment-manual-card-prepared-hint">
-                {t("installmentManualCard.prepared")}
-              </Text>
-            ) : null}
-            {showConfirmation ? (
-              <ActionButton
-                disabled={state.busy}
-                label={
-                  state.checkout.cashRepaymentStatus === "ready" ||
-                  state.checkout.cashRepaymentStatus === "confirming"
-                    ? t(confirmCollectionLabelKey(state))
-                    : locale === "zh"
-                      ? "确认分期付款"
-                      : "Confirm lay-by payment"
-                }
-                onPress={onConfirm}
-                sound="danger"
-                style={styles.confirmAction}
-                testID="payment-confirm"
-              />
-            ) : null}
-            {showPreparedCashCancellationInFooter ? (
-              <ActionButton
-                disabled={state.busy}
-                label={t(cancelPreparedLabelKey(state))}
-                onPress={onCancelPreparedCash}
-                sound="danger"
-                style={styles.preparedCashCancelAction}
-                testID="payment-cancel-prepared-cash"
-                tone="quiet"
-              />
-            ) : null}
-          </View>
-        ) : null}
         <LinklyControls presenter={presenter} state={state} t={t} />
-      </View>
+      </PosKeyboardAwareScrollView>
+
+      {state.fieldIssue ? (
+        <Text
+          accessibilityRole="alert"
+          style={styles.fieldError}
+          testID="payment-field-error"
+        >
+          {t(paymentFieldIssueCopyKey(state.fieldIssue))}
+        </Text>
+      ) : null}
+
+      {flags.hasDockActions || showFooter ? (
+        <View
+          style={styles.summaryActionDock}
+          testID="payment-summary-action-dock"
+        >
+          <RecoveryActions
+            onCancelPreparedCash={onCancelPreparedCash}
+            presenter={presenter}
+            primary={primaryOwner === "recovery"}
+            state={state}
+            t={t}
+          />
+          {showFooter ? (
+            <View style={styles.summaryFooter} testID="payment-summary-footer">
+              {state.checkout.preparedCollection === "manual-card" ? (
+                <Text style={styles.preparedHint} testID="payment-manual-card-prepared-hint">
+                  {t("installmentManualCard.prepared")}
+                </Text>
+              ) : null}
+              {showConfirmation ? (
+                <ActionButton
+                  disabled={state.busy}
+                  icon="check-circle"
+                  label={
+                    state.checkout.cashRepaymentStatus === "ready" ||
+                    state.checkout.cashRepaymentStatus === "confirming"
+                      ? t(confirmCollectionLabelKey(state))
+                      : locale === "zh"
+                        ? "确认分期付款"
+                        : "Confirm lay-by payment"
+                  }
+                  onPress={onConfirm}
+                  size="primary"
+                  sound="danger"
+                  testID="payment-confirm"
+                  tone="primary"
+                />
+              ) : null}
+              {showPreparedCashCancellationInFooter ? (
+                <ActionButton
+                  disabled={state.busy}
+                  label={t(cancelPreparedLabelKey(state))}
+                  onPress={onCancelPreparedCash}
+                  size="button"
+                  sound="danger"
+                  testID="payment-cancel-prepared-cash"
+                  tone="danger"
+                />
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {showEntry ? (
+        <View style={styles.formActions} testID="payment-entry-actions">
+          <ActionButton
+            disabled={
+              !entryArmed ||
+              state.busy ||
+              !state.selectedMethod ||
+              !canSubmitPaymentMethod(state, state.selectedMethod)
+            }
+            icon="check-circle"
+            label={submitLabel}
+            onPress={onSubmit}
+            size={primaryOwner === "submit" ? "primary" : "large"}
+            testID="payment-submit"
+            tone={primaryOwner === "submit" ? "primary" : "secondary"}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
 
+/** 分期开关：放在付款方式网格里，和其他付款方式同一尺寸。 */
 function PaymentInstallmentToggle({
   control,
   t,
@@ -1954,8 +2157,9 @@ function PaymentInstallmentToggle({
   control: PaymentInstallmentModeControl;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.installmentToggleGroup}>
+    <Fragment>
       <PosPressable
         accessibilityLabel={t("installment.toggle")}
         accessibilityRole="switch"
@@ -1966,15 +2170,38 @@ function PaymentInstallmentToggle({
         disabled={control.locked}
         onPress={() => control.onToggle(!control.enabled)}
         style={({ pressed }) => [
-          styles.installmentToggle,
-          control.locked && styles.disabled,
+          styles.methodButton,
+          control.locked && styles.methodButtonDisabled,
           pressed && !control.locked && styles.pressed,
         ]}
         testID="payment-installment-toggle"
       >
-        <Text style={styles.installmentToggleLabel}>
-          {t("installment.toggle")}
-        </Text>
+        <MaterialCommunityIcons
+          accessible={false}
+          color={control.locked ? posColors.disabledInk : posColors.ink}
+          name="calendar-month-outline"
+          size={34}
+        />
+        <View style={styles.methodCopy}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.methodButtonText,
+              control.locked && styles.methodTextDisabled,
+            ]}
+          >
+            {t("installment.toggle")}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.methodHint,
+              control.locked && styles.methodTextDisabled,
+            ]}
+          >
+            {t("installment.toggleHint")}
+          </Text>
+        </View>
         <View
           style={[
             styles.installmentToggleTrack,
@@ -1997,66 +2224,122 @@ function PaymentInstallmentToggle({
           {t("installment.unavailable")}
         </Text>
       ) : null}
-    </View>
+    </Fragment>
   );
 }
 
+const KEYPAD_ROWS = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  [".", "0", "backspace"],
+] as const;
+
 function PaymentKeypad({
   amountText,
-  dense,
   disabled,
   onChange,
 }: Readonly<{
   amountText: string;
-  dense: boolean;
   disabled: boolean;
   onChange(value: string): void;
 }>) {
-  const keys = [
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    ".",
-    "0",
-    "backspace",
-  ] as const;
+  usePosThemeVersion();
   return (
-    <View
-      style={[styles.keypad, dense && styles.keypadShort]}
-      testID="payment-keypad"
-    >
-      {keys.map((key) => (
-        <PosPressable
-          accessibilityRole="button"
-          disabled={disabled}
-          key={key}
-          onPress={() =>
-            onChange(nextKeypadAmount(amountText, key))
-          }
-          sound={key === "backspace" ? "danger" : "key"}
-          style={({ pressed }) => [
-            styles.keypadKey,
-            dense && styles.keypadKeyShort,
-            disabled && styles.disabled,
-            pressed && !disabled && styles.pressed,
-          ]}
-          testID={`payment-key-${
-            key === "." ? "decimal" : key
-          }`}
-        >
-          <Text style={styles.keypadKeyText}>
-            {key === "backspace" ? "⌫" : key}
-          </Text>
-        </PosPressable>
+    <View style={styles.keypad} testID="payment-keypad">
+      {KEYPAD_ROWS.map((row) => (
+        <View key={row[0]} style={styles.keypadRow}>
+          {row.map((key) => (
+            <PosPressable
+              // 退格键改成图标后没有文字，沿用原来的符号作为朗读内容。
+              {...(key === "backspace" ? { accessibilityLabel: "⌫" } : {})}
+              accessibilityRole="button"
+              disabled={disabled}
+              key={key}
+              onPress={() =>
+                onChange(nextKeypadAmount(amountText, key))
+              }
+              sound={key === "backspace" ? "danger" : "key"}
+              style={({ pressed }) => [
+                styles.keypadKey,
+                disabled && styles.keypadKeyDisabled,
+                pressed && !disabled && styles.pressed,
+              ]}
+              testID={`payment-key-${
+                key === "." ? "decimal" : key
+              }`}
+            >
+              {key === "backspace" ? (
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={disabled ? posColors.disabledInk : posColors.ink}
+                  name="backspace-outline"
+                  size={30}
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.keypadKeyText,
+                    disabled && styles.keypadKeyTextDisabled,
+                  ]}
+                >
+                  {key}
+                </Text>
+              )}
+            </PosPressable>
+          ))}
+        </View>
       ))}
     </View>
   );
+}
+
+/** 纸币快捷键：底色对应真实纸币颜色，不随主题变化。 */
+function QuickCashButton({
+  amount,
+  disabled,
+  onPress,
+}: Readonly<{
+  amount: (typeof QUICK_CASH_NOTES)[number];
+  disabled: boolean;
+  onPress(): void;
+}>) {
+  usePosThemeVersion();
+  return (
+    <PosPressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      sound="key"
+      style={({ pressed }) => [
+        styles.quickCashButton,
+        quickCashNoteStyle(amount),
+        disabled && styles.disabled,
+        pressed && !disabled && styles.pressed,
+      ]}
+      testID={`payment-cash-quick-${amount}`}
+    >
+      <Text style={styles.quickCashNoteText}>{`$${amount}`}</Text>
+    </PosPressable>
+  );
+}
+
+function quickCashNoteStyle(
+  amount: (typeof QUICK_CASH_NOTES)[number],
+): ViewStyle {
+  switch (amount) {
+    case 5:
+      return styles.quickCashNote5;
+    case 10:
+      return styles.quickCashNote10;
+    case 20:
+      return styles.quickCashNote20;
+    case 50:
+      return styles.quickCashNote50;
+    case 100:
+      return styles.quickCashNote100;
+  }
 }
 
 function TenderRow({
@@ -2072,6 +2355,7 @@ function TenderRow({
   tender: PaymentPresenterTender;
   t: Translate;
 }>) {
+  usePosThemeVersion();
   return (
     <View
       style={styles.tenderRow}
@@ -2101,6 +2385,7 @@ function TenderRow({
           disabled={!state.allowedActions.removeTender || state.busy}
           label={t("action.remove")}
           onPress={onRemove}
+          size="small"
           sound="danger"
           testID={`payment-remove-${tender.tenderGuid}`}
           tone="quiet"
@@ -2114,21 +2399,25 @@ function SummaryAmount({
   emphasis = false,
   label,
   locale,
+  strong = false,
   testID,
   value,
 }: Readonly<{
   emphasis?: boolean;
   label: string;
   locale: PaymentLocale;
+  strong?: boolean;
   testID?: string;
   value: number;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.summaryAmountRow}>
       <Text style={styles.summaryLabel}>{label}</Text>
       <Text
         style={[
           styles.summaryAmount,
+          strong && styles.summaryAmountStrong,
           emphasis && styles.summaryAmountEmphasis,
         ]}
         testID={testID}
@@ -2142,16 +2431,27 @@ function SummaryAmount({
 function PaymentMethodButton({
   active,
   disabled,
+  highlighted,
+  hint,
+  icon,
+  iconColor,
   label,
   onPress,
   testID,
 }: Readonly<{
+  /** presenter 当前选中的付款方式（无障碍 selected 状态沿用它）。 */
   active: boolean;
   disabled: boolean;
+  /** 右栏正在为这个方式录入金额。 */
+  highlighted: boolean;
+  hint: string;
+  icon: PosIconName;
+  iconColor: keyof PosPalette;
   label: string;
   onPress(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityRole="button"
@@ -2160,70 +2460,127 @@ function PaymentMethodButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.methodButton,
-        active && styles.methodButtonActive,
-        disabled && styles.disabled,
+        highlighted && styles.methodButtonActive,
+        disabled && styles.methodButtonDisabled,
         pressed && !disabled && styles.pressed,
       ]}
       testID={testID}
     >
-      <Text
-        style={[
-          styles.methodButtonText,
-          active && styles.methodButtonTextActive,
-        ]}
-      >
-        {label}
-      </Text>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={disabled ? posColors.disabledInk : posColors[iconColor]}
+        name={icon}
+        size={34}
+      />
+      <View style={styles.methodCopy}>
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.methodButtonText,
+            disabled && styles.methodTextDisabled,
+          ]}
+        >
+          {label}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.methodHint,
+            disabled && styles.methodTextDisabled,
+          ]}
+        >
+          {hint}
+        </Text>
+      </View>
+      {highlighted ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.accent}
+          name="check-circle"
+          size={22}
+          style={styles.methodCheck}
+        />
+      ) : null}
     </PosPressable>
   );
 }
 
+/** 付款页内的按钮：尺寸与配色走通用 PosButton，保留「危险操作用警示音」的约定。 */
 function ActionButton({
   disabled = false,
+  icon,
   label,
   onPress,
+  size = "button",
   sound,
   style,
   testID,
-  tone = "primary",
+  tone = "secondary",
 }: Readonly<{
   disabled?: boolean;
+  icon?: PosIconName;
   label: string;
   onPress(): void;
+  size?: PosButtonSize;
   sound?: "tap" | "key" | "navigate" | "danger";
   style?: StyleProp<ViewStyle>;
   testID?: string;
-  tone?: "primary" | "secondary" | "danger" | "quiet";
+  tone?: PosButtonTone;
 }>) {
   return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
+    <PosButton
       disabled={disabled}
+      {...(icon ? { icon } : {})}
+      label={label}
       onPress={onPress}
+      size={size}
       sound={sound ?? (tone === "danger" ? "danger" : "tap")}
-      style={({ pressed }) => [
-        styles.actionButton,
-        tone === "secondary" && styles.actionSecondary,
-        tone === "danger" && styles.actionDanger,
-        tone === "quiet" && styles.actionQuiet,
-        disabled && styles.disabled,
-        pressed && !disabled && styles.pressed,
-        style,
-      ]}
-      testID={testID}
-    >
-      <Text
-        style={[
-          styles.actionButtonText,
-          tone === "secondary" && styles.actionSecondaryText,
-          tone === "quiet" && styles.actionQuietText,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
+      style={style}
+      {...(testID ? { testID } : {})}
+      tone={tone}
+    />
   );
+}
+
+/**
+ * 恢复类操作的显示条件，左栏的「取消支付」与右栏动作区共用同一份判断，
+ * 条件本身与改版前完全一致。
+ */
+function recoveryActionFlags(
+  state: PaymentPresenterState,
+  presenter: PaymentScreenPresenter,
+): Readonly<{
+  cashConfirmationRecovery: boolean;
+  showPreparedCashCancellation: boolean;
+  showGenericCancellation: boolean;
+  showVoidBlockedTenderReversal: boolean;
+  hasDockActions: boolean;
+}> {
+  const preparedCashCancellation = canCancelPreparedCash(state);
+  const cashConfirmationRecovery =
+    state.checkout.flow === "installment-repayment" &&
+    state.phase === "recovery-required" &&
+    state.checkout.cashRepaymentStatus === "ready";
+  const showPreparedCashCancellation =
+    preparedCashCancellation && state.phase === "recovery-required";
+  const showGenericCancellation =
+    state.allowedActions.cancel && !preparedCashCancellation;
+  // Blocked 礼券撤券只能由主管授权作废；没有授权能力时不显示任何可点按钮。
+  const showVoidBlockedTenderReversal =
+    state.tenderReversalRecovery?.status === "blocked" &&
+    state.tenderReversalRecovery.voidAvailable === true &&
+    typeof presenter.voidBlockedTenderReversal === "function";
+  return {
+    cashConfirmationRecovery,
+    showPreparedCashCancellation,
+    showGenericCancellation,
+    showVoidBlockedTenderReversal,
+    hasDockActions:
+      state.allowedActions.recover ||
+      showPreparedCashCancellation ||
+      cashConfirmationRecovery ||
+      showVoidBlockedTenderReversal,
+  };
 }
 
 function statusTone(
@@ -2421,636 +2778,181 @@ export function nextKeypadAmount(
   return candidate;
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-  },
-  header: {
-    minHeight: 74,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: posColors.ink,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 18,
-  },
-  headerIdentity: {
-    flexShrink: 1,
-  },
-  title: {
-    color: "#FFFFFF",
-    fontSize: 25,
-    fontWeight: "800",
-    letterSpacing: -0.4,
-  },
-  subtitle: {
-    marginTop: 2,
-    color: "#C8D4DF",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  orderReference: {
-    maxWidth: 230,
-    color: "#D8E2EA",
-    fontSize: 13,
-    fontVariant: ["tabular-nums"],
-  },
+const styles = createPosStyles((colors) => ({
   contentScroll: {
     flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
-    padding: 18,
-    gap: 14,
+    padding: 12,
+    gap: 12,
   },
   scrollContentBounded: {
     flex: 1,
   },
-  scrollContentShort: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-  },
-  statusPanel: {
-    minHeight: 70,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
-    borderLeftWidth: 5,
-    borderLeftColor: posColors.blue,
-    backgroundColor: posColors.blueSoft,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  statusWarning: {
-    borderLeftColor: "#B7791F",
-    backgroundColor: "#FFF4D6",
-  },
-  statusDanger: {
-    borderLeftColor: posColors.red,
-    backgroundColor: posColors.redSoft,
-  },
-  statusSuccess: {
-    borderLeftColor: posColors.green,
-    backgroundColor: posColors.greenSoft,
-  },
-  statusCopy: {
-    flex: 1,
-  },
-  statusTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  statusHint: {
-    marginTop: 4,
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 19,
-  },
+
+  /* ---------- 错误提示条 ---------- */
   errorBanner: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    minHeight: PAYMENT_MIN_TOUCH_TARGET,
-    borderWidth: 1,
-    borderColor: "#DCA09C",
-    backgroundColor: posColors.redSoft,
+    minHeight: 64,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
   },
   errorText: {
     flex: 1,
-    color: "#7A211D",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  errorDismiss: {
-    minHeight: PAYMENT_MIN_TOUCH_TARGET,
-    minWidth: PAYMENT_MIN_TOUCH_TARGET,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  errorDismissText: {
-    color: posColors.red,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  successLayout: {
-    flex: 1,
-    minHeight: 520,
-    flexDirection: "row",
-    gap: 14,
-  },
-  successLayoutCompact: {
-    minHeight: 0,
-    flexDirection: "column",
-  },
-  successMain: {
-    flex: 68,
-    minWidth: 0,
-    gap: 14,
-  },
-  successMainCompact: {
-    flex: 0,
-  },
-  successHero: {
-    minHeight: 118,
-    paddingHorizontal: 24,
-    paddingVertical: 18,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 20,
-  },
-  successIcon: {
-    width: 76,
-    height: 76,
-    borderWidth: 4,
-    borderColor: posColors.green,
-    borderRadius: 38,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  successIconText: {
-    color: posColors.green,
-    fontSize: 44,
-    fontWeight: "800",
-    lineHeight: 50,
-  },
-  successHeroCopy: {
-    flex: 1,
-  },
-  successTitle: {
-    color: posColors.green,
-    fontSize: 32,
-    fontWeight: "900",
-    letterSpacing: -0.5,
-  },
-  successHint: {
-    marginTop: 5,
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "700",
-    lineHeight: 21,
-  },
-  successSummary: {
-    minHeight: 154,
-    padding: 24,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "stretch",
-    gap: 24,
-  },
-  successTotal: {
-    flex: 0.8,
-    justifyContent: "center",
-  },
-  successLabel: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  successTotalAmount: {
-    marginTop: 7,
-    color: posColors.green,
-    fontSize: 40,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  successSummaryRule: {
-    width: 1,
-    backgroundColor: posColors.border,
-  },
-  successTransaction: {
-    flex: 1.2,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 16,
-  },
-  successTransactionCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  successOrderReference: {
-    marginTop: 9,
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-    lineHeight: 23,
-  },
-  successTransactionQr: {
-    flexShrink: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  successTransactionQrQuietZone: {
-    backgroundColor: "#FFFFFF",
-  },
-  successTransactionQrRow: {
-    flexDirection: "row",
-  },
-  successTransactionQrCell: {
-    backgroundColor: "#FFFFFF",
-  },
-  successTransactionQrCellDark: {
-    backgroundColor: "#111111",
-  },
-  successSettlement: {
-    minHeight: 116,
-    paddingHorizontal: 22,
-    paddingVertical: 18,
-    borderWidth: 1,
-    borderColor: "#D9A441",
-    backgroundColor: posColors.yellowSoft,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 18,
-  },
-  successCashIdentity: {
-    minWidth: 0,
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-  },
-  successCashIcon: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: posColors.yellow,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  successCashIconText: {
-    color: "#FFFFFF",
-    fontSize: 29,
-    fontWeight: "900",
-  },
-  successCashTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  successCashTenderedRow: {
-    marginTop: 6,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-  },
-  successCashTenderedLabel: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  successCashTenderedAmount: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  successChange: {
-    minWidth: 180,
-    paddingLeft: 22,
-    borderLeftWidth: 1,
-    borderLeftColor: "#D9A441",
-    alignItems: "flex-end",
-  },
-  successChangeLabel: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  successChangeAmount: {
-    marginTop: 5,
-    color: posColors.orange,
-    fontSize: 34,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  successSync: {
-    minHeight: 72,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  successSyncDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: posColors.green,
-  },
-  successSyncText: {
-    flex: 1,
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "700",
-    lineHeight: 20,
-  },
-  successReceiptColumn: {
-    flex: 32,
-    minWidth: 300,
-  },
-  successReceiptColumnCompact: {
-    flex: 0,
-    minWidth: 0,
-  },
-  successReceipt: {
-    flex: 1,
-    minHeight: 390,
-    padding: 22,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-  },
-  successReceiptTitle: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "900",
-  },
-  successReceiptOrder: {
-    marginTop: 6,
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
-  },
-  successReceiptRule: {
-    height: 1,
-    marginVertical: 15,
-    backgroundColor: posColors.border,
-  },
-  successReceiptLines: {
-    flex: 1,
-    minHeight: 92,
-  },
-  successReceiptLine: {
-    minHeight: 52,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: posColors.border,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  successReceiptLineCopy: {
-    flex: 1,
-  },
-  successReceiptLineName: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  successReceiptLineQuantity: {
-    marginTop: 3,
-    color: posColors.mutedInk,
-    fontSize: 12,
-  },
-  successReceiptLineAmount: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  successReceiptEmpty: {
-    paddingVertical: 16,
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  successReceiptTender: {
-    minHeight: 34,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  successReceiptTenderLabel: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  successReceiptTenderAmount: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  successReceiptTotal: {
-    minHeight: 48,
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: posColors.ink,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  successReceiptTotalLabel: {
-    color: posColors.ink,
+    color: colors.red,
     fontSize: 16,
-    fontWeight: "900",
+    fontWeight: "800",
+    lineHeight: 22,
   },
-  successReceiptTotalAmount: {
-    color: posColors.ink,
-    fontSize: 22,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  successPrintAction: {
-    marginTop: 12,
-  },
-  successPrintStatus: {
-    marginTop: 7,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  successPrintStatusPrinting: {
-    color: posColors.blue,
-  },
-  successPrintStatusCompleted: {
-    color: posColors.green,
-  },
-  successPrintStatusUnknown: {
-    color: posColors.yellow,
-  },
-  successPrintStatusFailed: {
-    color: posColors.red,
-  },
-  successCompleteAction: {
-    marginTop: 10,
-  },
+
+  /* ---------- 三栏骨架 ---------- */
   workspace: {
     flex: 1,
     minHeight: 0,
     flexDirection: "row",
-    overflow: "hidden",
-    backgroundColor: posColors.surface,
-    borderWidth: 1,
-    borderColor: posColors.border,
+    gap: 12,
+  },
+  workspaceCompact: {
+    flex: 0,
+    flexDirection: "column",
   },
   contextPane: {
-    flex: 30,
+    width: 318,
     minHeight: 0,
-    minWidth: 250,
-    padding: 16,
-    borderRightWidth: 1,
-    borderRightColor: posColors.border,
-    backgroundColor: "#FBFAF7",
+    gap: 10,
+  },
+  contextPaneNarrow: {
+    width: 270,
   },
   contextPaneCompact: {
-    minWidth: 0,
+    width: "100%",
     maxHeight: 420,
-    borderRightWidth: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: posColors.border,
   },
-  contextControls: {
-    marginBottom: 14,
-    gap: 8,
+  summaryPane: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+    gap: 10,
   },
-  contextBack: {
-    alignSelf: "flex-start",
-    marginTop: 0,
-    marginBottom: 0,
+  summaryPaneCompact: {
+    flex: 0,
   },
-  installmentToggleGroup: {
-    gap: 5,
+  entryPane: {
+    width: 392,
+    minHeight: 0,
+    gap: 10,
   },
-  installmentToggle: {
-    minHeight: PAYMENT_MIN_TOUCH_TARGET,
-    paddingHorizontal: 11,
+  entryPaneNarrow: {
+    width: 350,
+  },
+  entryPaneCompact: {
+    width: "100%",
+  },
+
+  /* ---------- 左栏：订单明细 ---------- */
+  contextCard: {
+    flex: 1,
+    minHeight: 0,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: "hidden",
+  },
+  contextCardHeader: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-end",
     justifyContent: "space-between",
     gap: 10,
   },
-  installmentToggleLabel: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  installmentToggleTrack: {
-    width: 42,
-    height: 24,
-    padding: 2,
-    borderRadius: 12,
-    backgroundColor: "#AAB4BE",
-    justifyContent: "center",
-  },
-  installmentToggleTrackEnabled: {
-    backgroundColor: posColors.blue,
-  },
-  installmentToggleThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-  },
-  installmentToggleThumbEnabled: {
-    alignSelf: "flex-end",
-  },
-  installmentToggleIssue: {
-    color: posColors.red,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 17,
+  contextCardHeading: {
+    flexShrink: 1,
   },
   contextEyebrow: {
-    color: posColors.orange,
-    fontSize: 13,
+    color: colors.accent,
+    fontSize: 12.5,
     fontWeight: "900",
     letterSpacing: 0.7,
     textTransform: "uppercase",
   },
-  customerCard: {
-    padding: 12,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
+  contextListTitle: {
+    marginTop: 2,
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  orderReference: {
+    flexShrink: 1,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
   },
   customerScroll: {
+    flexGrow: 0,
     flexShrink: 1,
     minHeight: 0,
-    marginTop: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
   },
   customerScrollContent: {
     flexGrow: 0,
-    paddingBottom: 4,
+  },
+  customerCard: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   customerHeading: {
+    minHeight: 48,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
   },
   customerTitle: {
-    color: posColors.ink,
-    fontSize: 15,
+    color: colors.ink,
+    fontSize: 16,
     fontWeight: "900",
   },
-  customerEdit: {
-    minHeight: PAYMENT_MIN_TOUCH_TARGET,
-    minWidth: PAYMENT_MIN_TOUCH_TARGET,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  customerEditText: {
-    color: posColors.blue,
-    fontSize: 14,
-    fontWeight: "800",
-  },
   customerNumber: {
-    marginTop: 7,
-    color: posColors.orange,
-    fontSize: 12,
+    marginTop: 2,
+    color: colors.accent,
+    fontSize: 13,
     fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
   customerValue: {
-    marginTop: 5,
-    color: posColors.ink,
-    fontSize: 14,
+    marginTop: 4,
+    color: colors.ink,
+    fontSize: 16,
     fontWeight: "700",
   },
   customerEditor: {
-    marginTop: 12,
+    marginTop: 10,
     gap: 8,
   },
   customerInput: {
-    minHeight: 48,
-    paddingHorizontal: 10,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-    color: posColors.ink,
-    fontSize: 15,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "700",
   },
   customerEditorActions: {
     flexDirection: "row",
@@ -3058,142 +2960,164 @@ const styles = StyleSheet.create({
   },
   customerEditorButton: {
     flex: 1,
-    marginTop: 0,
-  },
-  contextListTitle: {
-    marginTop: 18,
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "900",
   },
   contextLines: {
     flex: 1,
     minHeight: 0,
-    marginTop: 8,
   },
   contextLine: {
-    minHeight: 58,
-    paddingVertical: 9,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: posColors.border,
+    borderBottomColor: colors.border,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 10,
   },
   contextLineCopy: {
     flex: 1,
+    minWidth: 0,
   },
   contextLineName: {
-    color: posColors.ink,
-    fontSize: 13,
+    color: colors.ink,
+    fontSize: 15,
     fontWeight: "700",
   },
   contextLineQuantity: {
-    marginTop: 3,
-    color: posColors.mutedInk,
-    fontSize: 12,
+    marginTop: 2,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
   },
   contextLineAmount: {
-    color: posColors.ink,
-    fontSize: 13,
+    color: colors.ink,
+    fontSize: 15,
     fontWeight: "800",
     fontVariant: ["tabular-nums"],
   },
   contextEmpty: {
+    paddingHorizontal: 14,
     paddingVertical: 18,
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 18,
+    color: colors.mutedInk,
+    fontSize: 15,
+    lineHeight: 21,
   },
-  workspaceCompact: {
-    flex: 0,
-    minHeight: 0,
-    flexDirection: "column",
-    overflow: "visible",
+  contextTotals: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
   },
-  entryModalBackdrop: {
-    flex: 1,
-    padding: 24,
-    backgroundColor: "rgba(15, 32, 48, 0.58)",
+  summaryAmountRow: {
+    minHeight: 34,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "space-between",
+    gap: 16,
   },
-  backdropDismissArea: {
-    ...StyleSheet.absoluteFillObject,
+  summaryLabel: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "700",
   },
-  entryModalCard: {
-    flex: 0,
-    width: "100%",
-    maxWidth: 720,
-    height: "88%",
-    padding: 20,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-  },
-  entryModalHeader: {
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: posColors.border,
-    gap: 4,
-  },
-  entryModalTitle: {
-    color: posColors.ink,
-    fontSize: 22,
-    fontWeight: "900",
-  },
-  entryModalRemaining: {
-    color: posColors.mutedInk,
-    fontSize: 14,
+  summaryAmount: {
+    color: colors.ink,
+    fontSize: 17,
     fontWeight: "800",
     fontVariant: ["tabular-nums"],
   },
-  entryPane: {
-    flex: 42,
-    minHeight: 0,
-    minWidth: 0,
-    padding: 20,
-    borderRightWidth: 1,
-    borderRightColor: posColors.border,
+  summaryAmountStrong: {
+    fontSize: 19,
+    fontWeight: "900",
   },
-  entryPaneShort: {
-    padding: 14,
+  summaryAmountEmphasis: {
+    color: colors.accent,
+    fontSize: 32,
+    fontWeight: "900",
   },
-  entryPaneCompact: {
-    borderRightWidth: 0,
-    borderBottomWidth: 1,
-    borderBottomColor: posColors.border,
+
+  /* ---------- 中栏：剩余应付 + 支付状态 ---------- */
+  dueCard: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    gap: 8,
   },
-  entryScroll: {
+  dueCardWarning: {
+    borderColor: colors.yellowBorder,
+    backgroundColor: colors.yellowSoft,
+  },
+  dueCardDanger: {
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
+  },
+  dueCardSuccess: {
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
+  },
+  dueRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  dueLabel: {
+    paddingBottom: 8,
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  dueAmount: {
+    flexShrink: 1,
+    color: colors.ink,
+    fontSize: 58,
+    fontWeight: "900",
+    letterSpacing: -1.5,
+    lineHeight: 62,
+    textAlign: "right",
+    fontVariant: ["tabular-nums"],
+  },
+  statusPanel: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  statusCopy: {
     flex: 1,
-    minHeight: 0,
   },
-  entryModalScroll: {
-    flex: 1,
+  statusTitle: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
   },
-  entryScrollCompact: {
-    flex: 0,
+  statusTitleWarning: {
+    color: colors.yellowInk,
   },
-  entryScrollContent: {
-    flexGrow: 1,
-    paddingBottom: 4,
+  statusTitleDanger: {
+    color: colors.red,
   },
-  entryScrollContentCompact: {
-    flexGrow: 0,
+  statusTitleSuccess: {
+    color: colors.green,
   },
-  summaryPane: {
-    flex: 28,
-    minHeight: 0,
-    minWidth: 270,
-    padding: 20,
-    backgroundColor: "#FBFAF7",
+  statusHint: {
+    marginTop: 2,
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
   },
-  summaryPaneShort: {
-    padding: 14,
-  },
-  summaryPaneCompact: {
-    minWidth: 0,
-  },
+
+  /* ---------- 中栏：付款方式 ---------- */
   summaryScroll: {
     flex: 1,
     minHeight: 0,
@@ -3202,165 +3126,343 @@ const styles = StyleSheet.create({
     flex: 0,
   },
   summaryScrollContent: {
-    paddingBottom: 4,
+    flexGrow: 1,
+    gap: 8,
+    paddingBottom: 2,
   },
-  summaryScrollContentCompact: {
-    flexGrow: 0,
-  },
-  summaryActionDock: {
-    flexShrink: 0,
-  },
-  summaryFooter: {
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: posColors.border,
+  sectionLabel: {
+    paddingHorizontal: 2,
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 0.5,
   },
   sectionTitle: {
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "900",
   },
   methodGrid: {
-    marginTop: 12,
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 10,
   },
   methodButton: {
-    minHeight: 52,
-    minWidth: 100,
+    minHeight: 92,
+    minWidth: 150,
+    // 固定两列：落单的最后一块也只占半行，不会被拉成整行宽。
+    maxWidth: "49%",
     flexGrow: 1,
     flexBasis: "46%",
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  methodButtonActive: {
+    borderWidth: 2.5,
+    borderColor: colors.accent,
+    backgroundColor: colors.accentSoft,
+  },
+  methodButtonDisabled: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
+  },
+  methodCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  methodButtonText: {
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
+  },
+  methodHint: {
+    marginTop: 3,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  methodTextDisabled: {
+    color: colors.disabledInk,
+  },
+  methodCheck: {
+    position: "absolute",
+    top: 8,
+    right: 10,
+  },
+  installmentToggleTrack: {
+    width: 54,
+    height: 32,
+    padding: 3,
+    borderRadius: 16,
+    backgroundColor: colors.border,
+    justifyContent: "center",
+  },
+  installmentToggleTrackEnabled: {
+    backgroundColor: colors.green,
+  },
+  installmentToggleThumb: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colors.surface,
+  },
+  installmentToggleThumbEnabled: {
+    alignSelf: "flex-end",
+  },
+  installmentToggleIssue: {
+    width: "100%",
+    color: colors.red,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  linklyTerminalPanel: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
+    borderColor: colors.blueBorder,
+    backgroundColor: colors.blueSoft,
+  },
+  linklyTerminalTitle: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  linklyTerminalName: {
+    marginTop: 2,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  linklyTerminalHint: {
+    marginTop: 2,
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  linklyTerminalError: {
+    color: colors.red,
+    fontSize: 15,
+    fontWeight: "800",
+    lineHeight: 21,
+  },
+
+  /* ---------- 中栏：当前付款 ---------- */
+  tenderList: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: "hidden",
+  },
+  tenderRow: {
+    minHeight: 78,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  tenderIdentity: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tenderMethod: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  tenderDisposition: {
+    marginTop: 2,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+  },
+  tenderAmount: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
+  emptyTenders: {
+    flexGrow: 1,
+    minHeight: 78,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
   },
-  methodButtonActive: {
-    borderColor: posColors.blue,
-    backgroundColor: posColors.blue,
+  emptyTendersText: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "700",
+    textAlign: "center",
   },
-  methodButtonText: {
-    color: posColors.ink,
+
+  /* ---------- 右栏：本次金额、纸币快捷键、数字键盘 ---------- */
+  entryScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  entryScrollCompact: {
+    flex: 0,
+  },
+  entryScrollContent: {
+    flexGrow: 1,
+    gap: 10,
+  },
+  form: {
+    flexGrow: 1,
+    gap: 10,
+  },
+  amountBox: {
+    minHeight: 92,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  amountBoxArmed: {
+    borderColor: colors.borderStrong,
+  },
+  amountBoxMeta: {
+    flexShrink: 1,
+    alignItems: "flex-start",
+    gap: 4,
+  },
+  amountBoxLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  amountValueRow: {
+    flex: 1,
+    minWidth: 120,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  amountCurrency: {
+    color: colors.ink,
+    fontSize: 42,
+    fontWeight: "900",
+    lineHeight: 48,
+  },
+  amountCurrencyIdle: {
+    color: colors.placeholder,
+  },
+  amountInput: {
+    flexShrink: 1,
+    minWidth: 96,
+    minHeight: 56,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    color: colors.ink,
+    fontSize: 42,
+    fontWeight: "900",
+    letterSpacing: -1,
+    textAlign: "right",
+    fontVariant: ["tabular-nums"],
+  },
+  inputLabel: {
+    color: colors.ink,
     fontSize: 15,
     fontWeight: "800",
   },
-  methodButtonTextActive: {
-    color: "#FFFFFF",
-  },
-  linklyTerminalPanel: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 10,
-    padding: 10,
-  },
-  linklyTerminalTitle: {
-    color: posColors.ink,
+  inputHint: {
+    color: colors.mutedInk,
     fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 18,
-  },
-  linklyTerminalName: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-    lineHeight: 18,
-  },
-  linklyTerminalHint: {
-    color: posColors.mutedInk,
-    fontSize: 11,
     fontWeight: "600",
-    lineHeight: 16,
-    marginTop: 2,
+    lineHeight: 18,
   },
-  linklyTerminalError: {
-    color: posColors.red,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 17,
+  voucherInputGroup: {
+    gap: 6,
   },
-  form: {
-    marginTop: 20,
-    paddingTop: 18,
-    borderTopWidth: 1,
-    borderTopColor: posColors.border,
+  voucherInput: {
+    minHeight: 64,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "800",
   },
-  formShort: {
-    marginTop: 12,
-    paddingTop: 12,
-  },
-  inputLabel: {
-    marginBottom: 6,
-    color: posColors.ink,
+  secureCapture: {
+    color: colors.green,
     fontSize: 14,
     fontWeight: "800",
   },
-  amountInput: {
-    minHeight: 62,
-    paddingHorizontal: 16,
-    borderWidth: 2,
-    borderColor: posColors.blue,
-    backgroundColor: "#FFFFFF",
-    color: posColors.ink,
-    fontSize: 30,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
+  manualCardConfirmation: {
+    gap: 10,
   },
-  amountInputShort: {
-    minHeight: 52,
-    fontSize: 28,
+  manualCardInstructions: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "700",
+    lineHeight: 25,
   },
-  keypad: {
-    marginTop: 14,
+  manualCardCheckRow: {
+    minHeight: 72,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.surface,
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  keypadShort: {
-    marginTop: 8,
-    gap: 6,
-  },
-  keypadKey: {
-    minHeight: 54,
-    flexBasis: "30%",
-    flexGrow: 1,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
     alignItems: "center",
-    justifyContent: "center",
+    gap: 12,
   },
-  keypadKeyShort: {
-    minHeight: PAYMENT_MIN_TOUCH_TARGET,
+  manualCardCheckRowChecked: {
+    borderColor: colors.green,
+    backgroundColor: colors.greenSoft,
   },
-  keypadKeyText: {
-    color: posColors.ink,
-    fontSize: 22,
+  manualCardCheckLabel: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 17,
     fontWeight: "800",
-    fontVariant: ["tabular-nums"],
+    lineHeight: 24,
   },
   quickCashRow: {
-    marginTop: 10,
     flexDirection: "row",
     flexWrap: "nowrap",
-    gap: 7,
-  },
-  quickCashRowShort: {
-    marginTop: 8,
-    flexWrap: "nowrap",
-    gap: 6,
+    gap: 8,
   },
   quickCashButton: {
     flexGrow: 1,
     flexBasis: 0,
     minWidth: PAYMENT_MIN_TOUCH_TARGET,
-    marginTop: 0,
+    minHeight: 60,
     paddingHorizontal: 4,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    alignItems: "center",
+    justifyContent: "center",
   },
+  // 纸币快捷键对应真实纸币颜色：底色、描边和文字都保持字面量，不随主题变化。
   quickCashNote5: {
     backgroundColor: "#E7C5DD",
     borderColor: "#956485",
@@ -3381,285 +3483,489 @@ const styles = StyleSheet.create({
     backgroundColor: "#B9D8B4",
     borderColor: "#5C8358",
   },
-  voucherInputGroup: {
-    marginTop: 16,
+  quickCashNoteText: {
+    color: "#10253A",
+    fontSize: 19,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
   },
-  manualCardConfirmation: {
-    marginTop: 14,
-    gap: 12,
+  keypad: {
+    flexGrow: 1,
+    gap: 10,
   },
-  manualCardInstructions: {
-    color: posColors.ink,
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  manualCardCheckRow: {
-    minHeight: 60,
+  keypadRow: {
+    flexGrow: 1,
+    flexBasis: 56,
+    minHeight: 56,
+    maxHeight: 86,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#F4F8FF",
+    gap: 10,
   },
-  manualCardCheckbox: {
-    width: 26,
-    height: 26,
-    borderWidth: 2,
-    borderColor: posColors.blue,
-    backgroundColor: "#FFFFFF",
+  keypadKey: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
   },
-  manualCardCheckboxChecked: {
-    backgroundColor: posColors.blue,
+  keypadKeyDisabled: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
   },
-  manualCardCheckmark: {
-    color: "#FFFFFF",
-    fontSize: 18,
+  keypadKeyText: {
+    color: colors.ink,
+    fontSize: 30,
     fontWeight: "800",
+    fontVariant: ["tabular-nums"],
   },
-  manualCardCheckLabel: {
-    flex: 1,
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "700",
-    lineHeight: 23,
+  keypadKeyTextDisabled: {
+    color: colors.disabledInk,
   },
-  voucherInput: {
-    minHeight: 52,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  inputHint: {
-    marginTop: 6,
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  inputHintShort: {
-    marginTop: 4,
-    lineHeight: 17,
-  },
-  secureCapture: {
-    marginTop: 6,
-    color: posColors.green,
-    fontSize: 13,
-    fontWeight: "700",
+  cashSettlement: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
   },
   fieldError: {
-    marginTop: 10,
-    color: posColors.red,
-    fontSize: 14,
-    fontWeight: "700",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
+    color: colors.red,
+    fontSize: 15,
+    fontWeight: "800",
+    lineHeight: 21,
   },
-  formActions: {
-    marginTop: 12,
-    flexDirection: "row",
+
+  /* ---------- 右栏：恢复 / 确认 / 提交 ---------- */
+  summaryActionDock: {
+    flexShrink: 0,
     gap: 10,
-  },
-  formActionsShort: {
-    marginTop: 8,
-  },
-  formAction: {
-    flex: 1,
-    marginTop: 0,
   },
   recoveryActions: {
-    marginTop: 8,
+    gap: 10,
+  },
+  summaryFooter: {
+    gap: 10,
+  },
+  preparedHint: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  formActions: {
+    flexShrink: 0,
+  },
+  linklyPanel: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    gap: 6,
+  },
+  linklyDisplayText: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "900",
+    lineHeight: 25,
+  },
+  linklyPromptText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 21,
+  },
+  linklyKeyGrid: {
+    marginTop: 6,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
   },
-  recoveryAction: {
+  linklyConfirmation: {
+    marginTop: 6,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  linklyKey: {
     flexGrow: 1,
     flexBasis: "46%",
-    marginTop: 0,
   },
-  linklyPanel: {
-    marginTop: 18,
-    paddingTop: 18,
-    borderTopWidth: 1,
-    borderTopColor: posColors.border,
-  },
-  linklyKeyGrid: {
-    marginTop: 12,
+
+  /* ---------- 支付完成 ---------- */
+  successLayout: {
+    flex: 1,
+    minHeight: 0,
     flexDirection: "row",
-    flexWrap: "wrap",
+    gap: 12,
+  },
+  successLayoutCompact: {
+    flex: 0,
+    flexDirection: "column",
+  },
+  successMain: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+  },
+  successMainCompact: {
+    flex: 0,
+  },
+  successMainContent: {
+    flexGrow: 1,
+    gap: 12,
+  },
+  successHero: {
+    minHeight: 118,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 18,
+  },
+  successHeroCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  successTitle: {
+    color: colors.green,
+    fontSize: 32,
+    fontWeight: "900",
+    letterSpacing: -0.5,
+  },
+  successHint: {
+    marginTop: 2,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  successTotal: {
+    flexShrink: 1,
+    alignItems: "flex-end",
+  },
+  successLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  successTotalAmount: {
+    color: colors.ink,
+    fontSize: 38,
+    fontWeight: "900",
+    letterSpacing: -1,
+    lineHeight: 44,
+    fontVariant: ["tabular-nums"],
+  },
+  successSettlement: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 22,
+  },
+  successCashTendered: {
+    flex: 1,
+    minWidth: 0,
+  },
+  successCashTenderedLabel: {
+    color: colors.mutedInk,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  successCashTenderedAmount: {
+    marginTop: 2,
+    color: colors.ink,
+    fontSize: 34,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
+  successSettlementRule: {
+    width: 1,
+    height: 76,
+    backgroundColor: colors.border,
+  },
+  successChange: {
+    flex: 1.4,
+    minWidth: 0,
+    alignItems: "flex-end",
+  },
+  successChangeLabel: {
+    color: colors.accent,
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  successChangeAmount: {
+    color: colors.accent,
+    fontSize: 72,
+    fontWeight: "900",
+    letterSpacing: -2,
+    lineHeight: 78,
+    fontVariant: ["tabular-nums"],
+  },
+  successTransaction: {
+    flexGrow: 1,
+    minHeight: 190,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 18,
+  },
+  successTransactionCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  successOrderReference: {
+    marginTop: 4,
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+    lineHeight: 25,
+  },
+  successTransactionQr: {
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // 二维码必须白底黑码，不随主题变化，否则深色主题下扫不出来。
+  successTransactionQrQuietZone: {
+    backgroundColor: "#FFFFFF",
+  },
+  successTransactionQrRow: {
+    flexDirection: "row",
+  },
+  successTransactionQrCell: {
+    backgroundColor: "#FFFFFF",
+  },
+  successTransactionQrCellDark: {
+    backgroundColor: "#111111",
+  },
+  successSync: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
-  linklyConfirmation: {
-    marginTop: 12,
-    flexDirection: "row",
-    flexWrap: "wrap",
+  successSyncText: {
+    flexShrink: 1,
+    color: colors.green,
+    fontSize: 15,
+    fontWeight: "800",
+    lineHeight: 21,
+  },
+  successReceiptColumn: {
+    width: 430,
+    minHeight: 0,
+    gap: 12,
+  },
+  successReceiptColumnCompact: {
+    width: "100%",
+  },
+  successReceipt: {
+    flex: 1,
+    minHeight: 220,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
     gap: 8,
   },
-  summaryAmountRow: {
+  successReceiptHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  successReceiptTitle: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  successReceiptOrder: {
+    flexShrink: 1,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    fontVariant: ["tabular-nums"],
+  },
+  successReceiptLines: {
+    flex: 1,
+    minHeight: 60,
+  },
+  successReceiptLine: {
+    minHeight: 46,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  successReceiptLineCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 6,
+  },
+  successReceiptLineName: {
+    flexShrink: 1,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  successReceiptLineQuantity: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  successReceiptLineAmount: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  successReceiptEmpty: {
+    paddingVertical: 16,
+    color: colors.mutedInk,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  successReceiptTotals: {
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  successReceiptTender: {
     minHeight: 38,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 16,
+    gap: 12,
   },
-  summaryLabel: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    fontWeight: "600",
+  successReceiptTenderLabel: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "700",
   },
-  summaryAmount: {
-    color: posColors.ink,
-    fontSize: 18,
+  successReceiptTenderAmount: {
+    color: colors.ink,
+    fontSize: 16,
     fontWeight: "800",
     fontVariant: ["tabular-nums"],
   },
-  summaryAmountEmphasis: {
-    color: posColors.orange,
-    fontSize: 30,
+  successReceiptTotalLabel: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "900",
   },
-  remainingRule: {
-    height: 1,
-    marginVertical: 8,
-    backgroundColor: posColors.border,
-  },
-  cashSettlement: {
-    marginTop: 10,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: posColors.border,
-  },
-  summarySectionRule: {
-    height: 1,
-    marginVertical: 16,
-    backgroundColor: posColors.border,
-  },
-  tenderTitle: {
-    marginTop: 22,
-    marginBottom: 8,
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  emptyTenders: {
-    paddingVertical: 18,
-    color: posColors.mutedInk,
-    fontSize: 14,
-  },
-  tenderRow: {
-    minHeight: 66,
-    paddingVertical: 8,
-    borderTopWidth: 1,
-    borderTopColor: posColors.border,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  tenderIdentity: {
-    flex: 1,
-  },
-  tenderMethod: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  tenderDisposition: {
-    marginTop: 2,
-    color: posColors.mutedInk,
-    fontSize: 12,
-  },
-  tenderAmount: {
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
+  successReceiptTotalAmount: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
     fontVariant: ["tabular-nums"],
   },
-  actionButton: {
-    minHeight: 48,
-    marginTop: 12,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderColor: posColors.blue,
-    backgroundColor: posColors.blue,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionButtonText: {
-    color: "#FFFFFF",
+  successPrintStatus: {
     fontSize: 15,
     fontWeight: "800",
+    lineHeight: 21,
   },
+  successPrintStatusPrinting: {
+    color: colors.blue,
+  },
+  successPrintStatusCompleted: {
+    color: colors.green,
+  },
+  successPrintStatusUnknown: {
+    color: colors.yellowInk,
+  },
+  successPrintStatusFailed: {
+    color: colors.red,
+  },
+
+  /* ---------- 确认弹窗 ---------- */
   confirmationBackdrop: {
     flex: 1,
     padding: 24,
-    backgroundColor: "rgba(13, 36, 53, 0.58)",
+    backgroundColor: colors.overlay,
     alignItems: "center",
     justifyContent: "center",
   },
+  backdropDismissArea: {
+    ...StyleSheet.absoluteFillObject,
+  },
   confirmationCard: {
     width: "100%",
-    maxWidth: 520,
+    maxWidth: 560,
     padding: 24,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
   },
   confirmationTitle: {
-    color: posColors.ink,
-    fontSize: 22,
+    color: colors.ink,
+    fontSize: 23,
     fontWeight: "900",
   },
   confirmationBody: {
     marginTop: 10,
-    color: posColors.mutedInk,
-    fontSize: 15,
-    lineHeight: 22,
+    color: colors.ink,
+    fontSize: 17,
+    lineHeight: 25,
   },
   confirmationActions: {
-    marginTop: 18,
+    marginTop: 20,
     flexDirection: "row",
-    gap: 10,
+    gap: 12,
   },
   confirmationAction: {
     flex: 1,
-    marginTop: 0,
   },
-  actionSecondary: {
-    borderColor: posColors.blue,
-    backgroundColor: posColors.blueSoft,
-  },
-  actionSecondaryText: {
-    color: posColors.blue,
-  },
-  actionDanger: {
-    borderColor: posColors.red,
-    backgroundColor: posColors.red,
-  },
-  actionQuiet: {
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-  },
-  actionQuietText: {
-    color: posColors.ink,
-  },
-  completeAction: {
-    alignSelf: "flex-end",
-    minWidth: 240,
-  },
-  confirmAction: {
-    marginTop: 0,
-  },
-  preparedCashCancelAction: {
-    marginTop: 10,
-  },
+
   disabled: {
     opacity: 0.42,
   },
   pressed: {
     opacity: 0.76,
   },
-});
+}));

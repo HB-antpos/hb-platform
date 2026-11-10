@@ -5,6 +5,7 @@ import {
   type PanResponderInstance,
   type ViewProps,
 } from "react-native";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type AndroidNativeResponderBlockProps = Readonly<{
   onShouldBlockNativeResponder?:
@@ -39,6 +40,7 @@ export function PosPanResponderView({
   style,
   testID,
 }: PosPanResponderViewProps) {
+  usePosThemeVersion();
   const handlers = panHandlers as PanResponderHandlers;
   return (
     <PanResponderHost

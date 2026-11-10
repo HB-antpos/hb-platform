@@ -15,6 +15,7 @@ import {
   type DailyClosePresenter,
 } from "@/features/daily-close";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type DailyCloseBinding = Readonly<{
   cashier: object;
@@ -27,6 +28,7 @@ type DailyCloseBinding = Readonly<{
  * repository 和打印 Port 全部留在零参数 runtime factory 内部。
  */
 export default function DailyCloseRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore(

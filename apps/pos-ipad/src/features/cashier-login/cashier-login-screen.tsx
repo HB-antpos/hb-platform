@@ -7,16 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  ActivityIndicator,
-  Image,
-  Keyboard,
-  StyleSheet,
-  Text,
-  View,
-  type TextInput,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Image, Keyboard, Text, View, type TextInput } from "react-native";
 
 import {
   CashierLoginController,
@@ -26,18 +17,25 @@ import {
 import { useCashierLoginStore } from "./cashier-login-store";
 
 import { HbposApiError } from "@/core/api/hbpos-api";
+import { PosButton } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { PosStatusStrip } from "@/ui/shell/status-strip";
-import { posColors } from "@/ui/theme";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posTouch,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 type LoginCopy = Readonly<{
   eyebrow: string;
   title: string;
   subtitle: string;
+  scanTitle: string;
   inputLabel: string;
   inputHint: string;
   keyboard: string;
@@ -66,6 +64,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     title: "Ready for the next sale",
     subtitle:
       "Scan your cashier barcode or enter it manually. This terminal only accepts approved staff for its assigned store.",
+    scanTitle: "Scan your cashier barcode",
     inputLabel: "Cashier barcode",
     inputHint: "Scan cashier barcode",
     keyboard: "Keyboard",
@@ -98,6 +97,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     title: "准备开始下一笔收银",
     subtitle:
       "请扫描收银员条码或手动输入。此终端只允许已获本门店授权的员工进入收银。",
+    scanTitle: "请扫描收银员条码",
     inputLabel: "收银员条码",
     inputHint: "扫描收银员条码",
     keyboard: "键盘",
@@ -156,6 +156,7 @@ export function CashierLoginScreen({
   runtime: CashierLoginRuntime;
   versionInfo?: CashierLoginVersionInfo;
 }>) {
+  usePosThemeVersion();
   const store = useCashierLoginStore;
   const defaultController = useMemo(
     () => new CashierLoginController(store.getState()),
@@ -285,14 +286,18 @@ export function CashierLoginScreen({
     }
   };
 
+  const inputLocked = submitting || blocked;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <PosStatusStrip
-        language={locale}
-        {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
-      />
+    <PosScreenFrame
+      language={locale}
+      {...(onSwitchLanguage ? { onSwitchLanguage } : {})}
+      // 登录前不允许跳去其他页面，这一页不显示左侧栏。
+      rail="none"
+    >
       <View style={styles.page} testID="cashier-login-page">
-        <View style={styles.contextPanel}>
+        {/* 左侧深色品牌区：Logo、眉标、标题、说明；安全提示和版本信息压在底部。 */}
+        <View style={styles.brandPanel}>
           <Image
             accessibilityIgnoresInvertColors
             accessible={false}
@@ -303,180 +308,184 @@ export function CashierLoginScreen({
           <Text style={styles.eyebrow}>{text.eyebrow}</Text>
           <Text style={styles.title}>{text.title}</Text>
           <Text style={styles.subtitle}>{text.subtitle}</Text>
+          <View style={styles.brandSpacer} />
           <View style={styles.securityNote}>
             <MaterialCommunityIcons
-              color={posColors.green}
-              name="shield-check-outline"
-              size={26}
+              accessible={false}
+              color={posColors.onInverse}
+              name="shield-lock-outline"
+              size={20}
+              style={styles.securityIcon}
             />
-            <Text style={styles.securityText}>{text.security}</Text>
+            <View style={styles.securityCopy}>
+              <Text style={styles.securityText}>{text.security}</Text>
+              <Text style={styles.securityText}>{text.offline}</Text>
+            </View>
           </View>
+          <Text
+            numberOfLines={1}
+            pointerEvents="none"
+            selectable={false}
+            style={styles.versionInfo}
+            testID="cashier-login-version-info"
+          >
+            {`Version ${versionInfo.appVersion} · Build ${versionInfo.buildNumber} · Runtime: ${versionInfo.runtimeVersion} · OTA: ${versionInfo.otaVersion}`}
+          </Text>
         </View>
 
+        {/* 右侧表单：条码输入留在键盘感知滚动容器内，手动键盘弹出时能把输入框滚出来。 */}
         <PosKeyboardAwareScrollView
           contentContainerStyle={styles.formPanelContent}
           showsVerticalScrollIndicator={false}
           style={styles.formPanel}
           testID="cashier-login-keyboard-scroll"
         >
-          <View style={styles.formHeader}>
+          <View style={styles.scanPrompt}>
             <MaterialCommunityIcons
-              color={posColors.orange}
+              accessible={false}
+              color={posColors.accent}
               name="barcode-scan"
-              size={30}
+              size={84}
             />
-            <View>
-              <Text style={styles.formTitle}>{text.inputLabel}</Text>
-              <Text style={styles.formHint}>{text.manualEntryHint}</Text>
-            </View>
+            <Text accessibilityRole="header" style={styles.scanTitle}>
+              {text.scanTitle}
+            </Text>
+            <Text style={styles.scanHint}>{text.manualEntryHint}</Text>
           </View>
-          <View style={styles.inputRow}>
-            <View style={styles.inputContainer}>
-              <PosKeyboardAwareTextInput
-                ref={barcodeRef}
-                accessibilityLabel={text.inputLabel}
-                autoFocus
-                autoCapitalize="characters"
-                // 蓝牙扫码枪不带回车时按扫码节奏自动提交（等效回车，对齐手持）；手动输入间隔大，不触发。
-                // 不启用 mediumSpeedHidSubmit：iPad 蓝牙 HID 连发很快，且软键盘手输不应被慢速判定误提交。
-                autoSubmitOnScanIdle
-                autoCorrect={false}
-                editable={!submitting && !blocked}
-                onBlur={handleBarcodeBlur}
-                onChangeText={setBarcode}
-                onFocus={notifyManualInputFocused}
-                onSubmitEditing={() => void submit()}
-                placeholder={text.inputHint}
-                returnKeyType="go"
-                secureTextEntry={!barcodeVisible}
-                showSoftInputOnFocus={showSoftInputOnFocus}
-                style={[
-                  styles.input,
-                  (submitting || blocked) && styles.inputDisabled,
-                ]}
-                submitBehavior="submit"
-                testID="cashier-login-barcode"
-                value={barcode}
-              />
+
+          <View>
+            <Text style={styles.inputLabel}>{text.inputLabel}</Text>
+            <View style={styles.inputRow}>
+              <View style={styles.inputContainer}>
+                <PosKeyboardAwareTextInput
+                  ref={barcodeRef}
+                  accessibilityLabel={text.inputLabel}
+                  autoFocus
+                  autoCapitalize="characters"
+                  // 蓝牙扫码枪不带回车时按扫码节奏自动提交（等效回车，对齐手持）；手动输入间隔大，不触发。
+                  // 不启用 mediumSpeedHidSubmit：iPad 蓝牙 HID 连发很快，且软键盘手输不应被慢速判定误提交。
+                  autoSubmitOnScanIdle
+                  autoCorrect={false}
+                  editable={!inputLocked}
+                  onBlur={handleBarcodeBlur}
+                  onChangeText={setBarcode}
+                  onFocus={notifyManualInputFocused}
+                  onSubmitEditing={() => void submit()}
+                  placeholder={text.inputHint}
+                  placeholderTextColor={posColors.placeholder}
+                  returnKeyType="go"
+                  secureTextEntry={!barcodeVisible}
+                  showSoftInputOnFocus={showSoftInputOnFocus}
+                  style={[
+                    styles.input,
+                    // 占位提示用正文字号；有内容后放大，遮罩圆点再拉开间距便于数位数。
+                    barcode.length > 0 && styles.inputFilled,
+                    barcode.length > 0 && !barcodeVisible && styles.inputMasked,
+                    inputLocked && styles.inputDisabled,
+                  ]}
+                  submitBehavior="submit"
+                  testID="cashier-login-barcode"
+                  value={barcode}
+                />
+                <View pointerEvents="none" style={styles.inputIcon}>
+                  <MaterialCommunityIcons
+                    accessible={false}
+                    color={inputLocked ? posColors.disabledInk : posColors.ink}
+                    name="account-key-outline"
+                    size={32}
+                  />
+                </View>
+              </View>
               <PosPressable
                 accessibilityLabel={
                   barcodeVisible ? text.hideBarcode : text.showBarcode
                 }
                 accessibilityRole="button"
-                accessibilityState={{ disabled: submitting || blocked }}
-                disabled={submitting || blocked}
+                accessibilityState={{ disabled: inputLocked }}
+                disabled={inputLocked}
                 onPress={() => setBarcodeVisible((visible) => !visible)}
                 sound="navigate"
                 style={({ pressed }) => [
-                  styles.visibilityButton,
-                  (pressed || submitting || blocked) &&
-                    styles.visibilityButtonPressed,
+                  styles.squareKey,
+                  inputLocked && styles.squareKeyDisabled,
+                  pressed && !inputLocked && styles.pressed,
                 ]}
                 testID="cashier-login-toggle-barcode-visibility"
               >
                 <MaterialCommunityIcons
-                  color={
-                    submitting || blocked ? posColors.mutedInk : posColors.blue
-                  }
+                  accessible={false}
+                  color={inputLocked ? posColors.disabledInk : posColors.ink}
                   name={barcodeVisible ? "eye-off-outline" : "eye-outline"}
-                  size={23}
+                  size={32}
+                />
+              </PosPressable>
+              <PosPressable
+                accessibilityLabel={text.keyboard}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: inputLocked }}
+                disabled={inputLocked}
+                onPress={requestManualKeyboard}
+                sound="navigate"
+                style={({ pressed }) => [
+                  styles.squareKey,
+                  inputLocked && styles.squareKeyDisabled,
+                  pressed && !inputLocked && styles.pressed,
+                ]}
+                testID="cashier-login-show-keyboard"
+              >
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={inputLocked ? posColors.disabledInk : posColors.ink}
+                  name="keyboard-outline"
+                  size={32}
+                  testID="cashier-login-keyboard-icon"
                 />
               </PosPressable>
             </View>
-            <PosPressable
-              accessibilityLabel={text.keyboard}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: submitting || blocked }}
-              disabled={submitting || blocked}
-              onPress={requestManualKeyboard}
-              sound="navigate"
-              style={({ pressed }) => [
-                styles.keyboardButton,
-                (pressed || submitting || blocked) &&
-                  styles.keyboardButtonPressed,
-              ]}
-              testID="cashier-login-show-keyboard"
-            >
-              <MaterialCommunityIcons
-                accessible={false}
-                color={posColors.blue}
-                name="keyboard-outline"
-                size={26}
-                testID="cashier-login-keyboard-icon"
-              />
-            </PosPressable>
+            {/* 出错提示紧跟在输入框下方，扫码后不用移开视线。 */}
+            {error ? (
+              <View
+                accessibilityRole="alert"
+                style={styles.errorBanner}
+                testID="cashier-login-error"
+              >
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={posColors.red}
+                  name="alert-circle-outline"
+                  size={24}
+                />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
           </View>
-          {error ? (
-            <View
-              accessibilityRole="alert"
-              style={styles.errorBanner}
-              testID="cashier-login-error"
-            >
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-          <PosPressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: submitting || blocked }}
-            disabled={submitting || blocked}
+
+          <PosButton
+            disabled={blocked}
+            icon="login"
+            label={submitting ? text.submitting : text.submit}
+            loading={submitting}
             onPress={() => void submit()}
-            style={({ pressed }) => [
-              styles.submit,
-              (pressed || submitting || blocked) && styles.submitPressed,
-            ]}
+            size="primary"
             testID="cashier-login-submit"
-          >
-            {submitting ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <MaterialCommunityIcons color="#FFFFFF" name="login" size={22} />
-            )}
-            <Text style={styles.submitLabel}>
-              {submitting ? text.submitting : text.submit}
-            </Text>
-          </PosPressable>
-          <View style={styles.offlineNote}>
-            <MaterialCommunityIcons
-              color={posColors.blue}
-              name="database-lock-outline"
-              size={20}
-            />
-            <Text style={styles.offlineText}>{text.offline}</Text>
-          </View>
+            tone="primary"
+          />
           {onOpenNetworkCheck ? (
-            <PosPressable
-              accessibilityLabel={text.networkCheck}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: submitting }}
+            <PosButton
               disabled={submitting}
+              icon="access-point-network"
+              label={text.networkCheck}
               onPress={onOpenNetworkCheck}
+              size="medium"
               sound="navigate"
-              style={({ pressed }) => [
-                styles.networkCheckButton,
-                (pressed || submitting) && styles.networkCheckButtonPressed,
-              ]}
+              style={styles.networkCheckButton}
               testID="cashier-login-network-check"
-            >
-              <MaterialCommunityIcons
-                color={posColors.blue}
-                name="access-point-network"
-                size={20}
-              />
-              <Text style={styles.networkCheckLabel}>{text.networkCheck}</Text>
-            </PosPressable>
+              tone="quiet"
+            />
           ) : null}
         </PosKeyboardAwareScrollView>
-        <Text
-          numberOfLines={1}
-          pointerEvents="none"
-          selectable={false}
-          style={styles.versionInfo}
-          testID="cashier-login-version-info"
-        >
-          {`Version ${versionInfo.appVersion} · Build ${versionInfo.buildNumber} · Runtime: ${versionInfo.runtimeVersion} · OTA: ${versionInfo.otaVersion}`}
-        </Text>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -526,156 +535,175 @@ function errorText(error: unknown, text: LoginCopy): string {
   return text.rejected;
 }
 
-const styles = StyleSheet.create({
-  safeArea: { backgroundColor: posColors.canvas, flex: 1 },
+/** 条码输入框与右侧方键的统一高度。 */
+const BARCODE_FIELD_HEIGHT = 76;
+
+const styles = createPosStyles((colors) => ({
   page: {
     flex: 1,
     flexDirection: "row",
-    gap: 28,
-    padding: 34,
+    gap: 12,
+    minHeight: 0,
+    padding: 12,
   },
-  contextPanel: {
-    backgroundColor: posColors.ink,
-    flex: 1.12,
-    justifyContent: "center",
-    padding: 48,
+  brandPanel: {
+    backgroundColor: colors.inverseSurface,
+    borderRadius: 14,
+    flexBasis: 440,
+    flexGrow: 0,
+    flexShrink: 1,
+    gap: 14,
+    paddingHorizontal: 32,
+    paddingVertical: 34,
   },
   brandMark: {
-    borderRadius: 12,
-    height: 52,
-    marginBottom: 30,
-    width: 52,
+    borderRadius: 18,
+    height: 76,
+    width: 76,
   },
   eyebrow: {
-    color: "#F9C1AD",
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.5,
-    marginBottom: 14,
+    color: colors.onInverse,
+    fontSize: 14,
+    fontWeight: "900",
+    letterSpacing: 2,
+    opacity: 0.72,
   },
   title: {
-    color: "#FFFFFF",
-    fontSize: 39,
-    fontWeight: "800",
-    letterSpacing: -0.5,
-    lineHeight: 47,
-    maxWidth: 480,
+    color: colors.onInverse,
+    fontSize: 34,
+    fontWeight: "900",
+    lineHeight: 42,
   },
   subtitle: {
-    color: "#D8E1E8",
-    fontSize: 18,
-    lineHeight: 27,
-    marginTop: 18,
-    maxWidth: 520,
+    color: colors.onInverse,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 23,
+    opacity: 0.82,
   },
+  brandSpacer: { flex: 1, minHeight: 8 },
   securityNote: {
     alignItems: "flex-start",
-    borderLeftColor: posColors.orange,
-    borderLeftWidth: 3,
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 42,
-    paddingLeft: 15,
-  },
-  securityText: { color: "#E3EEF2", flex: 1, fontSize: 15, lineHeight: 22 },
-  formPanel: {
-    alignSelf: "center",
-    backgroundColor: posColors.surface,
-    flex: 0.88,
-    maxWidth: 560,
-    minHeight: 430,
-    width: "100%",
-  },
-  formPanelContent: { flexGrow: 1, padding: 48 },
-  formHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 14,
-    marginBottom: 32,
-  },
-  formTitle: { color: posColors.ink, fontSize: 25, fontWeight: "800" },
-  formHint: { color: posColors.mutedInk, fontSize: 15, marginTop: 3 },
-  inputRow: { flexDirection: "row", gap: 12 },
-  inputContainer: { flex: 1, minWidth: 0, position: "relative" },
-  input: {
-    backgroundColor: "#FFFDF8",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    color: posColors.ink,
-    fontSize: 22,
-    minHeight: 62,
-    paddingHorizontal: 18,
-    paddingRight: 62,
-  },
-  inputDisabled: { backgroundColor: "#F1F0EC", color: posColors.mutedInk },
-  visibilityButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 44,
-    minWidth: 44,
-    position: "absolute",
-    right: 8,
-    top: 9,
-  },
-  visibilityButtonPressed: { opacity: 0.62 },
-  keyboardButton: {
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    borderColor: posColors.blue,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 62,
-    minWidth: 62,
-  },
-  keyboardButtonPressed: { opacity: 0.62 },
-  submit: {
-    alignItems: "center",
-    backgroundColor: posColors.orange,
-    flexDirection: "row",
-    gap: 10,
-    justifyContent: "center",
-    marginTop: 20,
-    minHeight: 58,
-    paddingHorizontal: 20,
-  },
-  submitPressed: { opacity: 0.62 },
-  submitLabel: { color: "#FFFFFF", fontSize: 18, fontWeight: "800" },
-  errorBanner: {
-    backgroundColor: posColors.redSoft,
-    borderLeftColor: posColors.red,
-    borderLeftWidth: 3,
-    marginTop: 16,
-    padding: 13,
-  },
-  errorText: { color: posColors.red, fontSize: 15, fontWeight: "700" },
-  offlineNote: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 9,
-    marginTop: 30,
-  },
-  offlineText: {
-    color: posColors.mutedInk,
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  networkCheckButton: {
-    alignItems: "center",
-    alignSelf: "flex-start",
+    backgroundColor: colors.chromeChip,
+    borderRadius: 10,
     flexDirection: "row",
     gap: 8,
-    marginTop: 18,
-    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  networkCheckButtonPressed: { opacity: 0.62 },
-  networkCheckLabel: { color: posColors.blue, fontSize: 15, fontWeight: "800" },
+  securityIcon: { opacity: 0.82 },
+  securityCopy: { flex: 1, minWidth: 0 },
+  securityText: {
+    color: colors.onInverse,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 20,
+    opacity: 0.82,
+  },
   versionInfo: {
-    bottom: 20,
-    color: posColors.mutedInk,
+    color: colors.onInverse,
     fontSize: 12,
-    position: "absolute",
-    right: 84,
-    textAlign: "right",
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+    opacity: 0.6,
   },
-});
+  formPanel: {
+    flex: 1,
+    minWidth: 0,
+  },
+  formPanelContent: {
+    flexGrow: 1,
+    gap: 14,
+    justifyContent: "center",
+    paddingHorizontal: 56,
+    paddingVertical: 12,
+  },
+  scanPrompt: { alignItems: "center" },
+  scanTitle: {
+    color: colors.ink,
+    fontSize: 26,
+    fontWeight: "900",
+    marginTop: 4,
+    textAlign: "center",
+  },
+  scanHint: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 6,
+    textAlign: "center",
+  },
+  inputLabel: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 5,
+  },
+  inputRow: { flexDirection: "row", gap: 10 },
+  inputContainer: { flex: 1, minWidth: 0 },
+  input: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "600",
+    height: BARCODE_FIELD_HEIGHT,
+    paddingLeft: 62,
+    paddingRight: 18,
+  },
+  inputFilled: { fontSize: 26, fontWeight: "900" },
+  inputMasked: { letterSpacing: 6 },
+  inputDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+    color: colors.disabledInk,
+  },
+  inputIcon: {
+    bottom: 0,
+    justifyContent: "center",
+    left: 18,
+    position: "absolute",
+    top: 0,
+  },
+  squareKey: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minHeight: BARCODE_FIELD_HEIGHT,
+    minWidth: BARCODE_FIELD_HEIGHT,
+  },
+  squareKeyDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+  },
+  pressed: { opacity: 0.72 },
+  errorBanner: {
+    alignItems: "center",
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+    minHeight: posTouch.small,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  errorText: {
+    color: colors.red,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 21,
+  },
+  networkCheckButton: {
+    alignSelf: "center",
+    minWidth: 240,
+  },
+}));

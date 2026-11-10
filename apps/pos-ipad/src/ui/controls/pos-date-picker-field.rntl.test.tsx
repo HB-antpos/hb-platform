@@ -60,7 +60,8 @@ test("触发器不是输入框，打开时关闭键盘并使用横屏 inline 日
   expect(trigger.props.accessibilityLabel).toBe("开始日期");
   expect(trigger.props.accessibilityRole).toBe("button");
   expect(renderedTypes(screen.toJSON())).not.toContain("TextInput");
-  expect(StyleSheet.flatten(trigger.props.style).minHeight).toBeGreaterThanOrEqual(44);
+  // 触发器与输入框同高（56）。
+  expect(StyleSheet.flatten(trigger.props.style).minHeight).toBeGreaterThanOrEqual(56);
 
   await fireEvent.press(trigger);
 
@@ -75,6 +76,12 @@ test("触发器不是输入框，打开时关闭键盘并使用横屏 inline 日
     display: "inline",
     mode: "date",
   });
+  // 弹层里的取消 / 确定是 56 高的大按钮。
+  for (const testID of ["date-from-cancel", "date-from-confirm"]) {
+    expect(
+      StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight,
+    ).toBeGreaterThanOrEqual(56);
+  }
 });
 
 test("日期触发器使用 navigate 音，禁用时保持静默", async () => {

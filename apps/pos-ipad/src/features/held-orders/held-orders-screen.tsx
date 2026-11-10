@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   useCallback,
   useEffect,
@@ -14,11 +15,11 @@ import {
   AppState,
   FlatList,
   PanResponder,
-  StyleSheet,
   Text,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   heldOrdersText,
@@ -30,19 +31,33 @@ import {
   type HeldOrderViewStatus,
 } from "./held-orders-presenter";
 
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPanResponderView } from "@/ui/controls/pos-pan-responder-view";
+import { PosPill, type PosPillTone } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosSegmented } from "@/ui/controls/pos-segmented";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 export const HELD_ORDERS_MIN_TOUCH_TARGET = 44;
 export const HELD_ORDERS_AUTO_REFRESH_INTERVAL_MS = 10_000;
 const HELD_ORDERS_DELETE_ACTION_WIDTH = 96;
 const HELD_ORDERS_SWIPE_ACTIVATION_DISTANCE = 8;
 const HELD_ORDERS_SWIPE_OPEN_DISTANCE = 44;
+
+/** 状态标签的色调：只存色调名，颜色在渲染时由 PosPill 按当前主题取。 */
+const HELD_ORDER_STATUS_TONE: Record<HeldOrderViewStatus, PosPillTone> = {
+  "local-pending": "good",
+  "claiming-here": "warning",
+  "local-pending-publish": "neutral",
+  "published-shareable": "info",
+  "remote-pending": "info",
+  blocked: "danger",
+};
 
 type HeldOrdersScreenProps = Readonly<{
   presenter: HeldOrdersPresenter;
@@ -53,6 +68,7 @@ export function HeldOrdersScreen({
   presenter,
   onBack,
 }: HeldOrdersScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -103,103 +119,154 @@ export function HeldOrdersScreen({
     }
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea} testID="held-orders-screen">
-      <View style={styles.header}>
-        <View style={styles.identity}>
-          <Text style={styles.title}>{t("title")}</Text>
-          <Text style={styles.subtitle}>
-            {t(state.sharedEnabled ? "subtitle.shared" : "subtitle")}
-          </Text>
-        </View>
-        <View style={styles.headerActions}>
-          {onBack ? (
-            <ActionButton
-              label={t("action.back")}
-              onPress={onBack}
-              sound="navigate"
-              testID="held-orders-back"
-              tone="quiet"
-            />
-          ) : null}
-          <ActionButton
-            disabled={state.busy}
-            label={t("action.hold")}
-            onPress={() => void presenter.hold()}
-            testID="held-orders-hold"
-          />
-          <ActionButton
-            disabled={state.busy || state.kind === "loading"}
-            label={t("action.refresh")}
-            onPress={() => void presenter.refresh()}
-            testID="held-orders-refresh"
-            tone="secondary"
-          />
-        </View>
-      </View>
+  const showsOtherDevices = state.sharedEnabled && sourceTab === "other";
+  const listVisible =
+    state.kind === "ready" ||
+    (state.kind === "loading" && state.rows.length > 0);
 
+  return (
+    <PosScreenFrame
+      active="held-orders"
+      header={
+        <PosPageHeader
+          actions={
+            <>
+              <PosButton
+                disabled={state.busy || state.kind === "loading"}
+                icon="refresh"
+                label={t("action.refresh")}
+                onPress={() => void presenter.refresh()}
+                size="medium"
+                testID="held-orders-refresh"
+                tone="quiet"
+              />
+              <PosButton
+                disabled={state.busy}
+                icon="pause-circle-outline"
+                label={t("action.hold")}
+                onPress={() => void presenter.hold()}
+                size="medium"
+                testID="held-orders-hold"
+              />
+            </>
+          }
+          backLabel={t("action.back")}
+          backTestID="held-orders-back"
+          onBack={onBack}
+          subtitle={t(state.sharedEnabled ? "subtitle.shared" : "subtitle")}
+          title={t("title")}
+        />
+      }
+      testID="held-orders-screen"
+    >
       <View style={styles.workspace}>
+        {/* 列表标题行：左边标题与数量，右边两组大分段筛选，不单独占一栏。 */}
         <View style={styles.listHeader}>
           <Text style={styles.listTitle}>{t("list.title")}</Text>
-          <View style={styles.listHeaderTools}>
-            {state.busy || state.kind === "loading" ? (
-              <ActivityIndicator color={posColors.orange} testID="held-orders-loading-indicator" />
-            ) : null}
-            {sourceTab === "other" && state.remoteRefreshing ? (
-              <ActivityIndicator
-                color={posColors.orange}
-                testID="held-orders-remote-loading-indicator"
-              />
-            ) : null}
-            <View style={styles.filterGroup}>
-              <FilterButton
-                label={t("filter.today")}
-                onPress={() => presenter.setDateFilter("today")}
-                selected={dateFilter === "today"}
-                testID="held-orders-filter-today"
-              />
-              <FilterButton
-                label={t("filter.all")}
-                onPress={() => presenter.setDateFilter("all")}
-                selected={dateFilter === "all"}
-                testID="held-orders-filter-all"
-              />
-            </View>
-            {state.sharedEnabled ? (
-              <View style={styles.filterGroup}>
-                <FilterButton
-                  label={t("filter.local")}
-                  onPress={() => presenter.setSourceTab("local")}
-                  selected={sourceTab === "local"}
-                  testID="held-orders-source-local"
-                />
-                <FilterButton
-                  label={t("filter.other")}
-                  onPress={() => presenter.setSourceTab("other")}
-                  selected={sourceTab === "other"}
-                  testID="held-orders-source-other"
-                />
-              </View>
-            ) : null}
-          </View>
+          {listVisible ? (
+            <PosPill
+              label={t("list.count", { count: state.rows.length })}
+              style={styles.inlinePill}
+            />
+          ) : null}
+          {state.busy || state.kind === "loading" ? (
+            <ActivityIndicator
+              color={posColors.accent}
+              testID="held-orders-loading-indicator"
+            />
+          ) : null}
+          {sourceTab === "other" && state.remoteRefreshing ? (
+            <ActivityIndicator
+              color={posColors.accent}
+              testID="held-orders-remote-loading-indicator"
+            />
+          ) : null}
+          <View style={styles.listHeaderSpacer} />
+          <PosSegmented
+            onChange={(next) => presenter.setDateFilter(next)}
+            options={[
+              {
+                label: t("filter.today"),
+                testID: "held-orders-filter-today",
+                value: "today",
+              },
+              {
+                label: t("filter.all"),
+                testID: "held-orders-filter-all",
+                value: "all",
+              },
+            ]}
+            style={styles.dateSegmented}
+            value={dateFilter}
+          />
+          {/* 「本机 / 非本机」只在开启共享挂单时出现。 */}
+          {state.sharedEnabled ? (
+            <PosSegmented
+              onChange={(next) => presenter.setSourceTab(next)}
+              options={[
+                {
+                  label: t("filter.local"),
+                  testID: "held-orders-source-local",
+                  value: "local",
+                },
+                {
+                  label: t("filter.other"),
+                  testID: "held-orders-source-other",
+                  value: "other",
+                },
+              ]}
+              style={styles.sourceSegmented}
+              value={sourceTab}
+            />
+          ) : null}
         </View>
 
         {sourceTab === "other" && state.refreshError ? (
-          <View style={styles.syncNotice} testID="held-orders-refresh-error">
-            <Text style={styles.syncNoticeText}>{t("error.shared-sync")}</Text>
+          <View
+            style={[styles.banner, styles.bannerInfo]}
+            testID="held-orders-refresh-error"
+          >
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.blue}
+              name="cloud-off-outline"
+              size={24}
+            />
+            <Text style={[styles.bannerText, styles.bannerTextInfo]}>
+              {t("error.shared-sync")}
+            </Text>
           </View>
         ) : null}
 
         {state.lastAction ? (
-          <Text
+          <View
             style={[
-              styles.notice,
-              state.lastAction.ok ? styles.noticeSuccess : styles.noticeDanger,
+              styles.banner,
+              state.lastAction.ok ? styles.bannerSuccess : styles.bannerDanger,
             ]}
-            testID="held-orders-result"
           >
-            {t(`result.${state.lastAction.code}`)}
-          </Text>
+            <MaterialCommunityIcons
+              accessible={false}
+              color={state.lastAction.ok ? posColors.green : posColors.red}
+              name={
+                state.lastAction.ok
+                  ? "check-circle-outline"
+                  : "alert-circle-outline"
+              }
+              size={24}
+            />
+            <Text
+              style={[
+                styles.bannerText,
+                state.lastAction.ok
+                  ? styles.bannerTextSuccess
+                  : styles.bannerTextDanger,
+              ]}
+              testID="held-orders-result"
+            >
+              {t(`result.${state.lastAction.code}`)}
+            </Text>
+          </View>
         ) : null}
 
         {state.kind === "loading" && !state.rows.length ? (
@@ -208,6 +275,7 @@ export function HeldOrdersScreen({
         {state.kind === "unauthorized" ? (
           <CenteredState
             hint={t("unauthorized.hint")}
+            icon="lock-alert-outline"
             message={t("unauthorized.title")}
             testID="held-orders-unauthorized"
           />
@@ -216,6 +284,7 @@ export function HeldOrdersScreen({
           <CenteredState
             actionLabel={t("action.refresh")}
             hint={t("failed.hint")}
+            icon="alert-circle-outline"
             message={t("failed.title")}
             onAction={() => void presenter.refresh()}
             testID="held-orders-failed"
@@ -228,17 +297,18 @@ export function HeldOrdersScreen({
             style={styles.forceReleasePanel}
             testID="held-orders-force-release-panel"
           >
-            <Text style={styles.forceReleaseTitle}>{t("forceRelease.title")}</Text>
+            <Text style={styles.panelTitle}>{t("forceRelease.title")}</Text>
             <PosKeyboardAwareTextInput
               accessibilityLabel={t("forceRelease.reasonAccessibility")}
               onChangeText={setForceReleaseReason}
               placeholder={t("forceRelease.reasonPlaceholder")}
+              placeholderTextColor={posColors.placeholder}
               style={styles.forceReleaseInput}
               testID="held-orders-force-release-reason"
               value={forceReleaseReason}
             />
-            <View style={styles.forceReleaseActions}>
-              <ActionButton
+            <View style={styles.panelActions}>
+              <PosButton
                 label={t("action.back")}
                 onPress={() => {
                   setForceReleaseFor(null);
@@ -247,7 +317,7 @@ export function HeldOrdersScreen({
                 testID="held-orders-force-release-cancel"
                 tone="quiet"
               />
-              <ActionButton
+              <PosButton
                 disabled={!forceReleaseReason.trim() || state.busy}
                 label={t("forceRelease.confirm")}
                 onPress={() => {
@@ -265,18 +335,24 @@ export function HeldOrdersScreen({
         ) : null}
         {deleteFor ? (
           <View style={styles.deletePanel} testID="held-orders-delete-panel">
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.red}
+              name="trash-can-outline"
+              size={30}
+            />
             <View style={styles.deleteCopy}>
-              <Text style={styles.deleteTitle}>{t("delete.title")}</Text>
+              <Text style={styles.panelTitle}>{t("delete.title")}</Text>
               <Text style={styles.deleteHint}>{t("delete.hint")}</Text>
             </View>
-            <View style={styles.deleteActions}>
-              <ActionButton
+            <View style={styles.panelActions}>
+              <PosButton
                 label={t("delete.cancel")}
                 onPress={() => setDeleteFor(null)}
                 testID="held-orders-delete-cancel"
                 tone="quiet"
               />
-              <ActionButton
+              <PosButton
                 disabled={state.busy}
                 label={t("delete.confirm")}
                 onPress={() => {
@@ -292,21 +368,13 @@ export function HeldOrdersScreen({
         ) : null}
         {state.kind === "ready" && !state.rows.length ? (
           <CenteredState
-            hint={t(
-              state.sharedEnabled && sourceTab === "other"
-                ? "empty.other.hint"
-                : "empty.hint",
-            )}
-            message={t(
-              state.sharedEnabled && sourceTab === "other"
-                ? "empty.other.title"
-                : "empty.title",
-            )}
+            hint={t(showsOtherDevices ? "empty.other.hint" : "empty.hint")}
+            icon="clipboard-clock-outline"
+            message={t(showsOtherDevices ? "empty.other.title" : "empty.title")}
             testID="held-orders-empty"
           />
         ) : null}
-        {(state.kind === "ready" ||
-          (state.kind === "loading" && state.rows.length > 0)) ? (
+        {listVisible ? (
           <FlatList
             contentContainerStyle={styles.list}
             data={state.rows}
@@ -362,14 +430,31 @@ export function HeldOrdersScreen({
                     presenter.takeRemote(item.holdId),
                   )
                 }
+                pendingConfirmation={
+                  deleteFor === item.holdId || forceReleaseFor === item.holdId
+                }
                 row={item}
               />
             )}
+            // 没有挂单时列表收起，把空间让给居中的空状态。
+            style={state.rows.length ? styles.listScroll : styles.listCollapsed}
             testID="held-orders-list"
           />
         ) : null}
+
+        <View style={[styles.banner, styles.bannerInfo]}>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.blue}
+            name="information-outline"
+            size={24}
+          />
+          <Text style={[styles.bannerText, styles.bannerTextInfo]}>
+            {t(state.sharedEnabled ? "footer.shared" : "footer.local")}
+          </Text>
+        </View>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -388,6 +473,7 @@ function HeldOrderRow({
   onRelease,
   onRevealDelete,
   onTakeRemote,
+  pendingConfirmation,
   row,
   shareBusy,
 }: Readonly<{
@@ -405,9 +491,12 @@ function HeldOrderRow({
   onRelease(): void;
   onRevealDelete(): void;
   onTakeRemote(): void;
+  /** 这一单正在等上方的删除 / 强制释放确认，行边框标红以便对上号。 */
+  pendingConfirmation: boolean;
   row: import("./held-orders-presenter").HeldOrderViewRow;
   shareBusy: boolean;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: HeldOrdersCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -435,63 +524,91 @@ function HeldOrderRow({
     blocked: "status.blocked",
   };
   const statusKey = statusKeyMap[row.status];
+  // 本机挂单除了共享状态，还要让收银员一眼看出「这单能取回」。
+  const showsRecallablePill =
+    canRecall &&
+    row.local !== null &&
+    (row.status === "local-pending-publish" ||
+      row.status === "published-shareable" ||
+      row.status === "blocked");
+  const remoteSource = row.remote
+    ? t("remote.source", {
+        device: row.remote.deviceCode,
+        cashier: row.remote.cashierName,
+      })
+    : null;
+  const meta = [
+    row.local ? remoteSource : null,
+    t("list.items", { count: itemCount }),
+    t("list.heldAt", { time: formatTime(heldAtIso, locale) }),
+  ].filter((part): part is string => part !== null);
+  const amountText = formatAud(amountCents, locale);
   const content = (
     <>
       <View style={styles.rowIdentity}>
-        <Text style={styles.sequence}>
-          {row.local
-            ? t("list.sequence", { sequence: row.local.localSequence })
-            : row.remote
-              ? t("remote.source", {
-                  device: row.remote.deviceCode,
-                  cashier: row.remote.cashierName,
-                })
-              : "—"}
-        </Text>
-        <Text
-          style={[
-            styles.status,
-            (claiming || row.status === "blocked") && styles.statusWarning,
-            row.status === "remote-pending" && styles.statusRemote,
-          ]}
-        >
-          {t(statusKey)}
-        </Text>
-        {row.remote && row.local ? (
-          <Text style={styles.itemCount}>
-            {t("remote.source", {
-              device: row.remote.deviceCode,
-              cashier: row.remote.cashierName,
-            })}
+        <View style={styles.rowTitleLine}>
+          <Text numberOfLines={1} style={styles.sequence}>
+            {row.local
+              ? t("list.sequence", { sequence: row.local.localSequence })
+              : (remoteSource ?? "—")}
           </Text>
-        ) : null}
-        <Text style={styles.itemCount}>{t("list.items", { count: itemCount })}</Text>
-        <Text style={styles.time}>
-          {t("list.heldAt", { time: formatTime(heldAtIso, locale) })}
-        </Text>
-        {row.status === "blocked" ? (
-          <Text style={styles.blockReason} testID={`held-order-blocked-reason-${row.holdId}`}>
-            {t(blockReasonCopyKey(row.blockReason))}
-          </Text>
-        ) : null}
+          {showsRecallablePill ? (
+            <PosPill
+              label={t("status.local-pending")}
+              style={styles.inlinePill}
+              tone="good"
+            />
+          ) : null}
+          <PosPill
+            label={t(statusKey)}
+            style={styles.inlinePill}
+            tone={HELD_ORDER_STATUS_TONE[row.status]}
+          />
+        </View>
+        <View style={styles.rowMetaLine}>
+          <Text style={styles.rowMeta}>{meta.join(" · ")}</Text>
+          {row.status === "blocked" ? (
+            <Text
+              style={styles.blockReason}
+              testID={`held-order-blocked-reason-${row.holdId}`}
+            >
+              {t(blockReasonCopyKey(row.blockReason))}
+            </Text>
+          ) : null}
+        </View>
       </View>
-      <View style={styles.amountColumn}>
-        <Text style={styles.amountLabel}>{t("list.amount")}</Text>
-        <Text style={styles.amount}>{formatAud(amountCents, locale)}</Text>
-      </View>
+      <Text
+        accessibilityLabel={`${t("list.amount")} ${amountText}`}
+        style={styles.amount}
+      >
+        {amountText}
+      </Text>
       <View style={styles.rowActions}>
         {canShare ? (
-          <ActionButton
+          <PosButton
             disabled={shareBusy || deleteRevealed}
             label={t("action.share")}
             onPress={onShare}
+            style={styles.shareButton}
             testID={`held-order-share-${row.holdId}`}
-            tone="secondary"
+            tone="quiet"
           />
         ) : null}
+        {claiming ? (
+          <PosButton
+            disabled={busy}
+            label={t("action.release")}
+            onPress={onRelease}
+            style={styles.sideActionButton}
+            testID={`held-order-release-${row.holdId}`}
+            tone="quiet"
+          />
+        ) : null}
+        {/* 这一行的主按钮：正常单是橙色「取回销售 / 本机在线取单」，取单中的异常单是「恢复取单」。 */}
         {canRecall ? (
-          <ActionButton
+          <PosButton
             disabled={busy || deleteRevealed}
+            icon={claiming ? "restore" : "cart-arrow-down"}
             label={t(
               claiming
                 ? "action.recover"
@@ -500,37 +617,56 @@ function HeldOrderRow({
                   : "action.recall",
             )}
             onPress={claiming ? onRecover : remoteOnly ? onTakeRemote : onRecall}
+            style={styles.mainActionButton}
             testID={`held-order-action-${row.holdId}`}
             tone={claiming ? "secondary" : "primary"}
           />
         ) : null}
-        {claiming ? (
-          <>
-            <ActionButton
-              disabled={busy}
-              label={t("action.release")}
-              onPress={onRelease}
-              testID={`held-order-release-${row.holdId}`}
-              tone="quiet"
+        {claiming && forceReleaseSupported ? (
+          <PosButton
+            disabled={busy}
+            label={t("action.force-release")}
+            onPress={() => onForceRelease(row.holdId)}
+            style={styles.sideActionButton}
+            testID={`held-order-force-release-${row.holdId}`}
+            tone="danger"
+          />
+        ) : null}
+        {/* 删除键直接摆在行尾，不必先左滑；点了先出确认面板。 */}
+        {canDelete ? (
+          <PosPressable
+            accessibilityLabel={t("action.delete")}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+            disabled={busy}
+            onPress={() => onDelete(row.holdId)}
+            style={({ pressed }) => [
+              styles.deleteIconButton,
+              busy && styles.deleteIconButtonDisabled,
+              pressed && !busy && styles.pressed,
+            ]}
+            testID={`held-order-delete-${row.holdId}`}
+          >
+            <MaterialCommunityIcons
+              accessible={false}
+              color={busy ? posColors.disabledInk : posColors.red}
+              name="trash-can-outline"
+              size={28}
             />
-            {forceReleaseSupported ? (
-              <ActionButton
-                disabled={busy}
-                label={t("action.force-release")}
-                onPress={() => onForceRelease(row.holdId)}
-                testID={`held-order-force-release-${row.holdId}`}
-                tone="quiet"
-              />
-            ) : null}
-          </>
+          </PosPressable>
         ) : null}
       </View>
     </>
   );
+  const rowStyle = [
+    styles.row,
+    claiming && styles.rowClaiming,
+    pendingConfirmation && styles.rowPendingConfirmation,
+  ];
 
   if (!canDelete) {
     return (
-      <View style={styles.row} testID={`held-order-row-${row.holdId}`}>
+      <View style={rowStyle} testID={`held-order-row-${row.holdId}`}>
         {content}
       </View>
     );
@@ -540,11 +676,12 @@ function HeldOrderRow({
     <SwipeDeleteRow
       busy={busy}
       deleteLabel={t("action.delete")}
-      deleteTestID={`held-order-delete-${row.holdId}`}
+      deleteTestID={`held-order-swipe-delete-${row.holdId}`}
       onDelete={() => onDelete(row.holdId)}
       onHide={onHideDelete}
       onReveal={onRevealDelete}
       open={deleteRevealed}
+      rowStyle={rowStyle}
       rowTestID={`held-order-row-${row.holdId}`}
       swipeTestID={`held-order-swipe-${row.holdId}`}
     >
@@ -562,6 +699,7 @@ function SwipeDeleteRow({
   onHide,
   onReveal,
   open,
+  rowStyle,
   rowTestID,
   swipeTestID,
 }: Readonly<{
@@ -573,9 +711,11 @@ function SwipeDeleteRow({
   onHide(): void;
   onReveal(): void;
   open: boolean;
+  rowStyle: StyleProp<ViewStyle>;
   rowTestID: string;
   swipeTestID: string;
 }>) {
+  usePosThemeVersion();
   const translateX = useRef(new Animated.Value(0)).current;
   const gestureStartX = useRef(0);
   const snapTo = useCallback(
@@ -667,11 +807,17 @@ function SwipeDeleteRow({
             }}
             style={({ pressed }) => [
               styles.swipeDeleteButton,
-              busy && styles.buttonDisabled,
+              busy && styles.swipeDeleteButtonDisabled,
               pressed && !busy && styles.pressed,
             ]}
             testID={deleteTestID}
           >
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.red}
+              name="trash-can-outline"
+              size={26}
+            />
             <Text style={styles.swipeDeleteText}>{deleteLabel}</Text>
           </PosPressable>
         ) : (
@@ -681,15 +827,18 @@ function SwipeDeleteRow({
             pointerEvents="none"
             style={styles.swipeDeleteButton}
           >
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.red}
+              name="trash-can-outline"
+              size={26}
+            />
             <Text style={styles.swipeDeleteText}>{deleteLabel}</Text>
           </View>
         )}
       </View>
       <Animated.View
-        style={[
-          styles.row,
-          { transform: [{ translateX }] },
-        ]}
+        style={[rowStyle, { transform: [{ translateX }] }]}
         testID={rowTestID}
       >
         {children}
@@ -726,107 +875,41 @@ function blockReasonCopyKey(reason: string | null): HeldOrdersCopyKey {
 function CenteredState({
   actionLabel,
   hint,
+  icon,
   message,
   onAction,
   testID,
 }: Readonly<{
   actionLabel?: string;
   hint?: string;
+  icon?: PosIconName;
   message: string;
   onAction?(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.centered} testID={testID}>
+      {icon ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.mutedInk}
+          name={icon}
+          size={56}
+        />
+      ) : null}
       <Text style={styles.centeredTitle}>{message}</Text>
       {hint ? <Text style={styles.centeredHint}>{hint}</Text> : null}
       {actionLabel && onAction ? (
-        <ActionButton label={actionLabel} onPress={onAction} testID={`${testID}-action`} />
+        <PosButton
+          icon="refresh"
+          label={actionLabel}
+          onPress={onAction}
+          style={styles.centeredAction}
+          testID={`${testID}-action`}
+        />
       ) : null}
     </View>
-  );
-}
-
-function ActionButton({
-  disabled = false,
-  label,
-  onPress,
-  sound = "tap",
-  testID,
-  tone = "primary",
-}: Readonly<{
-  disabled?: boolean;
-  label: string;
-  onPress(): void;
-  sound?: "tap" | "navigate";
-  testID: string;
-  tone?: "primary" | "secondary" | "quiet" | "danger";
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
-      style={({ pressed }) => [
-        styles.button,
-        tone === "primary"
-          ? styles.buttonPrimary
-          : tone === "secondary"
-            ? styles.buttonSecondary
-            : tone === "danger"
-              ? styles.buttonDanger
-              : styles.buttonQuiet,
-        disabled && styles.buttonDisabled,
-        pressed && !disabled && styles.pressed,
-      ]}
-      testID={testID}
-    >
-      <Text
-        style={[
-          styles.buttonText,
-          tone !== "primary" && tone !== "danger" && styles.buttonTextDark,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
-  );
-}
-
-function FilterButton({
-  label,
-  onPress,
-  selected,
-  testID,
-}: Readonly<{
-  label: string;
-  onPress(): void;
-  selected: boolean;
-  testID: string;
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.filterButton,
-        selected && styles.filterButtonSelected,
-        pressed && styles.pressed,
-      ]}
-      testID={testID}
-    >
-      <Text
-        style={[
-          styles.filterButtonText,
-          selected && styles.filterButtonTextSelected,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
   );
 }
 
@@ -846,65 +929,58 @@ function formatTime(iso: string, locale: ReturnType<typeof resolveHeldOrdersLoca
   }).format(new Date(timestamp));
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: posColors.canvas },
-  header: { alignItems: "center", borderBottomColor: posColors.border, borderBottomWidth: 1, flexDirection: "row", gap: 20, minHeight: 96, paddingHorizontal: 28, paddingVertical: 16 },
-  identity: { flex: 1, gap: 4 },
-  title: { color: posColors.ink, fontSize: 27, fontWeight: "800" },
-  subtitle: { color: posColors.mutedInk, fontSize: 15 },
-  headerActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, justifyContent: "flex-end" },
-  workspace: { flex: 1, padding: 28 },
-  listHeader: { alignItems: "center", flexDirection: "row", justifyContent: "space-between", marginBottom: 16 },
-  listHeaderTools: { alignItems: "center", flexDirection: "row", gap: 12 },
-  listTitle: { color: posColors.ink, fontSize: 20, fontWeight: "800" },
-  filterGroup: { backgroundColor: posColors.surface, borderColor: posColors.border, borderRadius: 4, borderWidth: 1, flexDirection: "row", overflow: "hidden" },
-  filterButton: { alignItems: "center", justifyContent: "center", minHeight: HELD_ORDERS_MIN_TOUCH_TARGET, minWidth: 72, paddingHorizontal: 16 },
-  filterButtonSelected: { backgroundColor: posColors.blueSoft },
-  filterButtonText: { color: posColors.mutedInk, fontSize: 14, fontWeight: "800" },
-  filterButtonTextSelected: { color: posColors.blue },
-  notice: { borderRadius: 4, fontSize: 15, fontWeight: "700", marginBottom: 14, padding: 12 },
-  noticeSuccess: { backgroundColor: posColors.greenSoft, color: posColors.green },
-  noticeDanger: { backgroundColor: posColors.redSoft, color: posColors.red },
-  syncNotice: { backgroundColor: posColors.blueSoft, borderRadius: 4, marginBottom: 14, padding: 12 },
-  syncNoticeText: { color: posColors.blue, fontSize: 14, fontWeight: "700" },
-  forceReleasePanel: { backgroundColor: posColors.surface, borderColor: posColors.red, borderRadius: 4, borderWidth: 1, marginBottom: 16 },
-  forceReleasePanelContent: { gap: 12, padding: 16 },
-  forceReleaseTitle: { color: posColors.ink, fontSize: 17, fontWeight: "800" },
-  forceReleaseInput: { borderColor: posColors.border, borderRadius: 4, borderWidth: 1, color: posColors.ink, fontSize: 15, minHeight: HELD_ORDERS_MIN_TOUCH_TARGET, paddingHorizontal: 12, paddingVertical: 10 },
-  forceReleaseActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end" },
-  deletePanel: { alignItems: "center", backgroundColor: posColors.redSoft, borderColor: posColors.red, borderRadius: 4, borderWidth: 1, flexDirection: "row", gap: 20, marginBottom: 16, padding: 16 },
-  deleteCopy: { flex: 1, gap: 4 },
-  deleteTitle: { color: posColors.ink, fontSize: 17, fontWeight: "800" },
-  deleteHint: { color: posColors.mutedInk, fontSize: 14, lineHeight: 20 },
-  deleteActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end" },
-  list: { gap: 10, paddingBottom: 28 },
-  swipeShell: { borderRadius: 4, overflow: "hidden", position: "relative" },
-  swipeDeleteTrack: { backgroundColor: posColors.red, bottom: 0, position: "absolute", right: 0, top: 0, width: HELD_ORDERS_DELETE_ACTION_WIDTH },
-  swipeDeleteButton: { alignItems: "center", flex: 1, justifyContent: "center", minHeight: HELD_ORDERS_MIN_TOUCH_TARGET, width: "100%" },
-  swipeDeleteText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
-  row: { alignItems: "center", backgroundColor: posColors.surface, borderColor: posColors.border, borderRadius: 4, borderWidth: 1, flexDirection: "row", gap: 20, minHeight: 106, padding: 18 },
-  rowIdentity: { flex: 1, gap: 4 },
-  rowActions: { alignItems: "stretch", gap: 8 },
-  sequence: { color: posColors.ink, fontSize: 16, fontWeight: "800" },
-  status: { color: posColors.green, fontSize: 14, fontWeight: "700" },
-  statusWarning: { color: posColors.orange },
-  statusRemote: { color: posColors.blue },
-  blockReason: { color: posColors.red, fontSize: 13, fontWeight: "600" },
-  itemCount: { color: posColors.mutedInk, fontSize: 14 },
-  time: { color: posColors.mutedInk, fontSize: 13 },
-  amountColumn: { alignItems: "flex-end", minWidth: 126 },
-  amountLabel: { color: posColors.mutedInk, fontSize: 13 },
-  amount: { color: posColors.ink, fontSize: 22, fontWeight: "800" },
-  button: { alignItems: "center", borderRadius: 4, justifyContent: "center", minHeight: HELD_ORDERS_MIN_TOUCH_TARGET, paddingHorizontal: 16 },
-  buttonPrimary: { backgroundColor: posColors.orange },
-  buttonSecondary: { backgroundColor: posColors.blueSoft, borderColor: posColors.blue, borderWidth: 1 },
-  buttonQuiet: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1 },
-  buttonDanger: { backgroundColor: posColors.red },
-  buttonDisabled: { opacity: 0.45 },
-  buttonText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
-  buttonTextDark: { color: posColors.ink },
-  pressed: { opacity: 0.78 },
-  centered: { alignItems: "center", flex: 1, justifyContent: "center", padding: 32 },
-  centeredTitle: { color: posColors.ink, fontSize: 20, fontWeight: "800", textAlign: "center" },
-  centeredHint: { color: posColors.mutedInk, fontSize: 15, marginBottom: 20, marginTop: 8, textAlign: "center" },
-});
+const styles = createPosStyles((colors) => ({
+  workspace: { flex: 1, gap: 10, minHeight: 0, padding: 12 },
+  listHeader: { alignItems: "center", flexDirection: "row", gap: 10 },
+  listHeaderSpacer: { flex: 1 },
+  listTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+  inlinePill: { alignSelf: "center" },
+  dateSegmented: { width: 220 },
+  sourceSegmented: { width: 280 },
+  banner: { alignItems: "center", borderRadius: 10, borderWidth: 1.5, flexDirection: "row", gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  bannerInfo: { backgroundColor: colors.blueSoft, borderColor: colors.blueBorder },
+  bannerSuccess: { backgroundColor: colors.greenSoft, borderColor: colors.greenBorder },
+  bannerDanger: { backgroundColor: colors.redSoft, borderColor: colors.redBorder },
+  bannerText: { flex: 1, fontSize: 14, fontWeight: "700", lineHeight: 20 },
+  bannerTextInfo: { color: colors.blue },
+  bannerTextSuccess: { color: colors.green },
+  bannerTextDanger: { color: colors.red },
+  panelTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+  panelActions: { alignItems: "center", flexDirection: "row", gap: 10, justifyContent: "flex-end" },
+  forceReleasePanel: { backgroundColor: colors.surface, borderColor: colors.red, borderRadius: 12, borderWidth: 1.5, flexGrow: 0 },
+  forceReleasePanelContent: { gap: 12, padding: 14 },
+  forceReleaseInput: { backgroundColor: colors.surface, borderColor: colors.borderStrong, borderRadius: 10, borderWidth: 1.5, color: colors.ink, fontSize: 17, fontWeight: "700", minHeight: 60, paddingHorizontal: 14, paddingVertical: 10 },
+  deletePanel: { alignItems: "center", backgroundColor: colors.redSoft, borderColor: colors.red, borderRadius: 12, borderWidth: 1.5, flexDirection: "row", gap: 14, padding: 14 },
+  deleteCopy: { flex: 1, gap: 4, minWidth: 0 },
+  deleteHint: { color: colors.mutedInk, fontSize: 14, fontWeight: "600", lineHeight: 20 },
+  listScroll: { flex: 1 },
+  listCollapsed: { flexGrow: 0 },
+  list: { gap: 8, paddingBottom: 4 },
+  swipeShell: { borderRadius: 12, overflow: "hidden", position: "relative" },
+  swipeDeleteTrack: { backgroundColor: colors.redSoft, borderBottomRightRadius: 12, borderColor: colors.red, borderTopRightRadius: 12, borderWidth: 1.5, bottom: 0, position: "absolute", right: 0, top: 0, width: HELD_ORDERS_DELETE_ACTION_WIDTH },
+  swipeDeleteButton: { alignItems: "center", flex: 1, gap: 4, justifyContent: "center", minHeight: HELD_ORDERS_MIN_TOUCH_TARGET, width: "100%" },
+  swipeDeleteButtonDisabled: { opacity: 0.45 },
+  swipeDeleteText: { color: colors.red, fontSize: 15, fontWeight: "900" },
+  row: { alignItems: "center", backgroundColor: colors.surface, borderColor: colors.border, borderRadius: 12, borderWidth: 1.5, flexDirection: "row", gap: 14, minHeight: 100, paddingHorizontal: 14, paddingVertical: 12 },
+  // 正在本机取单 / 恢复的异常单整行黄底。
+  rowClaiming: { backgroundColor: colors.yellowSoft, borderColor: colors.yellowBorder },
+  rowPendingConfirmation: { borderColor: colors.red },
+  rowIdentity: { flex: 1, gap: 5, minWidth: 0 },
+  rowTitleLine: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  rowMetaLine: { alignItems: "center", columnGap: 8, flexDirection: "row", flexWrap: "wrap", rowGap: 2 },
+  rowMeta: { color: colors.mutedInk, fontSize: 13.5, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  rowActions: { alignItems: "center", flexDirection: "row", flexShrink: 0, gap: 10 },
+  sequence: { color: colors.ink, flexShrink: 1, fontSize: 19, fontWeight: "900" },
+  blockReason: { color: colors.red, flexShrink: 1, fontSize: 13.5, fontWeight: "700" },
+  amount: { color: colors.ink, flexShrink: 0, fontSize: 24, fontVariant: ["tabular-nums"], fontWeight: "900", minWidth: 120, textAlign: "right" },
+  shareButton: { minWidth: 104 },
+  sideActionButton: { minWidth: 130 },
+  mainActionButton: { minWidth: 190 },
+  deleteIconButton: { alignItems: "center", backgroundColor: colors.redSoft, borderColor: colors.red, borderRadius: 10, borderWidth: 1.5, height: 64, justifyContent: "center", width: 64 },
+  deleteIconButtonDisabled: { backgroundColor: colors.disabledSurface, borderColor: colors.disabledBorder },
+  pressed: { opacity: 0.72 },
+  centered: { alignItems: "center", flex: 1, gap: 8, justifyContent: "center", padding: 32 },
+  centeredTitle: { color: colors.ink, fontSize: 20, fontWeight: "900", textAlign: "center" },
+  centeredHint: { color: colors.mutedInk, fontSize: 15, fontWeight: "600", lineHeight: 22, textAlign: "center" },
+  centeredAction: { marginTop: 12, minWidth: 190 },
+}));

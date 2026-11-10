@@ -12,6 +12,7 @@ import { Alert, StyleSheet } from "react-native";
 import { BootstrapScreen } from "./bootstrap-screen";
 
 import { PosSoundContext } from "@/ui/feedback/pos-sound-context";
+import { posColors } from "@/ui/theme";
 
 const mockRetry = jest.fn<() => Promise<void>>();
 const mockLoadOtaRecovery = jest.fn<
@@ -224,6 +225,91 @@ describe("BootstrapScreen", () => {
     await screen.unmount();
   });
 
+  it("启动失败时未就绪的核心状态卡整张标红，按钮集中在右栏且重试是 88 高主按钮", async () => {
+    const screen = await render(
+      <BootstrapScreen onOpenNetworkCheck={jest.fn()} />,
+    );
+
+    for (const testID of [
+      "bootstrap-card-device",
+      "bootstrap-card-backend",
+      "bootstrap-card-database",
+    ]) {
+      expect(
+        StyleSheet.flatten(screen.getByTestId(testID).props.style),
+      ).toMatchObject({
+        backgroundColor: posColors.redSoft,
+        borderColor: posColors.red,
+      });
+    }
+    // 客显已就绪：保持普通卡片样式。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("bootstrap-card-display").props.style,
+      ),
+    ).toMatchObject({
+      backgroundColor: posColors.surface,
+      borderColor: posColors.border,
+    });
+
+    expect(
+      StyleSheet.flatten(screen.getByTestId("bootstrap-retry").props.style),
+    ).toMatchObject({ backgroundColor: posColors.accent, minHeight: 88 });
+    const abandon = await screen.findByTestId(
+      "bootstrap-abandon-pending-activation",
+    );
+    expect(StyleSheet.flatten(abandon.props.style)).toMatchObject({
+      backgroundColor: posColors.redSoft,
+      borderColor: posColors.red,
+    });
+    expect(
+      StyleSheet.flatten(abandon.props.style).minHeight,
+    ).toBeGreaterThanOrEqual(64);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("bootstrap-network-check").props.style,
+      ).minHeight,
+    ).toBeGreaterThanOrEqual(64);
+    await screen.unmount();
+  });
+
+  it("正常启动中只显示四张状态卡和底部说明，不出现失败按钮与服务器面板", async () => {
+    mockRuntimePhase = "starting";
+
+    const screen = await render(
+      <BootstrapScreen onOpenNetworkCheck={jest.fn()} />,
+    );
+
+    for (const testID of [
+      "bootstrap-card-device",
+      "bootstrap-card-backend",
+      "bootstrap-card-database",
+      "bootstrap-card-display",
+    ]) {
+      expect(screen.getByTestId(testID)).toBeTruthy();
+    }
+    // 启动中还没轮到的核心项不标红；只有明确失败的那张（这里是本机账本）标红。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("bootstrap-card-backend").props.style,
+      ),
+    ).toMatchObject({ backgroundColor: posColors.surface });
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("bootstrap-card-database").props.style,
+      ),
+    ).toMatchObject({ backgroundColor: posColors.redSoft });
+    expect(screen.getByText("bootstrap.footer")).toBeTruthy();
+    expect(screen.queryByTestId("bootstrap-retry")).toBeNull();
+    expect(screen.queryByTestId("bootstrap-network-check")).toBeNull();
+    expect(
+      screen.queryByTestId("bootstrap-abandon-pending-activation"),
+    ).toBeNull();
+    expect(screen.queryByTestId("server-connection-panel")).toBeNull();
+    expect(mockLoadOtaRecovery).not.toHaveBeenCalled();
+    await screen.unmount();
+  });
+
   it("失败准备页可修改候选地址并测试，但不允许绕过账本门禁保存", async () => {
     const screen = await render(<BootstrapScreen />);
     await waitFor(() =>
@@ -273,8 +359,11 @@ describe("BootstrapScreen", () => {
     );
     const retryButton = screen.getByRole("button", { name: "bootstrap.retry" });
     expect(retryButton.props.accessibilityState.disabled).toBe(true);
-    // 禁用时外观同步变灰，避免店员误以为按钮无响应。
-    expect(StyleSheet.flatten(retryButton.props.style).opacity).toBe(0.4);
+    // 禁用时外观同步变灰（统一按钮的禁用底色），避免店员误以为按钮无响应。
+    expect(StyleSheet.flatten(retryButton.props.style)).toMatchObject({
+      backgroundColor: posColors.disabledSurface,
+      minHeight: 88,
+    });
     await fireEvent.press(retryButton);
     expect(mockRetry).not.toHaveBeenCalled();
 

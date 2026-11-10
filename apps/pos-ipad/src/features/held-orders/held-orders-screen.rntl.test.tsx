@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react-native";
 import {
   AppState,
+  StyleSheet,
   type AppStateEvent,
   type AppStateStatus,
 } from "react-native";
@@ -18,8 +19,12 @@ import {
   HeldOrdersScreen,
 } from "./held-orders-screen";
 
+// 页面外壳的顶栏通过 t() 取全局文案，这里原样返回键名即可。
 jest.mock("react-i18next", () => ({
-  useTranslation: () => ({ i18n: { language: "en", resolvedLanguage: "en" } }),
+  useTranslation: () => ({
+    i18n: { language: "en", resolvedLanguage: "en" },
+    t: (key: string) => key,
+  }),
 }));
 
 let appStateListener: ((state: AppStateStatus) => void) | null = null;
@@ -171,13 +176,14 @@ test("挂单列表默认选中今天，并可切换查看全部挂单", async ()
   });
   const screen = await render(<HeldOrdersScreen presenter={presenter} />);
 
+  // 筛选改为大分段（单选语义），选中态用 checked 表达。
   expect(
     screen.getByTestId("held-orders-filter-today").props.accessibilityState
-      .selected,
+      .checked,
   ).toBe(true);
   expect(
     screen.getByTestId("held-orders-filter-all").props.accessibilityState
-      .selected,
+      .checked,
   ).toBe(false);
 
   await fireEvent.press(screen.getByTestId("held-orders-filter-all"));
@@ -214,7 +220,7 @@ test("挂单列表默认本机分栏，可切换非本机；未请求行显示�
   });
   const screen = await render(<HeldOrdersScreen presenter={presenter} />);
 
-  expect(screen.getByTestId("held-orders-source-local").props.accessibilityState.selected).toBe(true);
+  expect(screen.getByTestId("held-orders-source-local").props.accessibilityState.checked).toBe(true);
   expect(screen.getByTestId("held-order-share-share-me")).toBeTruthy();
   await fireEvent.press(screen.getByTestId("held-order-share-share-me"));
   expect(presenter.requestShare).toHaveBeenCalledWith("share-me");
@@ -496,7 +502,8 @@ test("左滑本机非恢复挂单露出删除，远端与恢复中挂单不可�
   });
   const screen = await render(<HeldOrdersScreen presenter={presenter} />);
 
-  expect(screen.queryByTestId("held-order-delete-local-1")).toBeNull();
+  // 左滑之前滑出的删除键不存在；远端与恢复中的挂单既没有行尾删除键也不能左滑。
+  expect(screen.queryByTestId("held-order-swipe-delete-local-1")).toBeNull();
   expect(screen.queryByTestId("held-order-delete-remote-2")).toBeNull();
   expect(screen.queryByTestId("held-order-delete-claim-3")).toBeNull();
   expect(screen.queryByTestId("held-order-swipe-remote-2")).toBeNull();
@@ -509,7 +516,7 @@ test("左滑本机非恢复挂单露出删除，远端与恢复中挂单不可�
     swipeShell.props.onResponderRelease(swipeEvent(110, 220));
   });
 
-  await fireEvent.press(screen.getByTestId("held-order-delete-local-1"));
+  await fireEvent.press(screen.getByTestId("held-order-swipe-delete-local-1"));
   expect(screen.getByTestId("held-orders-delete-panel")).toBeTruthy();
   expect(presenter.delete).not.toHaveBeenCalled();
 
@@ -522,10 +529,87 @@ test("左滑本机非恢复挂单露出删除，远端与恢复中挂单不可�
     reopenedSwipeShell.props.onResponderMove(swipeEvent(110, 220));
     reopenedSwipeShell.props.onResponderRelease(swipeEvent(110, 220));
   });
-  await fireEvent.press(screen.getByTestId("held-order-delete-local-1"));
+  await fireEvent.press(screen.getByTestId("held-order-swipe-delete-local-1"));
   await fireEvent.press(screen.getByTestId("held-orders-delete-confirm"));
   expect(presenter.delete).toHaveBeenCalledWith("local-1");
   expect(screen.queryByTestId("held-orders-delete-panel")).toBeNull();
+});
+
+test("行尾红色删除键直接可见（64×64），不必左滑；点击先出确认面板，确认后才删除", async () => {
+  const presenter = createPresenter({
+    state: {
+      kind: "ready",
+      busy: false,
+      lastAction: null,
+      refreshError: null,
+      sharedEnabled: true,
+      rows: [
+        viewRow({ holdId: "local-1", local: localSummary({ holdId: "local-1" }) }),
+        viewRow({
+          holdId: "claim-3",
+          local: localSummary({ holdId: "claim-3", status: "Recalling" }),
+          status: "claiming-here",
+        }),
+      ],
+    },
+  });
+  const screen = await render(<HeldOrdersScreen presenter={presenter} />);
+
+  const deleteButton = screen.getByTestId("held-order-delete-local-1");
+  expect(deleteButton.props.accessibilityLabel).toBe("Delete");
+  expect(StyleSheet.flatten(deleteButton.props.style)).toMatchObject({
+    height: 64,
+    width: 64,
+  });
+  // 恢复中的挂单不能删除，行尾不出现删除键。
+  expect(screen.queryByTestId("held-order-delete-claim-3")).toBeNull();
+
+  await fireEvent.press(deleteButton);
+  expect(screen.getByTestId("held-orders-delete-panel")).toBeTruthy();
+  expect(presenter.delete).not.toHaveBeenCalled();
+
+  await fireEvent.press(screen.getByTestId("held-orders-delete-cancel"));
+  expect(screen.queryByTestId("held-orders-delete-panel")).toBeNull();
+  expect(presenter.delete).not.toHaveBeenCalled();
+
+  await fireEvent.press(screen.getByTestId("held-order-delete-local-1"));
+  await fireEvent.press(screen.getByTestId("held-orders-delete-confirm"));
+  expect(presenter.delete).toHaveBeenCalledWith("local-1");
+});
+
+test("新布局尺寸：行高不低于 100，行主按钮约 190×64，忙碌时行尾删除键禁用", async () => {
+  const makeState = (busy: boolean) => ({
+    kind: "ready",
+    busy,
+    lastAction: null,
+    refreshError: null,
+    sharedEnabled: false,
+    rows: [
+      viewRow({ holdId: "local-1", local: localSummary({ holdId: "local-1" }) }),
+    ],
+  });
+  const screen = await render(
+    <HeldOrdersScreen presenter={createPresenter({ state: makeState(false) })} />,
+  );
+  expect(
+    StyleSheet.flatten(screen.getByTestId("held-order-row-local-1").props.style)
+      .minHeight,
+  ).toBeGreaterThanOrEqual(100);
+  const action = StyleSheet.flatten(
+    screen.getByTestId("held-order-action-local-1").props.style,
+  );
+  expect(action.minHeight).toBe(64);
+  expect(action.minWidth).toBe(190);
+  // 未开启共享时不显示「本机 / 非本机」分段。
+  expect(screen.queryByTestId("held-orders-source-local")).toBeNull();
+  expect(screen.getByTestId("held-orders-filter-today")).toBeTruthy();
+
+  const busyPresenter = createPresenter({ state: makeState(true) });
+  const busyScreen = await render(<HeldOrdersScreen presenter={busyPresenter} />);
+  const busyDelete = busyScreen.getByTestId("held-order-delete-local-1");
+  expect(busyDelete.props.accessibilityState.disabled).toBe(true);
+  await fireEvent.press(busyDelete);
+  expect(busyScreen.queryByTestId("held-orders-delete-panel")).toBeNull();
 });
 
 test("删除未完成的阻断行只允许重试删除，不再允许取回到购物车", async () => {

@@ -15,6 +15,7 @@ import {
   type ScannerCaptureContext,
 } from "@/core/peripherals/scanner";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type ScannerRouteContextValue = Readonly<{
   scanner: HidScannerRouter | null;
@@ -41,6 +42,7 @@ const ScannerRouteContext = createContext<ScannerRouteContextValue>({
  * 根路由只管理扫码 context；主管授权弹窗仍由 AppProviders 挂载，避免复制授权 UI。
  */
 export function ScannerRouteProvider({ children }: PropsWithChildren) {
+  usePosThemeVersion();
   const runtime = usePosRuntime();
   const scanner = runtime.services?.scanner.router ?? null;
   const authorization = runtime.services?.operationAuthorization;
@@ -75,6 +77,7 @@ export function ScannerRouteProvider({ children }: PropsWithChildren) {
 
 /** 仅在当前可见路由内捕获 HID，路由失焦、主管弹窗和卸载都会释放焦点与 context。 */
 export function RouteHidScannerCapture(props: RouteHidScannerCaptureProps) {
+  usePosThemeVersion();
   const { scanner, supervisorAwaiting } = useContext(ScannerRouteContext);
   if (!scanner) return null;
   return (
@@ -99,6 +102,7 @@ function ActiveRouteHidScannerCapture({
     scanner: HidScannerRouter;
     supervisorAwaiting: boolean;
   }>) {
+  usePosThemeVersion();
   const isFocused = useIsFocused();
   const pathname = usePathname();
   const active =

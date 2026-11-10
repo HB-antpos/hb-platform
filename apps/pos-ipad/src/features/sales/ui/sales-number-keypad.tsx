@@ -1,9 +1,9 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { MIN_TOUCH_TARGET } from "./sales-presenter";
 
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 export type SalesNumberKey =
   | "0"
@@ -96,6 +96,7 @@ export function SalesNumberKeypad({
   testIDPrefix,
   labels,
 }: SalesNumberKeypadProps) {
+  usePosThemeVersion();
   const rows = mode === "decimal" ? DECIMAL_KEY_ROWS : INTEGER_KEY_ROWS;
 
   return (
@@ -191,7 +192,10 @@ function getAccessibilityLabel(
   }
 }
 
-const styles = StyleSheet.create({
+/** 数字键高度（pt）。 */
+const NUMBER_KEY_HEIGHT = 60;
+
+const styles = createPosStyles((colors) => ({
   keypad: {
     gap: 8,
     width: "100%",
@@ -202,27 +206,28 @@ const styles = StyleSheet.create({
   },
   key: {
     alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 4,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1.5,
     flex: 1,
     justifyContent: "center",
-    minHeight: MIN_TOUCH_TARGET,
+    // 数字键是收银员按得最多的键：高度从 44 提到 60。
+    minHeight: NUMBER_KEY_HEIGHT,
     minWidth: MIN_TOUCH_TARGET,
     paddingHorizontal: 8,
   },
   quickKey: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blue,
   },
   clearKey: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
   },
   keyDisabled: {
-    backgroundColor: posColors.canvas,
-    borderColor: posColors.border,
+    backgroundColor: colors.canvas,
+    borderColor: colors.border,
     opacity: 0.62,
   },
   keyPressed: {
@@ -230,18 +235,18 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
   keyText: {
-    color: posColors.ink,
-    fontSize: 20,
+    color: colors.ink,
+    fontSize: 26,
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
   },
   quickKeyText: {
-    color: posColors.blue,
+    color: colors.blue,
   },
   clearKeyText: {
-    color: posColors.red,
+    color: colors.red,
   },
   keyTextDisabled: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
   },
-});
+}));

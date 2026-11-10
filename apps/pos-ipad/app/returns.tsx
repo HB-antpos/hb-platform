@@ -7,7 +7,6 @@ import {
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -19,13 +18,12 @@ import {
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import {
-  RETURN_MIN_TOUCH_TARGET,
   type ReturnPresenter,
   ReturnScreen,
 } from "@/features/returns";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 type ReturnPresenterBinding = Readonly<{
   services: object;
@@ -40,6 +38,7 @@ type ReturnRouteFailure = "unavailable" | "creation";
  * provider 与恢复键全部留在 createPresenter 的生产闭包中。
  */
 export default function ReturnsRoute() {
+  usePosThemeVersion();
   const { dismissTo } = useRouter();
   const params = useLocalSearchParams<{
     orderRef?: string | string[];
@@ -176,6 +175,7 @@ function ReturnRouteError({
   onBack(): void;
   onRetry?: () => void;
 }>) {
+  usePosThemeVersion();
   const chinese = language.toLowerCase().startsWith("zh");
   const unavailable = failure === "unavailable";
   return (
@@ -236,6 +236,7 @@ function RouteButton({
   sound?: "tap" | "navigate";
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityLabel={label}
@@ -271,7 +272,7 @@ function isViewPermissionDenied(error: unknown): boolean {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   actions: {
     flexDirection: "row",
     gap: 10,
@@ -279,63 +280,63 @@ const styles = StyleSheet.create({
   },
   button: {
     alignItems: "center",
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
-    borderRadius: 4,
-    borderWidth: 1,
+    backgroundColor: colors.orange,
+    borderColor: colors.orange,
+    borderRadius: 10,
+    borderWidth: 1.5,
     justifyContent: "center",
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    minWidth: 128,
-    paddingHorizontal: 18,
+    minHeight: 64,
+    minWidth: 160,
+    paddingHorizontal: 22,
   },
   buttonPressed: {
     opacity: 0.72,
   },
   buttonSecondary: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
   },
   buttonSecondaryText: {
-    color: posColors.ink,
+    color: colors.ink,
   },
   buttonText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "800",
+    color: colors.onAccent,
+    fontSize: 18,
+    fontWeight: "900",
   },
   errorPanel: {
     alignItems: "flex-start",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 6,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 14,
     borderWidth: 1,
     gap: 12,
-    maxWidth: 560,
+    maxWidth: 600,
     padding: 28,
     width: "100%",
   },
   eyebrow: {
-    color: posColors.orange,
+    color: colors.orange,
     fontSize: 12,
     fontWeight: "900",
     letterSpacing: 1,
   },
   hint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 16,
     lineHeight: 24,
     maxWidth: 480,
   },
   safeArea: {
     alignItems: "center",
-    backgroundColor: posColors.canvas,
+    backgroundColor: colors.canvas,
     flex: 1,
     justifyContent: "center",
     padding: 24,
   },
   title: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 26,
     fontWeight: "900",
   },
-});
+}));

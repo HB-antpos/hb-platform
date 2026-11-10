@@ -1,19 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Text, View } from "react-native";
 
+import { PosButton } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
-
-const MIN_TOUCH_TARGET = 44;
+import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 type ConnectionState =
   | "idle"
@@ -76,18 +69,23 @@ export type ServerConnectionPanelProps = Readonly<{
   currentAddress: string;
   saveAddress(address: string): Promise<void>;
   testAddress(address: string): Promise<boolean>;
+  /** 标题行右侧的附加入口（例如注册页的「网络检测」），与「修改 / 检查」并排。 */
+  actions?: ReactNode;
 }>;
 
 /**
  * 预登录页只负责编辑与呈现；地址校验、健康检查和账本安全门禁均由注入端口负责。
+ * 平时收成一条：标题 + 当前服务器地址 + 右侧入口；点「修改 / 检查」后才展开地址输入、测试与保存。
  */
 export function ServerConnectionPanel({
+  actions,
   canSave,
   copy: copyOverride,
   currentAddress,
   saveAddress,
   testAddress,
 }: ServerConnectionPanelProps) {
+  usePosThemeVersion();
   const copy = { ...DEFAULT_COPY, ...copyOverride };
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(currentAddress);
@@ -159,6 +157,8 @@ export function ServerConnectionPanel({
     }
   };
 
+  const status = statusText(state, candidate, copy);
+
   return (
     <PosKeyboardAwareScrollView
       contentContainerStyle={styles.panelContent}
@@ -168,11 +168,32 @@ export function ServerConnectionPanel({
     >
       <View style={styles.headerRow}>
         <View style={styles.headingCopy}>
-          <Text style={styles.eyebrow}>{copy.eyebrow}</Text>
-          <Text style={styles.title}>{copy.title}</Text>
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>{copy.title}</Text>
+            <Text numberOfLines={1} style={styles.eyebrow}>
+              {copy.eyebrow}
+            </Text>
+          </View>
+          <View style={styles.currentAddressRow}>
+            <Text style={styles.currentAddressLabel}>
+              {copy.currentAddress}
+            </Text>
+            <Text
+              numberOfLines={2}
+              selectable
+              style={styles.currentAddress}
+              testID="server-connection-current"
+            >
+              {currentAddress}
+            </Text>
+          </View>
+          {/* 只读阶段（不能保存）在收起时就说明原因，展开后由编辑区的提示条承担。 */}
+          {!canSave && !editing ? (
+            <Text style={styles.readOnlyHint}>{copy.saveBlocked}</Text>
+          ) : null}
         </View>
         {!editing ? (
-          <PanelButton
+          <PosButton
             label={copy.edit}
             onPress={() => {
               setDraft(currentAddress);
@@ -180,22 +201,12 @@ export function ServerConnectionPanel({
               setTestedAddress(null);
               setEditing(true);
             }}
+            size="medium"
             testID="server-connection-edit"
-            tone="secondary"
+            tone="quiet"
           />
         ) : null}
-      </View>
-
-      <View style={styles.currentAddressRow}>
-        <Text style={styles.currentAddressLabel}>{copy.currentAddress}</Text>
-        <Text
-          numberOfLines={2}
-          selectable
-          style={styles.currentAddress}
-          testID="server-connection-current"
-        >
-          {currentAddress}
-        </Text>
+        {actions}
       </View>
 
       {editing ? (
@@ -208,40 +219,49 @@ export function ServerConnectionPanel({
             editable={!busy && !confirmationVisible}
             onChangeText={updateDraft}
             placeholder={copy.addressPlaceholder}
-            placeholderTextColor="#7B8793"
-            style={styles.input}
+            placeholderTextColor={posColors.placeholder}
+            style={[
+              styles.input,
+              (busy || confirmationVisible) && styles.inputDisabled,
+            ]}
             testID="server-connection-input"
             value={draft}
           />
 
           <View style={styles.actionRow}>
-            <PanelButton
+            <PosButton
               disabled={!candidate || busy || confirmationVisible}
+              fill
               label={state === "testing" ? copy.testing : copy.test}
               loading={state === "testing"}
               onPress={() => void runTest()}
+              size="medium"
               testID="server-connection-test"
-              tone="secondary"
             />
-            <PanelButton
+            <PosButton
               disabled={!saveEnabled}
+              fill
               label={copy.save}
               onPress={() => setConfirmationVisible(true)}
+              size="medium"
               testID="server-connection-save"
+              tone="inverse"
             />
           </View>
 
           {!canSave ? (
-            <Text
-              accessibilityRole="alert"
-              style={styles.blockedText}
-              testID="server-connection-save-disabled-reason"
-            >
-              {copy.saveBlocked}
-            </Text>
+            <View style={styles.blockedBanner}>
+              <Text
+                accessibilityRole="alert"
+                style={styles.blockedText}
+                testID="server-connection-save-disabled-reason"
+              >
+                {copy.saveBlocked}
+              </Text>
+            </View>
           ) : null}
 
-          {statusText(state, candidate, copy) ? (
+          {status ? (
             <Text
               accessibilityRole="alert"
               style={[
@@ -253,7 +273,7 @@ export function ServerConnectionPanel({
               ]}
               testID="server-connection-status"
             >
-              {statusText(state, candidate, copy)}
+              {status}
             </Text>
           ) : null}
 
@@ -273,16 +293,18 @@ export function ServerConnectionPanel({
                 {candidate}
               </Text>
               <View style={styles.confirmationActions}>
-                <PanelButton
+                <PosButton
                   label={copy.cancel}
                   onPress={() => setConfirmationVisible(false)}
+                  size="medium"
                   testID="server-connection-cancel"
-                  tone="secondary"
                 />
-                <PanelButton
+                <PosButton
                   label={copy.confirm}
                   onPress={() => void confirmSave()}
+                  size="medium"
                   testID="server-connection-confirm"
+                  tone="inverse"
                 />
               </View>
             </View>
@@ -316,209 +338,155 @@ function statusText(
   }
 }
 
-function PanelButton({
-  disabled = false,
-  label,
-  loading = false,
-  onPress,
-  testID,
-  tone = "primary",
-}: Readonly<{
-  disabled?: boolean;
-  label: string;
-  loading?: boolean;
-  onPress(): void;
-  testID: string;
-  tone?: "primary" | "secondary";
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.button,
-        tone === "secondary" && styles.secondaryButton,
-        disabled && styles.buttonDisabled,
-        pressed && !disabled && styles.buttonPressed,
-      ]}
-      testID={testID}
-    >
-      {loading ? (
-        <ActivityIndicator color={posColors.blue} size="small" />
-      ) : null}
-      <Text
-        style={[
-          styles.buttonLabel,
-          tone === "secondary" && styles.secondaryButtonLabel,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
-  );
-}
-
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   panel: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 2,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: 12,
     borderWidth: 1,
+    // 嵌在其他滚动容器里时按内容高度排版，不抢占剩余空间。
+    flexGrow: 0,
   },
   panelContent: {
-    gap: 14,
-    padding: 18,
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   headerRow: {
     alignItems: "center",
     flexDirection: "row",
-    gap: 16,
-    justifyContent: "space-between",
+    gap: 10,
   },
   headingCopy: {
     flex: 1,
     gap: 2,
+    minWidth: 0,
   },
-  eyebrow: {
-    color: posColors.orange,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
+  titleRow: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    gap: 8,
   },
   title: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  eyebrow: {
+    color: colors.mutedInk,
+    flexShrink: 1,
+    fontSize: 12.5,
+    fontWeight: "600",
   },
   currentAddressRow: {
     alignItems: "flex-start",
-    backgroundColor: posColors.canvas,
-    borderColor: posColors.border,
-    borderLeftColor: posColors.blue,
-    borderLeftWidth: 3,
-    borderWidth: 1,
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    gap: 6,
   },
   currentAddressLabel: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 13,
-    fontWeight: "700",
-    minWidth: 82,
+    fontWeight: "600",
   },
   currentAddress: {
-    color: posColors.ink,
+    color: colors.mutedInk,
     flex: 1,
-    fontSize: 14,
-    fontWeight: "600",
-    minWidth: 220,
-  },
-  editor: {
-    gap: 10,
-  },
-  fieldLabel: {
-    color: posColors.ink,
     fontSize: 13,
     fontWeight: "700",
+    minWidth: 0,
+  },
+  readOnlyHint: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  editor: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: 10,
+    paddingTop: 12,
+  },
+  fieldLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
   },
   input: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 2,
-    borderWidth: 1,
-    color: posColors.ink,
-    fontSize: 15,
-    minHeight: MIN_TOUCH_TARGET,
-    paddingHorizontal: 12,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "700",
+    minHeight: 60,
+    paddingHorizontal: 14,
     paddingVertical: 9,
+  },
+  inputDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+    color: colors.disabledInk,
   },
   actionRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 10,
   },
-  button: {
-    alignItems: "center",
-    backgroundColor: posColors.blue,
-    borderColor: posColors.blue,
-    borderRadius: 2,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    minHeight: MIN_TOUCH_TARGET,
-    minWidth: 116,
-    paddingHorizontal: 16,
+  blockedBanner: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
     paddingVertical: 10,
   },
-  secondaryButton: {
-    backgroundColor: posColors.surface,
-  },
-  buttonDisabled: {
-    opacity: 0.45,
-  },
-  buttonPressed: {
-    opacity: 0.76,
-  },
-  buttonLabel: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  secondaryButtonLabel: {
-    color: posColors.blue,
-  },
   blockedText: {
-    color: posColors.yellow,
-    fontSize: 13,
+    color: colors.yellowInk,
+    fontSize: 14,
     fontWeight: "700",
+    lineHeight: 20,
   },
   statusText: {
-    color: posColors.mutedInk,
-    fontSize: 13,
+    color: colors.mutedInk,
+    fontSize: 14,
     fontWeight: "700",
+    lineHeight: 20,
   },
   statusError: {
-    color: posColors.red,
+    color: colors.red,
   },
   statusSuccess: {
-    color: posColors.green,
+    color: colors.green,
   },
   confirmation: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
-    borderLeftWidth: 3,
-    borderWidth: 1,
-    gap: 7,
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    gap: 6,
     padding: 14,
   },
   confirmationTitle: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
   },
   confirmationHint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 13,
+    fontWeight: "600",
     lineHeight: 19,
   },
   confirmationAddress: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "700",
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
   },
   confirmationActions: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: 10,
     justifyContent: "flex-end",
-    marginTop: 4,
+    marginTop: 6,
   },
-});
+}));

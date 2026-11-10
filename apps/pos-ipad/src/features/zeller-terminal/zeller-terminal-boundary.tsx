@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { StyleSheet, View } from "react-native";
+import { View } from "react-native";
 
 import type { ZellerProbeTerminal } from "@/features/zeller-probe/zeller-probe-runner";
 import {
@@ -16,6 +16,7 @@ import {
   type ZellerSdkHostState,
   type ZellerSdkVendor,
 } from "@/features/zeller-probe/zeller-sdk-host";
+import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 /**
  * 给一整个页面提供 Zeller 终端：页面里任何位置的组件都可以用 useZellerTerminalBoundary() 取到 SDK 客户端。
@@ -63,6 +64,7 @@ export function ZellerTerminalBoundary({
   onOpenNetworkCheck,
   children,
 }: ZellerTerminalBoundaryProps) {
+  usePosThemeVersion();
   const [active, setActive] = useState(false);
   const [state, setState] = useState<ZellerTerminalBoundaryState>({ status: "idle" });
   const activate = useCallback(() => setActive(true), []);
@@ -127,6 +129,6 @@ function PublishHostState({
   return null;
 }
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   root: { flex: 1 },
-});
+}));

@@ -6,8 +6,10 @@ import {
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 export default function IndexScreen() {
+  usePosThemeVersion();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore(
     (state) => state.activeCashier,

@@ -1,24 +1,26 @@
 import Storage from "expo-sqlite/kv-store";
 
 import type { CameraScanMode } from "@/core/contracts/scanner";
+import { isPosThemeId, type PosThemeId } from "@/ui/theme-palettes";
 
 export type AppLanguage = "zh" | "en";
 
 export const LANGUAGE_PREFERENCE_KEY = "hb.pos.language.v1";
-export const SALES_TOOLBAR_ORDER_PREFERENCE_KEY = "hb.pos.sales-toolbar-order.v1";
 export const CAMERA_SCAN_MODE_PREFERENCE_KEY = "hb.pos.camera-scan-mode.v1";
 export const BUTTON_SOUND_PREFERENCE_KEY = "hb.pos.button-sound.v1";
 export const SPECIAL_NODE_SOUND_PREFERENCE_KEY =
   "hb.pos.special-node-sound.v1";
 /** 旧版本总开关仅用于双开关首次读取时的兼容回退。 */
 export const TOUCH_SOUND_PREFERENCE_KEY = "hb.pos.touch-sound.v1";
+export const THEME_PREFERENCE_KEY = "hb.pos.theme.v1";
+export const NAV_PINNED_PREFERENCE_KEY = "hb.pos.nav-pinned.v1";
 
 function isAppLanguage(value: unknown): value is AppLanguage {
   return value === "zh" || value === "en";
 }
 
-function isToolbarActionOrder(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((actionId) => typeof actionId === "string");
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
 function isCameraScanMode(value: unknown): value is CameraScanMode {
@@ -39,39 +41,6 @@ export function readStoredLanguage(): AppLanguage | null {
 export async function saveStoredLanguage(language: AppLanguage): Promise<void> {
   try {
     await Storage.setItem(LANGUAGE_PREFERENCE_KEY, language);
-  } catch {
-    // 偏好持久化失败不应阻断 POS 界面。
-  }
-}
-
-/** 同步读取销售工具栏 action ID 排序，损坏数据一律忽略。 */
-export function readSalesToolbarOrder(): string[] | null {
-  try {
-    const serialized = Storage.getItemSync(SALES_TOOLBAR_ORDER_PREFERENCE_KEY);
-    if (serialized == null) {
-      return null;
-    }
-
-    const actionOrder: unknown = JSON.parse(serialized);
-    return isToolbarActionOrder(actionOrder) ? actionOrder : null;
-  } catch {
-    return null;
-  }
-}
-
-/** 异步保存销售工具栏 action ID 排序，非法数据或存储故障均安全忽略。 */
-export async function saveSalesToolbarOrder(
-  actionIds: readonly string[],
-): Promise<void> {
-  if (!isToolbarActionOrder(actionIds)) {
-    return;
-  }
-
-  try {
-    await Storage.setItem(
-      SALES_TOOLBAR_ORDER_PREFERENCE_KEY,
-      JSON.stringify(actionIds),
-    );
   } catch {
     // 偏好持久化失败不应阻断 POS 界面。
   }
@@ -151,4 +120,60 @@ export async function saveSpecialNodeSoundEnabled(
   enabled: boolean,
 ): Promise<void> {
   await saveSoundEnabled(SPECIAL_NODE_SOUND_PREFERENCE_KEY, enabled);
+}
+
+/** 同步读取界面主题；缺失、损坏或存储故障时返回 null，由调用方使用默认主题。 */
+export function readStoredTheme(): PosThemeId | null {
+  try {
+    const value = Storage.getItemSync(THEME_PREFERENCE_KEY);
+    return isPosThemeId(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 仅保存合法主题；持久化失败不得影响当前会话已生效的主题。 */
+export async function saveStoredTheme(themeId: PosThemeId): Promise<void> {
+  if (!isPosThemeId(themeId)) {
+    return;
+  }
+
+  try {
+    await Storage.setItem(THEME_PREFERENCE_KEY, themeId);
+  } catch {
+    // 偏好持久化失败不应阻断 POS 界面。
+  }
+}
+
+/** 同步读取固定到左侧栏的功能 ID 列表，损坏数据一律忽略。 */
+export function readPinnedDestinations(): string[] | null {
+  try {
+    const serialized = Storage.getItemSync(NAV_PINNED_PREFERENCE_KEY);
+    if (serialized == null) {
+      return null;
+    }
+
+    const pinned: unknown = JSON.parse(serialized);
+    return isStringArray(pinned) ? pinned : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 异步保存固定到左侧栏的功能 ID 列表，非法数据或存储故障均安全忽略。 */
+export async function savePinnedDestinations(
+  destinationIds: readonly string[],
+): Promise<void> {
+  if (!isStringArray(destinationIds)) {
+    return;
+  }
+
+  try {
+    await Storage.setItem(
+      NAV_PINNED_PREFERENCE_KEY,
+      JSON.stringify(destinationIds),
+    );
+  } catch {
+    // 偏好持久化失败不应阻断 POS 界面。
+  }
 }

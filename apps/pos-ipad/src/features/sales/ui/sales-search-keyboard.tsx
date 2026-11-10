@@ -1,9 +1,9 @@
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { MIN_TOUCH_TARGET } from "./sales-presenter";
 
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 export type SalesSearchKeyAction =
   | "backspace"
@@ -86,6 +86,7 @@ export function SalesSearchKeyboard({
   labels,
   onKeyPress,
 }: SalesSearchKeyboardProps) {
+  usePosThemeVersion();
   return (
     <View
       accessibilityLabel={labels.title}
@@ -193,6 +194,7 @@ function SearchKey({
   testID: string;
   tone?: "default" | "quiet" | "danger" | "primary";
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityLabel={accessibilityLabel}
@@ -228,9 +230,9 @@ function SearchKey({
   );
 }
 
-const KEY_HEIGHT = 52;
+const KEY_HEIGHT = 56;
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   keyboard: {
     gap: 8,
     width: "100%",
@@ -242,8 +244,8 @@ const styles = StyleSheet.create({
   // 与 SalesNumberKeypad 保持一致的按键外观，收银员在两套键盘间不需重新适应。
   key: {
     alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
     borderRadius: 4,
     borderWidth: 1,
     height: KEY_HEIGHT,
@@ -252,19 +254,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   quietKey: {
-    backgroundColor: posColors.canvas,
+    backgroundColor: colors.canvas,
   },
   dangerKey: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
   },
   primaryKey: {
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
+    backgroundColor: colors.orange,
+    borderColor: colors.orange,
   },
   keyDisabled: {
-    backgroundColor: posColors.canvas,
-    borderColor: posColors.border,
+    backgroundColor: colors.canvas,
+    borderColor: colors.border,
     opacity: 0.62,
   },
   keyPressed: {
@@ -272,7 +274,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.98 }],
   },
   keyText: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 20,
     fontWeight: "800",
   },
@@ -280,12 +282,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   dangerKeyText: {
-    color: posColors.red,
+    color: colors.red,
   },
   primaryKeyText: {
-    color: "#FFFFFF",
+    color: colors.onAccent,
   },
   keyTextDisabled: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
   },
-});
+}));

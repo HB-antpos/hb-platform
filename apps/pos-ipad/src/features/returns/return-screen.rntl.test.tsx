@@ -1,5 +1,6 @@
 import { expect, jest, test } from "@jest/globals";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 
 import type {
   NoReceiptReturnItem,
@@ -17,9 +18,16 @@ import {
   type ReturnExecutionPort,
 } from "@hb/pos-domain/features/returns/return-workflow";
 
+import {
+  PosNavigationContext,
+  type PosNavigationContextValue,
+} from "@/ui/shell/pos-navigation-context";
+
+// 页面外壳的顶栏与侧栏通过 t() 取全局文案，这里原样返回键名即可。
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "en", resolvedLanguage: "en" },
+    t: (key: string) => key,
   }),
 }));
 
@@ -409,6 +417,177 @@ test("原单无代金券付款时不显示代金券提示", async () => {
 
   expect(presenter.getState().requiredVoucherRefundCents).toBe(0);
   expect(screen.queryByTestId("return-voucher-funded-notice")).toBeNull();
+});
+
+test("新布局：模式切换在页头分段、商品行与 −/＋、退款方式大块、带金额的确认键", async () => {
+  const execution = new ScreenExecution();
+  const presenter = createScreenPresenter(execution, {
+    receiptContext: {
+      ...screenReceiptContext(),
+      tenderCapacities: [
+        {
+          capacityId: "card-capacity",
+          originalOrderGuid: "order-a",
+          method: "card",
+          remainingCents: 2_000,
+          offlineCashProof: null,
+        },
+      ],
+    },
+  });
+  const beginNoReceipt = jest.spyOn(presenter, "beginNoReceipt");
+  const reset = jest.spyOn(presenter, "reset");
+  const screen = await render(
+    <ReturnScreen locale="en" presenter={presenter} />,
+  );
+
+  // 模式切换是单选分段：当前模式 checked。
+  expect(
+    screen.getByTestId("return-mode-receipt").props.accessibilityState.checked,
+  ).toBe(true);
+  expect(
+    screen.getByTestId("return-mode-no-receipt").props.accessibilityState
+      .checked,
+  ).toBe(false);
+  // 未选商品时确认键不带金额且禁用。
+  const confirm = screen.getByTestId("return-confirm");
+  expect(confirm.props.accessibilityLabel).toBe("Confirm refund");
+  expect(confirm.props.accessibilityState.disabled).toBe(true);
+  expect(StyleSheet.flatten(confirm.props.style).minHeight).toBe(88);
+  expect(
+    StyleSheet.flatten(screen.getByTestId("return-order-search").props.style)
+      .height,
+  ).toBe(60);
+
+  await fireEvent.changeText(
+    screen.getByTestId("return-order-query"),
+    "HB-1001",
+  );
+  await fireEvent.press(screen.getByTestId("return-order-search"));
+  await waitFor(() =>
+    expect(screen.getByTestId("return-row-return-line-1")).toBeTruthy(),
+  );
+
+  expect(
+    StyleSheet.flatten(screen.getByTestId("return-row-return-line-1").props.style)
+      .minHeight,
+  ).toBeGreaterThanOrEqual(92);
+  for (const id of ["return-decrease-return-line-1", "return-increase-return-line-1"]) {
+    expect(StyleSheet.flatten(screen.getByTestId(id).props.style)).toMatchObject({
+      height: 52,
+      width: 52,
+    });
+  }
+  expect(screen.getByTestId("return-quantity-return-line-1").props.children).toBe(
+    "0 of 2",
+  );
+  // 一件都没选时不能再减。
+  expect(
+    screen.getByTestId("return-decrease-return-line-1").props.accessibilityState
+      .disabled,
+  ).toBe(true);
+
+  // 退款方式是 68 高的大块单选；只有可原路退回的原支付方式带「原支付方式」标记。
+  const card = screen.getByTestId("return-method-card");
+  expect(StyleSheet.flatten(card.props.style).height).toBe(68);
+  expect(card.props.accessibilityRole).toBe("radio");
+  expect(card.props.accessibilityState.checked).toBe(false);
+  expect(card.props.accessibilityLabel).toBe("Card · Original tender");
+  expect(screen.getByTestId("return-method-cash").props.accessibilityLabel).toBe(
+    "Cash",
+  );
+  expect(screen.getAllByText("Original tender")).toHaveLength(1);
+
+  await fireEvent.press(screen.getByTestId("return-increase-return-line-1"));
+  expect(screen.getByTestId("return-quantity-return-line-1").props.children).toBe(
+    "1 of 2",
+  );
+  expect(screen.getByTestId("return-confirm").props.accessibilityLabel).toMatch(
+    /^Confirm refund · \$10\.00$/u,
+  );
+  await fireEvent.press(screen.getByTestId("return-method-cash"));
+  expect(
+    screen.getByTestId("return-method-cash").props.accessibilityState.checked,
+  ).toBe(true);
+
+  // 切到无小票：三个输入与两个添加按钮按同一尺寸排，且无原支付标记。
+  await fireEvent.press(screen.getByTestId("return-mode-no-receipt"));
+  expect(beginNoReceipt).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("return-product-query")).toBeTruthy();
+  expect(screen.getByTestId("return-open-item-name")).toBeTruthy();
+  expect(screen.getByTestId("return-open-item-amount")).toBeTruthy();
+  for (const id of ["return-product-add", "return-open-item-add"]) {
+    expect(StyleSheet.flatten(screen.getByTestId(id).props.style).height).toBe(60);
+  }
+  expect(screen.queryByText("Original tender")).toBeNull();
+
+  // 切回小票退货沿用原来的 reset。
+  await fireEvent.press(screen.getByTestId("return-mode-receipt"));
+  expect(reset).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("return-order-query")).toBeTruthy();
+
+  // 与改版前的页签一致：再点一次当前模式 = 清空并重新开始这种退货。
+  await fireEvent.press(screen.getByTestId("return-mode-receipt"));
+  expect(reset).toHaveBeenCalledTimes(2);
+  await fireEvent.press(screen.getByTestId("return-mode-no-receipt"));
+  await fireEvent.press(screen.getByTestId("return-mode-no-receipt"));
+  expect(beginNoReceipt).toHaveBeenCalledTimes(3);
+});
+
+test("退款进行中与结果未知时锁住侧栏跳转；选商品阶段侧栏可用", async () => {
+  const pending = deferred<{ status: "unknown"; recoveryKey: string | null }>();
+  const execution = new ScreenExecution();
+  execution.executeImpl = async () => pending.promise;
+  const presenter = createScreenPresenter(execution);
+  await presenter.loadReceipt("HB-1001");
+  presenter.incrementLine("return-line-1");
+  const openSales = jest.fn();
+  const navigation: PosNavigationContextValue = {
+    appVersionLabel: null,
+    language: "en",
+    model: {
+      entries: [{ id: "returns", label: "Returns", onPress: jest.fn() }],
+      onOpenSales: openSales,
+      pinned: ["returns"],
+    },
+    openSales,
+    switchLanguage: jest.fn(),
+  };
+  const screen = await render(
+    <PosNavigationContext.Provider value={navigation}>
+      <ReturnScreen locale="en" presenter={presenter} />
+    </PosNavigationContext.Provider>,
+  );
+
+  expect(screen.getByTestId("pos-rail-sales").props.accessibilityState.disabled).toBe(
+    false,
+  );
+  expect(
+    screen.getByTestId("pos-rail-returns").props.accessibilityState.selected,
+  ).toBe(true);
+
+  await fireEvent.press(screen.getByTestId("return-confirm"));
+  expect(screen.getByTestId("return-waiting")).toBeTruthy();
+  expect(screen.getByTestId("pos-rail-sales").props.accessibilityState.disabled).toBe(
+    true,
+  );
+  expect(screen.getByTestId("pos-rail-more").props.accessibilityState.disabled).toBe(
+    true,
+  );
+  await fireEvent.press(screen.getByTestId("pos-rail-sales"));
+  expect(openSales).not.toHaveBeenCalled();
+
+  pending.resolve({ status: "unknown", recoveryKey: "private-recovery-key" });
+  await waitFor(() =>
+    expect(screen.getByTestId("return-unknown")).toBeTruthy(),
+  );
+  expect(screen.getByTestId("pos-rail-sales").props.accessibilityState.disabled).toBe(
+    true,
+  );
+  expect(
+    StyleSheet.flatten(screen.getByTestId("return-unknown-action").props.style)
+      .minHeight,
+  ).toBe(72);
 });
 
 function voucherFundedReceiptContext(): ReceiptReturnContext {

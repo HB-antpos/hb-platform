@@ -8,8 +8,9 @@ import {
   resolveCameraScannerLocale,
 } from "./camera-scanner-copy";
 import {
-  CAMERA_SCANNER_MIN_TOUCH_TARGET,
+  CAMERA_SCANNER_PREVIEW_BACKGROUND,
   CAMERA_SCANNER_SUPPORTED_ORIENTATIONS,
+  CAMERA_SCANNER_TARGET_BORDER,
   type CameraScannerBarcodeResult,
   CameraScannerCameraView,
   CameraScannerState,
@@ -22,8 +23,9 @@ import {
   normalizeScanValue,
   type ScannerCaptureContext,
 } from "@/core/peripherals/scanner";
+import { PosButton } from "@/ui/controls/pos-button";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, posRadius, usePosThemeVersion } from "@/ui/theme";
 
 export {
   CAMERA_SCANNER_MIN_TOUCH_TARGET,
@@ -49,6 +51,7 @@ export function CameraScannerModal({
   scanner,
   visible,
 }: CameraScannerModalProps) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale = resolveCameraScannerLocale(
     i18n.resolvedLanguage ?? i18n.language,
@@ -162,16 +165,14 @@ export function CameraScannerModal({
             />
           )}
 
-          <PosPressable
+          <PosButton
             accessibilityLabel={t("action.closeLabel")}
-            accessibilityRole="button"
+            icon="close"
+            label={t("action.cancel")}
             onPress={close}
             sound="navigate"
-            style={({ pressed }) => [styles.closeButton, pressed && styles.buttonPressed]}
             testID="camera-scanner-close"
-          >
-            <Text style={styles.closeButtonLabel}>{t("action.cancel")}</Text>
-          </PosPressable>
+          />
         </View>
       </View>
     </Modal>
@@ -185,10 +186,10 @@ function contextLabel(
   return t(cameraScannerContextCopyKey(context));
 }
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   backdrop: {
     alignItems: "center",
-    backgroundColor: "rgba(16, 37, 58, 0.78)",
+    backgroundColor: colors.overlay,
     flex: 1,
     justifyContent: "center",
     padding: 24,
@@ -196,25 +197,20 @@ const styles = StyleSheet.create({
   backdropDismissArea: {
     ...StyleSheet.absoluteFillObject,
   },
-  buttonPressed: { opacity: 0.8 },
-  closeButton: {
-    alignItems: "center",
-    borderColor: posColors.border,
-    borderRadius: 2,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: CAMERA_SCANNER_MIN_TOUCH_TARGET,
-    paddingHorizontal: 18,
+  description: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+    marginTop: 6,
   },
-  closeButtonLabel: { color: posColors.ink, fontSize: 16, fontWeight: "700" },
-  description: { color: posColors.mutedInk, fontSize: 15, lineHeight: 22, marginTop: 8 },
-  eyebrow: { color: posColors.orange, fontSize: 12, fontWeight: "800", letterSpacing: 1.2 },
+  eyebrow: { color: colors.accent, fontSize: 12.5, fontWeight: "900", letterSpacing: 1.2 },
   panel: {
-    backgroundColor: posColors.surface,
-    borderRadius: 2,
+    backgroundColor: colors.surface,
+    borderRadius: posRadius.sheet,
     maxWidth: 880,
-    padding: 28,
-    shadowColor: "#000000",
+    padding: 24,
+    shadowColor: colors.shadow,
     shadowOffset: { height: 8, width: 0 },
     shadowOpacity: 0.24,
     shadowRadius: 20,
@@ -222,16 +218,18 @@ const styles = StyleSheet.create({
   },
   preview: { flex: 1 },
   previewFrame: {
-    backgroundColor: "#0A1723",
+    // 取景框固定深色底，不跟主题。
+    backgroundColor: CAMERA_SCANNER_PREVIEW_BACKGROUND,
+    borderRadius: posRadius.large,
     height: 340,
-    marginVertical: 22,
+    marginVertical: 18,
     overflow: "hidden",
     position: "relative",
   },
-  stateSpacing: { marginVertical: 22 },
+  stateSpacing: { marginVertical: 18 },
   target: {
-    borderColor: "#FFFFFF",
-    borderRadius: 2,
+    borderColor: CAMERA_SCANNER_TARGET_BORDER,
+    borderRadius: 6,
     borderWidth: 2,
     bottom: "32%",
     left: "10%",
@@ -239,5 +237,5 @@ const styles = StyleSheet.create({
     right: "10%",
     top: "32%",
   },
-  title: { color: posColors.ink, fontSize: 26, fontWeight: "800", marginTop: 6 },
-});
+  title: { color: colors.ink, fontSize: 26, fontWeight: "900", marginTop: 4 },
+}));

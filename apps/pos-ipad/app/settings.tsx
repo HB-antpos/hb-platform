@@ -18,6 +18,7 @@ import {
 } from "@/features/settings";
 import { ZellerSettingsBoundary } from "@/features/zeller-terminal/zeller-settings-boundary";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type SettingsBinding = Readonly<{
   cashier: object;
@@ -30,6 +31,7 @@ type SettingsBinding = Readonly<{
  * 可信 lease、细分权限复核、数据库与硬件端口都留在组合根，不能由路由传入。
  */
 export default function SettingsRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore(

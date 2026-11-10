@@ -1,8 +1,9 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
-import { StyleSheet, TextInput, type TextInput as TextInputInstance } from "react-native";
+import { TextInput, type TextInput as TextInputInstance } from "react-native";
 
 import { HidScannerRouter } from "./hid-scanner";
 import type { ScannerCaptureStatus } from "./types";
+import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 export type HidScannerCaptureHandle = {
   focus(): void;
@@ -24,6 +25,7 @@ export type HidScannerCaptureProps = {
  */
 export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerCaptureProps>(
   ({ active, focusRequestKey, onCaptureStatusChange, onHidTextChange, scanner }, ref) => {
+    usePosThemeVersion();
     const inputRef = useRef<TextInputInstance>(null);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [value, setValue] = useState("");
@@ -131,7 +133,7 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
 
 HidScannerCapture.displayName = "HidScannerCapture";
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   hiddenInput: {
     height: 1,
     left: -10_000,
@@ -140,4 +142,4 @@ const styles = StyleSheet.create({
     top: -10_000,
     width: 1,
   },
-});
+}));

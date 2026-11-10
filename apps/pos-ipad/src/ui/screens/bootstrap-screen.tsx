@@ -2,16 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { Alert, ScrollView, Text, useWindowDimensions, View } from "react-native";
 
 import {
   loadExpoBootstrapServerDiagnostics,
@@ -22,49 +13,98 @@ import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import { StartupOtaRecoveryPanel } from "@/features/app-updates/startup-ota-recovery-panel";
 import { serverConnectionPanelCopy } from "@/features/device-registration/server-connection-copy";
 import { ServerConnectionPanel } from "@/features/device-registration/server-connection-panel";
-import { PosPressable } from "@/ui/controls/pos-pressable";
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
+import { PosKeyboardAwareScrollView } from "@/ui/controls/pos-keyboard-aware-scroll-view";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { PosStatusStrip } from "@/ui/shell/status-strip";
-import { posColors } from "@/ui/theme";
+import {
+  createPosStyles,
+  posColors,
+  usePosThemeVersion,
+  type PosPalette,
+} from "@/ui/theme";
+
+/**
+ * 状态卡的四种样子：
+ * good 已就绪；danger 出问题（整张红底红描边）；pending 启动中还没轮到；idle 可选项未接入（例如没接客显）。
+ */
+type ReadinessTone = "good" | "danger" | "pending" | "idle";
 
 type ReadinessCardProps = {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  icon: PosIconName;
   label: string;
-  ready: boolean;
+  tone: ReadinessTone;
   statusText?: string;
+  testID?: string;
 };
 
-function ReadinessCard({ icon, label, ready, statusText }: ReadinessCardProps) {
+// 只存色名，渲染时再取 posColors[name]，换主题后颜色才会跟着变。
+const TONE_COLOR: Record<ReadinessTone, keyof PosPalette> = {
+  good: "green",
+  danger: "red",
+  pending: "blue",
+  idle: "mutedInk",
+};
+
+const TONE_MARK: Record<ReadinessTone, PosIconName> = {
+  good: "check-circle",
+  danger: "alert-circle",
+  pending: "progress-clock",
+  idle: "minus-circle-outline",
+};
+
+function ReadinessCard({
+  icon,
+  label,
+  statusText,
+  testID,
+  tone,
+}: ReadinessCardProps) {
+  usePosThemeVersion();
   const { t } = useTranslation();
+  const color = posColors[TONE_COLOR[tone]];
 
   return (
-    <View style={styles.card}>
-      <View
-        style={[
-          styles.iconFrame,
-          ready ? styles.iconReady : styles.iconPending,
-        ]}
-      >
-        <MaterialCommunityIcons
-          color={ready ? posColors.green : posColors.blue}
-          name={icon}
-          size={28}
-        />
-      </View>
+    <View
+      style={[styles.card, tone === "danger" && styles.cardDanger]}
+      testID={testID}
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={color}
+        name={icon}
+        size={40}
+      />
       <View style={styles.cardCopy}>
-        <Text style={styles.cardLabel}>{label}</Text>
-        <Text
-          style={[
-            styles.cardState,
-            ready ? styles.stateReady : styles.statePending,
-          ]}
-        >
+        <Text numberOfLines={1} style={styles.cardLabel}>
+          {label}
+        </Text>
+        <Text numberOfLines={2} style={[styles.cardState, { color }]}>
           {statusText ??
-            (ready ? t("bootstrap.ready") : t("bootstrap.pending"))}
+            (tone === "good" ? t("bootstrap.ready") : t("bootstrap.pending"))}
         </Text>
       </View>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={color}
+        name={TONE_MARK[tone]}
+        size={30}
+      />
     </View>
   );
+}
+
+/**
+ * 核心启动项（设备 / 服务端 / 本机账本）的状态卡色调：
+ * 已就绪为绿；明确失败，或启动已经停在失败而它还没就绪，整张标红；其余是启动中的等待态。
+ */
+function coreTone(
+  ready: boolean,
+  hardFailure: boolean,
+  startupFailed: boolean,
+): ReadinessTone {
+  if (ready) return "good";
+  return hardFailure || startupFailed ? "danger" : "pending";
 }
 
 export function BootstrapScreen({
@@ -73,6 +113,7 @@ export function BootstrapScreen({
   /** 启动失败时显示「网络检测」入口；只有首页路由传入，其他路由的加载兜底页不显示。 */
   onOpenNetworkCheck?: () => void;
 }> = {}) {
+  usePosThemeVersion();
   const { t } = useTranslation();
   const { width } = useWindowDimensions();
   const { retry, state: runtime } = usePosRuntime();
@@ -100,6 +141,25 @@ export function BootstrapScreen({
     runtime.phase === "failed" &&
     serverDiagnostics?.canAbandonPendingDeviceActivation === true &&
     !pendingActivationAbandoned;
+  const startupFailed = runtime.phase === "failed";
+  const deviceTone = coreTone(
+    deviceReady,
+    runtime.device === "locked",
+    startupFailed,
+  );
+  const backendTone = coreTone(
+    backendReady,
+    runtime.backend === "rejected",
+    startupFailed,
+  );
+  const databaseTone = coreTone(
+    databaseReady,
+    runtime.database === "failed",
+    startupFailed,
+  );
+  // 客显是可选外设：没接不算问题，只有明确报错才标红。
+  const displayTone: ReadinessTone =
+    display === "ready" ? "good" : display === "failed" ? "danger" : "idle";
   const [otaRecoveryBusy, setOtaRecoveryBusy] = useState(false);
   const startupActionBusy =
     abandoningPendingActivation || retryingStartup || otaRecoveryBusy;
@@ -202,163 +262,167 @@ export function BootstrapScreen({
     };
   }, []);
 
+  const statusMessage =
+    pendingActivationError ??
+    (startupFailed
+      ? bootstrapErrorSummary(runtime.error, t)
+      : t("bootstrap.footer"));
+  const statusIsError = startupFailed || pendingActivationError !== null;
+
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-      <PosStatusStrip />
-      {/* 失败态同时展示服务器检查与修复更新时会超出横屏高度，必须可滚动以保证重试按钮可达。 */}
-      <ScrollView
-        contentContainerStyle={[styles.page, compact && styles.pageCompact]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.brandRail}>
-          <Image
-            accessibilityIgnoresInvertColors
-            accessible={false}
-            resizeMode="contain"
-            source={require("../../../assets/icon.png")}
-            style={styles.brandMark}
-          />
+    // 启动阶段不允许跳去其他页面，这一页不显示左侧栏。
+    <PosScreenFrame rail="none">
+      <StatusBar style="light" />
+      <View style={[styles.page, compact && styles.pageCompact]}>
+        {/* 左栏：标题、四张状态卡、启动结果提示；失败时底部多一条只读的服务器连接。 */}
+        {/* 服务器地址输入框贴在这一栏底部，用键盘感知滚动容器，软键盘弹出时能把它让出来。 */}
+        <PosKeyboardAwareScrollView
+          contentContainerStyle={styles.mainContent}
+          showsVerticalScrollIndicator={false}
+          style={styles.mainColumn}
+        >
           <View>
-            <Text style={styles.brandName}>{t("app.name")}</Text>
             <Text style={styles.eyebrow}>{t("bootstrap.eyebrow")}</Text>
+            <Text accessibilityRole="header" style={styles.title}>
+              {t("bootstrap.title")}
+            </Text>
+            <Text style={styles.subtitle}>{t("bootstrap.subtitle")}</Text>
           </View>
-        </View>
 
-        <View style={styles.hero}>
-          <View style={styles.orangeRule} />
-          <Text style={styles.title}>{t("bootstrap.title")}</Text>
-          <Text style={styles.subtitle}>{t("bootstrap.subtitle")}</Text>
-        </View>
+          <View style={styles.cardGrid}>
+            <View style={styles.cardRow}>
+              <ReadinessCard
+                icon="tablet"
+                label={t("bootstrap.device")}
+                statusText={t(`bootstrap.deviceState.${runtime.device}`)}
+                testID="bootstrap-card-device"
+                tone={deviceTone}
+              />
+              <ReadinessCard
+                icon={
+                  backendTone === "danger"
+                    ? "server-network-off"
+                    : "server-network"
+                }
+                label={t("bootstrap.backend")}
+                statusText={t(`bootstrap.backendState.${runtime.backend}`)}
+                testID="bootstrap-card-backend"
+                tone={backendTone}
+              />
+            </View>
+            <View style={styles.cardRow}>
+              <ReadinessCard
+                icon="cash-lock"
+                label={t("bootstrap.offline")}
+                statusText={t(`bootstrap.databaseState.${runtime.database}`)}
+                testID="bootstrap-card-database"
+                tone={databaseTone}
+              />
+              <ReadinessCard
+                icon="monitor"
+                label={t("bootstrap.display")}
+                statusText={t(`status.peripheral.${display}`)}
+                testID="bootstrap-card-display"
+                tone={displayTone}
+              />
+            </View>
+          </View>
 
-        <View style={[styles.cardGrid, compact && styles.cardGridCompact]}>
-          <ReadinessCard
-            icon="table-account"
-            label={t("bootstrap.device")}
-            ready={deviceReady}
-            statusText={t(`bootstrap.deviceState.${runtime.device}`)}
-          />
-          <ReadinessCard
-            icon="server-security"
-            label={t("bootstrap.backend")}
-            ready={backendReady}
-            statusText={t(`bootstrap.backendState.${runtime.backend}`)}
-          />
-          <ReadinessCard
-            icon="database-lock"
-            label={t("bootstrap.offline")}
-            ready={databaseReady}
-            statusText={t(`bootstrap.databaseState.${runtime.database}`)}
-          />
-          <ReadinessCard
-            icon="monitor-multiple"
-            label={t("bootstrap.display")}
-            ready={display === "ready"}
-            statusText={t(`status.peripheral.${display}`)}
-          />
-        </View>
+          {statusIsError ? (
+            <View accessibilityRole="alert" style={styles.errorBanner}>
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.red}
+                name="alert-outline"
+                size={24}
+              />
+              <Text style={styles.errorBannerText}>{statusMessage}</Text>
+            </View>
+          ) : (
+            <View style={styles.footer}>
+              <View style={styles.footerDot} />
+              <Text style={styles.footerText}>{statusMessage}</Text>
+            </View>
+          )}
 
-        {runtime.phase === "failed" && serverDiagnostics ? (
-          <View style={styles.serverDiagnostics}>
-            <ServerConnectionPanel
-              canSave={false}
-              copy={serverConnectionPanelCopy(t)}
-              currentAddress={serverDiagnostics.currentApiBaseUrl}
-              saveAddress={() =>
-                Promise.reject(
-                  new Error("BOOTSTRAP_SERVER_SWITCH_SAFETY_UNAVAILABLE"),
-                )
-              }
-              testAddress={(address) => {
-                const controller = new AbortController();
-                serverProbe.current?.abort();
-                serverProbe.current = controller;
-                return serverDiagnostics.test(address, controller.signal);
+          {startupFailed && serverDiagnostics ? (
+            <View style={styles.serverDiagnostics}>
+              {/* 准备阶段只读：canSave 固定为 false，只能改候选地址并测试，不能保存。 */}
+              <ServerConnectionPanel
+                canSave={false}
+                copy={serverConnectionPanelCopy(t)}
+                currentAddress={serverDiagnostics.currentApiBaseUrl}
+                saveAddress={() =>
+                  Promise.reject(
+                    new Error("BOOTSTRAP_SERVER_SWITCH_SAFETY_UNAVAILABLE"),
+                  )
+                }
+                testAddress={(address) => {
+                  const controller = new AbortController();
+                  serverProbe.current?.abort();
+                  serverProbe.current = controller;
+                  return serverDiagnostics.test(address, controller.signal);
+                }}
+              />
+            </View>
+          ) : null}
+        </PosKeyboardAwareScrollView>
+
+        {/* 右栏只在启动失败时出现：上面是「修复更新」，下面三个按钮固定在底部，始终点得到。 */}
+        {startupFailed ? (
+          <View
+            style={[styles.actionColumn, compact && styles.actionColumnCompact]}
+          >
+            <ScrollView
+              contentContainerStyle={styles.recoveryContent}
+              showsVerticalScrollIndicator={false}
+              style={styles.recoveryScroll}
+            >
+              <StartupOtaRecoveryPanel
+                load={loadOtaRecovery}
+                onBusyChange={setOtaRecoveryBusy}
+              />
+            </ScrollView>
+            {canAbandonPendingActivation ? (
+              <PosButton
+                disabled={startupActionBusy}
+                label={
+                  abandoningPendingActivation
+                    ? t("bootstrap.abandoningPending")
+                    : t("bootstrap.abandonPending")
+                }
+                onPress={confirmAbandonPendingActivation}
+                sound="tap"
+                testID="bootstrap-abandon-pending-activation"
+                tone="danger"
+              />
+            ) : null}
+            {onOpenNetworkCheck ? (
+              <PosButton
+                icon="access-point-network"
+                label={t("bootstrap.networkCheck")}
+                onPress={onOpenNetworkCheck}
+                sound="navigate"
+                testID="bootstrap-network-check"
+              />
+            ) : null}
+            <PosButton
+              disabled={startupActionBusy}
+              icon="restart"
+              label={t("bootstrap.retry")}
+              loading={retryingStartup}
+              onPress={() => {
+                void retryStartup();
               }}
+              size="primary"
+              sound="tap"
+              testID="bootstrap-retry"
+              tone="primary"
             />
           </View>
         ) : null}
-
-        {runtime.phase === "failed" ? (
-          <StartupOtaRecoveryPanel
-            load={loadOtaRecovery}
-            onBusyChange={setOtaRecoveryBusy}
-          />
-        ) : null}
-
-        <View style={styles.footer}>
-          <View style={styles.footerDot} />
-          <View style={styles.footerCopy}>
-            <Text style={styles.footerText}>
-              {pendingActivationError ??
-                (runtime.phase === "failed"
-                  ? bootstrapErrorSummary(runtime.error, t)
-                  : t("bootstrap.footer"))}
-            </Text>
-            {runtime.phase === "failed" ? (
-              <View style={styles.footerActions}>
-                {canAbandonPendingActivation ? (
-                  <PosPressable
-                    accessibilityRole="button"
-                    accessibilityState={{
-                      disabled: startupActionBusy,
-                    }}
-                    disabled={startupActionBusy}
-                    onPress={confirmAbandonPendingActivation}
-                    sound="tap"
-                    style={({ pressed }) => [
-                      styles.abandonPendingButton,
-                      pressed && styles.retryButtonPressed,
-                      startupActionBusy && styles.retryButtonDisabled,
-                    ]}
-                    testID="bootstrap-abandon-pending-activation"
-                  >
-                    <Text style={styles.abandonPendingLabel}>
-                      {abandoningPendingActivation
-                        ? t("bootstrap.abandoningPending")
-                        : t("bootstrap.abandonPending")}
-                    </Text>
-                  </PosPressable>
-                ) : null}
-                {onOpenNetworkCheck ? (
-                  <PosPressable
-                    accessibilityRole="button"
-                    onPress={onOpenNetworkCheck}
-                    sound="navigate"
-                    style={({ pressed }) => [
-                      styles.networkCheckButton,
-                      pressed && styles.retryButtonPressed,
-                    ]}
-                    testID="bootstrap-network-check"
-                  >
-                    <Text style={styles.networkCheckLabel}>
-                      {t("bootstrap.networkCheck")}
-                    </Text>
-                  </PosPressable>
-                ) : null}
-                <PosPressable
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: startupActionBusy }}
-                  disabled={startupActionBusy}
-                  onPress={() => {
-                    void retryStartup();
-                  }}
-                  sound="tap"
-                  style={({ pressed }) => [
-                    styles.retryButton,
-                    pressed && styles.retryButtonPressed,
-                    startupActionBusy && styles.retryButtonDisabled,
-                  ]}
-                >
-                  <Text style={styles.retryLabel}>{t("bootstrap.retry")}</Text>
-                </PosPressable>
-              </View>
-            ) : null}
-          </View>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      </View>
+    </PosScreenFrame>
   );
 }
 
@@ -377,205 +441,140 @@ function bootstrapErrorSummary(
   return t("bootstrap.error.generic");
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-  },
+const styles = createPosStyles((colors) => ({
   page: {
-    flexGrow: 1,
-    paddingHorizontal: 48,
-    paddingVertical: 30,
-  },
-  pageCompact: {
-    paddingHorizontal: 28,
-    paddingVertical: 22,
-  },
-  brandRail: {
+    flex: 1,
     flexDirection: "row",
-    alignItems: "center",
+    gap: 18,
+    minHeight: 0,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  // 窄屏（分屏等）时左右两栏改为上下排，按钮仍固定在下方。
+  pageCompact: {
+    flexDirection: "column",
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  mainColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  mainContent: {
+    flexGrow: 1,
     gap: 14,
-  },
-  brandMark: {
-    borderRadius: 11,
-    height: 48,
-    width: 48,
-  },
-  brandName: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "800",
   },
   eyebrow: {
-    marginTop: 2,
-    color: posColors.orange,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.6,
-  },
-  hero: {
-    maxWidth: 760,
-    marginTop: 56,
-  },
-  orangeRule: {
-    width: 72,
-    height: 5,
-    marginBottom: 22,
-    backgroundColor: posColors.orange,
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 2,
   },
   title: {
-    color: posColors.ink,
-    fontSize: 44,
-    fontWeight: "800",
-    letterSpacing: -1.2,
-    lineHeight: 50,
+    color: colors.ink,
+    fontSize: 30,
+    fontWeight: "900",
+    marginTop: 4,
   },
   subtitle: {
-    maxWidth: 680,
-    marginTop: 18,
-    color: posColors.mutedInk,
-    fontSize: 18,
-    lineHeight: 28,
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    marginTop: 4,
   },
   cardGrid: {
+    gap: 12,
+  },
+  cardRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 16,
-    marginTop: 44,
-  },
-  cardGridCompact: {
-    marginTop: 30,
-  },
-  serverDiagnostics: {
-    marginTop: 20,
-    maxWidth: 720,
+    gap: 12,
   },
   card: {
-    minWidth: 220,
-    flex: 1,
-    maxWidth: 310,
-    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: "row",
     gap: 14,
+    minHeight: 92,
+    minWidth: 0,
     paddingHorizontal: 18,
     paddingVertical: 16,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: posColors.surface,
   },
-  iconFrame: {
-    width: 48,
-    height: 48,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iconReady: {
-    backgroundColor: posColors.greenSoft,
-  },
-  iconPending: {
-    backgroundColor: posColors.blueSoft,
+  cardDanger: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
   },
   cardCopy: {
     flex: 1,
+    minWidth: 0,
   },
   cardLabel: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "700",
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
   },
   cardState: {
-    marginTop: 4,
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: "800",
+    marginTop: 3,
+  },
+  errorBanner: {
+    alignItems: "center",
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  errorBannerText: {
+    color: colors.red,
+    flex: 1,
+    fontSize: 16,
     fontWeight: "700",
-  },
-  stateReady: {
-    color: posColors.green,
-  },
-  statePending: {
-    color: posColors.blue,
+    lineHeight: 22,
   },
   footer: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 9,
-    marginTop: "auto",
-    // 内容超出一屏时 auto 间距归零，保留固定留白避免贴住上方面板。
-    paddingTop: 20,
-  },
-  footerCopy: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
+    flexDirection: "row",
+    gap: 9,
   },
   footerDot: {
-    width: 7,
-    height: 7,
+    backgroundColor: colors.accent,
     borderRadius: 4,
-    backgroundColor: posColors.orange,
+    height: 8,
+    width: 8,
   },
   footerText: {
+    color: colors.mutedInk,
     flex: 1,
-    minWidth: 240,
-    color: posColors.mutedInk,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: "600",
-    letterSpacing: 0.4,
   },
-  footerActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-    gap: 10,
+  serverDiagnostics: {
+    // 内容不满一屏时贴底；超出一屏时 auto 间距归零，靠 mainContent 的 gap 留白。
+    marginTop: "auto",
   },
-  abandonPendingButton: {
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: posColors.red,
-    backgroundColor: posColors.surface,
+  actionColumn: {
+    gap: 12,
+    width: 360,
   },
-  abandonPendingLabel: {
-    color: posColors.red,
-    fontSize: 13,
-    fontWeight: "800",
+  actionColumnCompact: {
+    maxHeight: "55%",
+    width: "100%",
   },
-  networkCheckButton: {
-    minHeight: 40,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: posColors.blue,
-    backgroundColor: posColors.surface,
+  recoveryScroll: {
+    flex: 1,
+    minHeight: 0,
   },
-  networkCheckLabel: {
-    color: posColors.blue,
-    fontSize: 13,
-    fontWeight: "800",
+  recoveryContent: {
+    flexGrow: 1,
   },
-  retryButton: {
-    minHeight: 40,
-    minWidth: 112,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 18,
-    backgroundColor: posColors.ink,
-  },
-  // 任一启动动作进行中时按钮禁用，外观须同步变灰，避免误以为无响应。
-  retryButtonDisabled: {
-    opacity: 0.4,
-  },
-  retryButtonPressed: {
-    opacity: 0.78,
-  },
-  retryLabel: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-});
+}));

@@ -34,6 +34,7 @@ import {
   type UnifiedPaymentFacadeDependencies,
 } from "@/features/payments/ui";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type PaymentPresenterBinding = Readonly<{
   services: object;
@@ -78,6 +79,7 @@ const UNAVAILABLE_INSTALLMENT_LANE: UnifiedPaymentFacadeDependencies["installmen
 
 /** 只接受 sales route 生成的最小 checkout 上下文；支付事实仍由组合根复核。 */
 export default function PaymentRoute() {
+  usePosThemeVersion();
   const { dismissTo, push } = useRouter();
   const runtime = usePosRuntime();
   const { i18n } = useTranslation();

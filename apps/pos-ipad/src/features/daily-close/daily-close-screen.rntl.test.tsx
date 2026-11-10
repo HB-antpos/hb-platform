@@ -1,5 +1,10 @@
 import { describe, expect, it, jest } from "@jest/globals";
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import {
+  fireEvent,
+  render,
+  waitFor,
+  within,
+} from "@testing-library/react-native";
 import {
   Keyboard,
   Platform,
@@ -19,12 +24,15 @@ import {
 } from "./index";
 
 import type { DailyCloseArchive, DailyCloseSummary } from "@/core/contracts";
+import { posColors } from "@/ui/theme";
 
 let mockLanguage = "en";
 
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: mockLanguage, resolvedLanguage: mockLanguage },
+    // 页面外壳的顶栏用全局 t() 取状态文案，这里原样返回键即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -250,13 +258,25 @@ describe("DailyCloseScreen", () => {
     const screen = await render(<DailyCloseScreen presenter={presenter} />);
 
     expect(screen.getByText("Cash")).toBeTruthy();
-    expect(screen.getByText(/\$12\.00.*-\$2\.00.*\$10\.00/)).toBeTruthy();
+    // 付款方式表分三列：销售 / 退款 / 净额各占一格。
+    const cashRow = within(screen.getByTestId("daily-close-tender-cash"));
+    expect(cashRow.getByText("$12.00")).toBeTruthy();
+    expect(cashRow.getByText("-$2.00")).toBeTruthy();
+    expect(cashRow.getByText("$10.00")).toBeTruthy();
+    expect(screen.getByText("Sales")).toBeTruthy();
+    expect(screen.getByText("Refunds")).toBeTruthy();
+    expect(screen.getByText("Net")).toBeTruthy();
     // 汇总里单独显示现金进位，应有现金在其后。
     expect(screen.getByText("Cash rounding")).toBeTruthy();
     expect(screen.getByText("Expected cash")).toBeTruthy();
     expect(screen.getByTestId("daily-close-history-close-old")).toBeTruthy();
     expect(screen.queryByTestId("daily-close-save")).toBeNull();
     expect(screen.queryByTestId("daily-close-reprint")).toBeNull();
+    // 点钞区整体换成说明文字，不再出现面额输入框。
+    expect(
+      screen.getByText("View-only access: counting and saving are hidden."),
+    ).toBeTruthy();
+    expect(screen.queryAllByTestId(/^daily-close-count-/)).toHaveLength(0);
     await screen.unmount();
   });
 
@@ -271,10 +291,16 @@ describe("DailyCloseScreen", () => {
     );
     expect(screen.getByTestId("daily-close-installments")).toBeTruthy();
     expect(screen.getByText("Lay-by payments: 4")).toBeTruthy();
-    // 三种方式各一行：现金 20.00 / -5.00 / 15.00。
-    expect(screen.getByText(/\$20\.00.*-\$5\.00.*\$15\.00/)).toBeTruthy();
-    // 归档详情：笔数 + 分期净额（15 + 8 - 3 = 20.00）。
-    expect(screen.getByText("Lay-by: 4 payments · net $20.00")).toBeTruthy();
+    // 三种方式各一行：现金 20.00 / -5.00 / 15.00，各占一列。
+    const installmentCashRow = within(
+      screen.getByTestId("daily-close-installment-cash"),
+    );
+    expect(installmentCashRow.getByText("$20.00")).toBeTruthy();
+    expect(installmentCashRow.getByText("-$5.00")).toBeTruthy();
+    expect(installmentCashRow.getByText("$15.00")).toBeTruthy();
+    // 归档详情：左标签右数值，笔数 + 分期净额（15 + 8 - 3 = 20.00）。
+    expect(screen.getByText("Lay-by")).toBeTruthy();
+    expect(screen.getByText("4 payments · net $20.00")).toBeTruthy();
     await screen.unmount();
 
     const plain = new ScreenPresenter({ permissions: viewOnly });
@@ -282,6 +308,84 @@ describe("DailyCloseScreen", () => {
     expect(plainScreen.queryByTestId("daily-close-installments")).toBeNull();
     expect(plainScreen.queryByText(/Lay-by/)).toBeNull();
     await plainScreen.unmount();
+  });
+
+  it("新布局：面额格一行 4 个、张数框 74×52，保存键 72 高且固定在滚动区之外", async () => {
+    const presenter = new ScreenPresenter();
+    const screen = await render(<DailyCloseScreen presenter={presenter} />);
+
+    const firstInput = screen.getByTestId("daily-close-count-10000");
+    const inputStyle = StyleSheet.flatten(firstInput.props.style);
+    expect(inputStyle.width).toBe(74);
+    expect(inputStyle.height).toBe(52);
+    // 面额格 72 高，外层按 25% 宽度排成一行 4 个。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("daily-close-denomination-box-10000").props.style,
+      ).height,
+    ).toBe(72);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("daily-close-denomination-10000").props.style,
+      ).width,
+    ).toBe("25%");
+    // 聚焦的面额格用主操作色描边，失焦后恢复。
+    await fireEvent(firstInput, "focus", { target: 1 });
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("daily-close-denomination-box-10000").props.style,
+      ).borderColor,
+    ).toBe(posColors.accent);
+    await fireEvent(firstInput, "blur", { target: 1 });
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("daily-close-denomination-box-10000").props.style,
+      ).borderColor,
+    ).toBe(posColors.border);
+
+    const save = screen.getByTestId("daily-close-save");
+    const saveStyle = StyleSheet.flatten(save.props.style);
+    expect(saveStyle.minHeight).toBe(72);
+    expect(saveStyle.width).toBe(270);
+    // 保存栏不在汇总滚动区里，内容再长也始终可见；面额输入框仍在滚动区内。
+    const summaryScroll = within(
+      screen.getByTestId("daily-close-summary-scroll"),
+    );
+    expect(summaryScroll.queryByTestId("daily-close-save")).toBeNull();
+    expect(summaryScroll.getByTestId("daily-close-count-10000")).toBeTruthy();
+
+    expect(
+      StyleSheet.flatten(screen.getByTestId("daily-close-reprint").props.style)
+        .minHeight,
+    ).toBe(64);
+    // 实点现金与差额分开显示：未点钞时差额等于负的应有现金。
+    expect(screen.getByText("Counted cash")).toBeTruthy();
+    expect(screen.getAllByText("Variance").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("-$10.00").length).toBeGreaterThan(0);
+    await screen.unmount();
+  });
+
+  it("已选中「点钞」时再点一次仍会重新聚焦第一个面额，不调用历史", async () => {
+    const presenter = new ScreenPresenter();
+    const focusInput = jest.spyOn(TextInput.prototype, "focus");
+    const screen = await render(<DailyCloseScreen presenter={presenter} />);
+
+    const count = screen.getByTestId("daily-close-show-count");
+    expect(count.props.accessibilityState.checked).toBe(true);
+    focusInput.mockClear();
+    await fireEvent.press(count);
+    expect(focusInput).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByTestId("daily-close-show-count").props.accessibilityState
+        .checked,
+    ).toBe(true);
+    expect(
+      screen.getByTestId("daily-close-show-history").props.accessibilityState
+        .checked,
+    ).toBe(false);
+
+    await screen.unmount();
+    focusInput.mockRestore();
   });
 });
 

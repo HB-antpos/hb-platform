@@ -18,8 +18,29 @@ import {
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "en", resolvedLanguage: "en" },
+    // 页面外壳的顶栏状态条会调用 t()；这里原样返回键名即可
+    t: (key: string) => key,
   }),
 }));
+
+// 窗口宽度：默认沿用 jest 环境的值（750，走窄屏堆叠）；
+// 需要横屏并排时在用例里设置 mockWindowWidth。
+let mockWindowWidth: number | null = null;
+
+jest.mock("react-native/Libraries/Utilities/useWindowDimensions", () => {
+  const actual = jest.requireActual<{
+    default: () => { fontScale: number; height: number; scale: number; width: number };
+  }>("react-native/Libraries/Utilities/useWindowDimensions");
+  return {
+    __esModule: true,
+    default: () => {
+      const dimensions = actual.default();
+      return mockWindowWidth === null
+        ? dimensions
+        : { ...dimensions, height: 820, width: mockWindowWidth };
+    },
+  };
+});
 
 const originalSummary: CatalogSummary = {
   snapshotId: "snapshot-ui-1",
@@ -105,13 +126,14 @@ async function renderInitialized(
 }
 
 afterEach(() => {
+  mockWindowWidth = null;
   for (const presenter of presenters.splice(0)) presenter.destroy();
   jest.restoreAllMocks();
   jest.useRealTimers();
 });
 
 describe("CatalogMaintenanceScreen", () => {
-  it("中文显示本地目录业务摘要、四步真实进度和 44pt 主操作", async () => {
+  it("中文显示本地目录业务摘要、四步真实进度和 88pt 主操作", async () => {
     let release!: () => void;
     const port = new ScreenCatalogMaintenancePort();
     port.hold = new Promise<void>((resolve) => {
@@ -133,6 +155,14 @@ describe("CatalogMaintenanceScreen", () => {
         screen.getByTestId("catalog-maintenance-refresh").props.style,
       ).minHeight,
     ).toBeGreaterThanOrEqual(CATALOG_MAINTENANCE_MIN_TOUCH_TARGET);
+    // 新布局：唯一的主按钮高 88，文案为「立即刷新目录」
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("catalog-maintenance-refresh").props.style,
+      ).minHeight,
+    ).toBe(88);
+    expect(screen.getByText("立即刷新目录")).toBeTruthy();
+    expect(screen.getByText("旧目录仍可继续使用。")).toBeTruthy();
 
     await act(async () => {
       fireEvent.press(screen.getByTestId("catalog-maintenance-refresh"));
@@ -147,15 +177,40 @@ describe("CatalogMaintenanceScreen", () => {
     expect(screen.getByText("下载并校验商品")).toBeTruthy();
     expect(screen.getByText("同步促销")).toBeTruthy();
     expect(screen.getByText("安全激活")).toBeTruthy();
-    expect(screen.getByText("总进度：37.5%")).toBeTruthy();
+    // 新布局：总进度是进度条旁的大号百分比，完整的「总进度：x%」留给读屏
+    const overallPercent = screen.getByTestId(
+      "catalog-maintenance-overall-percent",
+    );
+    expect(overallPercent.props.children).toEqual(["37.5", "%"]);
+    expect(overallPercent.props.accessibilityLabel).toBe("总进度：37.5%");
+    expect(StyleSheet.flatten(overallPercent.props.style).fontSize).toBe(26);
+    const overallProgress = screen.getByTestId(
+      "catalog-maintenance-overall-progress",
+    );
+    expect(overallProgress.props.accessibilityValue).toEqual({
+      max: 100,
+      min: 0,
+      now: 37.5,
+    });
+    expect(StyleSheet.flatten(overallProgress.props.style).height).toBe(22);
+    // 当前步骤标签与四个步骤逐行的百分比
+    expect(screen.getByText("当前步骤：下载并校验商品")).toBeTruthy();
     expect(
-      screen.getByTestId("catalog-maintenance-overall-progress").props
-        .accessibilityValue,
-    ).toEqual({ max: 100, min: 0, now: 37.5 });
+      screen.getByTestId("catalog-maintenance-step-prepare").props
+        .accessibilityLabel,
+    ).toBe("准备目录，已完成 100%");
+    expect(
+      screen.getByTestId("catalog-maintenance-step-products").props
+        .accessibilityLabel,
+    ).toBe("下载并校验商品，已完成 50%");
+    expect(screen.getByText("21 / 42")).toBeTruthy();
     expect(
       screen.getByTestId("catalog-maintenance-refresh").props
         .accessibilityState,
     ).toEqual({ disabled: true });
+    expect(screen.getByText("正在刷新目录…")).toBeTruthy();
+    // 刷新过程中「旧目录仍可继续使用」一直显示
+    expect(screen.getByText("旧目录仍可继续使用。")).toBeTruthy();
     expect(screen.getByText("2026.07.28.1")).toBeTruthy();
 
     await act(async () => {
@@ -207,14 +262,16 @@ describe("CatalogMaintenanceScreen", () => {
     expect(screen.getByTestId("catalog-maintenance-preparing")).toBeTruthy();
     expect(screen.getByText("已用时：00:00")).toBeTruthy();
     expect(screen.queryByTestId("catalog-maintenance-overall-progress")).toBeNull();
-    expect(screen.queryByText("总进度：0%")).toBeNull();
+    expect(screen.queryByTestId("catalog-maintenance-overall-percent")).toBeNull();
+    expect(screen.queryByLabelText("总进度：0%")).toBeNull();
 
     await act(async () => {
       jest.advanceTimersByTime(16_000);
     });
     expect(screen.getByText("已用时：00:16")).toBeTruthy();
     expect(screen.queryByTestId("catalog-maintenance-overall-progress")).toBeNull();
-    expect(screen.queryByText("总进度：0%")).toBeNull();
+    expect(screen.queryByTestId("catalog-maintenance-overall-percent")).toBeNull();
+    expect(screen.queryByLabelText("总进度：0%")).toBeNull();
 
     await act(async () => {
       port.progressListener?.({
@@ -235,7 +292,8 @@ describe("CatalogMaintenanceScreen", () => {
     expect(screen.queryByTestId("catalog-maintenance-preparing")).toBeNull();
     expect(screen.getByText("500 / 2000 · 1 / 4 页")).toBeTruthy();
     expect(screen.getByTestId("catalog-maintenance-overall-progress")).toBeTruthy();
-    expect(screen.getByText("总进度：31.25%")).toBeTruthy();
+    expect(screen.getByLabelText("总进度：31.25%")).toBeTruthy();
+    expect(screen.getByText("31.25%")).toBeTruthy();
 
     await act(async () => {
       release();
@@ -304,6 +362,46 @@ describe("CatalogMaintenanceScreen", () => {
       screen.getByTestId("catalog-maintenance-refresh").props
         .accessibilityState,
     ).toEqual({ disabled: false });
+  });
+
+  it("横屏左右并排（右侧说明栏固定 380 宽），窄屏改为上下堆叠", async () => {
+    mockWindowWidth = 1180;
+    const wide = await renderInitialized(
+      createPresenter(new ScreenCatalogMaintenancePort()),
+      "zh",
+    );
+    expect(
+      StyleSheet.flatten(
+        wide.getByTestId("catalog-maintenance-workspace").props.style,
+      ).flexDirection,
+    ).toBe("row");
+    expect(
+      StyleSheet.flatten(
+        wide.getByTestId("catalog-maintenance-side-panel").props.style,
+      ).width,
+    ).toBe(380);
+    // 四项指标都在同一张摘要卡里
+    for (const label of ["目录版本", "商品数", "启用时间", "快照 ID"]) {
+      expect(wide.getByText(label)).toBeTruthy();
+    }
+    await wide.unmount();
+
+    mockWindowWidth = 820;
+    const compact = await renderInitialized(
+      createPresenter(new ScreenCatalogMaintenancePort()),
+      "zh",
+    );
+    expect(
+      StyleSheet.flatten(
+        compact.getByTestId("catalog-maintenance-workspace").props.style,
+      ).flexDirection,
+    ).toBe("column");
+    expect(
+      StyleSheet.flatten(
+        compact.getByTestId("catalog-maintenance-side-panel").props.style,
+      ).width,
+    ).toBe("100%");
+    await compact.unmount();
   });
 
   it("可选返回按钮保留至少 44pt 触控目标", async () => {

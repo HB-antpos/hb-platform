@@ -51,11 +51,18 @@ import {
 } from "@/core/db/pos-settings-repository";
 import { ZellerTerminalBoundaryContext } from "@/features/zeller-terminal/zeller-terminal-boundary";
 import { usePosSound } from "@/ui/feedback/pos-sound-context";
-import { posColors } from "@/ui/theme";
+import {
+  applyPosTheme,
+  DEFAULT_POS_THEME_ID,
+  getActivePosThemeId,
+  posColors,
+} from "@/ui/theme";
 
+// 页面外壳的顶栏状态条用到 t()：这里原样返回键名即可，设置页自己的文案走 settings-copy。
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "en", resolvedLanguage: "en" },
+    t: (key: string) => key,
   }),
 }));
 
@@ -2830,6 +2837,250 @@ describe("SettingsScreen", () => {
 
 });
 
+describe("SettingsScreen 新布局", () => {
+  afterEach(async () => {
+    // 主题是全局状态，切过之后要还原，避免影响其他用例。
+    await act(async () => {
+      applyPosTheme(DEFAULT_POS_THEME_ID);
+    });
+  });
+
+  it("系统与目录提供界面主题卡片：四个主题可选，只有查看权限也能切换", async () => {
+    const presenter = new SettingsPresenter({
+      permissions: [SETTINGS_VIEW_PERMISSION],
+      port: new ScreenSettingsPort(),
+    });
+    presenters.push(presenter);
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-pane-content-general");
+
+    expect(screen.getByTestId("settings-theme-card")).toBeTruthy();
+    expect(screen.getByText("界面主题")).toBeTruthy();
+    expect(
+      screen.getByText("点一下立即生效，选择保存在这台 iPad 上。"),
+    ).toBeTruthy();
+    for (const themeId of ["classic", "ocean", "forest", "dark"]) {
+      const option = screen.getByTestId(`settings-theme-${themeId}`);
+      expect(option.props.accessibilityState.disabled).not.toBe(true);
+    }
+    expect(
+      screen.getByTestId("settings-theme-classic").props.accessibilityState
+        .checked,
+    ).toBe(true);
+
+    await fireEvent.press(screen.getByTestId("settings-theme-ocean"));
+    expect(getActivePosThemeId()).toBe("ocean");
+    expect(
+      screen.getByTestId("settings-theme-ocean").props.accessibilityState
+        .checked,
+    ).toBe(true);
+    expect(
+      screen.getByTestId("settings-theme-classic").props.accessibilityState
+        .checked,
+    ).toBe(false);
+  });
+
+  it("主题卡片的标题与说明按界面语言显示", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="en" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-pane-content-general");
+
+    expect(screen.getByText("Appearance")).toBeTruthy();
+    expect(screen.queryByText("界面主题")).toBeNull();
+    expect(screen.getByText("Ocean Blue")).toBeTruthy();
+  });
+
+  it("分区目录每项 66 高，当前分区标记为选中", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-pane-content-general");
+
+    for (const pane of ["general", "payments", "peripherals", "device", "hardware"]) {
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId(`settings-nav-${pane}`).props.style,
+        ).minHeight,
+      ).toBe(66);
+    }
+    expect(
+      screen.getByTestId("settings-nav-general").props.accessibilityState
+        .selected,
+    ).toBe(true);
+    await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+    expect(
+      screen.getByTestId("settings-nav-peripherals").props.accessibilityState
+        .selected,
+    ).toBe(true);
+    expect(
+      screen.getByTestId("settings-nav-general").props.accessibilityState
+        .selected,
+    ).toBe(false);
+  });
+
+  it("外设：打印与钱箱用开关，纸宽与小票语言用分段按钮，都只改草稿", async () => {
+    const port = new ScreenSettingsPort();
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+    await screen.findByTestId("settings-pane-content-peripherals");
+
+    const before = presenter.getState().printer;
+    await fireEvent(
+      screen.getByTestId("settings-printer-enabled"),
+      "valueChange",
+      !before.printEnabled,
+    );
+    await fireEvent(
+      screen.getByTestId("settings-drawer-enabled"),
+      "valueChange",
+      !before.drawerEnabled,
+    );
+    expect(presenter.getState().printer.printEnabled).toBe(!before.printEnabled);
+    expect(presenter.getState().printer.drawerEnabled).toBe(
+      !before.drawerEnabled,
+    );
+
+    expect(
+      screen.getByTestId("settings-printer-paper-80mm").props
+        .accessibilityState.checked,
+    ).toBe(before.paper === "80mm");
+    await fireEvent.press(screen.getByTestId("settings-printer-paper-58mm"));
+    expect(presenter.getState().printer.paper).toBe("58mm");
+    expect(
+      screen.getByTestId("settings-printer-paper-58mm").props
+        .accessibilityState.checked,
+    ).toBe(true);
+
+    await fireEvent.press(screen.getByTestId("settings-printer-locale-zh-CN"));
+    expect(presenter.getState().printer.locale).toBe("zh-CN");
+    await fireEvent.press(screen.getByTestId("settings-printer-locale-en"));
+    expect(presenter.getState().printer.locale).toBe("en");
+
+    // 开关和分段只改草稿，点「保存」才写入。
+    expect(port.savedPrinterSettings).toHaveLength(0);
+    await fireEvent.press(screen.getByTestId("settings-printer-save"));
+    await waitFor(() => expect(port.savedPrinterSettings).toHaveLength(1));
+    expect(port.savedPrinterSettings[0]?.paper).toBe("58mm");
+  });
+
+  it("外设：小票打印机标题旁显示连接状态，客显启用改成开关", async () => {
+    const port = new ScreenSettingsPort();
+    const current = snapshot();
+    port.snapshotValue = {
+      ...current,
+      hardware: { ...current.hardware, printerStatus: "disconnected" },
+    };
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await fireEvent.press(screen.getByTestId("settings-nav-peripherals"));
+    await screen.findByTestId("settings-pane-content-peripherals");
+
+    expect(
+      within(screen.getByTestId("settings-printer-status")).getByText(
+        "未连接",
+      ),
+    ).toBeTruthy();
+
+    const displaySwitch = screen.getByTestId("settings-display-enabled");
+    expect(displaySwitch.props.accessibilityRole).toBe("switch");
+    expect(displaySwitch.props.value).toBe(
+      presenter.getState().externalDisplay.enabled,
+    );
+  });
+
+  it("支付设置：刷卡终端与环境是分段按钮，启用与保存固定在滚动区外", async () => {
+    const port = new ScreenSettingsPort();
+    port.linklySetup.lineManagementSupported = true;
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    await screen.findByTestId("settings-pane-content-payments");
+
+    // 当前查看的页签用 selected 标出；环境二选一用 radio 的 checked。
+    expect(
+      screen.getByTestId("settings-payment-tab-square").props
+        .accessibilityState.selected,
+    ).toBe(true);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("settings-payment-tab-square").props.style,
+      ).minHeight,
+    ).toBe(56);
+    expect(
+      screen.getByTestId("settings-square-production").props
+        .accessibilityState.checked,
+    ).toBe(true);
+    await fireEvent.press(screen.getByTestId("settings-square-sandbox"));
+    expect(
+      screen.getByTestId("settings-square-sandbox").props.accessibilityState
+        .checked,
+    ).toBe(true);
+
+    const scroll = within(screen.getByTestId("settings-content-scroll"));
+    expect(scroll.getByTestId("settings-payment-toolbar")).toBeTruthy();
+    expect(scroll.queryByTestId("settings-payment-save")).toBeNull();
+    expect(scroll.queryByTestId("settings-payment-provider-square")).toBeNull();
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("settings-payment-save").props.style,
+      ).minHeight,
+    ).toBe(64);
+  });
+
+  it("危险操作按钮用红色浅底，保存支付终端选择是唯一的主按钮", async () => {
+    const presenter = createPresenter(new ScreenSettingsPort());
+    await presenter.load();
+    const screen = await render(
+      <SettingsScreen locale="zh" presenter={presenter} />,
+    );
+    await screen.findByTestId("settings-pane-content-general");
+
+    for (const testID of [
+      "settings-api-request-change",
+      "settings-catalog-reset",
+      "settings-update-restart",
+    ]) {
+      const style = StyleSheet.flatten(screen.getByTestId(testID).props.style);
+      expect(style.minHeight).toBe(56);
+      expect(style.borderColor).toBe(
+        screen.getByTestId(testID).props.accessibilityState.disabled
+          ? posColors.disabledBorder
+          : posColors.red,
+      );
+    }
+
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("settings-payment-save").props.style,
+      ).backgroundColor,
+    ).toBe(posColors.accent);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("settings-payment-methods-save").props.style,
+      ).backgroundColor,
+    ).not.toBe(posColors.accent);
+  });
+});
+
 describe("SettingsScreen 收银入口（线路）", () => {
   it("运行时未接线（不传 apiEntry）时不显示该设置", async () => {
     const presenter = createPresenter(new ScreenSettingsPort());
@@ -2857,7 +3108,7 @@ describe("SettingsScreen 收银入口（线路）", () => {
     ).toBeTruthy();
     expect(
       screen.getByTestId("settings-api-entry-auto").props.accessibilityState,
-    ).toMatchObject({ selected: true });
+    ).toMatchObject({ checked: true });
     expect(screen.queryByTestId("settings-api-entry-fallback")).toBeNull();
   });
 
@@ -2879,7 +3130,7 @@ describe("SettingsScreen 收银入口（线路）", () => {
     expect(screen.getByText("本机手动指定")).toBeTruthy();
     expect(
       screen.getByTestId("settings-api-entry-direct").props.accessibilityState,
-    ).toMatchObject({ selected: true });
+    ).toMatchObject({ checked: true });
 
     // 后台下发了别的线路：本机手动选择不变。
     await act(async () => {
@@ -2893,7 +3144,7 @@ describe("SettingsScreen 收银入口（线路）", () => {
     expect(screen.getByText("自动：后台指定为 EdgeOne")).toBeTruthy();
     expect(
       screen.getByTestId("settings-api-entry-auto").props.accessibilityState,
-    ).toMatchObject({ selected: true });
+    ).toMatchObject({ checked: true });
   });
 
   it("首选线路不通时显示已临时切到备用线路", async () => {

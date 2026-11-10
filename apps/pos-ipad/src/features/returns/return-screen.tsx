@@ -1,13 +1,7 @@
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 
 import {
   resolveReturnLocale,
@@ -21,14 +15,34 @@ import {
   type ReturnPresenterLine,
 } from "@hb/pos-domain/features/returns/return-presenter";
 
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
+import { PosPill } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosSegmented } from "@/ui/controls/pos-segmented";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  usePosThemeVersion,
+  type PosPalette,
+} from "@/ui/theme";
 
 export const RETURN_MIN_TOUCH_TARGET = 44;
+
+/** 退款方式大块的图标；颜色只存色名，渲染时再按当前主题取色。 */
+const RETURN_METHOD_ICON: Record<
+  ReturnTenderMethod,
+  Readonly<{ icon: PosIconName; color: keyof PosPalette }>
+> = {
+  card: { icon: "credit-card-outline", color: "blue" },
+  cash: { icon: "cash", color: "green" },
+  voucher: { icon: "wallet-giftcard", color: "yellow" },
+  installment: { icon: "calendar-clock-outline", color: "ink" },
+};
 
 type ReturnScreenProps = Readonly<{
   presenter: ReturnPresenter;
@@ -43,6 +57,7 @@ export function ReturnScreen({
   initialReceiptQuery,
   onBack,
 }: ReturnScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -84,6 +99,8 @@ export function ReturnScreen({
   if (state.phase === "submitting") {
     return (
       <StatusPage
+        pageSubtitle={t("subtitle")}
+        pageTitle={t("title")}
         hint={t("status.waitingHint")}
         testID="return-waiting"
         title={t("status.waitingTitle")}
@@ -98,6 +115,8 @@ export function ReturnScreen({
         busy={state.busy}
         error={state.errorCode ? errorText(t, state.errorCode, state.requiredVoucherRefundCents) : null}
         hint={t("status.unknownHint")}
+        pageSubtitle={t("subtitle")}
+        pageTitle={t("title")}
         onAction={() => void presenter.recoverUnknown()}
         testID="return-unknown"
         title={t("status.unknownTitle")}
@@ -124,6 +143,8 @@ export function ReturnScreen({
           order: state.result.returnOrderSummary,
         })}
         onAction={() => presenter.reset()}
+        pageSubtitle={t("subtitle")}
+        pageTitle={t("title")}
         secondary={t("status.successAmount", {
           amount: formatAud(state.result.refundAmountCents, locale),
         })}
@@ -140,6 +161,8 @@ export function ReturnScreen({
         error={state.errorCode ? errorText(t, state.errorCode, state.requiredVoucherRefundCents) : null}
         hint={t("status.failedHint")}
         onAction={() => presenter.reset()}
+        pageSubtitle={t("subtitle")}
+        pageTitle={t("title")}
         testID="return-failed"
         title={t("status.failedTitle")}
         tone="danger"
@@ -163,108 +186,127 @@ export function ReturnScreen({
           ]),
         );
 
+  // 只有可原路退回的原支付方式才标「原支付方式」；无小票退货没有原支付。
+  const originalMethods = new Set<ReturnTenderMethod>(
+    state.mode === "receipt"
+      ? state.capacities
+          .filter((capacity) => capacity.originalRefundAvailable)
+          .map((capacity) => capacity.method)
+      : [],
+  );
+  const submitReceiptQuery = () => {
+    void presenter.loadReceipt(orderQuery).then((ok) => {
+      if (ok) setOrderQuery("");
+    });
+  };
+  const submitProductQuery = () => {
+    void presenter.addNoReceiptProduct(productQuery).then((ok) => {
+      if (ok) setProductQuery("");
+    });
+  };
+
   return (
-    <SafeAreaView style={styles.safeArea} testID="return-screen">
-      <View style={styles.header}>
-        <View style={styles.headerIdentity}>
-          <Text style={styles.title}>{t("title")}</Text>
-          <Text style={styles.subtitle}>{t("subtitle")}</Text>
-        </View>
-        {onBack ? (
-          <ActionButton
-            label={t("action.back")}
-            onPress={onBack}
-            sound="navigate"
-            testID="return-back"
-            tone="quiet"
-          />
-        ) : null}
-      </View>
-
-      <View style={styles.modeTabs}>
-        <ModeTab
-          active={state.mode === "receipt"}
-          disabled={state.busy}
-          label={t("mode.receipt")}
-          onPress={() => presenter.reset()}
-          testID="return-mode-receipt"
+    <PosScreenFrame
+      active="returns"
+      header={
+        <PosPageHeader
+          actions={
+            // 模式切换放在页头右侧：当前是哪种退货一眼可见。
+            <PosSegmented
+              disabled={state.busy}
+              onChange={(mode) => {
+                if (mode === "receipt") presenter.reset();
+                else presenter.beginNoReceipt();
+              }}
+              // 与改版前的页签一致：再点一次当前模式 = 清空并重新开始这种退货。
+              onReselect={(mode) => {
+                if (mode === "receipt") presenter.reset();
+                else presenter.beginNoReceipt();
+              }}
+              options={[
+                {
+                  icon: "receipt-text-outline",
+                  label: t("mode.receipt"),
+                  testID: "return-mode-receipt",
+                  value: "receipt",
+                },
+                {
+                  icon: "receipt-text-remove-outline",
+                  label: t("mode.noReceipt"),
+                  testID: "return-mode-no-receipt",
+                  value: "no-receipt",
+                },
+              ]}
+              style={styles.modeSwitch}
+              value={state.mode}
+            />
+          }
+          backLabel={t("action.back")}
+          backTestID="return-back"
+          onBack={onBack}
+          subtitle={t("subtitle")}
+          title={t("title")}
         />
-        <ModeTab
-          active={state.mode === "no-receipt"}
-          disabled={state.busy}
-          label={t("mode.noReceipt")}
-          onPress={() => presenter.beginNoReceipt()}
-          testID="return-mode-no-receipt"
-        />
-      </View>
-
+      }
+      testID="return-screen"
+    >
       <View style={styles.workspace}>
+        {/* 左栏：查单 → 选商品。 */}
         <View style={styles.mainColumn}>
           <PosKeyboardAwareScrollView
             style={styles.editorScroll}
             testID="return-editor-keyboard-scroll"
           >
             {state.mode === "receipt" ? (
-              <View style={styles.lookupCard}>
+              <View style={styles.lookupRow}>
                 <LabeledInput
                   editable={!state.busy}
+                  fill
+                  hideLabel
+                  icon="barcode-scan"
                   label={t("search.orderLabel")}
                   onChangeText={setOrderQuery}
-                  onSubmitEditing={() => {
-                    void presenter.loadReceipt(orderQuery).then((ok) => {
-                      if (ok) setOrderQuery("");
-                    });
-                  }}
+                  onSubmitEditing={submitReceiptQuery}
                   placeholder={t("search.orderPlaceholder")}
                   testID="return-order-query"
                   value={orderQuery}
                 />
-                <ActionButton
+                <PosButton
                   disabled={state.busy}
+                  icon="magnify"
                   label={t("action.search")}
-                  onPress={() => {
-                    void presenter.loadReceipt(orderQuery).then((ok) => {
-                      if (ok) setOrderQuery("");
-                    });
-                  }}
+                  onPress={submitReceiptQuery}
+                  style={styles.lookupButton}
                   testID="return-order-search"
                 />
               </View>
             ) : (
               <View style={styles.noReceiptPanel}>
-                <View style={styles.lookupCard}>
+                <View style={styles.lookupRow}>
                   <LabeledInput
                     editable={!state.busy}
+                    fill
+                    icon="barcode-scan"
                     label={t("search.productLabel")}
                     onChangeText={setProductQuery}
-                    onSubmitEditing={() => {
-                      void presenter
-                        .addNoReceiptProduct(productQuery)
-                        .then((ok) => {
-                          if (ok) setProductQuery("");
-                        });
-                    }}
+                    onSubmitEditing={submitProductQuery}
                     placeholder={t("search.productPlaceholder")}
                     testID="return-product-query"
                     value={productQuery}
                   />
-                  <ActionButton
+                  <PosButton
                     disabled={state.busy}
+                    icon="plus"
                     label={t("action.addProduct")}
-                    onPress={() => {
-                      void presenter
-                        .addNoReceiptProduct(productQuery)
-                        .then((ok) => {
-                          if (ok) setProductQuery("");
-                        });
-                    }}
+                    onPress={submitProductQuery}
+                    style={styles.lookupButton}
                     testID="return-product-add"
-                    tone="secondary"
                   />
                 </View>
-                <View style={styles.openItemRow}>
+                <View style={styles.lookupRow}>
                   <LabeledInput
                     editable={!state.busy}
+                    fill
                     label={t("openItem.nameLabel")}
                     onChangeText={setOpenItemName}
                     placeholder={t("openItem.namePlaceholder")}
@@ -282,8 +324,9 @@ export function ReturnScreen({
                       value={openItemAmount}
                     />
                   </View>
-                  <ActionButton
+                  <PosButton
                     disabled={state.busy}
+                    icon="plus"
                     label={t("action.addOpenItem")}
                     onPress={() => {
                       const cents = parsePositiveAudCents(openItemAmount);
@@ -299,8 +342,8 @@ export function ReturnScreen({
                           }
                         });
                     }}
+                    style={styles.lookupButton}
                     testID="return-open-item-add"
-                    tone="secondary"
                   />
                 </View>
               </View>
@@ -309,37 +352,51 @@ export function ReturnScreen({
 
           {state.orderSummary ? (
             <View style={styles.orderBanner} testID="return-order-summary">
-              <Text style={styles.orderTitle}>
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.green}
+                name="check-decagram-outline"
+                size={24}
+              />
+              <Text numberOfLines={2} style={styles.orderTitle}>
                 {`${t("order.summary", { order: state.orderSummary })}${formatOrderMeta(
                     state.orderSoldAtIso,
                     state.orderCashierName,
                   )}`}
               </Text>
-              <Text style={styles.orderSource}>
-                {t(
+              <PosPill
+                label={t(
                   state.loadedFrom === "remote"
                     ? "order.remote"
                     : "order.local",
                 )}
-              </Text>
+                style={styles.orderSourcePill}
+                tone={state.loadedFrom === "remote" ? "good" : "info"}
+              />
             </View>
           ) : null}
           {state.returnRecordsMayBeStale ? (
-            <Text style={styles.warning} testID="return-stale-warning">
-              {t("order.stale")}
-            </Text>
+            <Notice
+              icon="alert-outline"
+              testID="return-stale-warning"
+              text={t("order.stale")}
+              tone="warning"
+            />
           ) : null}
           {state.errorCode ? (
-            <Text style={styles.errorNotice} testID="return-error">
-              {errorText(t, state.errorCode, state.requiredVoucherRefundCents)}
-            </Text>
+            <Notice
+              icon="alert-circle-outline"
+              testID="return-error"
+              text={errorText(t, state.errorCode, state.requiredVoucherRefundCents)}
+              tone="danger"
+            />
           ) : null}
 
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t("lines.title")}</Text>
+            <Text style={styles.sectionLabel}>{t("lines.title")}</Text>
             {state.phase === "loading" ? (
               <ActivityIndicator
-                color={posColors.orange}
+                color={posColors.accent}
                 testID="return-loading"
               />
             ) : null}
@@ -361,78 +418,122 @@ export function ReturnScreen({
                 />
               ))
             ) : (
-              <Text style={styles.emptyText}>{t("lines.empty")}</Text>
+              <View style={styles.emptyLines}>
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={posColors.mutedInk}
+                  name="receipt-text-outline"
+                  size={44}
+                />
+                <Text style={styles.emptyText}>{t("lines.empty")}</Text>
+              </View>
             )}
           </ScrollView>
         </View>
 
-        <View style={styles.summaryColumn}>
-          <Text style={styles.sectionTitle}>{t("capacity.title")}</Text>
-          {state.mode === "no-receipt" ? (
-            <Text style={styles.capacityHint}>{t("capacity.noReceipt")}</Text>
-          ) : (
-            state.capacities.map((capacity) => (
-              <Text
-                key={capacity.method}
-                style={styles.capacityRow}
-                testID={`return-capacity-${capacity.method}`}
-              >
-                {t(
-                  capacity.originalRefundAvailable
-                    ? "capacity.remaining"
-                    : "capacity.substituteOnly",
-                  {
-                    method: t(`method.${capacity.method}`),
-                    amount: formatAud(capacity.remainingCents, locale),
-                  },
-                )}
-              </Text>
-            ))
-          )}
+        {/* 右栏：怎么退。顺序与操作顺序一致：可退容量 → 退款计划 → 确认。 */}
+        <View style={styles.sideColumn}>
+          <View style={styles.card}>
+            <Text style={styles.sectionLabel}>{t("capacity.title")}</Text>
+            {state.mode === "no-receipt" ? (
+              <Text style={styles.capacityHint}>{t("capacity.noReceipt")}</Text>
+            ) : (
+              state.capacities.map((capacity) => (
+                <Text
+                  key={capacity.method}
+                  style={styles.capacityRow}
+                  testID={`return-capacity-${capacity.method}`}
+                >
+                  {t(
+                    capacity.originalRefundAvailable
+                      ? "capacity.remaining"
+                      : "capacity.substituteOnly",
+                    {
+                      method: t(`method.${capacity.method}`),
+                      amount: formatAud(capacity.remainingCents, locale),
+                    },
+                  )}
+                </Text>
+              ))
+            )}
+          </View>
 
-          <View style={styles.divider} />
-          <Text style={styles.sectionTitle}>{t("summary.title")}</Text>
-          <Text style={styles.summaryLabel}>{t("summary.selected")}</Text>
-          <Text style={styles.total} testID="return-selected-total">
-            {formatAud(state.selectedTotalCents, locale)}
-          </Text>
-          <Text style={styles.summaryLabel}>{t("summary.method")}</Text>
-          <View style={styles.methodGrid}>
-            {methods.map((method) => (
-              <MethodButton
-                active={state.preferredMethod === method}
-                key={method}
-                label={t(`method.${method}`)}
-                onPress={() => presenter.selectMethod(method)}
-                testID={`return-method-${method}`}
-              />
-            ))}
+          <View style={[styles.card, styles.planCard]}>
+            {/* 退款方式较多或带代金券提示时内容会超出，卡片内部滚动，确认键始终固定在下方。 */}
+            <ScrollView
+              contentContainerStyle={styles.planContent}
+              testID="return-plan-scroll"
+            >
+              <Text style={styles.sectionLabel}>{t("summary.title")}</Text>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>{t("summary.selected")}</Text>
+                <Text
+                  adjustsFontSizeToFit
+                  numberOfLines={1}
+                  style={styles.total}
+                  testID="return-selected-total"
+                >
+                  {formatAud(state.selectedTotalCents, locale)}
+                </Text>
+              </View>
+              <View style={styles.divider} />
+              <Text style={styles.fieldLabel}>{t("summary.method")}</Text>
+              <View accessibilityRole="radiogroup" style={styles.methodList}>
+                {methods.map((method) => (
+                  <MethodTile
+                    active={state.preferredMethod === method}
+                    badge={
+                      originalMethods.has(method)
+                        ? t("method.originalBadge")
+                        : null
+                    }
+                    key={method}
+                    label={t(`method.${method}`)}
+                    method={method}
+                    onPress={() => presenter.selectMethod(method)}
+                    testID={`return-method-${method}`}
+                  />
+                ))}
+              </View>
+              <Text style={styles.rule}>
+                {state.mode === "receipt" && state.preferredMethod === null
+                  ? t("summary.ruleReceiptDefault")
+                  : t("summary.rule")}
+              </Text>
+              {/* 代金券买的部分只能退代金券；计划阶段同口径强制，这里只做提示。 */}
+              {state.requiredVoucherRefundCents > 0 ? (
+                <Notice
+                  icon="wallet-giftcard"
+                  testID="return-voucher-funded-notice"
+                  text={t("voucherFunded.notice", {
+                    amount: formatAud(state.requiredVoucherRefundCents, locale),
+                  })}
+                  tone="warning"
+                />
+              ) : null}
+            </ScrollView>
           </View>
-          <Text style={styles.rule}>
-            {state.mode === "receipt" && state.preferredMethod === null
-              ? t("summary.ruleReceiptDefault")
-              : t("summary.rule")}
-          </Text>
-          {/* 代金券买的部分只能退代金券；计划阶段同口径强制，这里只做提示。 */}
-          {state.requiredVoucherRefundCents > 0 ? (
-            <Text style={styles.warning} testID="return-voucher-funded-notice">
-              {t("voucherFunded.notice", {
-                amount: formatAud(state.requiredVoucherRefundCents, locale),
-              })}
-            </Text>
-          ) : null}
-          <View style={styles.confirmArea}>
-            <ActionButton
-              disabled={!state.canConfirm || state.busy}
-              label={t("action.confirm")}
-              onPress={() => void presenter.confirm()}
-              sound="danger"
-              testID="return-confirm"
-            />
-          </View>
+
+          {/* 本页唯一的主按钮，固定在右下角，带上本次退款金额。 */}
+          <PosButton
+            disabled={!state.canConfirm || state.busy}
+            icon="cash-refund"
+            label={
+              state.selectedTotalCents > 0
+                ? t("action.confirmAmount", {
+                    amount: formatAud(state.selectedTotalCents, locale),
+                  })
+                : t("action.confirm")
+            }
+            onPress={() => void presenter.confirm()}
+            size="primary"
+            sound="danger"
+            testID="return-confirm"
+            tone="primary"
+          />
         </View>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -452,8 +553,14 @@ function ReturnLineRow({
     values?: Readonly<Record<string, string | number>>,
   ): string;
 }>) {
+  usePosThemeVersion();
+  const selected = line.selectedQuantity > 0;
+  const amountText = formatAud(line.amountCents, locale);
   return (
-    <View style={styles.lineRow} testID={`return-row-${line.id}`}>
+    <View
+      style={[styles.lineRow, selected && styles.lineRowSelected]}
+      testID={`return-row-${line.id}`}
+    >
       <View style={styles.lineIdentity}>
         <Text numberOfLines={2} style={styles.lineName}>
           {line.displayName}
@@ -463,21 +570,29 @@ function ReturnLineRow({
             {t("line.itemNumber", { itemNumber: line.itemNumber })}
           </Text>
         ) : null}
-        <Text style={styles.lineAmount}>
-          {t("line.refund", {
-            amount: formatAud(line.amountCents, locale),
-          })}
-        </Text>
       </View>
-      <View style={styles.quantityControl}>
-        <IconButton
-          disabled={line.selectedQuantity === 0}
-          label="−"
-          onPress={onDecrease}
-          testID={`return-decrease-${line.id}`}
-          accessibilityLabel={t("action.decrease")}
-        />
-        <Text style={styles.quantityText} testID={`return-quantity-${line.id}`}>
+      <View style={styles.stepperColumn}>
+        <View style={styles.stepper}>
+          <StepButton
+            accessibilityLabel={t("action.decrease")}
+            disabled={line.selectedQuantity === 0}
+            icon="minus"
+            onPress={onDecrease}
+            testID={`return-decrease-${line.id}`}
+          />
+          <Text style={styles.stepperValue}>{line.selectedQuantity}</Text>
+          <StepButton
+            accessibilityLabel={t("action.increase")}
+            disabled={
+              line.sourceKind === "receipt" &&
+              line.selectedQuantity >= line.availableQuantity
+            }
+            icon="plus"
+            onPress={onIncrease}
+            testID={`return-increase-${line.id}`}
+          />
+        </View>
+        <Text style={styles.quantityCaption} testID={`return-quantity-${line.id}`}>
           {line.sourceKind === "receipt"
             ? t("line.quantity", {
                 selected: line.selectedQuantity,
@@ -487,16 +602,17 @@ function ReturnLineRow({
                 selected: line.selectedQuantity,
               })}
         </Text>
-        <IconButton
-          disabled={
-            line.sourceKind === "receipt" &&
-            line.selectedQuantity >= line.availableQuantity
-          }
-          label="+"
-          onPress={onIncrease}
-          testID={`return-increase-${line.id}`}
-          accessibilityLabel={t("action.increase")}
-        />
+      </View>
+      <View style={styles.lineAmountColumn}>
+        <Text
+          accessibilityLabel={t("line.refund", { amount: amountText })}
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[styles.lineAmount, !selected && styles.lineAmountIdle]}
+        >
+          {amountText}
+        </Text>
+        <Text style={styles.lineAmountLabel}>{t("line.refundLabel")}</Text>
       </View>
     </View>
   );
@@ -508,6 +624,8 @@ function StatusPage({
   error,
   hint,
   onAction,
+  pageSubtitle,
+  pageTitle,
   secondary,
   testID,
   title,
@@ -530,11 +648,14 @@ function StatusPage({
   error?: string | null;
   hint: string;
   onAction?(): void;
+  pageSubtitle: string;
+  pageTitle: string;
   secondary?: string;
   testID: string;
   title: string;
   tone: "waiting" | "warning" | "success" | "danger";
 }>) {
+  usePosThemeVersion();
   const body = (
     <>
       <View
@@ -552,9 +673,24 @@ function StatusPage({
         {tone === "waiting" ? (
           <ActivityIndicator color={posColors.blue} size="large" />
         ) : (
-          <Text style={styles.statusMarkText}>
-            {tone === "success" ? "✓" : tone === "danger" ? "!" : "?"}
-          </Text>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={
+              tone === "success"
+                ? posColors.green
+                : tone === "danger"
+                  ? posColors.red
+                  : posColors.yellowInk
+            }
+            name={
+              tone === "success"
+                ? "check-bold"
+                : tone === "danger"
+                  ? "exclamation-thick"
+                  : "help"
+            }
+            size={52}
+          />
         )}
       </View>
       <Text style={styles.statusTitle}>{title}</Text>
@@ -562,17 +698,26 @@ function StatusPage({
       {secondary ? <Text style={styles.statusSecondary}>{secondary}</Text> : null}
       {error ? <Text style={styles.statusError}>{error}</Text> : null}
       {actionLabel && onAction ? (
-        <ActionButton
+        <PosButton
           disabled={busy}
           label={actionLabel}
           onPress={onAction}
+          size="large"
+          style={styles.statusAction}
           testID={`${testID}-action`}
+          tone="primary"
         />
       ) : null}
     </>
   );
   return (
-    <SafeAreaView style={styles.statusSafeArea} testID={testID}>
+    // 退款中、结果未知、完成、未完成都是整页替换：只能按页内按钮继续，侧栏跳转一律锁住。
+    <PosScreenFrame
+      active="returns"
+      header={<PosPageHeader subtitle={pageSubtitle} title={pageTitle} />}
+      navigationLocked
+      testID={testID}
+    >
       {resolution ? (
         <PosKeyboardAwareScrollView
           contentContainerStyle={styles.statusScrollContent}
@@ -588,9 +733,9 @@ function StatusPage({
           />
         </PosKeyboardAwareScrollView>
       ) : (
-        body
+        <View style={styles.statusBody}>{body}</View>
       )}
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -609,6 +754,7 @@ function SupervisorResolutionPanel({
   t: (key: ReturnCopyKey) => string;
   waitingRecorded: boolean;
 }>) {
+  usePosThemeVersion();
   const [evidence, setEvidence] = useState("");
   const [note, setNote] = useState("");
   const ready = !busy && evidence.trim().length > 0 && note.trim().length > 0;
@@ -637,26 +783,33 @@ function SupervisorResolutionPanel({
           {t("resolution.waitingRecorded")}
         </Text>
       ) : null}
-      <ActionButton
-        disabled={!ready}
-        label={t("resolution.notRefunded")}
-        onPress={() => onResolve("not-refunded", evidence, note)}
-        sound="danger"
-        testID="return-resolution-not-refunded"
-      />
-      <ActionButton
-        disabled={!ready}
-        label={t("resolution.keepWaiting")}
-        onPress={() => onResolve("keep-waiting", evidence, note)}
-        testID="return-resolution-keep-waiting"
-        tone="quiet"
-      />
+      <View style={styles.resolutionActions}>
+        <PosButton
+          disabled={!ready}
+          fill
+          label={t("resolution.notRefunded")}
+          onPress={() => onResolve("not-refunded", evidence, note)}
+          sound="danger"
+          testID="return-resolution-not-refunded"
+          tone="danger"
+        />
+        <PosButton
+          disabled={!ready}
+          fill
+          label={t("resolution.keepWaiting")}
+          onPress={() => onResolve("keep-waiting", evidence, note)}
+          testID="return-resolution-keep-waiting"
+        />
+      </View>
     </View>
   );
 }
 
 function LabeledInput({
   editable,
+  fill = false,
+  hideLabel = false,
+  icon,
   keyboardType,
   label,
   onChangeText,
@@ -666,6 +819,11 @@ function LabeledInput({
   value,
 }: Readonly<{
   editable: boolean;
+  /** 在横排里占满剩余宽度。 */
+  fill?: boolean;
+  /** 不显示上方标签（占位文字已说明用途），标签仍作为无障碍名称。 */
+  hideLabel?: boolean;
+  icon?: PosIconName;
   keyboardType?: "default" | "decimal-pad";
   label: string;
   onChangeText(value: string): void;
@@ -674,97 +832,138 @@ function LabeledInput({
   testID: string;
   value: string;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.inputGroup}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <PosKeyboardAwareTextInput
-        autoCapitalize="none"
-        autoCorrect={false}
-        editable={editable}
-        keyboardType={keyboardType}
-        onChangeText={onChangeText}
-        onSubmitEditing={onSubmitEditing}
-        placeholder={placeholder}
-        placeholderTextColor={posColors.mutedInk}
-        returnKeyType="done"
-        style={styles.input}
-        testID={testID}
-        value={value}
-      />
+    <View style={[styles.inputGroup, fill && styles.inputGroupFill]}>
+      {hideLabel ? null : <Text style={styles.inputLabel}>{label}</Text>}
+      <View style={[styles.inputBox, !editable && styles.inputBoxDisabled]}>
+        {icon ? (
+          <MaterialCommunityIcons
+            accessible={false}
+            color={editable ? posColors.ink : posColors.disabledInk}
+            name={icon}
+            size={24}
+          />
+        ) : null}
+        <PosKeyboardAwareTextInput
+          accessibilityLabel={label}
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={editable}
+          keyboardType={keyboardType}
+          onChangeText={onChangeText}
+          onSubmitEditing={onSubmitEditing}
+          placeholder={placeholder}
+          placeholderTextColor={posColors.placeholder}
+          returnKeyType="done"
+          style={styles.input}
+          testID={testID}
+          value={value}
+        />
+      </View>
     </View>
   );
 }
 
-function ModeTab({
-  active,
-  disabled,
-  label,
-  onPress,
+/** 黄 / 红提示条：图标 + 一段文字，testID 落在文字上。 */
+function Notice({
+  icon,
   testID,
+  text,
+  tone,
 }: Readonly<{
-  active: boolean;
-  disabled: boolean;
-  label: string;
-  onPress(): void;
+  icon: PosIconName;
   testID: string;
+  text: string;
+  tone: "warning" | "danger";
 }>) {
+  usePosThemeVersion();
+  const danger = tone === "danger";
   return (
-    <PosPressable
-      accessibilityRole="tab"
-      accessibilityState={{ disabled, selected: active }}
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.modeTab, active && styles.modeTabActive]}
-      testID={testID}
+    <View
+      style={[styles.notice, danger ? styles.noticeDanger : styles.noticeWarning]}
     >
-      <Text style={[styles.modeTabText, active && styles.modeTabTextActive]}>
-        {label}
+      <MaterialCommunityIcons
+        accessible={false}
+        color={danger ? posColors.red : posColors.yellowInk}
+        name={icon}
+        size={22}
+      />
+      <Text
+        style={[
+          styles.noticeText,
+          danger ? styles.noticeTextDanger : styles.noticeTextWarning,
+        ]}
+        testID={testID}
+      >
+        {text}
       </Text>
-    </PosPressable>
+    </View>
   );
 }
 
-function MethodButton({
+/** 优先退款方式：68 高的大块单选，整块都是点击区。 */
+function MethodTile({
   active,
+  badge,
   label,
+  method,
   onPress,
   testID,
 }: Readonly<{
   active: boolean;
+  badge: string | null;
   label: string;
+  method: ReturnTenderMethod;
   onPress(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
+  const visual = RETURN_METHOD_ICON[method];
   return (
     <PosPressable
+      accessibilityLabel={badge ? `${label} · ${badge}` : label}
       accessibilityRole="radio"
       accessibilityState={{ checked: active }}
       onPress={onPress}
-      style={[styles.methodButton, active && styles.methodButtonActive]}
+      style={({ pressed }) => [
+        styles.methodTile,
+        active && styles.methodTileActive,
+        pressed && styles.pressed,
+      ]}
       testID={testID}
     >
-      <Text
-        style={[styles.methodButtonText, active && styles.methodButtonTextActive]}
-      >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors[visual.color]}
+        name={visual.icon}
+        size={28}
+      />
+      <Text numberOfLines={1} style={styles.methodTileText}>
         {label}
       </Text>
+      {badge ? (
+        <PosPill label={badge} style={styles.methodTileBadge} tone="accent" />
+      ) : null}
     </PosPressable>
   );
 }
 
-function IconButton({
+/** 商品行的 −/＋：52×52。 */
+function StepButton({
   accessibilityLabel,
   disabled,
-  label,
+  icon,
   onPress,
   testID,
 }: Readonly<{
   accessibilityLabel: string;
   disabled: boolean;
-  label: string;
+  icon: "minus" | "plus";
   onPress(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityLabel={accessibilityLabel}
@@ -772,56 +971,19 @@ function IconButton({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={[styles.iconButton, disabled && styles.buttonDisabled]}
-      testID={testID}
-    >
-      <Text style={styles.iconButtonText}>{label}</Text>
-    </PosPressable>
-  );
-}
-
-function ActionButton({
-  disabled = false,
-  label,
-  onPress,
-  sound = "tap",
-  testID,
-  tone = "primary",
-}: Readonly<{
-  disabled?: boolean;
-  label: string;
-  onPress(): void;
-  sound?: "tap" | "navigate" | "danger";
-  testID: string;
-  tone?: "primary" | "secondary" | "quiet";
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
       style={({ pressed }) => [
-        styles.actionButton,
-        tone === "primary"
-          ? styles.actionPrimary
-          : tone === "secondary"
-            ? styles.actionSecondary
-            : styles.actionQuiet,
-        disabled && styles.buttonDisabled,
+        styles.stepButton,
+        disabled && styles.stepButtonDisabled,
         pressed && !disabled && styles.pressed,
       ]}
       testID={testID}
     >
-      <Text
-        style={[
-          styles.actionButtonText,
-          tone !== "primary" && styles.actionButtonTextDark,
-        ]}
-      >
-        {label}
-      </Text>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={disabled ? posColors.disabledInk : posColors.ink}
+        name={icon}
+        size={28}
+      />
     </PosPressable>
   );
 }
@@ -855,457 +1017,468 @@ function formatAud(cents: number, locale: ReturnLocale): string {
   }).format(cents / 100);
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-  },
-  header: {
-    minHeight: 78,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    backgroundColor: posColors.surface,
-    borderBottomColor: posColors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-  },
-  headerIdentity: {
-    flex: 1,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 28,
-    fontWeight: "800",
-  },
-  subtitle: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    marginTop: 3,
-  },
-  modeTabs: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-  },
-  modeTab: {
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    minWidth: 150,
-    paddingHorizontal: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: posColors.surface,
-  },
-  modeTabActive: {
-    borderColor: posColors.orange,
-    backgroundColor: posColors.orangeSoft,
-  },
-  modeTabText: {
-    color: posColors.mutedInk,
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  modeTabTextActive: {
-    color: posColors.orange,
+const styles = createPosStyles((colors) => ({
+  modeSwitch: {
+    width: 340,
   },
   workspace: {
     flex: 1,
     flexDirection: "row",
-    gap: 16,
-    padding: 24,
-    paddingTop: 14,
+    gap: 12,
+    minHeight: 0,
+    padding: 12,
   },
   mainColumn: {
-    flex: 1.7,
+    flex: 1,
+    gap: 10,
     minWidth: 0,
+  },
+  sideColumn: {
+    flexShrink: 0,
+    gap: 10,
+    width: 380,
   },
   editorScroll: {
     flexGrow: 0,
   },
-  summaryColumn: {
-    flex: 1,
-    minWidth: 290,
-    maxWidth: 420,
-    padding: 18,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    borderRadius: 10,
-    backgroundColor: posColors.surface,
-  },
-  lookupCard: {
+  lookupRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 10,
+  },
+  lookupButton: {
+    height: 60,
+    minHeight: 60,
+    minWidth: 150,
   },
   noReceiptPanel: {
     gap: 10,
   },
-  openItemRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 10,
-  },
   amountInput: {
-    maxWidth: 190,
-    flex: 0.5,
+    width: 190,
   },
   inputGroup: {
-    flex: 1,
     gap: 5,
   },
+  inputGroupFill: {
+    flex: 1,
+    minWidth: 0,
+  },
   inputLabel: {
-    color: posColors.ink,
+    color: colors.mutedInk,
     fontSize: 13,
-    fontWeight: "700",
-  },
-  input: {
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    paddingHorizontal: 13,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: posColors.surface,
-    color: posColors.ink,
-    fontSize: 16,
-  },
-  orderBanner: {
-    marginTop: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderLeftColor: posColors.blue,
-    borderLeftWidth: 4,
-    backgroundColor: posColors.blueSoft,
-  },
-  orderTitle: {
-    color: posColors.ink,
-    fontSize: 16,
     fontWeight: "800",
   },
-  orderSource: {
-    color: posColors.blue,
-    fontSize: 13,
-    marginTop: 2,
+  inputBox: {
+    height: 60,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    borderColor: colors.borderStrong,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
   },
-  warning: {
-    marginTop: 8,
-    padding: 10,
-    color: "#6F4A00",
-    backgroundColor: "#FFF4D9",
-    borderRadius: 6,
-    fontSize: 13,
-    fontWeight: "600",
+  inputBoxDisabled: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
   },
-  errorNotice: {
-    marginTop: 8,
-    padding: 10,
-    color: posColors.red,
-    backgroundColor: posColors.redSoft,
-    borderRadius: 6,
-    fontSize: 13,
+  input: {
+    flex: 1,
+    alignSelf: "stretch",
+    minWidth: 0,
+    padding: 0,
+    color: colors.ink,
+    fontSize: 17,
     fontWeight: "700",
   },
+  orderBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderColor: colors.greenBorder,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    backgroundColor: colors.greenSoft,
+  },
+  orderTitle: {
+    flex: 1,
+    color: colors.green,
+    fontSize: 15,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+  },
+  orderSourcePill: {
+    alignSelf: "center",
+    backgroundColor: colors.surface,
+  },
+  notice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderRadius: 10,
+  },
+  noticeWarning: {
+    borderColor: colors.yellowBorder,
+    backgroundColor: colors.yellowSoft,
+  },
+  noticeDanger: {
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  noticeTextWarning: {
+    color: colors.yellowInk,
+  },
+  noticeTextDanger: {
+    color: colors.red,
+  },
   sectionHeader: {
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    marginTop: 10,
+    minHeight: 24,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  sectionTitle: {
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
+  sectionLabel: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
   },
   lineScroll: {
     flex: 1,
   },
   lineList: {
-    gap: 8,
-    paddingBottom: 12,
+    gap: 6,
+    paddingBottom: 4,
   },
   lineRow: {
-    minHeight: 94,
+    minHeight: 92,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: 12,
-    padding: 14,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: posColors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  // 已选中要退的行：主操作色粗描边 + 浅底；内边距各减 1 抵消加粗的描边，避免行内容跳动。
+  lineRowSelected: {
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
+    backgroundColor: colors.selectedSurface,
   },
   lineIdentity: {
     flex: 1,
     minWidth: 0,
   },
   lineName: {
-    color: posColors.ink,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  lineMeta: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+    marginTop: 3,
+  },
+  stepperColumn: {
+    alignItems: "center",
+    flexShrink: 0,
+    gap: 4,
+  },
+  stepper: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  stepperValue: {
+    width: 52,
+    textAlign: "center",
+    color: colors.ink,
+    fontSize: 22,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  stepButton: {
+    width: 52,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: colors.borderStrong,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  stepButtonDisabled: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
+  },
+  quantityCaption: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  lineAmountColumn: {
+    width: 96,
+    alignItems: "flex-end",
+    flexShrink: 0,
+  },
+  lineAmount: {
+    color: colors.ink,
+    fontSize: 18,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    textAlign: "right",
+  },
+  lineAmountIdle: {
+    color: colors.disabledInk,
+  },
+  lineAmountLabel: {
+    color: colors.mutedInk,
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  emptyLines: {
+    alignItems: "center",
+    gap: 10,
+    padding: 28,
+    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderRadius: 10,
+  },
+  emptyText: {
+    textAlign: "center",
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+  },
+  card: {
+    gap: 6,
+    padding: 14,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
+  },
+  planCard: {
+    flex: 1,
+    minHeight: 0,
+    padding: 0,
+  },
+  planContent: {
+    gap: 8,
+    padding: 14,
+  },
+  capacityHint: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+  },
+  capacityRow: {
+    color: colors.ink,
+    fontSize: 17,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+    lineHeight: 30,
+  },
+  totalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  totalLabel: {
+    color: colors.mutedInk,
     fontSize: 16,
     fontWeight: "800",
   },
-  lineMeta: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  lineAmount: {
-    color: posColors.green,
-    fontSize: 14,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  quantityControl: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  quantityText: {
-    minWidth: 106,
-    textAlign: "center",
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  iconButton: {
-    width: RETURN_MIN_TOUCH_TARGET,
-    height: RETURN_MIN_TOUCH_TARGET,
-    alignItems: "center",
-    justifyContent: "center",
-    borderColor: posColors.blue,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: posColors.blueSoft,
-  },
-  iconButtonText: {
-    color: posColors.blue,
-    fontSize: 24,
-    fontWeight: "700",
-  },
-  emptyText: {
-    padding: 28,
-    textAlign: "center",
-    color: posColors.mutedInk,
-    fontSize: 14,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    borderRadius: 8,
-  },
-  capacityHint: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 10,
-  },
-  capacityRow: {
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    paddingVertical: 11,
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "700",
-    borderBottomColor: posColors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+  total: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 40,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    letterSpacing: -1,
+    lineHeight: 46,
+    textAlign: "right",
   },
   divider: {
     height: 1,
-    marginVertical: 16,
-    backgroundColor: posColors.border,
+    backgroundColor: colors.border,
   },
-  summaryLabel: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 14,
-    textTransform: "uppercase",
-  },
-  total: {
-    color: posColors.ink,
-    fontSize: 34,
-    fontWeight: "900",
-    marginTop: 2,
-  },
-  methodGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginTop: 8,
-  },
-  methodButton: {
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    minWidth: 92,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    borderRadius: 8,
-    backgroundColor: posColors.surface,
-  },
-  methodButtonActive: {
-    borderColor: posColors.blue,
-    backgroundColor: posColors.blueSoft,
-  },
-  methodButtonText: {
-    color: posColors.mutedInk,
+  fieldLabel: {
+    color: colors.mutedInk,
     fontSize: 13,
-    fontWeight: "700",
-  },
-  methodButtonTextActive: {
-    color: posColors.blue,
-  },
-  rule: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 14,
-  },
-  confirmArea: {
-    flex: 1,
-    justifyContent: "flex-end",
-    paddingTop: 18,
-  },
-  actionButton: {
-    minHeight: RETURN_MIN_TOUCH_TARGET,
-    minWidth: 116,
-    paddingHorizontal: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 8,
-  },
-  actionPrimary: {
-    backgroundColor: posColors.orange,
-  },
-  actionSecondary: {
-    borderColor: posColors.blue,
-    borderWidth: 1,
-    backgroundColor: posColors.blueSoft,
-  },
-  actionQuiet: {
-    borderColor: posColors.border,
-    borderWidth: 1,
-    backgroundColor: posColors.surface,
-  },
-  actionButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
     fontWeight: "800",
   },
-  actionButtonTextDark: {
-    color: posColors.ink,
+  methodList: {
+    gap: 8,
   },
-  buttonDisabled: {
-    opacity: 0.38,
+  methodTile: {
+    height: 68,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+  },
+  methodTileActive: {
+    paddingHorizontal: 13,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
+    backgroundColor: colors.selectedSurface,
+  },
+  methodTileText: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
+  },
+  methodTileBadge: {
+    alignSelf: "center",
+  },
+  rule: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
   },
   pressed: {
-    opacity: 0.78,
+    opacity: 0.72,
   },
-  statusSafeArea: {
+  statusBody: {
     flex: 1,
     padding: 32,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: posColors.canvas,
   },
   statusMark: {
-    width: 82,
-    height: 82,
+    width: 96,
+    height: 96,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 41,
+    borderRadius: 48,
     marginBottom: 20,
   },
   statusSuccess: {
-    backgroundColor: posColors.greenSoft,
+    backgroundColor: colors.greenSoft,
   },
   statusDanger: {
-    backgroundColor: posColors.redSoft,
+    backgroundColor: colors.redSoft,
   },
   statusWarning: {
-    backgroundColor: "#FFF4D9",
+    backgroundColor: colors.yellowSoft,
   },
   statusWaiting: {
-    backgroundColor: posColors.blueSoft,
-  },
-  statusMarkText: {
-    color: posColors.ink,
-    fontSize: 38,
-    fontWeight: "900",
+    backgroundColor: colors.blueSoft,
   },
   statusTitle: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 30,
     fontWeight: "900",
     textAlign: "center",
   },
   statusHint: {
-    maxWidth: 620,
+    maxWidth: 640,
     marginTop: 10,
-    color: posColors.mutedInk,
-    fontSize: 16,
-    lineHeight: 23,
+    color: colors.mutedInk,
+    fontSize: 17,
+    fontWeight: "600",
+    lineHeight: 25,
     textAlign: "center",
   },
   statusSecondary: {
     marginTop: 12,
-    color: posColors.green,
-    fontSize: 22,
-    fontWeight: "800",
+    color: colors.green,
+    fontSize: 30,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  statusAction: {
+    marginTop: 22,
+    minWidth: 320,
   },
   statusScroll: {
+    flex: 1,
     alignSelf: "stretch",
   },
   statusScrollContent: {
     alignItems: "center",
-    paddingVertical: 16,
+    padding: 24,
   },
   resolutionCard: {
-    alignSelf: "stretch",
-    maxWidth: 620,
-    marginTop: 8,
+    alignSelf: "center",
+    width: "100%",
+    maxWidth: 640,
+    marginTop: 20,
     padding: 16,
-    gap: 10,
-    borderColor: posColors.border,
+    gap: 12,
+    borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 10,
-    backgroundColor: posColors.surface,
+    borderRadius: 12,
+    backgroundColor: colors.surface,
   },
   resolutionTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
   },
   resolutionHint: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 20,
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
   },
   resolutionNotice: {
-    padding: 10,
-    color: posColors.green,
-    backgroundColor: posColors.greenSoft,
-    borderRadius: 8,
-    fontSize: 14,
+    padding: 12,
+    color: colors.green,
+    backgroundColor: colors.greenSoft,
+    borderRadius: 10,
+    fontSize: 15,
     fontWeight: "700",
+  },
+  resolutionActions: {
+    flexDirection: "row",
+    gap: 10,
   },
   statusError: {
-    maxWidth: 620,
-    marginVertical: 16,
+    maxWidth: 640,
+    marginTop: 16,
     padding: 12,
-    color: posColors.red,
-    backgroundColor: posColors.redSoft,
-    borderRadius: 8,
-    fontSize: 14,
+    color: colors.red,
+    backgroundColor: colors.redSoft,
+    borderRadius: 10,
+    fontSize: 15,
     fontWeight: "700",
+    lineHeight: 22,
     textAlign: "center",
   },
-});
+}));
 
 /** 摘要后缀“  时间  收银员”（对齐 WPF #701：订单 #单号  时间  收银员）；缺失的部分省略。 */
 function formatOrderMeta(

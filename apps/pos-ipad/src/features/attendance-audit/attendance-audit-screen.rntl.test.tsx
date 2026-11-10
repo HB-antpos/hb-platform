@@ -14,6 +14,8 @@ let mockLanguage: "en" | "zh" = "zh";
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: mockLanguage, resolvedLanguage: mockLanguage },
+    // 页面外壳的顶栏用全局 t() 取状态文案，这里原样返回键即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -154,6 +156,88 @@ describe("AttendanceAuditScreen", () => {
       screen.getAllByText("Bearer [REDACTED_TOKEN]").length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText(/very-secret-value/)).toBeNull();
+    await screen.unmount();
+  });
+
+  it("新布局：二维码 210 见方且白底、倒计时 40 号字、列表行高至少 84、安全刷新 64 高", async () => {
+    const screen = await render(
+      <AttendanceAuditScreen presenter={new ScreenPresenter()} />,
+    );
+
+    const qrImage = screen.getByTestId("attendance-qr-image");
+    const qrStyle = StyleSheet.flatten(qrImage.props.style);
+    expect(qrStyle.width).toBe(210);
+    expect(qrStyle.height).toBe(210);
+    // 二维码外框固定白底，不跟随主题。
+    expect(
+      StyleSheet.flatten(qrImage.parent!.props.style).backgroundColor,
+    ).toBe("#FFFFFF");
+    expect(StyleSheet.flatten(screen.getByText("15 秒").props.style).fontSize)
+      .toBe(40);
+    expect(
+      StyleSheet.flatten(screen.getByTestId("attendance-qr-refresh").props.style)
+        .minHeight,
+    ).toBe(64);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("audit-row-11111111-1111-4111-8111-111111111111")
+          .props.style,
+      ).minHeight,
+    ).toBeGreaterThanOrEqual(84);
+    // 列表第二行带「小票」前缀；详情里 8 个字段都在。
+    expect(screen.getByText("小票 receipt-1")).toBeTruthy();
+    for (const label of [
+      "操作",
+      "结果",
+      "时间",
+      "收银员",
+      "小票",
+      "订单",
+      "金额",
+      "关联",
+    ]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.getByText("#1 · 数量 1 · 金额 $1.00")).toBeTruthy();
+    await screen.unmount();
+  });
+
+  it("来源与上传状态是两组分段：当前项高亮，离线时远程不可点", async () => {
+    const presenter = new ScreenPresenter({
+      audit: { online: false, uploadState: "uploaded" },
+    });
+    const screen = await render(
+      <AttendanceAuditScreen presenter={presenter} />,
+    );
+
+    expect(
+      screen.getByTestId("audit-source-local").props.accessibilityState.checked,
+    ).toBe(true);
+    const remote = screen.getByTestId("audit-source-remote");
+    expect(remote.props.accessibilityState.disabled).toBe(true);
+    await fireEvent.press(remote);
+    expect(presenter.sources).toEqual([]);
+
+    expect(
+      screen.getByTestId("audit-upload-uploaded").props.accessibilityState
+        .checked,
+    ).toBe(true);
+    expect(
+      screen.getByTestId("audit-upload-all").props.accessibilityState.checked,
+    ).toBe(false);
+    // 「全部」对应 presenter 的 null。
+    await fireEvent.press(screen.getByTestId("audit-upload-all"));
+    expect(presenter.uploadStates).toEqual([null]);
+    for (const testID of [
+      "audit-upload-all",
+      "audit-upload-pending",
+      "audit-upload-uploaded",
+      "audit-upload-rejected",
+    ]) {
+      expect(
+        StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight,
+      ).toBeGreaterThanOrEqual(56);
+    }
     await screen.unmount();
   });
 });

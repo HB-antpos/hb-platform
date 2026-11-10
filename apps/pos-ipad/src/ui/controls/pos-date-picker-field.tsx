@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
@@ -10,7 +11,15 @@ import {
   View,
 } from "react-native";
 
-import { posColors } from "../theme";
+import {
+  createPosStyles,
+  getActivePosTheme,
+  posColors,
+  posRadius,
+  posTouch,
+  usePosThemeVersion,
+} from "../theme";
+import { PosButton } from "./pos-button";
 import { PosPressable } from "./pos-pressable";
 
 export type PosDatePickerLocale = "en" | "zh";
@@ -81,6 +90,7 @@ export function PosDatePickerField({
   testID,
   value,
 }: Readonly<PosDatePickerFieldProps>) {
+  usePosThemeVersion();
   const text = copy[locale];
   const [open, setOpen] = useState(false);
   const [draftDate, setDraftDate] = useState<Date>(
@@ -135,14 +145,27 @@ export function PosDatePickerField({
         sound="navigate"
         testID={testID}
       >
+        <MaterialCommunityIcons
+          accessible={false}
+          color={
+            disabled
+              ? posColors.disabledInk
+              : value
+                ? posColors.ink
+                : posColors.placeholder
+          }
+          name="calendar-outline"
+          size={22}
+        />
         <Text
           numberOfLines={1}
-          style={[styles.triggerText, !value && styles.placeholderText]}
+          style={[
+            styles.triggerText,
+            !value && styles.placeholderText,
+            disabled && styles.triggerTextDisabled,
+          ]}
         >
           {displayValue}
-        </Text>
-        <Text accessibilityElementsHidden style={styles.disclosure}>
-          ▾
         </Text>
       </PosPressable>
 
@@ -173,62 +196,47 @@ export function PosDatePickerField({
               <Text numberOfLines={1} style={styles.title}>
                 {accessibilityLabel}
               </Text>
+              {/* 原生日历的明暗跟随当前主题，否则深色主题下是深底深字。 */}
               <DateTimePicker
-                accentColor={posColors.blue}
+                accentColor={posColors.accent}
                 display="inline"
                 locale={locale === "zh" ? "zh-CN" : "en-AU"}
                 mode="date"
                 onChange={handlePickerChange}
                 style={styles.picker}
                 testID={`${testID}-picker`}
-                themeVariant="light"
+                themeVariant={getActivePosTheme().dark ? "dark" : "light"}
                 value={draftDate}
               />
               <View style={styles.actions}>
                 {allowClear ? (
-                  <PosPressable
-                    accessibilityLabel={text.clear}
-                    accessibilityRole="button"
+                  <PosButton
+                    label={text.clear}
                     onPress={clear}
-                    style={({ pressed }) => [
-                      styles.button,
-                      styles.clearButton,
-                      pressed && styles.pressed,
-                    ]}
+                    size="medium"
                     sound="danger"
+                    style={styles.clearButton}
                     testID={`${testID}-clear`}
-                  >
-                    <Text style={styles.clearLabel}>{text.clear}</Text>
-                  </PosPressable>
+                    tone="info"
+                  />
                 ) : null}
-                <PosPressable
-                  accessibilityLabel={text.cancel}
-                  accessibilityRole="button"
+                <PosButton
+                  label={text.cancel}
                   onPress={closePicker}
-                  style={({ pressed }) => [
-                    styles.button,
-                    styles.cancelButton,
-                    pressed && styles.pressed,
-                  ]}
+                  size="medium"
                   sound="tap"
+                  style={styles.actionButton}
                   testID={`${testID}-cancel`}
-                >
-                  <Text style={styles.cancelLabel}>{text.cancel}</Text>
-                </PosPressable>
-                <PosPressable
-                  accessibilityLabel={text.confirm}
-                  accessibilityRole="button"
+                />
+                <PosButton
+                  label={text.confirm}
                   onPress={confirm}
-                  style={({ pressed }) => [
-                    styles.button,
-                    styles.confirmButton,
-                    pressed && styles.pressed,
-                  ]}
+                  size="medium"
                   sound="navigate"
+                  style={styles.actionButton}
                   testID={`${testID}-confirm`}
-                >
-                  <Text style={styles.confirmLabel}>{text.confirm}</Text>
-                </PosPressable>
+                  tone="primary"
+                />
               </View>
             </View>
           </View>
@@ -238,39 +246,37 @@ export function PosDatePickerField({
   );
 }
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
+  // 触发器与输入框同一套外观：高 56、强描边、左侧日历图标。
   trigger: {
     alignItems: "center",
-    backgroundColor: "#FFFDF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
     flexDirection: "row",
-    gap: 8,
-    minHeight: 44,
+    gap: 10,
+    minHeight: posTouch.medium,
     minWidth: 142,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
   },
   triggerDisabled: {
-    backgroundColor: "#F1F0EC",
-    opacity: 0.62,
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
   },
   triggerText: {
-    color: posColors.ink,
+    color: colors.ink,
     flex: 1,
     fontSize: 15,
+    fontVariant: ["tabular-nums"],
     fontWeight: "700",
   },
-  placeholderText: { color: posColors.mutedInk },
-  disclosure: {
-    color: posColors.blue,
-    fontSize: 15,
-    fontWeight: "900",
-  },
+  triggerTextDisabled: { color: colors.disabledInk },
+  placeholderText: { color: colors.placeholder, fontWeight: "600" },
   pressed: { opacity: 0.62 },
   overlay: {
     alignItems: "center",
-    backgroundColor: "rgba(16, 37, 58, 0.48)",
+    backgroundColor: colors.overlay,
     flex: 1,
     justifyContent: "center",
     padding: 24,
@@ -279,23 +285,23 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   panel: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 6,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.sheet,
     borderWidth: 1,
     elevation: 12,
     maxWidth: "92%",
-    padding: 20,
-    shadowColor: "#000000",
+    padding: 22,
+    shadowColor: colors.shadow,
     shadowOffset: { height: 8, width: 0 },
     shadowOpacity: 0.2,
     shadowRadius: 18,
     width: 420,
   },
   title: {
-    color: posColors.ink,
-    fontSize: 19,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
     marginBottom: 8,
   },
   picker: {
@@ -307,26 +313,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: 10,
     justifyContent: "flex-end",
-    marginTop: 8,
+    marginTop: 10,
   },
-  button: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 44,
-    minWidth: 88,
-    paddingHorizontal: 16,
-  },
-  clearButton: {
-    backgroundColor: posColors.blueSoft,
-    marginRight: "auto",
-  },
-  cancelButton: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderWidth: 1,
-  },
-  confirmButton: { backgroundColor: posColors.blue },
-  clearLabel: { color: posColors.blue, fontSize: 15, fontWeight: "800" },
-  cancelLabel: { color: posColors.ink, fontSize: 15, fontWeight: "800" },
-  confirmLabel: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
-});
+  actionButton: { minWidth: 104 },
+  // 「清除」靠左，与取消 / 确定分开，避免误点。
+  clearButton: { marginRight: "auto", minWidth: 104 },
+}));

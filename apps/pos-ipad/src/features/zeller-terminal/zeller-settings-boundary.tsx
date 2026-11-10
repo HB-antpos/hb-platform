@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import { ZellerTerminalBoundary } from "./zeller-terminal-boundary";
 
 import type { ZellerSdkVendor } from "@/features/zeller-probe/zeller-sdk-host";
+import { usePosThemeVersion } from "@/ui/theme";
 
 /**
  * 「支付设置」里的 Zeller 页签目前只做配对：Zeller 收款还没有接进收银流程。
@@ -19,6 +20,7 @@ export function ZellerSettingsBoundary({
   onOpenNetworkCheck,
   children,
 }: Readonly<{ onOpenNetworkCheck?: () => void; children: ReactNode }>) {
+  usePosThemeVersion();
   const vendor = useMemo<ZellerSdkVendor>(
     () => ({
       vendorName: "Hot Bargain",

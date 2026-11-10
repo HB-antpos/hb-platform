@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { type Href, usePathname, useRouter } from "expo-router";
 import {
   useCallback,
@@ -22,8 +23,13 @@ import type {
 } from "./app-update-orchestrator";
 
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 const HIDDEN_PRESENTATION: AppUpdatePresentation = Object.freeze({
   key: "runtime-unavailable",
@@ -40,7 +46,15 @@ const RECOVERY_ACCESS_PATHS = new Set([
   "/update-recovery",
 ]);
 
+/**
+ * 更新恢复页的右上角是页头的「设备注册」和导出卡的「导出诊断」，小卡片放在右上角会把它们盖住，
+ * 所以在这一页把更新入口停靠到右下角（诊断信息卡下方的空白处），横向排成一条。
+ * 注册页仍是右上角小卡片。
+ */
+const RECOVERY_DOCK_PATH = "/update-recovery";
+
 export function AppUpdateGateBridge() {
+  usePosThemeVersion();
   const runtime = usePosRuntime();
   const { i18n } = useTranslation();
   const pathname = usePathname();
@@ -114,8 +128,12 @@ export function AppUpdateGateBridge() {
   }
 
   const required = presentation.requirement === "required";
+  const normalizedPath = normalizePathname(pathname);
   const preserveRecoveryAccess =
-    required && RECOVERY_ACCESS_PATHS.has(normalizePathname(pathname));
+    required && RECOVERY_ACCESS_PATHS.has(normalizedPath);
+  const docked =
+    preserveRecoveryAccess && normalizedPath === RECOVERY_DOCK_PATH;
+  const blocking = required && !preserveRecoveryAccess;
   const titleKey: AppUpdateCopyKey =
     presentation.kind === "native"
       ? required
@@ -128,10 +146,56 @@ export function AppUpdateGateBridge() {
     presentation.kind === "native"
       ? "action.openStore"
       : "action.installOta";
+  const actionIcon: PosIconName =
+    presentation.kind === "native" ? "apple" : "download";
+
+  const message = (
+    <>
+      <Text style={styles.eyebrow}>
+        {copy[required ? "eyebrow.required" : "eyebrow.optional"]}
+      </Text>
+      <Text style={[styles.title, !blocking && styles.titleCompact]}>
+        {copy[titleKey]}
+      </Text>
+      <Text
+        // 停靠条高度有限：说明最多三行，避免盖住下面的诊断信息。
+        numberOfLines={docked ? 3 : undefined}
+        style={[styles.body, !blocking && styles.bodyCompact]}
+      >
+        {presentation.releaseMessage ??
+          copy[required ? "required.body" : "optional.body"]}
+      </Text>
+      {errorKey ? (
+        <Text accessibilityRole="alert" style={styles.error}>
+          {copy[errorKey]}
+        </Text>
+      ) : null}
+    </>
+  );
+
+  // 主按钮：这一层里唯一的主操作色按钮。执行中禁用并换成「正在更新…」。
+  const primaryAction = (
+    <PosButton
+      disabled={working}
+      icon={actionIcon}
+      label={copy[working ? "action.working" : actionKey]}
+      onPress={performUpdate}
+      size={blocking || docked ? "large" : "button"}
+      style={
+        docked
+          ? styles.dockedAction
+          : blocking
+            ? styles.blockingAction
+            : styles.fillAction
+      }
+      testID="app-update-action"
+      tone="primary"
+    />
+  );
 
   return (
     <View
-      accessibilityViewIsModal={required && !preserveRecoveryAccess}
+      accessibilityViewIsModal={blocking}
       pointerEvents={
         preserveRecoveryAccess
           ? "box-none"
@@ -140,11 +204,13 @@ export function AppUpdateGateBridge() {
             : "box-none"
       }
       style={
-        preserveRecoveryAccess
-          ? styles.recoveryAccessLayer
-          : required
-          ? styles.blockingLayer
-          : styles.optionalLayer
+        docked
+          ? styles.dockedLayer
+          : preserveRecoveryAccess
+            ? styles.recoveryAccessLayer
+            : required
+              ? styles.blockingLayer
+              : styles.optionalLayer
       }
       testID={
         preserveRecoveryAccess
@@ -154,108 +220,89 @@ export function AppUpdateGateBridge() {
           : "app-update-optional-prompt"
       }
     >
-      <View
-        accessibilityRole="alert"
-        style={[
-          styles.card,
-          preserveRecoveryAccess
-            ? styles.recoveryAccessCard
-            : required
-              ? styles.requiredCard
-              : styles.optionalCard,
-        ]}
-      >
-        <View style={styles.accent} />
-        <Text style={styles.eyebrow}>
-          {copy[required ? "eyebrow.required" : "eyebrow.optional"]}
-        </Text>
-        <Text style={styles.title}>{copy[titleKey]}</Text>
-        <Text style={styles.body}>
-          {presentation.releaseMessage ??
-            copy[required ? "required.body" : "optional.body"]}
-        </Text>
-        {errorKey ? (
-          <Text accessibilityRole="alert" style={styles.error}>
-            {copy[errorKey]}
-          </Text>
-        ) : null}
-        <View style={styles.actions}>
-          {required && !preserveRecoveryAccess ? (
-            <>
-              <PosPressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push(
-                    "/update-recovery?section=settings" as Href,
-                  )
-                }
-                sound="navigate"
-                style={styles.secondaryButton}
-                testID="app-update-settings-entry"
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {copy["action.settings"]}
-                </Text>
-              </PosPressable>
-              <PosPressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push(
-                    "/update-recovery?section=support" as Href,
-                  )
-                }
-                sound="navigate"
-                style={styles.secondaryButton}
-                testID="app-update-support-entry"
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {copy["action.support"]}
-                </Text>
-              </PosPressable>
-              <PosPressable
-                accessibilityRole="button"
-                onPress={() =>
-                  router.push("/registration" as Href)
-                }
-                sound="navigate"
-                style={styles.secondaryButton}
-                testID="app-update-registration-entry"
-              >
-                <Text style={styles.secondaryButtonText}>
-                  {copy["action.registration"]}
-                </Text>
-              </PosPressable>
-            </>
-          ) : null}
-          {!required ? (
-            <PosPressable
-              accessibilityRole="button"
-              onPress={() => setDismissedKey(presentation.key)}
-              sound="navigate"
-              style={styles.secondaryButton}
-              testID="app-update-dismiss"
-            >
-              <Text style={styles.secondaryButtonText}>
-                {copy["action.later"]}
-              </Text>
-            </PosPressable>
-          ) : null}
-          <PosPressable
-            accessibilityRole="button"
-            disabled={working}
-            onPress={performUpdate}
-            style={[
-              styles.primaryButton,
-              working ? styles.disabledButton : null,
-            ]}
-            testID="app-update-action"
-          >
-            <Text style={styles.primaryButtonText}>
-              {copy[working ? "action.working" : actionKey]}
-            </Text>
-          </PosPressable>
+      {docked ? (
+        <View accessibilityRole="alert" style={styles.dockedCard}>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.accent}
+            name="update"
+            size={40}
+          />
+          <View style={styles.dockedCopy}>{message}</View>
+          {primaryAction}
         </View>
-      </View>
+      ) : (
+        <View
+          accessibilityRole="alert"
+          style={[
+            styles.card,
+            preserveRecoveryAccess
+              ? styles.recoveryAccessCard
+              : required
+                ? styles.requiredCard
+                : styles.optionalCard,
+          ]}
+        >
+          <View style={styles.accent} />
+          {message}
+          {blocking ? (
+            // 强制更新：三个只读入口排成一行，主按钮单独占一行放在最下面。
+            <View style={styles.blockingActions}>
+              <View style={styles.entryRow}>
+                <PosButton
+                  fill
+                  icon="cog-outline"
+                  label={copy["action.settings"]}
+                  onPress={() =>
+                    router.push(
+                      "/update-recovery?section=settings" as Href,
+                    )
+                  }
+                  sound="navigate"
+                  testID="app-update-settings-entry"
+                />
+                <PosButton
+                  fill
+                  icon="lifebuoy"
+                  label={copy["action.support"]}
+                  onPress={() =>
+                    router.push(
+                      "/update-recovery?section=support" as Href,
+                    )
+                  }
+                  sound="navigate"
+                  testID="app-update-support-entry"
+                />
+                <PosButton
+                  fill
+                  icon="tablet"
+                  label={copy["action.registration"]}
+                  onPress={() =>
+                    router.push("/registration" as Href)
+                  }
+                  sound="navigate"
+                  testID="app-update-registration-entry"
+                />
+              </View>
+              {primaryAction}
+            </View>
+          ) : (
+            <View style={styles.actions}>
+              {!required ? (
+                <PosButton
+                  label={copy["action.later"]}
+                  onPress={() => setDismissedKey(presentation.key)}
+                  sound="navigate"
+                  style={styles.laterAction}
+                  testID="app-update-dismiss"
+                  tone="quiet"
+                />
+              ) : null}
+              {primaryAction}
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -280,11 +327,11 @@ function useUpdatePresentation(
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   blockingLayer: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
-    backgroundColor: posColors.canvas,
+    backgroundColor: colors.canvas,
     elevation: 50,
     justifyContent: "center",
     paddingHorizontal: 48,
@@ -306,26 +353,39 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     zIndex: 900,
   },
+  dockedLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "flex-end",
+    justifyContent: "flex-end",
+    // 底部多留一些，避开 iPad 底部的安全区，让停靠条落在诊断信息卡的空白处。
+    paddingBottom: 40,
+    paddingHorizontal: 24,
+    zIndex: 900,
+  },
   card: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.sheet,
     borderWidth: 1,
     elevation: 12,
-    maxWidth: 560,
+    maxWidth: 640,
     overflow: "hidden",
-    paddingBottom: 24,
-    paddingHorizontal: 28,
-    paddingTop: 26,
-    shadowColor: posColors.ink,
+    paddingBottom: 20,
+    paddingHorizontal: 24,
+    paddingTop: 25,
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.16,
     shadowRadius: 20,
     width: "100%",
   },
   requiredCard: {
-    borderColor: posColors.orange,
-    minHeight: 320,
+    borderColor: colors.accent,
+    borderWidth: 2,
     justifyContent: "center",
+    // 加宽到 720：一行并排三个 64 高的入口按钮，英文「Device registration」也放得下。
+    maxWidth: 720,
+    minHeight: 320,
   },
   optionalCard: {
     maxWidth: 480,
@@ -334,8 +394,26 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     minHeight: 0,
   },
+  dockedCard: {
+    alignItems: "center",
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+    borderRadius: posRadius.large,
+    borderWidth: 2,
+    elevation: 12,
+    flexDirection: "row",
+    gap: 16,
+    maxWidth: 760,
+    padding: 14,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    width: "100%",
+  },
+  dockedCopy: { flex: 1, minWidth: 0 },
   accent: {
-    backgroundColor: posColors.orange,
+    backgroundColor: colors.accent,
     height: 5,
     left: 0,
     position: "absolute",
@@ -343,68 +421,54 @@ const styles = StyleSheet.create({
     top: 0,
   },
   eyebrow: {
-    color: posColors.orange,
+    color: colors.accent,
     fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 1.3,
-    marginBottom: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginBottom: 4,
   },
   title: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 28,
-    fontWeight: "800",
+    fontWeight: "900",
     lineHeight: 34,
   },
+  titleCompact: { fontSize: 21, lineHeight: 27 },
   body: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 17,
+    fontWeight: "600",
     lineHeight: 25,
-    marginTop: 14,
+    marginTop: 10,
   },
+  bodyCompact: { fontSize: 14, lineHeight: 20, marginTop: 4 },
   error: {
-    backgroundColor: posColors.redSoft,
-    color: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderRadius: posRadius.medium,
+    color: colors.red,
     fontSize: 15,
+    fontWeight: "700",
     lineHeight: 21,
-    marginTop: 16,
+    marginTop: 12,
+    overflow: "hidden",
     paddingHorizontal: 14,
     paddingVertical: 11,
   },
   actions: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 18,
+  },
+  blockingActions: {
     gap: 12,
-    justifyContent: "flex-end",
     marginTop: 24,
   },
-  primaryButton: {
-    alignItems: "center",
-    backgroundColor: posColors.orange,
-    justifyContent: "center",
-    minHeight: 48,
-    minWidth: 150,
-    paddingHorizontal: 22,
+  entryRow: {
+    flexDirection: "row",
+    gap: 10,
   },
-  secondaryButton: {
-    alignItems: "center",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 48,
-    minWidth: 96,
-    paddingHorizontal: 20,
-  },
-  disabledButton: {
-    opacity: 0.58,
-  },
-  primaryButtonText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  secondaryButtonText: {
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-});
+  laterAction: { minWidth: 120 },
+  fillAction: { flex: 1 },
+  blockingAction: { alignSelf: "stretch" },
+  dockedAction: { flexShrink: 0, width: 240 },
+}));

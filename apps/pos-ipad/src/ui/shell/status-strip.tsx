@@ -1,11 +1,11 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 
 import { usePosShellStore } from "./pos-shell-store";
 
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 type IndicatorTone = "good" | "warning" | "neutral" | "danger";
 type StatusIconName = keyof typeof MaterialCommunityIcons.glyphMap;
@@ -21,6 +21,10 @@ type PosStatusStripProps = Readonly<{
   language?: string;
   onSwitchLanguage?: () => void;
   showTerminalIdentity?: boolean;
+  /** 顶栏最右侧的小字版本号；不传则不显示。 */
+  appVersionLabel?: string | null;
+  /** 在最左侧显示品牌名「HB POS」。 */
+  showBrand?: boolean;
 }>;
 
 type StaticIdentityProps = Readonly<{
@@ -31,6 +35,9 @@ type StaticIdentityProps = Readonly<{
   value: string | null | undefined;
 }>;
 
+/** 顶栏高度：页面布局与弹窗定位按它留位。 */
+export const POS_TOP_BAR_HEIGHT = 52;
+
 function StatusIndicator({ icon, label, tone, value }: StatusIndicatorProps) {
   return (
     <View
@@ -40,9 +47,9 @@ function StatusIndicator({ icon, label, tone, value }: StatusIndicatorProps) {
       <View style={[styles.dot, toneStyles[tone]]} />
       <MaterialCommunityIcons
         accessible={false}
-        color="#B9C5D1"
+        color={posColors.chromeMuted}
         name={icon}
-        size={14}
+        size={16}
       />
       <Text numberOfLines={1} style={styles.value}>
         {value}
@@ -73,14 +80,14 @@ function StaticIdentity({
     >
       <MaterialCommunityIcons
         accessible={false}
-        color="#B9C5D1"
+        color={posColors.chromeMuted}
         name={icon}
-        size={14}
+        size={15}
       />
       <Text
         numberOfLines={1}
         style={[
-          styles.value,
+          styles.identityValue,
           truncate
             ? styles.storeIdentityValue
             : styles.deviceCodeIdentityValue,
@@ -92,11 +99,18 @@ function StaticIdentity({
   );
 }
 
+/**
+ * 顶栏：品牌、门店与设备身份、各项设备状态、语言切换。
+ * 所有页面共用同一条，状态一眼可见，不再占用单独一行。
+ */
 export function PosStatusStrip({
+  appVersionLabel,
   language,
   onSwitchLanguage,
+  showBrand = false,
   showTerminalIdentity = false,
 }: PosStatusStripProps = {}) {
+  usePosThemeVersion();
   const { i18n, t } = useTranslation();
   const {
     connectivity,
@@ -117,6 +131,16 @@ export function PosStatusStrip({
 
   return (
     <View style={styles.container}>
+      {showBrand ? (
+        <Text
+          accessible={false}
+          numberOfLines={1}
+          style={styles.brand}
+          testID="status-strip-brand"
+        >
+          HB POS
+        </Text>
+      ) : null}
       <StatusIndicator
         icon="tablet"
         label={t("status.device")}
@@ -143,6 +167,7 @@ export function PosStatusStrip({
           />
         </View>
       ) : null}
+      <View style={styles.spacer} />
       <StatusIndicator
         icon="wifi"
         label={t("status.network")}
@@ -208,62 +233,104 @@ export function PosStatusStrip({
           </Text>
         </PosPressable>
       ) : null}
+      {appVersionLabel ? (
+        <Text
+          numberOfLines={1}
+          selectable={false}
+          style={styles.version}
+          testID="status-strip-app-version"
+        >
+          {appVersionLabel}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
-const toneStyles = StyleSheet.create({
+const toneStyles = createPosStyles((colors) => ({
   danger: {
-    backgroundColor: posColors.red,
+    backgroundColor: colors.red,
   },
   good: {
-    backgroundColor: posColors.green,
+    backgroundColor: colors.green,
   },
   neutral: {
-    backgroundColor: posColors.mutedInk,
+    backgroundColor: colors.chromeMuted,
   },
   warning: {
-    backgroundColor: posColors.orange,
+    backgroundColor: colors.yellow,
   },
-});
+}));
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
+  brand: {
+    color: colors.chromeInk,
+    flexShrink: 0,
+    fontSize: 17,
+    fontWeight: "900",
+    letterSpacing: 0.3,
+    marginRight: 6,
+  },
   container: {
     alignItems: "center",
-    backgroundColor: posColors.ink,
+    backgroundColor: colors.chrome,
     flexDirection: "row",
-    gap: 20,
-    minHeight: 42,
-    paddingHorizontal: 24,
+    gap: 6,
+    minHeight: POS_TOP_BAR_HEIGHT,
+    paddingHorizontal: 16,
+  },
+  deviceCodeIdentity: {
+    flexShrink: 0,
+  },
+  deviceCodeIdentityValue: {
+    flexShrink: 0,
   },
   dot: {
     borderRadius: 4,
-    height: 7,
-    width: 7,
+    height: 8,
+    width: 8,
+  },
+  identityValue: {
+    color: colors.chromeInk,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
   },
   indicator: {
     alignItems: "center",
-    flexShrink: 1,
+    backgroundColor: colors.chromeChip,
+    borderRadius: 16,
     flexDirection: "row",
+    flexShrink: 1,
     gap: 6,
+    minHeight: 32,
     minWidth: 0,
+    paddingHorizontal: 10,
   },
   languageButton: {
     alignItems: "center",
+    borderColor: colors.chromeBorder,
+    borderRadius: 8,
+    borderWidth: 1.5,
     flexShrink: 0,
     justifyContent: "center",
-    marginLeft: "auto",
+    marginLeft: 6,
     minHeight: 44,
-    minWidth: 44,
+    minWidth: 52,
   },
   languageButtonPressed: {
-    backgroundColor: posColors.mutedInk,
+    backgroundColor: colors.chromeChip,
   },
   languageTargetGlyph: {
-    color: "#FFFFFF",
-    fontSize: 13,
+    color: colors.chromeInk,
+    fontSize: 14,
     fontWeight: "900",
-    lineHeight: 16,
+    lineHeight: 17,
+  },
+  spacer: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   staticIdentity: {
     alignItems: "center",
@@ -278,23 +345,25 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
-  deviceCodeIdentity: {
-    flexShrink: 0,
-  },
-  deviceCodeIdentityValue: {
-    flexShrink: 0,
-  },
   terminalIdentity: {
     alignItems: "center",
     flexDirection: "row",
     flexShrink: 1,
     gap: 12,
+    marginLeft: 8,
     minWidth: 0,
   },
   value: {
-    color: "#FFFFFF",
-    fontSize: 11,
+    color: colors.chromeInk,
+    fontSize: 12.5,
     fontVariant: ["tabular-nums"],
     fontWeight: "700",
   },
-});
+  version: {
+    color: colors.chromeMuted,
+    flexShrink: 0,
+    fontSize: 11,
+    fontVariant: ["tabular-nums"],
+    marginLeft: 6,
+  },
+}));

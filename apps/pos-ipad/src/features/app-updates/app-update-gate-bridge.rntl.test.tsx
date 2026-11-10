@@ -6,6 +6,7 @@ import {
   render,
   waitFor,
 } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 
 import { AppUpdateGateBridge } from "./app-update-gate-bridge";
 
@@ -127,6 +128,95 @@ test.each(["/registration", "/update-recovery"])(
     expect(screen.getByTestId("app-update-action")).toBeTruthy();
   },
 );
+
+test("恢复页上更新入口停靠在右下角，不盖住页头的设备注册；注册页仍在右上角", async () => {
+  const updates = updateService({
+    key: "native:required:2.0.0",
+    kind: "native",
+    requirement: "required",
+    phase: "blocking",
+    blocking: true,
+    releaseMessage: null,
+    appStoreUrl: "https://apps.apple.com/app/id123",
+  });
+  mockRuntime = { services: { appUpdates: updates } };
+
+  mockPathname = "/update-recovery";
+  const recovery = await render(<AppUpdateGateBridge />);
+  expect(
+    StyleSheet.flatten(
+      recovery.getByTestId("app-update-recovery-access").props.style,
+    ),
+  ).toEqual(
+    expect.objectContaining({
+      alignItems: "flex-end",
+      justifyContent: "flex-end",
+    }),
+  );
+  // 停靠条只保留升级主按钮，不重复提供设置 / 支持 / 注册入口。
+  expect(recovery.getByText("打开 App Store")).toBeTruthy();
+  expect(recovery.queryByTestId("app-update-settings-entry")).toBeNull();
+  expect(recovery.queryByTestId("app-update-dismiss")).toBeNull();
+  await recovery.unmount();
+
+  mockPathname = "/registration";
+  const registration = await render(<AppUpdateGateBridge />);
+  expect(
+    StyleSheet.flatten(
+      registration.getByTestId("app-update-recovery-access").props.style,
+    ),
+  ).toEqual(
+    expect.objectContaining({
+      alignItems: "flex-end",
+      justifyContent: "flex-start",
+    }),
+  );
+  expect(registration.getByTestId("app-update-action")).toBeTruthy();
+});
+
+test("升级执行中主按钮禁用并显示正在更新，失败后给出稳定提示", async () => {
+  const updates = updateService({
+    key: "ota:required:policy-42:update-id",
+    kind: "ota",
+    requirement: "required",
+    phase: "blocking",
+    blocking: true,
+    releaseMessage: null,
+    appStoreUrl: null,
+  });
+  let finish: (value: unknown) => void = () => undefined;
+  updates.performSelectedUpdate.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  expect(screen.getByText("安装更新")).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("app-update-action"));
+  });
+  expect(screen.getByText("正在更新…")).toBeTruthy();
+  expect(
+    screen.getByTestId("app-update-action").props.accessibilityState
+      ?.disabled,
+  ).toBe(true);
+
+  await act(async () => {
+    finish({ action: "blocked" });
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByText("请先完成当前交易或支付恢复，再执行更新。"),
+    ).toBeTruthy(),
+  );
+  expect(
+    screen.getByTestId("app-update-action").props.accessibilityState
+      ?.disabled,
+  ).toBe(false);
+});
 
 test.each(["/login", "/settings", "/sync-history"])(
   "required 不放开完整业务路由 %s",

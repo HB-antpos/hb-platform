@@ -17,6 +17,7 @@ import type {
   RuntimeBackendState,
   RuntimeDeviceState,
 } from "./pos-runtime";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type PosRuntimeContextValue = Readonly<{
   state: PosRuntimeState;
@@ -32,6 +33,7 @@ const PosRuntimeContext = createContext<PosRuntimeContextValue | null>(null);
 const productionController = createExpoPosRuntimeController();
 
 export function PosRuntimeProvider({ children }: PropsWithChildren) {
+  usePosThemeVersion();
   return (
     <PosRuntimeProviderWithController controller={productionController}>
       {children}
@@ -45,6 +47,7 @@ export function PosRuntimeProviderWithController({
 }: PropsWithChildren<{
   controller: PosRuntimeController<ExpoPosRuntimeServices>;
 }>) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     (listener) => controller.subscribe(listener),
     () => controller.getState(),

@@ -17,6 +17,7 @@ import {
   PosTextInput,
   type PosTextInputProps,
 } from "@/ui/controls/pos-text-input";
+import { usePosThemeVersion } from "@/ui/theme";
 
 const DEFAULT_KEYBOARD_REVEAL_OFFSET = 16;
 
@@ -38,6 +39,7 @@ export const PosKeyboardAwareScrollView = forwardRef<
   { keyboardRevealOffset = DEFAULT_KEYBOARD_REVEAL_OFFSET, ...props },
   forwardedRef,
 ) {
+  usePosThemeVersion();
   const scrollViewRef = useRef<ScrollView>(null);
 
   const setScrollViewRef = useCallback(
@@ -129,6 +131,7 @@ export const PosKeyboardAwareTextInput = forwardRef<
   },
   ref,
 ) {
+  usePosThemeVersion();
   const revealFocusedInput = useContext(KeyboardRevealContext);
   const focusedTargetRef = useRef<KeyboardRevealTarget | null>(null);
   const lastChangeAtRef = useRef(0);
