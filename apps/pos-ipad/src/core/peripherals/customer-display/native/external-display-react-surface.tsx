@@ -1,6 +1,6 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import type { TFunction } from "i18next";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AppRegistry,
@@ -9,6 +9,7 @@ import {
   Text,
   useWindowDimensions,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 
 import {
@@ -372,6 +373,28 @@ export function ExternalDisplaySurface({
   // 客显面向顾客固定使用英文，不跟随收银主界面的语言切换。
   const { t } = useTranslation(undefined, { lng: "en" });
   const windowSize = useWindowDimensions();
+  // 中文注释：外屏是另一个 UIWindow 里的第二个 RN root，useWindowDimensions 读的是 RN 全局的窗口尺寸
+  // （跟着主窗口 / 当前 key window 走），并不是外屏自己的尺寸。App 从后台回到前台时 RN 会重新上报全局尺寸，
+  // 它可能变回 iPad 自己的屏幕，于是这一层按 iPad 的尺度重排，和原生层（用外屏 view.bounds）错位，
+  // 外屏上就叠出大小不一的两套客显。所以以根视图实际排出来的尺寸为准（外屏分辨率变化时 onLayout 也会再报），
+  // 测得之前才退回全局窗口尺寸。
+  const [measuredSize, setMeasuredSize] = useState<Readonly<{
+    width: number;
+    height: number;
+  }> | null>(null);
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    // 无效尺寸（0 / NaN）忽略，沿用上一次有效值。
+    if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) {
+      return;
+    }
+    setMeasuredSize((current) =>
+      current !== null && current.width === width && current.height === height
+        ? current
+        : { width, height },
+    );
+  }, []);
+  const layoutSize = measuredSize ?? windowSize;
   const [snapshot, setSnapshot] = useState(() =>
     parseSnapshot(initialSnapshot),
   );
@@ -406,10 +429,10 @@ export function ExternalDisplaySurface({
   const layout = useMemo(
     () =>
       resolveCustomerDisplayLayout({
-        width: windowSize.width,
-        height: windowSize.height,
+        width: layoutSize.width,
+        height: layoutSize.height,
       }),
-    [windowSize.width, windowSize.height],
+    [layoutSize.width, layoutSize.height],
   );
   const styles = useMemo(() => createStyles(layout), [layout]);
   const itemWindow = useMemo(() => visibleItemWindow(snapshot), [snapshot]);
@@ -426,6 +449,7 @@ export function ExternalDisplaySurface({
     return (
       <View
         accessible={false}
+        onLayout={handleLayout}
         pointerEvents="none"
         style={staticStyles.surface}
         testID="external-display-surface"
@@ -463,6 +487,7 @@ export function ExternalDisplaySurface({
   return (
     <View
       accessible={false}
+      onLayout={handleLayout}
       pointerEvents="none"
       style={staticStyles.surface}
       testID="external-display-surface"

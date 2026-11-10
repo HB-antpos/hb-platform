@@ -719,3 +719,88 @@ function installNativeModule() {
     },
   };
 }
+
+/** 外屏根视图排出来的尺寸（onLayout）。 */
+async function reportRootLayout(
+  screen: Awaited<ReturnType<typeof renderSurface>>,
+  width: number,
+  height: number,
+) {
+  await fireEvent(screen.getByTestId("external-display-surface"), "layout", {
+    nativeEvent: { layout: { x: 0, y: 0, width, height } },
+  });
+}
+
+function advertWindowStyle(screen: Awaited<ReturnType<typeof renderSurface>>) {
+  return StyleSheet.flatten(
+    screen.getByTestId("external-display-advert-window").props.style,
+  );
+}
+
+test("外屏排版以根视图实测尺寸为准：App 从后台回来 RN 全局窗口尺寸变回 iPad 屏幕时，外屏布局不能跟着变", async () => {
+  // 外屏 1366×768；RN 全局窗口一开始恰好等于外屏（外屏窗口是 key window）。
+  setWindow(1_366, 768);
+  const screen = await renderSurface(designedSnapshot("cart"));
+  await reportRootLayout(screen, 1_366, 768);
+  const onExternal = resolveCustomerDisplayLayout({ width: 1_366, height: 768 });
+  expect(advertWindowStyle(screen)).toMatchObject({
+    left: onExternal.advertPanel.x,
+    width: onExternal.advertPanel.width,
+  });
+
+  // 回到前台：RN 把全局窗口尺寸重新上报成 iPad 自己的屏幕。
+  await act(async () => {
+    setWindow(1_180, 820);
+  });
+  const onIpad = resolveCustomerDisplayLayout({ width: 1_180, height: 820 });
+  expect(onIpad.advertPanel.width).not.toBeCloseTo(onExternal.advertPanel.width, 0);
+  // 布局仍按外屏实际尺寸，不会按 iPad 尺度重排。
+  expect(advertWindowStyle(screen)).toMatchObject({
+    left: onExternal.advertPanel.x,
+    width: onExternal.advertPanel.width,
+  });
+});
+
+test("测得尺寸之前退回 RN 全局窗口尺寸；测得之后外屏分辨率变化会按新尺寸重排", async () => {
+  setWindow(1_024, 768);
+  const screen = await renderSurface(designedSnapshot("cart"));
+  const beforeMeasure = resolveCustomerDisplayLayout({ width: 1_024, height: 768 });
+  expect(advertWindowStyle(screen)).toMatchObject({ width: beforeMeasure.advertPanel.width });
+
+  await reportRootLayout(screen, 1_920, 1_080);
+  const after = resolveCustomerDisplayLayout({ width: 1_920, height: 1_080 });
+  expect(advertWindowStyle(screen)).toMatchObject({ width: after.advertPanel.width });
+
+  // 外屏换了分辨率：onLayout 再报一次，按新的重排。
+  await reportRootLayout(screen, 1_280, 720);
+  const resized = resolveCustomerDisplayLayout({ width: 1_280, height: 720 });
+  expect(advertWindowStyle(screen)).toMatchObject({ width: resized.advertPanel.width });
+});
+
+test("无效的实测尺寸（0 / NaN）被忽略，沿用上一次有效值", async () => {
+  setWindow(1_024, 768);
+  const screen = await renderSurface(designedSnapshot("cart"));
+  await reportRootLayout(screen, 1_366, 768);
+  const valid = resolveCustomerDisplayLayout({ width: 1_366, height: 768 });
+
+  await reportRootLayout(screen, 0, 0);
+  await reportRootLayout(screen, Number.NaN, 768);
+  expect(advertWindowStyle(screen)).toMatchObject({ width: valid.advertPanel.width });
+});
+
+test("idle 全屏广告分支的根视图同样上报尺寸：之后切回购物车布局不会错位", async () => {
+  setWindow(1_024, 768);
+  const idleSnapshot = designedSnapshot("idle", { advert });
+  const screen = await renderSurface(idleSnapshot);
+  expect(typeof screen.getByTestId("external-display-surface").props.onLayout).toBe("function");
+  await reportRootLayout(screen, 1_366, 768);
+
+  const i18n = await createTestI18n("en");
+  await screen.rerender(
+    <I18nextProvider i18n={i18n}>
+      <ExternalDisplaySurface snapshot={designedSnapshot("cart")} surfaceId="external-test" />
+    </I18nextProvider>,
+  );
+  const valid = resolveCustomerDisplayLayout({ width: 1_366, height: 768 });
+  expect(advertWindowStyle(screen)).toMatchObject({ width: valid.advertPanel.width });
+});
