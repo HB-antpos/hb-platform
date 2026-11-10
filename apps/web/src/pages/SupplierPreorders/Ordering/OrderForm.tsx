@@ -37,6 +37,7 @@ import { windowDayCount } from './orderingHistory.logic'
 import OrderingHistoryExpand, { type HistoryDetailEntry } from './OrderingHistoryExpand'
 import './orderingMessages'
 import {
+  DEFAULT_ORDERING_SORT,
   ORDERING_PAGE_SIZES,
   PAGE_SIZE_STORAGE_KEY,
   computeClockOffsetMs,
@@ -142,8 +143,8 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
   const [keyword, setKeyword] = useState('')
   const [category, setCategory] = useState<string | undefined>(undefined)
   const [filter, setFilter] = useState<SupplierPreorderOrderingFilter>('all')
-  // 默认按去年本店销量从高到低（设计图 1）；本页没有记忆排序
-  const [sort, setSort] = useState<SupplierPreorderOrderingSort>('lastYearSalesDesc')
+  // 默认按序号（原订单表顺序）；想看去年本店销量从高到低在下拉里手选，本页没有记忆排序
+  const [sort, setSort] = useState<SupplierPreorderOrderingSort>(DEFAULT_ORDERING_SORT)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(() => readStoredPageSize(storage))
   const [rows, setRows] = useState<SupplierPreorderOrderingItem[]>([])

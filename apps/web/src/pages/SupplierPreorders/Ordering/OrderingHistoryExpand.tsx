@@ -10,6 +10,7 @@ import HistoryTrendChart from './HistoryTrendChart'
 import { aggregateBatches, expandDaily, formatDateSpan, formatPercent, refDisplayCode, resolveSeriesLength, windowDayCount } from './orderingHistory.logic'
 import { HISTORY_COLORS, RefTooltip, sellThroughClassName } from './orderingHistoryCells'
 import { formatAud, formatInteger } from './orderingPage.logic'
+import { sortStoresBySalesDesc } from './orderingStoreCompare.logic'
 
 const NS = 'supplierPreorderOrdering'
 
@@ -221,6 +222,8 @@ function StoreSummary({ t, store, suggestedCartons, isRef }: { t: TFunction; sto
 }
 
 function StoresCompareTable({ t, stores }: { t: TFunction; stores: SupplierPreorderStoreHistory[] }) {
+  // 按去年销量从高到低排（没有记录的店在最后），当前分店靠行高亮标出
+  const sortedStores = useMemo(() => sortStoresBySalesDesc(stores), [stores])
   const discountText = (store: SupplierPreorderStoreHistory) => {
     if (!store.hasData) return '—'
     if (store.discountStatus === 'unknown') return t(`${NS}.expand.discountUnknownShort`)
@@ -233,14 +236,14 @@ function StoresCompareTable({ t, stores }: { t: TFunction; stores: SupplierPreor
           <tr>
             <th>{t(`${NS}.expand.colStore`)}</th>
             <th>{t(`${NS}.expand.colPurchase`)}</th>
-            <th>{t(`${NS}.expand.colSales`)}</th>
+            <th>{t(`${NS}.expand.colSales`)} ↓</th>
             <th>{t(`${NS}.expand.colSellThrough`)}</th>
             <th>{t(`${NS}.expand.colDiscount`)}</th>
             <th>{t(`${NS}.expand.colThisYear`)}</th>
           </tr>
         </thead>
         <tbody>
-          {stores.map((store) => (
+          {sortedStores.map((store) => (
             <tr key={store.storeCode || store.storeName} className={store.isCurrent ? 'is-current' : undefined}>
               <td>{store.storeName}</td>
               <td>{store.hasData ? formatInteger(store.purchaseQty) : '—'}</td>

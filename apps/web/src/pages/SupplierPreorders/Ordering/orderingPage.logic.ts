@@ -2,7 +2,11 @@
 // 本机记忆（localStorage）容错读写、分页大小校验、初始分店选择、错误文案提取。
 // 不依赖 React / antd，便于 node 直接跑单测。
 
-import { SUPPLIER_PREORDER_PAGE_SIZES, type SupplierPreorderMyStore } from '../../../types/supplierPreorder'
+import {
+  SUPPLIER_PREORDER_PAGE_SIZES,
+  type SupplierPreorderMyStore,
+  type SupplierPreorderOrderingSort,
+} from '../../../types/supplierPreorder'
 
 export const DAY_MS = 24 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
@@ -16,6 +20,9 @@ export const MAX_CARTONS_PER_LINE = 9999
 /** 分页大小：只允许 50 / 100 / 200 / 500，默认 50 */
 export const ORDERING_PAGE_SIZES: readonly number[] = SUPPLIER_PREORDER_PAGE_SIZES
 export const DEFAULT_ORDERING_PAGE_SIZE = 50
+
+/** 商品列表默认排序：按序号（原订单表顺序）；去年本店销量、进价、其他分店订得多仍可在下拉里手选，本页不记忆排序 */
+export const DEFAULT_ORDERING_SORT: SupplierPreorderOrderingSort = 'seq'
 
 const SYDNEY_TIME_ZONE = 'Australia/Sydney'
 
