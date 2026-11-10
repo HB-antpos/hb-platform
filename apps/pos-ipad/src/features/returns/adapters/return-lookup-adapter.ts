@@ -24,6 +24,7 @@ import type {
   LocalReturnRecord,
   LocalReturnRecordReader,
 } from "@hb/pos-db/core/db/sqlite-local-return-records";
+import { parseZellerPayment } from "@hb/pos-payments-core/features/payments/zeller/zeller-payment-reference";
 
 type OrderHistoryQueryResponse =
   components["schemas"]["OrderHistoryQueryResponse"];
@@ -174,6 +175,11 @@ export type ReturnLookupAdapterOptions = Readonly<{
    * 本地降级时扣掉本机全部已退数量；缺省时保持旧行为（仅由退货账本在执行时兜底）。
    */
   localReturnRecords?: LocalReturnRecordReader | undefined;
+  /**
+   * 本机现在能不能用 Zeller 刷卡机把钱退回原卡（已选 Zeller 通道）。每次查单时现读，
+   * 缺省或返回 false 时 Zeller 原付款只能现金 / 代金券代替退款。
+   */
+  zellerOriginalRefundAvailable?: (() => boolean) | undefined;
   createOpaqueId(kind: "selection" | "source"): string;
 }>;
 
@@ -575,13 +581,28 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
                 remainingCents: handle.remainingCents,
               }
             : null,
-        // 手工刷卡没有集成刷卡机退款凭据，Zeller 原付款本机无法原路退回，都只能现金或代金券代替退款。
+        // 手工刷卡没有集成刷卡机退款凭据，只能现金或代金券代替退款。
+        // Zeller 原付款默认退回原卡；拿不到原交易号，或本机没有启用 Zeller 时，同样只能代替退款。
         ...(isManualCardReturnMaterial(material) ||
-        isZellerCardReturnMaterial(material)
+        (isZellerCardReturnMaterial(material) &&
+          !this.canRefundToZellerCard(material))
           ? { substituteOnly: true }
           : {}),
       };
     });
+  }
+
+  /** Zeller 原付款能否原路退回：引用里要有原交易号，并且本机此刻启用着 Zeller。 */
+  private canRefundToZellerCard(
+    material: ProtectedTenderCapacityMaterial,
+  ): boolean {
+    if (zellerOriginalPaymentOf(material) === null) return false;
+    try {
+      return this.options.zellerOriginalRefundAvailable?.() === true;
+    } catch {
+      // 读不出本机通道状态时按不可用处理：最多是多走一次代替退款，不会把退款发到没配好的刷卡机上。
+      return false;
+    }
   }
 
   private sameStoreCatalogItems(
@@ -777,9 +798,8 @@ const ZELLER_PROCESSOR = "Zeller";
  * 与 WPF ZellerPaymentReference.IsZeller 口径一致：引用以 ZELLER: / ZELLERRF: 开头（含主管确认、
  * 没有交易号的未核实格式，以及损坏的 Zeller 引用——格式错误也不能回退成别的刷卡通道），或处理器为 Zeller。
  *
- * 中文注释：本机目前没有 Zeller 刷卡通道（线 B 才接入），拿不到原交易号就不可能原路退回，
- * 所以 Zeller 原付款只登记代替退款额度（现金 / 代金券），与手动刷卡同一规则。
- * 线 B 接入 Zeller 并且本机配对可用后，这里要改成“本机 Zeller 不可用才只能代替”。
+ * 中文注释：是不是 Zeller 的单，和能不能原路退回是两件事。这里只回答前者；
+ * 能否原路退回见 zellerOriginalPaymentOf（要有原交易号）以及本机是否启用了 Zeller。
  */
 export function isZellerCardReturnMaterial(
   material: ProtectedTenderCapacityMaterial,
@@ -797,6 +817,26 @@ export function isZellerCardReturnMaterial(
           ZELLER_PROCESSOR.toLowerCase(),
     )
   );
+}
+
+/**
+ * Zeller 原付款的原交易号与原付款引用。与 WPF ZellerPaymentReference.TryGetOriginalTransactionUuid 口径一致：
+ * 只有格式完整的 ZELLER:{HBZ-…}:{transactionUuid} 才取得出原交易号；主管确认、没有交易号的未核实引用，
+ * 以及损坏的引用都返回 null，这类单只能代替退款。
+ *
+ * 中文注释：originalReference 原样保留服务端给的写法（只去首尾空白）。退货单上传时服务端按这个引用
+ * 找原付款扣减可退额度，不能在本机改写。
+ */
+export function zellerOriginalPaymentOf(
+  material: ProtectedTenderCapacityMaterial,
+): Readonly<{ transactionUuid: string; originalReference: string }> | null {
+  if (material.method !== "card") return null;
+  const originalReference =
+    material.protectedProviderMaterial.reference?.trim() ?? "";
+  const parsed = parseZellerPayment(originalReference);
+  return parsed === null
+    ? null
+    : { transactionUuid: parsed.transactionUuid, originalReference };
 }
 
 function isTransportFailure(error: unknown): boolean {

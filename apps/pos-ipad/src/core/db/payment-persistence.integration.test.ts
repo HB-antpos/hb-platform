@@ -1930,6 +1930,96 @@ test("真实 SQLite：退款结果未知经主管确认未退款，作废 action
   });
 });
 
+test("真实 SQLite：Zeller 原路退款的 attempt 可以绑定到退货额度；结果未知时主管可确认未退款，且不登记 Linkly 会话 ACK", async () => {
+  await withDatabase("return-supervisor-resolution-zeller", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: {
+        version: 1,
+        provider: "zeller",
+        transactionUuid: "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+        originalReference: "ZELLER:HBZ-3b241101e2bb42558caf4136c566a962:65c4b343-03e6-49ef-a54d-012e3f2c222c",
+      },
+      observedAtIso: T0,
+    });
+    let tenderId = 0;
+    let auditId = 0;
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      { createTenderGuid: () => `rz-tender-${++tenderId}`, createAuditEventId: () => `rz-audit-${++auditId}` },
+      () => T2,
+    );
+    const base = durableReturnDraft();
+    const cardAllocation = { ...base.allocations[1]!, index: 0, signedAmountCents: -500 };
+    const cardOnly = {
+      ...base,
+      allocations: [cardAllocation],
+      plan: {
+        ...base.plan,
+        allocations: [{
+          method: "card" as const,
+          signedAmountCents: -500,
+          originalCapacityId: "return-capacity-card",
+          originalOrderGuid: "original-return-order",
+          offlineCashProof: null,
+        }],
+      },
+    };
+    await ledger.prepareOrLoad(cardOnly);
+    await ledger.markAllocationSubmitted({ actionId: cardOnly.actionId, allocationId: "return-allocation-card" });
+    await insertActionBinding(
+      connection, cardOnly.returnOrderGuid, "rz-provider-action", "rz-attempt", "rz-idempotency",
+      ["zeller", "refund", "AUD", -500],
+    );
+    await insertAttempt(connection, {
+      attemptId: "rz-attempt", idempotencyKey: "rz-idempotency", orderGuid: cardOnly.returnOrderGuid,
+      provider: "zeller", operation: "refund", amountCents: -500, state: "Unknown",
+    });
+    // 退货账本认 zeller 的退款 attempt：绑定不再因通道不在名单里被拒。
+    await ledger.bindAllocationAttempt({
+      actionId: cardOnly.actionId, allocationId: "return-allocation-card",
+      attemptKind: "payment-provider", externalActionId: "rz-provider-action", durableAttemptId: "rz-attempt",
+    });
+    await ledger.recordAllocationOutcome({
+      actionId: cardOnly.actionId, allocationId: "return-allocation-card",
+      expectedStatuses: ["submitted"], status: "unknown", protectedRecoveryKey: null,
+    });
+    await ledger.markActionUnknown({ actionId: cardOnly.actionId });
+
+    const store = new SqliteReturnSupervisorResolutionStore(
+      connection,
+      { createResolutionId: () => "rz-resolution-1", createAuditEventId: () => "rz-resolution-audit-1" },
+      () => T2,
+    );
+    assert.equal(
+      await store.resolve({
+        actionId: cardOnly.actionId,
+        finding: "not-refunded",
+        evidenceReference: "Zeller dashboard",
+        note: "Zeller dashboard shows no refund for this reference",
+        authorizationId: "rz-auth-1",
+        supervisorActor: { cashierId: "SUP-RETURN", cashierName: "Supervisor", userGuid: "user-sup" },
+        requestingActor: { cashierId: "C-RETURN", cashierName: "Return Cashier", userGuid: "user-cash" },
+        scope: { storeCode: "S-RETURN", deviceCode: "D-RETURN" },
+      }),
+      "declined",
+    );
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM return_action_allocations WHERE status = 'declined' AND capacity_reservation_state = 'Released'"),
+      1,
+    );
+    // Zeller 没有后端会话，不需要也不能登记 Linkly 的会话 ACK。
+    assert.equal(await scalar(connection, "SELECT COUNT(*) AS count FROM payment_supervisor_session_acks"), 0);
+  });
+});
+
 test("真实 SQLite：多笔/部分完成的退款不开放主管结案（失败关闭）", async () => {
   await withDatabase("return-supervisor-resolution-partial", async (connection) => {
     await migrateFresh(connection);

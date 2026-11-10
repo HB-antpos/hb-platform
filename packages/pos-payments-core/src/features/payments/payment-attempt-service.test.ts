@@ -203,7 +203,72 @@ test("Zeller attemptId 不是标准 GUID 时不预置 reference，留给适配�
   assert.equal(started.attempt.state, "Declined");
 });
 
-test("Zeller 原路退款还没有接入：退款 attempt 在调用 provider 之前失败关闭", async () => {
+test("Zeller 原路退款：原交易号由可信种子写进 paymentId，退款 reference 在提交前由 attemptId 派生并落库", async () => {
+  const guid = "799287a3-3dc2-4df1-bca3-d33eea19b35a";
+  const original = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+  const refundUuid = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const expected = "HBZR-799287a33dc24df1bca3d33eea19b35a";
+  const refundInput = {
+    ...input(),
+    provider: "zeller" as const,
+    operation: "refund" as const,
+    amount: { currency: "AUD" as const, cents: -1_250 },
+    refundCapacityId: "capacity-1",
+  };
+
+  const ledger = new MemoryLedger();
+  const provider = new FakeProvider("zeller");
+  provider.refundResult = async (value) => {
+    // 向刷卡机发退款之前，两个引用都必须已经落库：原交易号告诉 Zeller 退哪一笔，
+    // reference 是崩溃后查回这笔退款的唯一线索。
+    assert.deepEqual(ledger.attempts.get(value.attemptId)?.references, value.references);
+    assert.equal(ledger.attempts.get(value.attemptId)?.state, "Submitted");
+    assert.equal(value.references.paymentId, original);
+    assert.equal(value.references.txnRef, expected);
+    return {
+      ...result("Approved", { paymentId: original, txnRef: expected }),
+      protectedSyncEvidence: { ...cardEvidence(value, refundUuid), processor: "Zeller" as const },
+    };
+  };
+  const service = createService({
+    ledger,
+    provider,
+    createAttemptId: () => guid,
+    trustedRefundReferenceSeed: async (seedInput) => {
+      assert.equal(seedInput.provider, "zeller");
+      assert.equal(seedInput.capacity.capacityId, "capacity-1");
+      return { provider: "zeller" as const, paymentId: original };
+    },
+  });
+
+  const completed = await service.startAttempt(refundInput);
+
+  assert.equal(completed.attempt.state, "Approved");
+  assert.equal(completed.attempt.references.paymentId, original);
+  assert.equal(completed.attempt.references.txnRef, expected);
+  assert.equal(provider.refundCalls, 1);
+  assert.equal(provider.submitCalls, 0);
+  // 退款自己的交易号只在加密保存的卡证据里。
+  assert.equal(ledger.protectedEvidence.get(guid)?.txnRef, refundUuid);
+
+  // 通道如果把退款自己的交易号写回 paymentId，就和原交易号冲突：不能悄悄覆盖，落成结果未知。
+  const conflictLedger = new MemoryLedger();
+  const conflicting = new FakeProvider("zeller");
+  conflicting.refundResult = async (value) => ({
+    ...result("Approved", { paymentId: refundUuid, txnRef: expected }),
+    protectedSyncEvidence: { ...cardEvidence(value, refundUuid), processor: "Zeller" as const },
+  });
+  const conflicted = await createService({
+    ledger: conflictLedger,
+    provider: conflicting,
+    createAttemptId: () => guid,
+    trustedRefundReferenceSeed: async () => ({ provider: "zeller" as const, paymentId: original }),
+  }).startAttempt(refundInput);
+  assert.equal(conflicted.attempt.state, "Unknown");
+  assert.equal(conflicted.attempt.references.paymentId, original);
+});
+
+test("Zeller 原路退款的种子必须是 zeller 自己的原交易号，给成别家通道的种子时在调用 provider 之前失败关闭", async () => {
   const ledger = new MemoryLedger();
   const provider = new FakeProvider("zeller");
   const service = createService({
@@ -2478,6 +2543,11 @@ function trustedRefundSeed(
       return {
         provider: "linkly-cloud",
         rfn: protectedReference,
+      };
+    case "zeller":
+      return {
+        provider: "zeller",
+        paymentId: protectedReference,
       };
   }
 }

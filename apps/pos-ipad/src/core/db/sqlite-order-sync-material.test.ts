@@ -440,6 +440,98 @@ test("同步材料拒绝调用输入与持久来源不一致，数据库拒绝�
   });
 });
 
+test("Zeller 原路退款上传 CARD_REFUND|refund=ZELLERRF:…|original=原付款引用，与 WPF 同格式", async (t) => {
+  const attemptId = "799287a3-3dc2-4df1-bca3-d33eea19b35a";
+  const refundReference = "HBZR-799287a33dc24df1bca3d33eea19b35a";
+  const originalUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+  const refundUuid = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  // 原付款引用按服务端给的写法原样保存（这里故意用大写的交易号），上传时不能改写。
+  const originalReference = `ZELLER:HBZ-3b241101e2bb42558caf4136c566a962:${originalUuid.toUpperCase()}`;
+  const context = { version: 1, provider: "zeller", transactionUuid: originalUuid, originalReference };
+  const evidence = {
+    version: 1, provider: "zeller", operation: "refund", processor: "Zeller",
+    // 卡证据里的 txnRef 是退款这一笔自己的交易号。
+    txnRef: refundUuid, authCode: null, cardType: "VISA", cardBin: null,
+    maskedCardNumber: "1234", merchantId: null, responseCode: "00", responseText: "APPROVED",
+    stan: null, bankDateTimeIso: null, amountCents: 500, refundReference: null,
+  } as const;
+  const seed = async (
+    connection: SqliteConnectionPort,
+    over: Partial<{
+      protectedContext: Readonly<Record<string, unknown>>;
+      paymentId: string;
+      txnRef: string;
+      evidence: Readonly<Record<string, unknown>> | null;
+    }> = {},
+  ) => {
+    const fixture = await seedRefundTender(connection, {
+      orderGuid: "order-zeller-refund",
+      tenderGuid: "tender-zeller-refund",
+      attemptId,
+      provider: "zeller",
+      method: "card",
+      amountCents: -500,
+      syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE,
+      // attempt 上 paymentId 是原交易号，txnRef 是本次退款的 reference。
+      paymentId: over.paymentId ?? originalUuid,
+      txnRef: over.txnRef ?? refundReference,
+      protectedContext: over.protectedContext ?? context,
+    });
+    const supplied = over.evidence === undefined ? evidence : over.evidence;
+    if (supplied !== null) {
+      const ciphertext = await encryptPaymentProtectedMaterial(encryptor, {
+        voucherReservationToken: null,
+        cardSyncEvidence: supplied as typeof evidence,
+      });
+      await connection.run(
+        "UPDATE payment_attempts SET provider_payload_ciphertext = ? WHERE attempt_id = ?",
+        [ciphertext, attemptId],
+      );
+    }
+    return fixture.resolver;
+  };
+
+  await t.test("批准的退款", async () => {
+    await withDatabase(async (connection) => {
+      const resolver = await seed(connection);
+      const ordinary = await readOrdinaryOrder(connection, "order-zeller-refund");
+      const resolved = await resolver.resolve(ordinary, null);
+      const expectedRefund = `ZELLERRF:${refundReference}:${refundUuid}`;
+      assert.equal(
+        resolved.tenders[0]?.reference,
+        `CARD_REFUND|refund=${utf8Base64(expectedRefund)}|original=${utf8Base64(originalReference)}`,
+      );
+      assert.equal(decodeCardRefundPart(resolved.tenders[0]?.reference, "refund"), expectedRefund);
+      assert.equal(decodeCardRefundPart(resolved.tenders[0]?.reference, "original"), originalReference);
+      const material = await resolver.resolveForSync(ordinary, null);
+      assert.deepEqual(material.cardSyncEvidenceByTenderGuid.get("tender-zeller-refund"), evidence);
+    });
+  });
+
+  const rejected: readonly (readonly [string, Parameters<typeof seed>[1], string])[] = [
+    ["额度只登记了代替退款（没有原交易号）", { protectedContext: { version: 1, provider: "zeller" } }, "ORDER_SYNC_RETURN_CONTEXT_MISMATCH"],
+    ["额度里的原交易号与 attempt 上的不是同一笔", { protectedContext: { ...context, transactionUuid: refundUuid } }, "ORDER_SYNC_RETURN_CONTEXT_MISMATCH"],
+    ["额度里的原付款引用指向另一笔交易", {
+      protectedContext: { ...context, originalReference: `ZELLER:HBZ-3b241101e2bb42558caf4136c566a962:${refundUuid}` },
+    }, "ORDER_SYNC_RETURN_CONTEXT_MISMATCH"],
+    ["额度是别家通道的", { protectedContext: { version: 1, provider: "square", paymentId: originalUuid } }, "ORDER_SYNC_RETURN_CONTEXT_MISMATCH"],
+    ["reference 是扣款用的", { txnRef: "HBZ-799287a33dc24df1bca3d33eea19b35a" }, "ORDER_SYNC_ATTEMPT_MISMATCH"],
+    ["卡证据里的退款交易号不是 GUID", { evidence: { ...evidence, txnRef: "not-a-uuid" } }, "ORDER_SYNC_CARD_EVIDENCE_MISMATCH"],
+  ];
+  for (const [name, over, code] of rejected) {
+    await t.test(name, async () => {
+      await withDatabase(async (connection) => {
+        const resolver = await seed(connection, over);
+        await assertMaterialRejects(
+          resolver,
+          await readOrdinaryOrder(connection, "order-zeller-refund"),
+          code,
+        );
+      });
+    });
+  }
+});
+
 test("Square refund 使用与 WPF 相同的 UTF-8 Base64 CardRefundReference", async () => {
   await withDatabase(async (connection) => {
     const paymentId = "原支付-🧾";
@@ -2048,7 +2140,7 @@ async function seedRefundTender(
     "attemptId" | "provider" | "operation" | "method"
   > & Readonly<{
     attemptId: string;
-    provider: "square" | "linkly-cloud" | "voucher";
+    provider: "square" | "linkly-cloud" | "voucher" | "zeller";
     method: "card" | "voucher";
     protectedContext: Readonly<Record<string, unknown>> | null;
     /** 原额度方式；缺省与退款方式相同（原路退款）。 */

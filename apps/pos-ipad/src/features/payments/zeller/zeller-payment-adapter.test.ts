@@ -16,6 +16,8 @@ import type {
 const ATTEMPT_ID = "799287a3-3dc2-4df1-bca3-d33eea19b35a";
 const REFERENCE = "HBZ-799287a33dc24df1bca3d33eea19b35a";
 const UUID = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+const REFUND_REFERENCE = "HBZR-799287a33dc24df1bca3d33eea19b35a";
+const REFUND_UUID = "0f8fad5b-d9cb-469f-a165-70867728950e";
 
 function attempt(over: Partial<PaymentAttempt> = {}): PaymentAttempt {
   return {
@@ -66,6 +68,26 @@ function sdkTransaction(over: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
+/** 一笔原路退款 attempt：金额为负，paymentId 是原交易号（保险库给的种子），txnRef 是本次退款的 reference。 */
+function refundAttempt(over: Partial<PaymentAttempt> = {}): PaymentAttempt {
+  return attempt({
+    operation: "refund",
+    amount: { currency: "AUD", cents: -500 },
+    references: { ...attempt().references, paymentId: UUID, txnRef: REFUND_REFERENCE },
+    ...over,
+  });
+}
+
+function sdkRefund(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return sdkTransaction({
+    type: "REFUND",
+    amount: 500,
+    transactionUuid: REFUND_UUID,
+    externalReference: REFUND_REFERENCE,
+    ...over,
+  });
+}
+
 /** 假的 SDK 调用句柄：由测试决定何时结束、推什么事件，并记录取消次数。 */
 function deferredOperation() {
   let resolve: (value: unknown) => void = () => undefined;
@@ -105,6 +127,7 @@ async function flush(): Promise<void> {
 
 function harness() {
   const purchases: { options: unknown; call: ReturnType<typeof deferredOperation> }[] = [];
+  const refunds: { options: unknown; call: ReturnType<typeof deferredOperation> }[] = [];
   const queries: unknown[] = [];
   let queryResult: () => unknown = () => [];
   let pairingResult: () => unknown = () => true;
@@ -118,7 +141,11 @@ function harness() {
       return Promise.resolve(pairingResult()) as ZellerProbeOperation;
     },
     setup: unexpected,
-    refund: unexpected,
+    refund: (options) => {
+      const call = deferredOperation();
+      refunds.push({ options, call });
+      return call.operation;
+    },
     purchase: (options) => {
       const call = deferredOperation();
       purchases.push({ options, call });
@@ -140,6 +167,7 @@ function harness() {
   return {
     adapter,
     purchases,
+    refunds,
     queries,
     unregister,
     advance: (ms: number) => {
@@ -447,11 +475,129 @@ test("卡证据里的附加字段过长或带控制字符时截断或留空，�
   assert.equal(evidence.bankDateTimeIso, "2026-11-05T01:24:01.000Z");
 });
 
-test("原路退款还没有接入：refund 不调用 SDK，返回结果未知", async () => {
+test("原路退款：按原交易号退回原卡，等刷卡机给出结果再返回；引用不变，卡证据记退款自己的交易号", async () => {
   const h = harness();
-  const result = await h.adapter.refund(attempt({ operation: "refund" }));
-  assert.equal(result.state, "Unknown");
-  assert.equal(result.responseCode, "ZELLER_REFUND_UNSUPPORTED");
+
+  let settled = false;
+  const refunding = h.adapter.refund(refundAttempt()).then((result) => {
+    settled = true;
+    return result;
+  });
+  await flush();
+  // 发给 Zeller 的是正的退款额、原交易号和本次退款的 reference。
+  assert.deepEqual(h.refunds.map((refund) => refund.options), [
+    { amount: 500, purchase: UUID, reference: REFUND_REFERENCE },
+  ]);
+  // 刷卡机还没给结果：不返回（退货流程不轮询等待中的退款）。
+  assert.equal(settled, false);
+
+  await h.refunds[0]!.call.resolve(sdkRefund());
+  const approved = await refunding;
+
+  assert.equal(approved.state, "Approved");
+  // paymentId 仍是原交易号：改成退款的交易号会被上游判成引用冲突，钱退了单子却卡在结果未知。
+  assert.deepEqual(approved.references, refundAttempt().references);
+  assert.deepEqual(normalizeCardSyncEvidence(approved.protectedSyncEvidence), {
+    version: 1,
+    provider: "zeller",
+    operation: "refund",
+    processor: "Zeller",
+    txnRef: REFUND_UUID,
+    authCode: "456321",
+    cardType: "VISA",
+    cardBin: 411111,
+    maskedCardNumber: "1234",
+    merchantId: "CAID-1",
+    responseCode: "00",
+    responseText: "APPROVED",
+    stan: null,
+    bankDateTimeIso: "2026-11-05T01:24:01.000Z",
+    amountCents: 500,
+    refundReference: null,
+  });
+  assert.equal(h.purchases.length, 0);
+  assert.equal(h.queries.length, 0);
+});
+
+test("原路退款：请求没有发出的情况都按未退款收尾，且不调用 SDK", async () => {
+  const cases: readonly (readonly [string, Partial<PaymentAttempt>])[] = [
+    ["没有原交易号", { references: { ...refundAttempt().references, paymentId: null } }],
+    ["原交易号不是 GUID", { references: { ...refundAttempt().references, paymentId: "payment-1" } }],
+    ["reference 是扣款用的", { references: { ...refundAttempt().references, txnRef: REFERENCE } }],
+    ["没有落库的 reference", { references: { ...refundAttempt().references, txnRef: null } }],
+    ["金额不是负数", { amount: { currency: "AUD", cents: 500 } }],
+    ["是扣款", { operation: "purchase", references: { ...attempt().references, paymentId: UUID } }],
+  ];
+  for (const [name, over] of cases) {
+    const h = harness();
+    const result = await h.adapter.refund(refundAttempt(over));
+    assert.equal(result.state, "Declined", name);
+    assert.equal(result.responseCode, "ZELLER_NOT_SUBMITTED_INVALID_ATTEMPT", name);
+    assert.equal(h.refunds.length, 0, name);
+  }
+
+  const unpaired = harness();
+  unpaired.setPairing(() => sdkError("Setup Required"));
+  const blocked = await unpaired.adapter.refund(refundAttempt());
+  assert.equal(blocked.state, "Declined");
+  assert.equal(blocked.responseCode, "ZELLER_NOT_SUBMITTED_SETUP_REQUIRED");
+  assert.equal(unpaired.refunds.length, 0);
+
+  const offline = harness();
+  offline.unregister();
+  const noTerminal = await offline.adapter.refund(refundAttempt());
+  assert.equal(noTerminal.state, "Declined");
+  assert.equal(noTerminal.responseCode, "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE");
+});
+
+test("原路退款：Zeller 找不到原交易时退款没有发生；被拒的退款按拒绝收尾", async () => {
+  const missing = harness();
+  const refunding = missing.adapter.refund(refundAttempt());
+  await flush();
+  await missing.refunds[0]!.call.resolve(sdkError("Transaction Not Found"));
+  const notFound = await refunding;
+  assert.equal(notFound.state, "Declined");
+  assert.equal(notFound.responseCode, "ZELLER_NOT_SUBMITTED_ORIGINAL_TRANSACTION_NOT_FOUND");
+  assert.equal(missing.queries.length, 0);
+
+  const declined = harness();
+  const declining = declined.adapter.refund(refundAttempt());
+  await flush();
+  await declined.refunds[0]!.call.resolve(sdkRefund({ status: "DECLINED", responseCode: "05" }));
+  const result = await declining;
+  assert.equal(result.state, "Declined");
+  assert.equal(result.responseCode, "05");
+});
+
+test("原路退款：结果不明时只按本次退款的 reference 查询，绝不重发；查不到就保持结果未知", async () => {
+  const h = harness();
+  const refunding = h.adapter.refund(refundAttempt());
+  await flush();
+  await h.refunds[0]!.call.resolve(sdkError("Network Failure"));
+  const unknown = await refunding;
+  // 断网不代表没退：查到 0 笔也不能判成没退，交给主管核实。
+  assert.equal(unknown.state, "Unknown");
+  assert.deepEqual(h.queries, [{ reference: REFUND_REFERENCE }]);
+
+  // 同一笔 attempt 再次调用 refund（重复提交）：只收结果，不发第二次退款。
+  h.setQuery(() => [sdkRefund()]);
+  const again = await h.adapter.refund(refundAttempt({ state: "Unknown" }));
+  assert.equal(again.state, "Approved");
+  assert.equal(h.refunds.length, 1);
+
+  // 进程重启后（内存里没有这笔调用）：只查询。
+  const restarted = harness();
+  const notFound = await restarted.adapter.recover(refundAttempt({ state: "Unknown" }));
+  assert.equal(notFound.state, "Unknown");
+  assert.equal(notFound.responseCode, "ZELLER_UNKNOWN_NOT_FOUND");
+  restarted.setQuery(() => [sdkRefund()]);
+  const recovered = await restarted.adapter.recover(refundAttempt({ state: "Unknown" }));
+  assert.equal(recovered.state, "Approved");
+  assert.equal(normalizeCardSyncEvidence(recovered.protectedSyncEvidence).txnRef, REFUND_UUID);
+  // 查到的是同一 reference 下的扣款而不是退款：对不上，不能当成已退。
+  restarted.setQuery(() => [sdkTransaction({ externalReference: REFUND_REFERENCE, amount: 500 })]);
+  assert.equal((await restarted.adapter.recover(refundAttempt({ state: "Unknown" }))).state, "Unknown");
+  assert.equal(restarted.refunds.length, 0);
 });
 
 test("恢复中心的只读查询：只有真的从 Zeller 拿到答复才算核实过，且不发起扣款或取消", async () => {
