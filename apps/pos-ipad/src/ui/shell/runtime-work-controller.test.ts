@@ -202,3 +202,71 @@ test("未提供下发资料同步入口（设备未就绪或旧组合）时全�
     "sync-start", "hardware", "sync-foreground", "hardware", "sync-network:true",
   ]);
 });
+
+test("促销规则后台刷新：回前台、联网恢复、定时各带对应触发源；启动（尚无收银员）与断网不发请求", async () => {
+  const calls: string[] = [];
+  const triggers: string[] = [];
+  const controller = new RuntimeWorkController({
+    ...basePort(calls),
+    promotionSync: {
+      async requestSync(trigger) {
+        triggers.push(trigger);
+      },
+    },
+  });
+
+  await controller.onApplicationStarted();
+  await controller.onForeground();
+  await controller.onNetworkChanged(false);
+  await controller.onNetworkChanged(true);
+  controller.onPromotionTimer();
+
+  assert.deepEqual(triggers, ["foreground", "network", "timer"]);
+});
+
+test("促销刷新入口挂起、同步抛错或返回 rejected Promise，都不影响订单同步与外设队列", async () => {
+  const calls: string[] = [];
+  const pending = new RuntimeWorkController({
+    ...basePort(calls),
+    promotionSync: { requestSync: () => new Promise(() => undefined) },
+  });
+  await pending.onForeground();
+
+  const throwing = new RuntimeWorkController({
+    ...basePort(calls),
+    promotionSync: {
+      requestSync() {
+        throw new Error("promotion entry crashed");
+      },
+    },
+  });
+  await throwing.onForeground();
+  await throwing.onNetworkChanged(true);
+  throwing.onPromotionTimer();
+
+  const rejecting = new RuntimeWorkController({
+    ...basePort(calls),
+    promotionSync: { requestSync: async () => { throw new Error("rejected"); } },
+  });
+  await rejecting.onForeground();
+  await rejecting.onNetworkChanged(true);
+  rejecting.onPromotionTimer();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls.filter((call) => call.startsWith("sync-")), [
+    "sync-foreground",
+    "sync-foreground", "sync-network:true",
+    "sync-foreground", "sync-network:true",
+  ]);
+});
+
+test("未提供促销刷新入口（设备未就绪或旧组合）时全部触发静默跳过", async () => {
+  const calls: string[] = [];
+  const controller = new RuntimeWorkController(basePort(calls));
+  await controller.onForeground();
+  await controller.onNetworkChanged(true);
+  controller.onPromotionTimer();
+  assert.deepEqual(calls, [
+    "sync-foreground", "hardware", "sync-network:true",
+  ]);
+});

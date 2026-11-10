@@ -934,6 +934,31 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
           properties: event.properties,
         });
       },
+      // 促销后台刷新：只记触发源、规则数与异常类型，不带规则内容；失败 / 延后只在进入该状态时记一条。
+      reportPromotionRefresh(event) {
+        applicationLog?.record({
+          level: event.kind === "applied" ? "Information" : "Warning",
+          message:
+            event.kind === "applied"
+              ? "Promotion rules refreshed from headquarters."
+              : event.kind === "deferred"
+                ? "Promotion rules refreshed but not applied to the busy cart yet."
+                : "Promotion rules background refresh failed.",
+          category: "catalog.promotion-refresh",
+          properties: {
+            trigger: event.trigger,
+            ...(event.ruleCount === undefined
+              ? {}
+              : { ruleCount: event.ruleCount }),
+            ...(event.error === undefined
+              ? {}
+              : {
+                  errorName:
+                    event.error instanceof Error ? event.error.name : "unknown",
+                }),
+          },
+        });
+      },
       reportPaymentRecoveryFallback(fallback) {
         // 设备仍可启动，但说明耐久草稿已无法被当前代码重算；须人工在支付页完成恢复或安全取消。
         applicationLog?.record({

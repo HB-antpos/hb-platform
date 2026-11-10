@@ -32,11 +32,11 @@ function isDeviceAuthorized(
   );
 }
 
-/** 设备未认证（待注册/待审批/已锁定）时不暴露下发资料同步，避免无凭据请求。 */
+/** 设备未认证（待注册/待审批/已锁定）时不暴露下发资料与促销同步，避免无凭据请求。 */
 function toWorkPort(services: ExpoPosRuntimeServices): RuntimeBackgroundWorkPort {
   return isDeviceAuthorized(services)
     ? services
-    : { ...services, receiptProfileSync: undefined };
+    : { ...services, receiptProfileSync: undefined, promotionSync: undefined };
 }
 
 export function RuntimeWorkBridge() {
@@ -89,6 +89,8 @@ export function RuntimeWorkBridge() {
       if (!isBackgroundPollDue(Date.now(), lastRunAtMs, intervalMs)) return;
       lastRunAtMs = Date.now();
       controller.onReceiptProfileTimer();
+      // 促销规则搭同一个定时器：总部改促销后一分钟内自动生效（与 WPF 一致）。
+      controller.onPromotionTimer();
     }, RECEIPT_PROFILE_SYNC_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [connectivity, controller, receiptProfileEnabled]);

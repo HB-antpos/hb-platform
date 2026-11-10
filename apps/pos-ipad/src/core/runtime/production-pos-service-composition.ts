@@ -18,6 +18,7 @@ import type {
 } from "@hb/pos-domain/features/catalog/catalog-refresh-contract";
 import {
   CatalogRefreshCoordinator,
+  CatalogRefreshCoordinatorError,
   type CatalogRefreshState,
 } from "../../features/catalog/catalog-refresh-coordinator";
 import {
@@ -134,8 +135,12 @@ import {
   ActivePromotionSnapshotLoader,
   ActivePricingCartSession,
   createConnectedSalesPresenter,
+  PromotionBackgroundRefresher,
   SALES_NEW_TRANSACTIONS_DISABLED,
   type ConnectedSalesIdentity,
+  type PromotionRefreshLogEvent,
+  type PromotionRefreshResult,
+  type PromotionRefreshTrigger,
 } from "../../features/sales/runtime";
 import type {
   SalesAuthorizedOperationContext,
@@ -477,6 +482,13 @@ export type ProductionPosRuntimeServices = Readonly<{
       trigger: Exclude<ReceiptProfileSyncTrigger, "manual">,
     ): Promise<ReceiptProfileSyncResult>;
   }>;
+  /**
+   * 促销规则的后台刷新入口：登录后、回前台、网络恢复、前台定时器调用。只拉促销、不碰商品目录；
+   * 与目录刷新互斥，购物车忙（付款中）时延后装入，永不 reject（对齐 WPF 的定时促销刷新）。
+   */
+  promotionSync: Readonly<{
+    requestSync(trigger: PromotionRefreshTrigger): Promise<PromotionRefreshResult>;
+  }>;
   fulfilment: PosFulfilmentRuntimeService;
   sync: Readonly<{
     requestDrain: PosSyncCoordinator["requestDrain"];
@@ -596,6 +608,10 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   /** 总部下发小票资料同步的日志旁路（只含版本号、原因等非敏感标量）；缺省时静默。 */
   reportReceiptProfileSync?:
     | ((event: ReceiptProfileSyncLogEvent) => void)
+    | undefined;
+  /** 促销后台刷新的日志旁路（只含触发源、规则数、异常类型等非敏感标量）；缺省时静默。 */
+  reportPromotionRefresh?:
+    | ((event: PromotionRefreshLogEvent) => void)
     | undefined;
   /**
    * 接收后台为本店设置的 POS API 首选入口（receipt-profile/sync 顶层 apiEntryMode 的原始取值）。
@@ -900,6 +916,8 @@ export function createProductionPosRuntimeServices(
       void advertisementPlayback.setSlot(slot).catch(() => undefined);
     });
   }
+  // 登录后立刻拉一次最新促销；刷新器在目录协调器之后才创建，这里先放占位，创建后再接上。
+  let requestPromotionRefreshAfterLogin: () => void = () => undefined;
   const cashierSession: PosCashierSessionRuntimeService = {
     signIn: async (userBarcode) => {
       const summary = await baseCashierSession.signIn(userBarcode);
@@ -907,6 +925,8 @@ export function createProductionPosRuntimeServices(
         storeCode: summary.storeCode,
         asOfIso: input.clock.nowIso(),
       });
+      // 先装入本机快照（上面），再在后台拉远端最新规则；不等待它，失败不影响登录。
+      requestPromotionRefreshAfterLogin();
       customerDisplayAdvertisementPlayback?.start(summary.storeCode);
       try {
         await repositories.audit.append([{
@@ -1155,6 +1175,65 @@ export function createProductionPosRuntimeServices(
           ),
       });
     });
+  // 促销规则后台刷新：只拉促销、不碰商品目录。过去 iPad 只有手动下载商品目录才会拉促销，
+  // 总部新建 / 修改 / 停用促销后要有人点下载才生效；WPF 则有定时刷新，这里补齐。
+  const promotionRefresher = new PromotionBackgroundRefresher({
+    currentStoreCode: () => {
+      try {
+        const session = currentCashier.require();
+        assertTrustedCashierScope(session, input.auditMetadata);
+        return session.storeCode;
+      } catch {
+        // 未登录、锁屏或会话与本机不符：没有可信门店，不发请求。
+        return null;
+      }
+    },
+    isCatalogRefreshRunning: () =>
+      catalogRefreshCoordinator.getState().kind === "running",
+    fetchRemote: ({ storeCode, signal }) =>
+      catalogPageApi.getPromotions({ storeCode, signal }),
+    loadStored: async (storeCode) => {
+      const active = await catalogRepository.loadActivePromotions(storeCode);
+      return active === null
+        ? null
+        : { snapshotId: active.snapshotId, promotions: active.promotions };
+    },
+    replaceStored: (snapshotId, promotions) =>
+      catalogRepository.replacePromotions(snapshotId, promotions),
+    applyToCart: ({ storeCode, asOfIso }) =>
+      promotionSnapshotLoader.load({ storeCode, asOfIso }),
+    // 与目录下载 / 重置共用协调器的互斥门闩：目录在刷新就让路，绝不排队等待。
+    tryRunExclusive: async (operation) => {
+      try {
+        return {
+          ran: true as const,
+          value: await catalogRefreshCoordinator.runExclusive(operation),
+        };
+      } catch (error) {
+        if (
+          error instanceof CatalogRefreshCoordinatorError &&
+          error.code === "CATALOG_REFRESH_OPERATION_CONFLICT"
+        ) {
+          return { ran: false as const };
+        }
+        throw error;
+      }
+    },
+    nowIso: input.clock.nowIso,
+    ...(input.reportPromotionRefresh
+      ? { log: input.reportPromotionRefresh }
+      : {}),
+  });
+  // 经应用更新门禁：更新切换期间不写库、不动购物车；任何异常都吞成 failed，永不 reject。
+  const requestPromotionRefresh = (
+    trigger: PromotionRefreshTrigger,
+  ): Promise<PromotionRefreshResult> =>
+    runUpdateOperation(() => promotionRefresher.request(trigger)).catch(
+      (): PromotionRefreshResult => ({ status: "failed" }),
+    );
+  requestPromotionRefreshAfterLogin = () => {
+    void requestPromotionRefresh("login");
+  };
   const specialProducts: SpecialProductsRuntimeFactory = {
     createPresenter: () => {
       const cashierLease = currentCashier.createLease();
@@ -2333,6 +2412,9 @@ export function createProductionPosRuntimeServices(
     receiptSettings,
     receiptProfileSync: {
       requestSync: (trigger) => receiptProfileSync.requestSync(trigger),
+    },
+    promotionSync: {
+      requestSync: (trigger) => requestPromotionRefresh(trigger),
     },
     fulfilment: {
       drainAutomaticQueue: () => fulfilment.drainAutomaticQueue(),
