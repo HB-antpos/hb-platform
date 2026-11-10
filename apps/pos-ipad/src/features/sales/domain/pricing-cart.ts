@@ -18,6 +18,7 @@ import type {
   PricingCartLineState,
   PricingCartDiscountSource,
   PricingCartOptions,
+  PricingCartRestoreOptions,
   PricingCartSnapshot,
   PricingCartStateSnapshot,
   PricingDiscountState,
@@ -369,6 +370,8 @@ export class PricingCart {
   private asOfIso: string;
   private promotions: PromotionDefinition[];
   private lines: MutablePricingLine[] = [];
+  /** 可选时钟：有则每次重算促销前刷新 asOfIso，没有则 asOfIso 固定不变。 */
+  private readonly nowIso: (() => string) | null;
 
   constructor(options: PricingCartOptions = {}) {
     this.mode = validateMode(options.mode ?? "sale");
@@ -377,9 +380,13 @@ export class PricingCart {
       "cart as-of timestamp",
     );
     this.promotions = canonicalPromotions(options.promotions ?? []);
+    this.nowIso = options.nowIso ?? null;
   }
 
-  static restore(snapshot: PricingCartStateSnapshot): PricingCart {
+  static restore(
+    snapshot: PricingCartStateSnapshot,
+    options: PricingCartRestoreOptions = {},
+  ): PricingCart {
     if (!Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
       throw new TypeError("cart revision must be a non-negative integer");
     }
@@ -388,6 +395,8 @@ export class PricingCart {
       mode: snapshot.mode,
       asOfIso: snapshot.asOfIso,
       promotions: snapshot.promotions,
+      // 中文注释：恢复出的购物车沿用调用方给的时钟；不给就保持存下来的定价时点（回放路径）。
+      ...(options.nowIso ? { nowIso: options.nowIso } : {}),
     });
     const seenLineIds = new Set<string>();
     cart.lines = snapshot.lines.map((line) => {
@@ -1158,6 +1167,7 @@ export class PricingCart {
       mode: this.mode,
       asOfIso: this.asOfIso,
       promotions: this.promotions,
+      ...this.clockOptions(),
     });
     candidate.revision = this.revision;
     candidate.lines = lines.map(cloneMutableLine);
@@ -1274,6 +1284,7 @@ export class PricingCart {
       mode: this.mode,
       asOfIso: this.asOfIso,
       promotions: this.promotions,
+      ...this.clockOptions(),
     });
     candidate.revision = this.revision;
     candidate.lines = lines
@@ -1651,7 +1662,18 @@ export class PricingCart {
     }
   }
 
+  /** 内部克隆（合并模拟用的候选副本）要带上同一个时钟；没有时钟则不带任何选项。 */
+  private clockOptions(): { nowIso?: () => string } {
+    return this.nowIso === null ? {} : { nowIso: this.nowIso };
+  }
+
   private refreshPromotionDiscounts(): void {
+    // 与 WPF 对齐：每次重算自动促销都按「此刻」判断规则是否在生效区间内，
+    // 否则登录后才开始（或已结束）的促销要等重新登录/刷新目录才会生效/失效。
+    // asOfIso 同步更新，让 stateSnapshot 记录的是实际用于定价的时点。
+    if (this.nowIso !== null) {
+      this.asOfIso = canonicalIso(this.nowIso(), "cart as-of timestamp");
+    }
     for (const line of this.lines) {
       if (line.discountState.kind === "promotion") {
         line.discountState = NONE_DISCOUNT;
