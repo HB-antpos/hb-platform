@@ -1191,6 +1191,9 @@ function PaymentsPane({
         <PaneHint
           text={t(modernLayout ? "payments.manageSubtitle" : "payments.subtitle")}
         />
+        {catalogRefreshRunning ? (
+          <CatalogBusyNotice text={t("payments.catalogBusy")} />
+        ) : null}
         <SectionCard
           hint={t("payments.methodsHint")}
           title={t("payments.methodsTitle")}
@@ -4119,6 +4122,29 @@ function EmptyPanel({
   );
 }
 
+/**
+ * 目录更新期间支付页签里的操作（保存支付设置、配对 / 启用 Zeller 等）整块禁用。
+ * 按钮变灰却不说原因会让人以为是故障，所以在页签顶部明说，更新结束后自动消失。
+ */
+function CatalogBusyNotice({ text }: Readonly<{ text: string }>) {
+  usePosThemeVersion();
+  return (
+    <View
+      accessibilityLiveRegion="polite"
+      style={[styles.statusBanner, styles.statusInfo]}
+      testID="settings-payments-catalog-busy"
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors.yellow}
+        name="progress-clock"
+        size={22}
+      />
+      <Text style={styles.statusText}>{text}</Text>
+    </View>
+  );
+}
+
 function StatusBanner({
   locale,
   statusCode,
@@ -5428,6 +5454,10 @@ const styles = createPosStyles((colors) => ({
   statusWarning: {
     backgroundColor: colors.redSoft,
     borderColor: colors.redBorder,
+  },
+  statusInfo: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
   },
   statusText: {
     color: colors.ink,

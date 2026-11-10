@@ -470,6 +470,89 @@ describe("SettingsScreen", () => {
     ).toEqual(["landscape-left", "landscape-right"]);
   });
 
+  it("目录更新中，支付页签顶部说明按钮为什么是灰的；更新结束后提示消失", async () => {
+    const port = new ScreenSettingsPort();
+    port.publishCatalogRefresh({
+      kind: "running",
+      storeCode: "BNE-01",
+      progress: {
+        currentStep: "products",
+        overallPercent: 35,
+        elapsedMilliseconds: 10_000,
+        steps: [
+          { step: "prepare", percent: 100 },
+          { step: "products", percent: 25 },
+          { step: "promotions", percent: 0 },
+          { step: "activate", percent: 0 },
+        ],
+      },
+    });
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(<SettingsScreen locale="zh" presenter={presenter} />);
+    await screen.findByTestId("settings-pane-content-general");
+    // 只在支付页签说明；常规页签不出现。
+    expect(screen.queryByTestId("settings-payments-catalog-busy")).toBeNull();
+
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    await screen.findByTestId("settings-pane-content-payments");
+    expect(screen.getByTestId("settings-payments-catalog-busy")).toBeTruthy();
+    expect(
+      screen.getByText("商品目录正在更新，更新完成前不能修改支付设置，也不能配对或启用 Zeller，完成后会自动恢复。"),
+    ).toBeTruthy();
+    expect(
+      screen.getByTestId("settings-payment-save").props.accessibilityState.disabled,
+    ).toBe(true);
+
+    // 更新结束：提示消失。
+    await act(async () => {
+      port.publishCatalogRefresh({ kind: "idle" });
+    });
+    await waitFor(() =>
+      expect(screen.queryByTestId("settings-payments-catalog-busy")).toBeNull(),
+    );
+  });
+
+  it("目录没有在更新时，支付页签不显示「目录更新中」提示；英文界面的提示也是英文", async () => {
+    const idlePort = new ScreenSettingsPort();
+    const idlePresenter = createPresenter(idlePort);
+    await idlePresenter.load();
+    const idleScreen = await render(<SettingsScreen locale="zh" presenter={idlePresenter} />);
+    await idleScreen.findByTestId("settings-pane-content-general");
+    await fireEvent.press(idleScreen.getByTestId("settings-nav-payments"));
+    await idleScreen.findByTestId("settings-pane-content-payments");
+    expect(idleScreen.queryByTestId("settings-payments-catalog-busy")).toBeNull();
+    await idleScreen.unmount();
+
+    const runningPort = new ScreenSettingsPort();
+    runningPort.publishCatalogRefresh({
+      kind: "running",
+      storeCode: "BNE-01",
+      progress: {
+        currentStep: "prepare",
+        overallPercent: 5,
+        elapsedMilliseconds: 1_000,
+        steps: [
+          { step: "prepare", percent: 50 },
+          { step: "products", percent: 0 },
+          { step: "promotions", percent: 0 },
+          { step: "activate", percent: 0 },
+        ],
+      },
+    });
+    const runningPresenter = createPresenter(runningPort);
+    await runningPresenter.load();
+    const screen = await render(<SettingsScreen locale="en" presenter={runningPresenter} />);
+    await screen.findByTestId("settings-pane-content-general");
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    await screen.findByTestId("settings-pane-content-payments");
+    expect(
+      screen.getByText(
+        "The catalog is refreshing. Payment settings, Zeller pairing and enabling are unavailable until it finishes.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("设置目录卡片恢复共享真实进度，刷新中可返回但阻断下载、重置与 API 切换", async () => {
     const port = new ScreenSettingsPort();
     port.publishCatalogRefresh({
