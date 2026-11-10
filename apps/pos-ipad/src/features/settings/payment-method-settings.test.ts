@@ -5,13 +5,13 @@ import type { SqliteConnectionPort, SqlValue } from "@hb/pos-db/core/db/types";
 
 import { DEFAULT_PAYMENT_METHOD_SETTINGS, PaymentMethodSettingsRepository, normalizePaymentMethodSettings } from "./payment-method-settings";
 
-test("损坏、旧配置或未知字段均保持手动刷卡和礼品卡关闭", () => {
+test("损坏、旧配置或未知字段均保持手动刷卡和购物券关闭", () => {
   for (const value of [undefined, null, [], {}, { useManualCard: "true", giftCardEnabled: true }, { useManualCard: true, giftCardEnabled: true, cardNumber: "secret" }]) {
     assert.deepEqual(normalizePaymentMethodSettings(value), DEFAULT_PAYMENT_METHOD_SETTINGS);
   }
 });
 
-test("支付方式使用独立持久化键并能重载，关闭手动不清除礼品卡或provider", async () => {
+test("支付方式使用独立持久化键并能重载，关闭手动不清除购物券或provider", async () => {
   const values = new Map<string, unknown>([["payment_provider_v1", "linkly"]]);
   let failed = false;
   const db: SqliteConnectionPort = {

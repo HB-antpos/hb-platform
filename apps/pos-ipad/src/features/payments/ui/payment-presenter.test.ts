@@ -561,7 +561,7 @@ test("Blocked 礼券撤销提供明确的中英文稳定文案", () => {
   );
   assert.equal(
     paymentText("zh", "error.TENDER_REVERSAL_RECOVERY_REQUIRED"),
-    "必须先恢复已保存的礼品卡撤销，才能继续收款。",
+    "必须先恢复已保存的购物券撤销，才能继续收款。",
   );
   assert.equal(
     paymentText("en", "error.TENDER_REVERSAL_BLOCKED"),
@@ -569,7 +569,7 @@ test("Blocked 礼券撤销提供明确的中英文稳定文案", () => {
   );
   assert.equal(
     paymentText("zh", "error.TENDER_REVERSAL_BLOCKED"),
-    "礼品卡撤销已阻断且不能重试。可由主管授权作废该礼品卡付款，本单不会核销该礼品卡。",
+    "购物券撤销已阻断且不能重试。可由主管授权作废该购物券付款，本单不会核销该购物券。",
   );
   assert.equal(
     paymentText("en", "error.TENDER_REVERSAL_VOID_NOT_AUTHORIZED"),
@@ -577,7 +577,7 @@ test("Blocked 礼券撤销提供明确的中英文稳定文案", () => {
   );
   assert.equal(
     paymentText("zh", "error.TENDER_REVERSAL_VOID_NOT_AUTHORIZED"),
-    "主管授权未完成，礼品卡付款仍处于阻断状态。",
+    "主管授权未完成，购物券付款仍处于阻断状态。",
   );
   assert.equal(
     paymentText("en", "action.voidBlockedTenderReversal"),
@@ -585,7 +585,7 @@ test("Blocked 礼券撤销提供明确的中英文稳定文案", () => {
   );
   assert.equal(
     paymentText("zh", "action.voidBlockedTenderReversal"),
-    "主管授权作废礼品卡付款",
+    "主管授权作废购物券付款",
   );
   assert.equal(
     paymentText("en", "error.SQUARE_SANDBOX_AMOUNT_LIMIT_EXCEEDED"),
@@ -1184,9 +1184,9 @@ test("手动刷卡不能绕过普通销售限制或 unknown 恢复锁", async ()
   assert.equal(runtime.startCalls.length + runtime.resumeCalls.length, 0);
 });
 
-test("手动刷卡与礼品卡具有稳定中英文提示", () => {
+test("手动刷卡与购物券具有稳定中英文提示", () => {
   assert.equal(paymentText("en", "method.voucher"), "Gift card");
-  assert.equal(paymentText("zh", "method.voucher"), "礼品卡");
+  assert.equal(paymentText("zh", "method.voucher"), "购物券");
   for (const code of ["MANUAL_CARD_CONFIRMATION_REQUIRED", "MANUAL_CARD_FULL_BALANCE_REQUIRED", "MANUAL_CARD_SALE_ONLY", "MANUAL_CARD_CONFIGURATION_DISABLED", "MANUAL_CARD_CONFIGURATION_LOAD_FAILED"] as const) {
     for (const locale of ["en", "zh"] as const) {
       assert.notEqual(paymentText(locale, `error.${code}`), `error.${code}`);

@@ -973,7 +973,7 @@ test("Blocked 礼券撤券显示主管作废入口，作废后回到可继续收
   const button = await waitFor(() =>
     screen.getByTestId("payment-void-blocked-tender-reversal"),
   );
-  expect(screen.getByText("主管授权作废礼品卡付款")).toBeTruthy();
+  expect(screen.getByText("主管授权作废购物券付款")).toBeTruthy();
   expect(screen.queryByTestId("payment-recover")).toBeNull();
   await fireEvent.press(button);
   await waitFor(() =>
@@ -3362,7 +3362,7 @@ test("取消续付确认弹窗点击遮罩关闭且 busy 时遮罩保留原门�
   await screen.unmount();
 });
 
-test.each(["en", "zh"] as const)("%s 手动刷卡固定余额并要求确认，礼品卡复用已有入口", async (locale) => {
+test.each(["en", "zh"] as const)("%s 手动刷卡固定余额并要求确认，购物券复用已有入口", async (locale) => {
   const { presenter, spies } = createUiPresenter({
     providers: [providerAvailability("manual-card"), providerAvailability("voucher")],
     selectedMethod: "cash",
@@ -3370,7 +3370,7 @@ test.each(["en", "zh"] as const)("%s 手动刷卡固定余额并要求确认，�
   const screen = await render(<PaymentScreen locale={locale} presenter={presenter} showStatusStrip={false} />);
   expect(screen.queryByTestId("payment-method-square")).toBeNull();
   expect(screen.queryByTestId("payment-method-linkly-cloud")).toBeNull();
-  expect(within(screen.getByTestId("payment-method-voucher")).getByText(locale === "zh" ? "礼品卡" : "Gift card")).toBeTruthy();
+  expect(within(screen.getByTestId("payment-method-voucher")).getByText(locale === "zh" ? "购物券" : "Gift card")).toBeTruthy();
   await openPaymentEntry(screen, "manual-card");
   expect(screen.getByTestId("payment-amount").props.editable).toBe(false);
   expect(screen.getByTestId("payment-amount").props.value).toBe("10.00");
@@ -3568,7 +3568,7 @@ test("付款方式大块高 92 并带一句说明，分期开关与付款方式�
     expect(within(cash).getByText("钱箱收款，可找零")).toBeTruthy();
     expect(
       within(screen.getByTestId("payment-method-voucher")).getByText(
-        "扫描或输入礼品卡码",
+        "扫描或输入购物券码",
       ),
     ).toBeTruthy();
 

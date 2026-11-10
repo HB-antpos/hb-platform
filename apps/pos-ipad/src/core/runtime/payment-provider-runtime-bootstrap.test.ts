@@ -26,7 +26,7 @@ test("持久化成功后更新共享快照，原 provider registry 即时切换�
   assert.equal(bootstrap.providers.getAvailability("manual-card").available, false);
 });
 
-test("手动刷卡替换已配置信用卡，礼品卡独立启用；分期禁止手动刷卡", async () => {
+test("手动刷卡替换已配置信用卡，购物券独立启用；分期禁止手动刷卡", async () => {
   for (const giftCardEnabled of [false, true]) {
     for (const allowManualCard of [false, true]) {
       const bootstrap = await createPaymentProviderRuntimeBootstrap({
@@ -80,7 +80,7 @@ test("provider bootstrap 对缺失公开配置返回稳定 unavailable，不触�
     }),
     null,
   );
-  // 开关只控制新支付，已收礼品卡仍须保留恢复与撤销能力。
+  // 开关只控制新支付，已收购物券仍须保留恢复与撤销能力。
   assert.equal(bootstrap.voucherApprovedPurchaseRelease.status, "available");
   assert.equal(bootstrap.providers.get("voucher").provider, "voucher");
   assert.equal(bootstrap.providers.get("manual-card").provider, "manual-card");
