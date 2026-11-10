@@ -26,6 +26,8 @@ services:
       - CatalogSync__DeltaEnabled=${HBPOS_CATALOG_DELTA_ENABLED:-true}
       # 整文件目录下载（第一阶段）：默认关闭；开启后新接口 /api/v1/catalog/files/* 按版本落盘到快照卷的 download-files 子目录。
       - CatalogDownloadFiles__Enabled=${HBPOS_CATALOG_FILE_DOWNLOAD_ENABLED:-false}
+      # 被取代的目录下载版本继续保留的小时数（默认 24；改小可降低 download-files 卷占用）。
+      - CatalogDownloadFiles__SupersededRetentionHours=${HBPOS_CATALOG_FILE_SUPERSEDED_RETENTION_HOURS:-24}
       # 完成容量验收后才显式开启每日预构建，避免默认触发全店负载。
       - CatalogDailyPrebuild__Enabled=${HBPOS_CATALOG_DAILY_PREBUILD_ENABLED:-false}
       - AttendanceQrDataProtection__KeysPath=/app/App_Data/AttendanceQrDataProtectionKeys
