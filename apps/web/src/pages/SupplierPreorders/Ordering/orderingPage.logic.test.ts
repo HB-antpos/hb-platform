@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import type { SupplierPreorderMyStore } from '../../../types/supplierPreorder'
 
 import {
   DAY_MS,
+  DEFAULT_ORDERING_SORT,
   PAGE_SIZE_STORAGE_KEY,
   computeClockOffsetMs,
   computeContainerRatio,
@@ -163,3 +166,15 @@ assert.equal(getErrorMessage(new Error('SUPPLIER_PREORDER_LOCKED: 订单表已�
 assert.equal(getErrorMessage(new Error('箱数必须为整数'), '保存失败'), '箱数必须为整数')
 assert.equal(getErrorMessage(null, '保存失败'), '保存失败')
 assert.equal(getErrorMessage({ message: '' }, '保存失败'), '保存失败')
+
+// ---------- 默认排序：按序号 ----------
+// 下单页商品列表默认按序号（原订单表顺序）；去年本店销量等排序仍可在下拉里手选（需在 apps/web 目录下运行）
+assert.equal(DEFAULT_ORDERING_SORT, 'seq', '默认排序必须是序号')
+const orderFormSource = readFileSync(resolve('src/pages/SupplierPreorders/Ordering/OrderForm.tsx'), 'utf8')
+assert.ok(
+  orderFormSource.includes('useState<SupplierPreorderOrderingSort>(DEFAULT_ORDERING_SORT)'),
+  '下单页的排序状态必须用 DEFAULT_ORDERING_SORT 初始化，不能写死别的排序',
+)
+for (const value of ['lastYearSalesDesc', 'seq', 'priceAsc', 'priceDesc', 'othersDesc']) {
+  assert.ok(orderFormSource.includes(`value: '${value}'`), `排序下拉里必须仍保留 ${value}`)
+}
