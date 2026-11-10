@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import type { SupplierPreorderItemHistory } from '../../../types/supplierPreorder'
 
@@ -15,10 +17,12 @@ import {
   formatPercent,
   groupKeyDateMarks,
   historyCellState,
+  isOrderingHistoryPending,
   keyDateMarks,
   layoutLabelRows,
   monthStartTicks,
   niceScale,
+  ORDERING_HISTORY_POLL_INTERVAL_MS,
   rangesToIndexSpans,
   refDisplayCode,
   resolveSeriesLength,
@@ -237,6 +241,29 @@ assert.equal(historyCellState(null, 'None'), 'pending')
 assert.equal(historyCellState(null, 'Failed'), 'failed')
 assert.equal(historyCellState(null, 'Ready'), 'none')
 assert.equal(historyCellState(undefined, 'NoWindow'), 'none')
+
+// 快照计算中：页面要定时重拉历史状态，直到算完（Queued / Running / None 算「还没算好」；Ready / Failed / NoWindow / 空值都不再轮询）
+for (const status of ['None', 'Queued', 'Running'] as const) assert.equal(isOrderingHistoryPending(status), true, `${status} 属于还没算好`)
+for (const status of ['Ready', 'Failed', 'NoWindow', null, undefined] as const) assert.equal(isOrderingHistoryPending(status), false, `${String(status)} 不再轮询`)
+// 与格子占位口径一致：没有数据的行显示「计算中」当且仅当还在轮询
+for (const status of ['None', 'Queued', 'Running', 'Ready', 'Failed', 'NoWindow'] as const) {
+  assert.equal(historyCellState(null, status) === 'pending', isOrderingHistoryPending(status), `${status}：占位与轮询口径必须一致`)
+}
+assert.equal(ORDERING_HISTORY_POLL_INTERVAL_MS, 15_000)
+
+// 回归：用户打开下单页时快照还在排队 / 计算，后台算完后没有历史的行仍一直显示「去年数据计算中…」——
+// 历史状态只在加载上下文时读一次，页面既不轮询、「刷新」也只重拉商品列表（需在 apps/web 目录下运行）。
+const orderFormSource = readFileSync(resolve('src/pages/SupplierPreorders/Ordering/OrderForm.tsx'), 'utf8')
+assert.ok(orderFormSource.includes('isOrderingHistoryPending(context?.history?.status)'), '下单页必须按历史状态判断是否还在计算')
+assert.ok(orderFormSource.includes('ORDERING_HISTORY_POLL_INTERVAL_MS'), '计算期间必须定时重拉上下文')
+assert.ok(
+  /if \(!isOrderingHistoryPending\(result\.history\?\.status\)\) setItemsReloadKey/.test(orderFormSource),
+  '状态算完后必须重新拉商品列表（各行去年数据随快照返回）',
+)
+assert.ok(
+  /onClick=\{\(\) => \{\s*setContextReloadKey\(\(value\) => value \+ 1\)\s*setItemsReloadKey\(\(value\) => value \+ 1\)\s*setSummaryReloadKey\(\(value\) => value \+ 1\)\s*\}\}\s*>\s*\{t\(`\$\{NS\}\.page\.refresh`\)\}/.test(orderFormSource.slice(orderFormSource.indexOf('<HistoryWindowNote'  ) - 900, orderFormSource.indexOf('<HistoryWindowNote'))),
+  '工具栏「刷新」必须连上下文一起重拉',
+)
 
 // ---------- 参考商品编号 ----------
 assert.equal(refDisplayCode({ source: 'Auto', itemNumber: ' XD0001342 ', productCode: 'P9' }), 'XD0001342')
