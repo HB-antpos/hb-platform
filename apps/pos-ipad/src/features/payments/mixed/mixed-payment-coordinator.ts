@@ -853,7 +853,8 @@ function isValidRecoverablePurchaseIdentity(
     (attempt.provider === "square" ||
       attempt.provider === "linkly-cloud" ||
       attempt.provider === "voucher" ||
-      attempt.provider === "manual-card") &&
+      attempt.provider === "manual-card" ||
+      attempt.provider === "zeller") &&
     attempt.amount.currency === "AUD" &&
     Number.isSafeInteger(attempt.amount.cents) &&
     attempt.amount.cents > 0 &&
@@ -1035,7 +1036,8 @@ function assertOnlineProvider(provider: PaymentProvider): void {
     provider !== "square" &&
     provider !== "linkly-cloud" &&
     provider !== "voucher" &&
-    provider !== "manual-card"
+    provider !== "manual-card" &&
+    provider !== "zeller"
   ) {
     throw new MixedPaymentValidationError(
       "UNSUPPORTED_PAYMENT_PROVIDER",

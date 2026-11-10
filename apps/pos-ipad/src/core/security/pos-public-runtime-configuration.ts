@@ -6,7 +6,8 @@ const THIS_DEVICE_ONLY = Object.freeze({
 });
 
 export type PosPaymentEnvironment = "Sandbox" | "Production";
-export type PosPublicCardProvider = "square" | "linkly";
+/** zeller：Zeller 刷卡机 SDK 直连。它没有需要保存的公开配置（配对信息由 Zeller SDK 自己存在钥匙串里），只保存「选中了它」。 */
+export type PosPublicCardProvider = "square" | "linkly" | "zeller";
 
 export type PosPublicPaymentConfiguration = Readonly<{
   provider?: PosPublicCardProvider;
@@ -53,6 +54,11 @@ export type PosPublicPaymentSettingsInput =
       provider: "linkly";
       square: null;
       linkly: NonNullable<PosPublicPaymentConfiguration["linkly"]>;
+    }>
+  | Readonly<{
+      provider: "zeller";
+      square: null;
+      linkly: null;
     }>;
 
 type StoredConfigurationV1 = Readonly<{
@@ -304,7 +310,9 @@ function normalizePayments(input: unknown): PosPublicPaymentConfiguration {
   }
   if (
     (provider === "square" && (!square || linkly)) ||
-    (provider === "linkly" && (!linkly || square))
+    (provider === "linkly" && (!linkly || square)) ||
+    // 选中 Zeller 时不保存别家的配置：切回 Square / Linkly 时由设置页重新保存它们自己的那一份。
+    (provider === "zeller" && (square || linkly))
   ) {
     throw new Error(
       "Only the explicitly selected payment provider may be stored.",
@@ -321,7 +329,7 @@ function normalizePayments(input: unknown): PosPublicPaymentConfiguration {
 }
 
 function cardProvider(value: unknown): PosPublicCardProvider {
-  if (value !== "square" && value !== "linkly") {
+  if (value !== "square" && value !== "linkly" && value !== "zeller") {
     throw new Error("Payment card provider is invalid.");
   }
   return value;

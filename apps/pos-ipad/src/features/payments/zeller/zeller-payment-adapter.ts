@@ -18,6 +18,7 @@ import {
   accumulateZellerCallEvidence,
   mapZellerSdkCallException,
   mapZellerSdkCallResponse,
+  mapZellerSdkPairingResponse,
   mapZellerSdkQueryResponse,
   type ZellerCallEvidence,
 } from "@hb/pos-payments-core/features/payments/zeller/zeller-sdk-mapper";
@@ -97,6 +98,17 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
       this.terminals.request?.();
       return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE");
     }
+    if (this.sdkCalls > 0) {
+      return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY");
+    }
+
+    // 中文注释：发扣款之前先确认这台 iPad 还配着对（不弹窗、不涉及金额）。
+    // 不做这一步的话，没配对时扣款会返回「需要设置」，随后按 reference 的核实查询同样因为没配对而失败，
+    // 这笔付款只能落成「结果未知」交给主管——而实际上请求根本没有发出。在这里拦下就能干净地按「没有发出」收尾。
+    const pairingBlocker = await this.pairingBlocker(terminal);
+    if (pairingBlocker !== null) return this.notSubmitted(attempt, pairingBlocker);
+    // 检查配对期间可能有别的调用进来（比如另一单的核实查询），再确认一次没有人占着 SDK，也没有重复发起。
+    if (this.inFlight.has(attempt.attemptId)) return this.recover(attempt);
     if (this.sdkCalls > 0) {
       return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY");
     }
@@ -215,6 +227,24 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
   public async refund(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
     // Zeller 原路退款还没有接入；上游在创建退款 attempt 时就会拦下，这里是最后一道失败关闭。
     return this.unknown(attempt, "ZELLER_REFUND_UNSUPPORTED");
+  }
+
+  /** 扣款前的配对检查：已配对返回 null，否则返回「请求没有发出」的原因码。占用 SDK 期间别的调用不会进来。 */
+  private async pairingBlocker(
+    terminal: NonNullable<ReturnType<ZellerTerminalSource["current"]>>,
+  ): Promise<string | null> {
+    this.sdkCalls += 1;
+    try {
+      const pairing = mapZellerSdkPairingResponse(await terminal.initialise());
+      if (pairing.isPaired) return null;
+      return pairing.errorType === "SetupRequired"
+        ? "ZELLER_NOT_SUBMITTED_SETUP_REQUIRED"
+        : "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE";
+    } catch {
+      return "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE";
+    } finally {
+      this.sdkCalls -= 1;
+    }
   }
 
   /** 按 reference 查询并下结论。record 为 null 表示内存里没有这笔调用。 */

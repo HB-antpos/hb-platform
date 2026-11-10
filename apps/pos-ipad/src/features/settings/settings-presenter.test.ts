@@ -3057,6 +3057,66 @@ test("缺少细分权限时写操作 fail closed", async () => {
   assert.equal(presenter.getState().statusCode, "permission-required");
 });
 
+test("启用 Zeller：先弹危险操作确认，确认后只保存通道本身，取消则不留下草稿选择", async () => {
+  const port = new FakeSettingsPort();
+  const presenter = createPresenter(port);
+  await presenter.load();
+  const before = presenter.getState();
+  assert.equal(before.paymentProvider, "square");
+
+  await presenter.requestEnableZeller();
+  assert.equal(presenter.getState().confirmation?.kind, "change-payment-settings");
+  // 还没确认：什么都没保存，已保存的通道和草稿选择都没变。
+  assert.deepEqual(port.savedPayments, []);
+  assert.equal(presenter.getState().paymentProvider, "square");
+  assert.equal(presenter.getState().paymentProviderDraft, before.paymentProviderDraft);
+
+  presenter.cancelConfirmation();
+  assert.equal(presenter.getState().confirmation, null);
+  assert.equal(presenter.getState().paymentProviderDraft, before.paymentProviderDraft);
+  assert.deepEqual(port.savedPayments, []);
+
+  await presenter.requestEnableZeller();
+  await presenter.confirmDangerousAction();
+  assert.deepEqual(port.savedPayments, [{ provider: "zeller", square: null, linkly: null }]);
+  assert.equal(presenter.getState().paymentProvider, "zeller");
+  assert.equal(presenter.getState().paymentProviderDraft, "zeller");
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+
+  // 已经是 Zeller：再点一次不再弹确认、不重复保存。
+  await presenter.requestEnableZeller();
+  assert.equal(presenter.getState().confirmation, null);
+  assert.equal(port.savedPayments.length, 1);
+});
+
+test("已保存的通道是 Zeller 时：加载后仍是 Zeller，不受 Square / Linkly 是否配置好的影响，也不会被当成 Linkly", async () => {
+  const port = new FakeSettingsPort();
+  const current = snapshot();
+  port.snapshotValue = {
+    ...current,
+    paymentProvider: "zeller",
+    square: {
+      ...current.square,
+      available: false,
+      blockerCode: "SQUARE_CONFIGURATION_MISSING",
+      deviceId: "",
+      locationId: "",
+    },
+    linkly: { ...current.linkly, available: false, blockerCode: "LINKLY_CONFIGURATION_INVALID" },
+  };
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  assert.equal(presenter.getState().paymentProvider, "zeller");
+  assert.equal(presenter.getState().paymentProviderDraft, "zeller");
+
+  // 草稿和已保存的都是 Zeller：保存是「没有变化」，不弹确认、不写配置。
+  await presenter.savePaymentSettings();
+  assert.equal(presenter.getState().confirmation, null);
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+  assert.deepEqual(port.savedPayments, []);
+});
+
 function createPresenter(port: FakeSettingsPort): SettingsPresenter {
   return new SettingsPresenter({ permissions: allPermissions, port });
 }

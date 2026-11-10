@@ -1145,6 +1145,29 @@ test("手动刷卡切换、刷新余额和销毁均清确认，恢复草稿显�
   assert.equal(presenter.getState().manualCardConfirmed, false);
 });
 
+test("Zeller 只在普通销售里可选，分期的首付和续付不能选；发起时走 zeller 通道", async () => {
+  const runtime = new FakePaymentRuntime();
+  runtime.listProviderAvailability = () => [availability("zeller")];
+  const presenter = createPresenter(runtime);
+  await presenter.initialize();
+  const state = presenter.getState();
+
+  assert.equal(canSelectPaymentMethod(state, "zeller"), true);
+  for (const flow of ["installment-create", "installment-repayment"] as const) {
+    assert.equal(
+      canSelectPaymentMethod({ ...state, checkout: { ...state.checkout, flow } }, "zeller"),
+      false,
+      flow,
+    );
+  }
+
+  assert.equal(presenter.selectMethod("zeller"), true);
+  await presenter.submitSelected();
+  assert.equal(runtime.startCalls.length, 1);
+  assert.equal((runtime.startCalls[0] as { provider?: string } | undefined)?.provider, "zeller");
+  presenter.destroy();
+});
+
 test("手动刷卡不能绕过普通销售限制或 unknown 恢复锁", async () => {
   const runtime = new FakePaymentRuntime();
   runtime.listProviderAvailability = () => [availability("manual-card")];

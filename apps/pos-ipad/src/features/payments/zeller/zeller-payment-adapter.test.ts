@@ -107,11 +107,16 @@ function harness() {
   const purchases: { options: unknown; call: ReturnType<typeof deferredOperation> }[] = [];
   const queries: unknown[] = [];
   let queryResult: () => unknown = () => [];
+  let pairingResult: () => unknown = () => true;
+  let pairingChecks = 0;
   const unexpected = (): ZellerProbeOperation => {
     throw new Error("unexpected SDK call");
   };
   const terminal: ZellerProbeTerminal = {
-    initialise: unexpected,
+    initialise: () => {
+      pairingChecks += 1;
+      return Promise.resolve(pairingResult()) as ZellerProbeOperation;
+    },
     setup: unexpected,
     refund: unexpected,
     purchase: (options) => {
@@ -143,6 +148,10 @@ function harness() {
     setQuery: (next: () => unknown) => {
       queryResult = next;
     },
+    setPairing: (next: () => unknown) => {
+      pairingResult = next;
+    },
+    pairingChecks: () => pairingChecks,
   };
 }
 
@@ -521,4 +530,30 @@ test("需要终端而 SDK 还没加载时，会通知界面层去加载；登记
   assert.notEqual(registry.current(), null);
   second();
   assert.equal(registry.current(), null);
+});
+
+test("扣款前先确认配对：没配对或查不了配对时请求不发出，不会落成结果未知", async () => {
+  const unpaired = harness();
+  unpaired.setPairing(() => sdkError("Setup Required"));
+  const setupRequired = await unpaired.adapter.submit(attempt());
+  assert.equal(setupRequired.state, "Declined");
+  assert.equal(setupRequired.responseCode, "ZELLER_NOT_SUBMITTED_SETUP_REQUIRED");
+  assert.equal(unpaired.purchases.length, 0);
+  assert.equal(unpaired.queries.length, 0);
+
+  const offline = harness();
+  offline.setPairing(() => sdkError("Network Failure"));
+  const unavailable = await offline.adapter.submit(attempt());
+  assert.equal(unavailable.state, "Declined");
+  assert.equal(unavailable.responseCode, "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE");
+  assert.equal(offline.purchases.length, 0);
+
+  // 配对正常：检查一次后才发扣款；核实和重复 submit 不再检查配对。
+  const paired = harness();
+  assert.equal((await paired.adapter.submit(attempt())).state, "Pending");
+  assert.equal(paired.pairingChecks(), 1);
+  assert.equal(paired.purchases.length, 1);
+  await paired.adapter.submit(attempt());
+  await paired.adapter.recover(attempt({ state: "Pending" }));
+  assert.equal(paired.pairingChecks(), 1);
 });
