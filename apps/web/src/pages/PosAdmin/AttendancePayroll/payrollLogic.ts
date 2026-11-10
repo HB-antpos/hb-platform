@@ -229,6 +229,16 @@ export function formatHours(value: number | null | undefined, empty = '—'): st
   return String(round2(value))
 }
 
+/**
+ * 单元格里的工时文本：没有工时（null / undefined / 0）一律返回 null，界面不显示 0。
+ * 注意后端全局 WhenWritingNull，没数据的日子 paidHours 字段会被整个省略（前端拿到 undefined），
+ * 所以这里不能用 `!== null` 判断，否则 undefined 会被当成有数据而显示成 "0"。
+ */
+export function cellHoursText(value: number | null | undefined): string | null {
+  const rounded = value ? round2(value) : 0
+  return rounded === 0 ? null : String(rounded)
+}
+
 /** 金额：$1,964.50；负数用减号「−$20.00」。 */
 export function formatMoney(value: number | null | undefined, empty = '—'): string {
   if (value === null || value === undefined) return empty

@@ -3,6 +3,7 @@ import {
   EMPLOYMENT_TYPE_TAG_COLORS,
   MANAGER_TAG_COLOR,
   calculatePay,
+  cellHoursText,
   countPublicHolidayRateMismatch,
   findRatesBelowMinimum,
   formatHours,
@@ -28,6 +29,14 @@ assert.equal(multiplyToCents(3.5, 42.75), 14963)
 assert.equal(formatHours(8), '8')
 assert.equal(formatHours(7.5), '7.5')
 assert.equal(formatHours(0), '—')
+
+// 单元格工时：0 / null / undefined（后端 WhenWritingNull 省略字段）都不显示，避免一片 0
+assert.equal(cellHoursText(6), '6')
+assert.equal(cellHoursText(7.5), '7.5')
+assert.equal(cellHoursText(0), null)
+assert.equal(cellHoursText(null), null)
+assert.equal(cellHoursText(undefined), null)
+assert.equal(cellHoursText(0.004), null, '四舍五入后为 0 的也不显示')
 assert.equal(formatMoney(1964.5), '$1,964.50')
 assert.equal(formatMoney(-20), '−$20.00')
 assert.equal(formatSignedMoney(50), '+$50.00')

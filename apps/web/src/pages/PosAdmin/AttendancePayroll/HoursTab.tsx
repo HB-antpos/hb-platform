@@ -13,7 +13,7 @@ import type {
   AttendanceHoursResultDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
-import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours } from './payrollLogic'
+import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours } from './payrollLogic'
 
 interface HoursTabProps {
   data: AttendanceHoursResultDto | null
@@ -185,9 +185,10 @@ export default function HoursTab(props: HoursTabProps) {
     // 带薪公假待确认单独用「公 待确认」角标，不再叠「待审」
     const pending = day.pending.some((type) => type !== 'PublicHolidayPay')
     const holidayPay = day.publicHolidayPay
-    let value: string | null = day.paidHours !== null ? formatHours(day.paidHours, '0') : null
-    if (value === null && day.leave && day.leave.type !== 'AnnualCashOut') value = formatHours(day.leave.hours, '0')
-    if (value === null && holidayPay?.state === 'Confirmed') value = formatHours(holidayPay.hours, '0')
+    // 工时为 0 / 没数据都不显示数字（落到下面的「休 / 不能上班」），不再出现一片 0
+    let value: string | null = cellHoursText(day.paidHours)
+    if (value === null && day.leave && day.leave.type !== 'AnnualCashOut') value = cellHoursText(day.leave.hours)
+    if (value === null && holidayPay?.state === 'Confirmed') value = cellHoursText(holidayPay.hours)
     if (value === null && holidayPay?.state === 'Pending') value = '?'
     const classes = ['atp-cell']
     if (pending || holidayPay?.state === 'Pending') classes.push('atp-cell-pending')
