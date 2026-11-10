@@ -75,6 +75,8 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
   private readonly inFlight = new Map<string, InFlightPurchase>();
   /** 正在占用 SDK 的调用数（扣款或查询）。大于 0 时不再向 SDK 发任何请求。 */
   private sdkCalls = 0;
+  /** 最近一次 recover 是否真的从 Zeller 拿到了可信的答复（供 queryExistingPayment 报告）。 */
+  private lastRecoverVerified = false;
 
   public constructor(options: ZellerPaymentAdapterOptions) {
     this.terminals = options.terminals;
@@ -91,6 +93,8 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     if (this.inFlight.has(attempt.attemptId)) return this.recover(attempt);
     const terminal = this.terminals.current();
     if (terminal === null) {
+      // 让界面层去加载 SDK，下一次发起时就有终端了；这一次请求没有发出。
+      this.terminals.request?.();
       return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE");
     }
     if (this.sdkCalls > 0) {
@@ -131,6 +135,21 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     return this.pending(attempt, "ZELLER_AWAITING_TERMINAL");
   }
 
+  /**
+   * 恢复中心用的只读查询：主管确认「已付款」之前，以及按主管结论恢复原单之前，先向 Zeller 核实一次原交易。
+   *
+   * 中文注释：recover 本身就是只读的（只收已发起调用的结果，或按 reference 查询，绝不发起扣款或取消），
+   * 所以这里直接复用它。queryVerified 表示这次确实从 Zeller 拿到了可信答复；
+   * 终端不在、SDK 忙或查询失败时为 false，调用方按「没查成」处理，不会把它当成「查过了、没有交易」。
+   */
+  public async queryExistingPayment(
+    attempt: PaymentAttempt,
+  ): Promise<PaymentProviderResult & Readonly<{ queryVerified: boolean }>> {
+    this.lastRecoverVerified = false;
+    const result = await this.recover(attempt);
+    return { ...result, queryVerified: this.lastRecoverVerified };
+  }
+
   public async recover(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
     const reference = this.purchaseReference(attempt);
     if (reference === null) {
@@ -152,6 +171,11 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     }
 
     const classification = classifyZellerCall(record.settled!, expectation);
+    // 扣款调用自己给出了明确结论（批准 / 拒付 / 没发出），等同于核实过。
+    this.lastRecoverVerified =
+      classification.decision === "Approved" ||
+      classification.decision === "Declined" ||
+      classification.decision === "NotSubmitted";
     switch (classification.decision) {
       case "Approved":
         return this.finish(attempt, this.approved(attempt, reference, classification.transaction!));
@@ -202,7 +226,11 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     failureKind: ZellerFailureKind,
   ): Promise<PaymentProviderResult> {
     const terminal = this.terminals.current();
-    if (terminal === null) return this.hold(attempt, record, "ZELLER_TERMINAL_UNAVAILABLE");
+    if (terminal === null) {
+      // 有 Zeller 的付款要核实但 SDK 还没加载（比如重启后）：先让界面层加载，下次轮询再查。
+      this.terminals.request?.();
+      return this.hold(attempt, record, "ZELLER_TERMINAL_UNAVAILABLE");
+    }
     if (this.sdkCalls > 0) return this.hold(attempt, record, "ZELLER_TERMINAL_BUSY");
 
     let query: ZellerQueryResult;
@@ -217,6 +245,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
       this.sdkCalls -= 1;
     }
 
+    this.lastRecoverVerified = query.succeeded;
     const verification = classifyZellerVerification(pending, query, expectation);
     switch (verification.decision) {
       case "Approved":

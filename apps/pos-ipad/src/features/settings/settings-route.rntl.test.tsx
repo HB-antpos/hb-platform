@@ -91,11 +91,6 @@ jest.mock("@/features/settings", () => {
   };
 });
 
-// Zeller 页签的外层只负责提供 SDK（读构建环境变量、加载原生库），与路由门禁无关，这里原样透传。
-jest.mock("@/features/zeller-terminal/zeller-settings-boundary", () => ({
-  ZellerSettingsBoundary: ({ children }: { children: unknown }) => children,
-}));
-
 jest.mock("@/ui/screens/bootstrap-screen", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } =

@@ -189,7 +189,7 @@ export class SqlitePaymentRecoveryCenterStore {
          SELECT selected.attempt_id FROM payment_attempts selected
          WHERE selected.order_guid = o.order_guid
            AND selected.operation = 'purchase'
-           AND selected.provider IN ('square', 'linkly-cloud')
+           AND selected.provider IN ('square', 'linkly-cloud', 'zeller')
            AND selected.state IN ('Created', 'Submitted', 'Pending', 'Unknown', 'Approved', 'Declined', 'Cancelled')
            AND NOT EXISTS (
              SELECT 1 FROM payment_recovery_cases selected_case
@@ -202,7 +202,7 @@ export class SqlitePaymentRecoveryCenterStore {
        )
        WHERE o.store_code = ? AND o.device_code = ?
          AND o.state IN ('Draft', 'Completing')
-         AND p.operation = 'purchase' AND p.provider IN ('square', 'linkly-cloud')
+         AND p.operation = 'purchase' AND p.provider IN ('square', 'linkly-cloud', 'zeller')
          AND p.state IN ('Created', 'Submitted', 'Pending', 'Unknown', 'Approved', 'Declined', 'Cancelled')
          AND NOT EXISTS (SELECT 1 FROM payment_recovery_cases c WHERE c.attempt_id = p.attempt_id AND c.is_parked = 1)
        ORDER BY o.local_sequence DESC LIMIT 2`,
@@ -591,8 +591,10 @@ function sameActor(left: AuditActorSnapshot, right: AuditActorSnapshot): boolean
   return left.cashierId === right.cashierId ||
     (left.userGuid !== null && right.userGuid !== null && left.userGuid === right.userGuid);
 }
-function isCardProvider(value: unknown): boolean { return value === "square" || value === "linkly-cloud"; }
-function cardProvider(value: unknown): "square" | "linkly-cloud" { if (value === "square" || value === "linkly-cloud") return value; return invalid("PAYMENT_RECOVERY_PROVIDER_INVALID"); }
+// 中文注释：这两个函数和上面候选查询的 SQL 必须认同一组刷卡通道。只放宽其中一处会更糟：
+// 例如库里有一条 zeller 案件而 cardProvider 不认它，整个恢复中心列表都会打不开。
+function isCardProvider(value: unknown): boolean { return value === "square" || value === "linkly-cloud" || value === "zeller"; }
+function cardProvider(value: unknown): "square" | "linkly-cloud" | "zeller" { if (value === "square" || value === "linkly-cloud" || value === "zeller") return value; return invalid("PAYMENT_RECOVERY_PROVIDER_INVALID"); }
 function isParkableAttemptState(value: unknown): boolean { return ["Created", "Submitted", "Pending", "Unknown", "Approved", "Declined", "Cancelled"].includes(String(value)); }
 function isUnfinishedOrderState(value: unknown): boolean { return value === "Draft" || value === "Completing"; }
 function manualFinding(value: unknown): "paid" | "unpaid" | "uncertain" { if (value === "paid" || value === "unpaid" || value === "uncertain") return value; return invalid("MANUAL_PAYMENT_FINDING_INVALID"); }

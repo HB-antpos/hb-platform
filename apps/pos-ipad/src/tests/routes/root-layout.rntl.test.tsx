@@ -26,6 +26,11 @@ jest.mock("@/app-providers", () => ({
 
 jest.mock("@/core/peripherals/customer-display/native", () => ({}));
 
+// Zeller 的根挂载点只负责按需加载 SDK（读构建环境变量、原生库），与根布局本身的行为无关，这里原样透传。
+jest.mock("@/features/zeller-terminal/zeller-app-boundary", () => ({
+  ZellerAppBoundary: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
   ScannerRouteProvider: ({ children }: { children: React.ReactNode }) =>
     children,

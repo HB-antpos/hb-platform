@@ -968,8 +968,9 @@ function PaymentsPane({
   const [providerPanel, setProviderPanel] = useState<PaymentProviderPanel>(
     state.paymentProviderDraft ?? "linkly",
   );
-  // Zeller 页签只在页面外层提供了 Zeller 终端时出现（设置路由决定，正式版暂不提供），并且只接进页签式布局。
-  const zeller = useZellerTerminalBoundary();
+  // Zeller 页签只在 App 根上提供了 Zeller 终端、并且当前构建开放时出现（正式版暂不开放），只接进页签式布局。
+  const zellerBoundary = useZellerTerminalBoundary();
+  const zeller = zellerBoundary?.settingsTabAvailable ? zellerBoundary : null;
   const zellerPanelOpen = zeller !== null && modernLayout && providerPanel === "zeller";
   const providerTabs: readonly PaymentProviderPanel[] =
     zeller !== null ? ["square", "linkly", "zeller"] : ["square", "linkly"];

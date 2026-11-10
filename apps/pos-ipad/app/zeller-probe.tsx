@@ -1,10 +1,10 @@
-import * as Application from "expo-application";
 import * as Crypto from "expo-crypto";
 import { type Href, useRouter } from "expo-router";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { describeNetworkCheckApp, describeNetworkCheckDevice } from "@/features/network-check";
-import { ZellerProbeScreen, ZellerSdkHost, type ZellerSdkVendor } from "@/features/zeller-probe";
+import { ZellerProbeScreen } from "@/features/zeller-probe";
+import { useZellerTerminalBoundary } from "@/features/zeller-terminal/zeller-terminal-boundary";
 
 /**
  * Zeller 真机验证页（开发工具），用地址 hbpos-ipad://zeller-probe 打开，收银界面里没有入口。
@@ -24,15 +24,10 @@ const PROBE_PORTS = {
 export default function ZellerProbeRoute() {
   const router = useRouter();
   const onBack = () => (router.canGoBack() ? router.back() : router.replace("/" as Href));
-  const vendor = useMemo<ZellerSdkVendor>(
-    () => ({
-      vendorName: "Hot Bargain",
-      vendorApplicationName: "HB POS iPad",
-      vendorApplicationVersion: Application.nativeApplicationVersion ?? "0.0.0",
-      vendorDeviceType: "tablet",
-    }),
-    [],
-  );
+  // 用 App 根上那一个 Zeller SDK（全 App 只能有一个实例），打开本页时才让它加载。
+  const zeller = useZellerTerminalBoundary();
+  const activate = PROBE_AVAILABLE ? zeller?.activate : undefined;
+  useEffect(() => activate?.(), [activate]);
   const context = useMemo(
     () => [
       "Zeller terminal check",
@@ -43,22 +38,12 @@ export default function ZellerProbeRoute() {
     [],
   );
 
-  if (!PROBE_AVAILABLE) {
-    return (
-      <ZellerProbeScreen
-        context={context}
-        onBack={onBack}
-        ports={PROBE_PORTS}
-        sdk={{ status: "unavailable" }}
-      />
-    );
-  }
+  const sdk =
+    !PROBE_AVAILABLE || !zeller
+      ? ({ status: "unavailable" } as const)
+      : zeller.state.status === "idle"
+        ? ({ status: "loading" } as const)
+        : zeller.state;
 
-  return (
-    <ZellerSdkHost vendor={vendor}>
-      {(sdk) => (
-        <ZellerProbeScreen context={context} onBack={onBack} ports={PROBE_PORTS} sdk={sdk} />
-      )}
-    </ZellerSdkHost>
-  );
+  return <ZellerProbeScreen context={context} onBack={onBack} ports={PROBE_PORTS} sdk={sdk} />;
 }
