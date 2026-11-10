@@ -4173,6 +4173,9 @@ function switchTint() {
   return {
     ios_backgroundColor: posColors.disabledBorder,
     trackColor: { false: posColors.disabledBorder, true: posColors.accent },
+    // 开关本体只有 31 高，44 的触控目标靠扩大点击范围得到，不能靠撑大 Switch 自己的尺寸：
+    // iOS 上 ios_backgroundColor 会铺满整个 Switch 视图，撑大后就在轨道后面露出一块灰色圆角底。
+    hitSlop: { bottom: 7, left: 4, right: 4, top: 7 },
   };
 }
 
@@ -4606,9 +4609,9 @@ const styles = createPosStyles((colors) => ({
     marginTop: 2,
   },
   // 系统开关固定 51×31，放大到约 58×34；触控区仍保证 44。
+  // 不要给 Switch 设 minWidth / minHeight：iOS 会把 ios_backgroundColor 铺满撑大后的整块视图，
+  // 在轨道后面露出一块比轨道大的灰色圆角底（用户反馈「开关背景不对」）。
   settingSwitch: {
-    minHeight: SETTINGS_MIN_TOUCH_TARGET,
-    minWidth: 58,
     transform: [{ scaleX: 1.12 }, { scaleY: 1.1 }],
   },
   inlineSwitch: {

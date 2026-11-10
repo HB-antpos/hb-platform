@@ -3104,6 +3104,37 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
+  it("点在加减区的空白处（按钮之间、数量上、按钮旁）不会打开编辑弹窗，点商品信息区才会", async () => {
+    const cart = new ScreenCartPort(cartSnapshot(995));
+    const salesPresenter = presenter(cart);
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    // 加减区整体接住点击：点到这一列的任何非按钮位置都不应冒泡成「点整行」。
+    const controls = screen.getByTestId("sales-line-line-1-controls");
+    await fireEvent.press(controls);
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    // 数量数字没有自己的点击处理，按 RN 的冒泡规则落到加减区，同样被吞掉。
+    await fireEvent.press(screen.getByLabelText("数量: 1"));
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    // 加减按钮本身照常工作，也不打开弹窗。
+    await fireEvent.press(screen.getByTestId("sales-line-line-1-increase"));
+    expect(salesPresenter.getState().cart.lines[0]?.quantity).toBe("2");
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+
+    // 点商品信息区（行本身）仍然直接打开编辑弹窗。
+    await fireEvent.press(screen.getByTestId("sales-line-line-1-identifiers"));
+    expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
   it("点商品行直接打开合并后的编辑弹窗：显示当前值，快捷折扣与删除都在弹窗内", async () => {
     const cart = new ScreenCartPort(cartSnapshot(995));
     const salesPresenter = presenter(cart);
