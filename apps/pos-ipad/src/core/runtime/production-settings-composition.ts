@@ -14,6 +14,7 @@ import type {
   ReceiptPrinterSettings,
 } from "@/core/db/pos-settings-repository";
 import type { CatalogRefreshState } from "@/features/catalog/catalog-refresh-coordinator";
+import { allocateProducerSessionRevision } from "@/features/customer-display/customer-display-publisher";
 import {
   buildSaleReceiptDocument,
   documentToEscPosBytes,
@@ -213,7 +214,6 @@ export function createProductionSettingsComposition(
   const terminal = normalizeTerminal(input.terminal);
   const squareSetup = input.squareSetup;
   let externalDisplayEnabled = input.externalDisplay !== undefined;
-  let displayRevision = 0;
 
   const productionControl = new ProductionSettingsControl({
     readSnapshot: async (signal) => {
@@ -438,9 +438,10 @@ export function createProductionSettingsComposition(
         if (!input.externalDisplay) {
           throw new Error("SETTINGS_EXTERNAL_DISPLAY_UNAVAILABLE");
         }
-        displayRevision += 1;
+        // 与收银客显 publisher 共用同一条 revision 序列；自带计数器会落后于
+        // 已发布的收银画面，被原生按 stale-revision 拒绝（真机上测试必失败）。
         await input.externalDisplay.publish({
-          revision: displayRevision,
+          revision: allocateProducerSessionRevision(),
           mode: "idle",
           items: [],
           gst: { currency: "AUD", cents: 0 },

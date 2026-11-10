@@ -461,7 +461,12 @@ function normalizeLocalAdvert(
   return Object.freeze({ kind: advert.kind, localUri });
 }
 
-function allocateProducerSessionRevision(): number {
+/**
+ * 原生客显只接受严格递增的 revision，且整个 JS 运行期共用一条序列。
+ * 设置页「显示测试画面」等绕过 publisher 直接发布的调用方也必须从这里取号，
+ * 否则自带计数器从 1 起步，会被原生按 stale-revision 拒绝。
+ */
+export function allocateProducerSessionRevision(): number {
   if (producerSessionRevision >= Number.MAX_SAFE_INTEGER) {
     throw new RangeError("Customer display revision is exhausted.");
   }
