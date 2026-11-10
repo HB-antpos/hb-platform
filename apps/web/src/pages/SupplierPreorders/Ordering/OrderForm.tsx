@@ -7,9 +7,10 @@ import { Alert, App, Button, Input, Result, Segmented, Select, Spin, Tag } from 
 import type { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import {
   downloadSupplierPreorderStoreExport,
   getSupplierPreorderOrderingContext,
@@ -114,7 +115,9 @@ function applySummaryToContext(context: SupplierPreorderOrderingContext, summary
 }
 
 export default function SupplierPreorderOrderForm() {
-  const { formGuid = '' } = useParams<{ formGuid: string }>()
+  // 关键：页面由 AdminLayout（挂在通配 splat 路由上）手工渲染，useParams() 拿不到 :formGuid，
+  // 会用空编号去请求下单上下文；必须从稳定路由上下文取参数。
+  const formGuid = useStableRouteContext()?.params.formGuid ?? ''
   // 以订单表为 key 重建页面：浏览器前进/后退切换订单表时，旧表的保存队列随组件卸载（卸载前会把待保存的值发出），不会串到新表
   return <SupplierPreorderOrderFormInner key={formGuid} formGuid={formGuid} />
 }

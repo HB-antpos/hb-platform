@@ -12,8 +12,9 @@ import {
 import { Alert, App, Button, Drawer, Dropdown, Form, Result, Spin, Tabs, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 
+import { useStableRouteContext } from '../../../hooks/useStableRouteContext'
 import {
   deleteSupplierPreorderForm,
   downloadSupplierPreorderExport,
@@ -55,7 +56,9 @@ export default function SupplierPreorderFormDetailPage() {
   const { t } = useTranslation()
   const { message, modal } = App.useApp()
   const navigate = useNavigate()
-  const { formGuid = '' } = useParams<{ formGuid: string }>()
+  // 关键：后台页由 AdminLayout（挂在通配 splat 路由上）手工渲染，不在带 :formGuid 的 <Route> 里，
+  // useParams() 只能拿到 { '*': ... }，formGuid 恒为空 → 不发请求 → 页面空白。必须从稳定路由上下文取参数。
+  const formGuid = useStableRouteContext()?.params.formGuid ?? ''
   const [editForm] = Form.useForm<FormHeaderValues>()
 
   const [detail, setDetail] = useState<SupplierPreorderFormDetail | null>(null)
@@ -152,15 +155,23 @@ export default function SupplierPreorderFormDetailPage() {
             extra={
               <>
                 <Button onClick={() => navigate('/supplier-preorders')}>{t('spAdmin.detail.backToList')}</Button>
-                <Button type="primary" onClick={() => loadDetail()}>
+                <Button type="primary" loading={loading} onClick={() => loadDetail()}>
                   {t('spAdmin.common.retry')}
                 </Button>
               </>
             }
           />
+        ) : !formGuid ? (
+          // 地址里没有订单表编号：不会发请求，必须给出明确提示，不能静默空白
+          <Result
+            status="warning"
+            title={t('spAdmin.detail.invalidAddress')}
+            extra={<Button onClick={() => navigate('/supplier-preorders')}>{t('spAdmin.detail.backToList')}</Button>}
+          />
         ) : (
+          // 有编号又没有详情也没有错误 = 正在（或即将）加载；始终显示转圈，避免首帧 loading 尚未置位时出现空白
           <div className="sp-admin-loading">
-            <Spin spinning={loading} />
+            <Spin spinning />
           </div>
         )}
       </div>
