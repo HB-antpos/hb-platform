@@ -285,28 +285,91 @@ export interface SupplierPreorderCopyStoresResult {
   stores: SupplierPreorderFormStoreStatus[]
 }
 
+/** 订货汇总页筛选：all 全部 / ordered 已下单 / missed 去年有销量今年没订 / adjusted 总部改过 */
+export type SupplierPreorderMatrixFilter = 'all' | 'ordered' | 'missed' | 'adjusted'
+
 export interface SupplierPreorderMatrixQuery {
   page?: number
   pageSize?: number
   keyword?: string
   onlyOrdered?: boolean
+  /** 传了就以它为准（忽略 onlyOrdered） */
+  filter?: SupplierPreorderMatrixFilter
+  category?: string
+}
+
+/** 总部改过某店某商品数量留下的标记；分店自己再改这一行后清除 */
+export interface SupplierPreorderLineMark {
+  /** 总部第一次调整前（分店自己填的）的箱数 */
+  originalCartons: number
+  adjustedBy?: string | null
+  adjustedAtUtc: string
+}
+
+/** 矩阵一行「去年全店」摘要：本品自己的销量，本品没有记录时借参考商品 */
+export interface SupplierPreorderMatrixLastYear {
+  source: 'Own' | 'Ref'
+  productCode: string
+  /** Source = Ref 时标「参考 XXX」 */
+  refDisplayCode?: string | null
+  purchaseQty: number
+  salesQty: number
+  sellThrough?: number | null
+  /** 全部分店合计的稀疏日销 */
+  daily: SupplierPreorderDailyPoint[]
 }
 
 export interface SupplierPreorderMatrixRow {
   itemGuid: string
   seq: number
   supplierItemCode: string
+  barcode?: string | null
   name: string
+  category?: string | null
   imageUrl?: string | null
   price: number
+  /** 最近一次修订前的进价；没改价为 null */
+  prevPrice?: number | null
+  isNew: boolean
   cartonQty: number
   cartonCbm?: number | null
-  /** 键为 storeGuid，值为箱数 */
+  /** 键为 storeGuid，值为箱数；没下单的分店不出现 */
   storeCartons: Record<string, number>
   totalCartons: number
   totalPieces: number
   totalAmount: number
   totalCbm: number
+  /** 去年全店摘要；没有记录为 null */
+  lastYear?: SupplierPreorderMatrixLastYear | null
+  /** 键为 storeGuid，值为这家店去年销量（件）；该店去年没记录的不出现 */
+  storeLastYearSales: Record<string, number>
+  /** 键为 storeGuid；总部改过且分店没再改的格子才有 */
+  storeMarks: Record<string, SupplierPreorderLineMark>
+}
+
+/** 筛选芯片计数（不受当前筛选与分页影响） */
+export interface SupplierPreorderMatrixCounts {
+  total: number
+  ordered: number
+  /** 去年有销量、今年所有开启分店都没订 */
+  missed: number
+  adjusted: number
+}
+
+/** 总部改某店某商品箱数的结果：不改分店订单的提交状态 */
+export interface SupplierPreorderAdminSaveLineResult {
+  itemGuid: string
+  storeGuid: string
+  cartons: number
+  /** 保存后这一格的标记；改回分店原值则为 null */
+  mark?: SupplierPreorderLineMark | null
+  rowTotalCartons: number
+  rowTotalPieces: number
+  rowTotalAmount: number
+  rowTotalCbm: number
+  /** 保存后全表合计（含每店合计） */
+  totals: SupplierPreorderMatrixTotals
+  adjustedCount: number
 }
 
 export interface SupplierPreorderMatrixTotals {
@@ -325,6 +388,13 @@ export interface SupplierPreorderMatrix {
   stores: SupplierPreorderStoreRef[]
   rows: { items: SupplierPreorderMatrixRow[]; total: number; page: number; pageSize: number }
   totals: SupplierPreorderMatrixTotals
+  /** 键为 storeGuid：None 未开始 / Draft 草稿 / Submitted 已提交 */
+  storeStatuses: Record<string, SupplierPreorderStoreOrderStatus>
+  counts: SupplierPreorderMatrixCounts
+  categories: string[]
+  /** 订单表还是草稿时为 false：只能看，不能改数量 */
+  editable: boolean
+  history: SupplierPreorderHistoryStatus
 }
 
 export interface SupplierPreorderSupplierOption {
@@ -591,6 +661,8 @@ export interface SupplierPreorderHistoryBatch {
 }
 
 export interface SupplierPreorderStoreHistory {
+  /** 订单表开启的分店才有；全店合计行与没开启的分店为 null */
+  storeGuid?: string | null
   storeCode: string
   storeName: string
   isCurrent: boolean

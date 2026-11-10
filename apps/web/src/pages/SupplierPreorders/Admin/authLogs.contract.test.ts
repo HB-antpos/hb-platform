@@ -11,6 +11,7 @@ const read = (path: string) => readFileSync(resolve(path), 'utf8')
 const backendModels = read('../../services/backend/BlazorApp.Shared/Models/HBweb/SupplierPreorderModels.cs')
 for (const [name, value] of [
   ['LineChanged', 'LineChanged'],
+  ['LineAdjusted', 'LineAdjusted'],
   ['OrderSubmitted', 'OrderSubmitted'],
 ] as const) {
   assert.ok(backendModels.includes(`public const string ${name} = "${value}";`), `后端缺少动作常量 ${name}`)
