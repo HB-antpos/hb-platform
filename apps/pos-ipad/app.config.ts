@@ -18,10 +18,16 @@ function buildOtaUpdateConfiguration(): Readonly<{
   easProjectId: string | null;
   runtimeVersion: NonNullable<ExpoConfig["runtimeVersion"]>;
 }> {
-  const buildProfile =
+  const rawBuildProfile =
     process.env.EAS_BUILD_PROFILE?.trim() ||
     process.env.EXPO_PUBLIC_HBPOS_BUILD_PROFILE?.trim() ||
     "development";
+  // 「production-xxx」是 production 的变体档位（目前只有 production-zeller：同一个 TestFlight 渠道，
+  // 只多开放 Zeller 验证）。生产保护（缺 projectId 直接失败、日志中心环境等）必须一视同仁，
+  // 所以统一归一成 production，不能让改个档位名就绕开。
+  const buildProfile = rawBuildProfile.startsWith("production-")
+    ? "production"
+    : rawBuildProfile;
   const easProjectId =
     process.env.EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID?.trim() || null;
   const updatesUrl =

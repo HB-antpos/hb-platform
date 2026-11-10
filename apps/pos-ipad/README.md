@@ -28,6 +28,28 @@ API 地址通过 `EXPO_PUBLIC_HBPOS_API_URL` 注入；可切换的备用 origin 
 支付 attempt；未选择 provider 时禁止发起新的银行卡交易。token、密钥和 provider
 交易引用不得写入 Expo public extra。
 
+### Zeller 刷卡的开放范围
+
+Zeller 收款还没有经过真机和刷卡机验证，所以设置页的 Zeller 页签（配对、启用）只在**非 production 构建**
+（development、preview）里开放，production 构建默认不显示，也就没有办法启用。
+
+要让测试员在 TestFlight 包里验证 Zeller，用 EAS 档位 `production-zeller`：它与 `production` 走同一个
+bundle id、TestFlight 渠道、EAS 项目和 App Store Connect 记录，只多一个构建变量
+`EXPO_PUBLIC_HBPOS_ENABLE_ZELLER=1`（只认字面量 `1`）。
+
+```bash
+npx eas-cli@21.3.0 build --platform ios --profile production-zeller --auto-submit --non-interactive
+```
+
+- `app.config.ts` 把 `production-*` 变体档位按 `production` 对待，生产保护（缺 EAS projectId 直接失败、
+  日志中心环境）一视同仁。
+- 日常正式构建仍用 `--profile production`，不带这个开关。
+- 开关是构建时写进包里的：同一个包以后用 OTA 更新时，JS 由 OTA 脚本按 `production`（不带开关）打包，
+  Zeller 页签会随之消失——iPad 的 OTA 目前全部关闭，不受影响，但开启 OTA 前要处理这一点。
+- Zeller 验证页（`hbpos-ipad://zeller-probe`）会不建订单直接扣款，仍只在非 production 构建里开放，
+  `production-zeller` 包里没有。
+- Zeller 没有测试环境，任何测试扣款都是真实扣款（最低 AUD 1.00），测完要在 Zeller 后台退款。
+
 ## App Store 与 OTA 更新
 
 原生版本策略与 OTA 策略分别检查、缓存和失败回退。生产构建必须显式提供独立

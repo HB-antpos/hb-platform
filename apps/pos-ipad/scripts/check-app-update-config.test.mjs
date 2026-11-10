@@ -41,6 +41,53 @@ test("EAS production profile 不得被公开环境变量降级绕过 fail-fast",
   assert.notEqual(result.status, 0);
 });
 
+test("production-zeller 变体档位按 production 对待：缺 EAS projectId/updates.url 同样 fail-fast", () => {
+  const result = runConfig({ EAS_BUILD_PROFILE: "production-zeller" });
+  assert.notEqual(result.status, 0);
+});
+
+test("production-zeller 带齐 projectId 与 updates URL 时归一成 production，OTA 配置与 production 一致", () => {
+  const projectId = "123e4567-e89b-42d3-a456-426614174000";
+  const updatesUrl = `https://u.expo.dev/${projectId}`;
+  const config = resolveConfig({
+    EAS_BUILD_PROFILE: "production-zeller",
+    EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID: projectId,
+    EXPO_PUBLIC_HBPOS_UPDATES_URL: updatesUrl,
+    EXPO_PUBLIC_HBPOS_RUNTIME_VERSION: "0.2.0",
+  });
+  assert.equal(config.extra?.hbpos?.buildProfile, "production");
+  assert.equal(config.extra?.hbpos?.automaticOtaChecks, true);
+  assert.equal(config.updates?.checkAutomatically, "NEVER");
+  assert.deepEqual(config.updates?.requestHeaders, {
+    "expo-channel-name": "pos-ipad-production",
+  });
+  assert.equal(config.updates?.url, updatesUrl);
+});
+
+test("eas.json 的 production-zeller 与 production 只差 Zeller 开关，submit 指向同一个 App Store Connect 记录", async () => {
+  const eas = JSON.parse(
+    await readFile(new URL("../eas.json", import.meta.url), "utf8"),
+  );
+  const { env: productionEnv, ...productionRest } = eas.build.production;
+  const { env: zellerEnv, ...zellerRest } = eas.build["production-zeller"];
+  assert.deepEqual(zellerRest, productionRest, "分发方式、渠道、自增等必须与 production 完全一致");
+  assert.deepEqual(zellerEnv, {
+    ...productionEnv,
+    EXPO_PUBLIC_HBPOS_ENABLE_ZELLER: "1",
+  });
+  assert.equal(
+    productionEnv.EXPO_PUBLIC_HBPOS_ENABLE_ZELLER,
+    undefined,
+    "production 档位不得带 Zeller 开关",
+  );
+  assert.equal(
+    zellerEnv.EXPO_PUBLIC_HBPOS_BUILD_PROFILE,
+    "production",
+    "运行时上报与日志中心仍按 production 环境",
+  );
+  assert.deepEqual(eas.submit["production-zeller"], eas.submit.production);
+});
+
 test("production 只接受显式 HTTPS updates URL 与 EAS projectId 注入", () => {
   const projectId = "123e4567-e89b-42d3-a456-426614174000";
   const updatesUrl = `https://u.expo.dev/${projectId}`;
