@@ -63,6 +63,45 @@ test("payment state machine never permits Unknown to create a fresh attempt", ()
   assert.equal(canTransitionPaymentAttempt("Approved", "Submitted"), false);
 });
 
+test("card sync evidence：zeller 通道只能配 Zeller 这个 Processor，反过来也一样", () => {
+  const zeller = {
+    version: 1,
+    provider: "zeller",
+    operation: "purchase",
+    processor: "Zeller",
+    txnRef: "65c4b343-03e6-49ef-a54d-012e3f2c222c",
+    authCode: "456321",
+    cardType: "VISA",
+    cardBin: 411111,
+    maskedCardNumber: "1234",
+    merchantId: "CAID-1",
+    responseCode: "00",
+    responseText: "APPROVED",
+    stan: null,
+    bankDateTimeIso: "2026-11-05T11:24:01+10:00",
+    amountCents: 500,
+    refundReference: null,
+  } as const;
+
+  const evidence = normalizeCardSyncEvidence(zeller);
+  assert.equal(evidence.provider, "zeller");
+  assert.equal(evidence.processor, "Zeller");
+  assert.equal(evidence.bankDateTimeIso, "2026-11-05T01:24:01.000Z");
+
+  // 不能让 Zeller 的交易以别家的名义同步，也不能让别家的交易冒用 Zeller。
+  for (const processor of ["Square", "ANZ", "Manual"]) {
+    assert.throws(() => normalizeCardSyncEvidence({ ...zeller, processor }), /provider processor/i);
+  }
+  for (const provider of ["square", "linkly-cloud"]) {
+    assert.throws(() => normalizeCardSyncEvidence({ ...zeller, provider }), /provider processor/i);
+  }
+  // 刷卡机时间没有时区时不能进证据（适配层要先按 UTC 补上）。
+  assert.throws(
+    () => normalizeCardSyncEvidence({ ...zeller, bankDateTimeIso: "2026-11-05T11:24:01" }),
+    /timezone/i,
+  );
+});
+
 test("card sync evidence freezes a strict protected whitelist and rejects PAN or raw payload", () => {
   const evidence = normalizeCardSyncEvidence({
     version: 1,

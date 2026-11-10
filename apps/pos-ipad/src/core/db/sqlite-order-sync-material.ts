@@ -14,6 +14,10 @@ import {
 } from "@hb/pos-domain/core/contracts/line-sync-provenance";
 import type { LocalOrder, OrderTender } from "@hb/pos-domain/core/contracts/order";
 import type { CardSyncEvidenceV1 } from "@hb/pos-domain/core/contracts/payment";
+import {
+  deriveZellerAttemptReference,
+  formatZellerPayment,
+} from "@hb/pos-payments-core/features/payments/zeller/zeller-payment-reference";
 
 import { readManualPaymentSyncEvidence } from "./sqlite-manual-payment-sync";
 import type { SqliteReturnCapacityVault } from "./sqlite-return-capacity-vault";
@@ -511,6 +515,9 @@ export class SqliteOrderSyncMaterialResolver {
         order,
         linklyEnvironmentInput,
       );
+    }
+    if (attempt.provider === "zeller") {
+      return resolveZeller(tender, attempt);
     }
     if (attempt.provider === "manual-card") {
       if (attempt.operation !== "purchase" || attempt.txnRef !== `MANUAL:${attempt.attemptId}` || attempt.paymentId !== null || attempt.sessionId !== null || attempt.rfn !== null || attempt.checkoutId !== null) throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
@@ -1423,7 +1430,7 @@ type ReturnBindingRow = Readonly<{
 type ApprovedAttempt = Readonly<{
   attemptId: string;
   idempotencyKey: string;
-  provider: "square" | "linkly-cloud" | "voucher" | "manual-card";
+  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | "zeller";
   operation: "purchase" | "refund";
   checkoutId: string | null;
   paymentId: string | null;
@@ -1468,7 +1475,7 @@ function readApprovedAttempt(
     (operation === "refund" && tender.amount.cents >= 0) ||
     (tender.method === "card" &&
       provider !== "square" &&
-      provider !== "linkly-cloud" && provider !== "manual-card") ||
+      provider !== "linkly-cloud" && provider !== "manual-card" && provider !== "zeller") ||
     (tender.method === "voucher" && provider !== "voucher")
   ) {
     throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
@@ -1993,11 +2000,47 @@ function paymentProvider(
   if (
     value === "square" ||
     value === "linkly-cloud" ||
-    (value === "voucher" || value === "manual-card")
+    (value === "voucher" || value === "manual-card") ||
+    value === "zeller"
   ) {
     return value;
   }
   throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+}
+
+/**
+ * Zeller 扣款的订单引用：ZELLER:{reference}:{transactionUuid}，与 WPF 收银机和服务端的格式一致
+ * （共用 test-fixtures/zeller/payment-reference-vectors.json）。
+ *
+ * 中文注释：attempt 上 txnRef 存发给 Zeller 的 reference（HBZ-…，提交前落库），paymentId 存 Zeller 返回的
+ * transactionUuid（批准时落库）。两者缺一、格式不对，或带了别家通道才有的引用，一律不上传：
+ * 没有 transactionUuid 的引用以后无法原路退回，也无法在 Zeller 后台对账。
+ * 退款还没有接入，Zeller 的退款 attempt 不应该存在，存在就失败关闭。
+ */
+function resolveZeller(tender: OrderTender, attempt: ApprovedAttempt): OrderTender {
+  if (
+    tender.method !== "card" ||
+    attempt.provider !== "zeller" ||
+    attempt.operation !== "purchase" ||
+    attempt.txnRef === null ||
+    attempt.paymentId === null ||
+    attempt.sessionId !== null ||
+    attempt.rfn !== null ||
+    attempt.checkoutId !== null
+  ) {
+    throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+  }
+  let reference: string;
+  try {
+    reference = formatZellerPayment(attempt.txnRef, attempt.paymentId);
+  } catch {
+    throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+  }
+  // reference 必须就是这笔 attempt 派生出来的那一个，不能是别的 attempt 的。
+  if (attempt.txnRef !== deriveZellerAttemptReference(attempt)) {
+    throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+  }
+  return frozenTender(tender, reference, null);
 }
 
 function paymentOperation(

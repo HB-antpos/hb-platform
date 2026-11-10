@@ -15,7 +15,7 @@ type PaymentProtectedMaterialEncryptor = Readonly<{
 export type PaymentProtectedMaterialBinding = Readonly<{
   attemptId: string;
   orderGuid: string;
-  provider: "square" | "linkly-cloud" | "manual-card";
+  provider: "square" | "linkly-cloud" | "manual-card" | "zeller";
   operation: PaymentOperation;
   /** 与 attempt 账本一致：purchase 为正、refund 为负。 */
   amountCents: number;
@@ -212,7 +212,12 @@ function normalizeBinding(
 ): PaymentProtectedMaterialBinding {
   const attemptId = nonBlankInput(input.attemptId, "attempt id");
   const orderGuid = nonBlankInput(input.orderGuid, "order guid");
-  if (input.provider !== "square" && input.provider !== "linkly-cloud" && input.provider !== "manual-card") {
+  if (
+    input.provider !== "square" &&
+    input.provider !== "linkly-cloud" &&
+    input.provider !== "manual-card" &&
+    input.provider !== "zeller"
+  ) {
     throw new TypeError("Payment protected material provider is invalid.");
   }
   if (input.operation !== "purchase" && input.operation !== "refund") {

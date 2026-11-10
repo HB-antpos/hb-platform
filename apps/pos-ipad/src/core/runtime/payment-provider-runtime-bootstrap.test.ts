@@ -68,6 +68,8 @@ test("provider bootstrap 对缺失公开配置返回稳定 unavailable，不触�
       blocker: "VOUCHER_CONFIGURATION_DISABLED",
     },
     { provider: "manual-card", available: false, blocker: "MANUAL_CARD_CONFIGURATION_DISABLED" },
+    // Zeller 适配器已注册（供恢复已有交易），但设置里还不能启用，新付款一律不可用。
+    { provider: "zeller", available: false, blocker: "ZELLER_NOT_ENABLED" },
   ]);
   assert.equal(
     bootstrap.createLinklyOperator({
@@ -110,6 +112,7 @@ test("bootstrap 仅在合法且可用的 Linkly 环境创建 operator，并一�
       { provider: "linkly-cloud", available: false },
       { provider: "voucher", available: true },
       { provider: "manual-card", available: false },
+      { provider: "zeller", available: false },
     ],
   );
   assert.deepEqual(
@@ -121,6 +124,7 @@ test("bootstrap 仅在合法且可用的 Linkly 环境创建 operator，并一�
       { provider: "linkly-cloud", available: true },
       { provider: "voucher", available: true },
       { provider: "manual-card", available: true },
+      { provider: "zeller", available: false },
     ],
   );
   assert.ok(

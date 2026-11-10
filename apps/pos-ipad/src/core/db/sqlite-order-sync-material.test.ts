@@ -76,6 +76,65 @@ test("手动刷卡保持MANUAL引用，无法伪装为Square或Linkly原卡退�
   });
 });
 
+test("Zeller 扣款上传 ZELLER:{reference}:{transactionUuid}，与 WPF 同格式；卡证据原样带出", async () => {
+  await withDatabase(async (connection) => {
+    const attemptId = "799287a3-3dc2-4df1-bca3-d33eea19b35a";
+    const reference = "HBZ-799287a33dc24df1bca3d33eea19b35a";
+    const transactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+    await seedOrderTender(connection, {
+      orderGuid: "order-zeller", tenderGuid: "tender-zeller", attemptId,
+      provider: "zeller", operation: "purchase", amountCents: 500,
+      syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE, txnRef: reference, paymentId: transactionUuid,
+    });
+    const evidence = {
+      version: 1, provider: "zeller", operation: "purchase", processor: "Zeller",
+      txnRef: transactionUuid, authCode: "456321", cardType: "VISA", cardBin: 411111,
+      maskedCardNumber: "1234", merchantId: "CAID-1", responseCode: "00", responseText: "APPROVED",
+      stan: null, bankDateTimeIso: "2026-11-05T01:24:01.000Z", amountCents: 500, refundReference: null,
+    } as const;
+    const ciphertext = await encryptPaymentProtectedMaterial(encryptor, { voucherReservationToken: null, cardSyncEvidence: evidence });
+    await connection.run("UPDATE payment_attempts SET provider_payload_ciphertext = ? WHERE attempt_id = ?", [ciphertext, attemptId]);
+
+    const ordinary = await readOrdinaryOrder(connection, "order-zeller");
+    const resolved = await createResolver(connection).resolve(ordinary, null);
+    assert.equal(resolved.tenders[0]?.reference, `ZELLER:${reference}:${transactionUuid}`);
+    assert.equal(resolved.tenders[0]?.reservationToken, null);
+    const material = await createResolver(connection).resolveForSync(ordinary, null);
+    assert.deepEqual(material.cardSyncEvidenceByTenderGuid.get("tender-zeller"), evidence);
+  });
+});
+
+test("Zeller 引用缺交易号、reference 不是本 attempt 派生的、或混入别家引用时，不上传", async (t) => {
+  const attemptId = "799287a3-3dc2-4df1-bca3-d33eea19b35a";
+  const reference = "HBZ-799287a33dc24df1bca3d33eea19b35a";
+  const transactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+  const cases: readonly (readonly [string, Partial<SeedTenderInput>])[] = [
+    ["没有 transactionUuid", { txnRef: reference }],
+    ["没有 reference", { paymentId: transactionUuid }],
+    ["transactionUuid 不是 GUID", { txnRef: reference, paymentId: "not-a-uuid" }],
+    ["reference 属于另一笔 attempt", { txnRef: "HBZ-00000000000000000000000000000001", paymentId: transactionUuid }],
+    ["退款种类的 reference", { txnRef: "HBZR-799287a33dc24df1bca3d33eea19b35a", paymentId: transactionUuid }],
+    ["混入 Linkly 的会话号", { txnRef: reference, paymentId: transactionUuid, sessionId: "session-1" }],
+    ["混入 Linkly 的 RFN", { txnRef: reference, paymentId: transactionUuid, rfn: "RFN-1" }],
+  ];
+  for (const [name, references] of cases) {
+    await t.test(name, async () => {
+      await withDatabase(async (connection) => {
+        await seedOrderTender(connection, {
+          orderGuid: "order-zeller-bad", tenderGuid: "tender-zeller-bad", attemptId,
+          provider: "zeller", operation: "purchase", amountCents: 500,
+          syncProvenance: DEFAULT_LINE_SYNC_PROVENANCE, ...references,
+        });
+        await assertMaterialRejects(
+          createResolver(connection),
+          await readOrdinaryOrder(connection, "order-zeller-bad"),
+          "ORDER_SYNC_ATTEMPT_MISMATCH",
+        );
+      });
+    });
+  }
+});
+
 test("Linkly 引用的环境取自 attempt 冻结的 provider_environment，不随当前配置漂移；仅历史 NULL 退回当前配置", async () => {
   await withDatabase(async (connection) => {
     for (const [suffix, providerEnvironment] of [
@@ -1689,7 +1748,7 @@ type SeedTenderInput = Readonly<{
   orderGuid: string;
   tenderGuid: string;
   attemptId: string | null;
-  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | null;
+  provider: "square" | "linkly-cloud" | "voucher" | "manual-card" | "zeller" | null;
   operation: "purchase" | "refund" | null;
   method?: "cash" | "card" | "voucher";
   amountCents: number;

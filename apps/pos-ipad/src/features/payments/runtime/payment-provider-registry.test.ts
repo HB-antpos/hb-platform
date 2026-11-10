@@ -179,6 +179,7 @@ test("缺失、非法、load 失败和运行时未知 provider 均 fail closed �
       "LINKLY_CONFIGURATION_LOAD_FAILED",
       "VOUCHER_CONFIGURATION_DISABLED",
       "MANUAL_CARD_CONFIGURATION_DISABLED",
+      "ZELLER_NOT_ENABLED",
     ],
   );
   assert.throws(
@@ -508,3 +509,49 @@ function paymentReferences(
     ...overrides,
   };
 }
+
+test("Zeller 适配器已注册但不可用：能找回原通道做恢复，新付款被门禁拦下", async () => {
+  const registry = await createConfiguredPaymentProviderRegistry({
+    transport: {} as never,
+    squareConfiguration: { load: async () => null as never },
+    linklyConfiguration: { load: async () => null as never },
+    voucherConfiguration: { load: async () => ({ enabled: false }) as never },
+    voucherProtectedTokens: {} as never,
+    voucherContextProvider: async () => {
+      throw new Error("not called");
+    },
+    // 没有登记终端：适配器取不到 SDK，任何请求都不会发出。
+    zellerTerminals: { current: () => null },
+  });
+
+  assert.deepEqual(registry.getAvailability("zeller"), {
+    provider: "zeller",
+    available: false,
+    blocker: "ZELLER_NOT_ENABLED",
+  });
+  const port = registry.get("zeller");
+  assert.equal(port.provider, "zeller");
+  // 即使有人绕过门禁调用了 submit，没有终端时也只会得到「请求没有发出」。
+  const result = await port.submit({
+    attemptId: "799287a3-3dc2-4df1-bca3-d33eea19b35a",
+    idempotencyKey: "idempotency-1",
+    orderGuid: "order-1",
+    provider: "zeller",
+    operation: "purchase",
+    amount: { currency: "AUD", cents: 500 },
+    state: "Submitted",
+    references: {
+      checkoutId: null,
+      paymentId: null,
+      sessionId: null,
+      txnRef: "HBZ-799287a33dc24df1bca3d33eea19b35a",
+      rfn: null,
+      voucherReservationToken: null,
+    },
+    createdAtIso: "2026-11-10T00:00:00.000Z",
+    updatedAtIso: "2026-11-10T00:00:01.000Z",
+    lastErrorCode: null,
+  });
+  assert.equal(result.state, "Declined");
+  assert.equal(result.responseCode, "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE");
+});

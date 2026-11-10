@@ -167,6 +167,65 @@ test("Linkly 在 Created→Submitted 的同一次 CAS 预置由 attemptId 派生
   }
 });
 
+test("Zeller 在 Created→Submitted 的同一次 CAS 预置发给 Zeller 的 reference，早于 provider 边界", async () => {
+  const guid = "799287A3-3DC2-4DF1-BCA3-D33EEA19B35A";
+  const expected = "HBZ-799287a33dc24df1bca3d33eea19b35a";
+  const ledger = new MemoryLedger();
+  const provider = new FakeProvider("zeller");
+  let persistedAtBoundary: string | null | undefined;
+  provider.submitResult = async (value) => {
+    // 向刷卡机发请求之前，reference 必须已经落库：它是崩溃后按 reference 查回交易的唯一线索。
+    persistedAtBoundary = ledger.attempts.get(value.attemptId)?.references.txnRef;
+    assert.equal(value.references.txnRef, expected);
+    assert.equal(ledger.attempts.get(value.attemptId)?.state, "Submitted");
+    return result("Pending", { txnRef: expected });
+  };
+  const service = createService({ ledger, provider, createAttemptId: () => guid });
+
+  const started = await service.startAttempt({ ...input(), provider: "zeller" });
+
+  assert.equal(persistedAtBoundary, expected);
+  assert.equal(started.attempt.references.txnRef, expected);
+  assert.equal(provider.submitCalls, 1);
+});
+
+test("Zeller attemptId 不是标准 GUID 时不预置 reference，留给适配器拒绝提交", async () => {
+  const provider = new FakeProvider("zeller");
+  provider.submitResult = async (value) => {
+    assert.equal(value.references.txnRef, null);
+    return result("Declined", {});
+  };
+  const started = await createService({ ledger: new MemoryLedger(), provider }).startAttempt({
+    ...input(),
+    provider: "zeller",
+  });
+  assert.equal(started.attempt.references.txnRef, null);
+  assert.equal(started.attempt.state, "Declined");
+});
+
+test("Zeller 原路退款还没有接入：退款 attempt 在调用 provider 之前失败关闭", async () => {
+  const ledger = new MemoryLedger();
+  const provider = new FakeProvider("zeller");
+  const service = createService({
+    ledger,
+    provider,
+    createAttemptId: () => "799287a3-3dc2-4df1-bca3-d33eea19b35a",
+    trustedRefundReferenceSeed: async () => ({ provider: "square" as const, paymentId: "payment-1" }),
+  });
+
+  await assert.rejects(() =>
+    service.startAttempt({
+      ...input(),
+      provider: "zeller",
+      operation: "refund",
+      amount: { currency: "AUD", cents: -1_250 },
+      refundCapacityId: "capacity-1",
+    }),
+  );
+  assert.equal(provider.refundCalls, 0);
+  assert.equal(provider.submitCalls, 0);
+});
+
 test("Linkly attemptId 不是标准 GUID 时不预置 TxnRef（沿用 UID 认领路径），其他 provider 不受影响", async () => {
   const linkly = new FakeProvider("linkly-cloud");
   linkly.submitResult = async (value) => {

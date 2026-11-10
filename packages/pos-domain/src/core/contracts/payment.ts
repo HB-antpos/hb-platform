@@ -1,7 +1,11 @@
 import type { Money } from "./money";
 import type { PaymentAttemptState } from "./state-machines";
 
-export type PaymentProvider = "square" | "linkly-cloud" | "voucher" | "manual-card";
+/**
+ * zeller：Zeller 刷卡机 SDK 直连。类型、本地库和订单同步已经认识这个通道，
+ * 但要等各端注册了适配器并在设置里启用后才会真的产生 zeller 付款。
+ */
+export type PaymentProvider = "square" | "linkly-cloud" | "voucher" | "manual-card" | "zeller";
 export type PaymentOperation = "purchase" | "refund";
 
 /**
@@ -10,9 +14,10 @@ export type PaymentOperation = "purchase" | "refund";
  */
 export type CardSyncEvidenceV1 = Readonly<{
   version: 1;
-  provider: "square" | "linkly-cloud" | "manual-card";
+  provider: "square" | "linkly-cloud" | "manual-card" | "zeller";
   operation: PaymentOperation;
-  processor: "Square" | "ANZ" | "Manual";
+  /** 与服务端、WPF 写进卡交易明细的 Processor 一致；Zeller 对应 ZellerPaymentReference.Processor。 */
+  processor: "Square" | "ANZ" | "Manual" | "Zeller";
   txnRef: string | null;
   authCode: string | null;
   cardType: string | null;
@@ -123,11 +128,13 @@ export function normalizeCardSyncEvidence(
   }
   if (
     input.version !== 1 ||
-    (input.provider !== "square" && input.provider !== "linkly-cloud" && input.provider !== "manual-card") ||
+    (input.provider !== "square" && input.provider !== "linkly-cloud" && input.provider !== "manual-card" && input.provider !== "zeller") ||
     (input.operation !== "purchase" && input.operation !== "refund") ||
-    (input.processor !== "Square" && input.processor !== "ANZ" && input.processor !== "Manual") ||
+    (input.processor !== "Square" && input.processor !== "ANZ" && input.processor !== "Manual" && input.processor !== "Zeller") ||
     (input.provider === "square") !== (input.processor === "Square") ||
     (input.provider === "manual-card") !== (input.processor === "Manual") ||
+    // 通道与 Processor 必须一一对应：不能让 Zeller 的交易以别家的名义同步，反之亦然。
+    (input.provider === "zeller") !== (input.processor === "Zeller") ||
     (input.provider === "manual-card" && input.operation !== "purchase")
   ) {
     throw new TypeError("Card sync evidence provider processor is invalid.");

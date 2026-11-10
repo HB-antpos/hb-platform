@@ -7613,6 +7613,24 @@ BEGIN
 END;
 `;
 
+/**
+ * M58 单终端阻塞认识 Zeller 刷卡：已批准且已被订单消费的 zeller 付款不再挡住下一单。
+ *
+ * 中文注释：两个阻塞触发器靠「已批准的 attempt 有没有对应的 order_tenders 行」判断这笔钱是否已经落到订单上，
+ * 判断里写死了算作刷卡（method='card'）的通道列表。列表里没有 zeller 时，一笔正常完成的 Zeller 销售会被永远
+ * 当成「批准了但没入单」，同一台设备的下一单付款从此被 PAYMENT_TERMINAL_BLOCKING_ATTEMPT_EXISTS 拦住。
+ * 这里只重建这两个触发器（不动任何表和数据），内容与 M52 完全相同，仅在刷卡通道列表里加上 zeller。
+ * 直接从 M52 的文本派生，避免手抄 90 行 SQL 时抄错；派生时核对恰好替换两处，对不上就在加载时失败。
+ */
+const M58 = (() => {
+  const cardProviders = "prior.provider IN ('square', 'linkly-cloud', 'manual-card')";
+  const parts = M52.split(cardProviders);
+  if (parts.length !== 3) {
+    throw new Error("M58 expects exactly two card provider lists in M52.");
+  }
+  return parts.join("prior.provider IN ('square', 'linkly-cloud', 'manual-card', 'zeller')");
+})();
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7671,6 +7689,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 55, name: "M55_installment_original_tender_zeller_manual", sql: M55 },
   { version: 56, name: "M56_daily_close_installments", sql: M56 },
   { version: 57, name: "M57_installment_attempts_zeller_manual", sql: M57 },
+  { version: 58, name: "M58_terminal_blocking_zeller", sql: M58 },
 ];
 
 export async function applyMigrations(

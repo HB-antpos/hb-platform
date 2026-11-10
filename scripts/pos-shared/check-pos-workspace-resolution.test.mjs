@@ -228,8 +228,16 @@ test("根 lockfile 的第三方版本全部来自当前整合基线的双端 loc
 
   // 反向核对：登记项必须真实存在于根 lockfile，且由所列 workspace 直接声明，避免留下过期放行。
   for (const addition of reviewedDependencyAdditions) {
+    // 同名包有两个版本并存时（例如应用用 zod 4，而某个 SDK 自带 zod 3），旧版本会嵌套安装在依赖方目录下；
+    // 这类登记项用 lockPath 写明它在 lockfile 里的确切位置，仍然逐条核对版本。
+    const lockPath = addition.lockPath ?? `node_modules/${addition.name}`;
+    assert.ok(
+      lockPath === `node_modules/${addition.name}` ||
+        lockPath.endsWith(`/node_modules/${addition.name}`),
+      `${addition.name} 登记的 lockPath 与包名不符：${lockPath}`,
+    );
     assert.equal(
-      lock.packages?.[`node_modules/${addition.name}`]?.version,
+      lock.packages?.[lockPath]?.version,
       addition.version,
       `${addition.name}@${addition.version} 已登记但不在根 lockfile 中`,
     );
