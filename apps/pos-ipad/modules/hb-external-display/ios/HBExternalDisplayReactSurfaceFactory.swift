@@ -52,6 +52,15 @@ enum HBExternalDisplayReactSurfaceFactory {
       initialProperties: initialProperties,
       launchOptions: nil
     )
+    // RCTRootViewFactory 对每个新 root 都会回调 customizeRootView，
+    // expo-splash-screen 因此把启动画面（白底）挂成这个 surface 的 loadingView
+    // 并关闭自动隐藏；而 JS 只在主 root 启动时隐藏一次启动画面，
+    // 外屏会一直被白色启动画面盖住。这里把它摘掉。
+    if surface.responds(
+      to: NSSelectorFromString("setActivityIndicatorViewFactory:")
+    ) {
+      surface.setValue(nil, forKey: "activityIndicatorViewFactory")
+    }
     surface.isUserInteractionEnabled = false
     surface.isOpaque = false
     surface.backgroundColor = .clear

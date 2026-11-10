@@ -595,6 +595,11 @@ test("second React Native surface mounts only after registration and render hand
   assert.match(factory, /rootViewFactory\.superView\(/);
   assert.doesNotMatch(factory, /rootViewFactory\s*\.view\(/);
   assert.match(factory, /value\(forKey:\s*"reactHost"\)\s*!=\s*nil/);
+  // expo-splash-screen 会把白底启动画面挂到每个新 root 上且不再隐藏，必须摘掉。
+  assert.match(
+    factory,
+    /setValue\(nil,\s*forKey:\s*"activityIndicatorViewFactory"\)/,
+  );
   assert.match(factory, /withModuleName:\s*"HBExternalDisplay"/);
   assert.match(factory, /isUserInteractionEnabled\s*=\s*false/);
   assert.match(coordinator, /reactSurfaceReady/);

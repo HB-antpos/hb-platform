@@ -8,6 +8,7 @@ import {
 } from "./production-settings-composition";
 
 import type { ReceiptPrinterSettings } from "@/core/db/pos-settings-repository";
+import { allocateProducerSessionRevision } from "@/features/customer-display/customer-display-publisher";
 import { PricingCart } from "@/features/sales/domain";
 import { ActivePricingCartSession } from "@/features/sales/runtime";
 
@@ -562,12 +563,16 @@ test("打印与外屏测试只使用已配置外设和无敏感字段的只读�
   await presenter.load();
 
   await presenter.testPrinter();
+  // 模拟收银客显已经发布过画面：测试画面必须排在它之后，否则原生按
+  // stale-revision 拒绝（真机「显示测试画面」必失败的回归）。
+  const publishedBySales = allocateProducerSessionRevision();
   await presenter.testExternalDisplay();
 
   assert.equal(presenter.getState().statusCode, "display-test-passed");
   assert.deepEqual(events[0], ["connect", "XP-1"]);
   const display = events.at(-1) as [string, Record<string, unknown>];
   assert.equal(display[0], "display");
+  assert.equal(display[1].revision, publishedBySales + 1);
   assert.deepEqual(Object.keys(display[1]).sort(), [
     "advert",
     "change",
