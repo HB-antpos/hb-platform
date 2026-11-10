@@ -200,6 +200,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifyStaffNotificationAsync", runtimeMethods);
         Assert.Contains("ApplyStaffNotificationSmsSenderAsync", runtimeMethods);
         Assert.Contains("VerifyStaffNotificationSmsSenderAsync", runtimeMethods);
+        Assert.Contains("ApplySupplierPreorderHqAdjustAsync", runtimeMethods);
+        Assert.Contains("VerifySupplierPreorderHqAdjustAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -795,6 +797,10 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaDatabase.Main,
             SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId
         );
+        runtime.MarkApplied(
+            SchemaDatabase.Main,
+            SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId
+        );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
             SchemaDatabase.Posm,
@@ -1300,6 +1306,7 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20261104.001-planogram",
                 "Check:Main:20261106.001-staff-notification",
                 "Check:Main:20261107.001-staff-notification-sms-sender",
+                "Check:Main:20261111.001-supplier-preorder-hq-adjust",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1584,238 +1591,242 @@ public sealed class SchemaMigrationCoordinatorTests
         // 然后是排班用餐次数（10-02）、可上班时间的不能上班类型（10-03）、敏感申请生日列与须改密标记表（10-04），未成年用工合规（10-04），然后是找回密码验证码表（10-04），然后是验证码表的新邮箱列（10-05），然后是 Mobile 安卓原生最低构建号策略表（10-05），然后是门店小票资料下发的两张新表（10-07），然后是考勤用餐休息的两张新表（10-07），然后是分店现金管理的六张新表（10-08），然后是门店小票资料「代金券使用说明 / 分期条款」两列（10-08）、贺卡填报供应商与批次三列（10-09）、客显广告版式三列（10-09），然后是通知平台的两张新表（10-12），然后是人脸抓拍接收的三张新表（10-13），然后是人脸比对的九张新表（10-14），然后是门店价格更新已通知记录表（10-15），然后是新品到店每日推送的两张新表（10-15），然后是班中定位批量上传的两列与过滤唯一索引（10-15），然后是门店分时客流报表表（10-16）与名单命中自动确认阈值列（10-16），然后是 App 系统推送的设备表与发件箱（10-17）、「不允许登录」标记表与价格变更任务页面设置表（10-17），最后是用户姓名拆分的四个新列（10-18）。
         Assert.Equal(
             SchemaMigrationCoordinator.LocalSupplierCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^59].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^60].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.CompactBoardMonthlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^58].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^59].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^57].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^58].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickStockoutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^56].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^57].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderPickAssignmentMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^55].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^56].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceScheduleMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^54].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^55].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceAvailabilityUnavailableMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^53].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^54].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeProfileSensitiveBirthdayMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^52].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^53].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordChangeRequirementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^51].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^52].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.EmployeeMinorComplianceMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^50].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^51].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^49].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^50].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPasswordResetCodeTargetEmailMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^48].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^49].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MobileAndroidNativeUpdatePolicyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^47].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^48].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^46].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^47].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceMealBreakMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^45].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^46].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreCashManagementMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^44].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^45].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StoreReceiptTermsMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^43].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^44].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SeasonalCardSupplierBatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^42].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^43].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AdvertisementOrientationMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^41].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^42].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AppNotificationMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^40].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^41].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceCaptureMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^39].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^40].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceMatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^38].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^39].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StorePriceUpdateNoticeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^37].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^38].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.ContainerNewProductNoticeMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^36].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^37].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceLocationSampleBatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^35].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^36].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceTrafficHourlyMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^34].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^35].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.FaceUnwelcomeAutoConfirmMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^33].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^34].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AppPushMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^32].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^33].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserLoginRestrictionMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^31].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^32].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StorePriceUpdateSettingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^30].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^31].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserNamePartsMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^29].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^30].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.WarehouseOrderReturnFieldsMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^28].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^29].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^27].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^28].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderHistoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^26].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^27].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderItemImageMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^25].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^26].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SupplierPreorderRevisionMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^24].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^25].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StorePosApiEntryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^23].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^24].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.HelpFaqMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^22].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^23].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceReviewAutoClockOutMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^21].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^22].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendancePayrollLeaveMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^20].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^21].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.RoleLevelMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^19].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^20].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.PosApiEntryUsageMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^18].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^19].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MainApiEntryUsageMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^17].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^18].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobConnectionMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^16].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^17].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobEmployeeBindingMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^15].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^16].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayCategoryMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^15].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobEmployeeSyncBatchMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^14].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayCategoryCasualMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^13].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayslipMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^12].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.UserPreferenceMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^11].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayslipExportMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^10].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobTimesheetPushMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^9].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.MyobPayCategoryPublicHolidayMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^8].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.SmsSendLogMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^7].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.AttendanceSettingsSingleActiveMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^6].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.PosReceiptShareLinkMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^5].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.PlanogramMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^4].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StaffNotificationMigrationId,
-            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+            SchemaMigrationCoordinator.MainMigrationSteps[^3].MigrationId
         );
         Assert.Equal(
             SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId,
+            SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
+        );
+        Assert.Equal(
+            SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.Equal("20261007.001-store-receipt-profile-release", SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId);
@@ -1864,6 +1875,7 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Equal("20261104.001-planogram", SchemaMigrationCoordinator.PlanogramMigrationId);
         Assert.Equal("20261106.001-staff-notification", SchemaMigrationCoordinator.StaffNotificationMigrationId);
         Assert.Equal("20261107.001-staff-notification-sms-sender", SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId);
+        Assert.Equal("20261111.001-supplier-preorder-hq-adjust", SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId);
         Assert.Equal("20261024.004-pos-device-api-entry", SchemaMigrationCoordinator.PosDeviceApiEntryMigrationId);
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
         foreach (var migrationId in new[]
@@ -1927,6 +1939,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.PlanogramMigrationId,
             SchemaMigrationCoordinator.StaffNotificationMigrationId,
             SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId,
+            SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -2388,6 +2401,15 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.True(smsSenderApply >= 0
             && smsSenderApply < smsSenderVerify
             && smsSenderVerify < smsSenderRecord);
+        // 供应商预订单总部调整标记三列（11-11）：Apply → 列签名校验 → 登记。
+        var hqAdjustApply = runtime.Events.IndexOf(
+            $"Apply:Main:{SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId}");
+        var hqAdjustVerify = runtime.Events.IndexOf("VerifySupplierPreorderHqAdjust", hqAdjustApply);
+        var hqAdjustRecord = runtime.Events.IndexOf(
+            $"Record:Main:{SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId}");
+        Assert.True(hqAdjustApply >= 0
+            && hqAdjustApply < hqAdjustVerify
+            && hqAdjustVerify < hqAdjustRecord);
         // MYOB Timesheet 推送记录表（10-30）：Apply → 列 / 主键 / 索引签名校验 → 登记。
         var timesheetPushApply = runtime.Events.IndexOf(
             $"Apply:Main:{SchemaMigrationCoordinator.MyobTimesheetPushMigrationId}");
@@ -2794,6 +2816,43 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.DoesNotContain(
             SchemaMigrationCoordinator.PosmMigrationSteps,
             step => step.MigrationId == SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId
+        );
+    }
+
+    [Fact]
+    public void SupplierPreorderHqAdjustSchema_错误号接在预订单之后_只加三个可空列_只在Main迁移链()
+    {
+        // 54010 订货行表缺失（Apply / Verify 都有），54011 列签名不兼容（只在只读门禁里）。
+        Assert.Contains("THROW 54010", SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("THROW 54010", SupplierPreorderHqAdjustSchema.VerifySql, StringComparison.Ordinal);
+        Assert.Contains("THROW 54011", SupplierPreorderHqAdjustSchema.VerifySql, StringComparison.Ordinal);
+        Assert.DoesNotContain("THROW 54011", SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.Ordinal);
+
+        // 幂等：三列各自先判断是否存在；只加可空列，不动既有列和数据。
+        foreach (var column in new[] { "HqOriginalCartons", "HqAdjustedAtUtc", "HqAdjustedBy" })
+        {
+            Assert.Contains($"COL_LENGTH(N'dbo.SupplierPreorderStoreOrderLine', N'{column}') IS NULL", SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("ADD [HqOriginalCartons] int NULL", SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("ADD [HqAdjustedAtUtc] datetime2 NULL", SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("ADD [HqAdjustedBy] nvarchar(100) NULL", SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.Ordinal);
+        foreach (var forbidden in new[] { "DROP ", "UPDATE ", "DELETE ", "CREATE TABLE", "ALTER COLUMN" })
+        {
+            Assert.DoesNotContain(forbidden, SupplierPreorderHqAdjustSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // 只读门禁：nvarchar(100) 的字节长度是 200，三列都必须可空。
+        Assert.Contains("N'nvarchar', 200, 1", SupplierPreorderHqAdjustSchema.VerifySql, StringComparison.Ordinal);
+        Assert.Contains("c.[is_nullable] <> expected.[is_nullable]", SupplierPreorderHqAdjustSchema.VerifySql, StringComparison.Ordinal);
+
+        Assert.Contains(
+            SchemaMigrationCoordinator.MainMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId
+        );
+        Assert.DoesNotContain(
+            SchemaMigrationCoordinator.PosmMigrationSteps,
+            step => step.MigrationId == SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId
         );
     }
 
@@ -4472,6 +4531,23 @@ public sealed class SchemaMigrationCoordinatorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Events.Add("VerifyStaffNotificationSmsSender");
+            return Task.CompletedTask;
+        }
+
+        public async Task ApplySupplierPreorderHqAdjustAsync(CancellationToken cancellationToken)
+        {
+            await ApplyAsync(
+                SchemaDatabase.Main,
+                SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId,
+                cancellationToken
+            );
+            await VerifySupplierPreorderHqAdjustAsync(cancellationToken);
+        }
+
+        public Task VerifySupplierPreorderHqAdjustAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Events.Add("VerifySupplierPreorderHqAdjust");
             return Task.CompletedTask;
         }
 

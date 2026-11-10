@@ -34,6 +34,9 @@ public static class SupplierPreorderLogActions
 
     /// <summary>分店提交订单（提交后再改会回到草稿，需重新提交）。</summary>
     public const string OrderSubmitted = "OrderSubmitted";
+
+    /// <summary>总部在订货汇总页改了某分店某商品的箱数（不改变分店订单的提交状态）。</summary>
+    public const string LineAdjusted = "LineAdjusted";
 }
 
 /// <summary>订单表商品与我方商品的匹配方式。</summary>
@@ -420,6 +423,18 @@ public class SupplierPreorderStoreOrderLine
 
     [SugarColumn(Length = 100, IsNullable = true)]
     public string? UpdatedBy { get; set; }
+
+    // 总部调整标记（迁移 20261111.001-supplier-preorder-hq-adjust）：总部改过这一格且分店没再改时有值；
+    // HqOriginalCartons = 总部第一次调整前的箱数（连续多次调整保留最初那个），分店自己再改这一行时清空。
+    // 总部把数量调成 0 时这一行保留（Cartons = 0）以便留住标记；所有汇总都只算 Cartons > 0 的行。
+    [SugarColumn(IsNullable = true)]
+    public int? HqOriginalCartons { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? HqAdjustedAtUtc { get; set; }
+
+    [SugarColumn(Length = 100, IsNullable = true)]
+    public string? HqAdjustedBy { get; set; }
 }
 
 /// <summary>按供应商记住的列映射：同一供应商、同样表头再次上传时自动套用。</summary>

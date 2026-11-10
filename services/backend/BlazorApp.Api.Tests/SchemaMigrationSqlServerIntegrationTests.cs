@@ -4273,6 +4273,57 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 预订单总部调整标记三列_依赖订货行表_保留已有行_可重复执行_识别缺列和签名漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 订货行表还没建（20261023.001 未执行）：Apply 与 Verify 都是 54010，不会顺手建表。
+        var applyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.ApplySql));
+        Assert.Equal(54010, applyNoTable.Number);
+        var verifyNoTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql));
+        Assert.Equal(54010, verifyNoTable.Number);
+
+        // 加列之前就存在的订货行：迁移后必须原样保留，新列全部为 NULL（= 没被总部改过）。
+        await ExecuteNonQueryAsync(main, SupplierPreorderSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.SupplierPreorderStoreOrderLine (LineGuid, OrderGuid, FormGuid, ItemGuid, Cartons, UpdatedAtUtc)
+            VALUES (N'l-old', N'o-1', N'f-1', N'i-1', 3, SYSUTCDATETIME());
+            """);
+
+        // 列还没加：只读门禁报 54011。
+        var noColumn = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql));
+        Assert.Equal(54011, noColumn.Number);
+
+        await ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.SupplierPreorderStoreOrderLine WHERE LineGuid = N'l-old' AND Cartons = 3 AND HqOriginalCartons IS NULL AND HqAdjustedAtUtc IS NULL AND HqAdjustedBy IS NULL"));
+
+        // 可重复执行：不报错、不重复加列、不丢数据；新列能写入。
+        await ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, "UPDATE dbo.SupplierPreorderStoreOrderLine SET HqOriginalCartons = 3, HqAdjustedAtUtc = SYSUTCDATETIME(), HqAdjustedBy = N'sean' WHERE LineGuid = N'l-old';");
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.SupplierPreorderStoreOrderLine WHERE HqOriginalCartons = 3 AND HqAdjustedBy = N'sean'"));
+
+        // 列宽漂移 → 54011；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderStoreOrderLine ALTER COLUMN HqAdjustedBy nvarchar(50) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql));
+        Assert.Equal(54011, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderStoreOrderLine ALTER COLUMN HqAdjustedBy nvarchar(100) NULL;");
+        await ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql);
+
+        // 缺一列 → 54011。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.SupplierPreorderStoreOrderLine DROP COLUMN HqAdjustedAtUtc;");
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, SupplierPreorderHqAdjustSchema.VerifySql));
+        Assert.Equal(54011, missing.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 员工通知三张表_新表_可重复执行_模板键唯一_识别列漂移缺表和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

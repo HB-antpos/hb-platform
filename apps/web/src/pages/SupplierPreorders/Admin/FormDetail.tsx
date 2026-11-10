@@ -30,8 +30,8 @@ import FormHeaderFields from './FormHeaderFields'
 import { buildHeaderValuesFromDetail, toHeaderPayload, type FormHeaderValues } from './formHeaderValues'
 import FormItemsTab from './FormItemsTab'
 import FormLogsPanel from './FormLogsPanel'
-import FormMatrixPanel from './FormMatrixPanel'
 import FormStoresPanel from './FormStoresPanel'
+import FormSummaryPanel from './FormSummaryPanel'
 import { HISTORY_POLL_INTERVAL_MS, canRecomputeHistory, getHistoryWindow, shouldPollHistory } from './refPicker.logic'
 import './registerSpAdminMessages'
 import RevisionModal from './RevisionModal'
@@ -49,9 +49,9 @@ import {
 } from './supplierPreorderAdmin.logic'
 import './styles.css'
 
-type DetailTab = 'stores' | 'items' | 'logs'
+type DetailTab = 'stores' | 'summary' | 'items' | 'logs'
 
-/** 订单表详情（/supplier-preorders/forms/:formGuid）：分店开启与汇总矩阵、商品、操作记录。 */
+/** 订单表详情（/supplier-preorders/forms/:formGuid）：分店开启、订货汇总（可编辑矩阵）、商品、操作记录。 */
 export default function SupplierPreorderFormDetailPage() {
   const { t } = useTranslation()
   const { message, modal } = App.useApp()
@@ -65,7 +65,8 @@ export default function SupplierPreorderFormDetailPage() {
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loadedAtMs, setLoadedAtMs] = useState(() => Date.now())
-  const [activeTab, setActiveTab] = useState<DetailTab>('stores')
+  // 用户手动切换过页签才记住；没切换过时：已有开启分店默认看「订货汇总」，还没开启分店先去「分店开启」
+  const [userTab, setUserTab] = useState<DetailTab | null>(null)
   const [matrixRefreshKey, setMatrixRefreshKey] = useState(0)
   const [logsRefreshKey, setLogsRefreshKey] = useState(0)
   const [statusSaving, setStatusSaving] = useState(false)
@@ -134,6 +135,12 @@ export default function SupplierPreorderFormDetailPage() {
     setLogsRefreshKey((value) => value + 1)
   }, [loadDetail])
 
+  // 订货汇总里改了数量：页头合计、操作记录要跟着刷新（保存队列清空后才调用，不会每改一格刷新一次）
+  const handleSummaryEdited = useCallback(() => {
+    loadDetail()
+    setLogsRefreshKey((value) => value + 1)
+  }, [loadDetail])
+
   // 应用修订版：用返回的详情刷新页头，并让商品、分店卡片、矩阵、操作记录都重拉
   const handleRevisionApplied = useCallback((next: SupplierPreorderFormDetail) => {
     setDetail(next)
@@ -179,6 +186,7 @@ export default function SupplierPreorderFormDetailPage() {
   }
 
   const { summary } = detail
+  const activeTab: DetailTab = userTab ?? (summary.enabledStoreCount > 0 ? 'summary' : 'stores')
   const notStarted = getNotStartedStoreCount(summary)
   const deletable = canDeleteForm(summary)
 
@@ -431,16 +439,31 @@ export default function SupplierPreorderFormDetailPage() {
       <Tabs
         className="sp-admin-tabs"
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as DetailTab)}
+        onChange={(key) => setUserTab(key as DetailTab)}
         items={[
           {
             key: 'stores',
             label: t('spAdmin.detail.tabStores'),
+            children: <FormStoresPanel formGuid={formGuid} formStatus={summary.status} refreshKey={storesRefreshKey} onChanged={handleStoresChanged} />,
+          },
+          {
+            key: 'summary',
+            label: (
+              <span>
+                {t('spAdmin.detail.tabSummary')}
+                <Tag color="blue" bordered={false} className="sp-admin-tag sp-admin-tab-new">
+                  {t('spAdmin.detail.tabSummaryNew')}
+                </Tag>
+              </span>
+            ),
             children: (
-              <div className="sp-admin-stack">
-                <FormStoresPanel formGuid={formGuid} formStatus={summary.status} refreshKey={storesRefreshKey} onChanged={handleStoresChanged} />
-                <FormMatrixPanel formGuid={formGuid} refreshKey={matrixRefreshKey} />
-              </div>
+              <FormSummaryPanel
+                formGuid={formGuid}
+                refreshKey={matrixRefreshKey}
+                containerType={detail.containerType}
+                containerCapacityCbm={detail.containerCapacityCbm}
+                onEdited={handleSummaryEdited}
+              />
             ),
           },
           {

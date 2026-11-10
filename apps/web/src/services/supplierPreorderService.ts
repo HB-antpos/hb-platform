@@ -1,5 +1,6 @@
 import type { PagedResult } from '../types/api'
 import type {
+  SupplierPreorderAdminSaveLineResult,
   SupplierPreorderAuthLog,
   SupplierPreorderAuthLogQuery,
   SupplierPreorderColumnMapping,
@@ -137,6 +138,29 @@ export async function getSupplierPreorderMatrix(
   signal?: AbortSignal,
 ): Promise<SupplierPreorderMatrix> {
   return unwrapApiData(await request.get(`${ADMIN_BASE}/forms/${formGuid}/matrix`, { params: { ...query }, signal }))
+}
+
+/**
+ * 管理端「订货汇总」：总部直接改某店某商品的箱数（0 = 清空，整数 0–9999）。
+ * 不改分店订单的提交状态；后端会留下「总部改过」标记并写操作记录，返回保存后的全表合计。
+ */
+export async function saveSupplierPreorderAdminLine(
+  formGuid: string,
+  storeGuid: string,
+  itemGuid: string,
+  cartons: number,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderAdminSaveLineResult> {
+  return unwrapApiData(await request.put(`${ADMIN_BASE}/forms/${formGuid}/stores/${storeGuid}/lines/${itemGuid}`, { cartons }, { signal }))
+}
+
+/** 管理端「订货汇总」抽屉：某款商品去年全部分店合计 + 每家分店的完整进销历史（日销、进货批次、折扣期） */
+export async function getSupplierPreorderAdminItemHistory(
+  formGuid: string,
+  itemGuid: string,
+  signal?: AbortSignal,
+): Promise<SupplierPreorderItemHistoryDetail> {
+  return unwrapApiData(await request.get(`${ADMIN_BASE}/forms/${formGuid}/items/${itemGuid}/history`, { signal }))
 }
 
 async function downloadFile(path: string, fallbackName: string): Promise<void> {

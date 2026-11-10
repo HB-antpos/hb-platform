@@ -123,6 +123,14 @@ public sealed class SupplierPreorderAdminController : ControllerBase
     public Task<IActionResult> GetMatrix(string formGuid, [FromQuery] SupplierPreorderMatrixQueryDto query) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetMatrixAsync(formGuid, query));
 
+    [HttpPut("forms/{formGuid}/stores/{storeGuid}/lines/{itemGuid}")]
+    public Task<IActionResult> AdminSaveLine(string formGuid, string storeGuid, string itemGuid, [FromBody] SupplierPreorderSaveLineDto request) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.AdminSaveLineAsync(formGuid, storeGuid, itemGuid, request), "已保存");
+
+    [HttpGet("forms/{formGuid}/items/{itemGuid}/history")]
+    public Task<IActionResult> GetAdminItemHistory(string formGuid, string itemGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetAdminItemHistoryAsync(formGuid, itemGuid));
+
     [HttpGet("forms/{formGuid}/export")]
     public Task<IActionResult> Export(string formGuid, [FromQuery] string format = "generic") =>
         SupplierPreorderResponses.FileAsync(this, () => _service.ExportAsync(formGuid, format));

@@ -376,7 +376,11 @@ public sealed partial class SupplierPreorderService
                 line.Cartons = request.Cartons;
                 line.UpdatedAtUtc = now;
                 line.UpdatedBy = CurrentUserName;
-                await _db.Updateable(line).UpdateColumns(l => new { l.Cartons, l.UpdatedAtUtc, l.UpdatedBy }).ExecuteCommandAsync();
+                // 分店自己改了这一行：总部调整的标记不再成立，清除
+                line.HqOriginalCartons = null;
+                line.HqAdjustedAtUtc = null;
+                line.HqAdjustedBy = null;
+                await _db.Updateable(line).UpdateColumns(l => new { l.Cartons, l.UpdatedAtUtc, l.UpdatedBy, l.HqOriginalCartons, l.HqAdjustedAtUtc, l.HqAdjustedBy }).ExecuteCommandAsync();
             }
 
             // 提交后再改：回到草稿，需要重新提交（保留上次提交时间供参考）

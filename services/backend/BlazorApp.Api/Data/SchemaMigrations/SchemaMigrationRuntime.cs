@@ -288,6 +288,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStaffNotificationSmsSenderAsync(CancellationToken cancellationToken);
 
+    Task ApplySupplierPreorderHqAdjustAsync(CancellationToken cancellationToken);
+
+    Task VerifySupplierPreorderHqAdjustAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1836,6 +1840,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StaffNotificationSmsSenderSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplySupplierPreorderHqAdjustAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderHqAdjustSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 3 列签名通过后协调器才登记账本。
+        await VerifySupplierPreorderHqAdjustAsync(cancellationToken);
+    }
+
+    public async Task VerifySupplierPreorderHqAdjustAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            SupplierPreorderHqAdjustSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

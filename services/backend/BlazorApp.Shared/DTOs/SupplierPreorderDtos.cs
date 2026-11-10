@@ -365,6 +365,36 @@ public sealed class SupplierPreorderMatrixQueryDto
     public int PageSize { get; set; } = 50;
     public string? Keyword { get; set; }
     public bool OnlyOrdered { get; set; } = true;
+    /// <summary>
+    /// 订货汇总页的筛选：all 全部 / ordered 已下单 / missed 去年有销量今年任何开启分店都没订 / adjusted 总部改过。
+    /// 不传时沿用 OnlyOrdered（兼容旧调用）。
+    /// </summary>
+    public string? Filter { get; set; }
+    public string? Category { get; set; }
+}
+
+/// <summary>总部（有管理权限的人）改过某店某商品数量留下的标记；分店自己再改这一行后标记清除。</summary>
+public sealed class SupplierPreorderLineMarkDto
+{
+    /// <summary>总部第一次调整前（分店自己填的）的箱数。</summary>
+    public int OriginalCartons { get; set; }
+    public string? AdjustedBy { get; set; }
+    public DateTime AdjustedAtUtc { get; set; }
+}
+
+/// <summary>矩阵一行「去年全店」摘要：本品自己的销量，本品没有记录时借参考商品。</summary>
+public sealed class SupplierPreorderMatrixLastYearDto
+{
+    /// <summary>Own 本品 / Ref 借用参考商品。</summary>
+    public string Source { get; set; } = "Own";
+    public string ProductCode { get; set; } = string.Empty;
+    /// <summary>参考商品的货号（Source = Ref 时给前端标「参考 XXX」）。</summary>
+    public string? RefDisplayCode { get; set; }
+    public decimal PurchaseQty { get; set; }
+    public decimal SalesQty { get; set; }
+    public decimal? SellThrough { get; set; }
+    /// <summary>全部分店合计的稀疏日销：[距窗口起点天数, 当天净销量, 当天折扣销量]，画缩略走势用。</summary>
+    public List<decimal[]> Daily { get; set; } = new();
 }
 
 public sealed class SupplierPreorderMatrixRowDto
@@ -372,9 +402,14 @@ public sealed class SupplierPreorderMatrixRowDto
     public string ItemGuid { get; set; } = string.Empty;
     public int Seq { get; set; }
     public string SupplierItemCode { get; set; } = string.Empty;
+    public string? Barcode { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? Category { get; set; }
     public string? ImageUrl { get; set; }
     public decimal Price { get; set; }
+    /// <summary>最近一次修订前的进价；没改价为 null。</summary>
+    public decimal? PrevPrice { get; set; }
+    public bool IsNew { get; set; }
     public int CartonQty { get; set; }
     public decimal? CartonCbm { get; set; }
     /// <summary>键为 StoreGuid，值为箱数；没下单的分店不出现。</summary>
@@ -383,6 +418,40 @@ public sealed class SupplierPreorderMatrixRowDto
     public int TotalPieces { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal TotalCbm { get; set; }
+    /// <summary>去年全店摘要；本品与参考商品都没有记录（或快照没算出来）为 null。</summary>
+    public SupplierPreorderMatrixLastYearDto? LastYear { get; set; }
+    /// <summary>键为 StoreGuid，值为这家店去年销量（件，本品或参考商品）；该店去年没记录的不出现。</summary>
+    public Dictionary<string, decimal> StoreLastYearSales { get; set; } = new();
+    /// <summary>键为 StoreGuid；只有总部改过且分店没再改的格子出现。</summary>
+    public Dictionary<string, SupplierPreorderLineMarkDto> StoreMarks { get; set; } = new();
+}
+
+/// <summary>订货汇总页上方筛选芯片的计数（不受当前筛选和分页影响）。</summary>
+public sealed class SupplierPreorderMatrixCountsDto
+{
+    public int Total { get; set; }
+    public int Ordered { get; set; }
+    /// <summary>去年有销量、今年所有开启分店都没订的款数。</summary>
+    public int Missed { get; set; }
+    public int Adjusted { get; set; }
+}
+
+/// <summary>总部改某店某商品的箱数：不改分店订单的提交状态，留下标记与操作记录。</summary>
+public sealed class SupplierPreorderAdminSaveLineResultDto
+{
+    public string ItemGuid { get; set; } = string.Empty;
+    public string StoreGuid { get; set; } = string.Empty;
+    public int Cartons { get; set; }
+    /// <summary>保存后这一格的标记；改回分店原值或本来没变则为 null。</summary>
+    public SupplierPreorderLineMarkDto? Mark { get; set; }
+    /// <summary>保存后这一行（全部开启分店）的合计。</summary>
+    public int RowTotalCartons { get; set; }
+    public int RowTotalPieces { get; set; }
+    public decimal RowTotalAmount { get; set; }
+    public decimal RowTotalCbm { get; set; }
+    /// <summary>保存后全表合计（含每店合计），前端据此刷新表尾与装柜进度。</summary>
+    public SupplierPreorderMatrixTotalsDto Totals { get; set; } = new();
+    public int AdjustedCount { get; set; }
 }
 
 public sealed class SupplierPreorderMatrixTotalsDto
@@ -403,6 +472,13 @@ public sealed class SupplierPreorderMatrixDto
     public List<SupplierPreorderStoreRefDto> Stores { get; set; } = new();
     public PagedResult<SupplierPreorderMatrixRowDto> Rows { get; set; } = new();
     public SupplierPreorderMatrixTotalsDto Totals { get; set; } = new();
+    /// <summary>键为 StoreGuid，值为 None 未开始 / Draft 草稿 / Submitted 已提交。</summary>
+    public Dictionary<string, string> StoreStatuses { get; set; } = new();
+    public SupplierPreorderMatrixCountsDto Counts { get; set; } = new();
+    public List<string> Categories { get; set; } = new();
+    /// <summary>订单表还是草稿时为 false：只能看，不能改数量。</summary>
+    public bool Editable { get; set; }
+    public SupplierPreorderHistoryStatusDto History { get; set; } = new();
 }
 
 public sealed class SupplierPreorderSupplierOptionDto
@@ -700,6 +776,8 @@ public sealed class SupplierPreorderHistoryBatchDto
 /// <summary>某家分店去年的数据。展开行的本店用全量（含 Daily、Batches）；各分店对比只填汇总数字。</summary>
 public sealed class SupplierPreorderStoreHistoryDto
 {
+    /// <summary>订单表开启的分店才有（管理端抽屉里改该店订货箱数用）；全店合计行与没开启的分店为 null。</summary>
+    public string? StoreGuid { get; set; }
     public string StoreCode { get; set; } = string.Empty;
     public string StoreName { get; set; } = string.Empty;
     public bool IsCurrent { get; set; }

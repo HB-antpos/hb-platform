@@ -1,0 +1,229 @@
+/* ===== 订货汇总页签（sp-admin-sum-*）：普通 CSS + 页面前缀；颜色 / 间距沿用设计稿与 styles.css ===== */
+.sp-admin-sum { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.sp-admin-sum-initial { padding: 48px 16px; }
+.sp-admin-sum-card-main { overflow: hidden; }
+
+/* ---------- 指标条 ---------- */
+.sp-admin-sum-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.5fr) minmax(0, 2.3fr); }
+.sp-admin-sum-metric { min-width: 0; padding: 10px 16px; border-right: 1px solid #eef0f4; }
+.sp-admin-sum-metric:last-child { border-right: 0; }
+.sp-admin-sum-metric-label { color: #667085; font-size: 12px; }
+.sp-admin-sum-metric-value { margin-top: 1px; color: #1f2430; font-size: 21px; font-weight: 600; line-height: 1.3; }
+.sp-admin-sum-metric-value small { margin-left: 3px; color: #667085; font-size: 12px; font-weight: 400; }
+.sp-admin-sum-dots { display: flex; gap: 3px; margin-top: 8px; }
+.sp-admin-sum-dots i { flex: 1; min-width: 4px; height: 8px; border-radius: 2px; background: #e4e7ec; }
+.sp-admin-sum-dots i.is-Submitted { background: #52c41a; }
+.sp-admin-sum-dots i.is-Draft { background: #faad14; }
+.sp-admin-sum-legend { display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 5px; color: #4b5563; font-size: 12px; }
+.sp-admin-sum-legend > span { display: inline-flex; align-items: center; gap: 4px; }
+.sp-admin-sum-sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: #e4e7ec; }
+.sp-admin-sum-sw.is-Submitted { background: #52c41a; }
+.sp-admin-sum-sw.is-Draft { background: #faad14; }
+.sp-admin-sum-volume-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.sp-admin-sum-bars { display: flex; gap: 6px; margin-top: 8px; }
+.sp-admin-sum-bar { position: relative; flex: 1; height: 8px; overflow: hidden; border-radius: 4px; background: #eef0f4; }
+.sp-admin-sum-bar b { display: block; height: 100%; background: #1677ff; transition: width 0.2s; }
+.sp-admin-sum-bar.is-part b { background: #69b1ff; }
+
+/* ---------- 工具条 ---------- */
+.sp-admin-sum-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 14px; border-bottom: 1px solid #eef0f4; }
+.sp-admin-sum-search.ant-input-search { width: 220px; max-width: 100%; }
+.sp-admin-sum-category.ant-select { min-width: 130px; }
+.sp-admin-sum-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-admin-sum-chip { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border: 1px solid #e4e7ec; border-radius: 14px; background: #fff; color: #344054; font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; transition: border-color 0.15s, background-color 0.15s; }
+.sp-admin-sum-chip b { font-weight: 600; }
+.sp-admin-sum-chip:hover { border-color: #91caff; }
+.sp-admin-sum-chip:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; }
+.sp-admin-sum-chip.is-on { border-color: #1677ff; background: #e6f4ff; color: #0958d9; }
+.sp-admin-sum-chip.is-warn b { color: #b45309; }
+.sp-admin-sum-save-state { display: inline-flex; align-items: center; gap: 4px; min-width: 120px; color: #4b5563; }
+.sp-admin-sum-ok { color: #389e0d; }
+
+/* ---------- 矩阵 ---------- */
+/* 滚动容器同时负责横向滚动和纵向限高：表头 / 表尾 / 固定列都用 sticky，页面本身不出现横向滚动条 */
+.sp-admin-sum-scroll { overflow: auto; max-height: min(72vh, 880px); }
+.sp-admin-sum-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.sp-admin-sum-th { position: sticky; top: 0; z-index: 3; height: 50px; padding: 4px 8px; border-bottom: 1px solid #e7eaf0; background: #f8f9fb; color: #4b5563; font-size: 12px; font-weight: 500; text-align: right; vertical-align: middle; }
+.sp-admin-sum-th.l { text-align: left; }
+.sp-admin-sum-th.is-store { padding: 4px 6px; border-left: 1px solid #f0f2f5; }
+.sp-admin-sum-th-sub { display: block; color: #98a2b3; font-size: 11px; font-weight: 400; }
+.sp-admin-sum-store-name { display: block; overflow: hidden; color: #1f2430; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-sum-store-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; color: #667085; font-size: 11px; font-weight: 400; white-space: nowrap; }
+.sp-admin-sum-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #d0d5dd; }
+.sp-admin-sum-dot.is-Submitted { background: #52c41a; }
+.sp-admin-sum-dot.is-Draft { background: #faad14; }
+.sp-admin-sum-td { position: relative; height: 54px; padding: 0 8px; border-bottom: 1px solid #f0f2f5; background: #fff; text-align: right; vertical-align: middle; }
+.sp-admin-sum-td.l { text-align: left; }
+.sp-admin-sum-empty { padding: 40px 0; color: #98a2b3; text-align: center; }
+.sp-admin-sum-row { cursor: pointer; }
+.sp-admin-sum-row:hover > td { background: #f7faff; }
+.sp-admin-sum-row.is-selected > td { background: #eaf3ff; }
+.sp-admin-sum-row.is-selected > td:first-child { box-shadow: inset 3px 0 0 #1677ff; }
+/* 固定列：左侧缩略图 + 商品；右侧三列合计。偏移量 = 前面固定列宽度之和（SummaryTable.tsx 里的列宽常量） */
+.is-sticky-l1 { position: sticky; left: 0; z-index: 2; }
+.is-sticky-l2 { position: sticky; left: 50px; z-index: 2; }
+.is-sticky-r1 { position: sticky; right: 0; z-index: 2; }
+.is-sticky-r2 { position: sticky; right: 62px; z-index: 2; }
+.is-sticky-r3 { position: sticky; right: 158px; z-index: 2; }
+.sp-admin-sum-th.is-sticky-l1,
+.sp-admin-sum-th.is-sticky-l2,
+.sp-admin-sum-th.is-sticky-r1,
+.sp-admin-sum-th.is-sticky-r2,
+.sp-admin-sum-th.is-sticky-r3 { z-index: 4; }
+.is-edge-l { box-shadow: inset -1px 0 0 #e1e5ec, 6px 0 8px -6px rgba(16, 24, 40, 0.12); }
+.is-edge-r { box-shadow: inset 1px 0 0 #e1e5ec, -6px 0 8px -6px rgba(16, 24, 40, 0.12); }
+.sp-admin-sum-td.is-total { background: #fafbfc; }
+.sp-admin-sum-th.is-edge-r { background: #f4f6f9; }
+.sp-admin-sum-filler { padding: 0; }
+.sp-admin-sum-row.is-selected > td.is-total { background: #eaf3ff; }
+.sp-admin-sum-thumb { display: block; width: 36px; height: 36px; border: 1px solid #eef0f4; border-radius: 5px; background: #fafbfc; object-fit: cover; }
+.sp-admin-sum-thumb.is-empty { display: inline-block; }
+.sp-admin-sum-name { display: block; width: 100%; padding: 0; overflow: hidden; border: 0; background: none; color: #1f2430; font: inherit; font-weight: 500; text-align: left; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
+.sp-admin-sum-name:hover { color: #1554c0; }
+.sp-admin-sum-name:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; border-radius: 3px; }
+.sp-admin-sum-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; color: #667085; font-size: 12px; white-space: nowrap; }
+.sp-admin-sum-price.is-changed { color: #cf1322; font-weight: 600; }
+.sp-admin-sum-strike { text-decoration: line-through; }
+.sp-admin-sum-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border: 1px solid transparent; border-radius: 4px; font-size: 11px; line-height: 16px; }
+.sp-admin-sum-tag.is-new { border-color: #d6ccff; background: #f3efff; color: #6d28d9; }
+.sp-admin-sum-tag.is-price { border-color: #ffd591; background: #fff7e6; color: #ad4e00; }
+
+/* 去年全店 */
+.sp-admin-sum-ly-td.is-ref { background: #f6f3ff; }
+.sp-admin-sum-row:hover > td.sp-admin-sum-ly-td.is-ref { background: #efe9ff; }
+.sp-admin-sum-row.is-selected > td.sp-admin-sum-ly-td.is-ref { background: #e3e6ff; }
+.sp-admin-sum-ly { display: flex; align-items: center; gap: 8px; }
+.sp-admin-sum-spark { flex: none; overflow: visible; border-bottom: 1px solid #eef0f4; }
+.sp-admin-sum-ly-text { display: flex; flex-direction: column; line-height: 1.35; font-size: 12px; text-align: left; }
+.sp-admin-sum-ly-text b { color: #1f2430; font-weight: 600; }
+.sp-admin-sum-rate { color: #1f2430; font-weight: 600; }
+.sp-admin-sum-rate.is-good { color: #15803d; }
+.sp-admin-sum-rate.is-low { color: #c2410c; }
+.sp-admin-sum-ref-tag { position: absolute; top: 4px; right: 6px; display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border: 1px solid #d6ccff; border-radius: 4px; background: #f3efff; color: #6d28d9; font-size: 11px; line-height: 16px; white-space: nowrap; }
+.sp-admin-sum-ly-empty { display: flex; align-items: center; justify-content: center; height: 34px; border: 1px dashed #d0d5dd; border-radius: 6px; color: #98a2b3; font-size: 12px; }
+
+/* 分店格：大字今年箱数 + 小字去年折合箱数 */
+.sp-admin-sum-store-td { padding: 0; border-left: 1px solid #f4f5f7; }
+.sp-admin-sum-cell { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; height: 53px; padding: 0 8px; line-height: 1.3; outline: none; }
+.sp-admin-sum-cell.is-editable { cursor: text; }
+.sp-admin-sum-cell:hover { background: #f5f9ff; box-shadow: inset 0 0 0 1px #bcd9ff; }
+.sp-admin-sum-cell:focus-visible { background: #f5f9ff; box-shadow: inset 0 0 0 2px #1677ff; }
+.sp-admin-sum-cell.is-editing,
+.sp-admin-sum-cell.is-editing:hover { padding: 0 5px; background: transparent; box-shadow: none; cursor: default; }
+.sp-admin-sum-q { color: #1554c0; font-size: 14px; font-weight: 600; }
+.sp-admin-sum-q.is-zero { color: #c8cdd6; font-weight: 400; }
+.sp-admin-sum-h { color: #98a2b3; font-size: 11px; }
+.sp-admin-sum-h.is-miss { color: #b45309; font-weight: 600; }
+.sp-admin-sum-input { width: 100%; height: 26px; padding: 0 6px; border: 1.5px solid #1677ff; border-radius: 5px; background: #fff; box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14); color: #1f2430; font: inherit; font-size: 14px; font-weight: 600; text-align: right; outline: none; }
+.sp-admin-sum-cell.is-editing .sp-admin-sum-h { margin-top: 2px; }
+/* 总部改过：右上橙色三角；保存中：左上小转圈 */
+.sp-admin-sum-store-td.has-mark::before { content: ''; position: absolute; top: 0; right: 0; z-index: 1; border-style: solid; border-width: 0 9px 9px 0; border-color: transparent #fa8c16 transparent transparent; pointer-events: none; }
+.sp-admin-sum-store-td.is-saving::after { content: ''; position: absolute; top: 9px; left: 7px; width: 9px; height: 9px; border: 1.5px solid #bcd9ff; border-top-color: #1677ff; border-radius: 50%; animation: sp-admin-sum-spin 0.8s linear infinite; pointer-events: none; }
+.sp-admin-sum-mark-tip { display: flex; flex-direction: column; gap: 2px; font-size: 12px; line-height: 1.55; }
+.sp-admin-sum-mark-by { color: #c8cdd6; }
+.sp-admin-sum-foot > td { position: sticky; bottom: 0; z-index: 2; height: 40px; border-top: 1px solid #e7eaf0; border-bottom: 0; background: #f8f9fb; }
+.sp-admin-sum-foot > td.is-total { background: #f1f4f8; z-index: 3; }
+.sp-admin-sum-foot > td.is-store-total { border-left: 1px solid #eef0f4; }
+.sp-admin-sum-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 14px; border-top: 1px solid #eef0f4; color: #667085; font-size: 12px; }
+.sp-admin-sum-hints { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.sp-admin-sum-keys { color: #667085; }
+.sp-admin-sum-keys kbd,
+.sp-admin-sum-dfoot kbd { display: inline-block; padding: 0 5px; border: 1px solid #d9dde5; border-bottom-width: 2px; border-radius: 4px; background: #fff; color: #4b5563; font: inherit; font-size: 11px; line-height: 16px; }
+@keyframes sp-admin-sum-spin { to { transform: rotate(360deg); } }
+
+/* ---------- 抽屉 ---------- */
+.sp-admin-sum-dhead { display: flex; align-items: flex-start; gap: 12px; padding: 14px 18px 12px; border-bottom: 1px solid #eef0f4; background: #fff; }
+.sp-admin-sum-dthumb { flex: none; width: 56px; height: 56px; border: 1px solid #eef0f4; border-radius: 8px; background: #fafbfc; object-fit: cover; }
+.sp-admin-sum-dthumb.is-empty { display: inline-block; }
+.sp-admin-sum-dtitle-block { flex: 1; min-width: 0; }
+.sp-admin-sum-dtitle { margin: 0; overflow: hidden; color: #1f2430; font-size: 16px; font-weight: 600; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-sum-dmeta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 3px; color: #667085; font-size: 12px; }
+.sp-admin-sum-dnav { display: flex; flex: none; align-items: center; gap: 6px; color: #667085; font-size: 12px; white-space: nowrap; }
+.sp-admin-sum-dscroll { flex: 1; min-height: 0; overflow-y: auto; }
+.sp-admin-sum-dbody { display: flex; flex-direction: column; gap: 12px; padding: 12px 18px 16px; }
+.sp-admin-sum-band { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); overflow: hidden; border: 1px solid #e7eaf0; border-radius: 10px; background: #fff; }
+.sp-admin-sum-band > div { min-width: 0; padding: 9px 14px; border-right: 1px solid #eef0f4; }
+.sp-admin-sum-band > div:last-child { border-right: 0; background: #f5f9ff; }
+.sp-admin-sum-band-label { color: #667085; font-size: 12px; }
+.sp-admin-sum-band-value { color: #1f2430; font-size: 18px; font-weight: 600; line-height: 1.3; }
+.sp-admin-sum-band-value small { margin-left: 3px; color: #667085; font-size: 12px; font-weight: 400; }
+.sp-admin-sum-band-value.is-blue { color: #1554c0; }
+.sp-admin-sum-band > .is-this-year .sp-admin-sum-band-sub { white-space: normal; }
+.sp-admin-sum-band-sub { overflow: hidden; color: #667085; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.sp-admin-sum-card { min-width: 0; padding: 0 14px 8px; border: 1px solid #e7eaf0; border-radius: 10px; background: #fff; }
+.sp-admin-sum-card.is-ref { border-color: #d6ccff; }
+.sp-admin-sum-card.is-flush { padding: 0; overflow: hidden; }
+.sp-admin-sum-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 0 6px; }
+.sp-admin-sum-card-head.is-pad { padding: 10px 14px 8px; }
+.sp-admin-sum-card-head h3 { margin: 0; color: #1f2430; font-size: 14px; font-weight: 600; }
+.sp-admin-sum-chart-select.ant-select { min-width: 110px; }
+.sp-admin-sum-chart { min-height: 120px; }
+.sp-admin-sum-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 160px; color: #667085; font-size: 13px; text-align: center; }
+.sp-admin-sum-state.is-empty { margin-bottom: 8px; border: 1px dashed #d0d5dd; border-radius: 6px; color: #98a2b3; }
+.sp-admin-sum-stores { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12px; }
+.sp-admin-sum-stores th { padding: 6px 8px; border-top: 1px solid #eef0f4; border-bottom: 1px solid #eef0f4; background: #f8f9fb; color: #667085; font-weight: 500; text-align: right; white-space: nowrap; }
+.sp-admin-sum-stores td { height: 33px; padding: 0 8px; border-bottom: 1px solid #f2f4f7; color: #344054; text-align: right; white-space: nowrap; }
+.sp-admin-sum-stores th:first-child,
+.sp-admin-sum-stores td:first-child { padding-left: 14px; text-align: left; }
+.sp-admin-sum-stores th:last-child,
+.sp-admin-sum-stores td:last-child { padding-right: 14px; }
+.sp-admin-sum-name-cell { display: flex; align-items: center; gap: 6px; min-width: 0; color: #1f2430; font-weight: 500; }
+.sp-admin-sum-stores tr.is-open > td { background: #f5f9ff; border-bottom-color: #e1ecfb; }
+.sp-admin-sum-stores tr.is-expand > td { height: auto; padding: 0; background: #fbfcfe; text-align: left; }
+.sp-admin-sum-stores tr.is-total > td { height: 36px; border-bottom: 0; background: #f8f9fb; color: #1f2430; font-weight: 600; }
+.sp-admin-sum-stores .is-blue { color: #1554c0; }
+.sp-admin-sum-expand-btn { display: inline-flex; align-items: center; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 500; cursor: pointer; }
+.sp-admin-sum-expand-btn:disabled { cursor: default; }
+.sp-admin-sum-expand-btn:focus-visible { outline: 2px solid #1677ff; outline-offset: 2px; border-radius: 3px; }
+.sp-admin-sum-caret { display: inline-block; flex: none; width: 6px; height: 6px; margin: 0 8px 1px 0; border-right: 1.5px solid #98a2b3; border-bottom: 1.5px solid #98a2b3; transform: rotate(-45deg); transition: transform 0.15s; }
+.sp-admin-sum-caret.is-down { margin-bottom: 3px; border-color: #1677ff; transform: rotate(45deg); }
+.sp-admin-sum-pill { display: inline-flex; align-items: center; height: 18px; padding: 0 5px; border: 1px solid transparent; border-radius: 4px; font-size: 11px; line-height: 16px; white-space: nowrap; }
+.sp-admin-sum-pill.is-red { border-color: #ffccc7; background: #fff1f0; color: #cf1322; }
+.sp-admin-sum-pill.is-green { border-color: #b7eb8f; background: #f6ffed; color: #389e0d; }
+.sp-admin-sum-pill.is-gray { border-color: #e4e7ec; background: #f2f4f7; color: #475467; }
+.sp-admin-sum-ratio { display: inline-block; min-width: 44px; }
+.sp-admin-sum-ratio.is-high { color: #b45309; font-weight: 600; }
+.sp-admin-sum-ratio.is-miss { color: #c2410c; font-weight: 600; }
+.sp-admin-sum-qty-wrap { position: relative; display: inline-flex; align-items: center; }
+.sp-admin-sum-qty { width: 54px; height: 24px; padding: 0 7px; border: 1px solid #d9dde5; border-radius: 5px; background: #fff; color: #1554c0; font: inherit; font-size: 13px; font-weight: 600; text-align: right; outline: none; }
+.sp-admin-sum-qty.is-empty { color: #c8cdd6; font-weight: 400; }
+.sp-admin-sum-qty:hover:not(:disabled) { border-color: #91caff; }
+.sp-admin-sum-qty:focus { border: 1.5px solid #1677ff; box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.14); color: #1f2430; }
+.sp-admin-sum-qty:disabled { background: #f8f9fb; cursor: not-allowed; }
+.sp-admin-sum-qty-spin { position: absolute; top: 50%; left: -14px; width: 9px; height: 9px; margin-top: -5px; border: 1.5px solid #bcd9ff; border-top-color: #1677ff; border-radius: 50%; animation: sp-admin-sum-spin 0.8s linear infinite; }
+.sp-admin-sum-expand { display: grid; grid-template-columns: minmax(0, 1fr) 214px; gap: 14px; padding: 10px 14px 12px 34px; }
+.sp-admin-sum-expand h4 { margin: 0 0 4px; color: #1f2430; font-size: 12px; font-weight: 600; }
+.sp-admin-sum-batch { display: grid; grid-template-columns: 74px 84px 64px minmax(0, 1fr); gap: 8px; padding: 3px 0; color: #344054; font-size: 12px; text-align: left; }
+.sp-admin-sum-batch .is-qty { font-weight: 600; color: #1f2430; text-align: right; }
+.sp-admin-sum-src { display: inline-flex; align-items: center; gap: 4px; }
+.sp-admin-sum-src i { width: 8px; height: 8px; border-radius: 2px; }
+.sp-admin-sum-kv { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 8px; padding: 3px 0; font-size: 12px; text-align: left; white-space: normal; }
+.sp-admin-sum-fill-list { margin: 4px 0 0; padding-left: 16px; max-height: 180px; overflow-y: auto; }
+.sp-admin-sum-dfoot { display: flex; align-items: center; gap: 4px; padding: 10px 18px; color: #667085; font-size: 12px; }
+.sp-admin-sum-drawer .ant-drawer-footer { padding: 0; }
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1100px) {
+  /* 数字指标一排，分店进度与体积各占一整行 */
+  .sp-admin-sum-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .sp-admin-sum-metric { border-bottom: 1px solid #eef0f4; }
+  .sp-admin-sum-metric.is-progress { grid-column: 1 / -1; border-right: 0; }
+  .sp-admin-sum-metric.is-volume { grid-column: 1 / -1; border-bottom: 0; }
+  .sp-admin-sum-expand { grid-template-columns: minmax(0, 1fr); padding-left: 14px; }
+}
+@media (max-width: 640px) {
+  .sp-admin-sum-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-admin-sum-search.ant-input-search { width: 100%; }
+  .sp-admin-sum-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-admin-sum-dhead { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sp-admin-sum-bar b,
+  .sp-admin-sum-chip,
+  .sp-admin-sum-caret { transition: none; }
+  .sp-admin-sum-store-td.is-saving::after,
+  .sp-admin-sum-qty-spin { animation: none; }
+}
+
+/* 页签上的「新」小标签 */
+.sp-admin-tab-new.ant-tag { margin-inline-start: 6px; padding-inline: 5px; font-size: 11px; line-height: 18px; }
