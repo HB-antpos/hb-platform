@@ -186,6 +186,12 @@ class RecordingUpdateTransitionLeaseCoordinator extends UpdateTransitionLeaseCoo
   }
 }
 
+/**
+ * 收银员登录后，组合根会在后台经同一个传输拉一次促销规则（对齐 WPF 的促销刷新）。
+ * 下面这些用例要断言的是别的请求 / 别的流程，这条后台请求与它们无关，统一在假传输里分流。
+ */
+const BACKGROUND_PROMOTIONS_URL = "/api/v1/catalog/promotions";
+
 test("生产组合只暴露 route 所需业务面，并以 DurableCashCheckoutService 提交现金订单", async () => {
   let nextId = 0;
   const durableCommits: DurableCashOrderCommit[] = [];
@@ -1029,6 +1035,13 @@ test("生产销售本地目录未命中且在线时使用可信门店做远程�
   });
   const transport: HbposTransport = {
     async request<T>(request: HbposTransportRequest) {
+      if (request.url === BACKGROUND_PROMOTIONS_URL) {
+        // 登录后的后台促销刷新：立即应答空规则，不算远程精确回退，也不参与下面的竞态断言。
+        return {
+          status: 200,
+          data: { success: true, data: remotePromotionsBody(false) } as T,
+        };
+      }
       requests.push(request);
       markRemoteLookupStarted();
       await remoteLookupReleased;
@@ -2292,8 +2305,9 @@ test("取消等待期间 cashier 会话失效时不调用服务端，也不复�
       invalidate = listener;
     },
     transport: {
-      async request() {
-        cancelRequests += 1;
+      async request(request: HbposTransportRequest) {
+        // 登录后的后台促销刷新发生在会话失效之前，不是「取消」请求，不计数（让它安静失败即可）。
+        if (request.url !== BACKGROUND_PROMOTIONS_URL) cancelRequests += 1;
         throw new Error("cancel must not be called after cashier invalidation");
       },
     },
@@ -3496,6 +3510,10 @@ function receiptProfileTransport(script: Readonly<{
   const requests: HbposTransportRequest[] = [];
   const transport: HbposTransport = {
     async request<T>(request: HbposTransportRequest) {
+      // 登录后的后台促销刷新与小票资料同步无关：不记录，让它安静失败（刷新器会吞掉）。
+      if (request.url === BACKGROUND_PROMOTIONS_URL) {
+        throw new Error("promotions are not part of this scenario");
+      }
       requests.push(request);
       if (request.url === "/api/v1/stores/current/receipt-profile/sync") {
         const known = Number((request.params as { knownVersion: number }).knownVersion);
@@ -4423,6 +4441,10 @@ test("可信收银员登录后缓存当前门店广告，并只向客显发布�
   const requestedUrls: string[] = [];
   const transport: HbposTransport = {
     async request<T>(request: HbposTransportRequest) {
+      // 登录后的后台促销刷新不是广告请求：不记录，让它安静失败（刷新器会吞掉）。
+      if (request.url === BACKGROUND_PROMOTIONS_URL) {
+        throw new Error("promotions are not part of this scenario");
+      }
       requestedUrls.push(request.url);
       return {
         status: 200,
@@ -6344,9 +6366,13 @@ async function catalogDownloadTransport(
     nodeCatalogPageDigest,
     2,
   );
+  // 登录后的后台促销刷新也会请求 /catalog/promotions；它发生在任何目录下载之前。
+  // 钩子只对「目录下载已开始」之后的促销请求生效，避免后台刷新抢先触发钩子。
+  let downloadStarted = false;
   return {
     async request<T>(request: HbposTransportRequest) {
       if (request.url === "/api/v1/catalog/sync-plan") {
+        downloadStarted = true;
         if (options.syncPlanStatus) {
           throw new HbposApiError("legacy catalog backend", {
             kind: "http",
@@ -6370,6 +6396,7 @@ async function catalogDownloadTransport(
         };
       }
       if (request.url === "/api/v1/catalog/sellable-items/page") {
+        downloadStarted = true;
         return {
           status: 200,
           data: {
@@ -6390,7 +6417,7 @@ async function catalogDownloadTransport(
         };
       }
       if (request.url === "/api/v1/catalog/promotions") {
-        await options.beforePromotions?.();
+        if (downloadStarted) await options.beforePromotions?.();
         return {
           status: 200,
           data: {
@@ -6636,6 +6663,11 @@ function databaseFor(
     }>[];
     pendingOrderSyncCount?: number;
     activeCatalogPromotions?: ActiveCatalogPromotions | null;
+    /**
+     * 可变的 active 促销存储：提供时 replacePromotions 会写入它、loadActivePromotions 读回它，
+     * 用来验证促销后台刷新「拉取 → 落库 → 装入购物车」整条链路（优先于 activeCatalogPromotions）。
+     */
+    promotionsStore?: { value: ActiveCatalogPromotions | null };
     activeCatalogMetadata?: ActiveCatalogMetadata | null;
     onCatalogActivate?(): void;
     onCatalogDiscard?(): void;
@@ -6786,7 +6818,24 @@ function databaseFor(
           itemCount: stagingCatalog.itemCount + items.length,
         };
       },
-      async replacePromotions() {},
+      async replacePromotions(
+        snapshotId: string,
+        promotions: readonly Readonly<{
+          promotionId: string;
+          definitionJson: string;
+        }>[],
+      ) {
+        const holder = options.promotionsStore;
+        if (holder?.value && holder.value.snapshotId === snapshotId) {
+          holder.value = {
+            ...holder.value,
+            promotions: promotions.map(({ promotionId, definitionJson }) => ({
+              promotionId,
+              definitionJson,
+            })),
+          };
+        }
+      },
       async activate(
         snapshotId: string,
         expectedItemCount: number,
@@ -6814,6 +6863,7 @@ function databaseFor(
       },
       async loadActivePromotions(storeCode: string) {
         options.onActivePromotionsLoad?.(storeCode);
+        if (options.promotionsStore) return options.promotionsStore.value;
         return options.activeCatalogPromotions ?? null;
       },
       async findExact(lookupCode: string) {
@@ -7632,3 +7682,124 @@ function encryptor(): SensitivePayloadEncryptor {
     },
   } as SensitivePayloadEncryptor;
 }
+
+/** 远端 /catalog/promotions 的应答：一条「2 件 1.50」规则（商品 P-1，原价 1.00）。 */
+function remotePromotionsBody(withRule: boolean) {
+  return {
+    storeCode: "S001",
+    generatedAt: "2026-07-28T00:00:00.000Z",
+    promotions: withRule
+      ? [
+          {
+            promotionId: "PROMO-2-FOR-1.50",
+            name: "2 for 1.50",
+            isExclusive: false,
+            priority: 10,
+            applyQuantity: 2,
+            fixedPrice: 1.5,
+            maxApplicationsPerOrder: null,
+            effectiveStart: "2026-07-27T00:00:00.000Z",
+            effectiveEnd: "2026-07-29T00:00:00.000Z",
+            updatedAt: null,
+            products: [{ productCode: "P-1", unitWeight: 1 }],
+          },
+        ]
+      : [],
+  };
+}
+
+test("促销后台刷新：总部新增促销后一轮刷新就落库并重算共享购物车；停用后折扣随之消失；不碰商品目录", async () => {
+  const promotionsStore = {
+    value: {
+      snapshotId: "catalog-active-1",
+      storeCode: "S001",
+      promotions: [],
+    } as ActiveCatalogPromotions | null,
+  };
+  let withRule = false;
+  const requests: HbposTransportRequest[] = [];
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      requests.push(request);
+      if (request.url === "/api/v1/catalog/promotions") {
+        return {
+          status: 200,
+          data: { success: true, data: remotePromotionsBody(withRule) } as T,
+        };
+      }
+      // 只允许拉促销：任何商品目录接口都不该被碰。
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+  const services = createTestComposition(
+    databaseFor([], { promotionsStore }),
+    { transport },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+
+  // 登录会在后台触发一轮刷新（单飞）：等它结束，之后每次调用都是一轮新的刷新。
+  const settle = async () => {
+    for (;;) {
+      const result = await services.promotionSync.requestSync("timer");
+      if (result.status === "skipped" && result.reason === "in-flight") {
+        await new Promise((resolve) => setImmediate(resolve));
+        continue;
+      }
+      return result;
+    }
+  };
+  await settle();
+
+  const presenter = services.sales.createPresenter();
+  presenter.setQuery("930000000001");
+  assert.equal(await presenter.addLookupCode(), true);
+  presenter.setQuery("930000000001");
+  assert.equal(await presenter.addLookupCode(), true);
+  // 本机还没有这条促销：两件原价 2.00，没有折扣。
+  assert.equal(presenter.getState().cart.discount.cents, 0);
+
+  // 总部新增促销 → 一轮刷新：落库并立刻重算正在编辑的购物车（2 件 1.50，优惠 0.50）。
+  withRule = true;
+  assert.deepEqual(await settle(), { status: "applied", ruleCount: 1 });
+  assert.equal(promotionsStore.value?.promotions.length, 1);
+  assert.equal(presenter.getState().cart.discount.cents, 50);
+  assert.equal(presenter.getState().cart.actualAmount.cents, 150);
+
+  // 规则没变：下一轮什么都不做。
+  assert.deepEqual(await settle(), { status: "unchanged" });
+
+  // 总部停用 → 折扣随之消失。
+  withRule = false;
+  assert.deepEqual(await settle(), { status: "applied", ruleCount: 0 });
+  assert.equal(presenter.getState().cart.discount.cents, 0);
+
+  assert.ok(requests.length > 0);
+  assert.ok(requests.every((request) => request.url === "/api/v1/catalog/promotions"));
+  presenter.destroy();
+});
+
+test("促销后台刷新：未登录不发请求", async () => {
+  const requests: HbposTransportRequest[] = [];
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest): Promise<never> {
+      requests.push(request);
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+  const services = createTestComposition(
+    databaseFor([], {
+      promotionsStore: {
+        value: { snapshotId: "catalog-active-1", storeCode: "S001", promotions: [] },
+      },
+    }),
+    { transport },
+  );
+  await services.initialize();
+
+  assert.deepEqual(await services.promotionSync.requestSync("timer"), {
+    status: "skipped",
+    reason: "no-session",
+  });
+  assert.equal(requests.length, 0);
+});

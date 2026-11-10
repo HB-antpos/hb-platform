@@ -295,3 +295,53 @@ test("回到前台立即触发一次下发资料同步", async () => {
     AppState.currentState = previous;
   }
 });
+
+test("促销规则搭同一个前台定时器：联网与定时都触发，后台不轮询；设备未认证时不暴露", async () => {
+  // 固定为白天：夜间周期是 5 分钟，不固定时间时 CI 在 22:00–06:00 跑会失败。
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
+  const promotionRequest = jest.fn(async (_trigger: string) => undefined);
+  const { services } = receiptProfileServices({
+    promotionSync: { requestSync: promotionRequest },
+  });
+  mockRuntime = { services };
+  const previous = AppState.currentState;
+  try {
+    AppState.currentState = "active";
+    const screen = await render(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    // 联网（含启动时的在线状态）触发一次；启动本身没有收银员，不单独触发。
+    expect(promotionRequest).toHaveBeenCalledWith("network");
+    expect(promotionRequest).not.toHaveBeenCalledWith("startup");
+    promotionRequest.mockClear();
+
+    await act(async () => { jest.advanceTimersByTime(59_000); });
+    expect(promotionRequest).not.toHaveBeenCalled();
+    await act(async () => { jest.advanceTimersByTime(1_000); });
+    expect(promotionRequest).toHaveBeenCalledTimes(1);
+    expect(promotionRequest).toHaveBeenLastCalledWith("timer");
+
+    // 后台不轮询
+    AppState.currentState = "background";
+    await act(async () => { jest.advanceTimersByTime(180_000); });
+    expect(promotionRequest).toHaveBeenCalledTimes(1);
+    await screen.unmount();
+
+    // 设备尚未认证：不暴露促销刷新入口
+    for (const device of ["registration-required", "pending-approval", "locked"]) {
+      const locked = jest.fn(async (_trigger: string) => undefined);
+      mockRuntime = {
+        services: receiptProfileServices({
+          device,
+          promotionSync: { requestSync: locked },
+        }).services,
+      };
+      AppState.currentState = "active";
+      const view = await render(<RuntimeWorkBridge />);
+      await act(async () => { jest.advanceTimersByTime(180_000); });
+      expect(locked).not.toHaveBeenCalled();
+      await view.unmount();
+    }
+  } finally {
+    AppState.currentState = previous;
+  }
+});

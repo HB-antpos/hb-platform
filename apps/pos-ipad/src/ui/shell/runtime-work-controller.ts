@@ -23,6 +23,17 @@ export type RuntimeBackgroundWorkPort = Readonly<{
         ): Promise<unknown>;
       }>
     | undefined;
+  /**
+   * 促销规则的后台刷新（只拉促销，不碰商品目录）。缺省时整条链路静默跳过；
+   * 实现保证永不 reject，且自身负责单飞、与目录刷新互斥和购物车忙时的延后装入。
+   */
+  promotionSync?:
+    | Readonly<{
+        requestSync(
+          trigger: "login" | "foreground" | "network" | "timer",
+        ): Promise<unknown>;
+      }>
+    | undefined;
 }>;
 
 /**
@@ -47,6 +58,7 @@ export class RuntimeWorkController {
 
   public onForeground(): Promise<void> {
     this.requestReceiptProfileSync("foreground");
+    this.requestPromotionSync("foreground");
     return this.runWithHardware(
       () => this.services.sync.onForeground(),
       () => this.services.appUpdates?.refreshOnForeground(),
@@ -55,7 +67,10 @@ export class RuntimeWorkController {
 
   public async onNetworkChanged(isOnline: boolean): Promise<void> {
     // 联网（含离线恢复）才去检查总部下发资料；断网不发请求，继续用本机资料。
-    if (isOnline) this.requestReceiptProfileSync("network");
+    if (isOnline) {
+      this.requestReceiptProfileSync("network");
+      this.requestPromotionSync("network");
+    }
     await this.services.sync.onNetworkChanged(isOnline);
     if (isOnline) {
       await this.services.appUpdates?.refreshOnNetworkAvailable();
@@ -65,6 +80,32 @@ export class RuntimeWorkController {
   /** 前台常驻时每 60 秒由壳层定时器调用一次，让总部下发在一分钟内生效。 */
   public onReceiptProfileTimer(): void {
     this.requestReceiptProfileSync("timer");
+  }
+
+  /**
+   * 与小票资料同一个前台定时器（白天 60 秒、夜间 5 分钟）：总部新建 / 修改 / 停用促销后
+   * 收银端一分钟内自动生效，不必再手动下载商品目录。
+   */
+  public onPromotionTimer(): void {
+    this.requestPromotionSync("timer");
+  }
+
+  /**
+   * 促销刷新与订单同步、外设队列、小票资料互不依赖：不等待它，也不让它的异常影响其他触发器。
+   * 单飞、与目录刷新互斥、购物车忙时延后装入都在 promotionSync 内部处理。
+   */
+  private requestPromotionSync(
+    trigger: "foreground" | "network" | "timer",
+  ): void {
+    const port = this.services.promotionSync;
+    if (!port) return;
+    try {
+      void Promise.resolve(port.requestSync(trigger)).catch(() => {
+        // 刷新失败只记日志（刷新器内部处理），这里不再重复上抛。
+      });
+    } catch {
+      // 入口同步抛错时同样不能影响前台与联网流程。
+    }
   }
 
   /**
