@@ -50,12 +50,11 @@ public sealed class StaffNotificationTemplateLogicTests
 
         Assert.True(SmsMessages.IsGsm7Safe(sms));
         Assert.Equal(1, SmsMessages.SegmentCount(sms));
-        // 短信正文不能带链接：ClickSend 把 hotbargain.vip 判为不安全网站，带域名的短信会被 HTTP 400 整条拒收（2026-11-09 生产实测）。
-        Assert.DoesNotContain("http", sms, System.StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("hotbargain.vip", sms, System.StringComparison.OrdinalIgnoreCase);
+        // 短信末尾带下载短链（ClickSend 已于 2026-11-09 放行 hotbargain.vip，带链接短信实发验证过）。
+        Assert.EndsWith("Get the app: https://hotbargain.vip/app", sms);
         // 短信不含密码：只提醒去邮箱查收。
         Assert.DoesNotContain("password:", sms, System.StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(125, sms.Length); // 改文案时要同步设计与前端提示
+        Assert.Equal(139, sms.Length); // 改文案时要同步设计与前端提示；超过 160 会变成两条
     }
 
     [Fact]

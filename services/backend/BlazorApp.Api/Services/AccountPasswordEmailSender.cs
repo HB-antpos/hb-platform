@@ -1,9 +1,11 @@
 using System.Net;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Api.Services.React;
+using BlazorApp.Api.Services.StaffNotifications;
 using BlazorApp.Shared.DTOs;
 using MailKit.Net.Smtp;
 using MailKit.Security;
+using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace BlazorApp.Api.Services;
@@ -61,6 +63,8 @@ public interface IAccountPasswordEmailSender
 /// <summary>
 /// 员工账号密码邮件：复用发票邮箱后台配置的公司 SMTP 账号（与监护人邮件同一套发件配置）。
 /// 正文只有英文，只放登录账号与验证码（新建员工时为一次性初始密码），不放其他个人资料。
+/// 「账号已创建」类邮件（新建员工的初始密码、设置密码邀请）末尾附 App 下载短链：新员工手机上还没有 App；
+/// 重置密码类邮件不附（员工已经装过）。
 /// 正文拼装在 internal 的 Build* 纯函数里，测试会断言它们不含中文字符。
 /// </summary>
 public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
@@ -68,12 +72,17 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
     private readonly IInvoiceEmailSettingsService _settings;
     private readonly ILogger<AccountPasswordEmailSender> _logger;
 
+    // 下载短链的基址只来自配置（与员工通知模板的 {{app_link}} 同一来源），不取请求 Host，防止伪造请求头把员工引到钓鱼站点。
+    private readonly string _appLink;
+
     public AccountPasswordEmailSender(
         IInvoiceEmailSettingsService settings,
+        IOptions<StaffNotificationOptions> staffNotificationOptions,
         ILogger<AccountPasswordEmailSender> logger
     )
     {
         _settings = settings;
+        _appLink = staffNotificationOptions.Value.ResolveAppLink();
         _logger = logger;
     }
 
@@ -87,7 +96,7 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         CancellationToken cancellationToken = default
     )
     {
-        var content = BuildPasswordCode(displayName, loginName, code, FormatValidity(expiresAtUtc), invite);
+        var content = BuildPasswordCode(displayName, loginName, code, FormatValidity(expiresAtUtc), invite, _appLink);
         return SendAsync(toEmail, content, invite ? "password-invite" : "password-reset", cancellationToken);
     }
 
@@ -101,7 +110,7 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
     )
     {
         // 日志只记类型，SendAsync 不会输出正文，初始密码不会进入日志。
-        var content = BuildInitialPassword(displayName, loginName, initialPassword, isReset);
+        var content = BuildInitialPassword(displayName, loginName, initialPassword, isReset, _appLink);
         return SendAsync(toEmail, content, isReset ? "reset-password" : "initial-password", cancellationToken);
     }
 
@@ -132,7 +141,8 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         string loginName,
         string code,
         string validFor,
-        bool invite
+        bool invite,
+        string? appLink = null
     )
     {
         var subject = invite
@@ -141,10 +151,13 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
         var intro = invite
             ? "An account has been created for you in the Hot Bargain staff app."
             : "We received a request to reset the password of your Hot Bargain staff app account.";
+        // 只有「账号已创建」的邀请邮件附下载入口；找回密码的员工已经装了 App。
+        var (downloadText, downloadHtml) = BuildDownloadLine(invite ? appLink : null);
         var text =
             $"Hi {displayName},\n\n{intro}\n\n" +
             $"Sign-in name: {loginName}\nVerification code: {code} (valid for {validFor})\n\n" +
             "Open the HB app, tap \"Set up / forgot password\" on the sign-in screen, enter this email address and the code, then choose your own password.\n" +
+            downloadText +
             "Do not share this code with anyone, including your manager. If you did not expect this email, you can ignore it.\n";
         var html =
             $"<p>Hi {Encode(displayName)},</p><p>{Encode(intro)}</p>" +
@@ -152,8 +165,23 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
             $"<p>Verification code (valid for {Encode(validFor)}):</p>" +
             $"<p style=\"font-size:24px;font-weight:700;letter-spacing:4px\">{Encode(code)}</p>" +
             "<p>Open the HB app, tap <b>Set up / forgot password</b> on the sign-in screen, enter this email address and the code, then choose your own password.</p>" +
+            downloadHtml +
             "<p>Do not share this code with anyone, including your manager. If you did not expect this email, you can ignore it.</p>";
         return new EmailContent(subject, text, html);
+    }
+
+    /// <summary>
+    /// 「下载 App」一行（纯文本 + HTML）。appLink 为空时两者都是空串，正文与加链接之前完全一致。
+    /// 链接指向公开短链页：iPhone 自动跳 App Store、安卓下载最新 APK、电脑显示二维码，所以一条链接够用。
+    /// </summary>
+    private static (string Text, string Html) BuildDownloadLine(string? appLink)
+    {
+        if (string.IsNullOrWhiteSpace(appLink)) return (string.Empty, string.Empty);
+        var link = appLink.Trim();
+        return (
+            $"Don't have the app yet? Get the latest HB app (iPhone and Android): {link}\n",
+            $"<p>Don't have the app yet? Get the latest HB app (iPhone and Android): <a href=\"{Encode(link)}\">{Encode(link)}</a></p>"
+        );
     }
 
     /// <summary>
@@ -161,14 +189,17 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
     /// isReset=true 是店长重置密码：必须明说旧密码已失效（员工的旧密码和旧设备登录在送达时就被作废了），
     /// 且「没想到会收到这封邮件」时应联系店长，而不是「忽略」——忽略的话员工会被锁在外面。
     /// 两种文案都保留 "choose your own password"，英文单语测试依赖它。
+    /// appLink 只在 isReset=false（账号刚创建，员工手机上还没有 App）时写进正文。
     /// </summary>
     internal static EmailContent BuildInitialPassword(
         string displayName,
         string loginName,
         string initialPassword,
-        bool isReset = false
+        bool isReset = false,
+        string? appLink = null
     )
     {
+        var (downloadText, downloadHtml) = BuildDownloadLine(isReset ? null : appLink);
         var subject = isReset ? "Your Hot Bargain app password has been reset" : "Your Hot Bargain app account";
         var intro = isReset
             ? "Your manager has reset the password of your Hot Bargain staff app account. Your old password no longer works."
@@ -181,6 +212,7 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
             $"Hi {displayName},\n\n{intro}\n\n" +
             $"Sign-in name: {loginName}\n{passwordLabel}: {initialPassword}\n\n" +
             "Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.\n" +
+            downloadText +
             $"{closing}\n";
         var html =
             $"<p>Hi {Encode(displayName)},</p><p>{Encode(intro)}</p>" +
@@ -188,6 +220,7 @@ public sealed class AccountPasswordEmailSender : IAccountPasswordEmailSender
             $"<p>{Encode(passwordLabel)}:</p>" +
             $"<p style=\"font-size:24px;font-weight:700;letter-spacing:2px;font-family:Consolas,monospace\">{Encode(initialPassword)}</p>" +
             "<p>Sign in to the HB app with these details. You will be asked to choose your own password the first time you sign in.</p>" +
+            downloadHtml +
             $"<p>{Encode(closing)}</p>";
         return new EmailContent(subject, text, html);
     }

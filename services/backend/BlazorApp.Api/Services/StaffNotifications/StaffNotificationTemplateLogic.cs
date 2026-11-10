@@ -54,10 +54,10 @@ internal static class StaffNotificationTemplateDefaults
     /// <summary>
     /// 「账号已开通」的默认文案：员工用邮箱 + 随机密码登录，密码只走邮件，附移动端下载入口。
     /// 邮件保留 "choose your own password" 字样，与 10-30 起账号邮件只有英文的口径一致。
-    /// 短信不含密码，只提醒去邮箱查收密码与下载链接；<b>短信正文里不能放链接</b>：
-    /// 2026-11-09 生产实测 ClickSend 把 hotbargain.vip 判为「not safe to send websites」，
-    /// 带该域名的短信一律返回 HTTP 400（11-06 那条也因此被 CancelledAfterReview 取消），
-    /// 所以下载入口只放在邮件里。自建模板的短信若仍写 {{app_link}}，同样会被拒，直到 ClickSend 加白该域名。
+    /// 短信不含密码，只提醒去邮箱查收密码，并在末尾附下载短链 {{app_link}}（手机点开自动跳商店 / 最新 APK）。
+    /// 历史：2026-11-09 ClickSend 曾把 hotbargain.vip 判为「not safe to send websites」，带该域名的短信一律 HTTP 400，
+    /// 当时临时把链接从短信里拿掉；同日 ClickSend 合规团队已放行该域名，并用带链接的短信实发验证送达，所以加回。
+    /// 若日后短信又整条失败，先看日志「短信服务商返回失败」里的被拒网址，确认是不是域名又被拦。
     /// </summary>
     public static StaffNotificationTemplateContent AccountActivated { get; } = new(
         AccountActivatedKey,
@@ -80,7 +80,7 @@ Get the latest HB app:
 
 Do not share this password with anyone, including your manager. If you did not expect this email, please let your manager know.
 """,
-        "Hot Bargain: your staff app account is ready. Sign in with your email. We've emailed your password and the app download link.",
+        "Hot Bargain: your staff app account is ready. Sign in with your email. We've emailed your password. Get the app: {{app_link}}",
         false,
         null
     );
