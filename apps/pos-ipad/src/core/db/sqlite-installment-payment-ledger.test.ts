@@ -366,6 +366,99 @@ test("attempt 仅按合法状态与完整 expected CAS，Approved material 和�
   });
 });
 
+test("Zeller 分期尝试：reference 随计划落库，批准后可原样读回，原付款证据登记为 zeller 并留底交易号", async () => {
+  await withMigratedDatabase(async (connection) => {
+    const encryptor = new RecordingEncryptor();
+    const actionStore = new SqliteInstallmentActionStore(connection, encryptor, () => NOW);
+    // action 里冻结的刷卡通道是 zeller：写得进去，也读得回来。
+    const base = createAction();
+    await actionStore.createIfNone(
+      Object.freeze({
+        ...base,
+        command: Object.freeze({ ...base.command, cardProvider: "zeller" as const }),
+      }),
+    );
+    await actionStore.transition({
+      actionId: ACTION_ID,
+      expectedState: "Created",
+      nextState: "ProviderPending",
+      terminal: { storeCode: STORE_CODE, deviceCode: DEVICE_CODE },
+    });
+    const store = new SqliteInstallmentProviderAttemptStore(connection, encryptor, () => NOW);
+    const reference = `HBZ-${ATTEMPT_ID.replaceAll("-", "")}`;
+    const transactionUuid = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+    const square = purchasePlan().attempts[0]!;
+    const created: InstallmentProviderAttemptRecord = Object.freeze({
+      ...square,
+      attempt: Object.freeze({
+        ...square.attempt,
+        provider: "zeller" as const,
+        references: Object.freeze({ ...emptyReferences(), txnRef: reference }),
+      }),
+    });
+    await store.bindPlanOrGet(
+      Object.freeze({ ...purchasePlan(), attempts: Object.freeze([created]) }),
+    );
+    // 重启后读回：通道仍是 zeller，reference 一字不差（恢复时只能靠它查回交易）。
+    const reloaded = (await store.loadPlan(ACTION_ID))?.attempts[0];
+    assert.equal(reloaded?.attempt.provider, "zeller");
+    assert.equal(reloaded?.attempt.references.txnRef, reference);
+
+    const submitted = withAttempt(created, {
+      state: "Submitted",
+      updatedAtIso: "2026-07-29T01:00:00.001Z",
+    });
+    assert.equal(
+      await store.compareAndUpdateAttempt({ expected: created, nextAttempt: submitted.attempt }),
+      true,
+    );
+    const approved = withAttempt(submitted, {
+      state: "Approved",
+      updatedAtIso: "2026-07-29T01:00:00.003Z",
+      receiptText: "PRIVATE RECEIPT",
+      references: { ...submitted.attempt.references, paymentId: transactionUuid },
+    });
+    const squareMaterial = cardMaterial();
+    const material = Object.freeze({
+      ...squareMaterial,
+      evidence: Object.freeze({
+        ...squareMaterial.evidence,
+        provider: "zeller" as const,
+        processor: "Zeller" as const,
+        txnRef: transactionUuid,
+        refundReference: null,
+      }),
+    });
+    assert.equal(
+      await store.compareAndUpdateAttempt({
+        expected: submitted,
+        nextAttempt: approved.attempt,
+        approvedMaterial: material,
+      }),
+      true,
+    );
+
+    const persisted = (await store.loadPlan(ACTION_ID))?.attempts[0];
+    assert.equal(persisted?.attempt.state, "Approved");
+    assert.equal(persisted?.attempt.references.txnRef, reference);
+    assert.equal(persisted?.attempt.references.paymentId, transactionUuid);
+    const evidence = await connection.getFirst<{ provider: unknown; method: unknown; amount_cents: unknown }>(
+      "SELECT provider, method, amount_cents FROM installment_original_tender_evidence WHERE evidence_id = ?",
+      [EVIDENCE_ID],
+    );
+    assert.deepEqual({ ...evidence }, { provider: "zeller", method: "card", amount_cents: 2_000 });
+    // 原付款证据的密文里留了 reference 和交易号。
+    assert.ok(
+      encryptor.encryptedPlaintexts.some(
+        (plaintext) =>
+          plaintext.includes('"kind":"zeller"') &&
+          plaintext.includes(reference) &&
+          plaintext.includes(transactionUuid),
+      ),
+    );
+  });
+});
+
 test("Linkly 分期 ACK 只在本地完成后写 marker，环境冻结并拒绝重复标记", async () => {
   await withMigratedDatabase(async (connection) => {
     const encryptor = new RecordingEncryptor();

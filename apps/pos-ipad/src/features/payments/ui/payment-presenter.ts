@@ -55,6 +55,7 @@ export type PaymentFieldIssue =
   | "installment-customer-required"
   | "installment-down-payment-below-minimum"
   | "installment-total-below-minimum"
+  | "zeller-amount-below-minimum"
   | "voucher-required"
   | "manual-card-confirmation-required"
   | "method-unavailable"
@@ -1278,8 +1279,6 @@ export function canSelectPaymentMethod(
         state.checkout.flow !== "installment-repayment") ||
         state.remaining.cents <= 0)) return false;
   if (method === "linkly-cloud" && !linklyTerminalReady(state)) return false;
-  // Zeller 目前只接了普通销售；分期走独立账本，还没有接 Zeller。
-  if (method === "zeller" && state.checkout.flow !== "regular") return false;
   const activeMethods = state.tenders.map((tender) => tender.method);
   if (state.checkout.flow !== "regular") {
     if (!state.allowedActions.start || activeMethods.length > 0) return false;

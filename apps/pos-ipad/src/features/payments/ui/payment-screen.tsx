@@ -1817,9 +1817,6 @@ function PaymentSummary({
             state.checkout.flow !== "regular" &&
             state.checkout.flow !== "installment-repayment"
               ? false
-              : // Zeller 目前只接了普通销售；分期的首付和续付还没有接 Zeller，不展示。
-                method === "zeller" && state.checkout.flow !== "regular"
-              ? false
               : method === "cash"
               ? state.cashAvailable === true
               : state.providers.some(

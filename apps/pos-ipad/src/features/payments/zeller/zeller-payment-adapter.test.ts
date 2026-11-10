@@ -600,6 +600,83 @@ test("原路退款：结果不明时只按本次退款的 reference 查询，绝
   assert.equal(restarted.refunds.length, 0);
 });
 
+test("分期用的扣款入口：等刷卡机给出结果再返回；没发出去的照常立刻返回", async () => {
+  const h = harness();
+  let settled = false;
+  const paying = h.adapter.submitAndSettle(attempt()).then((result) => {
+    settled = true;
+    return result;
+  });
+  await flush();
+  assert.equal(h.purchases.length, 1);
+  assert.equal(settled, false);
+  await h.purchases[0]!.call.resolve(sdkTransaction());
+  const approved = await paying;
+  assert.equal(approved.state, "Approved");
+  assert.equal(approved.references.paymentId, UUID);
+
+  // 没发出去（这里是没配对）：不等待，直接按「没有发出」返回。
+  const unpaired = harness();
+  unpaired.setPairing(() => sdkError("Setup Required"));
+  const blocked = await unpaired.adapter.submitAndSettle(attempt());
+  assert.equal(blocked.state, "Declined");
+  assert.equal(blocked.responseCode, "ZELLER_NOT_SUBMITTED_SETUP_REQUIRED");
+});
+
+test("低于 1.00 澳元的扣款不向刷卡机发请求", async () => {
+  const h = harness();
+  const result = await h.adapter.submit(attempt({ amount: { currency: "AUD", cents: 99 } }));
+  assert.equal(result.state, "Declined");
+  assert.equal(result.responseCode, "ZELLER_NOT_SUBMITTED_BELOW_MINIMUM");
+  assert.equal(h.purchases.length, 0);
+  assert.equal(h.pairingChecks(), 0);
+
+  assert.equal((await h.adapter.submit(attempt({ amount: { currency: "AUD", cents: 100 } }))).state, "Pending");
+});
+
+test("两个适配器实例共用同一台刷卡机时，SDK 闸门是共享的：一边在扣款，另一边不发请求也不查询", async () => {
+  // 销售和分期各有一套通道注册表，各建一个适配器实例，但终端来源是同一个。
+  const registry = new ZellerTerminalRegistry();
+  const purchases: ReturnType<typeof deferredOperation>[] = [];
+  let queries = 0;
+  const terminal: ZellerProbeTerminal = {
+    initialise: () => Promise.resolve(true) as ZellerProbeOperation,
+    setup: () => Promise.resolve(true) as ZellerProbeOperation,
+    refund: () => Promise.resolve(null) as ZellerProbeOperation,
+    purchase: () => {
+      const call = deferredOperation();
+      purchases.push(call);
+      return call.operation;
+    },
+    getTransactions: () => {
+      queries += 1;
+      return Promise.resolve([]) as ZellerProbeOperation;
+    },
+  };
+  registry.register(terminal);
+  const sales = new ZellerPaymentAdapter({ terminals: registry });
+  const installments = new ZellerPaymentAdapter({ terminals: registry });
+
+  assert.equal((await sales.submit(attempt())).state, "Pending");
+  const otherId = "3b241101-e2bb-4255-8caf-4136c566a962";
+  const other = attempt({
+    attemptId: otherId,
+    references: { ...attempt().references, txnRef: "HBZ-3b241101e2bb42558caf4136c566a962" },
+  });
+  const blocked = await installments.submit(other);
+  assert.equal(blocked.state, "Declined");
+  assert.equal(blocked.responseCode, "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY");
+  const held = await installments.recover({ ...other, state: "Unknown" });
+  assert.equal(held.responseCode, "ZELLER_TERMINAL_BUSY");
+  assert.equal(purchases.length, 1);
+  assert.equal(queries, 0);
+
+  // 第一笔结束后闸门放开，另一边可以发起。
+  await purchases[0]!.resolve(sdkTransaction());
+  assert.equal((await installments.submit(other)).state, "Pending");
+  assert.equal(purchases.length, 2);
+});
+
 test("恢复中心的只读查询：只有真的从 Zeller 拿到答复才算核实过，且不发起扣款或取消", async () => {
   const h = harness();
 

@@ -15,6 +15,12 @@ import {
 } from "./production-installment-payment-adapter";
 import type { PersistedInstallmentAction } from "./production-installment-runtime";
 import { ManualCardPaymentAdapter } from "@/features/payments/manual/manual-card-payment-adapter";
+import { ZellerPaymentAdapter } from "@/features/payments/zeller/zeller-payment-adapter";
+import { ZellerTerminalRegistry } from "@/features/payments/zeller/zeller-terminal-registry";
+import type {
+  ZellerProbeOperation,
+  ZellerProbeTerminal,
+} from "@/features/zeller-probe/zeller-probe-runner";
 
 import type {
   CardSyncEvidenceV1,
@@ -644,6 +650,174 @@ test("可用通道枚举包含手动刷卡，且只有注册表里真有适配�
   assert.equal(missing.get("manual-card"), false);
 });
 
+const ZELLER_TRANSACTION_UUID = "65c4b343-03e6-49ef-a54d-012e3f2c222c";
+
+/** 真的 Zeller 适配器接一台假刷卡机：扣款由测试决定何时结束，查询结果可改。 */
+function zellerHarness() {
+  const purchases: { options: unknown; resolve: (value: unknown) => void }[] = [];
+  const queries: unknown[] = [];
+  let queryResult: unknown = [];
+  const terminal: ZellerProbeTerminal = {
+    initialise: () => Promise.resolve(true) as ZellerProbeOperation,
+    setup: () => Promise.resolve(true) as ZellerProbeOperation,
+    refund: () => {
+      throw new Error("unexpected refund");
+    },
+    purchase: (options) => {
+      let resolve: (value: unknown) => void = () => undefined;
+      const promise = new Promise<unknown>((done) => {
+        resolve = done;
+      });
+      purchases.push({ options, resolve });
+      return promise as ZellerProbeOperation;
+    },
+    getTransactions: (options) => {
+      queries.push(options);
+      return Promise.resolve(queryResult) as ZellerProbeOperation;
+    },
+  };
+  const registry = new ZellerTerminalRegistry();
+  registry.register(terminal);
+  return {
+    zeller: new ZellerPaymentAdapter({ terminals: registry }),
+    purchases,
+    queries,
+    setQuery: (next: unknown) => {
+      queryResult = next;
+    },
+  };
+}
+
+function zellerTransaction(reference: string, over: Record<string, unknown> = {}) {
+  return {
+    type: "PURCHASE",
+    amount: 2_500,
+    status: "APPROVED",
+    responseCode: "00",
+    responseText: "APPROVED",
+    transactionUuid: ZELLER_TRANSACTION_UUID,
+    externalReference: reference,
+    approvalCode: "456321",
+    panMasked: "1234",
+    scheme: "VISA",
+    bin: "411111",
+    caid: "CAID-1",
+    receiptText: "ZELLER RECEIPT",
+    timestampLocal: "2026-11-05T11:24:01+10:00",
+    ...over,
+  };
+}
+
+async function nextTick(): Promise<void> {
+  await new Promise((done) => setImmediate(done));
+}
+
+test("Zeller 分期付款：reference 随 Created 落库，等刷卡机给出结果再返回，上传 ZELLER:{reference}:{transactionUuid}", async () => {
+  const store = new MemoryAttemptStore(paymentAction("card", "zeller"));
+  const h = zellerHarness();
+  const adapter = createAdapter({
+    store,
+    providers: new ProviderRegistry(h.zeller),
+    configuredCardProviders: ["zeller"],
+  });
+
+  let settled = false;
+  const running = adapter.beginOrRecover(ACTION_ID).then((result) => {
+    settled = true;
+    return result;
+  });
+  await nextTick();
+
+  const record = () => store.plans.get(ACTION_ID)!.attempts[0]!;
+  const reference = `HBZ-${record().attempt.attemptId.replaceAll("-", "")}`;
+  // 发给刷卡机的 reference 就是随 Created 一起落库的那一个；请求在 Submitted 落盘之后才发出。
+  assert.deepEqual(store.events.slice(0, 2), ["bind-plan", "attempt:Created->Submitted"]);
+  assert.equal(record().attempt.references.txnRef, reference);
+  assert.deepEqual(h.purchases.map((purchase) => purchase.options), [
+    { amount: 2_500, reference },
+  ]);
+  // 顾客还在刷卡：不返回，也不把这笔记成结果未知。
+  assert.equal(settled, false);
+  assert.equal(record().attempt.state, "Submitted");
+
+  h.purchases[0]!.resolve(zellerTransaction(reference));
+  const result = await running;
+
+  assert.equal(result.kind, "approved");
+  assert.ok(result.kind === "approved" && "payment" in result);
+  const payment = (result as { payment: { reference: unknown; cardTransactions: readonly Record<string, unknown>[] } }).payment;
+  // 与 WPF 和普通销售同格式：WPF 取消分期时要从这里取原交易号。
+  assert.equal(payment.reference, `ZELLER:${reference}:${ZELLER_TRANSACTION_UUID}`);
+  assert.equal(payment.cardTransactions[0]?.processor, "Zeller");
+  assert.equal(payment.cardTransactions[0]?.txnRef, ZELLER_TRANSACTION_UUID);
+  assert.equal(payment.cardTransactions[0]?.amount, 25);
+  assert.equal(record().attempt.references.paymentId, ZELLER_TRANSACTION_UUID);
+  assert.equal(store.approvedMaterialWrites, 1);
+
+  // 已批准后的恢复不再碰刷卡机。
+  await adapter.recoverBlocking(ACTION_ID);
+  assert.equal(h.purchases.length, 1);
+  assert.equal(h.queries.length, 0);
+});
+
+test("Zeller 分期付款：结果不明时保持未知，恢复只按 reference 查询、绝不重新扣款；被拒按未付款收尾", async () => {
+  const store = new MemoryAttemptStore(paymentAction("card", "zeller"));
+  const h = zellerHarness();
+  const adapter = createAdapter({
+    store,
+    providers: new ProviderRegistry(h.zeller),
+    configuredCardProviders: ["zeller"],
+  });
+  const running = adapter.beginOrRecover(ACTION_ID);
+  await nextTick();
+  const reference = `HBZ-${store.plans.get(ACTION_ID)!.attempts[0]!.attempt.attemptId.replaceAll("-", "")}`;
+  // 断网不代表没扣款：查到 0 笔也只能是结果未知。
+  h.purchases[0]!.resolve(Object.assign(new Error(""), { type: "Network Failure" }));
+  assert.deepEqual(await running, { kind: "unknown" });
+  assert.deepEqual(h.queries, [{ reference }]);
+
+  h.setQuery([zellerTransaction(reference)]);
+  const recovered = await adapter.recoverBlocking(ACTION_ID);
+  assert.equal(recovered.kind, "approved");
+  assert.equal(h.purchases.length, 1);
+
+  const declinedStore = new MemoryAttemptStore(paymentAction("card", "zeller"));
+  const declinedHarness = zellerHarness();
+  const declining = createAdapter({
+    store: declinedStore,
+    providers: new ProviderRegistry(declinedHarness.zeller),
+    configuredCardProviders: ["zeller"],
+  }).beginOrRecover(ACTION_ID);
+  await nextTick();
+  const declinedReference = `HBZ-${declinedStore.plans.get(ACTION_ID)!.attempts[0]!.attempt.attemptId.replaceAll("-", "")}`;
+  declinedHarness.purchases[0]!.resolve(
+    zellerTransaction(declinedReference, { status: "DECLINED", responseCode: "05" }),
+  );
+  assert.deepEqual(await declining, { kind: "declined" });
+});
+
+test("可用通道枚举包含 Zeller，且只有被配置并且注册表里真有适配器时才可用", async () => {
+  const h = zellerHarness();
+  const withZeller = createAdapter({
+    providers: new ProviderRegistry(h.zeller, new ScriptedProvider("square")),
+    configuredCardProviders: ["zeller"],
+  });
+  const available = new Map(
+    (await withZeller.listProviderAvailability()).map((entry) => [entry.provider, entry.available]),
+  );
+  assert.equal(available.get("zeller"), true);
+  assert.equal(available.get("square"), false);
+
+  const notConfigured = createAdapter({
+    providers: new ProviderRegistry(h.zeller, new ScriptedProvider("square")),
+    configuredCardProviders: ["square"],
+  });
+  const other = new Map(
+    (await notConfigured.listProviderAvailability()).map((entry) => [entry.provider, entry.available]),
+  );
+  assert.equal(other.get("zeller"), false);
+});
+
 test("Linkly Pending/Unknown 只恢复同一 attempt，Approved 前不创建第二套身份", async () => {
   const store = new MemoryAttemptStore(paymentAction("card"));
   const linkly = new ScriptedProvider("linkly-cloud");
@@ -1147,7 +1321,7 @@ function createAdapter(
     store?: MemoryAttemptStore;
     ids?: StableIds;
     providers?: ProviderRegistry;
-    configuredCardProviders?: readonly ("square" | "linkly-cloud" | "manual-card")[];
+    configuredCardProviders?: readonly ("square" | "linkly-cloud" | "manual-card" | "zeller")[];
     provenance?: FakeProvenance;
     voucherMaterials?: FakeVoucherMaterials;
     acknowledgements?: PaymentAcknowledgementRuntimePort | null;
@@ -1458,7 +1632,7 @@ class StableIds {
 
 function paymentAction(
   method: "cash" | "card" | "voucher",
-  cardProvider?: "square" | "linkly-cloud" | "manual-card",
+  cardProvider?: "square" | "linkly-cloud" | "manual-card" | "zeller",
 ): PersistedInstallmentAction {
   return Object.freeze({
     action: Object.freeze({

@@ -6,7 +6,8 @@ import type {
 
 export type InstallmentPaymentMethod = "cash" | "card" | "voucher";
 // 中文注释：manual-card 只用于分期续付（独立刷卡机收款、收银员确认，对齐 WPF #1195），首付 / 创建分期不接受。
-export type InstallmentCardProvider = "square" | "linkly-cloud" | "manual-card";
+// zeller（刷卡机 SDK 直连）首付和续付都可以用。
+export type InstallmentCardProvider = "square" | "linkly-cloud" | "manual-card" | "zeller";
 export type InstallmentPaymentStatus = "Recorded" | "Voided";
 export type InstallmentDeviceScope = "store" | "device";
 export type InstallmentDatePreset =
@@ -233,7 +234,7 @@ export type InstallmentCashRepaymentPreparation = Readonly<{
 export type InstallmentCardRepaymentCancellation = Readonly<{
   installmentGuid: string;
   amountCents: number;
-  provider: "square" | "linkly-cloud";
+  provider: "square" | "linkly-cloud" | "zeller";
 }>;
 
 /**

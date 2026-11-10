@@ -68,6 +68,7 @@ import {
 } from "@/features/installments/installment-presenter";
 import type { InstallmentsRuntimeFactory } from "@/features/installments/installment-runtime";
 import { PAYMENT_PERMISSION } from "@/features/payments/runtime/payment-checkout-runtime";
+import { ZELLER_MINIMUM_PURCHASE_CENTS } from "@/features/payments/zeller/zeller-payment-adapter";
 import {
   installmentCreatePaymentEntry,
   type InstallmentCreatePaymentEntry,
@@ -634,7 +635,8 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
         serverEnabled !== null &&
         (entry.provider === "square" ||
           entry.provider === "linkly-cloud" ||
-          entry.provider === "manual-card") &&
+          entry.provider === "manual-card" ||
+          entry.provider === "zeller") &&
         !serverEnabled.has(cardProviderFamily(entry.provider))
           ? Object.freeze({
               ...entry,
@@ -3554,7 +3556,8 @@ function validatePersistedAction(
           (command.cardProvider === undefined ||
             command.cardProvider === "square" ||
             command.cardProvider === "linkly-cloud" ||
-            command.cardProvider === "manual-card")
+            command.cardProvider === "manual-card" ||
+            command.cardProvider === "zeller")
         : action.method === "cash"
           ? command.cardProvider === undefined &&
             (command.cashTenderedCents === undefined ||
@@ -4382,12 +4385,12 @@ function collectedKindOf(
 }
 
 /**
- * 可向通道取消的续付刷卡：只认 Square / Linkly 的卡续付，且本机 action 仍是 ProviderPending / Unknown。
+ * 可向通道取消的续付刷卡：只认 Square / Linkly / Zeller 的卡续付，且本机 action 仍是 ProviderPending / Unknown。
  * 手动刷卡走“准备-确认”两阶段（它没有通道可取消），代金券 / 现金 / 其它 action 一律不是。
  */
 function cancellableCardProviderOf(
   persisted: PersistedInstallmentAction,
-): "square" | "linkly-cloud" | null {
+): "square" | "linkly-cloud" | "zeller" | null {
   const action = persisted.action;
   if (action.kind !== "repayment" || action.method !== "card") return null;
   if (persisted.state !== "ProviderPending" && persisted.state !== "Unknown") {
@@ -4395,7 +4398,9 @@ function cancellableCardProviderOf(
   }
   if (persisted.command.kind === "cancel-refund") return null;
   const provider = persisted.command.cardProvider;
-  return provider === "square" || provider === "linkly-cloud" ? provider : null;
+  return provider === "square" || provider === "linkly-cloud" || provider === "zeller"
+    ? provider
+    : null;
 }
 
 /** 取消刷卡续付已完成收尾（占用释放 + 本机结案）的内部信号，只在 cancelPendingCardRepayment 内部使用。 */
@@ -4564,10 +4569,22 @@ function paymentCommandMetadata(
       (input.cardProvider !== undefined &&
         input.cardProvider !== "square" &&
         input.cardProvider !== "linkly-cloud" &&
+        input.cardProvider !== "zeller" &&
         // 手动刷卡只用于续付（input 带 amountCents）；创建分期的首付不接受。
         !(input.cardProvider === "manual-card" && !("downPaymentCents" in input)))
     ) {
       throw workflowError("conflict", "Installment card provider is invalid.");
+    }
+    // 中文注释：Zeller 不收低于 1.00 澳元的款。必须在登记中央续付占用之前拦下（与 WPF 一致），
+    // 否则占用登记了、刷卡机却不会收，只能白白走一遍释放。页面已先拦一道，这里防绕过。
+    if (
+      input.cardProvider === "zeller" &&
+      amountCents < ZELLER_MINIMUM_PURCHASE_CENTS
+    ) {
+      throw workflowError(
+        "conflict",
+        "Zeller card payments must be at least AUD 1.00.",
+      );
     }
     return input.cardProvider === undefined
       ? Object.freeze({})
