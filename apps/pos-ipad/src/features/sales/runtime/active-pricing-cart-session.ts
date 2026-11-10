@@ -11,6 +11,7 @@ import {
   type AddOpenItemInput,
   type CartAddDisposition,
   type MergeCompatibleCartLinesResult,
+  type PricingCartRestoreOptions,
   type RefreshCatalogItemInput,
 } from "@/features/sales/domain";
 
@@ -43,6 +44,11 @@ export type ActivePricingCartSessionOptions = Readonly<{
   committedOrderTombstoneLimit?: number;
   /** 默认允许；生产组合根在 App 更新切换期间注入同步写门禁。 */
   canStartMutation?: () => boolean;
+  /**
+   * 当前时间来源。提供后，会话持有的每一辆购物车在每次重算自动促销时都按此刻判断
+   * 规则是否在生效区间内（与 WPF 一致）；召回的旧挂单、克隆、换车也都带着同一个时钟。
+   */
+  nowIso?: () => string;
 }>;
 
 /**
@@ -82,6 +88,8 @@ export class ActivePricingCartSession {
   private readonly committedOrderGuidOrder: string[] = [];
   private readonly committedOrderTombstoneLimit: number;
   private readonly canStartMutation: () => boolean;
+  /** 传给每次 PricingCart.restore / 克隆的选项，保证时钟不会在换车时丢掉。 */
+  private readonly restoreOptions: PricingCartRestoreOptions;
   private activeLeaseToken: symbol | null = null;
   private scopeInvalidated = false;
   private pendingRecallRecovery: RecallActiveBinding | null = null;
@@ -101,8 +109,9 @@ export class ActivePricingCartSession {
       "Committed order tombstone limit",
     );
     this.canStartMutation = options.canStartMutation ?? (() => true);
+    this.restoreOptions = options.nowIso ? { nowIso: options.nowIso } : {};
     // 中文注释：克隆传入对象，调用方即使仍持有 initialCart 也无法绕过 session 变更。
-    this.cart = cloneCart(initialCart);
+    this.cart = cloneCart(initialCart, this.restoreOptions);
     this.current = this.buildSnapshot();
   }
 
@@ -229,7 +238,7 @@ export class ActivePricingCartSession {
     this.assertIdle();
     this.assertTerminalRecoveryResolved();
     if (expectedTransactionEpoch !== this.transactionEpoch) return [];
-    const replacement = cloneCart(this.cart);
+    const replacement = cloneCart(this.cart, this.restoreOptions);
     const updatedLineIds = replacement.refreshCatalogItem(input);
     if (updatedLineIds.length === 0) return [];
     this.swapCart(replacement);
@@ -335,7 +344,7 @@ export class ActivePricingCartSession {
   ): ActivePricingCartSessionSnapshot {
     this.assertIdle();
     this.assertTerminalRecoveryResolved();
-    const replacement = cloneCart(this.cart);
+    const replacement = cloneCart(this.cart, this.restoreOptions);
     replacement.setPromotions(promotions, asOfIso);
     return this.swapCart(replacement);
   }
@@ -358,11 +367,14 @@ export class ActivePricingCartSession {
     if (pricingState.revision >= Number.MAX_SAFE_INTEGER) {
       throw new RangeError("Pricing cart revision is exhausted.");
     }
-    const replacement = PricingCart.restore({
-      ...pricingState,
-      revision: pricingState.revision + 1,
-      lines: [],
-    });
+    const replacement = PricingCart.restore(
+      {
+        ...pricingState,
+        revision: pricingState.revision + 1,
+        lines: [],
+      },
+      this.restoreOptions,
+    );
     this.advanceTransactionEpoch();
     this.cart = replacement;
     this.commitCurrentCartMutation();
@@ -379,7 +391,8 @@ export class ActivePricingCartSession {
   ): ActivePricingCartSessionSnapshot {
     this.assertIdle();
     this.assertReplacementBindingAllowed(recallBinding);
-    const replacement = PricingCart.restore(pricingState);
+    // 中文注释：召回的旧挂单带着挂起时的定价时点，恢复后要改用会话时钟，下一次改动才按此刻判断促销。
+    const replacement = PricingCart.restore(pricingState, this.restoreOptions);
     return this.replaceForNewTransaction(replacement, recallBinding);
   }
 
@@ -475,7 +488,10 @@ export class ActivePricingCartSession {
       ) => {
         this.assertLease(token);
         this.assertReplacementBindingAllowed(recallBinding);
-        const replacement = PricingCart.restore(pricingState);
+        const replacement = PricingCart.restore(
+          pricingState,
+          this.restoreOptions,
+        );
         return this.replaceForNewTransaction(replacement, recallBinding);
       },
       setRecallBinding: (recallBinding: RecallActiveBinding | null) => {
@@ -515,7 +531,7 @@ export class ActivePricingCartSession {
 
   /** 移交恢复中心只清当前车，不可污染订单完成幂等墓碑。 */
   private clearCurrentCartWithoutCompletionTombstone(): ActivePricingCartSessionSnapshot {
-    const emptyCart = cloneCart(this.createEmptyCart());
+    const emptyCart = cloneCart(this.createEmptyCart(), this.restoreOptions);
     if (emptyCart.snapshot().lines.length > 0) {
       throw new Error("Empty cart factory must return a cart without lines.");
     }
@@ -761,8 +777,11 @@ export class ActivePricingCartSession {
   }
 }
 
-function cloneCart(cart: PricingCart): PricingCart {
-  return PricingCart.restore(cart.stateSnapshot());
+function cloneCart(
+  cart: PricingCart,
+  options: PricingCartRestoreOptions,
+): PricingCart {
+  return PricingCart.restore(cart.stateSnapshot(), options);
 }
 
 function cloneRecallBinding(

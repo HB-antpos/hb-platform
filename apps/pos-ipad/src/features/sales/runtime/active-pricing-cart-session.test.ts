@@ -699,6 +699,22 @@ function session(initial = new PricingCart()): ActivePricingCartSession {
   return new ActivePricingCartSession(initial, () => new PricingCart());
 }
 
+/** 一条 2 件 8 澳元的固定价促销，09:00 才开始生效（单价 5 澳元，满 2 件优惠 2 澳元）。 */
+function lateTwoForEightPromotion() {
+  return {
+    id: "PROMO-LATE",
+    name: "PROMO-LATE",
+    effectiveStartIso: "2026-06-13T09:00:00.000Z",
+    effectiveEndIso: "2026-06-14T00:00:00.000Z",
+    isExclusive: false,
+    priority: 10,
+    applyQuantity: 2,
+    fixedPrice: { currency: "AUD" as const, cents: 800 },
+    maxApplicationsPerOrder: null,
+    products: [{ productCode: "P1", unitWeight: 1 }],
+  };
+}
+
 function cartWithLine(): PricingCart {
   const cart = new PricingCart();
   cart.addItem({
@@ -784,3 +800,67 @@ function security(): SalesOperationSecurity {
 function uuid(value: number): string {
   return `00000000-0000-4000-8000-${String(value).padStart(12, "0")}`;
 }
+
+
+test("会话时钟：登录后才开始生效的促销，在下一次改购物车时开始打折", () => {
+  let now = "2026-06-13T08:00:00.000Z";
+  const active = new ActivePricingCartSession(
+    new PricingCart(),
+    () => new PricingCart(),
+    { nowIso: () => now },
+  );
+  active.applyPromotionSnapshot([lateTwoForEightPromotion()], now);
+  active.addItemWithDisposition({
+    lineId: "line-1",
+    productCode: "P1",
+    itemNumber: null,
+    lookupCode: "1",
+    displayName: "Tea",
+    unitPrice: { currency: "AUD", cents: 500 },
+    syncProvenance: { referenceCode: null, priceSource: 0 },
+  });
+  active.increaseLine("line-1");
+  // 08:00 还没到 09:00：不打折。
+  assert.equal(active.getSnapshot().lines[0]!.discount.cents, 0);
+
+  now = "2026-06-13T09:30:00.000Z";
+  active.increaseLine("line-1");
+  // 3 件里凑满一组：5 * 2 - 8 = 2 澳元。
+  assert.equal(active.getSnapshot().lines[0]!.discount.cents, 200);
+});
+
+test("会话时钟：召回的旧挂单带着挂起时的时点，恢复后按当前时间判断促销", () => {
+  const stale = new PricingCart({
+    asOfIso: "2026-06-13T08:00:00.000Z",
+    promotions: [lateTwoForEightPromotion()],
+  });
+  stale.addItem({
+    lineId: "line-1",
+    productCode: "P1",
+    itemNumber: null,
+    lookupCode: "1",
+    displayName: "Tea",
+    unitPrice: { currency: "AUD", cents: 500 },
+    syncProvenance: { referenceCode: null, priceSource: 0 },
+  });
+  stale.increaseLine("line-1");
+  const heldState = stale.stateSnapshot();
+
+  const withClock = new ActivePricingCartSession(
+    new PricingCart(),
+    () => new PricingCart(),
+    { nowIso: () => "2026-06-13T09:30:00.000Z" },
+  );
+  withClock.replace(heldState);
+  withClock.increaseLine("line-1");
+  assert.equal(withClock.getSnapshot().lines[0]!.discount.cents, 200);
+
+  // 对照：不给时钟时仍沿用挂起时的 08:00，促销没开始（旧行为，保持确定性）。
+  const withoutClock = new ActivePricingCartSession(
+    new PricingCart(),
+    () => new PricingCart(),
+  );
+  withoutClock.replace(heldState);
+  withoutClock.increaseLine("line-1");
+  assert.equal(withoutClock.getSnapshot().lines[0]!.discount.cents, 0);
+});

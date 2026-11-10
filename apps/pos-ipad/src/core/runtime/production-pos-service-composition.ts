@@ -758,12 +758,16 @@ export function createProductionPosRuntimeServices(
   const activePricingCart = new ActivePricingCartSession(
     new PricingCart(),
     () => new PricingCart(),
-    input.appUpdateTransition
-      ? {
-          canStartMutation: () =>
-            !input.appUpdateTransition?.isTransitionActive(),
-        }
-      : {},
+    {
+      // 自动促销每次重算都按系统时钟判断生效区间，与 WPF 一致；不再停在登录 / 刷新目录那一刻。
+      nowIso: input.clock.nowIso,
+      ...(input.appUpdateTransition
+        ? {
+            canStartMutation: () =>
+              !input.appUpdateTransition?.isTransitionActive(),
+          }
+        : {}),
+    },
   );
   let unsubscribeDeviceScopeChange: (() => void) | null = null;
   let deviceScopeListenerDisposed = false;

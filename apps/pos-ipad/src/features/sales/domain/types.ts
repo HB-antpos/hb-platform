@@ -102,6 +102,16 @@ export type PricingCartOptions = Readonly<{
   mode?: CartMode;
   asOfIso?: string;
   promotions?: readonly PromotionDefinition[];
+  /**
+   * 可选的当前时间来源。提供后，每次重算自动促销前都会先取一次当前时间作为
+   * 「促销是否在生效区间内」的判断点；不提供则一直使用 asOfIso（测试与账务回放保持确定性）。
+   */
+  nowIso?: () => string;
+}>;
+
+/** PricingCart.restore 的可选参数：只携带时钟，恢复出的购物车要继续按当前时间判断促销。 */
+export type PricingCartRestoreOptions = Readonly<{
+  nowIso?: () => string;
 }>;
 
 export type PricingCartResult = Readonly<{

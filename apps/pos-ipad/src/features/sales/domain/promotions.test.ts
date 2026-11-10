@@ -331,3 +331,114 @@ test("OPENITEM never participates in automatic promotions", () => {
 
   assert.equal(cart.snapshot().discount.cents, 0);
 });
+
+test("带时钟的购物车：购物车建立时还没开始的促销，下一次改动时按当前时间开始生效", () => {
+  let now = "2026-06-13T08:00:00.000Z";
+  const cart = new PricingCart({
+    asOfIso: now,
+    nowIso: () => now,
+    promotions: [
+      promotion("PROMO-LATE", { effectiveStartIso: "2026-06-13T09:00:00.000Z" }),
+    ],
+  });
+  cart.addItem(item("line-a"));
+  cart.setLineQuantity("line-a", 2);
+  // 还没到 09:00：促销不生效。
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 0);
+
+  now = "2026-06-13T09:30:00.000Z";
+  assert.equal(cart.increaseLine("line-a"), true);
+  // 3 件里凑满一组（2 件）：1000 * 2 - 1500 = 500。
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 500);
+  assert.equal(cart.snapshot().lines[0]!.priceSource, "promotion");
+  // 定价时点记录的是实际用于这次重算的时间。
+  assert.equal(cart.stateSnapshot().asOfIso, now);
+});
+
+test("带时钟的购物车：已结束的促销在下一次改动时失效", () => {
+  let now = "2026-06-13T08:30:00.000Z";
+  const cart = new PricingCart({
+    asOfIso: now,
+    nowIso: () => now,
+    promotions: [
+      promotion("PROMO-ENDING", { effectiveEndIso: "2026-06-13T09:00:00.000Z" }),
+    ],
+  });
+  cart.addItem(item("line-a"));
+  cart.setLineQuantity("line-a", 2);
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 500);
+
+  now = "2026-06-13T09:30:00.000Z";
+  assert.equal(cart.increaseLine("line-a"), true);
+  // 09:00 已过：折扣消失，价格回到目录价。
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 0);
+  assert.equal(cart.snapshot().lines[0]!.priceSource, "catalog");
+});
+
+test("不带时钟时定价时点保持固定（账务回放与恢复路径的确定性）", () => {
+  const cart = new PricingCart({
+    asOfIso,
+    promotions: [promotion("PROMO-FIXED")],
+  });
+  cart.addItem(item("line-a"));
+  cart.setLineQuantity("line-a", 2);
+
+  assert.equal(cart.stateSnapshot().asOfIso, asOfIso);
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 500);
+});
+
+test("restore 可携带时钟；不携带则沿用存下来的定价时点", () => {
+  const stale = new PricingCart({
+    asOfIso: "2026-06-13T08:00:00.000Z",
+    promotions: [
+      promotion("PROMO-LATE", { effectiveStartIso: "2026-06-13T09:00:00.000Z" }),
+    ],
+  });
+  stale.addItem(item("line-a"));
+  stale.setLineQuantity("line-a", 2);
+  const state = stale.stateSnapshot();
+
+  const now = "2026-06-13T09:30:00.000Z";
+  const withClock = PricingCart.restore(state, { nowIso: () => now });
+  withClock.increaseLine("line-a");
+  assert.equal(withClock.snapshot().lines[0]!.discount.cents, 500);
+  assert.equal(withClock.stateSnapshot().asOfIso, now);
+
+  // 没有时钟：仍按 08:00 判断，促销没开始，保持确定性。
+  const withoutClock = PricingCart.restore(state);
+  withoutClock.increaseLine("line-a");
+  assert.equal(withoutClock.snapshot().lines[0]!.discount.cents, 0);
+  assert.equal(withoutClock.stateSnapshot().asOfIso, "2026-06-13T08:00:00.000Z");
+});
+
+test("带时钟：时钟越过生效边界后，合并兼容行会拒绝（不悄悄改金额），下一次普通改动才重新定价", () => {
+  let now = "2026-06-13T08:00:00.000Z";
+  const cart = new PricingCart({
+    asOfIso: now,
+    nowIso: () => now,
+    promotions: [
+      promotion("PROMO-LATE", { effectiveStartIso: "2026-06-13T09:00:00.000Z" }),
+    ],
+  });
+  const sameProduct = { productCode: "SKU-001", lookupCode: "SKU-001" };
+  cart.addScannedItem(item("line-a", sameProduct));
+  cart.addScannedItem(
+    item("separator", { productCode: "SKU-OTHER", lookupCode: "SKU-OTHER" }),
+  );
+  cart.addScannedItem(item("line-b", sameProduct));
+  assert.equal(cart.snapshot().discount.cents, 0);
+
+  now = "2026-06-13T09:30:00.000Z";
+  // 合并要求「合并前后交易金额不变」。时钟越过边界后，候选副本按新时间算出折扣，
+  // 与当前购物车（仍是旧时间的金额）不一致，所以保守地拒绝合并，不让合并顺带改价。
+  const merged = cart.mergeCompatibleLines();
+  assert.equal(merged.removedLineCount, 0);
+  assert.equal(cart.snapshot().lines.length, 3);
+  assert.equal(cart.snapshot().discount.cents, 0);
+  assert.equal(cart.stateSnapshot().asOfIso, "2026-06-13T08:00:00.000Z");
+
+  // 下一次普通改动会按当前时间整体重新定价：SKU-001 共 3 件，凑满一组优惠 500。
+  assert.equal(cart.increaseLine("line-b"), true);
+  assert.equal(cart.snapshot().discount.cents, 500);
+  assert.equal(cart.stateSnapshot().asOfIso, now);
+});
