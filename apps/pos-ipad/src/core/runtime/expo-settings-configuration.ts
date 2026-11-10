@@ -37,6 +37,9 @@ export function settingsPaymentConfiguration(
         })
       : null;
   }
+  if (input?.provider === "zeller") {
+    return Object.freeze({ provider: "zeller" as const, square: null, linkly: null });
+  }
   return null;
 }
 

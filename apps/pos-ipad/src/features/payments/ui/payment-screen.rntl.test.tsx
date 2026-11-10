@@ -267,6 +267,26 @@ test("现金无权限时隐藏现金入口，已启用礼券仍可使用", async
   expect(screen.getByTestId("payment-method-voucher")).toBeTruthy();
 });
 
+test("设置里启用 Zeller 后收银页出现 Zeller 支付方式，没启用时不出现", async () => {
+  const enabled = createUiPresenter({ providers: [providerAvailability("zeller")] });
+  const screen = await render(
+    <PaymentScreen locale="zh" presenter={enabled.presenter} showStatusStrip={false} />,
+  );
+  expect(screen.getByTestId("payment-method-zeller")).toBeTruthy();
+  expect(screen.getByText("Zeller")).toBeTruthy();
+  expect(screen.queryByTestId("payment-method-square")).toBeNull();
+  expect(screen.queryByTestId("payment-method-linkly-cloud")).toBeNull();
+  await screen.unmount();
+
+  const disabled = createUiPresenter({
+    providers: [{ provider: "zeller", available: false, blocker: "PAYMENT_PROVIDER_UNKNOWN" }],
+  });
+  const other = await render(
+    <PaymentScreen locale="zh" presenter={disabled.presenter} showStatusStrip={false} />,
+  );
+  expect(other.queryByTestId("payment-method-zeller")).toBeNull();
+});
+
 test("Linkly Cloud 多终端只展示实际选中线路，支付页不能更改绑定", async () => {
   const harness = createUiPresenter({
     selectedMethod: "linkly-cloud",

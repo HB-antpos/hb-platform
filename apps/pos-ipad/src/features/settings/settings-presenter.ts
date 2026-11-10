@@ -37,7 +37,11 @@ export type SettingsPane =
   "general" | "payments" | "peripherals" | "device" | "hardware";
 
 export type PaymentEnvironment = "Sandbox" | "Production";
-export type SettingsPaymentProvider = "square" | "linkly";
+/**
+ * zeller：Zeller 刷卡机直连。它没有环境、门店、设备这些要在设置页填写的配置，
+ * 配对在 Zeller 页签里做、由 Zeller SDK 自己保存；这里只表示「这台 iPad 的刷卡走 Zeller」。
+ */
+export type SettingsPaymentProvider = "square" | "linkly" | "zeller";
 
 export type SettingsCatalogSnapshot = Readonly<{
   snapshotId: string | null;
@@ -329,6 +333,11 @@ export type SettingsPaymentSettingsInput =
       provider: "linkly";
       square: null;
       linkly: SettingsPaymentDraft["linkly"];
+    }>
+  | Readonly<{
+      provider: "zeller";
+      square: null;
+      linkly: null;
     }>;
 
 export type SettingsSquareRequestKind =
@@ -1514,6 +1523,31 @@ export class SettingsPresenter {
       return;
     }
     this.patch({ paymentProviderDraft: provider, statusCode: null });
+  }
+
+  /**
+   * 把这台 iPad 的刷卡切到 Zeller。和保存 Square / Linkly 设置走同一个危险操作确认与保存流程
+   * （确认框 → 写本机配置 → 重载运行时），只是不经过「先选草稿、再点保存」两步：
+   * Zeller 没有要填写的配置，而且取消确认时不应该留下一个「已选择 Zeller」的草稿。
+   * 调用方（Zeller 页签）负责只在已配对时提供这个入口。
+   */
+  public requestEnableZeller(): Promise<void> {
+    if (this.catalogRefreshRunning()) {
+      this.patch({ confirmation: null, statusCode: "safety-check-failed" });
+      return Promise.resolve();
+    }
+    if (!this.requirePermission(this.state.access.canConfigurePayments)) {
+      return Promise.resolve();
+    }
+    if (this.state.paymentProvider === "zeller") {
+      this.patch({ statusCode: "payment-settings-saved" });
+      return Promise.resolve();
+    }
+    this.requestConfirmation({
+      kind: "change-payment-settings",
+      input: ZELLER_PAYMENT_SETTINGS,
+    });
+    return Promise.resolve();
   }
 
   public setPrinterEnabled(enabled: boolean): void {
@@ -3844,8 +3878,18 @@ function normalizePaymentDraft(
       }),
     });
   }
+  if (provider === "zeller") {
+    return ZELLER_PAYMENT_SETTINGS;
+  }
   return null;
 }
+
+/** 选中 Zeller 时保存的设置：只有通道本身，不带 Square / Linkly 的配置。 */
+const ZELLER_PAYMENT_SETTINGS: SettingsPaymentSettingsInput = Object.freeze({
+  provider: "zeller",
+  square: null,
+  linkly: null,
+});
 
 function normalizePrinterSettings(
   settings: ReceiptPrinterSettings,
@@ -3998,6 +4042,8 @@ function paymentSettingsEqual(
   right: SettingsPaymentSettingsInput,
 ): boolean {
   if (left.provider !== right.provider) return false;
+  // Zeller 没有可比较的配置项：通道相同即相同。
+  if (left.provider === "zeller") return true;
   if (left.provider === "square" && right.provider === "square") {
     return (
       left.square.environment === right.square.environment &&
@@ -4016,6 +4062,9 @@ function isPaymentProviderAvailable(
   provider: SettingsPaymentProvider,
   state: Pick<SettingsState, "linkly" | "square">,
 ): boolean {
+  // 中文注释：Zeller 不能落到下面的二选一里被当成 Linkly——它的可用性与 Linkly 的配置无关。
+  // 它没有服务端或本机配置可检查，这里恒为可用；能不能真的刷卡取决于配对，由 Zeller 页签和收款适配器把关。
+  if (provider === "zeller") return true;
   const snapshot = provider === "square" ? state.square : state.linkly;
   return snapshot.available && snapshot.blockerCode === null;
 }
@@ -4096,6 +4145,8 @@ function isNormalizedPaymentProviderConfigured(
   square: SettingsSquareSnapshot,
   linkly: SettingsPaymentProviderSnapshot,
 ): boolean {
+  // Zeller 没有要保存的公开配置，选中即算已配置（配对状态由 Zeller 页签实时查询）。
+  if (provider === "zeller") return true;
   if (
     !isPaymentProviderAvailable(provider, {
       square,
@@ -4113,7 +4164,7 @@ function isNormalizedPaymentProviderConfigured(
 function settingsPaymentProvider(
   value: unknown,
 ): SettingsPaymentProvider | null {
-  return value === "square" || value === "linkly" ? value : null;
+  return value === "square" || value === "linkly" || value === "zeller" ? value : null;
 }
 
 function findSquareLocation(

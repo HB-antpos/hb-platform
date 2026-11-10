@@ -73,8 +73,6 @@ export type PaymentProviderConfigurationBlocker =
   | "VOUCHER_CONFIGURATION_LOAD_FAILED"
   | "MANUAL_CARD_CONFIGURATION_DISABLED"
   | "MANUAL_CARD_CONFIGURATION_LOAD_FAILED"
-  /** Zeller 收款还不能在设置里启用：适配器已注册（供恢复已有交易），但不接受新付款。 */
-  | "ZELLER_NOT_ENABLED"
   | "PAYMENT_PROVIDER_UNKNOWN";
 
 export type PaymentProviderAvailability = Readonly<{
@@ -294,13 +292,14 @@ export async function createConfiguredPaymentProviderRegistry(
     availability: { provider: "manual-card", available: manual.kind === "loaded" && manual.value.enabled === true,
       blocker: manual.kind === "failed" ? "MANUAL_CARD_CONFIGURATION_LOAD_FAILED" : manual.value.enabled === true ? null : "MANUAL_CARD_CONFIGURATION_DISABLED" },
   });
-  // 中文注释：Zeller 适配器先注册、但不可用。注册是为了让已经存在的 zeller 付款能被 recover 找回原通道核实；
-  // 不可用是因为设置里还不能启用 Zeller（恢复中心尚未支持 Zeller 的结果未知交易），新付款一律被门禁拦下。
+  // 中文注释：Zeller 没有需要读取的公开配置（配对信息由 Zeller SDK 自己保存），所以这里总是「已配置」。
+  // 新付款是否放行由上层的通道选择决定：只有设置里选中了 Zeller 才可用，其余情况按未选中拦下。
+  // 没选中时适配器照样注册着，已经存在的 zeller 付款才能被 recover 找回原通道核实。
   entries.set("zeller", {
     port: new ZellerPaymentAdapter({
       terminals: dependencies.zellerTerminals ?? zellerTerminalRegistry,
     }),
-    availability: { provider: "zeller", available: false, blocker: "ZELLER_NOT_ENABLED" },
+    availability: { provider: "zeller", available: true, blocker: null },
   });
   return new ConfiguredPaymentProviderRegistry(entries);
 }

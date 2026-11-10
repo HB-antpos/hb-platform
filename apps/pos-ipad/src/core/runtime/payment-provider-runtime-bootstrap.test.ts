@@ -68,8 +68,8 @@ test("provider bootstrap 对缺失公开配置返回稳定 unavailable，不触�
       blocker: "VOUCHER_CONFIGURATION_DISABLED",
     },
     { provider: "manual-card", available: false, blocker: "MANUAL_CARD_CONFIGURATION_DISABLED" },
-    // Zeller 适配器已注册（供恢复已有交易），但设置里还不能启用，新付款一律不可用。
-    { provider: "zeller", available: false, blocker: "ZELLER_NOT_ENABLED" },
+    // Zeller 适配器总是注册着（供恢复已有交易），但设置里没有选中它，新付款不可用。
+    { provider: "zeller", available: false, blocker: "PAYMENT_PROVIDER_UNKNOWN" },
   ]);
   assert.equal(
     bootstrap.createLinklyOperator({
@@ -124,7 +124,8 @@ test("bootstrap 仅在合法且可用的 Linkly 环境创建 operator，并一�
       { provider: "linkly-cloud", available: true },
       { provider: "voucher", available: true },
       { provider: "manual-card", available: true },
-      { provider: "zeller", available: false },
+      // 配置层面 Zeller 恒为可用（它没有要读取的公开配置）；是否放行新付款由上面的通道选择决定。
+      { provider: "zeller", available: true },
     ],
   );
   assert.ok(
@@ -215,4 +216,58 @@ test("双卡终端均已配置但未显式选择时，新支付全部失败关�
     bootstrap.providers.get("linkly-cloud").provider,
     "linkly-cloud",
   );
+});
+
+test("设置里选中 Zeller：只有 Zeller 可以收新的刷卡，启动时就请求加载 Zeller SDK", async () => {
+  let requested = 0;
+  const bootstrap = await createPaymentProviderRuntimeBootstrap({
+    paymentMethods: { useManualCard: false, giftCardEnabled: false },
+    transport,
+    extra: { provider: "zeller", linkly: { environment: "Sandbox" } },
+    voucherProtectedTokens: voucherTokens,
+    zellerTerminals: { current: () => null, request: () => { requested += 1; } },
+  });
+
+  assert.equal(requested, 1);
+  assert.deepEqual(bootstrap.providers.getAvailability("zeller"), {
+    provider: "zeller",
+    available: true,
+    blocker: null,
+  });
+  // 同一时间只有一家刷卡通道：Linkly 即使配置完好也不接新付款。
+  assert.deepEqual(bootstrap.providers.getAvailability("linkly-cloud"), {
+    provider: "linkly-cloud",
+    available: false,
+    blocker: "PAYMENT_PROVIDER_UNKNOWN",
+  });
+  // 旧付款的恢复不受选择影响：原通道的适配器始终取得到。
+  assert.equal(bootstrap.providers.get("linkly-cloud").provider, "linkly-cloud");
+  assert.equal(bootstrap.providers.get("zeller").provider, "zeller");
+});
+
+test("开启手动刷卡后 Zeller 与其他刷卡机一样让位；没选中 Zeller 时不请求加载 SDK", async () => {
+  let requested = 0;
+  const terminals = { current: () => null, request: () => { requested += 1; } };
+  const manual = await createPaymentProviderRuntimeBootstrap({
+    paymentMethods: { useManualCard: true, giftCardEnabled: false },
+    transport,
+    extra: { provider: "zeller" },
+    voucherProtectedTokens: voucherTokens,
+    zellerTerminals: terminals,
+  });
+  assert.equal(manual.providers.getAvailability("zeller").available, false);
+  assert.equal(manual.providers.getAvailability("manual-card").available, true);
+
+  requested = 0;
+  const square = await createPaymentProviderRuntimeBootstrap({
+    transport,
+    extra: {
+      provider: "square",
+      square: { environment: "Sandbox", deviceId: "square-device", locationId: "square-location" },
+    },
+    voucherProtectedTokens: voucherTokens,
+    zellerTerminals: terminals,
+  });
+  assert.equal(requested, 0);
+  assert.equal(square.providers.getAvailability("zeller").available, false);
 });
