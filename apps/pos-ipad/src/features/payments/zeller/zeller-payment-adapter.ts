@@ -38,6 +38,27 @@ import type { ZellerProbeOperation } from "@/features/zeller-probe/zeller-probe-
  */
 export const ZELLER_NOT_PAID_SETTLE_MS = 60_000;
 
+/** Zeller 单笔扣款最低 100 分（1.00 澳元），与 WPF 的 ZellerMinimumPurchaseCents 一致。 */
+export const ZELLER_MINIMUM_PURCHASE_CENTS = 100;
+
+/**
+ * 「SDK 是否正忙」的闸门，按终端来源共享。
+ *
+ * 中文注释：销售和分期各有一套通道注册表，也就各有一个适配器实例，但刷卡机和 SDK 只有一份。
+ * 闸门如果每个实例各记各的，一边在扣款时另一边还会去查询，SDK 并发时会串结果。
+ */
+type ZellerSdkGate = { calls: number };
+const sdkGates = new WeakMap<ZellerTerminalSource, ZellerSdkGate>();
+
+function sdkGateOf(terminals: ZellerTerminalSource): ZellerSdkGate {
+  let gate = sdkGates.get(terminals);
+  if (gate === undefined) {
+    gate = { calls: 0 };
+    sdkGates.set(terminals, gate);
+  }
+  return gate;
+}
+
 /** 一笔还在本进程内存里的 Zeller 扣款或退款调用。进程重启后不存在，只能按 reference 查询。 */
 type InFlightCall = {
   readonly operation: ZellerProbeOperation;
@@ -84,13 +105,14 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
   private readonly terminals: ZellerTerminalSource;
   private readonly nowMs: () => number;
   private readonly inFlight = new Map<string, InFlightCall>();
-  /** 正在占用 SDK 的调用数（扣款或查询）。大于 0 时不再向 SDK 发任何请求。 */
-  private sdkCalls = 0;
+  /** 正在占用 SDK 的调用数（扣款、退款或查询）。大于 0 时不再向 SDK 发任何请求；同一终端来源的实例共用。 */
+  private readonly gate: ZellerSdkGate;
   /** 最近一次 recover 是否真的从 Zeller 拿到了可信的答复（供 queryExistingPayment 报告）。 */
   private lastRecoverVerified = false;
 
   public constructor(options: ZellerPaymentAdapterOptions) {
     this.terminals = options.terminals;
+    this.gate = sdkGateOf(options.terminals);
     this.nowMs = options.nowMs ?? (() => Date.now());
   }
 
@@ -105,6 +127,10 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     ) {
       return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_INVALID_ATTEMPT");
     }
+    // Zeller 不收低于 1.00 澳元的款。页面应该先拦住，这里是最后一道：不向刷卡机发请求。
+    if (attempt.amount.cents < ZELLER_MINIMUM_PURCHASE_CENTS) {
+      return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_BELOW_MINIMUM");
+    }
     const amountCents = attempt.amount.cents;
     const started = await this.start(attempt, (terminal) =>
       terminal.purchase({ amount: amountCents, reference }),
@@ -113,6 +139,21 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     if (started.kind === "existing") return this.recover(attempt);
     if (started.kind === "blocked") return this.notSubmitted(attempt, started.code);
     return this.pending(attempt, "ZELLER_AWAITING_TERMINAL");
+  }
+
+  /**
+   * 扣款并等刷卡机给出结果再返回，给不会轮询等待中付款的流程用（分期首付、续付）。
+   *
+   * 中文注释：分期页提交后不会自动来收结果。立刻返回 Pending 的话，页面直接进入「需要恢复」，
+   * 中央的续付占用也会被标成结果未知，而顾客可能还在刷卡。等到有结论再返回，真的不明才是未知。
+   * 等待期间进程被杀也没关系：reference 在发起前已经落库，重启后按 reference 查询。
+   */
+  public async submitAndSettle(attempt: PaymentAttempt): Promise<PaymentProviderResult> {
+    const submitted = await this.submit(attempt);
+    const record = this.inFlight.get(attempt.attemptId);
+    if (submitted.state !== "Pending" || record === undefined) return submitted;
+    await record.done;
+    return this.recover(attempt);
   }
 
   /**
@@ -164,7 +205,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
       this.terminals.request?.();
       return { kind: "blocked", code: "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE" };
     }
-    if (this.sdkCalls > 0) return { kind: "blocked", code: "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY" };
+    if (this.gate.calls > 0) return { kind: "blocked", code: "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY" };
 
     // 中文注释：发请求之前先确认这台 iPad 还配着对（不弹窗、不涉及金额）。
     // 不做这一步的话，没配对时调用会返回「需要设置」，随后按 reference 的核实查询同样因为没配对而失败，
@@ -174,7 +215,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     // 检查配对期间可能有别的调用进来（比如另一单的核实查询），再确认一次没有人占着 SDK，也没有重复发起。
     const raced = this.inFlight.get(attempt.attemptId);
     if (raced !== undefined) return { kind: "existing", record: raced };
-    if (this.sdkCalls > 0) return { kind: "blocked", code: "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY" };
+    if (this.gate.calls > 0) return { kind: "blocked", code: "ZELLER_NOT_SUBMITTED_TERMINAL_BUSY" };
 
     let operation: ZellerProbeOperation;
     try {
@@ -186,7 +227,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     const settle = (result: ZellerCallResult) => {
       record.settled = result;
       record.settledAtMs = this.nowMs();
-      this.sdkCalls -= 1;
+      this.gate.calls -= 1;
     };
     const record: InFlightCall = {
       operation,
@@ -199,7 +240,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
       ),
     };
     this.inFlight.set(attempt.attemptId, record);
-    this.sdkCalls += 1;
+    this.gate.calls += 1;
     try {
       operation.onEvent?.((event) => {
         record.evidence = accumulateZellerCallEvidence(record.evidence, event);
@@ -290,7 +331,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
 
   /** 发起前的配对检查：已配对返回 null，否则返回「请求没有发出」的原因码。占用 SDK 期间别的调用不会进来。 */
   private async pairingBlocker(terminal: ZellerTerminal): Promise<string | null> {
-    this.sdkCalls += 1;
+    this.gate.calls += 1;
     try {
       const pairing = mapZellerSdkPairingResponse(await terminal.initialise());
       if (pairing.isPaired) return null;
@@ -300,7 +341,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     } catch {
       return "ZELLER_NOT_SUBMITTED_TERMINAL_UNAVAILABLE";
     } finally {
-      this.sdkCalls -= 1;
+      this.gate.calls -= 1;
     }
   }
 
@@ -318,10 +359,10 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
       this.terminals.request?.();
       return this.hold(attempt, record, "ZELLER_TERMINAL_UNAVAILABLE");
     }
-    if (this.sdkCalls > 0) return this.hold(attempt, record, "ZELLER_TERMINAL_BUSY");
+    if (this.gate.calls > 0) return this.hold(attempt, record, "ZELLER_TERMINAL_BUSY");
 
     let query: ZellerQueryResult;
-    this.sdkCalls += 1;
+    this.gate.calls += 1;
     try {
       query = mapZellerSdkQueryResponse(
         await terminal.getTransactions({ reference: expectation.reference }),
@@ -329,7 +370,7 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
     } catch {
       query = { succeeded: false, transactions: [], errorType: "Unrecognised" };
     } finally {
-      this.sdkCalls -= 1;
+      this.gate.calls -= 1;
     }
 
     this.lastRecoverVerified = query.succeeded;

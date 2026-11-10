@@ -150,6 +150,7 @@ test("非现金还款严格按 durable action、claim、provider、commit、本�
     { method: "voucher" as const },
     { method: "card" as const, cardProvider: "square" as const },
     { method: "card" as const, cardProvider: "linkly-cloud" as const },
+    { method: "card" as const, cardProvider: "zeller" as const },
   ];
 
   for (const entry of cases) {
@@ -289,6 +290,57 @@ test("claim BUSY 在 provider plan 与授权前停止，且不接管远端 Pendi
   assert.equal(harness.api.appendCalls, 0);
   assert.equal(await harness.runtime.hasRecoveryRequired(), false);
   assert.deepEqual(harness.actionStore.finalizedCreatedReasons, ["ClaimBusy"]);
+});
+
+test("Zeller 续付低于 1.00 澳元：在建立 action 和登记续付占用之前拒绝；正好 1.00 澳元可以收", async () => {
+  const harness = createHarness();
+  const workflow = workflowOf(harness.runtime.createPresenter());
+
+  await assert.rejects(
+    workflow.addRepayment({
+      installmentGuid: "installment-1",
+      amountCents: 99,
+      method: "card",
+      cardProvider: "zeller",
+      voucherReference: null,
+      voucherReservationToken: null,
+    }),
+    (error) => error instanceof Error && "code" in error && error.code === "conflict",
+  );
+  // 占用没有登记，刷卡机没有被调用，也没有留下要恢复的 action。
+  assert.equal(harness.actionStore.createdCandidates.length, 0);
+  assert.equal(harness.api.createClaimCalls.length, 0);
+  assert.equal(harness.payments.beginCalls, 0);
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+
+  // 正好 1.00 澳元可以收；别家通道不受这条限制。
+  await workflow.addRepayment({
+    installmentGuid: "installment-1",
+    amountCents: 100,
+    method: "card",
+    cardProvider: "zeller",
+    voucherReference: null,
+    voucherReservationToken: null,
+  });
+  assert.equal(harness.api.createClaimCalls.length, 1);
+});
+
+test("服务端续付通道能力位对 Zeller 同样生效：放开才展示，没放开即使本机启用也不展示", async () => {
+  const configured: readonly PaymentProviderAvailability[] = [
+    { provider: "zeller", available: true, blocker: null },
+    { provider: "voucher", available: true, blocker: null },
+  ];
+  const availabilityOf = async (cardRepaymentProviders: readonly string[]) => {
+    const harness = createHarness();
+    harness.payments.providerAvailability = configured;
+    harness.api.capabilities = { ...harness.api.capabilities, cardRepaymentProviders };
+    return (
+      await workflowOf(harness.runtime.createPresenter()).listPaymentProviderAvailability!()
+    ).map((entry) => [entry.provider, entry.available] as const);
+  };
+
+  assert.deepEqual(await availabilityOf(["Square", " Zeller "]), [["zeller", true], ["voucher", true]]);
+  assert.deepEqual(await availabilityOf(["square", "linkly"]), [["zeller", false], ["voucher", true]]);
 });
 
 test("Card capability false 在 action ledger 前失败关闭", async () => {

@@ -1450,7 +1450,7 @@ function normalizePaymentSelection(
   value: Record<string, unknown>,
   action: InstallmentPaymentAction,
 ): Readonly<{
-  cardProvider?: "square" | "linkly-cloud" | "manual-card";
+  cardProvider?: "square" | "linkly-cloud" | "manual-card" | "zeller";
   cashTenderedCents?: number;
 }> {
   if (
@@ -1464,7 +1464,8 @@ function normalizePaymentSelection(
     if (
       (value.cardProvider !== "square" &&
         value.cardProvider !== "linkly-cloud" &&
-        value.cardProvider !== "manual-card")
+        value.cardProvider !== "manual-card" &&
+        value.cardProvider !== "zeller")
     ) {
       throw new TypeError("Installment payment selection is invalid.");
     }

@@ -1145,7 +1145,7 @@ test("手动刷卡切换、刷新余额和销毁均清确认，恢复草稿显�
   assert.equal(presenter.getState().manualCardConfirmed, false);
 });
 
-test("Zeller 只在普通销售里可选，分期的首付和续付不能选；发起时走 zeller 通道", async () => {
+test("Zeller 在普通销售、分期首付和分期续付里都可选；发起时走 zeller 通道", async () => {
   const runtime = new FakePaymentRuntime();
   runtime.listProviderAvailability = () => [availability("zeller")];
   const presenter = createPresenter(runtime);
@@ -1156,7 +1156,7 @@ test("Zeller 只在普通销售里可选，分期的首付和续付不能选；�
   for (const flow of ["installment-create", "installment-repayment"] as const) {
     assert.equal(
       canSelectPaymentMethod({ ...state, checkout: { ...state.checkout, flow } }, "zeller"),
-      false,
+      true,
       flow,
     );
   }
