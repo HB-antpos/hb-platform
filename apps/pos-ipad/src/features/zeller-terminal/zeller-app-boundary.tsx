@@ -2,6 +2,7 @@ import * as Application from "expo-application";
 import { type Href, useRouter } from "expo-router";
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
+import { isZellerSettingsAvailable } from "./zeller-availability";
 import { ZellerTerminalBoundary, useZellerTerminalBoundary } from "./zeller-terminal-boundary";
 
 import { zellerTerminalRegistry } from "@/features/payments/zeller/zeller-terminal-registry";
@@ -10,8 +11,13 @@ import type { ZellerSdkVendor } from "@/features/zeller-probe/zeller-sdk-host";
 /**
  * 设置页的 Zeller 页签（配对、启用）目前只在非正式构建里开放：Zeller 收款还没有经过真机和刷卡机验证。
  * 正式版（production 构建）不显示页签，也就没有办法启用 Zeller，SDK 永远不会被加载。
+ * 例外：EAS 档位 `production-zeller` 会带 `EXPO_PUBLIC_HBPOS_ENABLE_ZELLER=1`，
+ * 让测试员能在 TestFlight 包里验证 Zeller（规则见 zeller-availability.ts）。
  */
-const ZELLER_SETTINGS_AVAILABLE = process.env.EXPO_PUBLIC_HBPOS_BUILD_PROFILE !== "production";
+const ZELLER_SETTINGS_AVAILABLE = isZellerSettingsAvailable({
+  buildProfile: process.env.EXPO_PUBLIC_HBPOS_BUILD_PROFILE,
+  enableZeller: process.env.EXPO_PUBLIC_HBPOS_ENABLE_ZELLER,
+});
 
 /**
  * 包在整个 App 的根上：全 App 只有这一处 Zeller SDK。

@@ -37,10 +37,27 @@
         "EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID": "b6491153-83a0-4fe0-9016-49e61e69ed97",
         "EXPO_PUBLIC_HBPOS_UPDATES_URL": "https://u.expo.dev/b6491153-83a0-4fe0-9016-49e61e69ed97"
       }
+    },
+    "production-zeller": {
+      "distribution": "store",
+      "channel": "pos-ipad-production",
+      "environment": "production",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_HBPOS_BUILD_PROFILE": "production",
+        "EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID": "b6491153-83a0-4fe0-9016-49e61e69ed97",
+        "EXPO_PUBLIC_HBPOS_UPDATES_URL": "https://u.expo.dev/b6491153-83a0-4fe0-9016-49e61e69ed97",
+        "EXPO_PUBLIC_HBPOS_ENABLE_ZELLER": "1"
+      }
     }
   },
   "submit": {
     "production": {
+      "ios": {
+        "ascAppId": "6802176079"
+      }
+    },
+    "production-zeller": {
       "ios": {
         "ascAppId": "6802176079"
       }
