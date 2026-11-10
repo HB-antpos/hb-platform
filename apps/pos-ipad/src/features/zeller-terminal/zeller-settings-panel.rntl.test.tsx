@@ -237,3 +237,59 @@ describe("ZellerSettingsPanel", () => {
     }
   });
 });
+
+describe("ZellerSettingsPanel：收款时不弹出 Zeller 窗口开关", () => {
+  const baseProps = {
+    activeProviderLabel: "Linkly",
+    enable: null,
+    sdk: { status: "loading" } as const,
+  };
+
+  it("不提供开关时不显示这一行", async () => {
+    const screen = await render(<ZellerSettingsPanel {...baseProps} locale="zh" />);
+    expect(screen.queryByTestId("settings-zeller-hide-ui")).toBeNull();
+    expect(screen.queryByText("收款时不弹出 Zeller 窗口")).toBeNull();
+  });
+
+  it("显示标题和说明（含「退款和配对仍会弹窗」），开关反映当前值，切换时通知调用方", async () => {
+    const onChange = jest.fn();
+    const screen = await render(
+      <ZellerSettingsPanel {...baseProps} hideSdkUi={{ value: false, onChange }} locale="zh" />,
+    );
+    expect(screen.getByText("收款时不弹出 Zeller 窗口")).toBeTruthy();
+    expect(screen.getByText(/退款和配对仍会弹出 Zeller 窗口/)).toBeTruthy();
+    const control = screen.getByTestId("settings-zeller-hide-ui");
+    expect(control.props.value).toBe(false);
+
+    await fireEvent(control, "valueChange", true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(true);
+
+    await screen.rerender(
+      <ZellerSettingsPanel {...baseProps} hideSdkUi={{ value: true, onChange }} locale="zh" />,
+    );
+    expect(screen.getByTestId("settings-zeller-hide-ui").props.value).toBe(true);
+  });
+
+  it("设置页忙或没有权限时，开关不能改", async () => {
+    const onChange = jest.fn();
+    const screen = await render(
+      <ZellerSettingsPanel
+        {...baseProps}
+        disabled
+        hideSdkUi={{ value: false, onChange }}
+        locale="zh"
+      />,
+    );
+    await fireEvent(screen.getByTestId("settings-zeller-hide-ui"), "valueChange", true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("英文界面显示英文标题", async () => {
+    const screen = await render(
+      <ZellerSettingsPanel {...baseProps} hideSdkUi={{ value: false, onChange: jest.fn() }} locale="en" />,
+    );
+    expect(screen.getByText("Hide the Zeller window when taking payment")).toBeTruthy();
+    expect(screen.getByText(/Refunds and pairing still open the Zeller window/)).toBeTruthy();
+  });
+});

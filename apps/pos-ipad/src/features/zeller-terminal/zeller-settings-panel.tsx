@@ -3,6 +3,7 @@ import { mapZellerSdkPairingResponse } from "@hb/pos-payments-core/features/paym
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 
+import type { ZellerHideSdkUiControl } from "./zeller-hide-sdk-ui";
 import {
   zellerSettingsText,
   type ZellerSettingsCopyKey,
@@ -12,6 +13,7 @@ import type { ZellerTerminalBoundaryState } from "./zeller-terminal-boundary";
 
 import type { ZellerProbeTerminal } from "@/features/zeller-probe/zeller-probe-runner";
 import { PosButton, type PosButtonTone } from "@/ui/controls/pos-button";
+import { PosSwitch } from "@/ui/controls/pos-switch";
 import {
   createPosStyles,
   posColors,
@@ -53,6 +55,8 @@ export type ZellerSettingsPanelProps = Readonly<{
    */
   enable: Readonly<{ active: boolean; onEnable(): void }> | null;
   locale: ZellerSettingsLocale;
+  /** 「收款时不弹出 Zeller 窗口」开关；不提供时不显示这一行。 */
+  hideSdkUi?: ZellerHideSdkUiControl;
   /** 设置页忙或当前收银员没有配置支付的权限时为 true。 */
   disabled?: boolean;
   onOpenNetworkCheck?: () => void;
@@ -101,6 +105,7 @@ export function ZellerSettingsPanel({
   activeProviderLabel,
   enable,
   locale,
+  hideSdkUi,
   disabled = false,
   onOpenNetworkCheck,
   now = () => new Date(),
@@ -253,6 +258,24 @@ export function ZellerSettingsPanel({
             />
           </View>
 
+          {hideSdkUi ? (
+            <View style={styles.switchRow}>
+              <View style={styles.switchCopy}>
+                <Text style={styles.switchTitle}>{t("hideUi.title")}</Text>
+                <Text style={styles.switchHint}>{t("hideUi.hint")}</Text>
+              </View>
+              <PosSwitch
+                accessibilityLabel={t("hideUi.title")}
+                disabled={disabled}
+                onValueChange={hideSdkUi.onChange}
+                style={styles.switchControl}
+                testID="settings-zeller-hide-ui"
+                value={hideSdkUi.value}
+                {...switchTint()}
+              />
+            </View>
+          ) : null}
+
           <View style={styles.actions}>
             {view === "offline" ? (
               <>
@@ -364,6 +387,18 @@ export function ZellerSettingsPanel({
       <Text style={styles.footer}>{t("footer.note")}</Text>
     </View>
   );
+}
+
+/**
+ * 开关配色与触控范围，与设置页其余开关一致。开关本体只有 31 高，44 的触控目标靠扩大点击范围得到，
+ * 不能靠撑大 Switch 自己的尺寸：iOS 上 ios_backgroundColor 会铺满整个 Switch 视图，撑大后会在轨道后面露出灰底。
+ */
+function switchTint() {
+  return {
+    ios_backgroundColor: posColors.disabledBorder,
+    trackColor: { false: posColors.disabledBorder, true: posColors.accent },
+    hitSlop: { bottom: 7, left: 4, right: 4, top: 7 },
+  };
 }
 
 /** 时钟时间 HH:mm；不带日期，界面上配「今天」二字。 */
@@ -524,6 +559,18 @@ const styles = createPosStyles((colors) => ({
   },
   rowLabel: { color: colors.mutedInk, fontSize: 14, fontWeight: "700" },
   rowValue: { color: colors.ink, flexShrink: 1, fontSize: 15, fontWeight: "800", textAlign: "right" },
+  switchRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: posTouch.min,
+    paddingVertical: 4,
+  },
+  switchCopy: { flex: 1, gap: 2 },
+  switchTitle: { color: colors.ink, fontSize: 15, fontWeight: "800" },
+  switchHint: { color: colors.mutedInk, fontSize: 12.5, fontWeight: "600", lineHeight: 18 },
+  switchControl: { transform: [{ scaleX: 1.1 }, { scaleY: 1.1 }] },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   banner: {
     alignItems: "center",

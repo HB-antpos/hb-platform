@@ -45,7 +45,8 @@ export type ZellerProbeOperation = PromiseLike<unknown> & {
 export type ZellerProbeTerminal = Readonly<{
   initialise(): ZellerProbeOperation;
   setup(): ZellerProbeOperation;
-  purchase(options: { amount: number; reference: string }): ZellerProbeOperation;
+  /** unattended 为 true 时 SDK 以「隐藏」方式显示窗口（透明、不接收触摸），支付仍在刷卡机上进行。 */
+  purchase(options: { amount: number; reference: string; unattended?: boolean }): ZellerProbeOperation;
   refund(options: { amount: number; purchase: string; reference: string }): ZellerProbeOperation;
   getTransactions(options: { reference: string }): ZellerProbeOperation;
 }>;

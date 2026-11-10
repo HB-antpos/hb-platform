@@ -1569,6 +1569,7 @@ function PaymentsPane({
               }}
               locale={locale}
               sdk={zeller.state}
+              {...(zeller.hideSdkUi ? { hideSdkUi: zeller.hideSdkUi } : {})}
               {...(zeller.onOpenNetworkCheck ? { onOpenNetworkCheck: zeller.onOpenNetworkCheck } : {})}
             />
           ) : null}

@@ -57,6 +57,9 @@ export const zellerSettingsEnglishCopy = {
     "Once it shows “Paired”, tap “Enable Zeller”. Each iPad is paired once; restarts and updates keep the pairing.",
   "footer.note":
     "Pair first, then enable. Square and Linkly settings stay as they are when you switch back. Keep all terminals of one store under the same Zeller Site, otherwise a refund from another terminal may not find the original payment.",
+  "hideUi.title": "Hide the Zeller window when taking payment",
+  "hideUi.hint":
+    "Card payments run on the terminal without covering this screen. Follow the prompts on the terminal and use “Cancel payment” on the payment page to cancel. Refunds and pairing still open the Zeller window.",
 } as const;
 
 export type ZellerSettingsCopyKey = keyof typeof zellerSettingsEnglishCopy;
@@ -118,6 +121,9 @@ export const zellerSettingsChineseCopy = {
     "显示「已配对」后，点「启用 Zeller」。每台 iPad 只需配对一次，重启和更新都不用重配。",
   "footer.note":
     "先配对，再启用。切回 Square 或 Linkly 时，它们的设置都还在。同一家店的刷卡机请放在同一个 Zeller Site 下，否则跨刷卡机退款可能找不到原交易。",
+  "hideUi.title": "收款时不弹出 Zeller 窗口",
+  "hideUi.hint":
+    "刷卡扣款时 iPad 上不再盖一层 Zeller 窗口，请看刷卡机屏幕上的提示操作；要取消请点付款页的「取消支付」。退款和配对仍会弹出 Zeller 窗口。",
 } as const satisfies Record<ZellerSettingsCopyKey, string>;
 
 const zellerSettingsCopy = {

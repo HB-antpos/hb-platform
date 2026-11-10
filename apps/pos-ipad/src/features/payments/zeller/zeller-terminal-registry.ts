@@ -14,6 +14,11 @@ export type ZellerTerminalSource = Readonly<{
   current(): ZellerProbeTerminal | null;
   /** 告诉界面层「需要 Zeller 终端」，让它开始加载 SDK。重复调用无副作用；不保证立刻可用。 */
   request?(): void;
+  /**
+   * 扣款时是否隐藏 SDK 自带的全屏窗口（设置里的开关）。缺省视为 false。
+   * 只对扣款有效：SDK 的退款没有这个选项，配对必须弹窗。
+   */
+  hideSdkUi?(): boolean;
 }>;
 
 export class ZellerTerminalRegistry implements ZellerTerminalSource {
@@ -33,6 +38,15 @@ export class ZellerTerminalRegistry implements ZellerTerminalSource {
 
   /** 运行时是否已经提出过需要 Zeller 终端。提出后本次进程内不再撤回。 */
   public isWanted = (): boolean => this.wanted;
+
+  private hideSdkUiValue = false;
+
+  /** 扣款时是否隐藏 SDK 窗口；由界面层按本机设置写入，适配器每次扣款前现读。 */
+  public hideSdkUi = (): boolean => this.hideSdkUiValue;
+
+  public setHideSdkUi(hidden: boolean): void {
+    this.hideSdkUiValue = hidden;
+  }
 
   /** 订阅「需要 Zeller 终端」的变化；返回取消订阅函数。签名与 useSyncExternalStore 兼容。 */
   public subscribe = (listener: () => void): (() => void) => {
