@@ -1437,7 +1437,7 @@ function LinklyTerminalSelector({
 }
 
 /**
- * 右栏动作区里的恢复类操作：恢复支付 / 确认已收 / 主管作废礼品卡 / 尚未收现取消续付。
+ * 右栏动作区里的恢复类操作：恢复支付 / 确认已收 / 主管作废购物券 / 尚未收现取消续付。
  * 「取消支付」单独放在左栏底部（见 PaymentContextPane），显示条件由 recoveryActionFlags 统一给出。
  */
 function RecoveryActions({
@@ -2172,7 +2172,6 @@ function PaymentInstallmentToggle({
         onPress={() => control.onToggle(!control.enabled)}
         style={({ pressed }) => [
           styles.methodButton,
-          styles.installmentToggleTile,
           control.locked && styles.methodButtonDisabled,
           pressed && !control.locked && styles.pressed,
         ]}
@@ -3198,16 +3197,16 @@ const styles = createPosStyles((colors) => ({
     top: 8,
     right: 10,
   },
-  // 开关块独占一行（两列网格里本来只占半行，英文文字区不够用）。
-  installmentToggleTile: {
-    maxWidth: "100%",
-    flexBasis: "100%",
-  },
+  // 开关放在块的右上角（与选中方式的勾同一个位置，不占文字区）：
+  // 块与其他付款方式一样大，半宽里放不下「图标 + 文字 + 开关」三样，并排会把英文挤成 "Lay…"。
   installmentToggleTrack: {
-    width: 54,
-    height: 32,
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 44,
+    height: 26,
     padding: 3,
-    borderRadius: 16,
+    borderRadius: 13,
     backgroundColor: colors.border,
     justifyContent: "center",
   },
@@ -3215,9 +3214,9 @@ const styles = createPosStyles((colors) => ({
     backgroundColor: colors.green,
   },
   installmentToggleThumb: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: colors.surface,
   },
   installmentToggleThumbEnabled: {

@@ -627,8 +627,8 @@ export const settingsChineseCopy = {
   "payments.methodsHint": "保存后生效，两个开关默认关闭。",
   "payments.manualCard": "手动刷卡",
   "payments.manualCardHint": "开启后替代收银页的信用卡入口，由收银员确认独立刷卡机收款成功；关闭后恢复已配置的刷卡机。",
-  "payments.giftCard": "礼品卡",
-  "payments.giftCardHint": "开启礼品卡核销，使用现有礼品卡服务。",
+  "payments.giftCard": "购物券",
+  "payments.giftCardHint": "开启购物券核销，使用现有购物券服务。",
   "payments.saveMethods": "保存支付方式",
   "payments.title": "支付设置",
   "payments.subtitle":

@@ -191,7 +191,7 @@ test("支付配置缺少显式 provider 或试图同时持久化两种卡终端�
   );
 });
 
-test("选中 Zeller 只保存通道本身；切回 Linkly 时 Zeller 的选择被替换，礼品卡开关保留", async () => {
+test("选中 Zeller 只保存通道本身；切回 Linkly 时 Zeller 的选择被替换，购物券开关保留", async () => {
   const secureStore = new InMemorySecureStore();
   const subject = new PosPublicRuntimeConfigurationStore(
     secureStore,

@@ -71,7 +71,7 @@ const COPY: Readonly<
     paymentRecoveryUnpaid: "人工确认刷卡未扣款",
     paymentRecoveryUncertain: "保留刷卡待核实状态",
     paymentRecoverySquareRefundOtherwise: "确认被拒的 Square 退款已用其他方式退给顾客",
-    paymentTenderVoidUnreleased: "作废已阻断的礼品卡付款",
+    paymentTenderVoidUnreleased: "作废已阻断的购物券付款",
     returnResolveUnknownRefund: "主管结案：退款结果未知",
     inputLabel: "主管条码",
     inputHint: "扫描主管条码",
