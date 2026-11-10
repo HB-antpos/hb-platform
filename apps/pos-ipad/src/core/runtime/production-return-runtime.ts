@@ -130,6 +130,8 @@ export type ProductionReturnRuntimeDependencies = Readonly<{
   supervisorResolution?: ReturnSupervisorResolutionPort | undefined;
   /** 主管结案后补发后端会话 supervisorResolved ACK；失败只留队列，不影响结案结果。 */
   supervisorAcknowledgements?: Readonly<{ drain(): Promise<unknown> }> | undefined;
+  /** 本机此刻是否启用着 Zeller 刷卡通道；缺省时 Zeller 原付款只能代替退款。 */
+  zellerOriginalRefundAvailable?: (() => boolean) | undefined;
   sha256Hex(material: string): Promise<string>;
   createId(): string;
   nowIso(): string;
@@ -347,6 +349,7 @@ function createPresenterForLease(
       localCatalog: context.localCatalog,
       capacityVault: context.capacityVault,
       localReturnRecords: input.database.localReturnRecords?.(),
+      zellerOriginalRefundAvailable: input.zellerOriginalRefundAvailable,
       createOpaqueId: () => runtimeId(input),
     }),
     collector,

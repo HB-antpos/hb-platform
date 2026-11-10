@@ -17,6 +17,8 @@ import type { CardSyncEvidenceV1 } from "@hb/pos-domain/core/contracts/payment";
 import {
   deriveZellerAttemptReference,
   formatZellerPayment,
+  formatZellerRefund,
+  parseZellerPayment,
 } from "@hb/pos-payments-core/features/payments/zeller/zeller-payment-reference";
 
 import { readManualPaymentSyncEvidence } from "./sqlite-manual-payment-sync";
@@ -517,7 +519,7 @@ export class SqliteOrderSyncMaterialResolver {
       );
     }
     if (attempt.provider === "zeller") {
-      return resolveZeller(tender, attempt);
+      return this.resolveZeller(tender, attempt, bindings[0] ?? null, order);
     }
     if (attempt.provider === "manual-card") {
       if (attempt.operation !== "purchase" || attempt.txnRef !== `MANUAL:${attempt.attemptId}` || attempt.paymentId !== null || attempt.sessionId !== null || attempt.rfn !== null || attempt.checkoutId !== null) throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
@@ -657,6 +659,101 @@ export class SqliteOrderSyncMaterialResolver {
         refundReference,
         context.originalReference,
       ),
+      null,
+    );
+  }
+
+  /**
+   * Zeller 的订单引用，与 WPF 收银机和服务端的格式一致（共用 test-fixtures/zeller/payment-reference-vectors.json）。
+   * 扣款：ZELLER:{reference}:{transactionUuid}。
+   * 退款：CARD_REFUND|refund=ZELLERRF:{reference}:{退款的 transactionUuid}|original={原付款引用}。
+   *
+   * 中文注释：
+   * 1. 扣款 attempt 上 txnRef 存发给 Zeller 的 reference（HBZ-…，提交前落库），paymentId 存 Zeller 返回的
+   *    transactionUuid（批准时落库）。两者缺一、格式不对，或带了别家通道才有的引用，一律不上传：
+   *    没有 transactionUuid 的引用以后无法原路退回，也无法在 Zeller 后台对账。
+   * 2. 退款 attempt 上 txnRef 存本次退款的 reference（HBZR-…），paymentId 存的是**原交易**的 transactionUuid
+   *    （退货额度保险库给的种子），必须与保险库里这份额度的原交易号一致。退款自己的 transactionUuid
+   *    不在 attempt 上，只在批准时加密保存的卡证据里（txnRef），从那里取。
+   * 3. original 用保险库里原样保存的原付款引用：服务端按它找原付款并扣减可退额度。
+   */
+  private async resolveZeller(
+    tender: OrderTender,
+    attempt: ApprovedAttempt,
+    binding: ReturnBindingRow | null,
+    order: LocalOrder,
+  ): Promise<OrderTender> {
+    if (
+      tender.method !== "card" ||
+      attempt.provider !== "zeller" ||
+      attempt.txnRef === null ||
+      attempt.paymentId === null ||
+      attempt.sessionId !== null ||
+      attempt.rfn !== null ||
+      attempt.checkoutId !== null ||
+      // reference 必须就是这笔 attempt 派生出来的那一个，不能是别的 attempt 的。
+      attempt.txnRef !== deriveZellerAttemptReference(attempt)
+    ) {
+      throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+    }
+    if (attempt.operation === "purchase") {
+      try {
+        return frozenTender(
+          tender,
+          formatZellerPayment(attempt.txnRef, attempt.paymentId),
+          null,
+        );
+      } catch {
+        throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
+      }
+    }
+
+    const returnIdentity = requireReturnBinding(binding, order, tender, attempt);
+    const context = await resolveProtectedMaterial(
+      () => this.options.returnCapacityVault
+        .resolveProtectedContext(returnIdentity.capacityId),
+      "ORDER_SYNC_RETURN_CONTEXT_MISMATCH",
+    );
+    if (
+      !isExactContext(
+        context,
+        ["version", "provider", "transactionUuid", "originalReference"],
+      ) ||
+      context.version !== 1 ||
+      context.provider !== "zeller" ||
+      context.transactionUuid !== attempt.paymentId ||
+      typeof context.originalReference !== "string" ||
+      parseZellerPayment(context.originalReference)?.transactionUuid !==
+        attempt.paymentId
+    ) {
+      throw materialError("ORDER_SYNC_RETURN_CONTEXT_MISMATCH");
+    }
+    const reader = this.options.paymentProtectedMaterials;
+    if (!reader) {
+      throw new Error(
+        "Payment protected material reader is not configured.",
+      );
+    }
+    const evidence = await resolveProtectedMaterial(
+      () => reader.read({
+        attemptId: attempt.attemptId,
+        orderGuid: order.orderGuid,
+        provider: "zeller",
+        operation: "refund",
+        amountCents: tender.amount.cents,
+      }),
+      "ORDER_SYNC_CARD_EVIDENCE_MISMATCH",
+    );
+    let refundReference: string;
+    try {
+      // 卡证据缺失，或里面的退款交易号格式不对，formatZellerRefund 都会抛错：不上传。
+      refundReference = formatZellerRefund(attempt.txnRef, evidence?.txnRef ?? "");
+    } catch {
+      throw materialError("ORDER_SYNC_CARD_EVIDENCE_MISMATCH");
+    }
+    return frozenTender(
+      tender,
+      formatCardRefundReference(refundReference, context.originalReference),
       null,
     );
   }
@@ -2006,41 +2103,6 @@ function paymentProvider(
     return value;
   }
   throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
-}
-
-/**
- * Zeller 扣款的订单引用：ZELLER:{reference}:{transactionUuid}，与 WPF 收银机和服务端的格式一致
- * （共用 test-fixtures/zeller/payment-reference-vectors.json）。
- *
- * 中文注释：attempt 上 txnRef 存发给 Zeller 的 reference（HBZ-…，提交前落库），paymentId 存 Zeller 返回的
- * transactionUuid（批准时落库）。两者缺一、格式不对，或带了别家通道才有的引用，一律不上传：
- * 没有 transactionUuid 的引用以后无法原路退回，也无法在 Zeller 后台对账。
- * 退款还没有接入，Zeller 的退款 attempt 不应该存在，存在就失败关闭。
- */
-function resolveZeller(tender: OrderTender, attempt: ApprovedAttempt): OrderTender {
-  if (
-    tender.method !== "card" ||
-    attempt.provider !== "zeller" ||
-    attempt.operation !== "purchase" ||
-    attempt.txnRef === null ||
-    attempt.paymentId === null ||
-    attempt.sessionId !== null ||
-    attempt.rfn !== null ||
-    attempt.checkoutId !== null
-  ) {
-    throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
-  }
-  let reference: string;
-  try {
-    reference = formatZellerPayment(attempt.txnRef, attempt.paymentId);
-  } catch {
-    throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
-  }
-  // reference 必须就是这笔 attempt 派生出来的那一个，不能是别的 attempt 的。
-  if (attempt.txnRef !== deriveZellerAttemptReference(attempt)) {
-    throw materialError("ORDER_SYNC_ATTEMPT_MISMATCH");
-  }
-  return frozenTender(tender, reference, null);
 }
 
 function paymentOperation(

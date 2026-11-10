@@ -25,6 +25,7 @@ import {
   buildVoucherFundedBasis,
   isManualCardReturnMaterial,
   isZellerCardReturnMaterial,
+  zellerOriginalPaymentOf,
 } from "./return-lookup-adapter";
 
 import type { CartLine } from "@hb/pos-domain/core/contracts/cart";
@@ -400,10 +401,21 @@ function cardProtectedContext(
     return { version: 1, provider: "manual-card" };
   }
   if (isZellerCardReturnMaterial(material)) {
-    // Zeller 原付款（WPF 收的单）同样只登记额度：本机没有 Zeller 刷卡通道，
-    // 引用与交易号不进入 Vault；领域层按 substituteOnly 拒绝原路退款，只能现金 / 代金券代替。
+    // 中文注释：Zeller 原付款。取得出原交易号的，把原交易号和原付款引用存进 Vault，供原路退款使用：
+    // 退款时用原交易号告诉 Zeller 退哪一笔，退货单上传时用原付款引用告诉服务端扣哪一笔的可退额度。
+    // 取不出的（主管确认的未核实引用、损坏的引用、只有处理器名）只登记额度，只能现金 / 代金券代替。
+    // 这里的形状只由原单决定，不看本机有没有启用 Zeller：Vault 靠上下文内容找回同一笔付款的历史额度，
+    // 形状随设置变化会让同一笔付款多出一份可退额度。本机能不能原路退由查单结果上的 substituteOnly 表达。
     // 不能落到下面的 Linkly 分支——那会因缺 RFN 抛 RETURN_SOURCE_MISMATCH，让整张原单查不出来。
-    return { version: 1, provider: "zeller" };
+    const original = zellerOriginalPaymentOf(material);
+    return original === null
+      ? { version: 1, provider: "zeller" }
+      : {
+          version: 1,
+          provider: "zeller",
+          transactionUuid: original.transactionUuid,
+          originalReference: original.originalReference,
+        };
   }
   const originalReference = requiredProviderText(
     material.protectedProviderMaterial.reference,

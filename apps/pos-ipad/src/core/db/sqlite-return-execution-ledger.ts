@@ -2066,7 +2066,9 @@ async function assertPaymentProviderAttemptBinding(
       signature.amountCents ||
     !(
       (method === "card" &&
-        (provider === "square" || provider === "linkly-cloud")) ||
+        (provider === "square" ||
+          provider === "linkly-cloud" ||
+          provider === "zeller")) ||
       (method === "voucher" && provider === "voucher")
     )
   ) {
