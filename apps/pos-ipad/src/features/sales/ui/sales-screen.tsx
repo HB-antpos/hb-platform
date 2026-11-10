@@ -2852,8 +2852,14 @@ const CartLineRow = memo(function CartLineRow({
           tone="danger"
         />
       </View>
+      {/*
+        pointerEvents="box-none"：这层手势壳铺满整行，向左滑开后右侧 96 宽的区域是空的，
+        露出的「删除」按钮在它下面。壳自己要是接触摸（默认 auto），点「删除」会被它截走，
+        真机上就点不了；box-none 让壳只在子视图（滑动面）上触发手势，空白处的触摸交给下面的按钮。
+      */}
       <PosPanResponderView
         panHandlers={swipeResponder.panHandlers}
+        pointerEvents="box-none"
         testID={`sales-line-${item.lineId}-swipe-surface`}
       >
         <Animated.View
