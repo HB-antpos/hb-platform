@@ -9,6 +9,7 @@ import {
   type TouchSoundKind,
   usePosSound,
 } from "@/ui/feedback/pos-sound-context";
+import { usePosThemeVersion } from "@/ui/theme";
 
 export type PosTextInputProps = TextInputProps &
   Readonly<{ sound?: TouchSoundKind | false }>;
@@ -27,6 +28,7 @@ export const PosTextInput = forwardRef<TextInput, PosTextInputProps>(
     },
     ref,
   ) {
+    usePosThemeVersion();
     const { play } = usePosSound();
     const touch = useRef({ active: false, moved: false });
 

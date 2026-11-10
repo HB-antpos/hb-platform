@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Jest runtime mock must load before the components. */
 import { expect, jest, test } from "@jest/globals";
 import { render } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 
 jest.doMock("react-i18next", () => ({
   useTranslation: () => ({
@@ -27,6 +28,7 @@ jest.doMock("expo-camera", () => {
 
 const { CameraScannerModal } = require("./camera-scanner-modal") as typeof import("./camera-scanner-modal");
 const { CameraScannerInline } = require("./camera-scanner-inline") as typeof import("./camera-scanner-inline");
+const { applyPosTheme } = require("@/ui/theme") as typeof import("@/ui/theme");
 type CameraScannerPort = import("./camera-scanner-session").CameraScannerPort;
 
 test("单次与连续相机启用 ean13、code128 和 qr", async () => {
@@ -84,6 +86,52 @@ test("单次与连续相机均显示横向窄取景框", async () => {
 
   await modal.unmount();
   await inline.unmount();
+});
+
+test("关闭按钮不小于 56 高；换成深色主题后对准框仍是白色", async () => {
+  applyPosTheme("dark");
+  try {
+    const modal = await render(
+      <CameraScannerModal
+        context="product"
+        onClose={jest.fn()}
+        onScan={jest.fn()}
+        scanner={new CameraScannerPortStub()}
+        visible
+      />,
+    );
+    const inline = await render(
+      <CameraScannerInline
+        context="product"
+        onClose={jest.fn()}
+        onScan={jest.fn(async () => true)}
+        scanner={new CameraScannerPortStub()}
+        visible
+      />,
+    );
+
+    await modal.findByTestId("camera-scanner-preview");
+    await inline.findByTestId("camera-scanner-preview");
+    for (const button of [
+      modal.getByTestId("camera-scanner-close"),
+      inline.getByTestId("camera-scanner-inline-close"),
+    ]) {
+      expect(
+        StyleSheet.flatten(button.props.style).minHeight,
+      ).toBeGreaterThanOrEqual(56);
+    }
+    // 对准框压在实时画面上，不能跟着主题变成深色。
+    for (const tree of [modal.toJSON(), inline.toJSON()]) {
+      expect(findViewfinder(tree).props.style).toEqual(
+        expect.objectContaining({ borderColor: "#FFFFFF" }),
+      );
+    }
+
+    await modal.unmount();
+    await inline.unmount();
+  } finally {
+    applyPosTheme("classic");
+  }
 });
 
 class CameraScannerPortStub implements CameraScannerPort {

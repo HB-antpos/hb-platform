@@ -5,19 +5,22 @@ import {
   BUTTON_SOUND_PREFERENCE_KEY,
   CAMERA_SCAN_MODE_PREFERENCE_KEY,
   LANGUAGE_PREFERENCE_KEY,
-  SPECIAL_NODE_SOUND_PREFERENCE_KEY,
-  TOUCH_SOUND_PREFERENCE_KEY,
+  NAV_PINNED_PREFERENCE_KEY,
   readButtonSoundEnabled,
   readCameraScanMode,
-  readSalesToolbarOrder,
+  readPinnedDestinations,
   readSpecialNodeSoundEnabled,
   readStoredLanguage,
-  SALES_TOOLBAR_ORDER_PREFERENCE_KEY,
+  readStoredTheme,
   saveButtonSoundEnabled,
   saveCameraScanMode,
-  saveSalesToolbarOrder,
+  savePinnedDestinations,
   saveSpecialNodeSoundEnabled,
   saveStoredLanguage,
+  saveStoredTheme,
+  SPECIAL_NODE_SOUND_PREFERENCE_KEY,
+  THEME_PREFERENCE_KEY,
+  TOUCH_SOUND_PREFERENCE_KEY,
 } from "./terminal-ui-preferences";
 
 import type { CameraScanMode } from "@/core/contracts/scanner";
@@ -53,28 +56,9 @@ test("语言偏好只接受 zh/en，读取异常时安全回退", () => {
   expect(readStoredLanguage()).toBeNull();
 });
 
-test("工具栏排序只接受字符串数组，并在损坏或读取异常时忽略", () => {
-  mockGetItemSync.mockReturnValue(JSON.stringify(["search", "payment"]));
-  expect(readSalesToolbarOrder()).toEqual(["search", "payment"]);
-  expect(mockGetItemSync).toHaveBeenCalledWith(
-    SALES_TOOLBAR_ORDER_PREFERENCE_KEY,
-  );
-
-  mockGetItemSync.mockReturnValue('["search", 1]');
-  expect(readSalesToolbarOrder()).toBeNull();
-
-  mockGetItemSync.mockReturnValue("{");
-  expect(readSalesToolbarOrder()).toBeNull();
-
-  mockGetItemSync.mockImplementation(() => {
-    throw new Error("SQLite unavailable");
-  });
-  expect(readSalesToolbarOrder()).toBeNull();
-});
-
 test("异步保存使用固定键且吞掉存储异常", async () => {
   await saveStoredLanguage("en");
-  await saveSalesToolbarOrder(["search", "payment"]);
+  await savePinnedDestinations(["returns", "settings"]);
 
   expect(mockSetItem).toHaveBeenNthCalledWith(
     1,
@@ -83,13 +67,13 @@ test("异步保存使用固定键且吞掉存储异常", async () => {
   );
   expect(mockSetItem).toHaveBeenNthCalledWith(
     2,
-    SALES_TOOLBAR_ORDER_PREFERENCE_KEY,
-    '["search","payment"]',
+    NAV_PINNED_PREFERENCE_KEY,
+    '["returns","settings"]',
   );
 
   mockSetItem.mockRejectedValue(new Error("disk full"));
   await expect(saveStoredLanguage("zh")).resolves.toBeUndefined();
-  await expect(saveSalesToolbarOrder(["payment"])).resolves.toBeUndefined();
+  await expect(savePinnedDestinations(["returns"])).resolves.toBeUndefined();
 });
 
 test("相机扫码模式只接受 single/continuous，缺失、损坏或读取异常时回退单次", () => {
@@ -203,4 +187,51 @@ test("双音效只写各自新键，写入异常不抛错且不触碰旧键", as
   mockSetItem.mockRejectedValue(new Error("disk full"));
   await expect(saveButtonSoundEnabled(true)).resolves.toBeUndefined();
   await expect(saveSpecialNodeSoundEnabled(false)).resolves.toBeUndefined();
+});
+
+test("界面主题只接受已知主题 ID，读取异常时回退为 null", async () => {
+  mockGetItemSync.mockReturnValue("dark");
+  expect(readStoredTheme()).toBe("dark");
+  expect(mockGetItemSync).toHaveBeenCalledWith(THEME_PREFERENCE_KEY);
+
+  mockGetItemSync.mockReturnValue("neon");
+  expect(readStoredTheme()).toBeNull();
+
+  mockGetItemSync.mockImplementation(() => {
+    throw new Error("SQLite unavailable");
+  });
+  expect(readStoredTheme()).toBeNull();
+
+  await saveStoredTheme("ocean");
+  expect(mockSetItem).toHaveBeenCalledWith(THEME_PREFERENCE_KEY, "ocean");
+
+  mockSetItem.mockClear();
+  await saveStoredTheme("neon" as never);
+  expect(mockSetItem).not.toHaveBeenCalled();
+
+  mockSetItem.mockRejectedValue(new Error("disk full"));
+  await expect(saveStoredTheme("dark")).resolves.toBeUndefined();
+});
+
+test("侧栏固定项只接受字符串数组，损坏数据与存储故障一律忽略", async () => {
+  expect(readPinnedDestinations()).toBeNull();
+
+  mockGetItemSync.mockReturnValue(JSON.stringify(["returns", "settings"]));
+  expect(readPinnedDestinations()).toEqual(["returns", "settings"]);
+  expect(mockGetItemSync).toHaveBeenCalledWith(NAV_PINNED_PREFERENCE_KEY);
+
+  mockGetItemSync.mockReturnValue("{not json");
+  expect(readPinnedDestinations()).toBeNull();
+
+  mockGetItemSync.mockReturnValue(JSON.stringify([1, 2]));
+  expect(readPinnedDestinations()).toBeNull();
+
+  await savePinnedDestinations(["returns"]);
+  expect(mockSetItem).toHaveBeenCalledWith(
+    NAV_PINNED_PREFERENCE_KEY,
+    JSON.stringify(["returns"]),
+  );
+
+  mockSetItem.mockRejectedValue(new Error("disk full"));
+  await expect(savePinnedDestinations(["returns"])).resolves.toBeUndefined();
 });

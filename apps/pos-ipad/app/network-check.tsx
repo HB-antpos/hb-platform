@@ -9,12 +9,14 @@ import {
   NetworkCheckScreen,
 } from "@/features/network-check";
 import { resolveCurrentApiBaseUrl } from "@/ui/shell/network-status-bridge";
+import { usePosThemeVersion } from "@/ui/theme";
 
 /**
  * 网络检测不经过设备 / 收银员门禁：只发只读 GET、不带任何令牌，
  * 启动失败、待审批、未登录时都要能用来排查网络。
  */
 export default function NetworkCheckRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
   const ports = useMemo(createExpoNetworkCheckPorts, []);

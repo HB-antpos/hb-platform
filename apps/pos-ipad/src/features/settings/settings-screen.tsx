@@ -1,7 +1,9 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
+  Keyboard,
   Linking,
   Modal,
   ScrollView,
@@ -12,7 +14,6 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { ApiEntrySettingsController } from "@hb/pos-api-client/api-entry-mode-coordinator";
 import {
@@ -63,14 +64,33 @@ import { zellerSettingsText } from "@/features/zeller-terminal/zeller-settings-c
 import { ZellerSettingsPanel } from "@/features/zeller-terminal/zeller-settings-panel";
 import { useZellerTerminalBoundary } from "@/features/zeller-terminal/zeller-terminal-boundary";
 import {
+  PosButton,
+  type PosButtonSize,
+  type PosButtonTone,
+  type PosIconName,
+} from "@/ui/controls/pos-button";
+import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
+import { PosPill, type PosPillTone } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
+import { PosSegmented } from "@/ui/controls/pos-segmented";
 import { PosSwitch } from "@/ui/controls/pos-switch";
-import { usePosSound } from "@/ui/feedback/pos-sound-context";
+import {
+  type TouchSoundKind,
+  usePosSound,
+} from "@/ui/feedback/pos-sound-context";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { posColors } from "@/ui/theme";
+import { PosThemePicker } from "@/ui/shell/pos-theme-picker";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  posTouch,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 export const SETTINGS_MIN_TOUCH_TARGET = 44;
 
@@ -157,19 +177,51 @@ type SettingsScreenProps = Readonly<{
 }>;
 
 const NAV_ITEMS: readonly Readonly<{
+  icon: PosIconName;
   label: SettingsCopyKey;
   pane: SettingsPane;
 }>[] = [
-  { pane: "general", label: "navigation.general" },
-  { pane: "payments", label: "navigation.payments" },
-  { pane: "peripherals", label: "navigation.peripherals" },
-  { pane: "device", label: "navigation.device" },
-  { pane: "hardware", label: "navigation.hardware" },
+  { pane: "general", label: "navigation.general", icon: "cog-outline" },
+  {
+    pane: "payments",
+    label: "navigation.payments",
+    icon: "credit-card-outline",
+  },
+  {
+    pane: "peripherals",
+    label: "navigation.peripherals",
+    icon: "printer-outline",
+  },
+  { pane: "device", label: "navigation.device", icon: "tablet" },
+  { pane: "hardware", label: "navigation.hardware", icon: "test-tube" },
 ];
 
 /**
- * iPad 横屏设置台保持清晰的左侧分区与右侧工作区。危险操作不使用平台 Alert，
- * 而在同一屏显示完整影响范围，确保自动化、键盘与触控都走同一确认路径。
+ * 软键盘当前占用的高度（没有键盘为 0）。确认弹窗带「员工条码」输入框且文案很长（英文尤甚），
+ * 居中的卡片会被键盘盖住下半截；把遮罩层的底部内边距加上键盘高度，
+ * 卡片就在键盘之上的可见区域里居中，标题、说明、输入框和按钮都不被盖住。
+ */
+function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardWillShow", (event) =>
+      setHeight(event.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener("keyboardWillHide", () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
+/** 窄屏 iPad 上线路管理需要更宽的工作区，分区目录在这个宽度以下收窄。 */
+const SETTINGS_COMPACT_NAVIGATION_WIDTH = 1100;
+
+/**
+ * iPad 横屏设置台：左侧是放大的分区目录与当前终端，右侧每组设置一张卡片。
+ * 危险操作不使用平台 Alert，而在同一屏显示完整影响范围，确保自动化、键盘与触控都走同一确认路径。
  */
 export function SettingsScreen({
   apiEntry,
@@ -180,6 +232,8 @@ export function SettingsScreen({
   presenter,
   scanner,
 }: SettingsScreenProps) {
+  usePosThemeVersion();
+  const keyboardHeight = useKeyboardHeight();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -217,34 +271,32 @@ export function SettingsScreen({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} testID="settings-screen">
+    <PosScreenFrame
+      active="settings"
+      header={
+        <PosPageHeader
+          backDisabled={interactionLocked}
+          backLabel={t("action.backToSales")}
+          backTestID="settings-back"
+          onBack={onBack}
+          subtitle={t("header.subtitle")}
+          title={t("header.title")}
+        />
+      }
+      // 忙碌或确认弹窗打开时不允许从侧栏跳走，与「返回」按钮的禁用条件一致。
+      navigationLocked={interactionLocked}
+      testID="settings-screen"
+    >
+      {scanner ? (
+        <HidScannerCapture
+          active={
+            state.activePane === "hardware" && state.confirmation === null
+          }
+          onCaptureStatusChange={setScannerStatus}
+          scanner={scanner}
+        />
+      ) : null}
       <View style={styles.page}>
-        {scanner ? (
-          <HidScannerCapture
-            active={
-              state.activePane === "hardware" && state.confirmation === null
-            }
-            onCaptureStatusChange={setScannerStatus}
-            scanner={scanner}
-          />
-        ) : null}
-        <View style={styles.header}>
-          <View style={styles.titleGroup}>
-            <Text style={styles.eyebrow}>{t("header.eyebrow")}</Text>
-            <Text style={styles.title}>{t(modernPayments ? "payments.title" : "header.title")}</Text>
-            <Text style={styles.subtitle}>{t(modernPayments ? "payments.manageSubtitle" : "header.subtitle")}</Text>
-          </View>
-          {onBack ? (
-            <ActionButton
-              disabled={interactionLocked}
-              label={t("action.backToSales")}
-              onPress={onBack}
-              testID="settings-back"
-              tone="quiet"
-            />
-          ) : null}
-        </View>
-
         {state.statusCode ? (
           <StatusBanner
             locale={locale}
@@ -256,20 +308,26 @@ export function SettingsScreen({
         <View style={styles.workspace} testID="settings-workspace">
           <View
             pointerEvents={state.confirmation ? "none" : "auto"}
-            style={[styles.navigation, modernPayments && windowWidth < 1100 && styles.navigationCompact]}
+            style={[
+              styles.navigation,
+              modernPayments &&
+                windowWidth < SETTINGS_COMPACT_NAVIGATION_WIDTH &&
+                styles.navigationCompact,
+            ]}
           >
             <Text style={styles.navigationTitle}>{t("navigation.title")}</Text>
             {NAV_ITEMS.map((item) => (
-              <ActionButton
+              <SectionNavButton
                 disabled={interactionLocked}
+                icon={item.icon}
                 key={item.pane}
                 label={t(item.label)}
                 onPress={() => presenter.selectPane(item.pane)}
                 selected={state.activePane === item.pane}
                 testID={`settings-nav-${item.pane}`}
-                tone="nav"
               />
             ))}
+            {/* 当前终端固定在目录底部：门店名称、设备代码、门店代码三行，顺序不变。 */}
             <View style={styles.deviceBadge} testID="settings-device-badge">
               <Text style={styles.badgeLabel}>
                 {t("device.currentTerminal")}
@@ -298,14 +356,13 @@ export function SettingsScreen({
             </View>
           </View>
 
-          <PosKeyboardAwareScrollView
-            contentContainerStyle={styles.content}
+          <View
             pointerEvents={state.confirmation ? "none" : "auto"}
-            style={styles.contentScroll}
-            testID="settings-content-scroll"
+            style={styles.workspaceMain}
           >
             {state.kind === "loading" || state.kind === "idle" ? (
               <EmptyPanel
+                busy
                 message={t("state.loading")}
                 testID="settings-loading"
               />
@@ -334,42 +391,49 @@ export function SettingsScreen({
                 state={state}
               />
             ) : null}
-          </PosKeyboardAwareScrollView>
+          </View>
         </View>
 
-        <Modal
-          animationType="fade"
-          onRequestClose={() => presenter.cancelConfirmation()}
-          supportedOrientations={["landscape-left", "landscape-right"]}
-          testID="settings-confirmation-modal"
-          transparent
-          visible={state.confirmation !== null}
-        >
-          <View accessibilityViewIsModal style={styles.confirmationOverlay}>
-            <PosPressable
-              accessible={false}
-              onPress={cancelConfirmation}
-              sound="navigate"
-              style={styles.backdropDismissArea}
-              testID="settings-confirmation-backdrop"
-            />
-            {state.confirmation ? (
-              <ConfirmationCard
-                busy={state.busy}
-                confirmation={state.confirmation}
-                locale={locale}
-                onCancel={() => presenter.cancelConfirmation()}
-                onConfirm={(employeeBarcode) =>
-                  void presenter.confirmDangerousAction(employeeBarcode)
-                }
-                storeCode={state.device.storeCode}
-                deviceCode={state.device.deviceCode}
-              />
-            ) : null}
-          </View>
-        </Modal>
       </View>
-    </SafeAreaView>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => presenter.cancelConfirmation()}
+        supportedOrientations={["landscape-left", "landscape-right"]}
+        testID="settings-confirmation-modal"
+        transparent
+        visible={state.confirmation !== null}
+      >
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.confirmationOverlay,
+            keyboardHeight > 0 && { paddingBottom: 24 + keyboardHeight },
+          ]}
+        >
+          <PosPressable
+            accessible={false}
+            onPress={cancelConfirmation}
+            sound="navigate"
+            style={styles.backdropDismissArea}
+            testID="settings-confirmation-backdrop"
+          />
+          {state.confirmation ? (
+            <ConfirmationCard
+              busy={state.busy}
+              confirmation={state.confirmation}
+              locale={locale}
+              onCancel={() => presenter.cancelConfirmation()}
+              onConfirm={(employeeBarcode) =>
+                void presenter.confirmDangerousAction(employeeBarcode)
+              }
+              storeCode={state.device.storeCode}
+              deviceCode={state.device.deviceCode}
+            />
+          ) : null}
+        </View>
+      </Modal>
+    </PosScreenFrame>
   );
 }
 
@@ -377,24 +441,42 @@ export function SettingsUnavailableScreen({
   locale: localeOverride,
   onBack,
 }: Readonly<{ locale?: SettingsLocale; onBack(): void }>) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale =
     localeOverride ??
     resolveSettingsLocale(i18n.resolvedLanguage ?? i18n.language);
   const t = (key: SettingsCopyKey) => settingsText(locale, key);
   return (
-    <SafeAreaView style={styles.safeArea} testID="settings-runtime-unavailable">
+    <PosScreenFrame
+      active="settings"
+      header={<PosPageHeader title={t("header.title")} />}
+      testID="settings-runtime-unavailable"
+    >
       <View style={styles.unavailable}>
-        <Text style={styles.eyebrow}>{t("unavailable.eyebrow")}</Text>
-        <Text style={styles.unavailableTitle}>{t("unavailable.title")}</Text>
-        <Text style={styles.unavailableHint}>{t("unavailable.hint")}</Text>
-        <ActionButton
-          label={t("action.backToSales")}
-          onPress={onBack}
-          testID="settings-unavailable-back"
-        />
+        <View style={styles.unavailableCard}>
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.mutedInk}
+            name="cog-off-outline"
+            size={44}
+          />
+          <Text style={styles.unavailableEyebrow}>
+            {t("unavailable.eyebrow")}
+          </Text>
+          <Text style={styles.unavailableTitle}>{t("unavailable.title")}</Text>
+          <Text style={styles.unavailableHint}>{t("unavailable.hint")}</Text>
+          <PosButton
+            icon="arrow-left"
+            label={t("action.backToSales")}
+            onPress={onBack}
+            size="button"
+            sound="navigate"
+            testID="settings-unavailable-back"
+          />
+        </View>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -417,6 +499,7 @@ function SettingsPaneContent({
   scanner: HidScannerRouter | undefined;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   switch (state.activePane) {
     case "payments":
       return (
@@ -467,6 +550,7 @@ function GeneralPane({
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const locked = state.busy || state.confirmation !== null;
   const catalogRefreshRunning = state.catalogRefresh.kind === "running";
   const {
@@ -480,230 +564,272 @@ function GeneralPane({
     values?: Readonly<Record<string, string | number>>,
   ) => settingsText(locale, key, values);
   return (
-    <View testID="settings-pane-content-general">
-      <PaneHeading
-        subtitle={t("general.subtitle")}
-        title={t("general.title")}
-      />
-      <SectionCard
-        eyebrow={t("eyebrow.interaction")}
-        title={t("general.soundFeedback")}
+    <View style={styles.pane} testID="settings-pane-content-general">
+      <PosKeyboardAwareScrollView
+        contentContainerStyle={styles.content}
+        style={styles.contentScroll}
+        testID="settings-content-scroll"
       >
-        <View
-          style={[styles.soundPreferenceRow, styles.soundPreferenceDivider]}
+        <SectionCard title={t("general.soundFeedback")}>
+          <View style={styles.switchRowGroup}>
+            <View style={styles.switchRow}>
+              <View style={styles.switchCopy}>
+                <Text style={styles.switchLabel}>
+                  {t("general.buttonSound")}
+                </Text>
+                <Text style={styles.switchHint}>
+                  {t("general.buttonSoundHint")}
+                </Text>
+              </View>
+              <PosSwitch
+                accessibilityLabel={t("general.buttonSound")}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: buttonSoundEnabled }}
+                onValueChange={setButtonSoundEnabled}
+                sound={false}
+                style={styles.settingSwitch}
+                testID="settings-button-sound"
+                {...switchTint()}
+                value={buttonSoundEnabled}
+              />
+            </View>
+            <View style={styles.switchRow}>
+              <View style={styles.switchCopy}>
+                <Text style={styles.switchLabel}>
+                  {t("general.specialNodeSound")}
+                </Text>
+                <Text style={styles.switchHint}>
+                  {t("general.specialNodeSoundHint")}
+                </Text>
+              </View>
+              <PosSwitch
+                accessibilityLabel={t("general.specialNodeSound")}
+                accessibilityRole="switch"
+                accessibilityState={{ checked: specialNodeSoundEnabled }}
+                onValueChange={setSpecialNodeSoundEnabled}
+                sound={false}
+                style={styles.settingSwitch}
+                testID="settings-special-node-sound"
+                {...switchTint()}
+                value={specialNodeSoundEnabled}
+              />
+            </View>
+          </View>
+        </SectionCard>
+
+        {/* 界面主题不需要任何权限：能进设置页的人都可以换，切换与保存由 PosThemePicker 自己完成。 */}
+        <SectionCard
+          hint={t("general.themeHint")}
+          testID="settings-theme-card"
+          title={t("general.theme")}
         >
-          <View style={styles.soundPreferenceCopy}>
-            <Text style={styles.soundPreferenceLabel}>
-              {t("general.buttonSound")}
-            </Text>
-            <Text style={[styles.sectionCopy, styles.soundPreferenceHint]}>
-              {t("general.buttonSoundHint")}
-            </Text>
-          </View>
-          <PosSwitch
-            accessibilityLabel={t("general.buttonSound")}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: buttonSoundEnabled }}
-            onValueChange={setButtonSoundEnabled}
-            sound={false}
-            style={styles.soundSwitch}
-            testID="settings-button-sound"
-            thumbColor={buttonSoundEnabled ? posColors.blue : undefined}
-            trackColor={{ false: "#A8B2BC", true: posColors.blueSoft }}
-            value={buttonSoundEnabled}
-          />
-        </View>
-        <View style={styles.soundPreferenceRow}>
-          <View style={styles.soundPreferenceCopy}>
-            <Text style={styles.soundPreferenceLabel}>
-              {t("general.specialNodeSound")}
-            </Text>
-            <Text style={[styles.sectionCopy, styles.soundPreferenceHint]}>
-              {t("general.specialNodeSoundHint")}
-            </Text>
-          </View>
-          <PosSwitch
-            accessibilityLabel={t("general.specialNodeSound")}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: specialNodeSoundEnabled }}
-            onValueChange={setSpecialNodeSoundEnabled}
-            sound={false}
-            style={styles.soundSwitch}
-            testID="settings-special-node-sound"
-            thumbColor={specialNodeSoundEnabled ? posColors.blue : undefined}
-            trackColor={{ false: "#A8B2BC", true: posColors.blueSoft }}
-            value={specialNodeSoundEnabled}
-          />
-        </View>
-      </SectionCard>
-      <SectionCard
-        eyebrow={t("eyebrow.network")}
-        title={t("general.apiAddress")}
-      >
-        <PosKeyboardAwareTextInput
-          accessibilityLabel={t("general.apiAddress")}
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!locked && state.access.canReregisterDevice}
-          onChangeText={(value) => presenter.setApiAddressDraft(value)}
-          placeholder="https://example.com/pos-api"
-          placeholderTextColor="#7B8793"
-          style={styles.textInput}
-          testID="settings-api-address"
-          value={state.apiAddressDraft}
-        />
-        <View style={styles.actionRow} testID="settings-api-actions">
-          <ActionButton
-            disabled={locked || !state.access.canReregisterDevice}
-            label={t("general.useLocalApi")}
-            onPress={() =>
-              presenter.setApiAddressDraft(
-                DEFAULT_LOCAL_HBPOS_API_BASE_URL,
-              )
-            }
-            testID="settings-api-use-local"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={locked || !state.access.canReregisterDevice}
-            label={t("general.useRemoteApi")}
-            onPress={() =>
-              presenter.setApiAddressDraft(
-                DEFAULT_REMOTE_HBPOS_API_BASE_URL,
-              )
-            }
-            testID="settings-api-use-remote"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={locked || !state.access.canReregisterDevice}
-            label={t("general.testApiAddress")}
-            onPress={() => void presenter.testApiAddress()}
-            testID="settings-api-test"
-            tone="secondary"
-          />
-          {onOpenNetworkCheck ? (
-            // 网络检测只读，不受「可重新绑定设备」权限限制；确认弹窗打开时仍锁定避免误触。
-            <ActionButton
-              disabled={locked}
-              label={t("general.networkCheck")}
-              onPress={onOpenNetworkCheck}
-              testID="settings-network-check"
-              tone="secondary"
-            />
-          ) : null}
-          <ActionButton
-            disabled={
-              locked ||
-              catalogRefreshRunning ||
-              !state.access.canReregisterDevice
-            }
-            label={t("general.reviewApiAddress")}
-            onPress={() => presenter.requestApiAddressChange()}
-            testID="settings-api-request-change"
-          />
-        </View>
-      </SectionCard>
-      <ApiEntryCard
-        apiBaseUrl={state.apiBaseUrl}
-        canChange={state.access.canReregisterDevice}
-        controller={apiEntry}
-        locale={locale}
-        locked={locked}
-      />
+          <PosThemePicker language={locale} testID="settings-theme" />
+        </SectionCard>
 
-      <SectionCard eyebrow={t("eyebrow.catalog")} title={t("general.catalog")}>
-        <View style={styles.metricRow}>
-          <Metric
-            label={t("metric.snapshot")}
-            value={state.catalog.snapshotId ?? t("value.none")}
-          />
-          <Metric
-            label={t("metric.items")}
-            value={String(state.catalog.itemCount)}
-          />
-          <Metric
-            label={t("metric.activated")}
-            value={compactDate(state.catalog.activatedAt)}
-          />
-        </View>
-        <CatalogRefreshStatus
+        <ApiEntryCard
+          apiBaseUrl={state.apiBaseUrl}
+          canChange={state.access.canReregisterDevice}
+          controller={apiEntry}
           locale={locale}
-          refresh={state.catalogRefresh}
+          locked={locked}
         />
-        <View style={styles.actionRow}>
-          <ActionButton
-            disabled={
-              locked ||
-              catalogRefreshRunning ||
-              !state.access.canDownloadCatalog
-            }
-            label={t(
-              catalogRefreshRunning
-                ? "general.downloadingCatalog"
-                : "general.downloadCatalog",
-            )}
-            onPress={() => void presenter.downloadCatalog()}
-            testID="settings-catalog-download"
-          />
-          <ActionButton
-            disabled={
-              locked ||
-              catalogRefreshRunning ||
-              !state.access.canResetCatalog
-            }
-            label={t("general.resetCatalog")}
-            onPress={() => presenter.requestCatalogReset()}
-            testID="settings-catalog-reset"
-            tone="danger"
-          />
-        </View>
-        <Text style={styles.safetyNote}>{t("general.catalogSafety")}</Text>
-        <Text style={styles.backgroundNote}>
-          {t("general.catalogBackground")}
-        </Text>
-      </SectionCard>
 
-      <SectionCard
-        eyebrow={t("eyebrow.updates")}
-        title={t("general.appUpdate")}
-      >
-        <View style={styles.metricRow}>
-          <Metric label={t("metric.channel")} value={state.appUpdate.channel} />
-          <Metric
-            label={t("metric.currentVersion")}
-            value={state.appUpdate.currentVersion || "—"}
-          />
-          <Metric
-            label={t("metric.availableVersion")}
-            value={state.appUpdate.availableVersion ?? t("value.current")}
-          />
+        <SectionCard
+          hint={t("general.subtitle")}
+          title={t("general.apiAddress")}
+        >
+          <View style={styles.cardRow}>
+            <View
+              style={[
+                styles.inputFrame,
+                (locked || !state.access.canReregisterDevice) &&
+                  styles.inputFrameDisabled,
+              ]}
+            >
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.mutedInk}
+                name="link-variant"
+                size={24}
+              />
+              <PosKeyboardAwareTextInput
+                accessibilityLabel={t("general.apiAddress")}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!locked && state.access.canReregisterDevice}
+                onChangeText={(value) => presenter.setApiAddressDraft(value)}
+                placeholder="https://example.com/pos-api"
+                placeholderTextColor={posColors.placeholder}
+                style={styles.inputFrameField}
+                testID="settings-api-address"
+                value={state.apiAddressDraft}
+              />
+            </View>
+            <ActionButton
+              disabled={locked || !state.access.canReregisterDevice}
+              label={t("general.useLocalApi")}
+              onPress={() =>
+                presenter.setApiAddressDraft(
+                  DEFAULT_LOCAL_HBPOS_API_BASE_URL,
+                )
+              }
+              testID="settings-api-use-local"
+              tone="quiet"
+            />
+            <ActionButton
+              disabled={locked || !state.access.canReregisterDevice}
+              label={t("general.useRemoteApi")}
+              onPress={() =>
+                presenter.setApiAddressDraft(
+                  DEFAULT_REMOTE_HBPOS_API_BASE_URL,
+                )
+              }
+              testID="settings-api-use-remote"
+              tone="quiet"
+            />
+          </View>
+          <View style={styles.actionRow} testID="settings-api-actions">
+            <ActionButton
+              disabled={locked || !state.access.canReregisterDevice}
+              fill
+              icon="lan-check"
+              label={t("general.testApiAddress")}
+              onPress={() => void presenter.testApiAddress()}
+              testID="settings-api-test"
+            />
+            {onOpenNetworkCheck ? (
+              // 网络检测只读，不受「可重新绑定设备」权限限制；确认弹窗打开时仍锁定避免误触。
+              <ActionButton
+                disabled={locked}
+                fill
+                icon="access-point-network"
+                label={t("general.networkCheck")}
+                onPress={onOpenNetworkCheck}
+                testID="settings-network-check"
+              />
+            ) : null}
+            {/* 红色只表示「会改变数据分区」；点了仍先弹确认框，提示音沿用普通按钮。 */}
+            <ActionButton
+              disabled={
+                locked ||
+                catalogRefreshRunning ||
+                !state.access.canReregisterDevice
+              }
+              fill
+              icon="swap-horizontal"
+              label={t("general.reviewApiAddress")}
+              onPress={() => presenter.requestApiAddressChange()}
+              sound="tap"
+              testID="settings-api-request-change"
+              tone="danger"
+            />
+          </View>
+        </SectionCard>
+
+        <View style={styles.cardColumns}>
+          <SectionCard style={styles.columnCard} title={t("general.catalog")}>
+            <View style={styles.metricRow}>
+              <Metric
+                label={t("metric.snapshot")}
+                value={state.catalog.snapshotId ?? t("value.none")}
+              />
+            </View>
+            <View style={styles.metricRow}>
+              <Metric
+                label={t("metric.items")}
+                value={String(state.catalog.itemCount)}
+              />
+              <Metric
+                label={t("metric.activated")}
+                value={compactDate(state.catalog.activatedAt)}
+              />
+            </View>
+            <CatalogRefreshStatus
+              locale={locale}
+              refresh={state.catalogRefresh}
+            />
+            <View style={styles.actionRow}>
+              <ActionButton
+                disabled={
+                  locked ||
+                  catalogRefreshRunning ||
+                  !state.access.canDownloadCatalog
+                }
+                fill
+                icon="cloud-download-outline"
+                label={t(
+                  catalogRefreshRunning
+                    ? "general.downloadingCatalog"
+                    : "general.downloadCatalog",
+                )}
+                onPress={() => void presenter.downloadCatalog()}
+                testID="settings-catalog-download"
+              />
+              <ActionButton
+                disabled={
+                  locked ||
+                  catalogRefreshRunning ||
+                  !state.access.canResetCatalog
+                }
+                label={t("general.resetCatalog")}
+                onPress={() => presenter.requestCatalogReset()}
+                testID="settings-catalog-reset"
+                tone="danger"
+              />
+            </View>
+            <Text style={styles.safetyNote}>{t("general.catalogSafety")}</Text>
+            <Text style={styles.backgroundNote}>
+              {t("general.catalogBackground")}
+            </Text>
+          </SectionCard>
+
+          <SectionCard style={styles.columnCard} title={t("general.appUpdate")}>
+            <View style={styles.metricRow}>
+              <Metric
+                label={t("metric.channel")}
+                value={state.appUpdate.channel}
+              />
+            </View>
+            <View style={styles.metricRow}>
+              <Metric
+                label={t("metric.currentVersion")}
+                value={state.appUpdate.currentVersion || "—"}
+              />
+              <Metric
+                label={t("metric.availableVersion")}
+                value={state.appUpdate.availableVersion ?? t("value.current")}
+              />
+            </View>
+            <View style={styles.actionRow}>
+              <ActionButton
+                disabled={locked || !state.access.canManageAppUpdate}
+                fill
+                icon="update"
+                label={t("general.checkUpdate")}
+                onPress={() => void presenter.checkForAppUpdate()}
+                testID="settings-update-check"
+              />
+              <ActionButton
+                disabled={
+                  locked ||
+                  catalogRefreshRunning ||
+                  !state.access.canManageAppUpdate ||
+                  !state.appUpdate.restartAvailable
+                }
+                label={t("general.restart")}
+                onPress={() => presenter.requestAppRestart()}
+                testID="settings-update-restart"
+                tone="danger"
+              />
+            </View>
+          </SectionCard>
         </View>
-        <View style={styles.actionRow}>
-          <ActionButton
-            disabled={locked || !state.access.canManageAppUpdate}
-            label={t("general.checkUpdate")}
-            onPress={() => void presenter.checkForAppUpdate()}
-            testID="settings-update-check"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={
-              locked ||
-              catalogRefreshRunning ||
-              !state.access.canManageAppUpdate ||
-              !state.appUpdate.restartAvailable
-            }
-            label={t("general.restart")}
-            onPress={() => presenter.requestAppRestart()}
-            testID="settings-update-restart"
-            tone="danger"
-          />
-        </View>
-      </SectionCard>
+      </PosKeyboardAwareScrollView>
     </View>
   );
 }
+
+type ApiEntryChoice = ApiEntryMode | "auto";
 
 /**
  * 收银入口（线路）：显示当前实际在用的线路与设置来源，并允许在本机手动指定首选线路。
@@ -723,6 +849,7 @@ function ApiEntryCard({
   locale: SettingsLocale;
   locked: boolean;
 }>) {
+  usePosThemeVersion();
   const snapshot = useApiEntrySettings(controller);
   if (!controller || !snapshot) return null;
   const t = (
@@ -744,12 +871,8 @@ function ApiEntryCard({
             route: modeLabel(DEFAULT_API_ENTRY_MODE),
           });
   return (
-    <SectionCard
-      eyebrow={t("eyebrow.network")}
-      title={t("apiEntry.title")}
-    >
-      <View testID="settings-api-entry">
-        <Text style={styles.sectionCopy}>{t("apiEntry.hint")}</Text>
+    <SectionCard hint={t("apiEntry.hint")} title={t("apiEntry.title")}>
+      <View style={styles.cardBody} testID="settings-api-entry">
         {applicable ? (
           <View style={styles.metricRow}>
             <Metric
@@ -774,27 +897,28 @@ function ApiEntryCard({
             })}
           </Text>
         ) : null}
-        <View style={styles.actionRow} testID="settings-api-entry-options">
-          <ActionButton
-            disabled={!editable}
-            label={t("apiEntry.option.auto")}
-            onPress={() => controller.setManualMode(null)}
-            selected={snapshot.manualMode === null}
-            testID="settings-api-entry-auto"
-            tone="secondary"
-          />
-          {API_ENTRY_MODES.map((mode) => (
-            <ActionButton
-              disabled={!editable}
-              key={mode}
-              label={modeLabel(mode)}
-              onPress={() => controller.setManualMode(mode)}
-              selected={snapshot.manualMode === mode}
-              testID={`settings-api-entry-${mode}`}
-              tone="secondary"
-            />
-          ))}
-        </View>
+        {/* 四选一整宽分段：「自动」= 清除本机覆盖，其余三项指定首选线路。 */}
+        <PosSegmented<ApiEntryChoice>
+          accessibilityLabel={t("apiEntry.title")}
+          disabled={!editable}
+          onChange={(choice) =>
+            controller.setManualMode(choice === "auto" ? null : choice)
+          }
+          options={[
+            {
+              value: "auto",
+              label: t("apiEntry.option.auto"),
+              testID: "settings-api-entry-auto",
+            },
+            ...API_ENTRY_MODES.map((mode) => ({
+              value: mode,
+              label: modeLabel(mode),
+              testID: `settings-api-entry-${mode}`,
+            })),
+          ]}
+          testID="settings-api-entry-options"
+          value={snapshot.manualMode ?? "auto"}
+        />
         {applicable && !canChange ? (
           <Text style={styles.sectionCopy} testID="settings-api-entry-no-permission">
             {t("apiEntry.noPermission")}
@@ -820,6 +944,7 @@ function CatalogRefreshStatus({
   locale: SettingsLocale;
   refresh: CatalogRefreshState;
 }>) {
+  usePosThemeVersion();
   if (refresh.kind === "idle") return null;
 
   const t = (
@@ -877,7 +1002,7 @@ function CatalogRefreshStatus({
     >
       <View style={styles.catalogRefreshHeading}>
         {refresh.kind === "running" ? (
-          <ActivityIndicator color={posColors.orange} size="small" />
+          <ActivityIndicator color={posColors.accent} size="small" />
         ) : null}
         <Text style={styles.catalogRefreshTitle}>{t(titleKey)}</Text>
       </View>
@@ -961,6 +1086,7 @@ function PaymentsPane({
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const [squarePicker, setSquarePicker] = useState<
     "device" | "location" | null
   >(null);
@@ -1056,345 +1182,399 @@ function PaymentsPane({
       ? state.squareSetup.devices.items.map(squareDevicePickerOption)
       : state.squareSetup.locations.items.map(squareLocationPickerOption);
   return (
-    <View testID="settings-pane-content-payments">
-      {!modernLayout ? <PaneHeading
-        subtitle={t("payments.subtitle")}
-        title={t("payments.title")}
-      /> : null}
-      <SectionCard eyebrow={t("payments.methodsEyebrow")} title={t("payments.methodsTitle")}>
-        <Text style={styles.sectionCopy}>{t("payments.methodsHint")}</Text>
-        {([
-          { key: "manual", label: "payments.manualCard", hint: "payments.manualCardHint", value: state.paymentMethodsDraft.useManualCard, change: (value: boolean) => presenter.setUseManualCard(value) },
-          { key: "gift", label: "payments.giftCard", hint: "payments.giftCardHint", value: state.paymentMethodsDraft.giftCardEnabled, change: (value: boolean) => presenter.setGiftCardEnabled(value) },
-        ] as const).map((method) => (
-          <View key={method.key} style={styles.soundPreferenceRow}>
-            <View style={styles.soundPreferenceCopy}>
-              <Text style={styles.soundPreferenceLabel}>{t(method.label)}</Text>
-              <Text style={[styles.sectionCopy, styles.soundPreferenceHint]}>{t(method.hint)}</Text>
-            </View>
-            <PosSwitch
-              accessibilityLabel={t(method.label)}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: method.value, disabled: disabled || catalogRefreshRunning || !state.paymentMethodsAvailable }}
-              disabled={disabled || catalogRefreshRunning || !state.paymentMethodsAvailable}
-              onValueChange={method.change}
-              style={styles.soundSwitch}
-              testID={`settings-payment-method-${method.key}`}
-              thumbColor={method.value ? posColors.blue : undefined}
-              trackColor={{ false: "#A8B2BC", true: posColors.blueSoft }}
-              value={method.value}
-            />
-          </View>
-        ))}
-        <ActionButton
-          disabled={disabled || catalogRefreshRunning || !state.paymentMethodsAvailable}
-          label={t("payments.saveMethods")}
-          onPress={() => void presenter.savePaymentMethods()}
-          testID="settings-payment-methods-save"
-        />
-      </SectionCard>
-      {!modernLayout ? <SectionCard
-        eyebrow={t("eyebrow.activeCardTerminal")}
-        title={t("payments.provider")}
+    <View style={styles.pane} testID="settings-pane-content-payments">
+      <PosKeyboardAwareScrollView
+        contentContainerStyle={styles.content}
+        style={styles.contentScroll}
+        testID="settings-content-scroll"
       >
-        <Text style={styles.sectionCopy}>{t("payments.providerHint")}</Text>
-        <View style={styles.actionRow}>
-          <ToggleButton
-            disabled={
-              disabled ||
-              (!squareAvailable && !state.squareSetup.available)
-            }
-            label="Square"
-            onPress={() => presenter.setPaymentProvider("square")}
-            selected={state.paymentProviderDraft === "square"}
-            testID="settings-payment-provider-square"
-          />
-          <ToggleButton
-            disabled={disabled || !linklySelectable}
-            label="Linkly"
-            onPress={() => presenter.setPaymentProvider("linkly")}
-            selected={state.paymentProviderDraft === "linkly"}
-            testID="settings-payment-provider-linkly"
-          />
-        </View>
-        <Text
-          style={styles.safetyNote}
-          testID="settings-payment-provider-state"
-        >
-          {state.paymentProviderDraft === null
-            ? t("payments.noneSelected")
-            : t(PAYMENT_PROVIDER_SELECTED_COPY[state.paymentProviderDraft])}
-        </Text>
-      </SectionCard> : (
-        <View style={styles.paymentToolbar} testID="settings-payment-toolbar">
-          <View style={styles.paymentTabs}>
-            {providerTabs.map((provider) => (
-              <PosPressable
-                key={provider}
-                accessibilityRole="tab"
-                accessibilityLabel={t("payments.manageProvider", { provider: PAYMENT_PROVIDER_PANEL_LABELS[provider] })}
-                accessibilityState={{ selected: providerPanel === provider, disabled }}
-                disabled={disabled}
-                onPress={() => setProviderPanel(provider)}
-                sound="navigate"
-                style={[styles.paymentTab, providerPanel === provider && styles.paymentTabSelected]}
-                testID={`settings-payment-tab-${provider}`}
-              >
-                {/* 小圆点标出这台 iPad 当前启用的是哪一家，和正在查看哪个页签无关。 */}
-                {state.paymentProviderDraft === provider ? (
-                  <View
-                    style={[styles.paymentTabDot, providerPanel === provider && styles.paymentTabDotSelected]}
-                    testID={`settings-payment-tab-${provider}-active`}
-                  />
-                ) : null}
-                <Text style={[styles.paymentTabLabel, providerPanel === provider && styles.paymentTabSelectedLabel]}>
-                  {PAYMENT_PROVIDER_PANEL_LABELS[provider]}
-                </Text>
-              </PosPressable>
-            ))}
-          </View>
-          {zellerPanelOpen ? (
-            // Zeller 没有测试环境：原来放环境切换的位置改成一句说明，不留空也不让人找「环境去哪了」。
-            <Text style={styles.paymentEnvironmentNote} testID="settings-zeller-environment-note">
-              {zellerSettingsText(locale, "tab.environmentNote")}
-            </Text>
-          ) : (
-          <EnvironmentSelector
-            disabled={disabled}
-            environment={cardProviderPanel === "square" ? state.squareDraft.environment : state.linklyDraft.environment}
-            locale={locale}
-            onSelect={(environment) => cardProviderPanel === "square"
-              ? presenter.setSquareEnvironment(environment)
-              : presenter.setLinklyEnvironment(environment)}
-            prefix={`settings-${cardProviderPanel}`}
-          />
-          )}
-        </View>
-      )}
-      <View style={modernLayout ? styles.paymentPanels : styles.twoColumn}>
-        {!modernLayout || (!zellerPanelOpen && cardProviderPanel === "square") ? (
+        <PaneHint
+          text={t(modernLayout ? "payments.manageSubtitle" : "payments.subtitle")}
+        />
         <SectionCard
-          eyebrow={t("eyebrow.cardTerminal")}
-          style={modernLayout ? styles.paymentProviderPanel : styles.columnCard}
-          title="Square"
+          hint={t("payments.methodsHint")}
+          title={t("payments.methodsTitle")}
         >
-          {!squareNeedsInitialSetup ? (
-            <Availability
-              available={squareAvailable}
-              blockerCode={state.square.blockerCode}
-              locale={locale}
-            />
-          ) : null}
-          {!modernLayout ? <EnvironmentSelector
-            disabled={squareSetupDisabled}
-            environment={state.squareDraft.environment}
-            locale={locale}
-            onSelect={(environment) =>
-              presenter.setSquareEnvironment(environment)
-            }
-            prefix="settings-square"
-          /> : null}
-          <View style={styles.squareSummaryRow}>
-            <SquareSummaryMetric
-              label={t("square.serverToken")}
-              testID="settings-square-token-status"
-              value={squareTokenStatusText(locale, state.squareSetup.token)}
-            />
-            <SquareSummaryMetric
-              label={t("square.currentBinding")}
-              testID="settings-square-current-binding"
-              value={`${state.square.environment} · ${
-                state.square.locationId || t("square.notSelected")
-              }\n${state.square.deviceId || t("square.notSelected")}`}
+          <View style={styles.paymentMethodsRow}>
+            {([
+              { key: "manual", label: "payments.manualCard", hint: "payments.manualCardHint", value: state.paymentMethodsDraft.useManualCard, change: (value: boolean) => presenter.setUseManualCard(value) },
+              { key: "gift", label: "payments.giftCard", hint: "payments.giftCardHint", value: state.paymentMethodsDraft.giftCardEnabled, change: (value: boolean) => presenter.setGiftCardEnabled(value) },
+            ] as const).map((method) => (
+              <View key={method.key} style={styles.switchRow}>
+                <View style={styles.switchCopy}>
+                  <Text style={styles.switchLabel}>{t(method.label)}</Text>
+                  <Text style={styles.switchHint}>{t(method.hint)}</Text>
+                </View>
+                <PosSwitch
+                  accessibilityLabel={t(method.label)}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: method.value, disabled: disabled || catalogRefreshRunning || !state.paymentMethodsAvailable }}
+                  disabled={disabled || catalogRefreshRunning || !state.paymentMethodsAvailable}
+                  onValueChange={method.change}
+                  style={styles.settingSwitch}
+                  testID={`settings-payment-method-${method.key}`}
+                  {...switchTint()}
+                  value={method.value}
+                />
+              </View>
+            ))}
+            <ActionButton
+              disabled={disabled || catalogRefreshRunning || !state.paymentMethodsAvailable}
+              icon="content-save-outline"
+              label={t("payments.saveMethods")}
+              onPress={() => void presenter.savePaymentMethods()}
+              testID="settings-payment-methods-save"
             />
           </View>
-          <SquareSelectionField
-            disabled={squareSetupDisabled}
-            disabledText={t("square.setupUnavailable")}
-            emptyText={t("square.locationsEmpty")}
-            failedText={t("square.loadFailed")}
-            idleText={t("square.notLoaded")}
-            label={t("square.location")}
-            loadLabel={t("square.loadLocations")}
-            loadingText={t("square.loadingLocations")}
-            onLoad={() => {
-              setSquarePicker("location");
-              void presenter.loadSquareLocations();
-            }}
-            onSelect={() => setSquarePicker("location")}
-            primaryText={selectedLocation?.name ?? t("square.notSelected")}
-            resourceKind={state.squareSetup.locations.kind}
-            secondaryText={squareLocationMeta}
-            selectLabel={t("square.selectLocation")}
-            selectReady={state.squareSetup.locations.kind === "ready"}
-            testID="settings-square-location"
-          />
-          <SquareSelectionField
-            disabled={
-              squareSetupDisabled || !state.squareSetup.selectedLocationId
-            }
-            disabledText={t("square.setupUnavailable")}
-            emptyText={t("square.devicesEmpty")}
-            failedText={t("square.loadFailed")}
-            idleText={t("square.notLoaded")}
-            label={t("square.device")}
-            loadLabel={t("square.loadDevices")}
-            loadingText={t("square.loadingDevices")}
-            onLoad={() => {
-              setSquarePicker("device");
-              void presenter.loadSquareDevices();
-            }}
-            onSelect={() => setSquarePicker("device")}
-            primaryText={selectedDevice?.name ?? t("square.notSelected")}
-            resourceKind={state.squareSetup.devices.kind}
-            secondaryText={squareDeviceMeta}
-            selectLabel={t("square.selectDevice")}
-            selectReady={
-              state.squareSetup.devices.kind === "ready" &&
-              state.squareSetup.devicesLoadedForLocationId ===
-                state.squareSetup.selectedLocationId
-            }
-            testID="settings-square-device"
-          />
+        </SectionCard>
 
-          <View style={styles.squareDeviceCodeSection}>
-            <FieldLabel label={t("square.deviceCode")} />
-            <PosKeyboardAwareTextInput
-              accessibilityLabel={t("square.deviceCodeName")}
-              autoCapitalize="words"
-              autoCorrect={false}
-              editable={!squareDeviceCodeDisabled}
-              onChangeText={(value) =>
-                presenter.setSquareDeviceCodeNameDraft(value)
-              }
-              placeholder={t("square.deviceCodeName")}
-              style={styles.textInput}
-              testID="settings-square-device-code-name"
-              value={state.squareDeviceCodeNameDraft}
-            />
-            <Text style={styles.squareFieldHint}>
-              {t("square.deviceCodeNameHint")}
-            </Text>
+        {!modernLayout ? (
+          <SectionCard
+            hint={t("payments.providerHint")}
+            title={t("payments.provider")}
+          >
             <View style={styles.actionRow}>
-              <ActionButton
-                compact
+              <ToggleButton
                 disabled={
-                  squareDeviceCodeDisabled ||
-                  state.squareSetup.deviceCodes.kind === "loading"
+                  disabled ||
+                  (!squareAvailable && !state.squareSetup.available)
                 }
-                label={t("square.loadDeviceCodes")}
-                onPress={() => void presenter.loadSquareDeviceCodes()}
-                testID="settings-square-device-code-load"
-                tone="secondary"
+                label="Square"
+                onPress={() => presenter.setPaymentProvider("square")}
+                selected={state.paymentProviderDraft === "square"}
+                testID="settings-payment-provider-square"
               />
-              <ActionButton
-                compact
-                disabled={
-                  squareDeviceCodeDisabled ||
-                  state.squareDeviceCodeNameDraft.trim().length === 0 ||
-                  state.squareSetup.deviceCodes.kind === "loading"
-                }
-                label={t("square.createDeviceCode")}
-                onPress={() => void presenter.createSquareDeviceCode()}
-                testID="settings-square-device-code-create"
-              />
-              <ActionButton
-                compact
-                disabled={
-                  squareDeviceCodeDisabled ||
-                  !state.squareSetup.selectedDeviceCodeId ||
-                  !squareDeviceCodesMatchLocation ||
-                  state.squareSetup.deviceCodes.kind === "loading"
-                }
-                label={t("square.refreshDeviceCode")}
-                onPress={() => void presenter.refreshSquareDeviceCode()}
-                testID="settings-square-device-code-refresh"
-                tone="secondary"
+              <ToggleButton
+                disabled={disabled || !linklySelectable}
+                label="Linkly"
+                onPress={() => presenter.setPaymentProvider("linkly")}
+                selected={state.paymentProviderDraft === "linkly"}
+                testID="settings-payment-provider-linkly"
               />
             </View>
-            {!squareProduction ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={styles.squareSandboxNote}
-                testID="settings-square-device-code-disabled"
-              >
-                {t("square.deviceCodeSandboxDisabled")}
-              </Text>
-            ) : (
-              <>
-                <SquareDeviceCodeList
-                  disabled={squareDeviceCodeDisabled}
-                  emptyText={t("square.deviceCodesEmpty")}
-                  failedText={t("square.loadFailed")}
-                  idleText={t("square.deviceCodesIdle")}
-                  items={state.squareSetup.deviceCodes.items}
-                  loadingText={t("square.deviceCodesLoading")}
-                  onSelect={(deviceCodeId) =>
-                    presenter.setSquareDeviceCodeId(deviceCodeId)
-                  }
-                  resourceKind={squareDeviceCodeResourceKind}
-                  selectedId={state.squareSetup.selectedDeviceCodeId}
-                  selectedLabel={t("square.currentDeviceCode")}
-                  statusUnknown={t("square.statusUnknown")}
-                  codePending={t("square.codePending")}
-                />
-                <Text style={styles.squarePairingNote}>
-                  {t("square.deviceCodePairing")}
-                </Text>
-              </>
-            )}
-          </View>
-          <ActionButton
-            disabled={squareRuntimeDisabled}
-            label={t("action.test")}
-            onPress={() => void presenter.testPaymentProvider("square")}
-            testID="settings-square-test"
-            tone="secondary"
-          />
-        </SectionCard>
+            <Text
+              style={styles.safetyNote}
+              testID="settings-payment-provider-state"
+            >
+              {state.paymentProviderDraft === null
+                ? t("payments.noneSelected")
+                : t(PAYMENT_PROVIDER_SELECTED_COPY[state.paymentProviderDraft])}
+            </Text>
+          </SectionCard>
         ) : null}
-        {!modernLayout || (!zellerPanelOpen && cardProviderPanel === "linkly") ? (
-        <SectionCard
-          eyebrow={modernLayout ? "" : t("eyebrow.eftpos")}
-          style={modernLayout ? styles.paymentProviderPanel : styles.columnCard}
-          title={modernLayout ? "" : "Linkly"}
-        >
-          {(!modernLayout || !linklyAvailable) && (!linklyNeedsInitialSetup || !state.linklySetup) ? (
-            <Availability
-              available={linklyAvailable}
-              blockerCode={state.linkly.blockerCode}
+
+        {/* 页签式布局：整块是一张「刷卡终端」卡；旧布局：Square / Linkly 两张卡并排。 */}
+        <PaymentTerminalShell modern={modernLayout} title={t("payments.provider")}>
+          {modernLayout ? (
+            <View style={styles.paymentToolbar} testID="settings-payment-toolbar">
+              <View accessibilityRole="tablist" style={styles.paymentTabs}>
+                {providerTabs.map((provider, index) => {
+                  const viewing = providerPanel === provider;
+                  return (
+                    <PosPressable
+                      key={provider}
+                      accessibilityRole="tab"
+                      accessibilityLabel={t("payments.manageProvider", { provider: PAYMENT_PROVIDER_PANEL_LABELS[provider] })}
+                      accessibilityState={{ selected: viewing, disabled }}
+                      disabled={disabled}
+                      onPress={() => setProviderPanel(provider)}
+                      sound="navigate"
+                      style={({ pressed }) => [
+                        styles.paymentTab,
+                        index > 0 && styles.paymentTabDivider,
+                        viewing && styles.paymentTabSelected,
+                        pressed && !disabled && !viewing && styles.paymentTabPressed,
+                      ]}
+                      testID={`settings-payment-tab-${provider}`}
+                    >
+                      {/* 小圆点标出这台 iPad 当前启用的是哪一家，和正在查看哪个页签无关。 */}
+                      {state.paymentProviderDraft === provider ? (
+                        <View
+                          style={styles.paymentTabDot}
+                          testID={`settings-payment-tab-${provider}-active`}
+                        />
+                      ) : null}
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.paymentTabLabel,
+                          viewing && styles.paymentTabSelectedLabel,
+                          disabled && !viewing && styles.paymentTabDisabledLabel,
+                        ]}
+                      >
+                        {PAYMENT_PROVIDER_PANEL_LABELS[provider]}
+                      </Text>
+                    </PosPressable>
+                  );
+                })}
+              </View>
+              {zellerPanelOpen ? (
+                // Zeller 没有测试环境：原来放环境切换的位置改成一句说明，不留空也不让人找「环境去哪了」。
+                <Text style={styles.paymentEnvironmentNote} testID="settings-zeller-environment-note">
+                  {zellerSettingsText(locale, "tab.environmentNote")}
+                </Text>
+              ) : (
+                <EnvironmentSelector
+                  disabled={disabled}
+                  environment={cardProviderPanel === "square" ? state.squareDraft.environment : state.linklyDraft.environment}
+                  locale={locale}
+                  onSelect={(environment) => cardProviderPanel === "square"
+                    ? presenter.setSquareEnvironment(environment)
+                    : presenter.setLinklyEnvironment(environment)}
+                  prefix={`settings-${cardProviderPanel}`}
+                  style={styles.paymentEnvironment}
+                />
+              )}
+            </View>
+          ) : null}
+
+          {!modernLayout || (!zellerPanelOpen && cardProviderPanel === "square") ? (
+            <ProviderPanelShell modern={modernLayout} title="Square">
+              {!squareNeedsInitialSetup ? (
+                <Availability
+                  available={squareAvailable}
+                  blockerCode={state.square.blockerCode}
+                  locale={locale}
+                />
+              ) : null}
+              {!modernLayout ? (
+                <EnvironmentSelector
+                  disabled={squareSetupDisabled}
+                  environment={state.squareDraft.environment}
+                  locale={locale}
+                  onSelect={(environment) =>
+                    presenter.setSquareEnvironment(environment)
+                  }
+                  prefix="settings-square"
+                />
+              ) : null}
+              <View style={styles.squareSummaryRow}>
+                <SquareSummaryMetric
+                  label={t("square.serverToken")}
+                  testID="settings-square-token-status"
+                  value={squareTokenStatusText(locale, state.squareSetup.token)}
+                />
+                <SquareSummaryMetric
+                  label={t("square.currentBinding")}
+                  testID="settings-square-current-binding"
+                  value={`${state.square.environment} · ${
+                    state.square.locationId || t("square.notSelected")
+                  }\n${state.square.deviceId || t("square.notSelected")}`}
+                />
+              </View>
+              <SquareSelectionField
+                disabled={squareSetupDisabled}
+                disabledText={t("square.setupUnavailable")}
+                emptyText={t("square.locationsEmpty")}
+                failedText={t("square.loadFailed")}
+                idleText={t("square.notLoaded")}
+                label={t("square.location")}
+                loadLabel={t("square.loadLocations")}
+                loadingText={t("square.loadingLocations")}
+                onLoad={() => {
+                  setSquarePicker("location");
+                  void presenter.loadSquareLocations();
+                }}
+                onSelect={() => setSquarePicker("location")}
+                primaryText={selectedLocation?.name ?? t("square.notSelected")}
+                resourceKind={state.squareSetup.locations.kind}
+                secondaryText={squareLocationMeta}
+                selectLabel={t("square.selectLocation")}
+                selectReady={state.squareSetup.locations.kind === "ready"}
+                testID="settings-square-location"
+              />
+              <SquareSelectionField
+                disabled={
+                  squareSetupDisabled || !state.squareSetup.selectedLocationId
+                }
+                disabledText={t("square.setupUnavailable")}
+                emptyText={t("square.devicesEmpty")}
+                failedText={t("square.loadFailed")}
+                idleText={t("square.notLoaded")}
+                label={t("square.device")}
+                loadLabel={t("square.loadDevices")}
+                loadingText={t("square.loadingDevices")}
+                onLoad={() => {
+                  setSquarePicker("device");
+                  void presenter.loadSquareDevices();
+                }}
+                onSelect={() => setSquarePicker("device")}
+                primaryText={selectedDevice?.name ?? t("square.notSelected")}
+                resourceKind={state.squareSetup.devices.kind}
+                secondaryText={squareDeviceMeta}
+                selectLabel={t("square.selectDevice")}
+                selectReady={
+                  state.squareSetup.devices.kind === "ready" &&
+                  state.squareSetup.devicesLoadedForLocationId ===
+                    state.squareSetup.selectedLocationId
+                }
+                testID="settings-square-device"
+              />
+
+              <View style={styles.squareDeviceCodeSection}>
+                <FieldLabel label={t("square.deviceCode")} />
+                <PosKeyboardAwareTextInput
+                  accessibilityLabel={t("square.deviceCodeName")}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  editable={!squareDeviceCodeDisabled}
+                  onChangeText={(value) =>
+                    presenter.setSquareDeviceCodeNameDraft(value)
+                  }
+                  placeholder={t("square.deviceCodeName")}
+                  placeholderTextColor={posColors.placeholder}
+                  style={[
+                    styles.textInput,
+                    squareDeviceCodeDisabled && styles.textInputDisabled,
+                  ]}
+                  testID="settings-square-device-code-name"
+                  value={state.squareDeviceCodeNameDraft}
+                />
+                <Text style={styles.fieldHint}>
+                  {t("square.deviceCodeNameHint")}
+                </Text>
+                <View style={styles.actionRow}>
+                  <ActionButton
+                    disabled={
+                      squareDeviceCodeDisabled ||
+                      state.squareSetup.deviceCodes.kind === "loading"
+                    }
+                    icon="refresh"
+                    label={t("square.loadDeviceCodes")}
+                    onPress={() => void presenter.loadSquareDeviceCodes()}
+                    testID="settings-square-device-code-load"
+                    tone="quiet"
+                  />
+                  <ActionButton
+                    disabled={
+                      squareDeviceCodeDisabled ||
+                      state.squareDeviceCodeNameDraft.trim().length === 0 ||
+                      state.squareSetup.deviceCodes.kind === "loading"
+                    }
+                    icon="plus"
+                    label={t("square.createDeviceCode")}
+                    onPress={() => void presenter.createSquareDeviceCode()}
+                    testID="settings-square-device-code-create"
+                  />
+                  <ActionButton
+                    disabled={
+                      squareDeviceCodeDisabled ||
+                      !state.squareSetup.selectedDeviceCodeId ||
+                      !squareDeviceCodesMatchLocation ||
+                      state.squareSetup.deviceCodes.kind === "loading"
+                    }
+                    label={t("square.refreshDeviceCode")}
+                    onPress={() => void presenter.refreshSquareDeviceCode()}
+                    testID="settings-square-device-code-refresh"
+                    tone="quiet"
+                  />
+                </View>
+                {!squareProduction ? (
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    style={styles.squareSandboxNote}
+                    testID="settings-square-device-code-disabled"
+                  >
+                    {t("square.deviceCodeSandboxDisabled")}
+                  </Text>
+                ) : (
+                  <>
+                    <SquareDeviceCodeList
+                      disabled={squareDeviceCodeDisabled}
+                      emptyText={t("square.deviceCodesEmpty")}
+                      failedText={t("square.loadFailed")}
+                      idleText={t("square.deviceCodesIdle")}
+                      items={state.squareSetup.deviceCodes.items}
+                      loadingText={t("square.deviceCodesLoading")}
+                      onSelect={(deviceCodeId) =>
+                        presenter.setSquareDeviceCodeId(deviceCodeId)
+                      }
+                      resourceKind={squareDeviceCodeResourceKind}
+                      selectedId={state.squareSetup.selectedDeviceCodeId}
+                      selectedLabel={t("square.currentDeviceCode")}
+                      statusUnknown={t("square.statusUnknown")}
+                      codePending={t("square.codePending")}
+                    />
+                    <Text style={styles.fieldHint}>
+                      {t("square.deviceCodePairing")}
+                    </Text>
+                  </>
+                )}
+              </View>
+              <View style={styles.actionRow}>
+                <ActionButton
+                  disabled={squareRuntimeDisabled}
+                  icon="check-network-outline"
+                  label={t("action.test")}
+                  onPress={() => void presenter.testPaymentProvider("square")}
+                  testID="settings-square-test"
+                />
+              </View>
+            </ProviderPanelShell>
+          ) : null}
+
+          {!modernLayout || (!zellerPanelOpen && cardProviderPanel === "linkly") ? (
+            <ProviderPanelShell modern={modernLayout} title="Linkly">
+              {(!modernLayout || !linklyAvailable) && (!linklyNeedsInitialSetup || !state.linklySetup) ? (
+                <Availability
+                  available={linklyAvailable}
+                  blockerCode={state.linkly.blockerCode}
+                  locale={locale}
+                />
+              ) : null}
+              {!modernLayout ? (
+                <EnvironmentSelector
+                  disabled={linklySetupDisabled}
+                  environment={state.linklyDraft.environment}
+                  locale={locale}
+                  onSelect={(environment) =>
+                    presenter.setLinklyEnvironment(environment)
+                  }
+                  prefix="settings-linkly"
+                />
+              ) : null}
+              {!modernLayout ? <Text style={styles.sectionCopy}>{t("payments.linklyHint")}</Text> : null}
+              {state.linklySetup ? (
+                <LinklySetupCard
+                  disabled={linklySetupDisabled}
+                  locale={locale}
+                  presenter={presenter}
+                  state={state}
+                />
+              ) : (
+                <View style={styles.actionRow}>
+                  <ActionButton
+                    disabled={linklySetupDisabled}
+                    icon="check-network-outline"
+                    label={t("action.test")}
+                    onPress={() => void presenter.testPaymentProvider("linkly")}
+                    testID="settings-linkly-test"
+                  />
+                </View>
+              )}
+            </ProviderPanelShell>
+          ) : null}
+
+          {zellerPanelOpen && zeller ? (
+            <ZellerSettingsPanel
+              // 「现在用哪家」和「是否已启用」都看已保存的通道，不看还没保存的草稿选择。
+              activeProviderLabel={
+                state.paymentProvider ? PAYMENT_PROVIDER_PANEL_LABELS[state.paymentProvider] : null
+              }
+              disabled={disabled || catalogRefreshRunning}
+              enable={{
+                active: state.paymentProvider === "zeller",
+                // 与保存 Square / Linkly 设置同一套流程：危险操作确认 → 写本机配置 → 重载运行时。
+                onEnable: () => void presenter.requestEnableZeller(),
+              }}
               locale={locale}
+              sdk={zeller.state}
+              {...(zeller.onOpenNetworkCheck ? { onOpenNetworkCheck: zeller.onOpenNetworkCheck } : {})}
             />
           ) : null}
-          {!modernLayout ? <EnvironmentSelector
-            disabled={linklySetupDisabled}
-            environment={state.linklyDraft.environment}
-            locale={locale}
-            onSelect={(environment) =>
-              presenter.setLinklyEnvironment(environment)
-            }
-            prefix="settings-linkly"
-          /> : null}
-          {!modernLayout ? <Text style={styles.sectionCopy}>{t("payments.linklyHint")}</Text> : null}
-          {state.linklySetup ? (
-            <LinklySetupCard
-              disabled={linklySetupDisabled}
-              locale={locale}
-              presenter={presenter}
-              state={state}
-            />
-          ) : (
-            <ActionButton
-              disabled={linklySetupDisabled}
-              label={t("action.test")}
-              onPress={() => void presenter.testPaymentProvider("linkly")}
-              testID="settings-linkly-test"
-              tone="secondary"
-            />
-          )}
-        </SectionCard>
-        ) : null}
-      </View>
+        </PaymentTerminalShell>
+      </PosKeyboardAwareScrollView>
+
       <SquarePickerModal
         closeLabel={t("square.closePicker")}
         disabled={squareSetupDisabled}
@@ -1456,50 +1636,72 @@ function PaymentsPane({
         }
         visible={squarePicker !== null}
       />
-      {zellerPanelOpen && zeller ? (
-        <ZellerSettingsPanel
-          // 「现在用哪家」和「是否已启用」都看已保存的通道，不看还没保存的草稿选择。
-          activeProviderLabel={
-            state.paymentProvider ? PAYMENT_PROVIDER_PANEL_LABELS[state.paymentProvider] : null
-          }
-          disabled={disabled || catalogRefreshRunning}
-          enable={{
-            active: state.paymentProvider === "zeller",
-            // 与保存 Square / Linkly 设置同一套流程：危险操作确认 → 写本机配置 → 重载运行时。
-            onEnable: () => void presenter.requestEnableZeller(),
-          }}
-          locale={locale}
-          sdk={zeller.state}
-          {...(zeller.onOpenNetworkCheck ? { onOpenNetworkCheck: zeller.onOpenNetworkCheck } : {})}
-        />
-      ) : (
-      <View style={modernLayout ? styles.paymentFooter : undefined}>
-        {modernLayout ? (
-          <>
-            <Text style={styles.paymentFooterNote} testID="settings-payment-provider-state">
-              {state.paymentProviderDraft === null ? t("payments.noneSelected")
-                : t(PAYMENT_PROVIDER_SELECTED_COPY[state.paymentProviderDraft])}
-            </Text>
-            <ActionButton
-              compact
-              disabled={disabled || (cardProviderPanel === "linkly" ? !linklySelectable : !squareAvailable && !state.squareSetup.available)}
-              label={t(state.paymentProviderDraft === cardProviderPanel ? "payments.enabledProvider" : "payments.enableProvider", { provider: PAYMENT_PROVIDER_PANEL_LABELS[cardProviderPanel] })}
-              onPress={() => presenter.setPaymentProvider(cardProviderPanel)}
-              selected={state.paymentProviderDraft === cardProviderPanel}
-              testID={`settings-payment-provider-${cardProviderPanel}`}
-              tone="secondary"
-            />
-          </>
-        ) : null}
-        <ActionButton
-          disabled={disabled || catalogRefreshRunning || (modernLayout && state.paymentProviderDraft === null)}
-          label={t("payments.save")}
-          onPress={() => void presenter.savePaymentSettings()}
-          testID="settings-payment-save"
-        />
-      </View>
+
+      {/* 启用与保存固定在分区底部，不随上面的配置内容滚动；Zeller 页签没有这两个操作。 */}
+      {zellerPanelOpen && zeller ? null : (
+        <View style={styles.paneFooter}>
+          {modernLayout ? (
+            <>
+              <Text style={styles.paneFooterNote} testID="settings-payment-provider-state">
+                {state.paymentProviderDraft === null ? t("payments.noneSelected")
+                  : t(PAYMENT_PROVIDER_SELECTED_COPY[state.paymentProviderDraft])}
+              </Text>
+              <ActionButton
+                disabled={disabled || (cardProviderPanel === "linkly" ? !linklySelectable : !squareAvailable && !state.squareSetup.available)}
+                label={t(state.paymentProviderDraft === cardProviderPanel ? "payments.enabledProvider" : "payments.enableProvider", { provider: PAYMENT_PROVIDER_PANEL_LABELS[cardProviderPanel] })}
+                onPress={() => presenter.setPaymentProvider(cardProviderPanel)}
+                selected={state.paymentProviderDraft === cardProviderPanel}
+                size="button"
+                style={styles.paneFooterButton}
+                testID={`settings-payment-provider-${cardProviderPanel}`}
+              />
+            </>
+          ) : (
+            <View style={styles.paneFooterSpacer} />
+          )}
+          <ActionButton
+            disabled={disabled || catalogRefreshRunning || (modernLayout && state.paymentProviderDraft === null)}
+            icon="content-save-outline"
+            label={t("payments.save")}
+            onPress={() => void presenter.savePaymentSettings()}
+            size="button"
+            style={styles.paneFooterButton}
+            testID="settings-payment-save"
+            tone="primary"
+          />
+        </View>
       )}
     </View>
+  );
+}
+
+/** 页签式布局把所有刷卡终端放进一张卡；旧布局里 Square / Linkly 各一张卡并排。 */
+function PaymentTerminalShell({
+  children,
+  modern,
+  title,
+}: Readonly<{ children: React.ReactNode; modern: boolean; title: string }>) {
+  usePosThemeVersion();
+  return modern ? (
+    <SectionCard title={title}>{children}</SectionCard>
+  ) : (
+    <View style={styles.cardColumns}>{children}</View>
+  );
+}
+
+/** 单个刷卡终端的配置区：页签式布局里直接排在卡片内，旧布局里自成一张卡。 */
+function ProviderPanelShell({
+  children,
+  modern,
+  title,
+}: Readonly<{ children: React.ReactNode; modern: boolean; title: string }>) {
+  usePosThemeVersion();
+  return modern ? (
+    <View style={styles.cardBody}>{children}</View>
+  ) : (
+    <SectionCard style={styles.columnCard} title={title}>
+      {children}
+    </SectionCard>
   );
 }
 
@@ -1534,6 +1736,7 @@ function SquareSummaryMetric({
   testID,
   value,
 }: Readonly<{ label: string; testID: string; value: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.squareSummaryMetric} testID={testID}>
       <Text style={styles.metricLabel}>{label}</Text>
@@ -1555,6 +1758,7 @@ function LinklySetupCard({
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const [pairCode, setPairCode] = useState("");
   const [pairTerminalId, setPairTerminalId] = useState("");
   const [pairingExpanded, setPairingExpanded] = useState(false);
@@ -1600,11 +1804,11 @@ function LinklySetupCard({
   );
   const pairInputDisabled = disabled || pairTerminal?.isBusy || pairTestRunning;
   const pairingForm = (
-    <View style={lineManagementSupported ? styles.linklyPairForm : styles.linklyLineActions} testID="settings-linkly-pairing-form">
+    <View style={lineManagementSupported ? styles.linklyPairForm : styles.linklyLegacyPairForm} testID="settings-linkly-pairing-form">
       {lineManagementSupported && pairTerminal ? (
         <>
           <View style={styles.linklyPairHeading}>
-            <Text style={styles.linklyTerminalName}>
+            <Text style={styles.linklyPairTitle}>
               {t("linkly.repairTitle", { terminal: `${pairTerminal.displayName} · Lane ${pairTerminal.laneNo}` })}
             </Text>
             <ActionButton compact label={t("action.cancel")} onPress={() => {
@@ -1612,10 +1816,10 @@ function LinklySetupCard({
               setPairingExpanded(false);
             }} testID="settings-linkly-pair-cancel" tone="quiet" />
           </View>
-          <Text style={styles.squareFieldHint}>{t("linkly.repairHint")}</Text>
+          <Text style={styles.fieldHint}>{t("linkly.repairHint")}</Text>
         </>
       ) : <FieldLabel label={t("linkly.pairCode")} />}
-      <View style={lineManagementSupported ? styles.linklyPairInputRow : undefined}>
+      <View style={styles.linklyPairInputRow}>
         <PosKeyboardAwareTextInput
           accessibilityLabel={t("linkly.pairCode")}
           autoCapitalize="none"
@@ -1625,27 +1829,28 @@ function LinklySetupCard({
           maxLength={6}
           onChangeText={(value) => setPairCode(value.replace(/[^0-9]/gu, "").slice(0, 6))}
           placeholder={t("linkly.pairCodePlaceholder")}
-          style={[styles.textInput, lineManagementSupported && styles.linklyPairInput]}
+          placeholderTextColor={posColors.placeholder}
+          style={[styles.textInput, styles.linklyPairInput]}
           testID="settings-linkly-pair-code"
           value={pairCode}
         />
         <ActionButton
-          compact
           disabled={Boolean(pairInputDisabled) || !storeCredentialsReady || !pairTerminal || pairCode.length !== 6}
+          icon="link-variant-plus"
           label={t(lineManagementSupported ? "linkly.submitNewPairCode" : "linkly.pair")}
           onPress={() => {
             if (presenter.requestLinklyPair(pairTerminalId, pairCode)) setPairCode("");
           }}
-          style={lineManagementSupported ? styles.linklyPairSubmit : undefined}
           testID="settings-linkly-pair"
+          tone="accent"
         />
       </View>
-      <Text style={styles.squareFieldHint}>{t(lineManagementSupported ? "linkly.pairCodeSteps" : "linkly.pairCodeHint")}</Text>
+      <Text style={styles.fieldHint}>{t(lineManagementSupported ? "linkly.pairCodeSteps" : "linkly.pairCodeHint")}</Text>
     </View>
   );
 
   return (
-    <View style={lineManagementSupported ? styles.linklyManagement : styles.linklySetupCard} testID="settings-linkly-setup">
+    <View style={styles.linklySetup} testID="settings-linkly-setup">
       {!lineManagementSupported ? <View style={styles.squareSummaryRow}>
         <SquareSummaryMetric
           label={t("linkly.storeCredentials")}
@@ -1675,32 +1880,36 @@ function LinklySetupCard({
           value={healthStatus}
         />
       </View> : null}
-      <View style={lineManagementSupported ? styles.linklySelectionBanner : styles.actionRow}>
+      {/* 状态在左、刷新与测试在右；线路管理布局里只显示本机所选刷卡机的连接状态。 */}
+      <View style={styles.linklyStatusRow}>
         {lineManagementSupported ? (
-          <View style={styles.linklySelectionCopy}>
-            <Text style={styles.linklyTerminalName} testID="settings-linkly-backend-ready">{terminalSnapshot?.selectedTerminalId ? healthStatus : t("linkly.noLocalSelection")}</Text>
+          <View style={styles.linklyStatusCopy}>
+            <Text style={styles.metricLabel}>{t("linkly.backendReady")}</Text>
+            <Text style={styles.linklyStatusValue} testID="settings-linkly-backend-ready">{terminalSnapshot?.selectedTerminalId ? healthStatus : t("linkly.noLocalSelection")}</Text>
           </View>
         ) : null}
         <ActionButton
           compact
           disabled={disabled || setup.health.kind === "loading"}
+          icon="refresh"
           label={t("linkly.refresh")}
           onPress={() => void presenter.refreshLinklySetup()}
           testID="settings-linkly-refresh"
-          tone="secondary"
+          tone="quiet"
         />
         <ActionButton
           compact
           disabled={disabled || !healthReady}
+          icon="check-network-outline"
           label={t("action.test")}
           onPress={() => void presenter.testPaymentProvider("linkly")}
           testID="settings-linkly-test"
-          tone="secondary"
+          tone="quiet"
         />
       </View>
       {setup.health.kind === "selection-required" ? (
         <Text
-          style={styles.squareFieldHint}
+          style={styles.fieldHint}
           testID="settings-linkly-selection-required"
         >
           {t("linkly.selectionRequiredHint")}
@@ -1709,7 +1918,7 @@ function LinklySetupCard({
       {lineManagementSupported ? (
         <View style={styles.linklyDirectoryHeading}>
           <Text style={styles.linklyDirectoryTitle}>{t("linkly.terminals")}</Text>
-          <Text style={styles.squareFieldHint}>{t("linkly.lineManagementHint")}</Text>
+          <Text style={styles.fieldHint}>{t("linkly.lineManagementHint")}</Text>
         </View>
       ) : <FieldLabel label={t("linkly.terminals")} />}
       {terminalSnapshot?.terminals.length ? (
@@ -1730,12 +1939,26 @@ function LinklySetupCard({
                   : terminal.pairingState === "Unpaired"
                     ? t("linkly.statusUnpaired")
                     : t("linkly.statusUnknown");
+            // 状态标签的颜色：忙碌 / 需重新配对用提醒色，已就绪用绿色，其余中性。
+            const statusTone: PosPillTone = terminal.isBusy || terminal.pairingState === "NeedsRepair"
+              ? "warning"
+              : terminal.isReady && terminal.pairingState === "Ready"
+                ? "good"
+                : "neutral";
             return (
               <View key={terminal.terminalId}
                 style={lineManagementSupported ? [styles.linklyLineCard, selected && styles.linklyLineCardSelected] : undefined}
                 testID={`settings-linkly-card-${terminal.terminalId}`}
               >
                 <View style={lineManagementSupported ? styles.linklyLineOverview : undefined}>
+                {lineManagementSupported ? (
+                  <MaterialCommunityIcons
+                    accessible={false}
+                    color={posColors.ink}
+                    name="credit-card-wireless-outline"
+                    size={32}
+                  />
+                ) : null}
                 <PosPressable
                 accessibilityLabel={`${terminal.displayName}. Lane ${terminal.laneNo}. ${status}${
                   selected
@@ -1763,8 +1986,8 @@ function LinklySetupCard({
                 style={({ pressed }) => [
                   lineManagementSupported ? styles.linklyLineIdentity : styles.linklyTerminalOption,
                   !lineManagementSupported && selected && styles.linklyTerminalOptionSelected,
-                  terminalDisabled && styles.squareSelectionDisabled,
-                  pressed && !terminalDisabled && styles.pressedButton,
+                  terminalDisabled && styles.dimmed,
+                  pressed && !terminalDisabled && styles.pressed,
                 ]}
                 testID={`settings-linkly-terminal-${terminal.terminalId}`}
               >
@@ -1772,7 +1995,17 @@ function LinklySetupCard({
                   <Text style={styles.linklyTerminalName}>
                     {`${terminal.displayName} · Lane ${terminal.laneNo}`}
                   </Text>
-                  <Text style={[styles.linklyTerminalStatus, lineManagementSupported && styles.linklyPairingBadge, terminal.pairingState !== "Ready" && styles.linklyUnpairedBadge]}>{status}</Text>
+                  <PosPill label={status} tone={statusTone} />
+                  {selected || (!lineManagementSupported && pairingTarget) ? (
+                    <PosPill
+                      label={t(
+                        selected
+                          ? "linkly.currentSelection"
+                          : "linkly.pairTarget",
+                      )}
+                      tone={selected ? "accent" : "info"}
+                    />
+                  ) : null}
                 </View>
                 {terminal.assignedDeviceCode ? (
                   <Text style={styles.linklyTerminalStatus}>
@@ -1781,15 +2014,6 @@ function LinklySetupCard({
                 ) : (
                   <Text style={styles.linklyTerminalStatus}>{t("linkly.unassigned")}</Text>
                 )}
-                {selected || (!lineManagementSupported && pairingTarget) ? (
-                  <Text style={styles.linklyTerminalStatus}>
-                    {t(
-                      selected
-                        ? "linkly.currentSelection"
-                        : "linkly.pairTarget",
-                    )}
-                  </Text>
-                ) : null}
                 </PosPressable>
                 {lineManagementSupported ? (
                   <LinklyLineActions
@@ -1840,10 +2064,10 @@ function LinklySetupCard({
           })}
         </View>
       ) : (
-        <Text style={styles.squareFieldHint}>{t("linkly.noTerminals")}</Text>
+        <Text style={styles.fieldHint}>{t("linkly.noTerminals")}</Text>
       )}
       {terminalSnapshot && !lineManagementSupported ? (
-        <Text style={styles.squareFieldHint} testID="settings-linkly-line-management-unavailable">
+        <Text style={styles.fieldHint} testID="settings-linkly-line-management-unavailable">
           {t("linkly.lineManagementUnavailable")}
         </Text>
       ) : null}
@@ -1853,7 +2077,7 @@ function LinklySetupCard({
           ? t("linkly.logonPassed")
           : t("linkly.logonRequired")}
       </Text>
-      {!lineManagementSupported ? <Text style={styles.squarePairingNote} testID="settings-linkly-instructions">
+      {!lineManagementSupported ? <Text style={styles.fieldHint} testID="settings-linkly-instructions">
         {t("linkly.instructions")}
       </Text> : null}
     </View>
@@ -1887,6 +2111,7 @@ function LinklyLineActions({
     : never;
   testState: NonNullable<SettingsState["linklySetup"]>["connectionTests"][string] | null;
 }>) {
+  usePosThemeVersion();
   if (!snapshot) return null;
   const t = (key: SettingsCopyKey, values?: Readonly<Record<string, string | number>>) =>
     settingsText(locale, key, values);
@@ -1918,8 +2143,15 @@ function LinklyLineActions({
         ? t(`linkly.guidance.${connectionResult.status}`)
         : null;
   return (
-    <View style={[styles.linklyLineActions, styles.linklyLineActionColumn]}>
-      <Text style={styles.linklyTerminalStatus}>
+    <View style={styles.linklyLineActionColumn}>
+      {/* 行内操作排在行尾，每个 48 高；配对、分配、解绑仍先弹确认框。 */}
+      <View style={styles.linklyLineActionRow}>
+        <ActionButton compact disabled={lineActionDisabled || !terminal.isReady} label={t("linkly.testConnection")} onPress={onTest} testID={`settings-linkly-connection-test-${terminal.terminalId}`} tone="quiet" />
+        <ActionButton compact disabled={lineActionDisabled || !terminal.isReady || !selfTargetAvailable} label={t("linkly.useThisLine")} onPress={() => onAssign(currentDeviceCode)} testID={`settings-linkly-use-self-${terminal.terminalId}`} />
+        <ActionButton compact disabled={lineActionDisabled} label={t("linkly.changeBinding")} onPress={onChangeBinding} testID={`settings-linkly-change-binding-${terminal.terminalId}`} tone="quiet" />
+        <ActionButton compact disabled={lineActionDisabled} label={t("linkly.repair")} onPress={onRepair} testID={`settings-linkly-repair-${terminal.terminalId}`} tone="quiet" />
+      </View>
+      <Text style={styles.linklyLineTestStatus}>
         {testState?.kind === "running"
           ? t("linkly.connectionTesting")
           : testState?.kind === "failed"
@@ -1935,14 +2167,8 @@ function LinklyLineActions({
           {connectionHint}
         </Text>
       ) : null}
-      <View style={styles.actionRow}>
-        <ActionButton compact disabled={lineActionDisabled || !terminal.isReady} label={t("linkly.testConnection")} onPress={onTest} testID={`settings-linkly-connection-test-${terminal.terminalId}`} tone="secondary" />
-        <ActionButton compact disabled={lineActionDisabled || !terminal.isReady || !selfTargetAvailable} label={t("linkly.useThisLine")} onPress={() => onAssign(currentDeviceCode)} testID={`settings-linkly-use-self-${terminal.terminalId}`} tone="secondary" />
-        <ActionButton compact disabled={lineActionDisabled} label={t("linkly.changeBinding")} onPress={onChangeBinding} testID={`settings-linkly-change-binding-${terminal.terminalId}`} tone="secondary" />
-        <ActionButton compact disabled={lineActionDisabled} label={t("linkly.repair")} onPress={onRepair} testID={`settings-linkly-repair-${terminal.terminalId}`} tone="accent" />
-      </View>
       {expanded ? (
-        <View style={styles.actionRow} testID={`settings-linkly-targets-${terminal.terminalId}`}>
+        <View style={styles.linklyLineActionRow} testID={`settings-linkly-targets-${terminal.terminalId}`}>
         <ActionButton compact disabled={lineActionDisabled || !terminal.assignedDeviceCode} label={t("linkly.unbind")} onPress={() => onAssign(null)} testID={`settings-linkly-unbind-${terminal.terminalId}`} tone="danger" />
           {targets.map((device) => (
             <ActionButton
@@ -1952,7 +2178,6 @@ function LinklyLineActions({
               label={`${device.deviceCode}${device.deviceCode === currentDeviceCode ? ` · ${t("linkly.thisDevice")}` : ""}${!device.isAvailable ? ` · ${t("linkly.targetUnavailable")}` : ""}`}
               onPress={() => onAssign(device.deviceCode)}
               testID={`settings-linkly-target-${terminal.terminalId}-${device.deviceCode}`}
-              tone="secondary"
             />
           ))}
         </View>
@@ -2029,6 +2254,7 @@ function SquareSelectionField({
   selectReady: boolean;
   testID: string;
 }>) {
+  usePosThemeVersion();
   const loading = resourceKind === "loading";
   const selectDisabled = disabled || loading || !selectReady;
   const resourceText =
@@ -2056,8 +2282,8 @@ function SquareSelectionField({
           sound="tap"
           style={({ pressed }) => [
             styles.squareSelectionValue,
-            selectDisabled && styles.squareSelectionDisabled,
-            pressed && !selectDisabled && styles.pressedButton,
+            selectDisabled && styles.dimmed,
+            pressed && !selectDisabled && styles.pressed,
           ]}
           testID={`${testID}-select`}
         >
@@ -2081,13 +2307,13 @@ function SquareSelectionField({
           </View>
         </PosPressable>
         <ActionButton
-          compact
           disabled={disabled || loading}
+          icon="refresh"
           label={loadLabel}
           onPress={onLoad}
-          style={styles.squareLoadButton}
+          size="button"
           testID={`${testID}-load`}
-          tone="secondary"
+          tone="quiet"
         />
       </View>
     </View>
@@ -2121,6 +2347,7 @@ function SquareDeviceCodeList({
   selectedLabel: string;
   statusUnknown: string;
 }>) {
+  usePosThemeVersion();
   if (resourceKind !== "ready") {
     const message =
       resourceKind === "loading"
@@ -2168,8 +2395,8 @@ function SquareDeviceCodeList({
             style={({ pressed }) => [
               styles.squareDeviceCodeRow,
               selected && styles.squareDeviceCodeSelected,
-              disabled && styles.squareSelectionDisabled,
-              pressed && !disabled && styles.pressedButton,
+              disabled && styles.dimmed,
+              pressed && !disabled && styles.pressed,
             ]}
             testID={`settings-square-device-code-${deviceCode.id}`}
           >
@@ -2182,7 +2409,11 @@ function SquareDeviceCodeList({
               </Text>
             </View>
             {selected ? (
-              <Text style={styles.squareCurrentTag}>{selectedLabel}</Text>
+              <PosPill
+                label={selectedLabel}
+                style={styles.pillCentered}
+                tone="accent"
+              />
             ) : null}
           </PosPressable>
         );
@@ -2230,6 +2461,7 @@ function SquarePickerModal({
   title: string;
   visible: boolean;
 }>) {
+  usePosThemeVersion();
   const loading = resourceKind === "loading";
   const resourceMessage =
     resourceKind === "disabled"
@@ -2256,7 +2488,7 @@ function SquarePickerModal({
           style={styles.backdropDismissArea}
           testID={`${testID}-backdrop`}
         />
-        <View style={styles.squarePicker} testID={testID}>
+        <View style={styles.pickerSheet} testID={testID}>
           <View style={styles.printerPickerHeader}>
             <Text style={styles.printerPickerTitle}>{title}</Text>
             <Text style={styles.printerPickerHint}>{hint}</Text>
@@ -2290,8 +2522,8 @@ function SquarePickerModal({
                     style={({ pressed }) => [
                       styles.squarePickerOption,
                       selected && styles.squareDeviceCodeSelected,
-                      optionDisabled && styles.squareSelectionDisabled,
-                      pressed && !optionDisabled && styles.pressedButton,
+                      optionDisabled && styles.dimmed,
+                      pressed && !optionDisabled && styles.pressed,
                     ]}
                     testID={`${testID}-option-${option.id}`}
                   >
@@ -2325,10 +2557,10 @@ function SquarePickerModal({
             />
             <ActionButton
               disabled={disabled || loading}
+              icon="refresh"
               label={reloadLabel}
               onPress={onReload}
               testID={`${testID}-reload`}
-              tone="secondary"
             />
           </View>
         </View>
@@ -2457,6 +2689,7 @@ function ReceiptStoreProfileCard({
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: SettingsCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -2464,132 +2697,23 @@ function ReceiptStoreProfileCard({
   // 已应用总部下发资料（profileVersion > 0）：八项资料（含券使用说明、分期条款）只读，按钮改为「立即同步」。
   const managed = state.printer.profileVersion > 0;
   const fieldsDisabled = disabled || managed;
+  // 只读（总部下发或无权限）时输入框换成禁用底色，一眼看出不能改。
+  const inputStyle = [
+    styles.textInput,
+    styles.profileInput,
+    fieldsDisabled && styles.textInputDisabled,
+  ];
+  const multilineStyle = [
+    styles.multilineTextInput,
+    fieldsDisabled && styles.textInputDisabled,
+  ];
   return (
     <SectionCard
-      eyebrow={t("eyebrow.storeProfile")}
-      title={t("peripherals.storeProfile")}
-    >
-      {managed ? (
-        <View testID="settings-receipt-profile-managed">
-          <Text style={styles.sectionCopy}>
-            {t("peripherals.storeProfileManaged")}
-          </Text>
-          <Text style={styles.sectionCopy}>
-            {t("peripherals.storeProfileVersion", {
-              version: state.printer.profileVersion,
-            })}
-          </Text>
-        </View>
-      ) : null}
-      <FieldLabel label={t("field.receiptBrandName")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptBrandName")}
-        autoCapitalize="words"
-        autoCorrect={false}
-        editable={!fieldsDisabled}
-        maxLength={120}
-        onChangeText={(value) => presenter.setReceiptBrandName(value)}
-        style={styles.textInput}
-        testID="settings-receipt-brand-name"
-        value={state.printer.brandName}
-      />
-      <FieldLabel label={t("field.receiptStoreName")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptStoreName")}
-        autoCapitalize="words"
-        autoCorrect={false}
-        editable={!fieldsDisabled}
-        maxLength={120}
-        onChangeText={(value) => presenter.setReceiptStoreName(value)}
-        style={styles.textInput}
-        testID="settings-receipt-store-name"
-        value={state.printer.storeName}
-      />
-      <FieldLabel label={t("field.receiptAddress")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptAddress")}
-        editable={!fieldsDisabled}
-        maxLength={240}
-        multiline
-        onChangeText={(value) => presenter.setReceiptAddress(value)}
-        style={styles.multilineTextInput}
-        testID="settings-receipt-address"
-        textAlignVertical="top"
-        value={state.printer.address}
-      />
-      <FieldLabel label={t("field.receiptPhone")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptPhone")}
-        autoCapitalize="none"
-        autoCorrect={false}
-        editable={!fieldsDisabled}
-        maxLength={60}
-        onChangeText={(value) => presenter.setReceiptPhone(value)}
-        style={styles.textInput}
-        testID="settings-receipt-phone"
-        value={state.printer.phone}
-      />
-      <FieldLabel label={t("field.receiptAbn")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptAbn")}
-        autoCapitalize="characters"
-        autoCorrect={false}
-        editable={!fieldsDisabled}
-        maxLength={32}
-        onChangeText={(value) => presenter.setReceiptAbn(value)}
-        style={styles.textInput}
-        testID="settings-receipt-abn"
-        value={state.printer.abn}
-      />
-      <FieldLabel label={t("field.receiptReturnPolicy")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptReturnPolicy")}
-        editable={!fieldsDisabled}
-        maxLength={500}
-        multiline
-        onChangeText={(value) => presenter.setReceiptReturnPolicy(value)}
-        style={styles.multilineTextInput}
-        testID="settings-receipt-return-policy"
-        textAlignVertical="top"
-        value={state.printer.returnPolicy}
-      />
-      <FieldLabel label={t("field.receiptVoucherTerms")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptVoucherTerms")}
-        editable={!fieldsDisabled}
-        maxLength={RECEIPT_TERMS_TEXT_MAX_LENGTH}
-        multiline
-        onChangeText={(value) => presenter.setReceiptVoucherTerms(value)}
-        placeholder={t("field.receiptTermsPlaceholder")}
-        placeholderTextColor="#7B8793"
-        style={styles.multilineTextInput}
-        testID="settings-receipt-voucher-terms"
-        textAlignVertical="top"
-        value={state.printer.voucherTerms}
-      />
-      <FieldLabel label={t("field.receiptInstallmentTerms")} />
-      <PosKeyboardAwareTextInput
-        accessibilityLabel={t("field.receiptInstallmentTerms")}
-        editable={!fieldsDisabled}
-        maxLength={RECEIPT_TERMS_TEXT_MAX_LENGTH}
-        multiline
-        onChangeText={(value) => presenter.setReceiptInstallmentTerms(value)}
-        placeholder={t("field.receiptTermsPlaceholder")}
-        placeholderTextColor="#7B8793"
-        style={styles.multilineTextInput}
-        testID="settings-receipt-installment-terms"
-        textAlignVertical="top"
-        value={state.printer.installmentTerms}
-      />
-      <Text
-        style={styles.sectionCopy}
-        testID="settings-receipt-terms-hint"
-      >
-        {t("peripherals.receiptTermsHint")}
-      </Text>
-      <View style={styles.actionRow}>
+      accessory={
         <ActionButton
+          compact
           disabled={disabled}
+          icon={managed ? "sync" : "store-outline"}
           label={t(
             managed
               ? "peripherals.syncStoreProfile"
@@ -2601,9 +2725,155 @@ function ReceiptStoreProfileCard({
               : presenter.loadReceiptProfile())
           }
           testID="settings-receipt-profile-load"
-          tone="secondary"
+          tone="quiet"
         />
+      }
+      title={t("peripherals.storeProfile")}
+    >
+      {managed ? (
+        <View
+          style={styles.profileManagedNotice}
+          testID="settings-receipt-profile-managed"
+        >
+          <Text style={styles.profileManagedText}>
+            {t("peripherals.storeProfileManaged")}
+          </Text>
+          <Text style={styles.profileManagedText}>
+            {t("peripherals.storeProfileVersion", {
+              version: state.printer.profileVersion,
+            })}
+          </Text>
+        </View>
+      ) : null}
+      {/* 八项资料三列排：品牌 / 门店 / 电话，地址（占两列）/ ABN，退货政策 / 代金券说明 / 分期条款。 */}
+      <View style={styles.profileRow}>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptBrandName")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptBrandName")}
+            autoCapitalize="words"
+            autoCorrect={false}
+            editable={!fieldsDisabled}
+            maxLength={120}
+            onChangeText={(value) => presenter.setReceiptBrandName(value)}
+            style={inputStyle}
+            testID="settings-receipt-brand-name"
+            value={state.printer.brandName}
+          />
+        </View>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptStoreName")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptStoreName")}
+            autoCapitalize="words"
+            autoCorrect={false}
+            editable={!fieldsDisabled}
+            maxLength={120}
+            onChangeText={(value) => presenter.setReceiptStoreName(value)}
+            style={inputStyle}
+            testID="settings-receipt-store-name"
+            value={state.printer.storeName}
+          />
+        </View>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptPhone")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptPhone")}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!fieldsDisabled}
+            maxLength={60}
+            onChangeText={(value) => presenter.setReceiptPhone(value)}
+            style={inputStyle}
+            testID="settings-receipt-phone"
+            value={state.printer.phone}
+          />
+        </View>
       </View>
+      <View style={styles.profileRow}>
+        <View style={styles.profileFieldWide}>
+          <FieldLabel label={t("field.receiptAddress")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptAddress")}
+            editable={!fieldsDisabled}
+            maxLength={240}
+            multiline
+            onChangeText={(value) => presenter.setReceiptAddress(value)}
+            style={[inputStyle, styles.profileAddressInput]}
+            testID="settings-receipt-address"
+            textAlignVertical="top"
+            value={state.printer.address}
+          />
+        </View>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptAbn")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptAbn")}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            editable={!fieldsDisabled}
+            maxLength={32}
+            onChangeText={(value) => presenter.setReceiptAbn(value)}
+            style={inputStyle}
+            testID="settings-receipt-abn"
+            value={state.printer.abn}
+          />
+        </View>
+      </View>
+      <View style={styles.profileRow}>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptReturnPolicy")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptReturnPolicy")}
+            editable={!fieldsDisabled}
+            maxLength={500}
+            multiline
+            onChangeText={(value) => presenter.setReceiptReturnPolicy(value)}
+            style={multilineStyle}
+            testID="settings-receipt-return-policy"
+            textAlignVertical="top"
+            value={state.printer.returnPolicy}
+          />
+        </View>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptVoucherTerms")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptVoucherTerms")}
+            editable={!fieldsDisabled}
+            maxLength={RECEIPT_TERMS_TEXT_MAX_LENGTH}
+            multiline
+            onChangeText={(value) => presenter.setReceiptVoucherTerms(value)}
+            placeholder={t("field.receiptTermsPlaceholder")}
+            placeholderTextColor={posColors.placeholder}
+            style={multilineStyle}
+            testID="settings-receipt-voucher-terms"
+            textAlignVertical="top"
+            value={state.printer.voucherTerms}
+          />
+        </View>
+        <View style={styles.profileField}>
+          <FieldLabel label={t("field.receiptInstallmentTerms")} />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={t("field.receiptInstallmentTerms")}
+            editable={!fieldsDisabled}
+            maxLength={RECEIPT_TERMS_TEXT_MAX_LENGTH}
+            multiline
+            onChangeText={(value) => presenter.setReceiptInstallmentTerms(value)}
+            placeholder={t("field.receiptTermsPlaceholder")}
+            placeholderTextColor={posColors.placeholder}
+            style={multilineStyle}
+            testID="settings-receipt-installment-terms"
+            textAlignVertical="top"
+            value={state.printer.installmentTerms}
+          />
+        </View>
+      </View>
+      <Text
+        style={styles.fieldHint}
+        testID="settings-receipt-terms-hint"
+      >
+        {t("peripherals.receiptTermsHint")}
+      </Text>
     </SectionCard>
   );
 }
@@ -2617,6 +2887,7 @@ function PeripheralsPane({
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: SettingsCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -2674,176 +2945,243 @@ function PeripheralsPane({
     if (!printerPickerBusy) setPrinterPickerVisible(false);
   };
   return (
-    <View testID="settings-pane-content-peripherals">
-      <PaneHeading
-        subtitle={t("peripherals.subtitle")}
-        title={t("peripherals.title")}
-      />
-      <SectionCard
-        eyebrow={t("eyebrow.receipt")}
-        title={t("peripherals.printer")}
+    <View style={styles.pane} testID="settings-pane-content-peripherals">
+      <PosKeyboardAwareScrollView
+        contentContainerStyle={styles.content}
+        style={styles.contentScroll}
+        testID="settings-content-scroll"
       >
-        <View style={styles.actionRow}>
-          <ToggleButton
-            disabled={printerDisabled}
-            label={t("peripherals.printing")}
-            onPress={() =>
-              presenter.setPrinterEnabled(!state.printer.printEnabled)
-            }
-            selected={state.printer.printEnabled}
-            testID="settings-printer-enabled"
-          />
-          <ToggleButton
-            disabled={printerDisabled}
-            label={t("peripherals.drawer")}
-            onPress={() =>
-              presenter.setDrawerEnabled(!state.printer.drawerEnabled)
-            }
-            selected={state.printer.drawerEnabled}
-            testID="settings-drawer-enabled"
-          />
-          <ToggleButton
-            disabled={printerDisabled}
-            label={state.printer.paper}
-            onPress={() =>
-              presenter.setPrinterPaper(
-                state.printer.paper === "80mm" ? "58mm" : "80mm",
-              )
-            }
-            selected
-            testID="settings-printer-paper"
-          />
-          <ToggleButton
-            disabled={printerDisabled}
-            label={t(
-              state.printer.locale === "en"
-                ? "printer.locale.en"
-                : "printer.locale.zhCN",
-            )}
-            onPress={() =>
-              presenter.setPrinterLocale(
-                state.printer.locale === "en" ? "zh-CN" : "en",
-              )
-            }
-            selected
-            testID="settings-printer-locale"
-          />
-        </View>
-        <FieldLabel label={t("field.peripheralId")} />
-        <PosKeyboardAwareTextInput
-          accessibilityLabel={t("field.printerPeripheralId")}
-          autoCapitalize="none"
-          autoCorrect={false}
-          editable={!printerDisabled}
-          onChangeText={(value) => presenter.setPrinterPeripheralId(value)}
-          style={styles.textInput}
-          testID="settings-printer-id"
-          value={state.printer.peripheralId ?? ""}
-        />
-        <View style={styles.actionRow}>
-          <ActionButton
-            disabled={printerDisabled}
-            label={t("peripherals.scanPrinters")}
-            onPress={() => void scanPrinterDevices()}
-            testID="settings-printer-scan"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={printerDisabled}
-            label={t("action.save")}
-            onPress={() => void presenter.savePrinterSettings()}
-            testID="settings-printer-save"
-          />
-          <ActionButton
-            disabled={printerDisabled}
-            label={t("peripherals.testPrint")}
-            onPress={() => void presenter.testPrinter()}
-            testID="settings-printer-test"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={
-              printerDisabled ||
-              !state.printer.peripheralId ||
-              !state.printer.drawerEnabled
-            }
-            label={t("peripherals.testDrawer")}
-            onPress={() => void presenter.testCashDrawer()}
-            testID="settings-drawer-test"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={printerDisabled || !state.printer.peripheralId}
-            label={t("peripherals.clearSavedPrinter")}
-            onPress={() => void presenter.clearSavedPrinter()}
-            testID="settings-printer-clear-saved"
-            tone="danger"
-          />
-        </View>
-      </SectionCard>
-
-      <ReceiptStoreProfileCard
-        disabled={printerDisabled}
-        locale={locale}
-        presenter={presenter}
-        state={state}
-      />
-
-      <View style={styles.twoColumn}>
+        <PaneHint text={t("peripherals.subtitle")} />
         <SectionCard
-          eyebrow={t("eyebrow.scanner")}
-          style={styles.columnCard}
-          title={t("peripherals.scanner")}
+          title={t("peripherals.printer")}
+          titleAccessory={
+            <PosPill
+              label={hardwareStatusText(locale, state.hardware.printerStatus)}
+              testID="settings-printer-status"
+              tone={hardwareStatusTone(state.hardware.printerStatus)}
+            />
+          }
         >
-          <Text style={styles.sectionCopy}>
-            {t("label.status", {
-              status: hardwareStatusText(locale, state.hardware.scannerStatus),
-            })}
-          </Text>
-          <ActionButton
-            disabled={
-              state.busy ||
-              state.confirmation !== null ||
-              !state.access.canTestScanner
-            }
-            label={t("peripherals.captureOneScan")}
-            onPress={() => void presenter.testScanner()}
-            testID="settings-scanner-test"
-            tone="secondary"
-          />
-        </SectionCard>
-        <SectionCard
-          eyebrow={t("eyebrow.customerDisplay")}
-          style={styles.columnCard}
-          title={t("peripherals.externalDisplay")}
-        >
-          <Text style={styles.sectionCopy}>
-            {t("label.status", {
-              status: hardwareStatusText(locale, state.externalDisplay.status),
-            })}
-          </Text>
-          <View style={styles.actionRow}>
-            <ToggleButton
-              disabled={displayDisabled || !state.externalDisplay.available}
-              label={t("action.enabled")}
-              onPress={() =>
-                void presenter.setExternalDisplayEnabled(
-                  !state.externalDisplay.enabled,
-                )
+          {/* 第一行：打印 / 钱箱开关，纸宽与小票语言二选一。 */}
+          <View style={styles.printerOptionRow}>
+            <View style={styles.inlineSwitch}>
+              <Text style={styles.switchLabel}>{t("peripherals.printing")}</Text>
+              <PosSwitch
+                accessibilityLabel={t("peripherals.printing")}
+                accessibilityRole="switch"
+                accessibilityState={{
+                  checked: state.printer.printEnabled,
+                  disabled: printerDisabled,
+                }}
+                disabled={printerDisabled}
+                onValueChange={(enabled) => presenter.setPrinterEnabled(enabled)}
+                style={styles.settingSwitch}
+                testID="settings-printer-enabled"
+                {...switchTint()}
+                value={state.printer.printEnabled}
+              />
+            </View>
+            <View style={styles.inlineSwitch}>
+              <Text style={styles.switchLabel}>{t("peripherals.drawer")}</Text>
+              <PosSwitch
+                accessibilityLabel={t("peripherals.drawer")}
+                accessibilityRole="switch"
+                accessibilityState={{
+                  checked: state.printer.drawerEnabled,
+                  disabled: printerDisabled,
+                }}
+                disabled={printerDisabled}
+                onValueChange={(enabled) => presenter.setDrawerEnabled(enabled)}
+                style={styles.settingSwitch}
+                testID="settings-drawer-enabled"
+                {...switchTint()}
+                value={state.printer.drawerEnabled}
+              />
+            </View>
+            <PosSegmented<ReceiptPaper>
+              disabled={printerDisabled}
+              onChange={(paper) => presenter.setPrinterPaper(paper)}
+              options={[
+                { value: "80mm", label: "80mm", testID: "settings-printer-paper-80mm" },
+                { value: "58mm", label: "58mm", testID: "settings-printer-paper-58mm" },
+              ]}
+              style={styles.printerOptionSegment}
+              testID="settings-printer-paper"
+              value={state.printer.paper}
+            />
+            <PosSegmented<ReceiptLocale>
+              disabled={printerDisabled}
+              onChange={(printerLocale) =>
+                presenter.setPrinterLocale(printerLocale)
               }
-              selected={state.externalDisplay.enabled}
-              testID="settings-display-enabled"
+              options={[
+                {
+                  value: "en",
+                  label: t("printer.locale.en"),
+                  testID: "settings-printer-locale-en",
+                },
+                {
+                  value: "zh-CN",
+                  label: t("printer.locale.zhCN"),
+                  testID: "settings-printer-locale-zh-CN",
+                },
+              ]}
+              style={styles.printerOptionSegment}
+              testID="settings-printer-locale"
+              value={state.printer.locale}
+            />
+          </View>
+          {/* 第二行：设备 ID、扫描附近设备、保存。 */}
+          <View style={styles.cardRow}>
+            <View
+              style={[
+                styles.inputFrame,
+                printerDisabled && styles.inputFrameDisabled,
+              ]}
+            >
+              <MaterialCommunityIcons
+                accessible={false}
+                color={posColors.mutedInk}
+                name="bluetooth"
+                size={24}
+              />
+              <Text style={styles.inputFramePrefix}>
+                {t("field.peripheralId")}
+              </Text>
+              <PosKeyboardAwareTextInput
+                accessibilityLabel={t("field.printerPeripheralId")}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!printerDisabled}
+                onChangeText={(value) => presenter.setPrinterPeripheralId(value)}
+                style={styles.inputFrameField}
+                testID="settings-printer-id"
+                value={state.printer.peripheralId ?? ""}
+              />
+            </View>
+            <ActionButton
+              disabled={printerDisabled}
+              icon="bluetooth-connect"
+              label={t("peripherals.scanPrinters")}
+              onPress={() => void scanPrinterDevices()}
+              testID="settings-printer-scan"
             />
             <ActionButton
-              disabled={displayDisabled || !state.externalDisplay.available}
-              label={t("peripherals.testDisplay")}
-              onPress={() => void presenter.testExternalDisplay()}
-              testID="settings-display-test"
-              tone="secondary"
+              disabled={printerDisabled}
+              icon="content-save-outline"
+              label={t("action.save")}
+              onPress={() => void presenter.savePrinterSettings()}
+              testID="settings-printer-save"
+            />
+          </View>
+          {/* 第三行：两个测试与清除。 */}
+          <View style={styles.actionRow}>
+            <ActionButton
+              disabled={printerDisabled}
+              fill
+              icon="printer-check"
+              label={t("peripherals.testPrint")}
+              onPress={() => void presenter.testPrinter()}
+              testID="settings-printer-test"
+            />
+            <ActionButton
+              disabled={
+                printerDisabled ||
+                !state.printer.peripheralId ||
+                !state.printer.drawerEnabled
+              }
+              fill
+              icon="archive-arrow-up-outline"
+              label={t("peripherals.testDrawer")}
+              onPress={() => void presenter.testCashDrawer()}
+              testID="settings-drawer-test"
+            />
+            <ActionButton
+              disabled={printerDisabled || !state.printer.peripheralId}
+              fill
+              icon="printer-off-outline"
+              label={t("peripherals.clearSavedPrinter")}
+              onPress={() => void presenter.clearSavedPrinter()}
+              testID="settings-printer-clear-saved"
+              tone="danger"
             />
           </View>
         </SectionCard>
-      </View>
+
+        <ReceiptStoreProfileCard
+          disabled={printerDisabled}
+          locale={locale}
+          presenter={presenter}
+          state={state}
+        />
+
+        {/* 扫描器和客显各一条：状态在左，操作在右。 */}
+        <View style={styles.cardColumns}>
+          <SectionCard style={styles.columnCard}>
+            <View style={styles.deviceLine}>
+              <View style={styles.deviceLineCopy}>
+                <Text style={styles.cardTitle}>{t("peripherals.scanner")}</Text>
+                <Text style={styles.deviceLineStatus}>
+                  {t("label.status", {
+                    status: hardwareStatusText(locale, state.hardware.scannerStatus),
+                  })}
+                </Text>
+              </View>
+              <ActionButton
+                disabled={
+                  state.busy ||
+                  state.confirmation !== null ||
+                  !state.access.canTestScanner
+                }
+                icon="barcode-scan"
+                label={t("peripherals.captureOneScan")}
+                onPress={() => void presenter.testScanner()}
+                testID="settings-scanner-test"
+              />
+            </View>
+          </SectionCard>
+          <SectionCard style={styles.columnCard}>
+            <View style={styles.deviceLine}>
+              <View style={styles.deviceLineCopy}>
+                <Text style={styles.cardTitle}>
+                  {t("peripherals.externalDisplay")}
+                </Text>
+                <Text style={styles.deviceLineStatus}>
+                  {t("label.status", {
+                    status: hardwareStatusText(locale, state.externalDisplay.status),
+                  })}
+                </Text>
+              </View>
+              <View style={styles.inlineSwitch}>
+                <Text style={styles.switchLabel}>{t("action.enabled")}</Text>
+                <PosSwitch
+                  accessibilityLabel={t("action.enabled")}
+                  accessibilityRole="switch"
+                  accessibilityState={{
+                    checked: state.externalDisplay.enabled,
+                    disabled: displayDisabled || !state.externalDisplay.available,
+                  }}
+                  disabled={displayDisabled || !state.externalDisplay.available}
+                  onValueChange={(enabled) =>
+                    void presenter.setExternalDisplayEnabled(enabled)
+                  }
+                  style={styles.settingSwitch}
+                  testID="settings-display-enabled"
+                  {...switchTint()}
+                  value={state.externalDisplay.enabled}
+                />
+              </View>
+              <ActionButton
+                disabled={displayDisabled || !state.externalDisplay.available}
+                icon="monitor-eye"
+                label={t("peripherals.testDisplay")}
+                onPress={() => void presenter.testExternalDisplay()}
+                testID="settings-display-test"
+              />
+            </View>
+          </SectionCard>
+        </View>
+      </PosKeyboardAwareScrollView>
 
       <Modal
         animationType="fade"
@@ -2861,7 +3199,7 @@ function PeripheralsPane({
             style={styles.backdropDismissArea}
             testID="settings-printer-picker-backdrop"
           />
-          <View style={styles.printerPicker} testID="settings-printer-picker">
+          <View style={styles.pickerSheet} testID="settings-printer-picker">
             <View
               style={styles.printerPickerHeader}
               testID="settings-printer-picker-header"
@@ -2897,10 +3235,10 @@ function PeripheralsPane({
                     </Text>
                     <View style={styles.printerPickerPermissionAction}>
                       <ActionButton
+                        icon="open-in-new"
                         label={t("action.openSystemSettings")}
                         onPress={() => void Linking.openSettings()}
                         testID="settings-printer-open-system-settings"
-                        tone="secondary"
                       />
                     </View>
                   </>
@@ -2961,11 +3299,12 @@ function PeripheralsPane({
                         </Text>
                       </View>
                       <ActionButton
-                        compact
                         disabled={printerPickerBusy}
+                        icon="bluetooth-connect"
                         label={t("action.connect")}
                         onPress={() => void connectPrinterDevice(device.id)}
                         testID={`settings-printer-connect-${device.id}`}
+                        tone="accent"
                       />
                     </View>
                   ))
@@ -2986,10 +3325,10 @@ function PeripheralsPane({
               />
               <ActionButton
                 disabled={printerPickerBusy}
+                icon="bluetooth-connect"
                 label={t("peripherals.scanPrinters")}
                 onPress={() => void scanPrinterDevices()}
                 testID="settings-printer-picker-rescan"
-                tone="secondary"
               />
             </View>
           </View>
@@ -2998,6 +3337,9 @@ function PeripheralsPane({
     </View>
   );
 }
+
+type ReceiptPaper = SettingsState["printer"]["paper"];
+type ReceiptLocale = SettingsState["printer"]["locale"];
 
 function DevicePane({
   locale,
@@ -3014,6 +3356,7 @@ function DevicePane({
   scanner: HidScannerRouter | undefined;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const [cameraVisible, setCameraVisible] = useState(false);
   useEffect(() => {
     if (!cameraVisible || !scanner) return undefined;
@@ -3029,146 +3372,163 @@ function DevicePane({
     values?: Readonly<Record<string, string | number>>,
   ) => settingsText(locale, key, values);
   return (
-    <View testID="settings-pane-content-device">
-      <PaneHeading subtitle={t("device.subtitle")} title={t("device.title")} />
-      <SectionCard
-        eyebrow={t("eyebrow.currentBinding")}
-        title={t("device.currentBinding")}
+    <View style={styles.pane} testID="settings-pane-content-device">
+      <PosKeyboardAwareScrollView
+        contentContainerStyle={styles.content}
+        style={styles.contentScroll}
+        testID="settings-content-scroll"
       >
-        <View style={styles.metricRow}>
-          <Metric
-            label={t("metric.store")}
-            value={state.device.storeCode || "—"}
-          />
-          <Metric
-            label={t("metric.storeName")}
-            value={state.device.storeName || "—"}
-          />
-          <Metric
-            label={t("metric.device")}
-            value={state.device.deviceCode || "—"}
-          />
-        </View>
-      </SectionCard>
-      <SectionCard
-        eyebrow={t("eyebrow.reregister")}
-        title={t("device.reregister")}
-      >
-        <FieldLabel label={t("field.deviceActivationCode")} />
-        <PosKeyboardAwareTextInput
-          accessibilityLabel={t("field.deviceActivationCode")}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          editable={!disabled}
-          maxLength={96}
-          onChangeText={(value) => presenter.setDeviceActivationCode(value)}
-          secureTextEntry
-          style={styles.textInput}
-          testID="settings-reregister-store"
-          textContentType="oneTimeCode"
-          value={state.deviceActivationCodeDraft}
-        />
-        <View style={styles.actionRow}>
-          <ActionButton
-            disabled={disabled || !scanner}
-            label={t("device.scanActivationCode")}
-            onPress={() => setCameraVisible(true)}
-            testID="settings-reregister-scan"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={disabled}
-            label={t("device.previewActivationCode")}
-            onPress={() => void presenter.previewDeviceReregistration()}
-            testID="settings-reregister-preview"
-            tone="secondary"
-          />
-        </View>
-        <FieldLabel label={t("field.terminalName")} />
-        <PosKeyboardAwareTextInput
-          accessibilityLabel={t("field.terminalName")}
-          editable={!disabled}
-          onChangeText={(value) => presenter.setTerminalName(value)}
-          style={styles.textInput}
-          testID="settings-reregister-terminal"
-          value={state.terminalNameDraft}
-        />
-        {state.deviceActivationPreview ? (
-          <View testID="settings-reregister-preview-card">
-            <Text style={styles.dangerDescription}>
-              {t("device.currentToTarget", {
-                current: state.device.storeCode || "—",
-                target: `${state.deviceActivationPreview.storeName} · ${state.deviceActivationPreview.storeCode}`,
-              })}
-            </Text>
-            <View style={styles.metricRow}>
-              <Metric
-                label={t("metric.platform")}
-                value={state.deviceActivationPreview.deviceSystem}
+        <PaneHint text={t("device.subtitle")} />
+        <SectionCard title={t("device.currentBinding")}>
+          <View style={styles.metricRow}>
+            <Metric
+              label={t("metric.store")}
+              value={state.device.storeCode || "—"}
+            />
+            <Metric
+              label={t("metric.storeName")}
+              value={state.device.storeName || "—"}
+            />
+            <Metric
+              label={t("metric.device")}
+              value={state.device.deviceCode || "—"}
+            />
+          </View>
+        </SectionCard>
+        <SectionCard title={t("device.reregister")}>
+          {/* 开通码一行：输入框 + 扫码 + 预览目标分店。 */}
+          <View style={styles.fieldGroup}>
+            <FieldLabel label={t("field.deviceActivationCode")} />
+            <View style={styles.cardRow}>
+              <PosKeyboardAwareTextInput
+                accessibilityLabel={t("field.deviceActivationCode")}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                editable={!disabled}
+                maxLength={96}
+                onChangeText={(value) => presenter.setDeviceActivationCode(value)}
+                secureTextEntry
+                style={[
+                  styles.textInput,
+                  styles.textInputFill,
+                  disabled && styles.textInputDisabled,
+                ]}
+                testID="settings-reregister-store"
+                textContentType="oneTimeCode"
+                value={state.deviceActivationCodeDraft}
               />
-              <Metric
-                label={t("metric.expires")}
-                value={formatActivationExpiry(
-                  state.deviceActivationPreview.expiresAtUtc,
-                  locale,
-                )}
+              <ActionButton
+                disabled={disabled || !scanner}
+                icon="qrcode-scan"
+                label={t("device.scanActivationCode")}
+                onPress={() => setCameraVisible(true)}
+                testID="settings-reregister-scan"
+              />
+              <ActionButton
+                disabled={disabled}
+                icon="store-search-outline"
+                label={t("device.previewActivationCode")}
+                onPress={() => void presenter.previewDeviceReregistration()}
+                testID="settings-reregister-preview"
               />
             </View>
+          </View>
+          <View style={styles.fieldGroup}>
+            <FieldLabel label={t("field.terminalName")} />
+            <PosKeyboardAwareTextInput
+              accessibilityLabel={t("field.terminalName")}
+              editable={!disabled}
+              onChangeText={(value) => presenter.setTerminalName(value)}
+              style={[styles.textInput, disabled && styles.textInputDisabled]}
+              testID="settings-reregister-terminal"
+              value={state.terminalNameDraft}
+            />
+          </View>
+          {state.deviceActivationPreview ? (
+            <View
+              style={styles.reregisterPreview}
+              testID="settings-reregister-preview-card"
+            >
+              <Text style={styles.dangerDescription}>
+                {t("device.currentToTarget", {
+                  current: state.device.storeCode || "—",
+                  target: `${state.deviceActivationPreview.storeName} · ${state.deviceActivationPreview.storeCode}`,
+                })}
+              </Text>
+              <View style={styles.metricRow}>
+                <Metric
+                  label={t("metric.platform")}
+                  value={state.deviceActivationPreview.deviceSystem}
+                />
+                <Metric
+                  label={t("metric.expires")}
+                  value={formatActivationExpiry(
+                    state.deviceActivationPreview.expiresAtUtc,
+                    locale,
+                  )}
+                />
+              </View>
+              <View style={styles.actionRow}>
+                <ActionButton
+                  disabled={disabled}
+                  icon="swap-horizontal"
+                  label={t(
+                    state.deviceReregistrationPreflight.kind === "checking"
+                      ? "action.checking"
+                      : "device.reviewReregistration",
+                  )}
+                  onPress={() => void presenter.requestDeviceReregistration()}
+                  size="button"
+                  testID="settings-reregister-request"
+                  tone="danger"
+                />
+              </View>
+            </View>
+          ) : null}
+          {state.deviceReregistrationPreflight.kind === "blocked" ||
+          state.deviceReregistrationPreflight.kind === "failed" ? (
+            <DeviceReregistrationBlockers
+              blockers={
+                state.deviceReregistrationPreflight.kind === "blocked"
+                  ? state.deviceReregistrationPreflight.blockers
+                  : []
+              }
+              disabled={disabled}
+              failed={state.deviceReregistrationPreflight.kind === "failed"}
+              locale={locale}
+              onBack={onBack}
+              onOpenSyncHistory={onOpenSyncHistory}
+              onRecheck={() => void presenter.requestDeviceReregistration()}
+            />
+          ) : null}
+        </SectionCard>
+        <SectionCard title={t("device.resetRegistration")}>
+          <Text style={styles.dangerDescription}>
+            {t("device.resetRegistrationImpact")}
+          </Text>
+          <View style={styles.metricRow}>
+            <Metric
+              label={t("metric.store")}
+              value={state.device.storeCode || "—"}
+            />
+            <Metric
+              label={t("metric.device")}
+              value={state.device.deviceCode || "—"}
+            />
+          </View>
+          <View style={styles.actionRow}>
             <ActionButton
               disabled={disabled}
-              label={t(
-                state.deviceReregistrationPreflight.kind === "checking"
-                  ? "action.checking"
-                  : "device.reviewReregistration",
-              )}
-              onPress={() => void presenter.requestDeviceReregistration()}
-              testID="settings-reregister-request"
+              icon="delete-alert-outline"
+              label={t("device.reviewResetRegistration")}
+              onPress={() => presenter.requestDeviceRegistrationReset()}
+              size="button"
+              testID="settings-device-registration-reset-request"
               tone="danger"
             />
           </View>
-        ) : null}
-        {state.deviceReregistrationPreflight.kind === "blocked" ||
-        state.deviceReregistrationPreflight.kind === "failed" ? (
-          <DeviceReregistrationBlockers
-            blockers={
-              state.deviceReregistrationPreflight.kind === "blocked"
-                ? state.deviceReregistrationPreflight.blockers
-                : []
-            }
-            disabled={disabled}
-            failed={state.deviceReregistrationPreflight.kind === "failed"}
-            locale={locale}
-            onBack={onBack}
-            onOpenSyncHistory={onOpenSyncHistory}
-            onRecheck={() => void presenter.requestDeviceReregistration()}
-          />
-        ) : null}
-      </SectionCard>
-      <SectionCard
-        eyebrow={t("eyebrow.dangerZone")}
-        title={t("device.resetRegistration")}
-      >
-        <Text style={styles.dangerDescription}>
-          {t("device.resetRegistrationImpact")}
-        </Text>
-        <View style={styles.metricRow}>
-          <Metric
-            label={t("metric.store")}
-            value={state.device.storeCode || "—"}
-          />
-          <Metric
-            label={t("metric.device")}
-            value={state.device.deviceCode || "—"}
-          />
-        </View>
-        <ActionButton
-          disabled={disabled}
-          label={t("device.reviewResetRegistration")}
-          onPress={() => presenter.requestDeviceRegistrationReset()}
-          testID="settings-device-registration-reset-request"
-          tone="danger"
-        />
-      </SectionCard>
+        </SectionCard>
+      </PosKeyboardAwareScrollView>
       {scanner ? (
         <CameraScannerModal
           context="device-activation"
@@ -3240,6 +3600,7 @@ function DeviceReregistrationBlockers({
   onOpenSyncHistory: (() => void) | undefined;
   onRecheck(): void;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: SettingsCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -3317,27 +3678,25 @@ function DeviceReregistrationBlockers({
       <View style={styles.actionRow}>
         {needsSales && onBack ? (
           <ActionButton
-            compact
             disabled={disabled}
+            icon="arrow-left"
             label={t("action.backToSales")}
             onPress={onBack}
             testID="settings-reregister-back-to-sales"
-            tone="secondary"
           />
         ) : null}
         {needsSyncHistory && onOpenSyncHistory ? (
           <ActionButton
-            compact
             disabled={disabled}
+            icon="sync"
             label={t("device.blockers.openSyncHistory")}
             onPress={onOpenSyncHistory}
             testID="settings-reregister-open-sync-history"
-            tone="secondary"
           />
         ) : null}
         <ActionButton
-          compact
           disabled={disabled}
+          icon="refresh"
           label={t("device.blockers.recheck")}
           onPress={onRecheck}
           testID="settings-reregister-recheck"
@@ -3356,66 +3715,71 @@ function HardwarePane({
   presenter: SettingsScreenPresenter;
   state: SettingsState;
 }>) {
+  usePosThemeVersion();
   const t = (key: SettingsCopyKey) => settingsText(locale, key);
   return (
-    <View testID="settings-pane-content-hardware">
-      <PaneHeading
-        subtitle={t("hardware.subtitle")}
-        title={t("hardware.title")}
-      />
-      <View style={styles.hardwareGrid}>
-        <HardwareCard
-          actionLabel={t("hardware.printTest")}
-          disabled={
-            state.busy ||
-            state.confirmation !== null ||
-            !state.access.canConfigurePrinter
-          }
-          onPress={() => void presenter.testPrinter()}
-          status={state.hardware.printerStatus}
-          statusText={hardwareStatusText(locale, state.hardware.printerStatus)}
-          testID="settings-hardware-printer"
-          title={t("peripherals.printer")}
-        />
-        <HardwareCard
-          actionLabel={t("hardware.captureScan")}
-          disabled={
-            state.busy ||
-            state.confirmation !== null ||
-            !state.access.canTestScanner
-          }
-          onPress={() => void presenter.testScanner()}
-          status={state.hardware.scannerStatus}
-          statusText={hardwareStatusText(locale, state.hardware.scannerStatus)}
-          testID="settings-hardware-scanner"
-          title={t("peripherals.scanner")}
-        />
-        <HardwareCard
-          actionLabel={t("hardware.showTest")}
-          disabled={
-            state.busy ||
-            state.confirmation !== null ||
-            !state.access.canManageCustomerDisplay ||
-            !state.externalDisplay.available
-          }
-          onPress={() => void presenter.testExternalDisplay()}
-          status={state.hardware.externalDisplayStatus}
-          statusText={hardwareStatusText(
-            locale,
-            state.hardware.externalDisplayStatus,
-          )}
-          testID="settings-hardware-display"
-          title={t("hardware.display")}
-        />
-      </View>
-      <SectionCard
-        eyebrow={t("eyebrow.lastCapture")}
-        title={t("hardware.lastScan")}
+    <View style={styles.pane} testID="settings-pane-content-hardware">
+      <PosKeyboardAwareScrollView
+        contentContainerStyle={styles.content}
+        style={styles.contentScroll}
+        testID="settings-content-scroll"
       >
-        <Text style={styles.scannerValue}>
-          {state.hardware.lastScannerValue ?? t("hardware.waitingForTest")}
-        </Text>
-      </SectionCard>
+        <PaneHint text={t("hardware.subtitle")} />
+        {/* 三张测试卡各带一个测试按钮：打印机、扫描器、客显。 */}
+        <View style={styles.cardColumns}>
+          <HardwareCard
+            actionLabel={t("hardware.printTest")}
+            disabled={
+              state.busy ||
+              state.confirmation !== null ||
+              !state.access.canConfigurePrinter
+            }
+            icon="printer-outline"
+            onPress={() => void presenter.testPrinter()}
+            status={state.hardware.printerStatus}
+            statusText={hardwareStatusText(locale, state.hardware.printerStatus)}
+            testID="settings-hardware-printer"
+            title={t("peripherals.printer")}
+          />
+          <HardwareCard
+            actionLabel={t("hardware.captureScan")}
+            disabled={
+              state.busy ||
+              state.confirmation !== null ||
+              !state.access.canTestScanner
+            }
+            icon="barcode-scan"
+            onPress={() => void presenter.testScanner()}
+            status={state.hardware.scannerStatus}
+            statusText={hardwareStatusText(locale, state.hardware.scannerStatus)}
+            testID="settings-hardware-scanner"
+            title={t("peripherals.scanner")}
+          />
+          <HardwareCard
+            actionLabel={t("hardware.showTest")}
+            disabled={
+              state.busy ||
+              state.confirmation !== null ||
+              !state.access.canManageCustomerDisplay ||
+              !state.externalDisplay.available
+            }
+            icon="monitor"
+            onPress={() => void presenter.testExternalDisplay()}
+            status={state.hardware.externalDisplayStatus}
+            statusText={hardwareStatusText(
+              locale,
+              state.hardware.externalDisplayStatus,
+            )}
+            testID="settings-hardware-display"
+            title={t("hardware.display")}
+          />
+        </View>
+        <SectionCard title={t("hardware.lastScan")}>
+          <Text style={styles.scannerValue}>
+            {state.hardware.lastScannerValue ?? t("hardware.waitingForTest")}
+          </Text>
+        </SectionCard>
+      </PosKeyboardAwareScrollView>
     </View>
   );
 }
@@ -3437,6 +3801,7 @@ function ConfirmationCard({
   storeCode: string;
   deviceCode: string;
 }>) {
+  usePosThemeVersion();
   const requiresEmployeeScan =
     confirmation.kind === "reset-device-registration";
   const [employeeBarcode, setEmployeeBarcode] = useState("");
@@ -3524,6 +3889,7 @@ function ConfirmationCard({
             disabled={busy}
             label={settingsText(locale, "action.cancel")}
             onPress={onCancel}
+            size="button"
             testID="settings-confirm-cancel"
             tone="quiet"
           />
@@ -3534,6 +3900,7 @@ function ConfirmationCard({
               busy ? "action.checking" : "action.confirm",
             )}
             onPress={submit}
+            size="button"
             testID="settings-confirm"
             tone="danger"
           />
@@ -3549,36 +3916,42 @@ function EnvironmentSelector({
   locale,
   onSelect,
   prefix,
+  style,
 }: Readonly<{
   disabled: boolean;
   environment: PaymentEnvironment;
   locale: SettingsLocale;
   onSelect(environment: PaymentEnvironment): void;
   prefix: string;
+  style?: StyleProp<ViewStyle>;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.actionRow}>
-      <ToggleButton
-        disabled={disabled}
-        label={settingsText(locale, "environment.production")}
-        onPress={() => onSelect("Production")}
-        selected={environment === "Production"}
-        testID={`${prefix}-production`}
-      />
-      <ToggleButton
-        disabled={disabled}
-        label={settingsText(locale, "environment.sandbox")}
-        onPress={() => onSelect("Sandbox")}
-        selected={environment === "Sandbox"}
-        testID={`${prefix}-sandbox`}
-      />
-    </View>
+    <PosSegmented<PaymentEnvironment>
+      disabled={disabled}
+      onChange={onSelect}
+      options={[
+        {
+          value: "Production",
+          label: settingsText(locale, "environment.production"),
+          testID: `${prefix}-production`,
+        },
+        {
+          value: "Sandbox",
+          label: settingsText(locale, "environment.sandbox"),
+          testID: `${prefix}-sandbox`,
+        },
+      ]}
+      style={style}
+      value={environment}
+    />
   );
 }
 
 function HardwareCard({
   actionLabel,
   disabled,
+  icon,
   onPress,
   status,
   statusText,
@@ -3587,66 +3960,92 @@ function HardwareCard({
 }: Readonly<{
   actionLabel: string;
   disabled: boolean;
+  icon: PosIconName;
   onPress(): void;
   status: string;
   statusText: string;
   testID: string;
   title: string;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.hardwareCard}>
-      <Text style={styles.hardwareTitle}>{title}</Text>
-      <Text
-        style={[
-          styles.hardwareStatus,
-          status === "connected" || status === "ready"
-            ? styles.hardwareStatusReady
-            : status === "disconnected"
-              ? styles.hardwareStatusDisconnected
-              : styles.hardwareStatusUnavailable,
-        ]}
-        testID={`${testID}-status`}
-      >
-        {statusText}
-      </Text>
+    <View style={[styles.sectionCard, styles.columnCard]}>
+      <View style={styles.hardwareHeading}>
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.ink}
+          name={icon}
+          size={30}
+        />
+        <View style={styles.deviceLineCopy}>
+          <Text style={styles.cardTitle}>{title}</Text>
+          <Text
+            style={[
+              styles.hardwareStatus,
+              status === "connected" || status === "ready"
+                ? styles.hardwareStatusReady
+                : status === "disconnected"
+                  ? styles.hardwareStatusDisconnected
+                  : styles.hardwareStatusUnavailable,
+            ]}
+            testID={`${testID}-status`}
+          >
+            {statusText}
+          </Text>
+        </View>
+      </View>
       <ActionButton
         disabled={disabled}
         label={actionLabel}
         onPress={onPress}
+        size="button"
         testID={testID}
-        tone="secondary"
       />
     </View>
   );
 }
 
-function PaneHeading({
-  subtitle,
-  title,
-}: Readonly<{ subtitle: string; title: string }>) {
-  return (
-    <View style={styles.paneHeading}>
-      <Text style={styles.paneTitle}>{title}</Text>
-      <Text style={styles.paneSubtitle}>{subtitle}</Text>
-    </View>
-  );
+/** 分区顶部的一句说明（原来的分区副标题）；分区名称已经在左侧目录里高亮，不再重复大标题。 */
+function PaneHint({ text }: Readonly<{ text: string }>) {
+  usePosThemeVersion();
+  return <Text style={styles.paneHint}>{text}</Text>;
 }
 
+/** 每组设置一张卡：标题（可带状态标签）、一句说明、右上角操作，下面直接是控件。 */
 function SectionCard({
+  accessory,
   children,
-  eyebrow,
+  hint,
   style,
+  testID,
   title,
+  titleAccessory,
 }: Readonly<{
+  /** 卡片右上角的操作（例如「从门店载入」）。 */
+  accessory?: React.ReactNode;
   children: React.ReactNode;
-  eyebrow: string;
+  hint?: string;
   style?: StyleProp<ViewStyle>;
-  title: string;
+  testID?: string;
+  title?: string;
+  /** 紧跟标题的状态标签。 */
+  titleAccessory?: React.ReactNode;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={[styles.sectionCard, style]}>
-      {eyebrow ? <Text style={styles.cardEyebrow}>{eyebrow}</Text> : null}
-      {title ? <Text style={styles.cardTitle}>{title}</Text> : null}
+    <View style={[styles.sectionCard, style]} testID={testID}>
+      {title || accessory ? (
+        <View style={styles.cardHeader}>
+          <View style={styles.cardHeaderCopy}>
+            <View style={styles.cardTitleRow}>
+              {title ? <Text style={styles.cardTitle}>{title}</Text> : null}
+              {titleAccessory}
+            </View>
+            {hint ? <Text style={styles.cardHint}>{hint}</Text> : null}
+          </View>
+          {accessory}
+        </View>
+      ) : null}
       {children}
     </View>
   );
@@ -3661,6 +4060,7 @@ function Availability({
   blockerCode: string | null;
   locale: SettingsLocale;
 }>) {
+  usePosThemeVersion();
   return (
     <View
       style={[
@@ -3668,7 +4068,14 @@ function Availability({
         available ? styles.availabilityReady : styles.availabilityUnavailable,
       ]}
     >
-      <Text style={styles.availabilityText}>
+      <Text
+        style={[
+          styles.availabilityText,
+          available
+            ? styles.availabilityTextReady
+            : styles.availabilityTextUnavailable,
+        ]}
+      >
         {available
           ? settingsText(locale, "availability.ready")
           : settingsText(locale, "availability.unavailable", {
@@ -3679,7 +4086,9 @@ function Availability({
   );
 }
 
+/** 只读信息：标签在前、数值在后排成一行，多项并排时自动换行。 */
 function Metric({ label, value }: Readonly<{ label: string; value: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.metric}>
       <Text style={styles.metricLabel}>{label}</Text>
@@ -3691,15 +4100,19 @@ function Metric({ label, value }: Readonly<{ label: string; value: string }>) {
 }
 
 function FieldLabel({ label }: Readonly<{ label: string }>) {
+  usePosThemeVersion();
   return <Text style={styles.fieldLabel}>{label}</Text>;
 }
 
 function EmptyPanel({
+  busy = false,
   message,
   testID,
-}: Readonly<{ message: string; testID: string }>) {
+}: Readonly<{ busy?: boolean; message: string; testID: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.emptyPanel} testID={testID}>
+      {busy ? <ActivityIndicator color={posColors.accent} size="large" /> : null}
       <Text style={styles.emptyText}>{message}</Text>
     </View>
   );
@@ -3715,6 +4128,7 @@ function StatusBanner({
   /** 「已更新到版本 N」文案用：同步成功后本机已应用的下发版本。 */
   receiptProfileVersion: number;
 }>) {
+  usePosThemeVersion();
   const success = isSuccessStatus(statusCode);
   return (
     <View
@@ -3725,6 +4139,12 @@ function StatusBanner({
       ]}
       testID="settings-status"
     >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={success ? posColors.green : posColors.red}
+        name={success ? "check-circle-outline" : "alert-circle-outline"}
+        size={22}
+      />
       <Text style={styles.statusText}>
         {statusCopy(locale, statusCode, { version: receiptProfileVersion })}
       </Text>
@@ -3742,6 +4162,76 @@ function hardwareStatusText(locale: SettingsLocale, status: string): string {
   return statusKey[status] ? settingsText(locale, statusKey[status]) : status;
 }
 
+/** 硬件状态对应的标签颜色：已连接 / 就绪为绿色，断开为红色，其余（不可用、未知）中性。 */
+function hardwareStatusTone(status: string): PosPillTone {
+  if (status === "connected" || status === "ready") return "good";
+  return status === "disconnected" ? "danger" : "neutral";
+}
+
+/** 开关统一配色：开 = 主操作色，关 = 灰色槽。渲染时读取，换主题后跟着变。 */
+function switchTint() {
+  return {
+    ios_backgroundColor: posColors.disabledBorder,
+    trackColor: { false: posColors.disabledBorder, true: posColors.accent },
+  };
+}
+
+/** 左侧分区目录的一项：66 高、带图标，当前分区深色填充。 */
+function SectionNavButton({
+  disabled,
+  icon,
+  label,
+  onPress,
+  selected,
+  testID,
+}: Readonly<{
+  disabled: boolean;
+  icon: PosIconName;
+  label: string;
+  onPress(): void;
+  selected: boolean;
+  testID: string;
+}>) {
+  usePosThemeVersion();
+  const foreground = selected
+    ? posColors.onInverse
+    : disabled
+      ? posColors.disabledInk
+      : posColors.ink;
+  return (
+    <PosPressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled, selected }}
+      disabled={disabled}
+      onPress={onPress}
+      sound="navigate"
+      style={({ pressed }) => [
+        styles.navButton,
+        selected && styles.navButtonSelected,
+        pressed && !disabled && !selected && styles.navButtonPressed,
+      ]}
+      testID={testID}
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={foreground}
+        name={icon}
+        size={26}
+      />
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+        numberOfLines={1}
+        style={[styles.navButtonLabel, { color: foreground }]}
+      >
+        {label}
+      </Text>
+    </PosPressable>
+  );
+}
+
+/** 二选一里的一个选项（旧布局的刷卡终端提供方）：选中时深色填充并带勾。 */
 function ToggleButton({
   disabled,
   label,
@@ -3755,73 +4245,79 @@ function ToggleButton({
   selected: boolean;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <ActionButton
       disabled={disabled}
-      label={`${selected ? "✓ " : ""}${label}`}
+      fill
+      label={label}
       onPress={onPress}
       selected={selected}
+      selectedTone="inverse"
       testID={testID}
-      tone="secondary"
     />
   );
 }
 
+type ActionButtonTone = "accent" | "danger" | "primary" | "quiet" | "secondary";
+
+const ACTION_BUTTON_TONES: Record<ActionButtonTone, PosButtonTone> = {
+  accent: "info",
+  danger: "danger",
+  primary: "primary",
+  quiet: "quiet",
+  secondary: "secondary",
+};
+
+/**
+ * 设置页按钮：统一走 PosButton。常规 56 高，行内次要操作（compact）48 高。
+ * 危险操作沿用 danger 提示音；selected 只用于「已选中 / 已启用」的状态展示。
+ */
 function ActionButton({
   compact = false,
   disabled = false,
+  fill = false,
+  icon,
   label,
   onPress,
   selected = false,
+  selectedTone = "success",
+  size,
+  sound,
   style,
   testID,
-  tone = "primary",
+  tone = "secondary",
 }: Readonly<{
   compact?: boolean;
   disabled?: boolean;
+  fill?: boolean;
+  icon?: PosIconName;
   label: string;
   onPress(): void;
   selected?: boolean;
+  selectedTone?: PosButtonTone;
+  size?: PosButtonSize;
+  sound?: TouchSoundKind;
   style?: StyleProp<ViewStyle>;
   testID: string;
-  tone?: "accent" | "danger" | "nav" | "primary" | "quiet" | "secondary";
+  tone?: ActionButtonTone;
 }>) {
+  usePosThemeVersion();
+  const resolvedIcon = selected ? "check" : icon;
   return (
-    <PosPressable
-      accessibilityRole="button"
+    <PosButton
       accessibilityState={{ disabled, selected }}
       disabled={disabled}
+      fill={fill}
+      label={label}
       onPress={onPress}
-      sound={
-        tone === "danger" ? "danger" : tone === "nav" ? "navigate" : "tap"
-      }
-      style={({ pressed }) => [
-        styles.button,
-        compact && styles.compactButton,
-        tone === "secondary" && styles.secondaryButton,
-        tone === "accent" && styles.accentButton,
-        tone === "quiet" && styles.quietButton,
-        tone === "danger" && styles.dangerButton,
-        tone === "nav" && styles.navButton,
-        selected && styles.selectedButton,
-        disabled && styles.disabledButton,
-        pressed && !disabled && styles.pressedButton,
-        style,
-      ]}
+      size={size ?? (compact ? "small" : "medium")}
+      sound={sound ?? (tone === "danger" ? "danger" : "tap")}
+      style={style}
       testID={testID}
-    >
-      <Text
-        style={[
-          styles.buttonLabel,
-          (tone === "secondary" || tone === "quiet" || tone === "nav") &&
-            styles.secondaryButtonLabel,
-          tone === "accent" && styles.accentButtonLabel,
-          selected && styles.selectedButtonLabel,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
+      tone={selected ? selectedTone : ACTION_BUTTON_TONES[tone]}
+      {...(resolvedIcon ? { icon: resolvedIcon } : {})}
+    />
   );
 }
 
@@ -3948,714 +4444,821 @@ function formatActivationExpiry(
     : date.toLocaleString(locale === "zh" ? "zh-CN" : "en-AU");
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: posColors.canvas },
-  page: { flex: 1, paddingHorizontal: 30, paddingVertical: 22 },
-  header: {
-    alignItems: "flex-start",
-    flexDirection: "row",
-    gap: 24,
-    justifyContent: "space-between",
-    marginBottom: 18,
-  },
-  titleGroup: { flex: 1, maxWidth: 920 },
-  eyebrow: {
-    color: posColors.blue,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 30,
-    fontWeight: "800",
-    marginTop: 5,
-  },
-  subtitle: {
-    color: posColors.mutedInk,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 5,
-  },
+const styles = createPosStyles((colors) => ({
+  // ---- 页面骨架：左侧分区目录 + 右侧工作区 ----
+  page: { flex: 1, gap: 12, minHeight: 0, padding: 12 },
   workspace: {
     flex: 1,
     flexDirection: "row",
-    gap: 20,
-    minHeight: 360,
+    gap: 12,
+    minHeight: 0,
   },
-  navigation: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    padding: 12,
-    width: 230,
-  },
+  navigation: { gap: 8, width: 232 },
+  navigationCompact: { width: 184 },
   navigationTitle: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    marginBottom: 8,
-    paddingHorizontal: 6,
-  },
-  contentScroll: { flex: 1 },
-  content: { gap: 14, paddingBottom: 28 },
-  navButton: {
-    alignItems: "flex-start",
-    backgroundColor: "transparent",
-    borderColor: "transparent",
-    marginTop: 4,
-  },
-  deviceBadge: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 8,
-    marginTop: "auto",
-    padding: 12,
-  },
-  badgeLabel: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  badgeValue: {
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
-    marginTop: 4,
-  },
-  badgeMeta: {
-    color: posColors.blue,
-    fontSize: 13,
-    fontWeight: "700",
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginHorizontal: 2,
     marginTop: 2,
   },
-  paneHeading: { marginBottom: 14 },
-  paneTitle: { color: posColors.ink, fontSize: 25, fontWeight: "800" },
-  paneSubtitle: {
-    color: posColors.mutedInk,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 6,
-  },
-  sectionCard: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 14,
-    padding: 20,
-  },
-  columnCard: { flex: 1, marginBottom: 0 },
-  cardEyebrow: {
-    color: posColors.blue,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.9,
-  },
-  cardTitle: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "800",
-    marginBottom: 14,
-    marginTop: 4,
-  },
-  sectionCopy: {
-    color: posColors.mutedInk,
-    fontSize: 15,
-    lineHeight: 22,
-    marginBottom: 14,
-  },
-  soundPreferenceRow: {
+  navButton: {
     alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
     flexDirection: "row",
-    gap: 16,
-    minHeight: SETTINGS_MIN_TOUCH_TARGET,
+    gap: 10,
+    minHeight: 66,
+    paddingHorizontal: 14,
   },
-  soundPreferenceCopy: { flex: 1 },
-  soundPreferenceDivider: {
-    borderBottomColor: posColors.border,
-    borderBottomWidth: 1,
-    marginBottom: 14,
-    paddingBottom: 14,
+  navButtonSelected: {
+    backgroundColor: colors.inverseSurface,
+    borderColor: colors.inverseSurface,
   },
-  soundPreferenceLabel: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-    lineHeight: 20,
+  navButtonPressed: { backgroundColor: colors.surfaceAlt },
+  navButtonLabel: { flexShrink: 1, fontSize: 16.5, fontWeight: "900" },
+  deviceBadge: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    gap: 2,
+    marginTop: "auto",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  badgeLabel: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
     marginBottom: 4,
   },
-  soundPreferenceHint: { fontSize: 13, lineHeight: 19, marginBottom: 0 },
-  soundSwitch: { minHeight: SETTINGS_MIN_TOUCH_TARGET, minWidth: 52 },
-  twoColumn: { flexDirection: "row", gap: 14 },
+  badgeValue: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  badgeMeta: { color: colors.mutedInk, fontSize: 13, fontWeight: "600" },
+  workspaceMain: { flex: 1, minHeight: 0, minWidth: 0 },
+  pane: { flex: 1, gap: 12, minHeight: 0 },
+  contentScroll: { flex: 1 },
+  content: { gap: 10, paddingBottom: 16 },
+  paneHint: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    paddingHorizontal: 2,
+  },
+  // 分区底部固定的操作条（支付设置的启用与保存）。
+  paneFooter: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  paneFooterNote: {
+    color: colors.mutedInk,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+    minWidth: 140,
+  },
+  paneFooterSpacer: { flex: 1 },
+  paneFooterButton: { minWidth: 220 },
+
+  // ---- 卡片 ----
+  sectionCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    gap: 8,
+    minWidth: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  cardColumns: { alignItems: "stretch", flexDirection: "row", gap: 10 },
+  columnCard: { flex: 1 },
+  cardHeader: { alignItems: "center", flexDirection: "row", gap: 12 },
+  cardHeaderCopy: { flex: 1, gap: 2, minWidth: 0 },
+  cardTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  cardTitle: { color: colors.ink, fontSize: 17, fontWeight: "900" },
+  cardHint: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+  cardBody: { gap: 8 },
+  cardRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
   actionRow: {
     alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 10,
-    marginTop: 12,
   },
-  metricRow: { flexDirection: "row", gap: 10 },
-  metric: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 8,
-    flex: 1,
-    minWidth: 130,
-    padding: 12,
+  sectionCopy: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
   },
-  metricLabel: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    fontWeight: "700",
-  },
-  metricValue: {
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "800",
-    marginTop: 4,
-  },
-  squareSummaryRow: {
+
+  // ---- 开关行 ----
+  switchRowGroup: {
+    alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 10,
-    marginTop: 12,
+    gap: 22,
   },
-  squareSummaryMetric: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 8,
+  switchRow: {
+    alignItems: "center",
     flex: 1,
-    minWidth: 130,
-    padding: 12,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 46,
+    minWidth: 240,
   },
-  squareSummaryValue: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-    lineHeight: 19,
-    marginTop: 4,
-  },
-  navigationCompact: { width: 184, padding: 10 },
-  paymentToolbar: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 16, justifyContent: "space-between", marginBottom: 18 },
-  paymentTabs: { flexDirection: "row", borderWidth: 1, borderColor: posColors.border, borderRadius: 8, padding: 3, backgroundColor: posColors.surface },
-  paymentTab: { alignItems: "center", flexDirection: "row", gap: 8, justifyContent: "center", minHeight: SETTINGS_MIN_TOUCH_TARGET, minWidth: 120, paddingHorizontal: 18, borderRadius: 5 },
-  paymentTabDot: { backgroundColor: posColors.green, borderRadius: 4, height: 8, width: 8 },
-  paymentTabDotSelected: { backgroundColor: "#FFFFFF" },
-  paymentEnvironmentNote: { color: posColors.mutedInk, fontSize: 13, fontWeight: "700" },
-  paymentTabSelected: { backgroundColor: posColors.blue },
-  paymentTabLabel: { color: posColors.ink, fontSize: 16, fontWeight: "700" },
-  paymentTabSelectedLabel: { color: "#FFFFFF" },
-  paymentPanels: { gap: 14 },
-  paymentProviderPanel: { padding: 0, borderWidth: 0, backgroundColor: "transparent", marginBottom: 0 },
-  paymentFooter: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12, borderTopColor: posColors.border, borderTopWidth: 1, marginTop: 18, paddingTop: 10 },
-  paymentFooterNote: { color: posColors.mutedInk, fontSize: 13, lineHeight: 20, flex: 1, minWidth: 200 },
-  linklyManagement: { gap: 0 },
-  linklySelectionBanner: { backgroundColor: posColors.blueSoft, borderRadius: 8, padding: 14, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12 },
-  linklySelectionCopy: { flex: 1, minWidth: 180 },
-  linklyDirectoryHeading: { marginTop: 18, marginBottom: 12 },
-  linklyDirectoryTitle: { color: posColors.ink, fontSize: 20, lineHeight: 26, fontWeight: "800" },
-  linklyLineOverview: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 12 },
-  linklyLineActionColumn: { flexGrow: 1, flexBasis: 470, minWidth: 0 },
-  linklyLineCard: { backgroundColor: posColors.surface, borderColor: posColors.border, borderWidth: 1, borderRadius: 10, padding: 16 },
-  linklyLineCardSelected: { borderColor: posColors.blue },
-  linklyLineIdentity: { minHeight: SETTINGS_MIN_TOUCH_TARGET, justifyContent: "center", flexGrow: 1, flexBasis: 200, minWidth: 0 },
-  linklyLineHeading: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  linklyPairingBadge: { color: posColors.blue, backgroundColor: posColors.blueSoft, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 4, overflow: "hidden" },
-  linklyUnpairedBadge: { backgroundColor: "#EEF0F2", color: posColors.mutedInk },
-  linklyConnectionWarning: { color: "#805700", backgroundColor: posColors.yellowSoft, borderRadius: 6, padding: 10, fontSize: 13, lineHeight: 20 },
-  linklyPairForm: { backgroundColor: posColors.blueSoft, borderColor: "#C4D9EC", borderWidth: 1, borderRadius: 8, padding: 14, marginTop: 14 },
-  linklyPairHeading: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  linklyPairInputRow: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 12, marginTop: 10 },
-  linklyPairInput: { flex: 1, minWidth: 210, backgroundColor: posColors.surface },
-  linklyPairSubmit: { backgroundColor: posColors.blue, borderColor: posColors.blue },
-  accentButton: { backgroundColor: posColors.surface, borderColor: posColors.blue },
-  accentButtonLabel: { color: posColors.blue },
-  linklySetupCard: {
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginTop: 12,
-    padding: 12,
-  },
-  linklyTerminalList: {
-    gap: 8,
-    marginBottom: 4,
-  },
-  linklyTerminalOption: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: SETTINGS_MIN_TOUCH_TARGET,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  linklyTerminalOptionSelected: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
-  },
-  linklyTerminalName: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-    lineHeight: 19,
-  },
-  linklyTerminalStatus: {
-    color: posColors.mutedInk,
+  switchCopy: { flex: 1, minWidth: 0 },
+  switchLabel: { color: colors.ink, fontSize: 15.5, fontWeight: "800" },
+  switchHint: {
+    color: colors.mutedInk,
     fontSize: 12,
     fontWeight: "600",
     lineHeight: 17,
     marginTop: 2,
   },
-  linklyLineActions: {
-    gap: 6,
-    marginTop: 8,
+  // 系统开关固定 51×31，放大到约 58×34；触控区仍保证 44。
+  settingSwitch: {
+    minHeight: SETTINGS_MIN_TOUCH_TARGET,
+    minWidth: 58,
+    transform: [{ scaleX: 1.12 }, { scaleY: 1.1 }],
   },
-  linklySetupStatus: {
-    color: posColors.mutedInk,
+  inlineSwitch: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 46,
+  },
+  paymentMethodsRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 22,
+  },
+
+  // ---- 只读信息 ----
+  metricRow: {
+    columnGap: 18,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    rowGap: 4,
+  },
+  metric: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    flexShrink: 1,
+    gap: 6,
+  },
+  metricLabel: { color: colors.mutedInk, fontSize: 14, fontWeight: "700" },
+  metricValue: {
+    color: colors.ink,
+    flexShrink: 1,
+    fontSize: 14,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+  },
+
+  // ---- 输入框 ----
+  inputFrame: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: posTouch.medium,
+    minWidth: 220,
+    paddingHorizontal: 14,
+  },
+  inputFrameDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+  },
+  inputFramePrefix: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  inputFrameField: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "700",
+    minHeight: posTouch.medium - 3,
+    minWidth: 0,
+    paddingVertical: 0,
+  },
+  textInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+    minHeight: posTouch.medium,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  textInputDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+    color: colors.mutedInk,
+  },
+  textInputFill: { flex: 1, minWidth: 220 },
+  multilineTextInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+    minHeight: 72,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingVertical: 10,
+    textAlignVertical: "top",
+  },
+  fieldGroup: { gap: 4 },
+  fieldLabel: { color: colors.mutedInk, fontSize: 13, fontWeight: "800" },
+  fieldHint: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
+  },
+
+  // ---- 支付设置 ----
+  paymentToolbar: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  paymentTabs: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: "row",
+    minHeight: posTouch.medium,
+    minWidth: 300,
+    overflow: "hidden",
+  },
+  paymentTab: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "center",
+    minHeight: posTouch.medium,
+    paddingHorizontal: 16,
+  },
+  paymentTabDivider: { borderLeftColor: colors.border, borderLeftWidth: 1 },
+  paymentTabSelected: { backgroundColor: colors.inverseSurface },
+  paymentTabPressed: { backgroundColor: colors.surfaceAlt },
+  paymentTabDot: {
+    backgroundColor: colors.green,
+    borderRadius: 5,
+    height: 9,
+    width: 9,
+  },
+  paymentTabLabel: {
+    color: colors.mutedInk,
+    flexShrink: 1,
+    fontSize: 15.5,
+    fontWeight: "800",
+  },
+  paymentTabSelectedLabel: { color: colors.onInverse },
+  paymentTabDisabledLabel: { color: colors.disabledInk },
+  paymentEnvironment: { width: 220 },
+  paymentEnvironmentNote: {
+    color: colors.mutedInk,
     fontSize: 13,
     fontWeight: "700",
-    lineHeight: 19,
-    marginTop: 12,
+    maxWidth: 260,
   },
-  squareFieldGroup: { marginTop: 3 },
+  availability: {
+    alignSelf: "flex-start",
+    borderRadius: 13,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  availabilityReady: { backgroundColor: colors.greenSoft },
+  availabilityUnavailable: { backgroundColor: colors.redSoft },
+  availabilityText: { fontSize: 12.5, fontWeight: "800" },
+  availabilityTextReady: { color: colors.green },
+  availabilityTextUnavailable: { color: colors.red },
+  squareSummaryRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  squareSummaryMetric: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    flex: 1,
+    gap: 3,
+    minWidth: 140,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  squareSummaryValue: {
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 19,
+  },
+  squareFieldGroup: { gap: 4 },
   squareSelectionRow: {
     alignItems: "stretch",
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    gap: 10,
   },
   squareSelectionValue: {
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
     flex: 1,
     justifyContent: "center",
-    minHeight: 56,
+    minHeight: posTouch.button,
     minWidth: 140,
-    paddingHorizontal: 13,
+    paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  squareSelectionDisabled: { opacity: 0.54 },
   squareSelectionPrimary: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-    lineHeight: 20,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "900",
+    lineHeight: 21,
   },
   squareSelectionMetaRow: {
     alignItems: "center",
     flexDirection: "row",
     gap: 6,
-    marginTop: 3,
+    marginTop: 2,
   },
   squareSelectionSecondary: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     flexShrink: 1,
-    fontSize: 12,
+    fontSize: 12.5,
     fontWeight: "600",
     lineHeight: 17,
   },
-  squareSelectionError: { color: posColors.red },
-  squareLoadButton: { marginTop: 0 },
-  squareFieldHint: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 5,
-  },
+  squareSelectionError: { color: colors.red },
   squareDeviceCodeSection: {
-    borderTopColor: posColors.border,
+    borderTopColor: colors.border,
     borderTopWidth: 1,
-    marginTop: 16,
-    paddingTop: 4,
+    gap: 8,
+    paddingTop: 10,
   },
   squareSandboxNote: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 8,
-    color: posColors.blue,
+    backgroundColor: colors.blueSoft,
+    borderRadius: posRadius.medium,
+    color: colors.blue,
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 19,
-    marginTop: 12,
+    overflow: "hidden",
     padding: 10,
-  },
-  squarePairingNote: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
   },
   squareResourceState: {
     alignItems: "center",
     flexDirection: "row",
     gap: 8,
-    marginTop: 12,
     minHeight: SETTINGS_MIN_TOUCH_TARGET,
   },
   squareResourceText: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     flex: 1,
     fontSize: 13,
+    fontWeight: "600",
     lineHeight: 19,
   },
-  squareDeviceCodeList: { gap: 8, marginTop: 12 },
+  squareDeviceCodeList: { gap: 8 },
   squareDeviceCodeRow: {
     alignItems: "center",
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 10,
-    minHeight: 54,
-    padding: 10,
+    minHeight: posTouch.button,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   squareDeviceCodeSelected: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
   },
   squareDeviceCodeIdentity: { flex: 1, minWidth: 0 },
-  squareCurrentTag: {
-    backgroundColor: posColors.blue,
-    borderRadius: 999,
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "800",
-    overflow: "hidden",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  squarePickerBody: { gap: 8, paddingBottom: 2 },
+  squarePickerOption: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minHeight: 78,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  fieldLabel: {
-    color: posColors.mutedInk,
+  linklySetup: { gap: 8 },
+  linklyStatusRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  linklyStatusCopy: {
+    alignItems: "baseline",
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    minWidth: 180,
+  },
+  linklyStatusValue: {
+    color: colors.ink,
+    flexShrink: 1,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  linklyDirectoryHeading: { gap: 2, marginTop: 2 },
+  linklyDirectoryTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" },
+  linklyTerminalList: { gap: 8 },
+  // 每台刷卡机一行（最少 84 高）；本机正在用的那台用主操作色粗框标出。
+  linklyLineCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 84,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  linklyLineCardSelected: {
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+  },
+  linklyLineOverview: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  linklyLineIdentity: {
+    flexBasis: 200,
+    flexGrow: 1,
+    justifyContent: "center",
+    minHeight: posTouch.small,
+    minWidth: 0,
+  },
+  linklyLineHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  linklyTerminalName: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  linklyTerminalStatus: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    marginTop: 3,
+  },
+  linklyLineActionColumn: {
+    flexBasis: 380,
+    flexGrow: 1,
+    gap: 6,
+    minWidth: 0,
+  },
+  linklyLineActionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    justifyContent: "flex-end",
+  },
+  linklyLineTestStatus: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    textAlign: "right",
+  },
+  linklyConnectionWarning: {
+    backgroundColor: colors.yellowSoft,
+    borderRadius: posRadius.small,
+    color: colors.yellowInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    overflow: "hidden",
+    padding: 10,
+  },
+  linklyTerminalOption: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    justifyContent: "center",
+    minHeight: posTouch.button,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  linklyTerminalOptionSelected: {
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+  },
+  linklyPairForm: {
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    gap: 8,
+    padding: 12,
+  },
+  linklyLegacyPairForm: { gap: 8 },
+  linklyPairHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    justifyContent: "space-between",
+  },
+  linklyPairTitle: {
+    color: colors.ink,
+    flexShrink: 1,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  linklyPairInputRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  linklyPairInput: { flex: 1, minWidth: 200 },
+  linklySetupStatus: {
+    color: colors.mutedInk,
     fontSize: 13,
     fontWeight: "700",
-    marginBottom: 5,
-    marginTop: 9,
+    lineHeight: 19,
   },
-  textInput: {
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
+
+  // ---- 外设 ----
+  printerOptionRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+  },
+  printerOptionSegment: { flex: 1, minWidth: 170 },
+  profileManagedNotice: {
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: posRadius.medium,
     borderWidth: 1,
-    color: posColors.ink,
-    fontSize: 16,
-    minHeight: SETTINGS_MIN_TOUCH_TARGET,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
-  fieldHint: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 5,
+  profileManagedText: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
   },
+  profileRow: { alignItems: "flex-start", flexDirection: "row", gap: 10 },
+  profileField: { flexBasis: 0, flexGrow: 1, gap: 4, minWidth: 0 },
+  // 占两列：基准宽度补上一个列间距，和上下两行的三列对齐。
+  profileFieldWide: { flexBasis: 10, flexGrow: 2, gap: 4, minWidth: 0 },
+  // 门店资料输入框按设计图用 48 高，三列排开一屏能看完。
+  profileInput: { minHeight: posTouch.small },
+  profileAddressInput: { paddingTop: 13 },
+  deviceLine: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  deviceLineCopy: { flex: 1, gap: 2, minWidth: 96 },
+  deviceLineStatus: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+
+  // ---- 设备注册 ----
   dangerDescription: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 20,
-    marginBottom: 12,
+  },
+  reregisterPreview: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    gap: 8,
+    padding: 12,
   },
   reregistrationBlockerPanel: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
-    borderRadius: 8,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: posRadius.medium,
     borderWidth: 1,
-    marginTop: 14,
+    gap: 8,
     padding: 14,
   },
   reregistrationBlockerTitle: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 17,
-    fontWeight: "800",
+    fontWeight: "900",
     lineHeight: 23,
   },
   reregistrationBlockerBody: {
-    color: posColors.ink,
-    fontSize: 13,
+    color: colors.ink,
+    fontSize: 13.5,
+    fontWeight: "600",
     lineHeight: 20,
-    marginTop: 4,
   },
-  reregistrationBlockerList: {
-    marginTop: 12,
-  },
+  reregistrationBlockerList: {},
   reregistrationBlockerRow: {
-    alignItems: "flex-start",
-    borderTopColor: posColors.border,
+    alignItems: "center",
+    borderTopColor: colors.redBorder,
     borderTopWidth: 1,
     flexDirection: "row",
     gap: 12,
-    minHeight: SETTINGS_MIN_TOUCH_TARGET,
-    paddingVertical: 9,
+    minHeight: posTouch.small,
+    paddingVertical: 8,
   },
-  reregistrationBlockerCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
+  reregistrationBlockerCopy: { flex: 1, minWidth: 0 },
   reregistrationBlockerLabel: {
-    color: posColors.ink,
-    fontSize: 14,
+    color: colors.ink,
+    fontSize: 15,
     fontWeight: "800",
     lineHeight: 20,
   },
   reregistrationBlockerHint: {
-    color: posColors.mutedInk,
-    fontSize: 12,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
     lineHeight: 18,
     marginTop: 2,
   },
   reregistrationBlockerValue: {
-    color: posColors.red,
-    fontSize: 13,
-    fontWeight: "800",
+    color: colors.red,
+    fontSize: 14,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
     lineHeight: 20,
     minWidth: 58,
     textAlign: "right",
   },
   reregistrationSupervisorHint: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 13,
     fontWeight: "700",
     lineHeight: 20,
-    marginTop: 10,
   },
-  multilineTextInput: {
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    color: posColors.ink,
-    fontSize: 16,
-    minHeight: 88,
-    paddingHorizontal: 13,
-    paddingVertical: 9,
-    textAlignVertical: "top",
-  },
-  button: {
-    alignItems: "center",
-    alignSelf: "flex-start",
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: "center",
-    marginTop: 12,
-    minHeight: SETTINGS_MIN_TOUCH_TARGET,
-    paddingHorizontal: 17,
-    paddingVertical: 9,
-  },
-  compactButton: {
-    marginTop: 0,
-    minWidth: 110,
-    paddingHorizontal: 12,
-  },
-  buttonLabel: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  secondaryButton: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-  },
-  quietButton: {
-    backgroundColor: "transparent",
-    borderColor: posColors.border,
-  },
-  dangerButton: {
-    backgroundColor: posColors.red,
-    borderColor: posColors.red,
-  },
-  secondaryButtonLabel: { color: posColors.ink },
-  selectedButton: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
-  },
-  selectedButtonLabel: { color: posColors.blue },
-  disabledButton: { opacity: 0.42 },
-  pressedButton: { opacity: 0.78 },
+
+  // ---- 系统与目录 ----
   safetyNote: {
-    color: posColors.green,
-    fontSize: 13,
+    color: colors.green,
+    fontSize: 12.5,
     fontWeight: "700",
-    lineHeight: 20,
-    marginTop: 12,
+    lineHeight: 18,
   },
   backgroundNote: {
-    color: posColors.blue,
-    fontSize: 13,
+    color: colors.blue,
+    fontSize: 12.5,
     fontWeight: "700",
-    lineHeight: 20,
-    marginTop: 6,
+    lineHeight: 18,
   },
   catalogRefreshStatus: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 8,
-    marginTop: 12,
+    backgroundColor: colors.blueSoft,
+    borderRadius: posRadius.medium,
     padding: 12,
   },
-  catalogRefreshWarning: {
-    backgroundColor: "#FFF5DB",
-  },
-  catalogRefreshFailed: {
-    backgroundColor: posColors.redSoft,
-  },
+  catalogRefreshWarning: { backgroundColor: colors.yellowSoft },
+  catalogRefreshFailed: { backgroundColor: colors.redSoft },
   catalogRefreshHeading: {
     alignItems: "center",
     flexDirection: "row",
     gap: 8,
   },
-  catalogRefreshTitle: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-  },
+  catalogRefreshTitle: { color: colors.ink, fontSize: 15, fontWeight: "900" },
   catalogRefreshTrack: {
-    backgroundColor: posColors.surface,
+    backgroundColor: colors.surface,
     borderRadius: 999,
-    height: 7,
+    height: 8,
     marginTop: 10,
     overflow: "hidden",
   },
   catalogRefreshFill: {
-    backgroundColor: posColors.orange,
+    backgroundColor: colors.accent,
     borderRadius: 999,
     height: "100%",
   },
   catalogRefreshMeta: {
-    color: posColors.mutedInk,
-    fontSize: 12,
+    color: colors.mutedInk,
+    fontSize: 12.5,
     fontWeight: "700",
     lineHeight: 18,
     marginTop: 5,
   },
   catalogRefreshCode: {
-    color: posColors.red,
+    color: colors.red,
     fontFamily: "Courier",
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: "700",
     marginTop: 6,
   },
-  availability: {
-    alignSelf: "flex-start",
-    borderRadius: 999,
-    marginBottom: 10,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-  },
-  availabilityReady: { backgroundColor: posColors.greenSoft },
-  availabilityUnavailable: { backgroundColor: posColors.redSoft },
-  availabilityText: {
-    color: posColors.ink,
-    fontSize: 12,
+
+  // ---- 硬件测试 ----
+  hardwareHeading: { alignItems: "center", flexDirection: "row", gap: 12 },
+  hardwareStatus: { fontSize: 14, fontWeight: "800" },
+  hardwareStatusReady: { color: colors.green },
+  hardwareStatusDisconnected: { color: colors.red },
+  hardwareStatusUnavailable: { color: colors.mutedInk },
+  scannerValue: {
+    color: colors.ink,
+    fontFamily: "Courier",
+    fontSize: 26,
     fontWeight: "800",
   },
-  deviceRow: {
+
+  // ---- 弹窗：蓝牙设备 / Square 选择 / 危险操作确认 ----
+  confirmationOverlay: {
     alignItems: "center",
-    borderColor: posColors.border,
-    borderTopWidth: 1,
-    flexDirection: "row",
-    gap: 12,
-    justifyContent: "space-between",
-    marginTop: 12,
-    paddingTop: 12,
-  },
-  deviceIdentity: { flex: 1 },
-  deviceDetailRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    minHeight: 20,
-  },
-  deviceFieldLabel: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "700",
-    width: 172,
-  },
-  deviceNameRow: {
-    alignItems: "center",
+    backgroundColor: colors.overlay,
     flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
+    justifyContent: "center",
+    padding: 24,
   },
-  deviceName: { color: posColors.ink, fontSize: 15, fontWeight: "800" },
-  preferredPrinterTag: {
-    alignSelf: "flex-start",
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 999,
-    color: posColors.blue,
-    fontSize: 11,
-    fontWeight: "800",
-    lineHeight: 15,
-    overflow: "hidden",
-    paddingHorizontal: 7,
-    paddingVertical: 2,
+  backdropDismissArea: {
+    ...StyleSheet.absoluteFillObject,
   },
-  deviceMeta: {
-    color: posColors.mutedInk,
-    flex: 1,
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  deviceTransport: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    marginLeft: 180,
-    marginTop: 2,
-  },
-  printerPicker: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
+  pickerSheet: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.sheet,
     borderWidth: 1,
     maxHeight: "82%",
     maxWidth: 760,
     padding: 20,
-    shadowColor: "#000000",
+    shadowColor: colors.shadow,
     shadowOffset: { height: 5, width: 0 },
     shadowOpacity: 0.18,
     shadowRadius: 10,
     width: "86%",
-  },
-  squarePicker: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    maxHeight: "82%",
-    maxWidth: 760,
-    padding: 20,
-    shadowColor: "#000000",
-    shadowOffset: { height: 5, width: 0 },
-    shadowOpacity: 0.18,
-    shadowRadius: 10,
-    width: "86%",
-  },
-  squarePickerBody: { gap: 8, paddingBottom: 2 },
-  squarePickerOption: {
-    backgroundColor: "#FAFAF8",
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    minHeight: 58,
-    padding: 11,
   },
   printerPickerHeader: { marginBottom: 12 },
-  printerPickerTitle: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "800",
-  },
+  printerPickerTitle: { color: colors.ink, fontSize: 20, fontWeight: "900" },
   printerPickerHint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 13,
+    fontWeight: "600",
     lineHeight: 19,
     marginTop: 4,
   },
@@ -4667,30 +5270,33 @@ const styles = StyleSheet.create({
     minHeight: 150,
   },
   printerPickerProgressText: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "700",
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
     marginTop: 12,
   },
   printerPickerEmpty: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 21,
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
     paddingVertical: 24,
     textAlign: "center",
   },
   printerPickerError: {
-    backgroundColor: posColors.redSoft,
-    borderRadius: 8,
-    color: posColors.red,
-    fontSize: 13,
-    fontWeight: "700",
-    padding: 10,
+    backgroundColor: colors.redSoft,
+    borderRadius: posRadius.medium,
+    color: colors.red,
+    fontSize: 14,
+    fontWeight: "800",
+    overflow: "hidden",
+    padding: 12,
   },
   printerPickerErrorBody: { minHeight: 92 },
   printerPickerPermissionHint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 14,
+    fontWeight: "600",
     lineHeight: 21,
     marginTop: 10,
   },
@@ -4702,60 +5308,76 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     marginTop: 16,
   },
-  hardwareGrid: { flexDirection: "row", gap: 14, marginBottom: 14 },
-  hardwareCard: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
-    borderWidth: 1,
-    flex: 1,
-    padding: 18,
+  deviceRow: {
+    alignItems: "center",
+    borderColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: 78,
+    paddingVertical: 10,
   },
-  hardwareTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
+  deviceIdentity: { flex: 1 },
+  deviceDetailRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    minHeight: 22,
   },
-  hardwareStatus: {
-    fontSize: 14,
+  deviceFieldLabel: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
     fontWeight: "700",
-    marginBottom: 8,
-    marginTop: 8,
+    width: 172,
   },
-  hardwareStatusReady: { color: posColors.green },
-  hardwareStatusDisconnected: { color: posColors.red },
-  hardwareStatusUnavailable: { color: posColors.mutedInk },
-  scannerValue: {
-    color: posColors.ink,
-    fontFamily: "Courier",
-    fontSize: 24,
+  deviceNameRow: {
+    alignItems: "center",
+    flex: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  deviceName: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  preferredPrinterTag: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.blueSoft,
+    borderRadius: 999,
+    color: colors.blue,
+    fontSize: 12,
     fontWeight: "800",
+    lineHeight: 16,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  deviceMeta: {
+    color: colors.mutedInk,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  deviceTransport: {
+    color: colors.mutedInk,
+    fontSize: 12,
+    marginLeft: 180,
+    marginTop: 2,
   },
   confirmation: {
     alignItems: "center",
-    backgroundColor: "#FFF3F0",
-    borderColor: posColors.red,
-    borderRadius: 12,
-    borderWidth: 1,
+    backgroundColor: colors.surface,
+    borderColor: colors.red,
+    borderRadius: posRadius.sheet,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 20,
     maxWidth: 980,
-    padding: 18,
-    shadowColor: "#000000",
+    padding: 20,
+    shadowColor: colors.shadow,
     shadowOffset: { height: 5, width: 0 },
     shadowOpacity: 0.18,
     shadowRadius: 10,
     width: "90%",
-  },
-  confirmationOverlay: {
-    alignItems: "center",
-    backgroundColor: "rgba(16, 37, 58, 0.45)",
-    flex: 1,
-    justifyContent: "center",
-    padding: 24,
-  },
-  backdropDismissArea: {
-    ...StyleSheet.absoluteFillObject,
   },
   confirmationCopy: { flex: 1 },
   confirmationScroll: { flex: 1 },
@@ -4765,75 +5387,104 @@ const styles = StyleSheet.create({
     gap: 20,
   },
   confirmationTitle: {
-    color: posColors.red,
-    fontSize: 18,
-    fontWeight: "800",
+    color: colors.red,
+    fontSize: 19,
+    fontWeight: "900",
+    lineHeight: 26,
   },
   confirmationBody: {
-    color: posColors.ink,
-    fontSize: 13,
-    lineHeight: 19,
+    color: colors.ink,
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 21,
     marginTop: 6,
   },
-  confirmationScan: { marginTop: 8 },
+  confirmationScan: { gap: 6, marginTop: 10 },
   confirmationActions: {
     alignItems: "center",
     flexDirection: "row",
     gap: 10,
   },
+
+  // ---- 状态横幅、空状态、不可用页 ----
   statusBanner: {
     alignItems: "center",
-    borderRadius: 8,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 14,
+    gap: 10,
+    minHeight: posTouch.small,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
-  statusSuccess: { backgroundColor: posColors.greenSoft },
-  statusWarning: { backgroundColor: posColors.redSoft },
+  statusSuccess: {
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+  },
+  statusWarning: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+  },
   statusText: {
-    color: posColors.ink,
+    color: colors.ink,
     flex: 1,
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "800",
   },
   emptyPanel: {
     alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
     borderWidth: 1,
     flex: 1,
+    gap: 14,
     justifyContent: "center",
-    minHeight: 320,
     padding: 28,
   },
   emptyText: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: "800",
     textAlign: "center",
   },
   unavailable: {
     alignItems: "center",
     flex: 1,
     justifyContent: "center",
-    padding: 40,
+    padding: 24,
+  },
+  unavailableCard: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.sheet,
+    borderWidth: 1,
+    gap: 12,
+    maxWidth: 720,
+    padding: 32,
+  },
+  unavailableEyebrow: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1.5,
   },
   unavailableTitle: {
-    color: posColors.ink,
-    fontSize: 28,
-    fontWeight: "800",
-    marginTop: 10,
+    color: colors.ink,
+    fontSize: 26,
+    fontWeight: "900",
     textAlign: "center",
   },
   unavailableHint: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 16,
+    fontWeight: "600",
     lineHeight: 24,
-    marginTop: 10,
-    maxWidth: 680,
     textAlign: "center",
   },
-});
+  // PosPill 默认靠上对齐；放在比它高的行里时改为垂直居中。
+  pillCentered: { alignSelf: "center" },
+  dimmed: { opacity: 0.5 },
+  pressed: { opacity: 0.72 },
+}));

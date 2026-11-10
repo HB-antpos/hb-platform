@@ -16,6 +16,7 @@ import {
   type SyncHistoryPresenter,
 } from "@/features/sync-history";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type SyncHistoryPresenterBinding = Readonly<{
   services: ExpoPosRuntimeServices;
@@ -46,6 +47,7 @@ async function shareSupportExport(serializedJson: string): Promise<void> {
 
 /** 本地历史同样复核当前设备绑定，避免锁机或切换设备后继续读取收银账本。 */
 export default function SyncHistoryRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);

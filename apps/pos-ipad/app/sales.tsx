@@ -8,7 +8,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import type { NewTransactionGate } from "@/core/contracts/app-updates";
@@ -32,6 +32,7 @@ import {
   resolveInstallmentsRuntimeFactory,
 } from "@/features/installments";
 import { LOCAL_HISTORY_VIEW_PERMISSION } from "@/features/local-history/local-history-presenter";
+import { registerPosDestinationGuard } from "@/features/navigation/pos-destination-access";
 import { REMOTE_HISTORY_VIEW_PERMISSION } from "@/features/remote-history";
 import { scanTiming } from "@/features/sales/runtime/scan-timing";
 import { resolveTrustedProductImageUri } from "@hb/pos-domain/features/sales/runtime/trusted-product-image-uri";
@@ -40,11 +41,9 @@ import {
   type SalesCartProductDetails,
   type SalesPresenter,
   SalesScreen,
-  type SalesToolbarActionId,
   type SalesUtilityActionResult,
 } from "@/features/sales/ui";
 import { bindSalesLookupSelectionLog } from "@/features/sales/ui/sales-lookup-selection-log";
-import { reconcileSalesToolbarOrder } from "@/features/sales/ui/sales-toolbar-order";
 import { SETTINGS_VIEW_PERMISSION } from "@/features/settings";
 import { SPECIAL_PRODUCTS_VIEW_PERMISSION } from "@/features/special-products";
 import { toggleAppLanguage } from "@/i18n";
@@ -52,14 +51,13 @@ import { PosPressable } from "@/ui/controls/pos-pressable";
 import { usePosSound } from "@/ui/feedback/pos-sound-context";
 import {
   readCameraScanMode,
-  readSalesToolbarOrder,
   saveCameraScanMode,
-  saveSalesToolbarOrder,
 } from "@/ui/preferences/terminal-ui-preferences";
 import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosNavigation } from "@/ui/shell/pos-navigation-context";
 import { PosStatusStrip } from "@/ui/shell/status-strip";
-import { posColors } from "@/ui/theme";
+import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 type SalesPresenterBinding = Readonly<{
   services: object;
@@ -80,6 +78,7 @@ const UNCHECKED_UPDATE_GATE: NewTransactionGate = Object.freeze({
 
 /** 组合根确认当前收银员后，路由只创建其受限销售 presenter。 */
 export default function SalesRoute() {
+  usePosThemeVersion();
   const { push, replace } = useRouter();
   const runtime = usePosRuntime();
   const { i18n } = useTranslation();
@@ -107,9 +106,7 @@ export default function SalesRoute() {
     useState<CameraScanMode>(readCameraScanMode);
   const [cameraScannerActive, setCameraScannerActive] = useState(false);
   const [manualInputActive, setManualInputActive] = useState(false);
-  const [toolbarOrder, setToolbarOrder] = useState<
-    readonly SalesToolbarActionId[]
-  >(() => reconcileSalesToolbarOrder(readSalesToolbarOrder()));
+  const navigation = usePosNavigation();
   const hidRestoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [bootstrapFailure, setBootstrapFailure] =
@@ -196,14 +193,6 @@ export default function SalesRoute() {
     },
     [cameraScanMode, cameraScannerActive],
   );
-  const handleToolbarOrderChange = useCallback(
-    (nextOrder: readonly SalesToolbarActionId[]) => {
-      const reconciledOrder = reconcileSalesToolbarOrder(nextOrder);
-      setToolbarOrder(reconciledOrder);
-      void saveSalesToolbarOrder(reconciledOrder).catch(() => undefined);
-    },
-    [],
-  );
   const handleSwitchLanguage = useCallback(() => {
     void toggleAppLanguage();
   }, []);
@@ -228,6 +217,15 @@ export default function SalesRoute() {
   );
 
   useEffect(() => clearHidRestoreTimer, [clearHidRestoreTimer]);
+
+  useEffect(() => {
+    if (!presenter) return undefined;
+    // 左侧栏在每个页面都能点「挂单管理」：取单会替换购物车，所以这项检查
+    // 登记到全局，从别的页面跳过去时也会先拦下一码多商品的待选。
+    return registerPosDestinationGuard("held-orders", () =>
+      presenter.requireNoPendingLookupSelections(),
+    );
+  }, [presenter]);
 
   useEffect(() => {
     if (!cameraScannerActive || !scanner || !presenter) return undefined;
@@ -451,7 +449,10 @@ export default function SalesRoute() {
         resolveCartProductDetails={resolveCartProductDetails}
         resolveCartProductImage={resolveCartProductImage}
         onSwitchLanguage={handleSwitchLanguage}
-        onToolbarOrderChange={handleToolbarOrderChange}
+        {...(navigation?.model.onPinnedChange
+          ? { onPinnedDestinationsChange: navigation.model.onPinnedChange }
+          : {})}
+        {...(navigation ? { pinnedDestinations: navigation.model.pinned } : {})}
         {...(appStoreUrl
           ? {
               onOpenRequiredUpdate: () => {
@@ -533,7 +534,6 @@ export default function SalesRoute() {
         onOpenSyncHistory={() => push("/sync-history" as Href)}
         onOpenPaymentRecovery={() => push("/payment-recovery" as Href)}
         presenter={presenter}
-        toolbarOrder={toolbarOrder}
         {...(activeCashier && canDownloadCatalog(activeCashier.permissions)
           ? {
               onOpenCatalogMaintenance: () =>
@@ -554,6 +554,7 @@ function SalesBootstrapFailureScreen({
   onRetry(): void;
   stage: SalesBootstrapFailureStage;
 }>) {
+  usePosThemeVersion();
   const zh = language.toLowerCase().startsWith("zh");
   const code = bootstrapFailureCode(stage);
   return (
@@ -677,7 +678,7 @@ function SalesSoundBridge({ presenter }: Readonly<{ presenter: SalesPresenter }>
   return null;
 }
 
-const bootstrapFailureStyles = StyleSheet.create({
+const bootstrapFailureStyles = createPosStyles((colors) => ({
   body: {
     alignItems: "center",
     flex: 1,
@@ -686,47 +687,55 @@ const bootstrapFailureStyles = StyleSheet.create({
     width: "100%",
   },
   code: {
-    color: posColors.red,
+    color: colors.red,
     fontSize: 13,
     fontWeight: "800",
     letterSpacing: 0.4,
     marginBottom: 24,
   },
   message: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 16,
     lineHeight: 24,
     marginBottom: 16,
   },
   page: {
-    backgroundColor: posColors.canvas,
+    backgroundColor: colors.canvas,
     flex: 1,
   },
   panel: {
-    backgroundColor: "#FFFFFF",
-    maxWidth: 520,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1,
+    maxWidth: 560,
     padding: 32,
     width: "100%",
   },
   retry: {
     alignItems: "center",
-    backgroundColor: posColors.blue,
+    backgroundColor: colors.accent,
+    borderBottomColor: colors.accentPressed,
+    borderBottomWidth: 4,
+    borderRadius: 12,
     justifyContent: "center",
-    minHeight: 48,
+    marginTop: 8,
+    // 这一页只有「重试」一个出路，按主按钮的尺寸给足点击面积。
+    minHeight: 72,
     paddingHorizontal: 20,
   },
   retryLabel: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "800",
+    color: colors.onAccent,
+    fontSize: 21,
+    fontWeight: "900",
   },
   title: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 24,
     fontWeight: "900",
     marginBottom: 12,
   },
-});
+}));
 
 function mapSalesUtilityResult(
   result: PosAuthorizedFulfilmentActionResult,

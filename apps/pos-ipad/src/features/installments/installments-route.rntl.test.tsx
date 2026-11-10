@@ -48,6 +48,8 @@ jest.mock("@/core/runtime/pos-runtime-context", () => ({
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "zh", resolvedLanguage: "zh" },
+    // 真实 Screen 套了页面外壳，顶栏用 t() 取状态文案；这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 

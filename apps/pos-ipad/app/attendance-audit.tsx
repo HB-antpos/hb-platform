@@ -15,6 +15,7 @@ import {
 } from "@/features/cashier-login";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type AttendanceAuditBinding = Readonly<{
   cashier: object;
@@ -27,6 +28,7 @@ type AttendanceAuditBinding = Readonly<{
  * 不阻止 WPF 等价的考勤 QR；可信身份和权限只能由零参数组合根注入。
  */
 export default function AttendanceAuditRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore(

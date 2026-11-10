@@ -17,6 +17,7 @@ import {
 } from "@/features/remote-history";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type RemoteHistoryBinding = Readonly<{
   services: object;
@@ -28,6 +29,7 @@ type RemoteHistoryBinding = Readonly<{
  * 远程历史在调用 API 前再次复核已认证设备；可信门店和终端只能来自设备记录。
  */
 export default function RemoteHistoryRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);

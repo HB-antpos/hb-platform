@@ -30,6 +30,9 @@ export const settingsEnglishCopy = {
   "general.specialNodeSound": "Special event sounds",
   "general.specialNodeSoundHint":
     "Covers product lookup, cart add/increment, not-found and blocked results. Turn it on to hear a sample; turn it off to keep them silent.",
+  "general.theme": "Appearance",
+  "general.themeHint":
+    "Tap a theme to apply it straight away. The choice is saved on this iPad.",
   "eyebrow.network": "NETWORK",
   "general.apiAddress": "API address",
   "general.useLocalApi": "Local backend",
@@ -557,6 +560,8 @@ export const settingsChineseCopy = {
   "general.specialNodeSound": "特殊节点音效",
   "general.specialNodeSoundHint":
     "覆盖商品查询、加购/累加、未找到和受阻结果；开启时播放一次示例，关闭后保持静音。",
+  "general.theme": "界面主题",
+  "general.themeHint": "点一下立即生效，选择保存在这台 iPad 上。",
   "eyebrow.network": "网络",
   "general.apiAddress": "API 地址",
   "general.useLocalApi": "本地后端",

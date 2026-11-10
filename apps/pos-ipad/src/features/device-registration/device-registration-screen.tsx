@@ -18,7 +18,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { reconcileDeviceSessionRuntime } from "./device-registration-state";
 import { serverConnectionPanelCopy } from "./server-connection-copy";
@@ -41,13 +40,14 @@ import {
   type RegistrationTranslate,
 } from "./device-registration-failure";
 import { toggleAppLanguage } from "@/i18n";
+import { PosButton } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { PosStatusStrip } from "@/ui/shell/status-strip";
-import { posColors } from "@/ui/theme";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 type StoreLoadState = "idle" | "loading" | "ready" | "failed";
 type RegistrationOperation = "preview" | "redeem" | "app-review" | null;
@@ -57,13 +57,22 @@ type ActivationPreview = Readonly<{
   response: DeviceActivationPreviewResponse;
 }>;
 
+/**
+ * 新布局才有的版式文案（全局语言包里没有对应键）；中英文两套键保持一致。
+ */
+const layoutCopy = {
+  en: { manualEntryDivider: "or enter it manually" },
+  zh: { manualEntryDivider: "或手动输入" },
+} as const;
+
 export function DeviceRegistrationScreen({
   onOpenNetworkCheck,
 }: Readonly<{
   /** 开通 / 待审批时也能打开只读网络检测，排查连不上服务器的问题。 */
   onOpenNetworkCheck?: () => void;
 }> = {}) {
-  const { t } = useTranslation();
+  usePosThemeVersion();
+  const { i18n, t } = useTranslation();
   const runtime = usePosRuntime();
   const [session, setSession] = useState<DeviceSessionState | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -265,6 +274,11 @@ export function DeviceRegistrationScreen({
     setRegistrationKind("app-review");
   }, [previewActivation, t]);
 
+  // 语言切换并入外壳顶栏；切换只改界面语言，已输入的注册码留在本页状态里。
+  const switchLanguage = useCallback(() => {
+    void toggleAppLanguage();
+  }, []);
+
   if (
     runtime.state.phase === "ready" ||
     runtime.state.phase === "ready-offline"
@@ -339,35 +353,44 @@ export function DeviceRegistrationScreen({
 
   const registrationBusy = operation !== null;
   const registrationReady = registrationCode.trim().length > 0;
+  const phase = runtime.state.phase;
+  // 已识别出注册码类型（App Review 选店 / 服务端已确认分店）后，主按钮让给下一步操作，
+  // 「扫描」降为普通按钮，保证一屏只有一个主按钮。
+  const staged = registrationKind === "app-review" || activationPreview !== null;
+  const appReviewSubmitDisabled =
+    operation === "app-review" || !selectedStore || !registrationCode.trim();
+  const storePickerDisabled =
+    storeLoadState !== "ready" || stores.length === 0;
+  const text =
+    layoutCopy[
+      (i18n.resolvedLanguage ?? i18n.language ?? "zh")
+        .toLowerCase()
+        .startsWith("zh")
+        ? "zh"
+        : "en"
+    ];
+  const networkCheckButton = onOpenNetworkCheck ? (
+    <PosButton
+      icon="access-point-network"
+      label={t("registration.networkCheck")}
+      onPress={onOpenNetworkCheck}
+      size="medium"
+      sound="navigate"
+      testID="registration-network-check"
+      tone="quiet"
+    />
+  ) : null;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <StatusBar style="dark" />
-      <PosStatusStrip />
-      <View style={styles.languageBar}>
-        <PosPressable
-          accessibilityLabel={t("registration.languageSwitchLabel")}
-          accessibilityRole="button"
-          hitSlop={8}
-          onPress={() => void toggleAppLanguage()}
-          style={({ pressed }) => [
-            styles.languageButton,
-            pressed && styles.languageButtonPressed,
-          ]}
-          testID="registration-language-switch"
-        >
-          <MaterialCommunityIcons
-            color={posColors.ink}
-            name="translate"
-            size={18}
-          />
-          <Text style={styles.languageButtonLabel}>
-            {t("registration.languageSwitch")}
-          </Text>
-        </PosPressable>
-      </View>
+    <PosScreenFrame
+      onSwitchLanguage={switchLanguage}
+      // 注册完成前不允许跳去其他页面，这一页不显示左侧栏。
+      rail="none"
+    >
+      <StatusBar style="light" />
       <View style={styles.page}>
-        <View style={styles.contextPanel}>
+        {/* 左侧深色品牌区：Logo、眉标、标题、说明；安全提示压在底部。 */}
+        <View style={styles.brandPanel}>
           <Image
             accessibilityIgnoresInvertColors
             accessible={false}
@@ -378,12 +401,13 @@ export function DeviceRegistrationScreen({
           <Text style={styles.eyebrow}>{t("registration.eyebrow")}</Text>
           <Text style={styles.title}>{t("registration.title")}</Text>
           <Text style={styles.subtitle}>{t("registration.subtitle")}</Text>
-
+          <View style={styles.brandSpacer} />
           <View style={styles.securityNote}>
             <MaterialCommunityIcons
-              color={posColors.green}
+              color={posColors.onInverse}
               name="shield-lock-outline"
-              size={24}
+              size={20}
+              style={styles.securityIcon}
             />
             <Text style={styles.securityCopy}>
               {t("registration.securityNote")}
@@ -391,165 +415,209 @@ export function DeviceRegistrationScreen({
           </View>
         </View>
 
+        {/* 右侧表单：所有状态（注册 / 等待审批 / 需要恢复 / 确认分店 / App Review 选店）都排在这一栏。 */}
         <PosKeyboardAwareScrollView
           contentContainerStyle={styles.formPanelContent}
           keyboardRevealOffset={112}
+          showsVerticalScrollIndicator={false}
           style={styles.formPanel}
         >
-          <Text style={styles.formTitle}>
-            {runtime.state.phase === "locked"
-              ? t("registration.lockedTitle")
-              : runtime.state.phase === "pending-approval"
-                ? t("registration.pendingTitle")
-                : t("registration.formTitle")}
-          </Text>
-          <Text style={styles.formHint}>
-            {runtime.state.phase === "locked"
-              ? t("registration.lockedHint")
-              : runtime.state.phase === "pending-approval"
-                ? t("registration.pendingHint")
-                : t("registration.formHint")}
-          </Text>
+          <View>
+            <Text accessibilityRole="header" style={styles.formTitle}>
+              {phase === "locked"
+                ? t("registration.lockedTitle")
+                : phase === "pending-approval"
+                  ? t("registration.pendingTitle")
+                  : t("registration.formTitle")}
+            </Text>
+            {/* 需要恢复时，说明文字由下方红色卡片承担，这里不再重复一遍。 */}
+            {phase === "locked" ? null : (
+              <Text style={styles.formHint}>
+                {phase === "pending-approval"
+                  ? t("registration.pendingHint")
+                  : t("registration.formHint")}
+              </Text>
+            )}
+          </View>
 
-          {runtime.state.phase === "locked" ? (
+          {phase === "locked" ? (
             <View
               accessibilityRole="alert"
-              style={styles.pendingCard}
+              style={[styles.stateCard, styles.stateCardDanger]}
               testID="registration-recovery-readonly"
             >
               <MaterialCommunityIcons
                 color={posColors.red}
                 name="shield-alert-outline"
-                size={34}
+                size={40}
               />
-              <View style={styles.pendingCopy}>
-                <Text style={styles.pendingCode}>
+              <View style={styles.stateCopy}>
+                <Text style={styles.stateTitle}>
                   {t("registration.lockedTitle")}
                 </Text>
-                <Text style={styles.pendingStore}>
+                <Text style={styles.stateDetail}>
                   {t("registration.lockedHint")}
                 </Text>
               </View>
             </View>
-          ) : runtime.state.phase === "pending-approval" ? (
-            <View style={styles.pendingCard}>
+          ) : phase === "pending-approval" ? (
+            <View style={styles.stateCard}>
               <MaterialCommunityIcons
-                color={posColors.orange}
+                color={posColors.accent}
                 name="clock-outline"
-                size={34}
+                size={40}
               />
-              <View style={styles.pendingCopy}>
-                <Text style={styles.pendingCode}>
+              <View style={styles.stateCopy}>
+                <Text style={styles.stateTitle}>
                   {session?.deviceCode ?? t("registration.pendingDeviceCode")}
                 </Text>
-                <Text style={styles.pendingStore}>
+                <Text style={styles.stateDetail}>
                   {session?.storeCode ?? t("registration.pendingStore")}
                 </Text>
               </View>
             </View>
           ) : (
             <>
-              <PosPressable
-                accessibilityRole="button"
-                accessibilityState={{
-                  disabled: registrationBusy || !scannerRouter,
-                }}
+              <PosButton
                 disabled={registrationBusy || !scannerRouter}
+                icon="qrcode-scan"
+                label={t("registration.scan")}
                 onPress={() => setCameraVisible(true)}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  pressed && styles.primaryButtonPressed,
-                  (!scannerRouter || registrationBusy) &&
-                    styles.primaryButtonDisabled,
-                ]}
+                size={staged ? "button" : "primary"}
                 testID="registration-scan"
-              >
-                <MaterialCommunityIcons
-                  color="#FFFFFF"
-                  name="qrcode-scan"
-                  size={22}
-                />
-                <Text style={styles.primaryButtonLabel}>
-                  {t("registration.scan")}
-                </Text>
-              </PosPressable>
-
-              <FieldLabel>{t("registration.activationCode")}</FieldLabel>
-              <PosKeyboardAwareTextInput
-                accessibilityLabel={t("registration.activationCode")}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!registrationBusy}
-                maxLength={128}
-                onChangeText={changeRegistrationCode}
-                onSubmitEditing={() =>
-                  identifyRegistrationCode(registrationCode)
-                }
-                placeholder={t("registration.activationCodePlaceholder")}
-                placeholderTextColor={posColors.mutedInk}
-                secureTextEntry
-                style={styles.provisioningCodeInput}
-                testID="registration-activation-code"
-                textContentType="oneTimeCode"
-                returnKeyType="go"
-                value={registrationCode}
+                tone={staged ? "secondary" : "primary"}
               />
-              <Text style={styles.provisioningCodeHint}>
-                {t("registration.activationCodeHint")}
-              </Text>
+
+              <View style={styles.divider}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerLabel}>
+                  {text.manualEntryDivider}
+                </Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <View>
+                <FieldLabel>{t("registration.activationCode")}</FieldLabel>
+                <View style={styles.codeRow}>
+                  <View style={styles.codeInputContainer}>
+                    <PosKeyboardAwareTextInput
+                      accessibilityLabel={t("registration.activationCode")}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      editable={!registrationBusy}
+                      maxLength={128}
+                      onChangeText={changeRegistrationCode}
+                      onSubmitEditing={() =>
+                        identifyRegistrationCode(registrationCode)
+                      }
+                      placeholder={t("registration.activationCodePlaceholder")}
+                      placeholderTextColor={posColors.placeholder}
+                      secureTextEntry
+                      style={[
+                        styles.codeInput,
+                        // 占位提示用正文字号；有内容后放大遮罩圆点。
+                        registrationCode.length > 0 && styles.codeInputFilled,
+                        registrationBusy && styles.codeInputDisabled,
+                      ]}
+                      testID="registration-activation-code"
+                      textContentType="oneTimeCode"
+                      returnKeyType="go"
+                      value={registrationCode}
+                    />
+                    <View pointerEvents="none" style={styles.codeInputIcon}>
+                      <MaterialCommunityIcons
+                        color={
+                          registrationBusy
+                            ? posColors.disabledInk
+                            : posColors.mutedInk
+                        }
+                        name="key-outline"
+                        size={32}
+                      />
+                    </View>
+                  </View>
+                  {staged ? null : (
+                    <PosButton
+                      disabled={
+                        registrationBusy ||
+                        runtime.state.database !== "ready" ||
+                        !registrationReady
+                      }
+                      label={
+                        operation === "preview"
+                          ? t("registration.previewing")
+                          : t("registration.preview")
+                      }
+                      loading={operation === "preview"}
+                      numberOfLines={2}
+                      onPress={() => identifyRegistrationCode(registrationCode)}
+                      style={styles.continueButton}
+                      testID="registration-preview"
+                    />
+                  )}
+                </View>
+                <Text style={styles.codeHint}>
+                  {t("registration.activationCodeHint")}
+                </Text>
+              </View>
 
               {registrationKind === "app-review" ? (
                 <>
-                  <View style={styles.compatibilityNote}>
-                    <Text style={styles.compatibilityTitle}>
+                  <View style={styles.infoNote}>
+                    <Text style={styles.infoNoteTitle}>
                       {t("registration.appReviewTitle")}
                     </Text>
-                    <Text style={styles.compatibilityHint}>
+                    <Text style={styles.infoNoteHint}>
                       {t("registration.appReviewHint")}
                     </Text>
                   </View>
 
-                  <FieldLabel>{t("registration.storeCode")}</FieldLabel>
-                  <PosPressable
-                    accessibilityRole="button"
-                    accessibilityState={{
-                      disabled:
-                        storeLoadState !== "ready" || stores.length === 0,
-                      expanded: pickerVisible,
-                    }}
-                    disabled={
-                      storeLoadState !== "ready" || stores.length === 0
-                    }
-                    onPress={() => setPickerVisible(true)}
-                    sound="navigate"
-                    style={({ pressed }) => [
-                      styles.storePicker,
-                      pressed && styles.storePickerPressed,
-                    ]}
-                    testID="registration-store-picker"
-                  >
-                    <View style={styles.storePickerCopy}>
-                      <Text
-                        style={[
-                          styles.storePickerValue,
-                          !selectedStore && styles.storePickerPlaceholder,
-                        ]}
-                      >
-                        {selectedStore
-                          ? storeDisplayName(selectedStore)
-                          : storePickerMessage(
-                              storeLoadState,
-                              stores.length,
-                              t,
-                            )}
-                      </Text>
-                    </View>
-                    <MaterialCommunityIcons
-                      color={posColors.ink}
-                      name="chevron-down"
-                      size={24}
-                    />
-                  </PosPressable>
+                  <View>
+                    <FieldLabel>{t("registration.storeCode")}</FieldLabel>
+                    <PosPressable
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        disabled: storePickerDisabled,
+                        expanded: pickerVisible,
+                      }}
+                      disabled={storePickerDisabled}
+                      onPress={() => setPickerVisible(true)}
+                      sound="navigate"
+                      style={({ pressed }) => [
+                        styles.storePicker,
+                        storePickerDisabled && styles.storePickerDisabled,
+                        pressed && !storePickerDisabled && styles.pressed,
+                      ]}
+                      testID="registration-store-picker"
+                    >
+                      <View style={styles.storePickerCopy}>
+                        <Text
+                          numberOfLines={1}
+                          style={[
+                            styles.storePickerValue,
+                            !selectedStore && styles.storePickerPlaceholder,
+                          ]}
+                        >
+                          {selectedStore
+                            ? storeDisplayName(selectedStore)
+                            : storePickerMessage(
+                                storeLoadState,
+                                stores.length,
+                                t,
+                              )}
+                        </Text>
+                      </View>
+                      <MaterialCommunityIcons
+                        color={
+                          storePickerDisabled
+                            ? posColors.disabledInk
+                            : posColors.ink
+                        }
+                        name="chevron-down"
+                        size={28}
+                      />
+                    </PosPressable>
+                  </View>
 
                   {storeLoadState === "failed" ||
                   (storeLoadState === "ready" && stores.length === 0) ? (
@@ -561,19 +629,12 @@ export function DeviceRegistrationScreen({
                             : t("registration.storeEmpty")
                         )}
                       </Text>
-                      <PosPressable
-                        accessibilityRole="button"
+                      <PosButton
+                        label={t("registration.storeRetry")}
                         onPress={() => void loadStores()}
-                        style={({ pressed }) => [
-                          styles.retryButton,
-                          pressed && styles.retryButtonPressed,
-                        ]}
+                        size="small"
                         testID="registration-store-retry"
-                      >
-                        <Text style={styles.retryButtonLabel}>
-                          {t("registration.storeRetry")}
-                        </Text>
-                      </PosPressable>
+                      />
                     </View>
                   ) : null}
                 </>
@@ -584,9 +645,9 @@ export function DeviceRegistrationScreen({
                   <MaterialCommunityIcons
                     color={posColors.green}
                     name="store-check-outline"
-                    size={28}
+                    size={40}
                   />
-                  <View style={styles.pendingCopy}>
+                  <View style={styles.stateCopy}>
                     <Text style={styles.activationPreviewLabel}>
                       {t("registration.activationPreviewTitle")}
                     </Text>
@@ -616,160 +677,95 @@ export function DeviceRegistrationScreen({
 
           {requestError ? (
             <View accessibilityRole="alert" style={styles.errorBanner}>
+              <MaterialCommunityIcons
+                color={posColors.red}
+                name="alert-circle-outline"
+                size={24}
+              />
               <Text style={styles.errorBannerText}>{requestError}</Text>
             </View>
           ) : null}
 
-          {runtime.state.phase === "locked" ? (
-            <PosPressable
-              accessibilityRole="button"
+          {/* 各状态的下一步操作：同一位置、同一尺寸（主按钮 88）。 */}
+          {phase === "locked" ? (
+            <PosButton
+              icon="restart"
+              label={t("registration.recoveryRetry")}
               onPress={() => void runtime.retry()}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryButtonPressed,
-              ]}
+              size="primary"
               testID="registration-recovery-retry"
-            >
-              <Text style={styles.secondaryButtonLabel}>
-                {t("registration.recoveryRetry")}
-              </Text>
-            </PosPressable>
-          ) : runtime.state.phase === "pending-approval" ? (
-            <PosPressable
-              accessibilityRole="button"
+              tone="primary"
+            />
+          ) : phase === "pending-approval" ? (
+            <PosButton
+              icon="refresh"
+              label={t("registration.checkNow")}
               onPress={() => void poll()}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryButtonPressed,
-              ]}
-            >
-              <Text style={styles.secondaryButtonLabel}>
-                {t("registration.checkNow")}
-              </Text>
-            </PosPressable>
+              size="primary"
+              tone="primary"
+            />
           ) : registrationKind === "app-review" ? (
-            <PosPressable
-              accessibilityRole="button"
-              accessibilityState={{
-                disabled:
-                  operation === "app-review" ||
-                  !selectedStore ||
-                  !registrationCode.trim(),
-              }}
-              disabled={
-                operation === "app-review" ||
-                !selectedStore ||
-                !registrationCode.trim()
-              }
-              onPress={() => void submitAppReview()}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.primaryButtonPressed,
-                (operation === "app-review" ||
-                  !selectedStore ||
-                  !registrationCode.trim()) && styles.primaryButtonDisabled,
-              ]}
-              testID="registration-app-review-submit"
-            >
-              <Text style={styles.primaryButtonLabel}>
-                {operation === "app-review"
+            <PosButton
+              disabled={appReviewSubmitDisabled}
+              label={
+                operation === "app-review"
                   ? t("registration.appReviewSubmitting")
-                  : t("registration.appReviewSubmit")}
-              </Text>
-            </PosPressable>
-          ) : activationPreview ? (
-            <PosPressable
-              accessibilityRole="button"
-              accessibilityState={{ disabled: registrationBusy }}
-              disabled={registrationBusy}
-              onPress={() => void redeemActivation()}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && styles.primaryButtonPressed,
-                registrationBusy && styles.primaryButtonDisabled,
-              ]}
-              testID="registration-redeem"
-            >
-              <Text style={styles.primaryButtonLabel}>
-                {operation === "redeem"
-                  ? t("registration.redeeming")
-                  : t("registration.confirmActivation")}
-              </Text>
-            </PosPressable>
-          ) : (
-            <PosPressable
-              accessibilityRole="button"
-              accessibilityState={{
-                disabled:
-                  registrationBusy ||
-                  runtime.state.database !== "ready" ||
-                  !registrationReady,
-              }}
-              disabled={
-                registrationBusy ||
-                runtime.state.database !== "ready" ||
-                !registrationReady
+                  : t("registration.appReviewSubmit")
               }
-              onPress={() => identifyRegistrationCode(registrationCode)}
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryButtonPressed,
-                (registrationBusy || !registrationReady) &&
-                  styles.primaryButtonDisabled,
-              ]}
-              testID="registration-preview"
-            >
-              <Text style={styles.secondaryButtonLabel}>
-                {operation === "preview"
-                  ? t("registration.previewing")
-                  : t("registration.preview")}
-              </Text>
-            </PosPressable>
-          )}
-
-          {serverConnection && runtime.state.phase !== "locked" ? (
-            <View style={styles.serverConnectionPanel}>
-              <ServerConnectionPanel
-                canSave={runtime.state.phase === "registration-required"}
-                copy={serverConnectionPanelCopy(t)}
-                currentAddress={serverConnection.getCurrentApiBaseUrl()}
-                saveAddress={async (address) => {
-                  const controller = new AbortController();
-                  serverOperation.current?.abort();
-                  serverOperation.current = controller;
-                  const result = await serverConnection.change(
-                    address,
-                    controller.signal,
-                  );
-                  if (result.status !== "completed") {
-                    throw new Error(result.reason);
-                  }
-                  await runtime.retry();
-                }}
-                testAddress={(address) => {
-                  const controller = new AbortController();
-                  serverOperation.current?.abort();
-                  serverOperation.current = controller;
-                  return serverConnection.test(address, controller.signal);
-                }}
-              />
-            </View>
+              loading={operation === "app-review"}
+              onPress={() => void submitAppReview()}
+              size="primary"
+              testID="registration-app-review-submit"
+              tone="primary"
+            />
+          ) : activationPreview ? (
+            <PosButton
+              disabled={registrationBusy}
+              icon="shield-check-outline"
+              label={
+                operation === "redeem"
+                  ? t("registration.redeeming")
+                  : t("registration.confirmActivation")
+              }
+              loading={operation === "redeem"}
+              onPress={() => void redeemActivation()}
+              size="primary"
+              testID="registration-redeem"
+              tone="primary"
+            />
           ) : null}
-          {onOpenNetworkCheck ? (
-            <PosPressable
-              accessibilityRole="button"
-              onPress={onOpenNetworkCheck}
-              sound="navigate"
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.secondaryButtonPressed,
-              ]}
-              testID="registration-network-check"
-            >
-              <Text style={styles.secondaryButtonLabel}>
-                {t("registration.networkCheck")}
-              </Text>
-            </PosPressable>
+
+          {serverConnection && phase !== "locked" ? (
+            <ServerConnectionPanel
+              actions={networkCheckButton}
+              canSave={phase === "registration-required"}
+              copy={serverConnectionPanelCopy(t)}
+              currentAddress={serverConnection.getCurrentApiBaseUrl()}
+              saveAddress={async (address) => {
+                const controller = new AbortController();
+                serverOperation.current?.abort();
+                serverOperation.current = controller;
+                const result = await serverConnection.change(
+                  address,
+                  controller.signal,
+                );
+                if (result.status !== "completed") {
+                  throw new Error(result.reason);
+                }
+                await runtime.retry();
+              }}
+              testAddress={(address) => {
+                const controller = new AbortController();
+                serverOperation.current?.abort();
+                serverOperation.current = controller;
+                return serverConnection.test(address, controller.signal);
+              }}
+            />
+          ) : networkCheckButton ? (
+            // 服务器面板不显示时（需要恢复 / 运行环境未就绪），网络检测入口单独保留。
+            <View style={styles.standaloneNetworkCheck}>
+              {networkCheckButton}
+            </View>
           ) : null}
         </PosKeyboardAwareScrollView>
       </View>
@@ -796,7 +792,7 @@ export function DeviceRegistrationScreen({
           visible={cameraVisible}
         />
       ) : null}
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -813,6 +809,7 @@ function StorePickerOverlay({
   stores: readonly DeviceRegistrationStore[];
   visible: boolean;
 }>) {
+  usePosThemeVersion();
   const { t } = useTranslation();
   if (!visible) {
     return null;
@@ -836,19 +833,12 @@ function StorePickerOverlay({
           <Text style={styles.modalTitle}>
             {t("registration.storePickerTitle")}
           </Text>
-          <PosPressable
-            accessibilityRole="button"
+          <PosButton
+            label={t("registration.storePickerClose")}
             onPress={onClose}
+            size="medium"
             sound="navigate"
-            style={({ pressed }) => [
-              styles.modalClose,
-              pressed && styles.modalClosePressed,
-            ]}
-          >
-            <Text style={styles.modalCloseLabel}>
-              {t("registration.storePickerClose")}
-            </Text>
-          </PosPressable>
+          />
         </View>
         <ScrollView
           contentContainerStyle={styles.storeList}
@@ -865,12 +855,12 @@ function StorePickerOverlay({
                 style={({ pressed }) => [
                   styles.storeOption,
                   selected && styles.storeOptionSelected,
-                  pressed && styles.storeOptionPressed,
+                  pressed && styles.pressed,
                 ]}
                 testID={`registration-store-${store.storeCode}`}
               >
                 <View style={styles.storeOptionCopy}>
-                  <Text style={styles.storeOptionName}>
+                  <Text numberOfLines={1} style={styles.storeOptionName}>
                     {store.storeName}
                   </Text>
                   <Text style={styles.storeOptionCode}>
@@ -881,7 +871,7 @@ function StorePickerOverlay({
                   <MaterialCommunityIcons
                     color={posColors.green}
                     name="check-circle"
-                    size={22}
+                    size={28}
                   />
                 ) : null}
               </PosPressable>
@@ -921,6 +911,7 @@ function applyRequestFailure(
 }
 
 function FieldLabel({ children }: { children: string }) {
+  usePosThemeVersion();
   return <Text style={styles.fieldLabel}>{children}</Text>;
 }
 
@@ -945,346 +936,351 @@ function storePickerMessage(
   return t("registration.storePlaceholder");
 }
 
-const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: posColors.canvas },
-  languageBar: {
-    minHeight: 48,
-    alignItems: "flex-end",
-    justifyContent: "center",
-    paddingHorizontal: 48,
-  },
-  languageButton: {
-    minWidth: 108,
-    minHeight: 44,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    paddingHorizontal: 16,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: posColors.surface,
-  },
-  languageButtonPressed: { backgroundColor: posColors.blueSoft },
-  languageButtonLabel: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-  },
+/** 注册码输入框与「继续」按钮的统一高度。 */
+const CODE_FIELD_HEIGHT = 76;
+
+const styles = createPosStyles((colors) => ({
   page: {
     flex: 1,
     flexDirection: "row",
-    paddingHorizontal: 48,
-    paddingTop: 8,
-    paddingBottom: 34,
-    gap: 56,
+    gap: 12,
+    minHeight: 0,
+    padding: 12,
   },
-  contextPanel: { flex: 1, justifyContent: "center", maxWidth: 520 },
+  brandPanel: {
+    backgroundColor: colors.inverseSurface,
+    borderRadius: 14,
+    flexBasis: 440,
+    flexGrow: 0,
+    flexShrink: 1,
+    gap: 14,
+    paddingHorizontal: 32,
+    paddingVertical: 34,
+  },
   brandMark: {
-    borderRadius: 12,
-    height: 52,
-    width: 52,
+    borderRadius: 18,
+    height: 76,
+    width: 76,
   },
   eyebrow: {
-    marginTop: 28,
-    color: posColors.orange,
-    fontSize: 11,
+    color: colors.onInverse,
+    fontSize: 14,
     fontWeight: "900",
-    letterSpacing: 1.8,
+    letterSpacing: 2,
+    opacity: 0.72,
   },
   title: {
-    marginTop: 14,
-    color: posColors.ink,
-    fontSize: 42,
+    color: colors.onInverse,
+    fontSize: 34,
     fontWeight: "900",
-    lineHeight: 48,
+    lineHeight: 42,
   },
   subtitle: {
-    marginTop: 18,
-    color: posColors.mutedInk,
-    fontSize: 17,
-    lineHeight: 27,
+    color: colors.onInverse,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 23,
+    opacity: 0.82,
   },
+  brandSpacer: { flex: 1, minHeight: 8 },
   securityNote: {
-    marginTop: 36,
+    alignItems: "flex-start",
+    backgroundColor: colors.chromeChip,
+    borderRadius: 10,
     flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: posColors.green,
-    backgroundColor: posColors.greenSoft,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
+  securityIcon: { opacity: 0.82 },
   securityCopy: {
+    color: colors.onInverse,
     flex: 1,
-    color: posColors.ink,
     fontSize: 13,
     fontWeight: "600",
     lineHeight: 20,
+    opacity: 0.82,
   },
   formPanel: {
-    width: 430,
-    alignSelf: "center",
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: posColors.surface,
+    flex: 1,
+    minWidth: 0,
   },
   formPanelContent: {
-    padding: 30,
+    flexGrow: 1,
+    gap: 12,
+    justifyContent: "center",
+    paddingHorizontal: 44,
+    paddingVertical: 12,
   },
-  formTitle: { color: posColors.ink, fontSize: 25, fontWeight: "900" },
+  formTitle: { color: colors.ink, fontSize: 24, fontWeight: "900" },
   formHint: {
-    marginTop: 8,
-    marginBottom: 24,
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 21,
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    marginTop: 4,
   },
-  compatibilityNote: {
-    marginTop: 18,
-    marginBottom: 4,
-    padding: 14,
-    borderLeftWidth: 3,
-    borderLeftColor: posColors.orange,
-    backgroundColor: "#FFF7ED",
+  divider: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
   },
-  compatibilityTitle: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "900",
+  dividerLine: {
+    backgroundColor: colors.border,
+    flex: 1,
+    height: 1,
   },
-  compatibilityHint: {
-    marginTop: 5,
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
+  dividerLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
   },
   fieldLabel: {
-    marginTop: 14,
-    marginBottom: 8,
-    color: posColors.ink,
-    fontSize: 13,
+    color: colors.mutedInk,
+    fontSize: 14,
     fontWeight: "800",
+    marginBottom: 5,
+  },
+  codeRow: { flexDirection: "row", gap: 10 },
+  codeInputContainer: { flex: 1, minWidth: 0 },
+  codeInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "600",
+    height: CODE_FIELD_HEIGHT,
+    paddingLeft: 62,
+    paddingRight: 18,
+  },
+  codeInputFilled: { fontSize: 26, fontWeight: "900", letterSpacing: 3 },
+  codeInputDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+    color: colors.disabledInk,
+  },
+  codeInputIcon: {
+    bottom: 0,
+    justifyContent: "center",
+    left: 18,
+    position: "absolute",
+    top: 0,
+  },
+  continueButton: {
+    minHeight: CODE_FIELD_HEIGHT,
+    width: 150,
+  },
+  codeHint: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  infoNote: {
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  infoNoteTitle: {
+    color: colors.blue,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  infoNoteHint: {
+    color: colors.blue,
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 19,
+    marginTop: 3,
   },
   storePicker: {
-    minHeight: 50,
-    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
     justifyContent: "space-between",
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
+    minHeight: 64,
+    paddingHorizontal: 14,
   },
-  storePickerPressed: { backgroundColor: posColors.blueSoft },
-  storePickerCopy: { flex: 1, paddingRight: 12 },
+  storePickerDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+  },
+  storePickerCopy: { flex: 1, minWidth: 0, paddingRight: 12 },
   storePickerValue: {
-    color: posColors.ink,
-    fontSize: 16,
+    color: colors.ink,
+    fontSize: 17,
     fontWeight: "700",
   },
   storePickerPlaceholder: {
-    color: posColors.mutedInk,
-    fontWeight: "500",
-  },
-  provisioningCodeInput: {
-    minHeight: 50,
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  provisioningCodeHint: {
-    marginTop: 7,
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  activationPreview: {
-    marginTop: 18,
-    padding: 14,
-    borderLeftWidth: 4,
-    borderLeftColor: posColors.green,
-    backgroundColor: posColors.greenSoft,
-  },
-  activationPreviewLabel: {
-    color: posColors.green,
-    fontSize: 11,
-    fontWeight: "900",
-    letterSpacing: 1.1,
-  },
-  activationPreviewStore: {
-    marginTop: 6,
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  activationPreviewExpiry: {
-    marginTop: 4,
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
+    color: colors.placeholder,
+    fontWeight: "600",
   },
   storeStatus: {
-    marginTop: 10,
-    padding: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: posColors.orange,
-    backgroundColor: "#FFF7ED",
+    alignItems: "center",
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   storeStatusText: {
-    color: posColors.ink,
+    color: colors.yellowInk,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  stateCard: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+  },
+  stateCardDanger: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
+  },
+  stateCopy: { flex: 1, minWidth: 0 },
+  stateTitle: { color: colors.ink, fontSize: 19, fontWeight: "900" },
+  stateDetail: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+    marginTop: 3,
+  },
+  activationPreview: {
+    alignItems: "center",
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+  },
+  activationPreviewLabel: {
+    color: colors.green,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  activationPreviewStore: {
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  activationPreviewExpiry: {
+    color: colors.mutedInk,
     fontSize: 13,
+    fontWeight: "600",
     lineHeight: 19,
-  },
-  retryButton: {
-    minHeight: 44,
-    marginTop: 8,
-    alignSelf: "flex-start",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: posColors.ink,
-  },
-  retryButtonPressed: { backgroundColor: posColors.blueSoft },
-  retryButtonLabel: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
+    marginTop: 3,
   },
   errorBanner: {
-    marginTop: 18,
-    padding: 12,
-    backgroundColor: "#FEE4E2",
-  },
-  errorBannerText: { color: "#912018", fontSize: 13, fontWeight: "700" },
-  primaryButton: {
-    minHeight: 52,
-    marginTop: 24,
+    alignItems: "center",
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: 10,
+    borderWidth: 1.5,
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 9,
-    backgroundColor: posColors.ink,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  primaryButtonPressed: { opacity: 0.7 },
-  primaryButtonDisabled: { opacity: 0.45 },
-  primaryButtonLabel: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
-  secondaryButton: {
-    minHeight: 50,
-    marginTop: 20,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: posColors.ink,
-  },
-  secondaryButtonPressed: { backgroundColor: posColors.blueSoft },
-  secondaryButtonLabel: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  pendingCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFF7ED",
-  },
-  pendingCopy: { flex: 1 },
-  pendingCode: { color: posColors.ink, fontSize: 18, fontWeight: "900" },
-  pendingStore: {
-    marginTop: 4,
-    color: posColors.mutedInk,
-    fontSize: 13,
+  errorBannerText: {
+    color: colors.red,
+    flex: 1,
+    fontSize: 15,
     fontWeight: "700",
+    lineHeight: 21,
   },
-  serverConnectionPanel: {
-    marginTop: 22,
+  standaloneNetworkCheck: {
+    alignSelf: "center",
+    minWidth: 240,
   },
+  pressed: { opacity: 0.72 },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 20,
     alignItems: "center",
     justifyContent: "center",
     padding: 32,
-    backgroundColor: "rgba(10, 31, 50, 0.42)",
+    backgroundColor: colors.overlay,
   },
   backdropDismissArea: {
     ...StyleSheet.absoluteFillObject,
   },
   modalCard: {
+    backgroundColor: colors.canvas,
+    borderRadius: 16,
+    maxHeight: "82%",
+    maxWidth: 640,
+    padding: 22,
     width: "100%",
-    maxWidth: 560,
-    maxHeight: "76%",
-    padding: 24,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: posColors.surface,
   },
   modalHeader: {
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    paddingBottom: 16,
+    borderBottomColor: colors.border,
     borderBottomWidth: 1,
-    borderBottomColor: posColors.border,
+    flexDirection: "row",
+    gap: 16,
+    justifyContent: "space-between",
+    paddingBottom: 14,
   },
   modalTitle: {
+    color: colors.ink,
     flex: 1,
-    color: posColors.ink,
     fontSize: 22,
     fontWeight: "900",
   },
-  modalClose: {
-    minWidth: 72,
-    minHeight: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: posColors.border,
-  },
-  modalClosePressed: { backgroundColor: posColors.blueSoft },
-  modalCloseLabel: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  storeList: { paddingTop: 12, gap: 8 },
+  storeList: { gap: 6, paddingTop: 12 },
   storeOption: {
-    minHeight: 58,
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexDirection: "row",
     gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    backgroundColor: "#FFFFFF",
+    justifyContent: "space-between",
+    minHeight: 78,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
   storeOptionSelected: {
-    borderColor: posColors.green,
-    backgroundColor: posColors.greenSoft,
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.green,
   },
-  storeOptionPressed: { opacity: 0.72 },
-  storeOptionCopy: { flex: 1 },
+  storeOptionCopy: { flex: 1, minWidth: 0 },
   storeOptionName: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
   },
   storeOptionCode: {
-    marginTop: 3,
-    color: posColors.mutedInk,
-    fontSize: 12,
+    color: colors.mutedInk,
+    fontSize: 13,
     fontWeight: "700",
+    marginTop: 3,
   },
-});
+}));

@@ -16,6 +16,7 @@ import {
   type AppUpdateRecoveryRuntimeSnapshot,
   type AppUpdateRecoverySection,
 } from "@/features/app-updates";
+import { usePosThemeVersion } from "@/ui/theme";
 
 const UPDATE_RECOVERY_EXPORT_FILE_NAME =
   "hb-pos-update-support.json";
@@ -52,6 +53,7 @@ export async function shareUpdateRecoverySnapshot(
 }
 
 export default function UpdateRecoveryRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const params = useLocalSearchParams<{ section?: string | string[] }>();
   const runtime = usePosRuntime();

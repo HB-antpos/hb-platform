@@ -9,6 +9,7 @@ import {
   SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
   SPECIAL_PRODUCTS_VIEW_PERMISSION,
   SpecialProductsScreen,
+  SpecialProductsUnavailableScreen,
   type SpecialProductsScreenPresenter,
   type SpecialProductsState,
 } from "./index";
@@ -26,6 +27,8 @@ let mockLanguage: "en" | "zh" = "zh";
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: mockLanguage, resolvedLanguage: mockLanguage },
+    // 页面外壳的顶栏状态条会调用 t()；这里原样返回键名即可
+    t: (key: string) => key,
   }),
 }));
 
@@ -51,9 +54,8 @@ describe("SpecialProductsScreen", () => {
     expect(screen.getByTestId("special-products-offline-note")).toBeTruthy();
     const download = screen.getByTestId("special-products-download");
     const addProduct = screen.getByTestId("special-products-add-product");
-    const remove = screen.getByTestId("special-products-remove-A");
-    const moveDown = screen.getByTestId("special-products-move-down-A");
-    for (const control of [cardA, download, addProduct, remove, moveDown]) {
+    const organize = screen.getByTestId("special-products-organize");
+    for (const control of [cardA, download, addProduct, organize]) {
       expect(StyleSheet.flatten(control.props.style).minHeight).toBeGreaterThanOrEqual(
         SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
       );
@@ -61,23 +63,31 @@ describe("SpecialProductsScreen", () => {
     expect(cardA.props.accessibilityState).toEqual({ disabled: false });
     expect(download.props.accessibilityState).toEqual({ disabled: true });
     expect(addProduct.props.accessibilityState).toEqual({ disabled: true });
-    expect(remove.props.accessibilityState).toEqual({ disabled: true });
-    expect(moveDown.props.accessibilityState).toEqual({ disabled: true });
-    // 每行 5 个卡片：卡片宽度按 5 列计算（(100%-4×12px gap)/5）
+    // 「整理」与其他管理操作同条件：离线时禁用，点了也进不去
+    expect(organize.props.accessibilityState).toEqual({ disabled: true });
+    await fireEvent.press(organize);
+    expect(
+      screen.queryByTestId("special-products-organize-banner"),
+    ).toBeNull();
+    // 日常状态下卡片底部没有 ↑ / ↓ / 取消标记（整理中掉线的禁用态见下一条用例）
+    expect(screen.queryByTestId("special-products-remove-A")).toBeNull();
+    expect(screen.queryByTestId("special-products-move-down-A")).toBeNull();
+    // 每行 5 个卡片：卡片宽度按 5 列计算（19.2% × 5 + 4 个 10pt 间距）
     expect(
       StyleSheet.flatten(
         screen.getByTestId("special-product-card-A-shell").props.style,
       ).width,
-    ).toBe("18.4%");
-    // Header 三个按钮高度一致：secondary 不带 marginTop 偏移
+    ).toBe("19.2%");
+    // 页头四个操作同为 56 高，且不带 marginTop 偏移
     for (const testID of [
       "special-products-refresh-local",
-      "special-products-add-product",
       "special-products-download",
+      "special-products-add-product",
+      "special-products-organize",
     ]) {
-      expect(
-        StyleSheet.flatten(screen.getByTestId(testID).props.style).marginTop,
-      ).toBeUndefined();
+      const style = StyleSheet.flatten(screen.getByTestId(testID).props.style);
+      expect(style.minHeight).toBe(56);
+      expect(style.marginTop).toBeUndefined();
     }
 
     await fireEvent.press(cardA);
@@ -91,6 +101,189 @@ describe("SpecialProductsScreen", () => {
     );
     await fireEvent.press(back);
     expect(onBack).toHaveBeenCalledTimes(1);
+    await screen.unmount();
+  });
+
+  it("整理中掉线：↑ / ↓ / 取消标记禁用且至少 44pt，卡片不加购，但仍可退出整理", async () => {
+    const presenter = new ScreenPresenter({
+      items: [product("A"), product("B")],
+      online: true,
+    });
+    const screen = await render(
+      <SpecialProductsScreen presenter={presenter} />,
+    );
+
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
+    await act(async () => {
+      presenter.setOnline(false);
+    });
+
+    expect(screen.getByTestId("special-products-offline-note")).toBeTruthy();
+    const remove = screen.getByTestId("special-products-remove-A");
+    const moveDown = screen.getByTestId("special-products-move-down-A");
+    for (const control of [remove, moveDown]) {
+      expect(StyleSheet.flatten(control.props.style).minHeight).toBeGreaterThanOrEqual(
+        SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
+      );
+    }
+    expect(remove.props.accessibilityState).toEqual({ disabled: true });
+    expect(moveDown.props.accessibilityState).toEqual({ disabled: true });
+    await fireEvent.press(remove);
+    await fireEvent.press(moveDown);
+    expect(presenter.markCalls).toEqual([]);
+    expect(presenter.reorderCalls).toEqual([]);
+
+    // 仍在整理状态：卡片既不能拖也不加购
+    const cardA = screen.getByTestId("special-product-card-A");
+    expect(cardA.props.accessibilityState).toEqual({ disabled: true });
+    await fireEvent.press(cardA);
+    expect(presenter.addToCartCalls).toEqual([]);
+
+    // 「完成整理」不随离线禁用，退出后恢复离线加购
+    const done = screen.getByTestId("special-products-organize");
+    expect(done.props.accessibilityState).toEqual({ disabled: false });
+    await fireEvent.press(done);
+    expect(
+      screen.queryByTestId("special-products-organize-banner"),
+    ).toBeNull();
+    expect(screen.queryByTestId("special-products-remove-A")).toBeNull();
+    await fireEvent.press(screen.getByTestId("special-product-card-A"));
+    expect(presenter.addToCartCalls).toEqual(["A"]);
+    await screen.unmount();
+  });
+
+  it("默认不在整理状态：不显示管理按钮，点卡片加购，长按不会抬起卡片", async () => {
+    const presenter = new ScreenPresenter({
+      items: [product("A"), product("B")],
+      online: true,
+    });
+    const screen = await render(
+      <SpecialProductsScreen presenter={presenter} />,
+    );
+
+    expect(screen.getByText("整理")).toBeTruthy();
+    expect(screen.queryByText("完成整理")).toBeNull();
+    expect(
+      screen.queryByTestId("special-products-organize-banner"),
+    ).toBeNull();
+    for (const code of ["A", "B"]) {
+      expect(screen.queryByTestId(`special-products-move-up-${code}`)).toBeNull();
+      expect(screen.queryByTestId(`special-products-move-down-${code}`)).toBeNull();
+      expect(screen.queryByTestId(`special-products-remove-${code}`)).toBeNull();
+    }
+    expect(screen.getByText("点商品卡片 = 加入购物车并返回收银")).toBeTruthy();
+    // 价格放大到 21 号
+    expect(
+      StyleSheet.flatten(screen.getAllByText("$12.50")[0]?.props.style).fontSize,
+    ).toBe(21);
+
+    const cardA = screen.getByTestId("special-product-card-A");
+    // 有管理权限且在线，但没进整理：长按拖动不启用
+    expect(cardA.props.onLongPress).toBeUndefined();
+    await fireEvent.press(cardA);
+    expect(presenter.addToCartCalls).toEqual(["A"]);
+    expect(mockPlayTouchSound).toHaveBeenCalledWith("tap");
+    await screen.unmount();
+  });
+
+  it("进入整理后显示管理按钮和提示条，点卡片不加购；完成整理后恢复", async () => {
+    const presenter = new ScreenPresenter({
+      items: [product("A"), product("B")],
+      online: true,
+    });
+    const screen = await render(
+      <SpecialProductsScreen presenter={presenter} />,
+    );
+
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
+
+    // 页头按钮变成「完成整理」，顶部出现黄色提示条
+    expect(screen.getByText("完成整理")).toBeTruthy();
+    expect(screen.queryByText("整理")).toBeNull();
+    expect(
+      screen.getByTestId("special-products-organize-banner"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "整理模式：用 ↑ ↓ 或长按拖动调整顺序，「取消标记」把商品移出特殊商品。此时点卡片不会加购。",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("点商品卡片 = 加入购物车并返回收银")).toBeNull();
+
+    // 每张卡片底部出现 ↑ / ↓ / 取消标记；第一张不能上移、最后一张不能下移
+    const moveUpA = screen.getByTestId("special-products-move-up-A");
+    const moveDownA = screen.getByTestId("special-products-move-down-A");
+    const removeA = screen.getByTestId("special-products-remove-A");
+    for (const control of [moveUpA, moveDownA, removeA]) {
+      expect(StyleSheet.flatten(control.props.style).minHeight).toBeGreaterThanOrEqual(46);
+    }
+    expect(moveUpA.props.accessibilityState).toEqual({ disabled: true });
+    expect(moveDownA.props.accessibilityState).toEqual({ disabled: false });
+    expect(removeA.props.accessibilityState).toEqual({ disabled: false });
+    expect(
+      screen.getByTestId("special-products-move-up-B").props.accessibilityState,
+    ).toEqual({ disabled: false });
+    expect(
+      screen.getByTestId("special-products-move-down-B").props
+        .accessibilityState,
+    ).toEqual({ disabled: true });
+    expect(screen.getAllByText("取消标记")).toHaveLength(2);
+
+    // 整理时点卡片不加购，也不发加购的触控音
+    mockPlayTouchSound.mockClear();
+    await fireEvent.press(screen.getByTestId("special-product-card-A"));
+    expect(presenter.addToCartCalls).toEqual([]);
+    expect(mockPlayTouchSound).not.toHaveBeenCalled();
+
+    // 管理按钮照常工作
+    await fireEvent.press(moveDownA);
+    expect(presenter.reorderCalls).toEqual([{ delta: 1, productCode: "A" }]);
+    await fireEvent.press(
+      screen.getByTestId("special-products-move-up-B"),
+    );
+    expect(presenter.reorderCalls).toEqual([
+      { delta: 1, productCode: "A" },
+      { delta: -1, productCode: "B" },
+    ]);
+    await fireEvent.press(removeA);
+    expect(presenter.markCalls).toEqual([
+      { isSpecialProduct: false, productCode: "A" },
+    ]);
+    expect(mockPlayTouchSound).toHaveBeenLastCalledWith("danger");
+    expect(presenter.addToCartCalls).toEqual([]);
+
+    // 完成整理：管理按钮与提示条消失，点卡片恢复加购
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
+    expect(screen.getByText("整理")).toBeTruthy();
+    expect(
+      screen.queryByTestId("special-products-organize-banner"),
+    ).toBeNull();
+    expect(screen.queryByTestId("special-products-move-up-A")).toBeNull();
+    expect(screen.queryByTestId("special-products-move-down-A")).toBeNull();
+    expect(screen.queryByTestId("special-products-remove-A")).toBeNull();
+    await fireEvent.press(screen.getByTestId("special-product-card-A"));
+    expect(presenter.addToCartCalls).toEqual(["A"]);
+    await screen.unmount();
+  });
+
+  it("整理模式文案按当前语言显示，英文界面不混入中文", async () => {
+    mockLanguage = "en";
+    const presenter = new ScreenPresenter({
+      items: [product("A")],
+      online: true,
+    });
+    const screen = await render(
+      <SpecialProductsScreen presenter={presenter} />,
+    );
+
+    expect(screen.getByText("Organize")).toBeTruthy();
+    expect(screen.queryByText("整理")).toBeNull();
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
+    expect(screen.getByText("Done")).toBeTruthy();
+    expect(screen.getByText(/^Organize mode:/)).toBeTruthy();
+    expect(screen.getByText("Remove")).toBeTruthy();
+    expect(screen.queryByText("完成整理")).toBeNull();
+    expect(screen.queryByText("取消标记")).toBeNull();
     await screen.unmount();
   });
 
@@ -108,6 +301,8 @@ describe("SpecialProductsScreen", () => {
     expect(cardA.props.accessibilityState).toEqual({ disabled: true });
     expect(screen.queryByTestId("special-products-add-product")).toBeNull();
     expect(screen.queryByTestId("special-products-remove-A")).toBeNull();
+    // 没有管理权限就没有「整理」入口
+    expect(screen.queryByTestId("special-products-organize")).toBeNull();
     expect(
       StyleSheet.flatten(
         screen.getByTestId("special-products-refresh-local").props.style,
@@ -249,6 +444,8 @@ describe("SpecialProductsScreen", () => {
     );
     expect(screen.queryByTestId("special-products-add-modal")).toBeNull();
 
+    // ↓ 收在整理模式里：先进入整理再操作
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
     await fireEvent.press(
       screen.getByTestId("special-products-move-down-A"),
     );
@@ -258,7 +455,7 @@ describe("SpecialProductsScreen", () => {
     await screen.unmount();
   });
 
-  it("长按卡片拖动到目标格后调用 moveTo 持久化排序", async () => {
+  it("整理状态下长按卡片拖动到目标格后调用 moveTo 持久化排序", async () => {
     const presenter = new ScreenPresenter({
       items: [product("A"), product("B"), product("C"), product("D")],
       online: true,
@@ -267,6 +464,8 @@ describe("SpecialProductsScreen", () => {
       <SpecialProductsScreen presenter={presenter} />,
     );
 
+    // 长按拖动只在整理状态下启用
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
     const cardA = screen.getByTestId("special-product-card-A");
     const shellA = screen.getByTestId("special-product-card-A-shell");
     // 卡片实测尺寸：宽 85.6（单列）、高 240 → 行高 252
@@ -336,6 +535,9 @@ describe("SpecialProductsScreen", () => {
       <SpecialProductsScreen presenter={presenter} />,
     );
 
+    // 进入整理后卡片才可拖拽；清掉点「整理」按钮本身的触控音再计数
+    await fireEvent.press(screen.getByTestId("special-products-organize"));
+    mockPlayTouchSound.mockClear();
     const cardA = screen.getByTestId("special-product-card-A");
     await fireEvent(cardA, "pressIn");
     await fireEvent(cardA, "longPress");
@@ -406,6 +608,26 @@ describe("SpecialProductsScreen", () => {
     expect(english.queryByText("特殊商品")).toBeNull();
     expect(english.queryByText("特殊商品 / Special products")).toBeNull();
     await english.unmount();
+  });
+
+  it("不可用页显示安全说明，并可从页头返回销售页", async () => {
+    const onBack = jest.fn();
+    const screen = await render(
+      <SpecialProductsUnavailableScreen onBack={onBack} />,
+    );
+
+    expect(
+      screen.getByTestId("special-products-runtime-unavailable"),
+    ).toBeTruthy();
+    expect(screen.getByText("功能暂不可用")).toBeTruthy();
+    expect(
+      screen.getByText("本机运行时尚未提供特殊商品服务，请返回销售页。"),
+    ).toBeTruthy();
+    const back = screen.getByTestId("special-products-unavailable-back");
+    expect(StyleSheet.flatten(back.props.style).minHeight).toBe(56);
+    await fireEvent.press(back);
+    expect(onBack).toHaveBeenCalledTimes(1);
+    await screen.unmount();
   });
 
   it("添加商品弹窗点击面板外遮罩关闭", async () => {
@@ -483,6 +705,11 @@ class ScreenPresenter implements SpecialProductsScreenPresenter {
   };
 
   public async load(): Promise<void> {}
+
+  /** 模拟路由层同步网络状态（presenter.setOnline），用于整理中掉线的场景。 */
+  public setOnline(online: boolean): void {
+    this.patch({ online });
+  }
 
   public setSearchQuery(searchQuery: string): void {
     this.searchQueries.push(searchQuery);

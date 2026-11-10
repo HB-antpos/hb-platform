@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 import { describeNetworkCheckApp, describeNetworkCheckDevice } from "@/features/network-check";
 import { ZellerProbeScreen } from "@/features/zeller-probe";
 import { useZellerTerminalBoundary } from "@/features/zeller-terminal/zeller-terminal-boundary";
+import { usePosThemeVersion } from "@/ui/theme";
 
 /**
  * Zeller 真机验证页（开发工具），用地址 hbpos-ipad://zeller-probe 打开，收银界面里没有入口。
@@ -22,6 +23,7 @@ const PROBE_PORTS = {
 };
 
 export default function ZellerProbeRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const onBack = () => (router.canGoBack() ? router.back() : router.replace("/" as Href));
   // 用 App 根上那一个 Zeller SDK（全 App 只能有一个实例），打开本页时才让它加载。

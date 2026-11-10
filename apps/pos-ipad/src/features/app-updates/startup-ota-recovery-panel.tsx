@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
-  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -12,8 +11,13 @@ import type {
   StartupOtaRecoveryState,
 } from "./startup-ota-recovery";
 
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton } from "@/ui/controls/pos-button";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 type StartupOtaRecoveryPanelProps = Readonly<{
   load(): Promise<StartupOtaRecovery>;
@@ -33,6 +37,7 @@ export function StartupOtaRecoveryPanel({
   load,
   onBusyChange,
 }: StartupOtaRecoveryPanelProps) {
+  usePosThemeVersion();
   const { t } = useTranslation();
   const [recovery, setRecovery] = useState<StartupOtaRecovery | null>(null);
   const [state, setState] = useState<PanelState>({ phase: "idle" });
@@ -111,22 +116,18 @@ export function StartupOtaRecoveryPanel({
           <Text style={styles.body}>
             {t("bootstrap.otaRecovery.keepsData")}
           </Text>
-          <PosPressable
-            accessibilityRole="button"
+          <PosButton
+            icon="download"
+            label={t("bootstrap.otaRecovery.install")}
             onPress={() => {
               void recovery?.apply();
             }}
+            size="medium"
             sound="tap"
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && styles.pressed,
-            ]}
+            style={styles.action}
             testID="startup-ota-recovery-apply"
-          >
-            <Text style={styles.primaryLabel}>
-              {t("bootstrap.otaRecovery.install")}
-            </Text>
-          </PosPressable>
+            tone="primary"
+          />
         </>
       ) : null}
       {state.phase === "up-to-date" ||
@@ -136,20 +137,15 @@ export function StartupOtaRecoveryPanel({
         <>
           <Text style={styles.body}>{panelMessage(state, t)}</Text>
           {state.phase !== "unavailable" && recovery ? (
-            <PosPressable
-              accessibilityRole="button"
+            <PosButton
+              icon="refresh"
+              label={t("bootstrap.otaRecovery.check")}
               onPress={recheck}
+              size="medium"
               sound="tap"
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                pressed && styles.pressed,
-              ]}
+              style={styles.action}
               testID="startup-ota-recovery-check"
-            >
-              <Text style={styles.secondaryLabel}>
-                {t("bootstrap.otaRecovery.check")}
-              </Text>
-            </PosPressable>
+            />
           ) : null}
         </>
       ) : null}
@@ -186,28 +182,27 @@ function panelMessage(
   }
 }
 
-const styles = StyleSheet.create({
+const styles = createPosStyles((colors) => ({
   panel: {
     gap: 8,
-    marginTop: 20,
-    maxWidth: 720,
-    padding: 14,
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderLeftColor: posColors.orange,
-    borderLeftWidth: 3,
+    padding: 16,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderLeftColor: colors.accent,
+    borderLeftWidth: 4,
+    borderRadius: posRadius.large,
     borderWidth: 1,
   },
   eyebrow: {
-    color: posColors.orange,
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 0.8,
+    color: colors.accent,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
   },
   title: {
-    color: posColors.ink,
+    color: colors.ink,
     fontSize: 18,
-    fontWeight: "800",
+    fontWeight: "900",
   },
   statusRow: {
     alignItems: "center",
@@ -215,42 +210,21 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   highlight: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "700",
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
   },
   body: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     flexShrink: 1,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  primaryButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: 18,
-    backgroundColor: posColors.orange,
-  },
-  primaryLabel: {
-    color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: "800",
+    fontWeight: "600",
+    lineHeight: 20,
   },
-  secondaryButton: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: 18,
-    borderColor: posColors.ink,
-    borderWidth: 1,
+  // 两个操作按钮都是 56 高，靠左按内容宽度排，不拉满整块面板。
+  action: {
+    alignSelf: "flex-start",
+    marginTop: 6,
+    minWidth: 180,
   },
-  secondaryLabel: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  pressed: {
-    opacity: 0.78,
-  },
-});
+}));

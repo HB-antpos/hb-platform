@@ -13,7 +13,7 @@ import {
   type RemoteHistoryReprintPort,
 } from "@hb/pos-domain/features/remote-history/remote-history-presenter";
 import {
-  REMOTE_HISTORY_MIN_TOUCH_TARGET,
+  REMOTE_HISTORY_LIST_WIDTH,
   RemoteHistoryScreen,
 } from "./remote-history-screen";
 
@@ -22,6 +22,8 @@ import type { RemoteOrderHistoryPort } from "@hb/pos-domain/core/contracts/remot
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "en", resolvedLanguage: "en" },
+    // 页面外壳自带的顶栏会调用 t()，这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -119,13 +121,40 @@ test("横屏列表与详情可读，且不渲染退款、取单或重打入口",
   for (const testID of [
     "remote-history-back",
     "remote-history-refresh",
+    "remote-history-quick-today",
+    "remote-history-date-from",
+    "remote-history-date-to",
     "remote-history-apply-filters",
   ]) {
     const style = StyleSheet.flatten(screen.getByTestId(testID).props.style);
-    expect(style.minHeight).toBeGreaterThanOrEqual(
-      REMOTE_HISTORY_MIN_TOUCH_TARGET,
-    );
+    expect(style.minHeight).toBeGreaterThanOrEqual(56);
   }
+
+  // 与本机历史同一套布局：左列表固定 420 宽、行高不低于 84，右详情占满。
+  expect(
+    StyleSheet.flatten(screen.getByTestId("remote-history-list-pane").props.style)
+      .width,
+  ).toBe(REMOTE_HISTORY_LIST_WIDTH);
+  expect(
+    StyleSheet.flatten(screen.getByTestId("remote-history-details").props.style),
+  ).toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId(
+        "remote-history-order-10000000-0000-4000-8000-000000000001",
+      ).props.style,
+    ).minHeight,
+  ).toBeGreaterThanOrEqual(84);
+  // 列表和详情头部都显示后端给的状态标签；刷卡付款显示付款方式 + 卡种卡号。
+  expect(screen.getAllByText("Synced")).toHaveLength(2);
+  expect(screen.getAllByText("Card").length).toBeGreaterThan(0);
+  // 终端、搜索框没有可见标签，用途写在无障碍标签里。
+  expect(
+    screen.getByTestId("remote-history-device").props.accessibilityLabel,
+  ).toBe("Terminal");
+  expect(
+    screen.getByTestId("remote-history-keyword").props.accessibilityLabel,
+  ).toBe("Order or product");
 });
 
 test("筛选只提交日期、终端和关键词，可信门店仍由 presenter 固定", async () => {
@@ -287,6 +316,25 @@ test("离线状态明确说明远程历史只在线可用", async () => {
     expect(screen.getByTestId("remote-history-offline")).toBeTruthy();
   });
   expect(screen.getByText(/online only/i)).toBeTruthy();
+  // 离线时筛选条与刷新整体置灰，只读说明仍然常驻。
+  for (const testID of [
+    "remote-history-refresh",
+    "remote-history-quick-today",
+    "remote-history-date-from",
+    "remote-history-date-to",
+    "remote-history-apply-filters",
+  ]) {
+    expect(
+      screen.getByTestId(testID).props.accessibilityState.disabled,
+    ).toBe(true);
+  }
+  expect(screen.getByTestId("remote-history-device").props.editable).toBe(
+    false,
+  );
+  expect(screen.getByTestId("remote-history-keyword").props.editable).toBe(
+    false,
+  );
+  expect(screen.getByTestId("remote-history-readonly-note")).toBeTruthy();
 });
 
 test("普通完成订单可从可信详情进入既有退款流程，重打权限仍独立", async () => {
@@ -312,6 +360,12 @@ test("普通完成订单可从可信详情进入既有退款流程，重打权�
   );
 
   const reprint = await screen.findByTestId("remote-history-reprint");
+  // 「退款此订单」「重打小票」并排各占一半，高度不低于 64。
+  for (const testID of ["remote-history-refund", "remote-history-reprint"]) {
+    const style = StyleSheet.flatten(screen.getByTestId(testID).props.style);
+    expect(style.flex).toBe(1);
+    expect(style.minHeight).toBeGreaterThanOrEqual(64);
+  }
   await fireEvent.press(reprint);
 
   expect(reprintPort.reprintExistingOrder).toHaveBeenCalledWith(

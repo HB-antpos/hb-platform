@@ -7,6 +7,8 @@ import { NetworkCheckScreen } from "./network-check-screen";
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "zh", resolvedLanguage: "zh" },
+    // 页面外壳的顶栏（状态条）用全局文案；这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -142,11 +144,17 @@ describe("NetworkCheckScreen", () => {
       />,
     );
     await waitFor(() => expect(screen.getByTestId("network-check-stop")).toBeTruthy());
+    // 检测中页头同一位置只有红色「停止」，不同时出现「重新检测」；报告没出来前不能分享。
+    expect(screen.queryByTestId("network-check-start")).toBeNull();
+    expect(
+      screen.getByTestId("network-check-share").props.accessibilityState?.disabled,
+    ).toBe(true);
     await fireEvent.press(screen.getByTestId("network-check-stop"));
     await waitFor(() =>
       expect(screen.getByTestId("network-check-phase").props.children).toBe("已停止"),
     );
     expect(screen.getByTestId("network-check-start")).toBeTruthy();
+    expect(screen.queryByTestId("network-check-stop")).toBeNull();
     expect(screen.getByTestId("network-check-report").props.children).toContain(
       "（检测中途停止）",
     );

@@ -63,7 +63,7 @@ function store(): CashierLoginStorePort {
   return { clearActiveCashier: jest.fn(), setActiveCashier: jest.fn() };
 }
 
-test("登录页右下角以弱提示单行显示版本号、Build、Runtime 和 OTA 且不可交互", async () => {
+test("登录页品牌区底部以弱提示单行显示版本号、Build、Runtime 和 OTA 且不可交互", async () => {
   const screen = await render(
     <CashierLoginScreen
       controller={new CashierLoginController(store())}
@@ -86,17 +86,93 @@ test("登录页右下角以弱提示单行显示版本号、Build、Runtime 和 
   expect(versionInfo.props.pointerEvents).toBe("none");
   expect(versionInfo.props.selectable).toBe(false);
   expect(versionInfo.props.accessible).toBeUndefined();
-  expect(StyleSheet.flatten(versionInfo.props.style)).toMatchObject({
-    bottom: 20,
-    color: posColors.mutedInk,
-    position: "absolute",
-    right: 84,
-  });
+  // 新布局：版本信息随品牌区排在安全提示下方，不再绝对定位压在表单上。
+  const versionStyle = StyleSheet.flatten(versionInfo.props.style);
+  expect(versionStyle).toMatchObject({ color: posColors.onInverse });
+  expect(versionStyle.opacity).toBeLessThan(1);
+  expect(versionStyle).not.toHaveProperty("position");
   const pageStyle = StyleSheet.flatten(
     screen.getByTestId("cashier-login-page").props.style,
   );
-  expect(pageStyle).toMatchObject({ padding: 34 });
+  expect(pageStyle).toMatchObject({ flexDirection: "row", padding: 12 });
   expect(pageStyle).not.toHaveProperty("paddingBottom");
+});
+
+test("登录页按新布局放大：扫码提示居中、条码框与方键 76、主按钮 88", async () => {
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onOpenNetworkCheck={jest.fn()}
+      onSuccess={jest.fn()}
+      runtime={runtime(async () => cashier())}
+    />,
+  );
+
+  expect(screen.getByText("请扫描收银员条码")).toBeTruthy();
+  expect(
+    StyleSheet.flatten(screen.getByTestId("cashier-login-barcode").props.style),
+  ).toMatchObject({ height: 76 });
+  for (const testID of [
+    "cashier-login-toggle-barcode-visibility",
+    "cashier-login-show-keyboard",
+  ]) {
+    expect(
+      StyleSheet.flatten(screen.getByTestId(testID).props.style),
+    ).toMatchObject({ minHeight: 76, minWidth: 76 });
+  }
+  const submit = screen.getByTestId("cashier-login-submit");
+  expect(StyleSheet.flatten(submit.props.style)).toMatchObject({
+    backgroundColor: posColors.accent,
+    minHeight: 88,
+  });
+  expect(submit.props.accessibilityLabel).toBe("进入收银");
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("cashier-login-network-check").props.style,
+    ).minHeight,
+  ).toBeGreaterThanOrEqual(56);
+  await screen.unmount();
+});
+
+test("核验期间主按钮显示「正在核验授权…」并禁用，结束后恢复", async () => {
+  let resolveSignIn: ((value: PosCashierSummary) => void) | undefined;
+  const signIn = jest.fn(
+    () =>
+      new Promise<PosCashierSummary>((resolve) => {
+        resolveSignIn = resolve;
+      }),
+  );
+  const onSuccess = jest.fn();
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={onSuccess}
+      runtime={runtime(signIn)}
+    />,
+  );
+
+  await fireEvent.changeText(
+    screen.getByTestId("cashier-login-barcode"),
+    "HID-BUSY",
+  );
+  await fireEvent.press(screen.getByTestId("cashier-login-submit"));
+
+  const busy = screen.getByTestId("cashier-login-submit");
+  expect(busy.props.accessibilityLabel).toBe("正在核验授权…");
+  expect(busy.props.accessibilityState).toMatchObject({
+    busy: true,
+    disabled: true,
+  });
+
+  await act(async () => {
+    resolveSignIn?.(cashier());
+    await Promise.resolve();
+  });
+  await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1));
+  expect(signIn).toHaveBeenCalledTimes(1);
+  await screen.unmount();
 });
 
 test("登录屏把当前语言和切换回调传给状态条", async () => {
@@ -170,7 +246,7 @@ test("收银员条码默认隐藏且显示按钮不改变输入值或软键盘�
   expect(visibilityButton.props.accessibilityState).toEqual({ disabled: false });
   expect(
     StyleSheet.flatten(visibilityButton.props.style),
-  ).toMatchObject({ minHeight: 44, minWidth: 44 });
+  ).toMatchObject({ minHeight: 76, minWidth: 76 });
 
   await fireEvent.changeText(input, "HID-SECRET");
   await fireEvent.press(visibilityButton);
@@ -271,8 +347,8 @@ test("英文扫码提示完整保留，键盘入口只显示图标并让出输�
   const keyboardButton = screen.getByTestId("cashier-login-show-keyboard");
   expect(keyboardButton.props.accessibilityLabel).toBe("Keyboard");
   expect(StyleSheet.flatten(keyboardButton.props.style)).toMatchObject({
-    minHeight: 62,
-    minWidth: 62,
+    minHeight: 76,
+    minWidth: 76,
   });
 });
 

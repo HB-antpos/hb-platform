@@ -13,6 +13,7 @@ import {
 
 import type { CashierSessionDto } from "@/core/api/hbpos-api";
 import type { CashierLoginResult } from "@/core/security/cashier-authentication";
+import { posColors } from "@/ui/theme";
 
 const PERMISSION = "Permissions.PosTerminal.Sales.ChangePrice";
 
@@ -138,7 +139,12 @@ test("仅在待授权时显示，中英双语且输入与按钮满足安全和�
   );
   expect(screen.getByText("Approval required")).toBeTruthy();
   expect(screen.getByText("Requested action: change-price")).toBeTruthy();
-  expect(screen.getByText("Keyboard")).toBeTruthy();
+  // 新布局：键盘入口是只有图标的方键，名称由无障碍标签提供。
+  expect(screen.queryByText("Keyboard")).toBeNull();
+  expect(
+    screen.getByTestId("operation-authorization-show-keyboard").props
+      .accessibilityLabel,
+  ).toBe("Keyboard");
 
   await act(async () => {
     fireEvent.press(screen.getByTestId("operation-authorization-cancel"));
@@ -410,5 +416,73 @@ test("主管授权弹窗点击面板外遮罩取消", async () => {
   await expect(authorization).resolves.toEqual({
     authorized: false,
     reason: "CANCELLED",
+  });
+});
+
+test("弹窗按新布局放大：条码框与键盘方键 76、取消 180×72、核验主管为 72 高主按钮", async () => {
+  const login = deferred<CashierLoginResult>();
+  const { service } = createHarness(() => login.promise);
+  const authorization = startAuthorization(
+    service,
+    undefined,
+    "payment-recovery-paid",
+  );
+  const screen = await render(
+    <OperationAuthorizationModal locale="zh" service={service} />,
+  );
+
+  expect(screen.getByText("申请操作：人工确认刷卡已收款")).toBeTruthy();
+  expect(
+    screen.getByText("条码会被遮罩，仅用于本次授权，并在提交后立即清除。"),
+  ).toBeTruthy();
+  const input = screen.getByTestId("operation-authorization-barcode");
+  expect(input.props.secureTextEntry).toBe(true);
+  expect(StyleSheet.flatten(input.props.style)).toMatchObject({
+    minHeight: 76,
+  });
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("operation-authorization-show-keyboard").props.style,
+    ),
+  ).toMatchObject({ minHeight: 76, minWidth: 76 });
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("operation-authorization-cancel").props.style,
+    ),
+  ).toMatchObject({ minHeight: 72, width: 180 });
+  const submit = screen.getByTestId("operation-authorization-submit");
+  expect(StyleSheet.flatten(submit.props.style)).toMatchObject({
+    backgroundColor: posColors.accent,
+    minHeight: 72,
+  });
+  expect(submit.props.accessibilityLabel).toBe("核验主管");
+
+  // 核验期间主按钮显示「正在核验…」并禁用，「取消」仍可点。
+  await act(async () => {
+    fireEvent.changeText(input, "SUP-NEW-LAYOUT\r");
+    await Promise.resolve();
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByTestId("operation-authorization-submit").props
+        .accessibilityLabel,
+    ).toBe("正在核验…"),
+  );
+  expect(
+    screen.getByTestId("operation-authorization-cancel").props
+      .accessibilityState,
+  ).toEqual({ disabled: false });
+
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("operation-authorization-cancel"));
+    await Promise.resolve();
+  });
+  await expect(authorization).resolves.toEqual({
+    authorized: false,
+    reason: "CANCELLED",
+  });
+  login.resolve({ session: supervisor(), source: "online" });
+  await act(async () => {
+    await Promise.resolve();
   });
 });

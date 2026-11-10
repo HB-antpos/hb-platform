@@ -17,6 +17,7 @@ import {
   type SettingsPresenter,
 } from "@/features/settings";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type SettingsBinding = Readonly<{
   cashier: object;
@@ -29,6 +30,7 @@ type SettingsBinding = Readonly<{
  * 可信 lease、细分权限复核、数据库与硬件端口都留在组合根，不能由路由传入。
  */
 export default function SettingsRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore(

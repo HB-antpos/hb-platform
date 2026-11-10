@@ -12,15 +12,11 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  StyleSheet,
   Text,
   View,
   type FocusEvent,
-  type StyleProp,
   type TextInput,
-  type ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   dailyCloseText,
@@ -38,10 +34,19 @@ import type {
   DailyCloseArchive,
   DailyCloseTenderBreakdown,
 } from "@/core/contracts";
+import { PosButton } from "@/ui/controls/pos-button";
 import { PosDatePickerField } from "@/ui/controls/pos-date-picker-field";
+import { PosPill } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { PosTextInput } from "@/ui/controls/pos-text-input";
-import { posColors } from "@/ui/theme";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  posTouch,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 export const DAILY_CLOSE_MIN_TOUCH_TARGET = 44;
 export const DAILY_CLOSE_KEYBOARD_AVOIDER_ENABLED = Platform.OS !== "ios";
@@ -70,6 +75,7 @@ type DailyCloseScreenProps = Readonly<{
 }>;
 
 export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -117,7 +123,59 @@ export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} testID="daily-close-screen">
+    <PosScreenFrame
+      active="daily-close"
+      header={
+        <PosPageHeader
+          actions={
+            <>
+              <Text style={styles.dateLabel}>
+                {dailyCloseText(locale, "businessDate.accessibility")}
+              </Text>
+              <PosDatePickerField
+                accessibilityLabel={dailyCloseText(
+                  locale,
+                  "businessDate.accessibility",
+                )}
+                disabled={state.busy}
+                locale={locale}
+                onChange={(value) => {
+                  if (value) setBusinessDate(value);
+                }}
+                testID="daily-close-business-date"
+                value={businessDate}
+              />
+              <PosButton
+                disabled={state.busy}
+                icon="refresh"
+                label={
+                  state.kind === "loading"
+                    ? dailyCloseText(locale, "action.refreshing")
+                    : dailyCloseText(locale, "action.refresh")
+                }
+                onPress={refresh}
+                size="medium"
+                testID="daily-close-refresh"
+                tone="quiet"
+              />
+              <PaneSwitch
+                activePane={state.activePane}
+                disabled={state.busy}
+                locale={locale}
+                onShowCount={showCount}
+                onShowHistory={() => presenter.showHistory()}
+              />
+            </>
+          }
+          backLabel={dailyCloseText(locale, "action.back")}
+          backTestID="daily-close-back"
+          onBack={onBack}
+          subtitle={dailyCloseText(locale, "subtitle")}
+          title={dailyCloseText(locale, "title")}
+        />
+      }
+      testID="daily-close-screen"
+    >
       <KeyboardAvoidingView
         behavior={DAILY_CLOSE_KEYBOARD_AVOIDING_BEHAVIOR}
         // iOS 由 ScrollView 的 keyboard inset 负责避让，避免重复计算同一键盘高度。
@@ -126,278 +184,151 @@ export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
         testID="daily-close-keyboard-avoider"
       >
         <View style={styles.page}>
-          <View style={styles.header}>
-            <View style={styles.titleGroup}>
-              <Text style={styles.eyebrow}>
-                {dailyCloseText(locale, "eyebrow")}
-              </Text>
-              <Text style={styles.title}>
-                {dailyCloseText(locale, "title")}
-              </Text>
-              <Text style={styles.subtitle}>
-                {dailyCloseText(locale, "subtitle")}
-              </Text>
-            </View>
-            <View style={styles.headerActions}>
-              {onBack ? (
-                <ActionButton
-                  label={dailyCloseText(locale, "action.back")}
-                  onPress={onBack}
-                  sound="navigate"
-                  testID="daily-close-back"
-                  tone="quiet"
-                />
-              ) : null}
-              <ActionButton
-                disabled={state.busy}
-                label={dailyCloseText(locale, "action.count")}
-                onPress={showCount}
-                sound="navigate"
-                selected={state.activePane === "count"}
-                testID="daily-close-show-count"
-                tone="secondary"
-              />
-              <ActionButton
-                disabled={state.busy}
-                label={dailyCloseText(locale, "action.history")}
-                onPress={() => presenter.showHistory()}
-                sound="navigate"
-                selected={state.activePane === "history"}
-                testID="daily-close-show-history"
-                tone="secondary"
-              />
-            </View>
-          </View>
-
           {state.statusCode ? (
             <StatusBanner locale={locale} statusCode={state.statusCode} />
           ) : null}
 
           <View style={styles.workspace} testID="daily-close-workspace">
-            <ScrollView
-              automaticallyAdjustKeyboardInsets
-              contentContainerStyle={styles.paneContent}
-              keyboardDismissMode="interactive"
-              keyboardShouldPersistTaps="handled"
-              ref={summaryScrollRef}
-              style={[styles.pane, styles.summaryPane]}
-              testID="daily-close-summary-scroll"
-            >
-              <View style={styles.sectionHeader}>
-                <View>
-                  <Text style={styles.sectionTitle}>
-                    {dailyCloseText(locale, "summary.title")}
-                  </Text>
-                  <Text style={styles.sectionHint}>
-                    {dailyCloseText(locale, "summary.hint")}
-                  </Text>
-                </View>
-                <View style={styles.dateControls}>
-                  <PosDatePickerField
-                    accessibilityLabel={dailyCloseText(
-                      locale,
-                      "businessDate.accessibility",
-                    )}
-                    disabled={state.busy}
-                    locale={locale}
-                    onChange={(value) => {
-                      if (value) setBusinessDate(value);
-                    }}
-                    testID="daily-close-business-date"
-                    value={businessDate}
-                  />
-                  <ActionButton
-                    disabled={state.busy}
-                    label={
-                      state.kind === "loading"
-                        ? dailyCloseText(locale, "action.refreshing")
-                        : dailyCloseText(locale, "action.refresh")
-                    }
-                    onPress={refresh}
-                    testID="daily-close-refresh"
-                  />
-                </View>
-              </View>
+            <View style={styles.mainColumn}>
+              {/*
+                汇总与点钞放在同一个滚动容器里：软键盘弹出时整列一起上移，
+                才能把正在输入的面额露在键盘上方（面额输入框不能移出这个容器）。
+              */}
+              <ScrollView
+                automaticallyAdjustKeyboardInsets
+                contentContainerStyle={styles.mainScrollContent}
+                keyboardDismissMode="interactive"
+                keyboardShouldPersistTaps="handled"
+                ref={summaryScrollRef}
+                style={styles.mainScroll}
+                testID="daily-close-summary-scroll"
+              >
+                <SummaryCard locale={locale} state={state} />
 
-              {state.summary ? (
-                <>
-                  <View style={styles.tenderCard}>
-                    <View style={styles.tenderHeader}>
-                      <Text style={styles.tenderMethod}>
-                        {dailyCloseText(locale, "tender.method")}
+                {state.access.canSave ? (
+                  <View style={[styles.card, styles.countCard]}>
+                    <View style={styles.countHeader}>
+                      <Text style={styles.cardTitle}>
+                        {dailyCloseText(locale, "count.title")}
                       </Text>
-                      <Text style={styles.tenderValues}>
-                        {dailyCloseText(locale, "tender.values")}
+                      <Text numberOfLines={3} style={styles.countHint}>
+                        {dailyCloseText(locale, "count.hint")}
                       </Text>
-                    </View>
-                    {state.summary.tenders.map((tender) => (
-                      <TenderRow
-                        key={tender.method}
-                        locale={locale}
-                        tender={tender}
+                      <PosPill
+                        label={dailyCloseText(locale, "count.notes", {
+                          amount: money(state.notesSubtotalCents),
+                        })}
+                        style={styles.countPill}
                       />
-                    ))}
-                  </View>
+                      <PosPill
+                        label={dailyCloseText(locale, "count.coins", {
+                          amount: money(state.coinsSubtotalCents),
+                        })}
+                        style={styles.countPill}
+                      />
+                    </View>
 
-                  {state.summary.installmentPaymentCount > 0 ? (
-                    <View
-                      style={styles.tenderCard}
-                      testID="daily-close-installments"
-                    >
-                      <View style={styles.tenderHeader}>
-                        <Text style={styles.tenderMethod}>
-                          {dailyCloseText(locale, "installment.title", {
-                            count: state.summary.installmentPaymentCount,
-                          })}
-                        </Text>
-                        <Text style={styles.tenderValues}>
-                          {dailyCloseText(locale, "tender.values")}
-                        </Text>
-                      </View>
-                      {state.summary.installmentPayments.map((tender) => (
-                        <TenderRow
-                          key={`installment-${tender.method}`}
+                    <View style={styles.denominationGrid}>
+                      {state.counts.map((count, index) => (
+                        <DenominationField
+                          autoFocus={
+                            index === 0 &&
+                            state.activePane === "count" &&
+                            !state.busy
+                          }
+                          count={count.quantity}
+                          denominationCents={count.denominationCents}
+                          disabled={state.busy}
+                          inputRef={
+                            index === 0 ? firstCountInputRef : undefined
+                          }
+                          key={count.denominationCents}
                           locale={locale}
-                          tender={tender}
+                          onChange={(quantity) =>
+                            presenter.setCount(
+                              count.denominationCents,
+                              quantity,
+                            )
+                          }
+                          onFocus={revealSummaryInput}
+                          subtotalCents={count.subtotalCents}
                         />
                       ))}
                     </View>
-                  ) : null}
-
-                  <View style={styles.metrics}>
-                    <Metric
-                      label={dailyCloseText(locale, "metric.orders")}
-                      value={String(state.summary.orderCount)}
-                    />
-                    <Metric
-                      label={dailyCloseText(locale, "metric.returnQuantity")}
-                      value={state.summary.returnQuantity}
-                    />
-                    <Metric
-                      label={dailyCloseText(locale, "metric.cashRounding")}
-                      value={signedMoney(state.summary.cashRoundingCents)}
-                    />
-                    <Metric
-                      label={dailyCloseText(locale, "metric.expectedCash")}
-                      value={money(state.summary.expectedCashCents)}
-                    />
                   </View>
-                </>
-              ) : (
-                <View style={styles.emptyCard}>
-                  <Text style={styles.emptyTitle}>
-                    {state.kind === "loading"
-                      ? dailyCloseText(locale, "summary.loading")
-                      : dailyCloseText(locale, "summary.empty")}
-                  </Text>
-                </View>
-              )}
+                ) : (
+                  <View style={styles.permissionNote}>
+                    <Text style={styles.permissionText}>
+                      {dailyCloseText(locale, "permission.viewOnly")}
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
 
+              {/* 保存栏固定在左栏底部，不随汇总和面额滚动。 */}
               {state.access.canSave ? (
-                <View style={styles.countSection}>
-                  <View style={styles.sectionHeader}>
-                    <View>
-                      <Text style={styles.sectionTitle}>
-                        {dailyCloseText(locale, "count.title")}
-                      </Text>
-                      <Text style={styles.sectionHint}>
-                        {dailyCloseText(locale, "count.hint")}
-                      </Text>
-                    </View>
-                    <View style={styles.countTotals}>
-                      <Text style={styles.countTotalText}>
-                        {dailyCloseText(locale, "count.notes", {
-                          amount: money(state.notesSubtotalCents),
-                        })}
-                      </Text>
-                      <Text style={styles.countTotalText}>
-                        {dailyCloseText(locale, "count.coins", {
-                          amount: money(state.coinsSubtotalCents),
-                        })}
-                      </Text>
-                    </View>
+                <View style={styles.saveBar}>
+                  <View>
+                    <Text style={styles.saveLabel}>
+                      {dailyCloseText(locale, "count.countedCash")}
+                    </Text>
+                    <Text
+                      adjustsFontSizeToFit
+                      numberOfLines={1}
+                      style={styles.countedAmount}
+                    >
+                      {money(state.countedCashCents)}
+                    </Text>
                   </View>
-
-                  <View style={styles.denominationGrid}>
-                    {state.counts.map((count, index) => (
-                      <DenominationField
-                        autoFocus={
-                          index === 0 &&
-                          state.activePane === "count" &&
-                          !state.busy
-                        }
-                        count={count.quantity}
-                        denominationCents={count.denominationCents}
-                        disabled={state.busy}
-                        inputRef={index === 0 ? firstCountInputRef : undefined}
-                        key={count.denominationCents}
-                        locale={locale}
-                        onChange={(quantity) =>
-                          presenter.setCount(count.denominationCents, quantity)
-                        }
-                        onFocus={revealSummaryInput}
-                        subtotalCents={count.subtotalCents}
-                      />
-                    ))}
+                  <View style={styles.varianceGroup}>
+                    <Text style={styles.saveLabel}>
+                      {dailyCloseText(locale, "count.varianceLabel")}
+                    </Text>
+                    <Text
+                      adjustsFontSizeToFit
+                      numberOfLines={1}
+                      style={[
+                        styles.varianceAmount,
+                        state.varianceCents === 0
+                          ? styles.varianceBalanced
+                          : styles.varianceDifferent,
+                      ]}
+                    >
+                      {signedMoney(state.varianceCents)}
+                    </Text>
                   </View>
-
-                  <View style={styles.saveBar}>
-                    <View>
-                      <Text style={styles.countedLabel}>
-                        {dailyCloseText(locale, "count.countedCash")}
-                      </Text>
-                      <Text style={styles.countedAmount}>
-                        {money(state.countedCashCents)}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.variance,
-                          state.varianceCents === 0
-                            ? styles.varianceBalanced
-                            : styles.varianceDifferent,
-                        ]}
-                      >
-                        {dailyCloseText(locale, "count.variance", {
-                          amount: signedMoney(state.varianceCents),
-                        })}
-                      </Text>
-                    </View>
-                    <ActionButton
-                      disabled={
-                        state.busy || !state.summary || state.kind !== "ready"
-                      }
-                      label={
-                        state.busy
-                          ? dailyCloseText(locale, "action.working")
-                          : dailyCloseText(locale, "action.save")
-                      }
-                      onPress={() => void presenter.saveAndPrint()}
-                      testID="daily-close-save"
-                      wide
-                    />
-                  </View>
+                  <PosButton
+                    disabled={
+                      state.busy || !state.summary || state.kind !== "ready"
+                    }
+                    icon="content-save-check-outline"
+                    label={
+                      state.busy
+                        ? dailyCloseText(locale, "action.working")
+                        : dailyCloseText(locale, "action.save")
+                    }
+                    onPress={() => void presenter.saveAndPrint()}
+                    size="large"
+                    style={styles.saveButton}
+                    testID="daily-close-save"
+                    tone="primary"
+                  />
                 </View>
-              ) : (
-                <View style={styles.permissionNote}>
-                  <Text style={styles.permissionText}>
-                    {dailyCloseText(locale, "permission.viewOnly")}
-                  </Text>
-                </View>
-              )}
-            </ScrollView>
+              ) : null}
+            </View>
 
-            <ScrollView
-              contentContainerStyle={styles.paneContent}
-              style={[styles.pane, styles.historyPane]}
-            >
-              <Text style={styles.sectionTitle}>
+            <View style={[styles.card, styles.archivePanel]}>
+              <Text style={styles.cardTitle}>
                 {dailyCloseText(locale, "history.title")}
               </Text>
-              <Text style={styles.sectionHint}>
+              <Text style={styles.archiveHint}>
                 {dailyCloseText(locale, "history.hint")}
               </Text>
 
-              <View style={styles.historyList}>
+              <ScrollView
+                contentContainerStyle={styles.archiveScrollContent}
+                style={styles.archiveScroll}
+              >
                 {state.archives.length === 0 ? (
                   <Text style={styles.historyEmpty}>
                     {dailyCloseText(locale, "history.empty")}
@@ -414,89 +345,346 @@ export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
                     />
                   ))
                 )}
-              </View>
 
-              {state.selectedArchive ? (
-                <ArchiveDetails
-                  archive={state.selectedArchive}
-                  locale={locale}
-                />
-              ) : null}
+                {state.selectedArchive ? (
+                  <ArchiveDetails
+                    archive={state.selectedArchive}
+                    locale={locale}
+                  />
+                ) : null}
+              </ScrollView>
 
               {state.access.canReprint ? (
-                <ActionButton
+                <PosButton
                   disabled={state.busy || !state.selectedArchive}
+                  icon="printer-outline"
                   label={
                     state.busy
                       ? dailyCloseText(locale, "action.working")
                       : dailyCloseText(locale, "action.reprint")
                   }
                   onPress={() => void presenter.reprintSelected()}
+                  size="button"
                   testID="daily-close-reprint"
-                  tone="secondary"
-                  wide
                 />
               ) : null}
-            </ScrollView>
+            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
 export function DailyCloseUnavailableScreen({
   onBack,
 }: Readonly<{ onBack(): void }>) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale = resolveDailyCloseLocale(
     i18n.resolvedLanguage ?? i18n.language,
   );
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <PosScreenFrame active="daily-close">
       <View style={styles.unavailable}>
-        <Text style={styles.title}>
-          {dailyCloseText(locale, "unavailable.title")}
-        </Text>
-        <Text style={styles.subtitle}>
-          {dailyCloseText(locale, "unavailable.subtitle")}
-        </Text>
-        <ActionButton
-          label={dailyCloseText(locale, "unavailable.back")}
-          onPress={onBack}
-          testID="daily-close-unavailable-back"
-          wide
-        />
+        <View style={[styles.card, styles.unavailableCard]}>
+          <Text style={styles.unavailableTitle}>
+            {dailyCloseText(locale, "unavailable.title")}
+          </Text>
+          <Text style={styles.unavailableBody}>
+            {dailyCloseText(locale, "unavailable.subtitle")}
+          </Text>
+          <PosButton
+            icon="arrow-left"
+            label={dailyCloseText(locale, "unavailable.back")}
+            onPress={onBack}
+            size="large"
+            sound="navigate"
+            style={styles.unavailableAction}
+            testID="daily-close-unavailable-back"
+            tone="primary"
+          />
+        </View>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
+  );
+}
+
+/**
+ * 「点钞 / 历史」切换。外观与 PosSegmented 一致，但已选中的一段再点一次仍会回调：
+ * 收银员收起键盘后再点「点钞」要能重新唤起键盘，而 PosSegmented 对已选中段不回调。
+ */
+function PaneSwitch({
+  activePane,
+  disabled,
+  locale,
+  onShowCount,
+  onShowHistory,
+}: Readonly<{
+  activePane: DailyCloseState["activePane"];
+  disabled: boolean;
+  locale: DailyCloseLocale;
+  onShowCount(): void;
+  onShowHistory(): void;
+}>) {
+  usePosThemeVersion();
+  const options = [
+    {
+      label: dailyCloseText(locale, "action.count"),
+      onPress: onShowCount,
+      pane: "count",
+      testID: "daily-close-show-count",
+    },
+    {
+      label: dailyCloseText(locale, "action.history"),
+      onPress: onShowHistory,
+      pane: "history",
+      testID: "daily-close-show-history",
+    },
+  ] as const;
+  return (
+    <View accessibilityRole="radiogroup" style={styles.paneSwitch}>
+      {options.map((option, index) => {
+        const selected = option.pane === activePane;
+        return (
+          <PosPressable
+            accessibilityLabel={option.label}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: selected, disabled, selected }}
+            disabled={disabled}
+            key={option.pane}
+            onPress={option.onPress}
+            sound="navigate"
+            style={({ pressed }) => [
+              styles.paneSegment,
+              index > 0 && styles.paneSegmentDivider,
+              selected && styles.paneSegmentSelected,
+              pressed && !selected && styles.paneSegmentPressed,
+            ]}
+            testID={option.testID}
+          >
+            <Text
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
+              numberOfLines={1}
+              style={[
+                styles.paneSegmentLabel,
+                {
+                  color: selected
+                    ? posColors.onInverse
+                    : disabled
+                      ? posColors.disabledInk
+                      : posColors.mutedInk,
+                },
+              ]}
+            >
+              {option.label}
+            </Text>
+          </PosPressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** 当日汇总：左边付款方式表（有分期时再加一张分期表），右边 4 个指标。 */
+function SummaryCard({
+  locale,
+  state,
+}: Readonly<{ locale: DailyCloseLocale; state: DailyCloseState }>) {
+  usePosThemeVersion();
+  const summary = state.summary;
+  return (
+    <View style={[styles.card, styles.summaryCard]}>
+      <View style={styles.summaryTables}>
+        <View style={styles.summaryTitleRow}>
+          <Text style={styles.cardTitle}>
+            {dailyCloseText(locale, "summary.title")}
+          </Text>
+          <Text numberOfLines={2} style={styles.summaryHint}>
+            {dailyCloseText(locale, "summary.hint")}
+          </Text>
+        </View>
+
+        {summary ? (
+          <>
+            <TenderTable
+              firstColumnLabel={dailyCloseText(locale, "tender.method")}
+              locale={locale}
+              rowTestIDPrefix="daily-close-tender"
+              tenders={summary.tenders}
+            />
+            {summary.installmentPaymentCount > 0 ? (
+              <TenderTable
+                firstColumnLabel={dailyCloseText(locale, "installment.title", {
+                  count: summary.installmentPaymentCount,
+                })}
+                locale={locale}
+                rowTestIDPrefix="daily-close-installment"
+                tenders={summary.installmentPayments}
+                testID="daily-close-installments"
+              />
+            ) : null}
+          </>
+        ) : (
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>
+              {state.kind === "loading"
+                ? dailyCloseText(locale, "summary.loading")
+                : dailyCloseText(locale, "summary.empty")}
+            </Text>
+          </View>
+        )}
+      </View>
+
+      {summary ? (
+        <View style={styles.metrics}>
+          <Metric
+            label={dailyCloseText(locale, "metric.orders")}
+            value={String(summary.orderCount)}
+          />
+          <Metric
+            label={dailyCloseText(locale, "metric.returnQuantity")}
+            value={summary.returnQuantity}
+          />
+          <Metric
+            label={dailyCloseText(locale, "metric.cashRounding")}
+            value={signedMoney(summary.cashRoundingCents)}
+          />
+          {/* 应有现金是点钞时要对的数，加粗描边突出。 */}
+          <Metric
+            emphasized
+            label={dailyCloseText(locale, "metric.expectedCash")}
+            value={money(summary.expectedCashCents)}
+          />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TenderTable({
+  firstColumnLabel,
+  locale,
+  rowTestIDPrefix,
+  tenders,
+  testID,
+}: Readonly<{
+  firstColumnLabel: string;
+  locale: DailyCloseLocale;
+  rowTestIDPrefix: string;
+  tenders: readonly DailyCloseTenderBreakdown[];
+  testID?: string;
+}>) {
+  usePosThemeVersion();
+  return (
+    <View testID={testID}>
+      <View style={styles.tenderHeader}>
+        <Text
+          numberOfLines={2}
+          style={[styles.tenderHeadText, styles.tenderMethodCell]}
+        >
+          {firstColumnLabel}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.tenderHeadText, styles.tenderSalesCell]}
+        >
+          {dailyCloseText(locale, "tender.sales")}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.tenderHeadText, styles.tenderRefundCell]}
+        >
+          {dailyCloseText(locale, "tender.refunds")}
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[styles.tenderHeadText, styles.tenderNetCell]}
+        >
+          {dailyCloseText(locale, "tender.net")}
+        </Text>
+      </View>
+      {tenders.map((tender) => (
+        <TenderRow
+          key={tender.method}
+          locale={locale}
+          tender={tender}
+          testID={`${rowTestIDPrefix}-${tender.method}`}
+        />
+      ))}
+    </View>
   );
 }
 
 function TenderRow({
   locale,
   tender,
+  testID,
 }: Readonly<{
   locale: DailyCloseLocale;
   tender: DailyCloseTenderBreakdown;
+  testID: string;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.tenderRow}>
-      <Text style={styles.tenderMethod}>
+    <View style={styles.tenderRow} testID={testID}>
+      <Text
+        numberOfLines={2}
+        style={[styles.tenderText, styles.tenderMethodCell]}
+      >
         {tenderName(tender.method, locale)}
       </Text>
-      <Text style={styles.tenderValues}>
-        {money(tender.salesCents)} / {money(tender.refundCents)} /{" "}
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        style={[styles.tenderText, styles.tenderAmount, styles.tenderSalesCell]}
+      >
+        {money(tender.salesCents)}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        style={[
+          styles.tenderText,
+          styles.tenderAmount,
+          styles.tenderRefundCell,
+          // 有退款时标红，没有退款的 $0.00 保持普通颜色。
+          tender.refundCents !== 0 && styles.tenderRefunded,
+        ]}
+      >
+        {money(tender.refundCents)}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        style={[
+          styles.tenderText,
+          styles.tenderAmount,
+          styles.tenderNetCell,
+          styles.tenderNet,
+        ]}
+      >
         {money(tender.netCents)}
       </Text>
     </View>
   );
 }
 
-function Metric({ label, value }: Readonly<{ label: string; value: string }>) {
+function Metric({
+  emphasized = false,
+  label,
+  value,
+}: Readonly<{ emphasized?: boolean; label: string; value: string }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.metric}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
+    <View style={[styles.metric, emphasized && styles.metricEmphasized]}>
+      <Text numberOfLines={1} style={styles.metricLabel}>
+        {label}
+      </Text>
+      <Text adjustsFontSizeToFit numberOfLines={1} style={styles.metricValue}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -522,42 +710,63 @@ function DenominationField({
   onFocus(event: FocusEvent): void;
   subtotalCents: number;
 }>) {
+  usePosThemeVersion();
+  // 仅用于高亮当前正在输入的面额格，不参与任何业务判断。
+  const [focused, setFocused] = useState(false);
   return (
-    <View style={styles.denomination}>
-      <View>
-        <Text style={styles.denominationLabel}>
-          {denominationLabel(denominationCents)}
-        </Text>
-        <Text style={styles.denominationSubtotal}>{money(subtotalCents)}</Text>
+    <View
+      style={styles.denominationCell}
+      testID={`daily-close-denomination-${denominationCents}`}
+    >
+      <View
+        style={[styles.denomination, focused && styles.denominationFocused]}
+        testID={`daily-close-denomination-box-${denominationCents}`}
+      >
+        <View style={styles.denominationCopy}>
+          <Text numberOfLines={1} style={styles.denominationLabel}>
+            {denominationLabel(denominationCents)}
+          </Text>
+          <Text
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            style={styles.denominationSubtotal}
+          >
+            {money(subtotalCents)}
+          </Text>
+        </View>
+        <PosTextInput
+          accessibilityLabel={dailyCloseText(
+            locale,
+            "denomination.accessibility",
+            {
+              denomination: denominationLabel(denominationCents),
+            },
+          )}
+          autoFocus={autoFocus}
+          editable={!disabled}
+          keyboardType="number-pad"
+          onBlur={() => setFocused(false)}
+          onChangeText={(value) => {
+            if (value === "") {
+              onChange(0);
+              return;
+            }
+            if (!/^\d+$/.test(value)) return;
+            const quantity = Number(value);
+            if (Number.isSafeInteger(quantity)) onChange(quantity);
+          }}
+          onFocus={(event) => {
+            setFocused(true);
+            onFocus(event);
+          }}
+          ref={inputRef}
+          selectTextOnFocus
+          showSoftInputOnFocus
+          style={[styles.countInput, focused && styles.countInputFocused]}
+          testID={`daily-close-count-${denominationCents}`}
+          value={String(count)}
+        />
       </View>
-      <PosTextInput
-        accessibilityLabel={dailyCloseText(
-          locale,
-          "denomination.accessibility",
-          {
-            denomination: denominationLabel(denominationCents),
-          },
-        )}
-        autoFocus={autoFocus}
-        editable={!disabled}
-        keyboardType="number-pad"
-        onChangeText={(value) => {
-          if (value === "") {
-            onChange(0);
-            return;
-          }
-          if (!/^\d+$/.test(value)) return;
-          const quantity = Number(value);
-          if (Number.isSafeInteger(quantity)) onChange(quantity);
-        }}
-        onFocus={onFocus}
-        ref={inputRef}
-        selectTextOnFocus
-        showSoftInputOnFocus
-        style={styles.countInput}
-        testID={`daily-close-count-${denominationCents}`}
-        value={String(count)}
-      />
     </View>
   );
 }
@@ -571,6 +780,7 @@ function ArchiveRow({
   onPress(): void;
   selected: boolean;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityRole="button"
@@ -579,11 +789,12 @@ function ArchiveRow({
       style={[styles.archiveRow, selected && styles.archiveRowSelected]}
       testID={`daily-close-history-${archive.closeId}`}
     >
-      <View>
-        <Text style={styles.archiveTitle}>
-          {archive.businessDate} · {shortId(archive.closeId)}
+      <View style={styles.archiveCopy}>
+        <Text numberOfLines={1} style={styles.archiveTitle}>
+          {archive.businessDate}{" "}
+          <Text style={styles.archiveId}>{shortId(archive.closeId)}</Text>
         </Text>
-        <Text style={styles.archiveMeta}>
+        <Text numberOfLines={1} style={styles.archiveMeta}>
           {archive.savedAtIso.replace("T", " ").slice(0, 19)} ·{" "}
           {archive.savedCashierName}
         </Text>
@@ -602,120 +813,96 @@ function ArchiveDetails({
   archive: DailyCloseArchive;
   locale: DailyCloseLocale;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.archiveDetails}>
+    <>
       <Text style={styles.detailTitle}>
         {dailyCloseText(locale, "archive.selected")}
       </Text>
-      <Text style={styles.detailLine}>
-        {dailyCloseText(locale, "archive.terminal", {
-          value: archive.deviceCode,
-        })}
-      </Text>
-      <Text style={styles.detailLine}>
-        {dailyCloseText(locale, "archive.cashier", {
-          value: archive.savedCashierName,
-        })}
-      </Text>
-      <Text style={styles.detailLine}>
-        {dailyCloseText(locale, "archive.ordersReturns", {
-          orders: archive.orderCount,
-          returns: archive.returnQuantity,
-        })}
-      </Text>
-      {archive.installmentPaymentCount > 0 ? (
-        <Text style={styles.detailLine}>
-          {dailyCloseText(locale, "archive.installments", {
-            count: archive.installmentPaymentCount,
-            amount: money(
-              archive.installmentPayments.reduce(
-                (total, payment) => total + payment.netCents,
-                0,
+      <View style={styles.archiveDetails}>
+        <DetailRow
+          first
+          label={dailyCloseText(locale, "archive.label.terminal")}
+          value={archive.deviceCode}
+        />
+        <DetailRow
+          label={dailyCloseText(locale, "archive.label.cashier")}
+          value={archive.savedCashierName}
+        />
+        <DetailRow
+          label={dailyCloseText(locale, "archive.label.ordersReturns")}
+          value={`${archive.orderCount} · ${archive.returnQuantity}`}
+        />
+        {archive.installmentPaymentCount > 0 ? (
+          <DetailRow
+            label={dailyCloseText(locale, "archive.label.installments")}
+            value={dailyCloseText(locale, "archive.value.installments", {
+              count: archive.installmentPaymentCount,
+              amount: money(
+                archive.installmentPayments.reduce(
+                  (total, payment) => total + payment.netCents,
+                  0,
+                ),
               ),
-            ),
-          })}
-        </Text>
-      ) : null}
-      <Text style={styles.detailLine}>
-        {dailyCloseText(locale, "archive.rounding", {
-          amount: signedMoney(archive.cashRoundingCents),
-        })}
-      </Text>
-      <Text style={styles.detailLine}>
-        {dailyCloseText(locale, "archive.expected", {
-          amount: money(archive.expectedCashCents),
-        })}
-      </Text>
-      <Text style={styles.detailLine}>
-        {dailyCloseText(locale, "archive.counted", {
-          amount: money(archive.countedCashCents),
-        })}
-      </Text>
-      <Text
-        style={[
-          styles.detailVariance,
-          archive.varianceCents === 0
-            ? styles.varianceBalanced
-            : styles.varianceDifferent,
-        ]}
-      >
-        {dailyCloseText(locale, "count.variance", {
-          amount: signedMoney(archive.varianceCents),
-        })}
-      </Text>
-    </View>
+            })}
+          />
+        ) : null}
+        <DetailRow
+          label={dailyCloseText(locale, "archive.label.rounding")}
+          value={signedMoney(archive.cashRoundingCents)}
+        />
+        <DetailRow
+          label={dailyCloseText(locale, "archive.label.expected")}
+          value={money(archive.expectedCashCents)}
+        />
+        <DetailRow
+          label={dailyCloseText(locale, "archive.label.counted")}
+          strong
+          value={money(archive.countedCashCents)}
+        />
+        <DetailRow
+          label={dailyCloseText(locale, "count.varianceLabel")}
+          strong
+          tone={archive.varianceCents === 0 ? "balanced" : "different"}
+          value={signedMoney(archive.varianceCents)}
+        />
+      </View>
+    </>
   );
 }
 
-function ActionButton({
-  disabled = false,
+function DetailRow({
+  first = false,
   label,
-  onPress,
-  selected = false,
-  sound = "tap",
-  style,
-  testID,
-  tone = "primary",
-  wide = false,
+  strong = false,
+  tone,
+  value,
 }: Readonly<{
-  disabled?: boolean;
+  first?: boolean;
   label: string;
-  onPress(): void;
-  selected?: boolean;
-  sound?: "tap" | "navigate";
-  style?: StyleProp<ViewStyle>;
-  testID: string;
-  tone?: "primary" | "secondary" | "quiet";
-  wide?: boolean;
+  strong?: boolean;
+  tone?: "balanced" | "different";
+  value: string;
 }>) {
+  usePosThemeVersion();
   return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled, selected }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
-      style={[
-        styles.action,
-        tone === "secondary" && styles.actionSecondary,
-        tone === "quiet" && styles.actionQuiet,
-        selected && styles.actionSelected,
-        wide && styles.actionWide,
-        disabled && styles.actionDisabled,
-        style,
-      ]}
-      testID={testID}
-    >
-      <Text
-        style={[
-          styles.actionText,
-          tone !== "primary" && styles.actionTextSecondary,
-          selected && styles.actionTextSelected,
-        ]}
-      >
+    <View style={[styles.detailRow, !first && styles.detailRowDivider]}>
+      <Text numberOfLines={1} style={styles.detailLabel}>
         {label}
       </Text>
-    </PosPressable>
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        style={[
+          styles.detailValue,
+          strong && styles.detailValueStrong,
+          tone === "balanced" && styles.varianceBalanced,
+          tone === "different" && styles.varianceDifferent,
+        ]}
+      >
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -726,6 +913,7 @@ function StatusBanner({
   locale: DailyCloseLocale;
   statusCode: DailyCloseStatusCode;
 }>) {
+  usePosThemeVersion();
   const success =
     statusCode === "saved-printed" || statusCode === "reprint-printed";
   return (
@@ -777,54 +965,20 @@ function shortId(closeId: string): string {
   return closeId.length <= 12 ? closeId : closeId.slice(0, 12);
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-  },
+const styles = createPosStyles((colors) => ({
   keyboardAvoider: {
     flex: 1,
   },
   page: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
     gap: 12,
+    minHeight: 0,
+    padding: 12,
   },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 18,
-  },
-  titleGroup: {
-    flex: 1,
-    maxWidth: 760,
-  },
-  eyebrow: {
-    color: posColors.orange,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.2,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 30,
-    fontWeight: "900",
-    letterSpacing: -0.7,
-    marginTop: 3,
-  },
-  subtitle: {
-    color: posColors.mutedInk,
+  dateLabel: {
+    color: colors.mutedInk,
     fontSize: 13,
-    lineHeight: 19,
-    marginTop: 4,
-  },
-  headerActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "flex-end",
-    gap: 8,
+    fontWeight: "800",
   },
   workspace: {
     flex: 1,
@@ -832,326 +986,471 @@ const styles = StyleSheet.create({
     gap: 12,
     minHeight: 0,
   },
-  pane: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 16,
-    borderWidth: 1,
+  mainColumn: {
+    flex: 1,
+    gap: 12,
+    minHeight: 0,
+    minWidth: 0,
   },
-  summaryPane: {
-    flex: 1.65,
-  },
-  historyPane: {
+  mainScroll: {
     flex: 1,
   },
-  paneContent: {
-    padding: 16,
+  mainScrollContent: {
+    // 内容不满一屏时让点钞卡片撑到保存栏上沿。
+    flexGrow: 1,
     gap: 12,
   },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  sectionTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-  },
-  sectionHint: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 2,
-  },
-  dateControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  tenderCard: {
-    borderColor: posColors.border,
-    borderRadius: 12,
+  card: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
     borderWidth: 1,
-    overflow: "hidden",
+    padding: 14,
+  },
+  cardTitle: {
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
+  },
+  summaryCard: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    gap: 18,
+  },
+  summaryTables: {
+    flex: 1,
+    gap: 6,
+    minWidth: 0,
+  },
+  summaryTitleRow: {
+    alignItems: "baseline",
+    flexDirection: "row",
+    gap: 10,
+  },
+  summaryHint: {
+    color: colors.mutedInk,
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: "600",
   },
   tenderHeader: {
+    alignItems: "center",
     flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: posColors.blueSoft,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
+    minHeight: 26,
   },
   tenderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderTopColor: posColors.border,
+    alignItems: "center",
+    borderTopColor: colors.border,
     borderTopWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    flexDirection: "row",
+    minHeight: 38,
   },
-  tenderMethod: {
-    color: posColors.ink,
-    fontSize: 13,
+  tenderHeadText: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  tenderText: {
+    color: colors.ink,
+    fontSize: 15,
     fontWeight: "700",
   },
-  tenderValues: {
-    color: posColors.ink,
-    fontSize: 13,
+  tenderAmount: {
     fontVariant: ["tabular-nums"],
+  },
+  tenderMethodCell: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tenderSalesCell: {
+    textAlign: "right",
+    width: 98,
+  },
+  tenderRefundCell: {
+    textAlign: "right",
+    width: 90,
+  },
+  tenderNetCell: {
+    textAlign: "right",
+    width: 98,
+  },
+  tenderRefunded: {
+    color: colors.red,
+  },
+  tenderNet: {
+    fontWeight: "900",
   },
   metrics: {
+    alignContent: "stretch",
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
+    width: 290,
   },
   metric: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-    borderRadius: 10,
-    padding: 11,
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 64,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    width: 141,
+  },
+  metricEmphasized: {
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderWidth: 2,
   },
   metricLabel: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    fontWeight: "700",
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "800",
   },
   metricValue: {
-    color: posColors.ink,
-    fontSize: 20,
-    fontWeight: "900",
+    color: colors.ink,
+    fontSize: 24,
     fontVariant: ["tabular-nums"],
-    marginTop: 4,
+    fontWeight: "900",
+    marginTop: 2,
   },
   emptyCard: {
     alignItems: "center",
-    borderColor: posColors.border,
-    borderRadius: 12,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
     borderStyle: "dashed",
     borderWidth: 1,
     padding: 24,
   },
   emptyTitle: {
-    color: posColors.mutedInk,
-    fontSize: 14,
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "700",
     textAlign: "center",
   },
-  countSection: {
-    borderTopColor: posColors.border,
-    borderTopWidth: 1,
-    gap: 12,
-    paddingTop: 14,
+  countCard: {
+    flexGrow: 1,
+    gap: 8,
   },
-  countTotals: {
-    alignItems: "flex-end",
+  countHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
   },
-  countTotalText: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
+  countHint: {
+    color: colors.mutedInk,
+    flex: 1,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 16,
+  },
+  countPill: {
+    alignSelf: "center",
   },
   denominationGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
+    // 每格自带 4 的内边距，这里用负边距抵消，得到 8 的格间距且与卡片内边对齐。
+    marginHorizontal: -4,
+  },
+  denominationCell: {
+    padding: 4,
+    width: "25%",
   },
   denomination: {
-    width: "18.8%",
-    minWidth: 112,
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: posColors.canvas,
-    borderRadius: 10,
-    paddingLeft: 10,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 8,
+    height: 72,
+    paddingLeft: 12,
+    paddingRight: 8,
+  },
+  denominationFocused: {
+    borderColor: colors.accent,
+  },
+  denominationCopy: {
+    flex: 1,
+    minWidth: 0,
   },
   denominationLabel: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
   },
   denominationSubtotal: {
-    color: posColors.mutedInk,
-    fontSize: 10,
+    color: colors.mutedInk,
+    fontSize: 12,
     fontVariant: ["tabular-nums"],
+    fontWeight: "700",
   },
   countInput: {
-    minHeight: DAILY_CLOSE_MIN_TOUCH_TARGET,
-    width: 54,
-    borderColor: posColors.border,
-    borderLeftWidth: 1,
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.small,
+    borderWidth: 1.5,
+    color: colors.ink,
+    fontSize: 22,
     fontVariant: ["tabular-nums"],
-    paddingHorizontal: 8,
+    fontWeight: "900",
+    height: 52,
+    minHeight: DAILY_CLOSE_MIN_TOUCH_TARGET,
+    paddingHorizontal: 4,
+    paddingVertical: 0,
     textAlign: "center",
+    width: 74,
+  },
+  countInputFocused: {
+    backgroundColor: colors.surface,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
   },
   saveBar: {
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    backgroundColor: posColors.orangeSoft,
-    borderRadius: 12,
-    padding: 13,
+    backgroundColor: colors.accentSoft,
+    borderRadius: posRadius.large,
+    flexDirection: "row",
+    gap: 22,
+    paddingLeft: 18,
+    paddingRight: 12,
+    paddingVertical: 10,
   },
-  countedLabel: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    fontWeight: "700",
+  saveLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
   },
   countedAmount: {
-    color: posColors.ink,
-    fontSize: 26,
+    color: colors.ink,
+    fontSize: 40,
+    fontVariant: ["tabular-nums"],
     fontWeight: "900",
-    fontVariant: ["tabular-nums"],
+    lineHeight: 44,
   },
-  variance: {
-    fontSize: 12,
-    fontWeight: "800",
+  varianceGroup: {
+    flex: 1,
+    minWidth: 0,
+  },
+  varianceAmount: {
+    fontSize: 28,
     fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    lineHeight: 44,
   },
   varianceBalanced: {
-    color: posColors.green,
+    color: colors.green,
   },
   varianceDifferent: {
-    color: posColors.red,
+    color: colors.red,
+  },
+  saveButton: {
+    width: 270,
   },
   permissionNote: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 10,
-    padding: 12,
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    padding: 16,
   },
   permissionText: {
-    color: posColors.blue,
-    fontSize: 12,
-    fontWeight: "700",
+    color: colors.blue,
+    fontSize: 15,
+    fontWeight: "800",
+    lineHeight: 21,
   },
-  historyList: {
-    gap: 7,
+  archivePanel: {
+    gap: 8,
+    width: 340,
+  },
+  archiveHint: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
+  archiveScroll: {
+    flex: 1,
+  },
+  archiveScrollContent: {
+    gap: 8,
+    paddingBottom: 4,
   },
   historyEmpty: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    paddingVertical: 20,
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "700",
+    paddingVertical: 24,
     textAlign: "center",
   },
   archiveRow: {
-    minHeight: DAILY_CLOSE_MIN_TOUCH_TARGET,
-    flexDirection: "row",
     alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
     justifyContent: "space-between",
-    borderColor: posColors.border,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
+    minHeight: 78,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   archiveRowSelected: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+    borderWidth: 2,
+  },
+  archiveCopy: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
   },
   archiveTitle: {
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  archiveMeta: {
-    color: posColors.mutedInk,
-    fontSize: 10,
-    marginTop: 2,
-  },
-  archiveAmount: {
-    color: posColors.ink,
-    fontSize: 15,
+    color: colors.ink,
+    fontSize: 16,
     fontWeight: "900",
-    fontVariant: ["tabular-nums"],
   },
-  archiveDetails: {
-    backgroundColor: posColors.canvas,
-    borderRadius: 12,
-    gap: 5,
-    padding: 12,
-  },
-  detailTitle: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-    marginBottom: 3,
-  },
-  detailLine: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
-  },
-  detailVariance: {
-    fontSize: 13,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  action: {
-    minHeight: DAILY_CLOSE_MIN_TOUCH_TARGET,
-    minWidth: 100,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  actionSecondary: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-  },
-  actionQuiet: {
-    backgroundColor: "transparent",
-    borderColor: posColors.border,
-  },
-  actionSelected: {
-    backgroundColor: posColors.blue,
-    borderColor: posColors.blue,
-  },
-  actionWide: {
-    minWidth: 190,
-  },
-  actionDisabled: {
-    opacity: 0.42,
-  },
-  actionText: {
-    color: "#FFFFFF",
-    fontSize: 13,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  actionTextSecondary: {
-    color: posColors.ink,
-  },
-  actionTextSelected: {
-    color: "#FFFFFF",
-  },
-  status: {
-    borderRadius: 9,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  statusSuccess: {
-    backgroundColor: posColors.greenSoft,
-  },
-  statusWarning: {
-    backgroundColor: posColors.redSoft,
-  },
-  statusText: {
-    color: posColors.ink,
-    fontSize: 12,
+  archiveId: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
     fontWeight: "700",
   },
-  unavailable: {
-    flex: 1,
+  archiveMeta: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+  },
+  archiveAmount: {
+    color: colors.ink,
+    fontSize: 18,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  detailTitle: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+    marginTop: 6,
+  },
+  archiveDetails: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+  },
+  detailRow: {
     alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: 34,
+  },
+  detailRowDivider: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+  },
+  detailLabel: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  detailValue: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 15,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+    textAlign: "right",
+  },
+  detailValueStrong: {
+    fontWeight: "900",
+  },
+  paneSwitch: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    minHeight: posTouch.medium,
+    overflow: "hidden",
+    width: 190,
+  },
+  paneSegment: {
+    alignItems: "center",
+    flex: 1,
     justifyContent: "center",
-    gap: 16,
+    minHeight: posTouch.medium,
+    paddingHorizontal: 12,
+  },
+  paneSegmentDivider: {
+    borderLeftColor: colors.border,
+    borderLeftWidth: 1,
+  },
+  paneSegmentSelected: {
+    backgroundColor: colors.inverseSurface,
+  },
+  paneSegmentPressed: {
+    backgroundColor: colors.surfaceAlt,
+  },
+  paneSegmentLabel: {
+    fontSize: 15.5,
+    fontWeight: "800",
+  },
+  status: {
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  statusSuccess: {
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+  },
+  statusWarning: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+  },
+  statusText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  unavailable: {
+    alignItems: "center",
+    flex: 1,
+    justifyContent: "center",
     padding: 32,
   },
-});
+  unavailableCard: {
+    alignItems: "center",
+    gap: 12,
+    maxWidth: 560,
+    padding: 28,
+    width: "100%",
+  },
+  unavailableTitle: {
+    color: colors.ink,
+    fontSize: 23,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  unavailableBody: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+    textAlign: "center",
+  },
+  unavailableAction: {
+    alignSelf: "stretch",
+    marginTop: 8,
+  },
+}));

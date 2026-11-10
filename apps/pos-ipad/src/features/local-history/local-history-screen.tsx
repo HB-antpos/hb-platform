@@ -1,3 +1,4 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   useEffect,
   useState,
@@ -13,7 +14,6 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   localHistoryText,
@@ -31,25 +31,46 @@ import {
   LocalHistoryReceiptPreview,
 } from "./local-history-receipt-preview";
 
-import { quickHistoryDateRange } from "@hb/pos-domain/features/remote-history/quick-date-range";
+import {
+  HISTORY_QUICK_DATE_RANGES,
+  quickHistoryDateRange,
+  type HistoryQuickDateRange,
+} from "@hb/pos-domain/features/remote-history/quick-date-range";
 import { HistoryQuickRangeRow } from "@/ui/controls/history-quick-range-row";
+import { PosButton } from "@/ui/controls/pos-button";
 import { PosDatePickerField } from "@/ui/controls/pos-date-picker-field";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
+import { PosPill, type PosPillTone } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosSegmented } from "@/ui/controls/pos-segmented";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  posTouch,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 export const LOCAL_HISTORY_MIN_TOUCH_TARGET = 44;
 
 const LOCAL_HISTORY_COMPACT_BREAKPOINT = 900;
+/** 宽度不足这个值时日期框收窄一档，让筛选条在 1024 宽的 iPad 上仍能一行排完。 */
+const LOCAL_HISTORY_WIDE_BREAKPOINT = 1100;
+/** 左侧订单列表的固定宽度（设计图 420）。 */
+export const LOCAL_HISTORY_LIST_WIDTH = 420;
 
 export type LocalHistoryLayout = Readonly<{
   compact: boolean;
   workspaceGap: number;
   workspacePadding: number;
+  /** 开始 / 结束日期框的宽度。 */
   filterWidth: number;
+  /** 左列表固定宽度；紧凑模式为 null，改为按比例分栏。 */
+  listWidth: number | null;
 }>;
 
 export function localHistoryLayoutForWidth(
@@ -62,12 +83,14 @@ export function localHistoryLayoutForWidth(
         workspaceGap: 8,
         workspacePadding: 8,
         filterWidth: 142,
+        listWidth: null,
       }
     : {
         compact: false,
-        workspaceGap: 14,
-        workspacePadding: 14,
-        filterWidth: 150,
+        workspaceGap: 12,
+        workspacePadding: 12,
+        filterWidth: width < LOCAL_HISTORY_WIDE_BREAKPOINT ? 150 : 166,
+        listWidth: LOCAL_HISTORY_LIST_WIDTH,
       };
 }
 
@@ -96,11 +119,13 @@ type LocalHistoryDetails = Extract<
 >["value"];
 type LocalHistoryLine = LocalHistoryDetails["lines"][number];
 type LocalHistoryTender = LocalHistoryDetails["tenders"][number];
+type DetailsPaneKey = "details" | "receiptPreview";
 
 export function LocalHistoryScreen({
   presenter,
   onBack,
 }: LocalHistoryScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -165,42 +190,36 @@ export function LocalHistoryScreen({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} testID="local-history-screen">
-      <View style={[styles.header, layout.compact && styles.headerCompact]}>
-        {onBack ? (
-          <ActionButton
-            compact={layout.compact}
-            label={t("action.back")}
-            onPress={onBack}
-            sound="navigate"
-            testID="local-history-back"
-            tone="quiet"
-          />
-        ) : null}
-        <View style={styles.headerIdentity}>
-          <Text
-            numberOfLines={1}
-            style={[styles.title, layout.compact && styles.titleCompact]}
-          >
-            {t("title")}
-          </Text>
-          <Text numberOfLines={1} style={styles.subtitle}>
-            {t("subtitle")}
-          </Text>
-        </View>
-        <ActionButton
-          compact={layout.compact}
-          disabled={loading}
-          label={
-            loading ? t("action.refreshing") : t("action.refresh")
+    <PosScreenFrame
+      active="local-history"
+      header={
+        <PosPageHeader
+          actions={
+            <PosButton
+              disabled={loading}
+              icon="refresh"
+              label={
+                loading ? t("action.refreshing") : t("action.refresh")
+              }
+              loading={loading}
+              onPress={() => {
+                void presenter.refresh();
+              }}
+              size="medium"
+              testID="local-history-refresh"
+              tone="quiet"
+            />
           }
-          onPress={() => {
-            void presenter.refresh();
-          }}
-          testID="local-history-refresh"
+          backLabel={t("action.back")}
+          backTestID="local-history-back"
+          onBack={onBack}
+          subtitle={t("subtitle")}
+          title={t("title")}
         />
-      </View>
-
+      }
+      testID="local-history-screen"
+    >
+      {/* 筛选条：快捷范围、起止日期、搜索框、应用筛选一行排完；宽度不够时自动换行。 */}
       <PosKeyboardAwareScrollView
         contentContainerStyle={[
           styles.filters,
@@ -209,32 +228,6 @@ export function LocalHistoryScreen({
         style={styles.filtersScroll}
         testID="local-history-filters-keyboard-scroll"
       >
-        <DateFilterField
-          compact={layout.compact}
-          label={t("filters.from")}
-          locale={locale}
-          onChange={(value) => {
-            if (!value) return;
-            setFromDate(value);
-            if (filterError === "date") setFilterError(null);
-          }}
-          testID="local-history-date-from"
-          value={fromDate}
-          width={layout.filterWidth}
-        />
-        <DateFilterField
-          compact={layout.compact}
-          label={t("filters.to")}
-          locale={locale}
-          onChange={(value) => {
-            if (!value) return;
-            setToDate(value);
-            if (filterError === "date") setFilterError(null);
-          }}
-          testID="local-history-date-to"
-          value={toDate}
-          width={layout.filterWidth}
-        />
         <HistoryQuickRangeRow
           disabled={loading}
           labels={{
@@ -249,11 +242,44 @@ export function LocalHistoryScreen({
             setToDate(range.to);
             applyFilters(range);
           }}
+          selected={matchingQuickRange(
+            fromDate,
+            toDate,
+            state.businessTimeZone,
+          )}
           testIDPrefix="local-history"
         />
-        <FilterField
+        <View style={{ width: layout.filterWidth }}>
+          <PosDatePickerField
+            accessibilityLabel={t("filters.from")}
+            locale={locale}
+            onChange={(value) => {
+              if (!value) return;
+              setFromDate(value);
+              if (filterError === "date") setFilterError(null);
+            }}
+            testID="local-history-date-from"
+            value={fromDate}
+          />
+        </View>
+        <Text style={styles.rangeSeparator}>
+          {t("filters.rangeSeparator")}
+        </Text>
+        <View style={{ width: layout.filterWidth }}>
+          <PosDatePickerField
+            accessibilityLabel={t("filters.to")}
+            locale={locale}
+            onChange={(value) => {
+              if (!value) return;
+              setToDate(value);
+              if (filterError === "date") setFilterError(null);
+            }}
+            testID="local-history-date-to"
+            value={toDate}
+          />
+        </View>
+        <SearchField
           compact={layout.compact}
-          grow
           label={t("filters.keyword")}
           maxLength={LOCAL_HISTORY_KEYWORD_MAX_LENGTH}
           onChangeText={(value) => {
@@ -264,13 +290,13 @@ export function LocalHistoryScreen({
           testID="local-history-keyword"
           value={keyword}
         />
-        <ActionButton
-          compact={layout.compact}
+        <PosButton
           disabled={loading}
+          icon="filter-check-outline"
           label={t("action.apply")}
           onPress={() => applyFilters()}
+          size="medium"
           testID="local-history-apply-filters"
-          tone="secondary"
         />
       </PosKeyboardAwareScrollView>
       {filterError ? (
@@ -299,18 +325,21 @@ export function LocalHistoryScreen({
       ) : null}
       {!hasRows && state.kind === "empty" ? (
         <CenteredState
+          icon="text-box-search-outline"
           message={t("state.empty")}
           testID="local-history-empty"
         />
       ) : null}
       {!hasRows && state.kind === "failed" ? (
         <CenteredState
+          icon="alert-circle-outline"
           message={t("state.failed")}
           testID="local-history-failed"
         />
       ) : null}
       {!hasRows && state.kind === "unauthorized" ? (
         <CenteredState
+          icon="lock-outline"
           message={t("state.unauthorized")}
           testID="local-history-unauthorized"
         />
@@ -327,43 +356,21 @@ export function LocalHistoryScreen({
           ]}
           testID="local-history-workspace"
         >
+          {/* 左：订单列表固定宽度，「加载更多」固定在列表下方，不随列表滚动。 */}
           <View
             style={[
               styles.listPane,
-              layout.compact && styles.paneCompact,
+              layout.listWidth === null
+                ? styles.listPaneCompact
+                : { width: layout.listWidth },
             ]}
             testID="local-history-list-pane"
           >
-            <View style={styles.paneHeader}>
-              <Text style={styles.paneTitle}>{t("list.title")}</Text>
-              {loading || state.loadingMore ? (
-                <ActivityIndicator color={posColors.orange} />
-              ) : null}
-            </View>
             <FlatList
+              accessibilityLabel={t("list.title")}
               contentContainerStyle={styles.orderList}
               data={state.rows}
               keyExtractor={(row) => row.orderGuid}
-              ListFooterComponent={
-                state.hasMore ? (
-                  <View style={styles.loadMore}>
-                    <ActionButton
-                      compact={layout.compact}
-                      disabled={loading || state.loadingMore}
-                      label={
-                        state.loadingMore
-                          ? t("action.loadingMore")
-                          : t("action.loadMore")
-                      }
-                      onPress={() => {
-                        void presenter.loadMore();
-                      }}
-                      testID="local-history-load-more"
-                      tone="quiet"
-                    />
-                  </View>
-                ) : null
-              }
               renderItem={({ item }) => (
                 <OrderRow
                   businessTimeZone={state.businessTimeZone}
@@ -375,8 +382,27 @@ export function LocalHistoryScreen({
                   selected={state.selectedOrderGuid === item.orderGuid}
                 />
               )}
+              style={styles.orderListScroll}
               testID="local-history-list"
             />
+            {state.hasMore ? (
+              <PosButton
+                disabled={loading || state.loadingMore}
+                icon="chevron-down"
+                label={
+                  state.loadingMore
+                    ? t("action.loadingMore")
+                    : t("action.loadMore")
+                }
+                loading={state.loadingMore}
+                onPress={() => {
+                  void presenter.loadMore();
+                }}
+                size="medium"
+                testID="local-history-load-more"
+                tone="quiet"
+              />
+            ) : null}
           </View>
           <DetailsPane
             businessTimeZone={state.businessTimeZone}
@@ -392,28 +418,41 @@ export function LocalHistoryScreen({
           />
         </View>
       ) : null}
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
 export function LocalHistoryUnavailableScreen({
   onBack,
 }: Readonly<{ onBack?(): void }>) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale = resolveLocalHistoryLocale(
     i18n.resolvedLanguage ?? i18n.language,
   );
   const t = copyFor(locale);
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <PosScreenFrame
+      active="local-history"
+      header={
+        <PosPageHeader
+          backLabel={t("action.back")}
+          backTestID="local-history-back"
+          onBack={onBack}
+          subtitle={t("subtitle")}
+          title={t("title")}
+        />
+      }
+    >
       <CenteredState
         {...(onBack
           ? { actionLabel: t("action.back"), onAction: onBack }
           : {})}
+        icon="alert-circle-outline"
         message={t("state.unavailable")}
         testID="local-history-unavailable"
       />
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -430,6 +469,7 @@ function OrderRow({
   row: LocalHistorySummary;
   selected: boolean;
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
   return (
     <PosPressable
@@ -444,35 +484,41 @@ function OrderRow({
       accessibilityRole="button"
       accessibilityState={{ selected }}
       onPress={onPress}
-      style={[styles.orderRow, selected && styles.orderRowSelected]}
+      style={({ pressed }) => [
+        styles.orderRow,
+        selected && styles.orderRowSelected,
+        pressed && !selected && styles.orderRowPressed,
+      ]}
       testID={`local-history-order-${row.orderGuid}`}
     >
-      <View style={styles.rowTop}>
-        <Text style={styles.orderNumber}>
-          {t("list.sequence", { sequence: row.localSequence })}
+      <View style={styles.orderRowMain}>
+        <View style={styles.orderTitleRow}>
+          <Text numberOfLines={1} style={styles.orderNumber}>
+            {t("list.sequence", { sequence: row.localSequence })}
+          </Text>
+          <PosPill
+            label={orderStateLabel(row.state, locale)}
+            style={styles.pillInline}
+            tone={orderStateTone(row.state)}
+          />
+        </View>
+        <Text numberOfLines={1} style={styles.rowMeta}>
+          {formatDateTime(row.soldAtIso, locale, businessTimeZone)} ·{" "}
+          {shortOrderGuid(row.orderGuid)} · {row.cashierName}
         </Text>
-        <Text style={styles.orderAmount}>
-          {formatAud(row.actualAmountCents, locale)}
-        </Text>
+        <View style={styles.rowBottom}>
+          <Text style={styles.rowMeta}>
+            {t(row.lineCount === 1 ? "list.itemsOne" : "list.items", { count: row.lineCount })}
+          </Text>
+          <Text style={styles.rowMeta}>·</Text>
+          <Text numberOfLines={1} style={[styles.rowMeta, styles.rowShrink]}>
+            {paymentSummaryLabel(row.paymentSummary, locale)}
+          </Text>
+        </View>
       </View>
-      <Text numberOfLines={1} style={styles.rowMeta}>
-        {formatDateTime(row.soldAtIso, locale, businessTimeZone)} ·{" "}
-        {shortOrderGuid(row.orderGuid)} · {row.cashierName}
+      <Text style={styles.orderAmount}>
+        {formatAud(row.actualAmountCents, locale)}
       </Text>
-      <View style={styles.rowBottom}>
-        <Text style={styles.rowSecondary}>
-          {t("list.items", { count: row.lineCount })}
-        </Text>
-        <Text numberOfLines={1} style={styles.rowSecondary}>
-          {paymentSummaryLabel(row.paymentSummary, locale)}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={[styles.statusPill, orderStateTone(row.state)]}
-        >
-          {orderStateLabel(row.state, locale)}
-        </Text>
-      </View>
     </PosPressable>
   );
 }
@@ -496,110 +542,151 @@ function DetailsPane({
   receiptPreview: LocalHistoryReceiptPreviewState;
   reprint: PresenterState["reprint"];
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
-  const [activePane, setActivePane] = useState<
-    "details" | "receiptPreview"
-  >("details");
+  const [activePane, setActivePane] = useState<DetailsPaneKey>("details");
+  const value = details.kind === "ready" ? details.value : null;
   return (
     <View
       style={[
         styles.detailsPane,
-        compact && styles.paneCompact,
+        compact && styles.detailsPaneCompact,
       ]}
       testID="local-history-details"
     >
-      <View style={styles.paneHeader}>
-        <View style={styles.detailsTabs}>
-          <PaneTab
-            active={activePane === "details"}
-            label={t("details.title")}
-            onPress={() => setActivePane("details")}
-            testID="local-history-details-tab"
-          />
-          <PaneTab
-            active={activePane === "receiptPreview"}
-            label={t("receiptPreview.title")}
-            onPress={() => setActivePane("receiptPreview")}
-            testID="local-history-receipt-preview-tab"
-          />
+      {value ? (
+        <View style={styles.detailsIdentity}>
+          <View style={styles.detailMain}>
+            <View style={styles.orderTitleRow}>
+              <Text numberOfLines={1} style={styles.detailsOrder}>
+                {t("list.sequence", { sequence: value.localSequence })}
+              </Text>
+              <PosPill
+                label={orderStateLabel(value.state, locale)}
+                style={styles.pillInline}
+                tone={orderStateTone(value.state)}
+              />
+            </View>
+            <Text numberOfLines={compact ? 2 : 1} style={styles.detailsMeta}>
+              {formatDateTime(
+                value.soldAtIso,
+                locale,
+                businessTimeZone,
+              )}{" "}
+              ·{" "}
+              {shortOrderGuid(value.orderGuid)} · {value.cashierName}
+            </Text>
+          </View>
+          <View style={styles.detailsTotals}>
+            <Text style={styles.detailsTotalLabel}>
+              {t("details.actual")}
+            </Text>
+            <Text
+              style={[
+                styles.detailsTotal,
+                compact && styles.detailsTotalCompact,
+              ]}
+            >
+              {formatAud(value.actualAmountCents, locale)}
+            </Text>
+          </View>
         </View>
-        <View style={styles.detailsHeaderActions}>
+      ) : null}
+
+      {/* 两个页签做成整宽分段按钮；切换订单后保留当前页签。 */}
+      <PosSegmented<DetailsPaneKey>
+        onChange={setActivePane}
+        options={[
+          {
+            icon: "format-list-bulleted",
+            label: t("details.title"),
+            testID: "local-history-details-tab",
+            value: "details",
+          },
+          {
+            icon: "receipt-text-outline",
+            label: t("receiptPreview.title"),
+            testID: "local-history-receipt-preview-tab",
+            value: "receiptPreview",
+          },
+        ]}
+        value={activePane}
+      />
+
+      <View style={styles.detailsBody}>
+        {activePane === "details" ? (
+          <DetailsContent details={details} locale={locale} />
+        ) : (
+          <ReceiptPreviewContent
+            locale={locale}
+            receiptPreview={receiptPreview}
+          />
+        )}
+      </View>
+
+      <ReprintResult locale={locale} reprint={reprint} />
+
+      {/* 汇总与「重打小票」固定在详情底部，不随商品行滚动。 */}
+      {value || canReprint ? (
+        <View style={styles.detailsFooter}>
+          {value ? (
+            <View style={styles.summaryCard}>
+              <SummaryRow
+                label={t("details.total")}
+                locale={locale}
+                value={value.totalCents}
+              />
+              {value.discountCents !== 0 ? (
+                <SummaryRow
+                  label={t("details.discount", { amount: "" }).trim()}
+                  locale={locale}
+                  tone="discount"
+                  value={value.discountCents}
+                />
+              ) : null}
+              <SummaryRow
+                label={t("details.actual")}
+                locale={locale}
+                tone="emphasized"
+                value={value.actualAmountCents}
+              />
+            </View>
+          ) : (
+            <View style={styles.detailsFooterSpacer} />
+          )}
           {canReprint ? (
-            <ActionButton
-              compact
+            <PosButton
               disabled={reprint.kind === "submitting"}
+              icon="printer-outline"
               label={
                 reprint.kind === "submitting"
                   ? t("action.reprinting")
                   : t("action.reprint")
               }
+              loading={reprint.kind === "submitting"}
               onPress={onReprint}
+              size={compact ? "medium" : "button"}
+              style={[
+                styles.reprintButton,
+                compact && styles.reprintButtonCompact,
+              ]}
               testID="local-history-reprint"
             />
           ) : null}
-          {activePane === "details" && details.kind === "loading" ? (
-            <ActivityIndicator color={posColors.orange} />
-          ) : null}
-          {activePane === "receiptPreview" && receiptPreview.kind === "loading" ? (
-            <ActivityIndicator color={posColors.orange} />
-          ) : null}
         </View>
-      </View>
-      <ReprintResult locale={locale} reprint={reprint} />
-      {activePane === "details" ? (
-        <DetailsContent
-          businessTimeZone={businessTimeZone}
-          compact={compact}
-          details={details}
-          locale={locale}
-        />
-      ) : (
-        <ReceiptPreviewContent
-          locale={locale}
-          receiptPreview={receiptPreview}
-        />
-      )}
+      ) : null}
     </View>
   );
 }
 
-function PaneTab({
-  active,
-  label,
-  onPress,
-  testID,
-}: Readonly<{
-  active: boolean;
-  label: string;
-  onPress(): void;
-  testID: string;
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="tab"
-      accessibilityState={{ selected: active }}
-      onPress={onPress}
-      style={[styles.paneTab, active && styles.paneTabActive]}
-      testID={testID}
-    >
-      <Text numberOfLines={1} style={[styles.paneTabText, active && styles.paneTabTextActive]}>
-        {label}
-      </Text>
-    </PosPressable>
-  );
-}
-
 function DetailsContent({
-  businessTimeZone,
-  compact,
   details,
   locale,
 }: Readonly<{
-  businessTimeZone: string;
-  compact: boolean;
   details: PresenterState["details"];
   locale: LocalHistoryLocale;
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
   if (details.kind === "idle") {
     return <DetailsState message={t("details.select")} />;
@@ -611,16 +698,9 @@ function DetailsContent({
     return <DetailsState message={t("details.failed")} />;
   }
   if (details.kind === "loading") {
-    return <DetailsState message={t("state.loading")} />;
+    return <DetailsState loading message={t("state.loading")} />;
   }
-  return (
-    <LocalOrderDetails
-      businessTimeZone={businessTimeZone}
-      compact={compact}
-      locale={locale}
-      value={details.value}
-    />
-  );
+  return <LocalOrderDetails locale={locale} value={details.value} />;
 }
 
 function ReceiptPreviewContent({
@@ -630,12 +710,13 @@ function ReceiptPreviewContent({
   locale: LocalHistoryLocale;
   receiptPreview: LocalHistoryReceiptPreviewState;
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
   if (receiptPreview.kind === "idle") {
     return <DetailsState message={t("receiptPreview.select")} />;
   }
   if (receiptPreview.kind === "loading") {
-    return <DetailsState message={t("receiptPreview.loading")} />;
+    return <DetailsState loading message={t("receiptPreview.loading")} />;
   }
   if (receiptPreview.kind === "not-found") {
     return <DetailsState message={t("receiptPreview.notFound")} />;
@@ -653,11 +734,12 @@ function ReprintResult({
   locale: LocalHistoryLocale;
   reprint: PresenterState["reprint"];
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
   if (reprint.kind === "succeeded") {
     return (
       <Text
-        style={styles.reprintSuccess}
+        style={[styles.reprintResult, styles.reprintSuccess]}
         testID="local-history-reprint-succeeded"
       >
         {t("reprint.succeeded")}
@@ -667,7 +749,7 @@ function ReprintResult({
   if (reprint.kind === "failed") {
     return (
       <Text
-        style={styles.reprintFailure}
+        style={[styles.reprintResult, styles.reprintFailure]}
         testID="local-history-reprint-failed"
       >
         {t("reprint.failed")}
@@ -678,153 +760,123 @@ function ReprintResult({
 }
 
 function LocalOrderDetails({
-  businessTimeZone,
-  compact,
   locale,
   value,
 }: Readonly<{
-  businessTimeZone: string;
-  compact: boolean;
   locale: LocalHistoryLocale;
   value: LocalHistoryDetails;
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
   return (
     <ScrollView contentContainerStyle={styles.detailsContent}>
-      <View style={styles.detailsIdentity}>
-        <View style={styles.detailMain}>
-          <Text style={styles.detailsOrder}>
-            {t("list.sequence", { sequence: value.localSequence })}
-          </Text>
-          <Text numberOfLines={compact ? 2 : 1} style={styles.rowMeta}>
-            {formatDateTime(
-              value.soldAtIso,
-              locale,
-              businessTimeZone,
-            )}{" "}
-            ·{" "}
-            {shortOrderGuid(value.orderGuid)} · {value.cashierName}
-          </Text>
-          <Text
-            style={[
-              styles.detailsStatus,
-              orderStateTone(value.state),
-            ]}
-          >
-            {orderStateLabel(value.state, locale)}
-          </Text>
-        </View>
-        <View style={styles.detailsTotals}>
-          <Text style={styles.detailsTotalLabel}>
-            {t("details.actual")}
-          </Text>
-          <Text style={[styles.detailsTotal, compact && styles.detailsTotalCompact]}>
-            {formatAud(value.actualAmountCents, locale)}
-          </Text>
-        </View>
+      <Text style={styles.sectionTitle}>{t("details.lines")}</Text>
+      <View>
+        {value.lines.map((line, index) => (
+          <OrderLine
+            first={index === 0}
+            key={line.lineId}
+            line={line}
+            locale={locale}
+          />
+        ))}
       </View>
 
-      <Text style={styles.sectionTitle}>{t("details.lines")}</Text>
-      {value.lines.map((line) => (
-        <OrderLine
-          key={line.lineId}
-          line={line}
-          locale={locale}
-        />
-      ))}
-
       <Text style={styles.sectionTitle}>{t("details.payments")}</Text>
-      {value.tenders.map((tender, index) => (
-        <TenderRow
-          key={`${tender.method}-${tender.amountCents}-${index}`}
-          locale={locale}
-          tender={tender}
-        />
-      ))}
-
-      <View style={styles.summaryCard}>
-        <SummaryRow
-          label={t("details.total")}
-          locale={locale}
-          value={value.totalCents}
-        />
-        {value.discountCents !== 0 ? (
-          <SummaryRow
-            label={t("details.discount", { amount: "" }).trim()}
+      <View>
+        {value.tenders.map((tender, index) => (
+          <TenderRow
+            first={index === 0}
+            key={`${tender.method}-${tender.amountCents}-${index}`}
             locale={locale}
-            value={value.discountCents}
+            tender={tender}
           />
-        ) : null}
-        <SummaryRow
-          emphasized
-          label={t("details.actual")}
-          locale={locale}
-          value={value.actualAmountCents}
-        />
+        ))}
       </View>
     </ScrollView>
   );
 }
 
 function OrderLine({
+  first,
   line,
   locale,
 }: Readonly<{
+  first: boolean;
   line: LocalHistoryLine;
   locale: LocalHistoryLocale;
 }>) {
+  usePosThemeVersion();
   const t = copyFor(locale);
+  const codes = [line.lookupCode, line.itemNumber, line.productCode]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+  // 行折扣紧跟在条码 / 货号后面，用红色标出。
+  const discount =
+    line.discountCents !== 0
+      ? t("details.discount", {
+          amount: formatAud(line.discountCents, locale),
+        })
+      : null;
   return (
-    <View style={styles.detailRow}>
+    <View style={[styles.itemRow, first && styles.itemRowFirst]}>
       <View style={styles.detailMain}>
-        <Text style={styles.detailName}>{line.displayName}</Text>
-        <Text numberOfLines={1} style={styles.rowMeta}>
-          {[line.lookupCode, line.itemNumber, line.productCode]
-            .filter((part): part is string => Boolean(part))
-            .join(" · ")}
-        </Text>
-        <Text style={styles.rowSecondary}>
-          {t("details.quantity", { quantity: line.quantity })} ·{" "}
-          {formatAud(line.unitPriceCents, locale)}
-        </Text>
-      </View>
-      <View style={styles.detailAmount}>
-        <Text
-          style={[
-            styles.lineKind,
-            line.kind === "return" && styles.lineKindReturn,
-          ]}
-        >
-          {line.kind === "return" ? "↩" : "•"}
-        </Text>
-        <Text style={styles.orderAmount}>
-          {formatAud(line.actualAmountCents, locale)}
-        </Text>
-        {line.discountCents !== 0 ? (
-          <Text style={styles.discount}>
-            {t("details.discount", {
-              amount: formatAud(line.discountCents, locale),
-            })}
+        <Text style={styles.itemName}>{line.displayName}</Text>
+        {codes || discount ? (
+          <Text numberOfLines={1} style={styles.itemMeta}>
+            {codes}
+            {discount ? (
+              <Text style={styles.itemDiscount}>
+                {codes ? " · " : ""}
+                {discount}
+              </Text>
+            ) : null}
           </Text>
         ) : null}
+      </View>
+      <Text style={styles.itemQuantity}>
+        {t("details.quantity", { quantity: line.quantity })} ·{" "}
+        {formatAud(line.unitPriceCents, locale)}
+      </Text>
+      <View style={styles.itemAmount}>
+        {/* 退货行用红色回车图标标出，销售行不加标记。 */}
+        {line.kind === "return" ? (
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.red}
+            name="keyboard-return"
+            size={18}
+          />
+        ) : null}
+        <Text
+          style={[
+            styles.itemValue,
+            line.kind === "return" && styles.itemValueReturn,
+          ]}
+        >
+          {formatAud(line.actualAmountCents, locale)}
+        </Text>
       </View>
     </View>
   );
 }
 
 function TenderRow({
+  first,
   locale,
   tender,
 }: Readonly<{
+  first: boolean;
   locale: LocalHistoryLocale;
   tender: LocalHistoryTender;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.paymentRow}>
-      <Text style={styles.detailName}>
+    <View style={[styles.itemRow, first && styles.itemRowFirst]}>
+      <Text style={[styles.itemName, styles.detailMain]}>
         {localHistoryText(locale, `method.${tender.method}`)}
       </Text>
-      <Text style={styles.orderAmount}>
+      <Text style={styles.itemValue}>
         {formatAud(tender.amountCents, locale)}
       </Text>
     </View>
@@ -832,31 +884,36 @@ function TenderRow({
 }
 
 function SummaryRow({
-  emphasized = false,
   label,
   locale,
+  tone = "normal",
   value,
 }: Readonly<{
-  emphasized?: boolean;
   label: string;
   locale: LocalHistoryLocale;
+  tone?: "normal" | "discount" | "emphasized";
   value: number;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.summaryRow}>
-      <Text style={[styles.summaryLabel, emphasized && styles.summaryStrong]}>
-        {label}
-      </Text>
-      <Text style={[styles.summaryValue, emphasized && styles.summaryStrong]}>
+      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text
+        style={[
+          styles.summaryValue,
+          tone === "discount" && styles.summaryDiscount,
+          tone === "emphasized" && styles.summaryStrong,
+        ]}
+      >
         {formatAud(value, locale)}
       </Text>
     </View>
   );
 }
 
-function FilterField({
+/** 搜索框：放大镜图标 + 输入框，外框与日期框同高（56）。 */
+function SearchField({
   compact,
-  grow = false,
   label,
   maxLength,
   onChangeText,
@@ -865,7 +922,6 @@ function FilterField({
   value,
 }: Readonly<{
   compact: boolean;
-  grow?: boolean;
   label: string;
   maxLength?: number;
   onChangeText(value: string): void;
@@ -873,150 +929,83 @@ function FilterField({
   testID: string;
   value: string;
 }>) {
+  usePosThemeVersion();
   return (
-    <View
-      style={[
-        styles.filterField,
-        grow && styles.filterFieldGrow,
-        compact && grow && styles.filterFieldGrowCompact,
-      ]}
-    >
-      <Text style={styles.fieldLabel}>{label}</Text>
+    <View style={[styles.searchField, compact && styles.searchFieldCompact]}>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors.placeholder}
+        name="magnify"
+        size={22}
+      />
       <PosKeyboardAwareTextInput
+        accessibilityLabel={label}
         autoCapitalize="none"
         autoCorrect={false}
         maxLength={maxLength}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor={posColors.mutedInk}
-        style={styles.input}
+        placeholderTextColor={posColors.placeholder}
+        selectionColor={posColors.accent}
+        style={styles.searchInput}
         testID={testID}
         value={value}
       />
     </View>
-  );
-}
-
-function DateFilterField({
-  compact,
-  label,
-  locale,
-  onChange,
-  testID,
-  value,
-  width,
-}: Readonly<{
-  compact: boolean;
-  label: string;
-  locale: LocalHistoryLocale;
-  onChange(value: string | null): void;
-  testID: string;
-  value: string;
-  width: number;
-}>) {
-  return (
-    <View
-      style={[
-        styles.filterField,
-        { width },
-        compact && styles.dateFilterCompact,
-      ]}
-    >
-      <Text style={styles.fieldLabel}>{label}</Text>
-      <PosDatePickerField
-        accessibilityLabel={label}
-        locale={locale}
-        onChange={onChange}
-        testID={testID}
-        value={value}
-      />
-    </View>
-  );
-}
-
-function ActionButton({
-  compact = false,
-  disabled = false,
-  label,
-  onPress,
-  sound = "tap",
-  testID,
-  tone = "primary",
-}: Readonly<{
-  compact?: boolean;
-  disabled?: boolean;
-  label: string;
-  onPress(): void;
-  sound?: "tap" | "navigate";
-  testID: string;
-  tone?: "primary" | "secondary" | "quiet";
-}>) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
-      style={[
-        styles.actionButton,
-        compact && styles.actionButtonCompact,
-        tone === "primary"
-          ? styles.actionPrimary
-          : tone === "secondary"
-            ? styles.actionSecondary
-            : styles.actionQuiet,
-        disabled && styles.disabled,
-      ]}
-      testID={testID}
-    >
-      <Text
-        numberOfLines={1}
-        style={[
-          styles.actionText,
-          tone !== "primary" && styles.actionTextDark,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
   );
 }
 
 function CenteredState({
   actionLabel,
+  icon,
   loading = false,
   message,
   onAction,
   testID,
 }: Readonly<{
   actionLabel?: string;
+  icon?: "alert-circle-outline" | "lock-outline" | "text-box-search-outline";
   loading?: boolean;
   message: string;
   onAction?(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.centered} testID={testID}>
       {loading ? (
-        <ActivityIndicator color={posColors.orange} size="large" />
+        <ActivityIndicator color={posColors.accent} size="large" />
+      ) : icon ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.mutedInk}
+          name={icon}
+          size={44}
+        />
       ) : null}
       <Text style={styles.centeredTitle}>{message}</Text>
       {actionLabel && onAction ? (
-        <ActionButton
+        <PosButton
+          icon="arrow-left"
           label={actionLabel}
           onPress={onAction}
+          size="medium"
+          sound="navigate"
           testID={`${testID}-back`}
-          tone="quiet"
         />
       ) : null}
     </View>
   );
 }
 
-function DetailsState({ message }: Readonly<{ message: string }>) {
+function DetailsState({
+  loading = false,
+  message,
+}: Readonly<{ loading?: boolean; message: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.detailsState}>
+      {loading ? <ActivityIndicator color={posColors.accent} /> : null}
       <Text style={styles.centeredHint}>{message}</Text>
     </View>
   );
@@ -1032,6 +1021,28 @@ function copyFor(locale: LocalHistoryLocale) {
 function nullableText(value: string): string | null {
   const normalized = value.trim();
   return normalized.length === 0 ? null : normalized;
+}
+
+/**
+ * 当前起止日期正好等于哪个快捷范围（只用于高亮分段按钮）。
+ * 时区解析失败时不高亮，不影响筛选本身。
+ */
+function matchingQuickRange(
+  from: string,
+  to: string,
+  businessTimeZone: string,
+): HistoryQuickDateRange | null {
+  try {
+    const now = new Date();
+    return (
+      HISTORY_QUICK_DATE_RANGES.find((kind) => {
+        const range = quickHistoryDateRange(kind, now, businessTimeZone);
+        return range.from === from && range.to === to;
+      }) ?? null
+    );
+  } catch {
+    return null;
+  }
 }
 
 function dateInputValue(
@@ -1114,470 +1125,407 @@ function orderStateLabel(
   return localHistoryText(locale, `orderState.${state}`);
 }
 
+/** 同步状态对应的标签色：已完成 / 已同步为绿，被拒 / 受阻为红，其余（待同步、同步中）为黄。 */
 function orderStateTone(
   state: LocalHistorySummary["state"],
-) {
+): PosPillTone {
   if (state === "Synced" || state === "CompletedLocal") {
-    return styles.statusPositive;
+    return "good";
   }
   if (
     state === "Rejected" ||
     state === "Blocked403"
   ) {
-    return styles.statusNegative;
+    return "danger";
   }
-  return styles.statusPending;
+  return "warning";
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-  },
-  header: {
-    minHeight: 76,
-    paddingHorizontal: 22,
-    paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: posColors.border,
-    backgroundColor: posColors.surface,
-  },
-  headerCompact: {
-    minHeight: 68,
-    paddingHorizontal: 12,
-    gap: 8,
-  },
-  headerIdentity: {
-    flex: 1,
-    minWidth: 0,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 27,
-    fontWeight: "800",
-    letterSpacing: -0.4,
-  },
-  titleCompact: {
-    fontSize: 22,
-  },
-  subtitle: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    marginTop: 2,
-  },
+const styles = createPosStyles((colors) => ({
+  // ---------- 筛选条 ----------
   filters: {
+    alignItems: "center",
     flexDirection: "row",
     flexWrap: "wrap",
-    alignItems: "flex-end",
     gap: 10,
-    paddingHorizontal: 22,
+    paddingHorizontal: 12,
     paddingTop: 12,
-    paddingBottom: 10,
-    backgroundColor: posColors.surface,
+  },
+  filtersCompact: {
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingTop: 8,
   },
   filtersScroll: {
     flexGrow: 0,
   },
-  filtersCompact: {
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  filterField: {
-    width: 150,
-    gap: 5,
-  },
-  dateFilterCompact: {
-    flexGrow: 0,
-  },
-  filterFieldGrow: {
-    flex: 1,
-    minWidth: 220,
-  },
-  filterFieldGrowCompact: {
-    minWidth: 180,
-  },
-  fieldLabel: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  input: {
-    minHeight: LOCAL_HISTORY_MIN_TOUCH_TARGET,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    color: posColors.ink,
-    backgroundColor: posColors.canvas,
+  rangeSeparator: {
+    color: colors.mutedInk,
     fontSize: 15,
+    fontWeight: "900",
+  },
+  searchField: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: posTouch.medium,
+    minWidth: 180,
+    paddingHorizontal: 14,
+  },
+  searchFieldCompact: {
+    minWidth: 160,
+  },
+  searchInput: {
+    alignSelf: "stretch",
+    color: colors.ink,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+    minHeight: LOCAL_HISTORY_MIN_TOUCH_TARGET,
+    minWidth: 0,
+    padding: 0,
   },
   validation: {
-    paddingHorizontal: 22,
-    paddingBottom: 8,
-    color: posColors.red,
-    backgroundColor: posColors.surface,
+    color: colors.red,
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
+    paddingHorizontal: 14,
+    paddingTop: 8,
   },
+
+  // ---------- 列表 + 详情 ----------
   workspace: {
     flex: 1,
     flexDirection: "row",
+    minHeight: 0,
   },
   listPane: {
-    flex: 0.43,
-    minWidth: 320,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: posColors.border,
-    borderRadius: 12,
-    backgroundColor: posColors.surface,
-  },
-  detailsPane: {
-    flex: 0.57,
-    minWidth: 400,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: posColors.border,
-    borderRadius: 12,
-    backgroundColor: posColors.surface,
-  },
-  paneCompact: {
-    minWidth: 0,
-  },
-  paneHeader: {
-    minHeight: 50,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: posColors.border,
-  },
-  detailsTabs: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    gap: 4,
-  },
-  paneTab: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: LOCAL_HISTORY_MIN_TOUCH_TARGET,
-    paddingHorizontal: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    borderBottomWidth: 3,
-    borderBottomColor: "transparent",
-  },
-  paneTabActive: {
-    borderBottomColor: posColors.orange,
-  },
-  paneTabText: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  paneTabTextActive: {
-    color: posColors.ink,
-    fontWeight: "800",
-  },
-  detailsHeaderActions: {
     flexShrink: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginLeft: 8,
+    gap: 10,
+    minHeight: 0,
   },
-  paneTitle: {
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
+  // 紧凑模式（宽度 < 900）：两栏按比例分，允许继续收窄。
+  listPaneCompact: {
+    flex: 0.43,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  orderListScroll: {
+    flex: 1,
+    minHeight: 0,
   },
   orderList: {
-    padding: 10,
-    gap: 8,
+    gap: 6,
   },
   orderRow: {
-    minHeight: 104,
-    padding: 13,
-    borderWidth: 1,
-    borderColor: posColors.border,
-    borderRadius: 9,
-    backgroundColor: posColors.surface,
-    gap: 7,
-  },
-  orderRowSelected: {
-    borderColor: posColors.orange,
-    borderLeftWidth: 5,
-    backgroundColor: posColors.orangeSoft,
-  },
-  rowTop: {
-    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 84,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  orderRowPressed: {
+    backgroundColor: colors.surfaceAlt,
+  },
+  // 选中行描边加粗 1pt，内边距相应减 1，避免选中时内容跳动。
+  orderRowSelected: {
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+  },
+  orderRowMain: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  orderTitleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    minWidth: 0,
   },
   orderNumber: {
+    color: colors.ink,
     flexShrink: 1,
-    color: posColors.ink,
     fontSize: 16,
-    fontWeight: "800",
     fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  pillInline: {
+    alignSelf: "center",
+    flexShrink: 0,
   },
   orderAmount: {
-    color: posColors.ink,
-    fontSize: 17,
-    fontWeight: "800",
+    color: colors.ink,
+    flexShrink: 0,
+    fontSize: 18,
     fontVariant: ["tabular-nums"],
+    fontWeight: "900",
   },
   rowMeta: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-  },
-  rowBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  rowSecondary: {
-    flexShrink: 1,
-    color: posColors.mutedInk,
-    fontSize: 13,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontVariant: ["tabular-nums"],
     fontWeight: "600",
   },
-  statusPill: {
-    marginLeft: "auto",
-    maxWidth: "45%",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    overflow: "hidden",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  statusPositive: {
-    color: posColors.ink,
-    backgroundColor: posColors.greenSoft,
-  },
-  statusPending: {
-    color: posColors.ink,
-    backgroundColor: posColors.yellowSoft,
-  },
-  statusNegative: {
-    color: posColors.red,
-    backgroundColor: posColors.redSoft,
-  },
-  loadMore: {
+  rowBottom: {
     alignItems: "center",
-    paddingVertical: 4,
+    flexDirection: "row",
+    gap: 5,
   },
-  detailsContent: {
-    padding: 16,
+  rowShrink: {
+    flexShrink: 1,
+  },
+  detailsPane: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    flex: 1,
     gap: 10,
+    minHeight: 0,
+    minWidth: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  detailsPaneCompact: {
+    flex: 0.57,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
   detailsIdentity: {
-    flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "flex-start",
+    flexDirection: "row",
     gap: 16,
-    paddingBottom: 8,
-  },
-  detailsOrder: {
-    color: posColors.ink,
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  detailsStatus: {
-    alignSelf: "flex-start",
-    marginTop: 7,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 999,
-    overflow: "hidden",
-    fontSize: 11,
-    fontWeight: "800",
-  },
-  detailsTotals: {
-    alignItems: "flex-end",
-  },
-  detailsTotalLabel: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "700",
-  },
-  detailsTotal: {
-    color: posColors.orange,
-    fontSize: 26,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  detailsTotalCompact: {
-    fontSize: 22,
-  },
-  reprintAction: {
-    alignItems: "flex-start",
-    gap: 6,
-    marginTop: 4,
-  },
-  reprintSuccess: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    color: posColors.green,
-    fontSize: 13,
-  },
-  reprintFailure: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    color: posColors.red,
-    fontSize: 13,
-  },
-  sectionTitle: {
-    marginTop: 4,
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-  },
-  detailRow: {
-    minHeight: 70,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: posColors.border,
-    flexDirection: "row",
     justifyContent: "space-between",
-    gap: 12,
   },
   detailMain: {
     flex: 1,
-    minWidth: 0,
     gap: 3,
+    minWidth: 0,
   },
-  detailName: {
-    color: posColors.ink,
+  detailsOrder: {
+    color: colors.ink,
+    flexShrink: 1,
+    fontSize: 22,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  detailsMeta: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+    marginTop: 1,
+  },
+  detailsTotals: {
+    alignItems: "flex-end",
+    flexShrink: 0,
+  },
+  detailsTotalLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  detailsTotal: {
+    color: colors.ink,
+    fontSize: 40,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    letterSpacing: -1,
+    lineHeight: 44,
+  },
+  detailsTotalCompact: {
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  detailsBody: {
+    flex: 1,
+    minHeight: 0,
+  },
+  detailsContent: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  sectionTitle: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginHorizontal: 2,
+    marginTop: 2,
+  },
+  itemRow: {
+    alignItems: "center",
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 48,
+    paddingVertical: 6,
+  },
+  itemRowFirst: {
+    borderTopWidth: 0,
+  },
+  itemName: {
+    color: colors.ink,
+    fontSize: 14.5,
+    fontWeight: "700",
+  },
+  itemMeta: {
+    color: colors.mutedInk,
+    fontSize: 12,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+  },
+  itemDiscount: {
+    color: colors.red,
+  },
+  itemQuantity: {
+    color: colors.mutedInk,
+    flexShrink: 0,
+    fontSize: 13.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+  },
+  itemAmount: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexShrink: 0,
+    gap: 4,
+    justifyContent: "flex-end",
+    minWidth: 76,
+  },
+  itemValue: {
+    color: colors.ink,
+    fontSize: 14.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    textAlign: "right",
+  },
+  itemValueReturn: {
+    color: colors.red,
+  },
+  reprintResult: {
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    fontSize: 14,
+    fontWeight: "700",
+    overflow: "hidden",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  reprintSuccess: {
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+    color: colors.green,
+  },
+  reprintFailure: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    color: colors.red,
+  },
+  detailsFooter: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    gap: 12,
+  },
+  detailsFooterSpacer: {
+    flex: 1,
+  },
+  summaryCard: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    flex: 1,
+    justifyContent: "center",
+    minWidth: 180,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  summaryRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    minHeight: 30,
+  },
+  summaryLabel: {
+    color: colors.mutedInk,
     fontSize: 15,
     fontWeight: "700",
   },
-  detailAmount: {
-    alignItems: "flex-end",
-    gap: 3,
-  },
-  lineKind: {
-    color: posColors.green,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  lineKindReturn: {
-    color: posColors.red,
-  },
-  discount: {
-    color: posColors.red,
-    fontSize: 11,
-  },
-  paymentRow: {
-    minHeight: 58,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: posColors.border,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  summaryCard: {
-    marginTop: 8,
-    padding: 14,
-    borderRadius: 10,
-    backgroundColor: posColors.canvas,
-    gap: 8,
-  },
-  summaryRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  summaryLabel: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-  },
   summaryValue: {
-    color: posColors.ink,
-    fontSize: 14,
+    color: colors.ink,
+    fontSize: 15,
     fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+  },
+  summaryDiscount: {
+    color: colors.red,
   },
   summaryStrong: {
-    color: posColors.ink,
     fontSize: 17,
-    fontWeight: "800",
+    fontWeight: "900",
   },
+  // 设计图 230 宽，高度随左侧汇总卡拉伸（三行汇总时约 96）；
+  // 详情栏很窄时允许收到 150，把宽度让给汇总金额。
+  reprintButton: {
+    flexShrink: 1,
+    minWidth: 150,
+    width: 230,
+  },
+  reprintButtonCompact: {
+    width: 150,
+  },
+
+  // ---------- 空 / 加载 / 错误 / 无权限 ----------
   centered: {
-    flex: 1,
-    minHeight: 180,
     alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    flex: 1,
+    gap: 14,
     justifyContent: "center",
-    gap: 10,
+    margin: 12,
+    minHeight: 180,
     padding: 28,
   },
   centeredTitle: {
-    color: posColors.ink,
-    fontSize: 19,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
     textAlign: "center",
   },
   centeredHint: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
     maxWidth: 520,
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 21,
     textAlign: "center",
   },
   detailsState: {
+    alignItems: "center",
     flex: 1,
-    minHeight: 220,
-    alignItems: "center",
+    gap: 12,
     justifyContent: "center",
-    padding: 28,
+    minHeight: 160,
+    padding: 24,
   },
-  actionButton: {
-    minHeight: LOCAL_HISTORY_MIN_TOUCH_TARGET,
-    minWidth: 112,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionButtonCompact: {
-    minWidth: 96,
-    paddingHorizontal: 12,
-  },
-  actionPrimary: {
-    borderColor: posColors.orange,
-    backgroundColor: posColors.orange,
-  },
-  actionSecondary: {
-    borderColor: posColors.blue,
-    backgroundColor: posColors.blueSoft,
-  },
-  actionQuiet: {
-    borderColor: posColors.border,
-    backgroundColor: posColors.surface,
-  },
-  actionText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  actionTextDark: {
-    color: posColors.ink,
-  },
-  disabled: {
-    opacity: 0.45,
-  },
-});
+}));

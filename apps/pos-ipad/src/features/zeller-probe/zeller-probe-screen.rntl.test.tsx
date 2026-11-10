@@ -7,6 +7,8 @@ import { ZellerProbeScreen } from "./zeller-probe-screen";
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "zh", resolvedLanguage: "zh" },
+    // 页面外壳的顶栏（状态条）用全局文案；这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -198,6 +200,27 @@ describe("ZellerProbeScreen", () => {
       `VerifyThenNotPaid · ${REFERENCE}`,
     );
     expect(disabled(screen.getByTestId("zeller-probe-cancel"))).toBe(true);
+  });
+
+  it("金额三选一：默认 $1.00，选中项跟着点击切换，扣款按钮显示所选金额", async () => {
+    const screen = await render(
+      <ZellerProbeScreen
+        context={[]}
+        onBack={jest.fn()}
+        ports={ports}
+        sdk={{ status: "ready", terminal: createTerminal() }}
+      />,
+    );
+    const checked = (cents: number) =>
+      screen.getByTestId(`zeller-probe-amount-${cents}`).props.accessibilityState
+        ?.checked === true;
+
+    expect([100, 200, 500].map(checked)).toEqual([true, false, false]);
+    expect(screen.getByText("扣款 $1.00")).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId("zeller-probe-amount-500"));
+    expect([100, 200, 500].map(checked)).toEqual([false, false, true]);
+    expect(screen.getByText("扣款 $5.00")).toBeTruthy();
   });
 
   it("分享的是整份日志；分享失败时提示可以手动拷贝", async () => {

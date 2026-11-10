@@ -2,7 +2,6 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActivityIndicator, ScrollView, Share, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   resolveZellerProbeLocale,
@@ -26,17 +25,26 @@ import {
 } from "./zeller-probe-runner";
 import type { ZellerSdkHostState } from "./zeller-sdk-host";
 
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton } from "@/ui/controls/pos-button";
+import { PosSegmented } from "@/ui/controls/pos-segmented";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+  type PosPalette,
+} from "@/ui/theme";
 
 /** 可选的验证金额（分）。Zeller 没有测试环境，只给小金额，不提供自由输入。 */
 export const ZELLER_PROBE_AMOUNTS_CENTS = [100, 200, 500] as const;
 
-const TONE_COLORS: Record<ZellerProbeTone, string> = {
-  good: posColors.green,
-  bad: posColors.red,
-  warn: posColors.yellow,
-  neutral: posColors.blue,
+// 只存色名：色值在渲染时按当前主题读取。
+const TONE_COLORS: Record<ZellerProbeTone, keyof PosPalette> = {
+  good: "green",
+  bad: "red",
+  warn: "yellow",
+  neutral: "blue",
 };
 
 export type ZellerProbeScreenProps = Readonly<{
@@ -70,6 +78,7 @@ export function ZellerProbeScreen({
   onBack,
   shareReport = shareWithSystemSheet,
 }: ZellerProbeScreenProps) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale =
     localeOverride ?? resolveZellerProbeLocale(i18n.resolvedLanguage ?? i18n.language);
@@ -190,57 +199,71 @@ export function ZellerProbeScreen({
   const actionsDisabled = !terminal || busy;
 
   return (
-    <SafeAreaView style={styles.safeArea} testID="zeller-probe-screen">
-      <View style={styles.header}>
-        <ActionButton
-          icon="arrow-left"
-          label={t("action.back")}
-          onPress={onBack}
-          sound="navigate"
-          testID="zeller-probe-back"
-          tone="secondary"
+    <PosScreenFrame
+      header={
+        <PosPageHeader
+          actions={
+            <>
+              <PosButton
+                disabled={entries.length === 0 || busy}
+                icon="trash-can-outline"
+                label={t("action.clear")}
+                onPress={() => setEntries([])}
+                size="medium"
+                testID="zeller-probe-clear"
+                tone="quiet"
+              />
+              <PosButton
+                disabled={entries.length === 0}
+                icon="export-variant"
+                label={t("action.share")}
+                onPress={() => void onShare()}
+                size="medium"
+                testID="zeller-probe-share"
+                tone="quiet"
+              />
+            </>
+          }
+          backLabel={t("action.back")}
+          backTestID="zeller-probe-back"
+          onBack={onBack}
+          subtitle={t("subtitle")}
+          title={t("title")}
         />
-        <View style={styles.headerCopy}>
-          <Text style={styles.title}>{t("title")}</Text>
-          <Text numberOfLines={1} style={styles.subtitle}>
-            {t("subtitle")}
-          </Text>
-        </View>
-        <ActionButton
-          disabled={entries.length === 0 || busy}
-          icon="trash-can-outline"
-          label={t("action.clear")}
-          onPress={() => setEntries([])}
-          testID="zeller-probe-clear"
-          tone="secondary"
-        />
-        <ActionButton
-          disabled={entries.length === 0}
-          icon="share-variant-outline"
-          label={t("action.share")}
-          onPress={() => void onShare()}
-          testID="zeller-probe-share"
-          tone="secondary"
-        />
-      </View>
-
+      }
+      rail="none"
+      testID="zeller-probe-screen"
+    >
       <View style={styles.workspace}>
         <ScrollView contentContainerStyle={styles.columnContent} style={styles.sideColumn}>
           <View style={styles.warning} testID="zeller-probe-warning">
-            <MaterialCommunityIcons color={posColors.red} name="alert" size={20} />
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.red}
+              name="alert"
+              size={24}
+            />
             <Text style={styles.warningText}>{t("warning.realMoney")}</Text>
           </View>
 
-          <View style={[styles.statusCard, { borderLeftColor: TONE_COLORS[sdkTone] }]}>
-            <Text style={styles.sectionTitle}>{t("section.sdk")}</Text>
-            <Text selectable style={styles.statusText} testID="zeller-probe-sdk-status">
-              {sdkLabel}
-            </Text>
-            <View style={styles.busyRow}>
-              {busy ? <ActivityIndicator color={posColors.blue} size="small" /> : null}
-              <Text style={styles.hint} testID="zeller-probe-state">
-                {busy ? t("state.busy") : t("state.idle")}
+          <View style={styles.statusCard}>
+            <View
+              style={[
+                styles.statusBar,
+                { backgroundColor: posColors[TONE_COLORS[sdkTone]] },
+              ]}
+            />
+            <View style={styles.statusBody}>
+              <Text style={styles.sectionTitle}>{t("section.sdk")}</Text>
+              <Text selectable style={styles.statusText} testID="zeller-probe-sdk-status">
+                {sdkLabel}
               </Text>
+              <View style={styles.busyRow}>
+                {busy ? <ActivityIndicator color={posColors.blue} size="small" /> : null}
+                <Text style={styles.hint} testID="zeller-probe-state">
+                  {busy ? t("state.busy") : t("state.idle")}
+                </Text>
+              </View>
             </View>
           </View>
 
@@ -248,21 +271,23 @@ export function ZellerProbeScreen({
             <Text style={styles.sectionTitle}>{t("section.pairing")}</Text>
             <Text style={styles.hint}>{t("hint.pairing")}</Text>
             <View style={styles.buttonRow}>
-              <ActionButton
+              <PosButton
                 disabled={actionsDisabled}
+                fill
                 icon="link-variant"
                 label={t("action.initialise")}
                 onPress={onInitialise}
+                size="medium"
                 testID="zeller-probe-initialise"
-                tone="secondary"
               />
-              <ActionButton
+              <PosButton
                 disabled={actionsDisabled}
+                fill
                 icon="account-key-outline"
                 label={t("action.setup")}
                 onPress={onSetup}
+                size="medium"
                 testID="zeller-probe-setup"
-                tone="secondary"
               />
             </View>
           </View>
@@ -270,46 +295,37 @@ export function ZellerProbeScreen({
           <View style={styles.panel}>
             <Text style={styles.sectionTitle}>{t("section.purchase")}</Text>
             <Text style={styles.hint}>{t("amount.label")}</Text>
+            {/* 金额三选一：只给固定的小金额，进行中不能换。 */}
+            <PosSegmented
+              accessibilityLabel={t("amount.label")}
+              disabled={busy}
+              onChange={(value) => setAmountCents(Number(value))}
+              options={ZELLER_PROBE_AMOUNTS_CENTS.map((cents) => ({
+                label: formatDollars(cents),
+                testID: `zeller-probe-amount-${cents}`,
+                value: String(cents),
+              }))}
+              value={String(amountCents)}
+            />
             <View style={styles.buttonRow}>
-              {ZELLER_PROBE_AMOUNTS_CENTS.map((cents) => (
-                <PosPressable
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: busy, selected: cents === amountCents }}
-                  disabled={busy}
-                  key={cents}
-                  onPress={() => setAmountCents(cents)}
-                  style={[
-                    styles.amountChip,
-                    cents === amountCents && styles.amountChipSelected,
-                    busy && styles.disabledButton,
-                  ]}
-                  testID={`zeller-probe-amount-${cents}`}
-                >
-                  <Text
-                    style={[
-                      styles.amountChipLabel,
-                      cents === amountCents && styles.amountChipLabelSelected,
-                    ]}
-                  >
-                    {formatDollars(cents)}
-                  </Text>
-                </PosPressable>
-              ))}
-            </View>
-            <View style={styles.buttonRow}>
-              <ActionButton
+              {/* 真实扣款是这一页唯一的主操作；「取消」只在刷卡机等待时可用。 */}
+              <PosButton
                 disabled={actionsDisabled}
+                fill
                 icon="credit-card-outline"
                 label={t("action.purchase", { amount: formatDollars(amountCents) })}
                 onPress={onPurchase}
+                size="large"
                 testID="zeller-probe-purchase"
                 tone="primary"
               />
-              <ActionButton
+              <PosButton
                 disabled={!busy || !cancellable}
                 icon="close-circle-outline"
                 label={t("action.cancel")}
                 onPress={onCancel}
+                size="large"
+                style={styles.cancelButton}
                 testID="zeller-probe-cancel"
                 tone="danger"
               />
@@ -328,28 +344,30 @@ export function ZellerProbeScreen({
             </Text>
             <Text style={styles.hint}>{t("hint.followUp")}</Text>
             <View style={styles.buttonRow}>
-              <ActionButton
+              <PosButton
                 disabled={actionsDisabled || !lastPurchase}
+                fill
                 icon="magnify"
                 label={t("action.query")}
                 onPress={onQuery}
+                size="medium"
                 testID="zeller-probe-query"
-                tone="secondary"
               />
-              <ActionButton
+              <PosButton
                 disabled={actionsDisabled || !refundableUuid}
+                fill
                 icon="cash-refund"
                 label={t("action.refund")}
                 onPress={onRefund}
+                size="medium"
                 testID="zeller-probe-refund"
-                tone="secondary"
               />
             </View>
           </View>
         </ScrollView>
 
-        <ScrollView contentContainerStyle={styles.columnContent} style={styles.mainColumn}>
-          <View style={styles.panel}>
+        <ScrollView contentContainerStyle={styles.logContent} style={styles.mainColumn}>
+          <View style={[styles.panel, styles.logPanel]}>
             <Text style={styles.sectionTitle}>{t("section.log")}</Text>
             {shareFailed ? <Text style={styles.shareFailed}>{t("share.failed")}</Text> : null}
             {entries.length === 0 ? (
@@ -360,7 +378,7 @@ export function ZellerProbeScreen({
               entries.map((entry, index) => (
                 <View
                   key={`${entry.startedAtIso}-${index}`}
-                  style={[styles.entry, { borderLeftColor: TONE_COLORS[entry.tone] }]}
+                  style={[styles.entry, { borderLeftColor: posColors[TONE_COLORS[entry.tone]] }]}
                   testID={`zeller-probe-entry-${index}`}
                 >
                   <View style={styles.entryTop}>
@@ -378,7 +396,7 @@ export function ZellerProbeScreen({
           </View>
         </ScrollView>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -386,144 +404,82 @@ function formatDollars(cents: number): string {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
-function ActionButton({
-  disabled = false,
-  icon,
-  label,
-  onPress,
-  sound = "tap",
-  testID,
-  tone,
-}: Readonly<{
-  disabled?: boolean;
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-  onPress(): void;
-  sound?: "tap" | "navigate";
-  testID: string;
-  tone: "primary" | "secondary" | "danger";
-}>) {
-  const ink = tone === "secondary" ? posColors.blue : "#FFFFFF";
-  return (
-    <PosPressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
-      style={({ pressed }) => [
-        styles.button,
-        tone === "primary" && styles.primaryButton,
-        tone === "secondary" && styles.secondaryButton,
-        tone === "danger" && styles.dangerButton,
-        disabled && styles.disabledButton,
-        pressed && !disabled && styles.pressedButton,
-      ]}
-      testID={testID}
-    >
-      <MaterialCommunityIcons color={ink} name={icon} size={20} />
-      <Text style={[styles.buttonLabel, { color: ink }]}>{label}</Text>
-    </PosPressable>
-  );
-}
-
-const styles = StyleSheet.create({
-  safeArea: { backgroundColor: posColors.canvas, flex: 1 },
-  header: {
-    alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderBottomColor: posColors.border,
-    borderBottomWidth: 1,
+const styles = createPosStyles((colors) => ({
+  workspace: {
+    flex: 1,
     flexDirection: "row",
     gap: 12,
-    minHeight: 72,
-    paddingHorizontal: 20,
+    minHeight: 0,
+    padding: 12,
   },
-  headerCopy: { flex: 1, minWidth: 0 },
-  title: { color: posColors.ink, fontSize: 23, fontWeight: "900" },
-  subtitle: { color: posColors.mutedInk, fontSize: 13, marginTop: 3 },
-  workspace: { flex: 1, flexDirection: "row", gap: 16, padding: 16 },
-  sideColumn: { flex: 1 },
-  mainColumn: { flex: 1.3 },
-  columnContent: { gap: 16, paddingBottom: 24 },
+  sideColumn: { flexGrow: 0, flexShrink: 0, width: 440 },
+  mainColumn: { flex: 1, minWidth: 0 },
+  columnContent: { gap: 12, paddingBottom: 12 },
+  logContent: { flexGrow: 1 },
   warning: {
     alignItems: "center",
-    backgroundColor: posColors.redSoft,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.red,
+    borderRadius: posRadius.large,
+    borderWidth: 1.5,
     flexDirection: "row",
     gap: 10,
     padding: 14,
   },
-  warningText: { color: posColors.red, flex: 1, fontSize: 15, fontWeight: "800" },
-  statusCard: {
-    backgroundColor: posColors.surface,
-    borderLeftWidth: 5,
-    gap: 6,
-    padding: 18,
-  },
-  statusText: { color: posColors.ink, fontSize: 17, fontWeight: "800" },
-  busyRow: { alignItems: "center", flexDirection: "row", gap: 8, minHeight: 22 },
-  panel: { backgroundColor: posColors.surface, gap: 10, padding: 18 },
-  sectionTitle: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 0.6,
-  },
-  hint: { color: posColors.mutedInk, fontSize: 14, lineHeight: 20 },
-  buttonRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  button: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    minHeight: 48,
-    minWidth: 112,
-    paddingHorizontal: 16,
-  },
-  primaryButton: { backgroundColor: posColors.orange },
-  secondaryButton: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.blue,
-    borderWidth: 1,
-  },
-  dangerButton: { backgroundColor: posColors.red },
-  disabledButton: { opacity: 0.45 },
-  pressedButton: { opacity: 0.62 },
-  buttonLabel: { fontSize: 15, fontWeight: "800" },
-  amountChip: {
-    alignItems: "center",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: 48,
-    minWidth: 88,
-    paddingHorizontal: 14,
-  },
-  amountChipSelected: { backgroundColor: posColors.blueSoft, borderColor: posColors.blue },
-  amountChipLabel: {
-    color: posColors.ink,
+  warningText: {
+    color: colors.red,
+    flex: 1,
     fontSize: 16,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "700",
+    fontWeight: "900",
+    lineHeight: 22,
   },
-  amountChipLabelSelected: { color: posColors.blue, fontWeight: "900" },
-  lastPurchase: { color: posColors.ink, fontSize: 14, fontWeight: "700" },
-  shareFailed: { color: posColors.red, fontSize: 14, fontWeight: "700" },
+  statusCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    flexDirection: "row",
+    overflow: "hidden",
+  },
+  statusBar: { width: 8 },
+  statusBody: { flex: 1, gap: 6, minWidth: 0, padding: 16 },
+  statusText: { color: colors.ink, fontSize: 17, fontWeight: "800" },
+  busyRow: { alignItems: "center", flexDirection: "row", gap: 8, minHeight: 22 },
+  panel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    gap: 10,
+    padding: 16,
+  },
+  logPanel: { flexGrow: 1 },
+  sectionTitle: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+  hint: { color: colors.mutedInk, fontSize: 14, fontWeight: "600", lineHeight: 20 },
+  buttonRow: { flexDirection: "row", gap: 10 },
+  cancelButton: { minWidth: 132 },
+  lastPurchase: { color: colors.ink, fontSize: 15, fontWeight: "800" },
+  shareFailed: { color: colors.red, fontSize: 14, fontWeight: "700" },
   entry: {
     borderLeftWidth: 4,
-    borderTopColor: posColors.border,
+    borderTopColor: colors.border,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 6,
     paddingLeft: 12,
     paddingVertical: 10,
   },
   entryTop: { alignItems: "baseline", flexDirection: "row", gap: 8 },
-  entryHeadline: { color: posColors.ink, flex: 1, fontSize: 16, fontWeight: "900" },
+  entryHeadline: { color: colors.ink, flex: 1, fontSize: 17, fontWeight: "900" },
   entryMs: {
-    color: posColors.mutedInk,
-    fontSize: 13,
+    color: colors.mutedInk,
+    fontSize: 14,
     fontVariant: ["tabular-nums"],
+    fontWeight: "700",
   },
-  entryLines: { color: posColors.ink, fontFamily: "Menlo", fontSize: 12, lineHeight: 18 },
-});
+  entryLines: { color: colors.ink, fontFamily: "Menlo", fontSize: 13, lineHeight: 20 },
+}));

@@ -78,6 +78,8 @@ jest.mock("expo-sharing", () => ({
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "zh", resolvedLanguage: "zh" },
+    // 页面外壳的顶栏（状态条）用全局文案；这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 

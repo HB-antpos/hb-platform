@@ -1,16 +1,13 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   FlatList,
   ScrollView,
-  StyleSheet,
   Text,
   View,
-  type StyleProp,
-  type ViewStyle,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { businessDayUtcRange } from "@hb/pos-sync/features/sync-history/business-day-range";
 import {
@@ -29,11 +26,24 @@ import {
   type SyncHistoryRow,
 } from "@hb/pos-sync/features/sync-history/sync-history-presenter";
 
+import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
 import { PosDatePickerField } from "@/ui/controls/pos-date-picker-field";
+import { PosPill, type PosPillTone } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 export const SYNC_HISTORY_MIN_TOUCH_TARGET = 44;
+
+/** 左侧筛选栏的固定宽度（设计图 300）。 */
+export const SYNC_HISTORY_FILTERS_WIDTH = 300;
+/** 行内勾选框的边长（设计图 34）。 */
+export const SYNC_HISTORY_CHECKBOX_SIZE = 34;
 
 const FILTER_STATES: readonly LocalSyncHistoryOrderState[] = [
   "CompletedLocal",
@@ -53,22 +63,13 @@ type SyncHistoryScreenProps = Readonly<{
   onBack?(): void;
 }>;
 
-type ActionButtonProps = Readonly<{
-  label: string;
-  onPress(): void;
-  disabled?: boolean;
-  sound?: "tap" | "navigate";
-  testID: string;
-  tone?: "primary" | "secondary" | "quiet";
-  style?: StyleProp<ViewStyle>;
-}>;
-
 export function SyncHistoryScreen({
   presenter,
   businessTimeZone,
   onExport,
   onBack,
 }: SyncHistoryScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -152,125 +153,175 @@ export function SyncHistoryScreen({
     }
   };
 
+  // 「已选 N 笔」里的数字单独放大成主操作色，其余文字沿用同一条文案。
+  const [selectionPrefix, selectionNumber, selectionSuffix] = splitAroundCount(
+    t("selection.count", { count: selectedCount }),
+    selectedCount,
+  );
+
   return (
-    <SafeAreaView style={styles.safeArea} testID="sync-history-screen">
-      <View style={styles.header}>
-        {onBack ? (
-          <ActionButton
-            label={t("action.back")}
-            onPress={onBack}
-            sound="navigate"
-            testID="sync-history-back"
-            tone="quiet"
-          />
-        ) : null}
-        <View style={styles.headerIdentity}>
-          <Text style={styles.title}>{t("title")}</Text>
-          <Text style={styles.subtitle}>{t("subtitle")}</Text>
-        </View>
-        <View style={styles.pendingCard} testID="sync-history-pending-count">
-          <Text style={styles.pendingLabel}>{t("pending.label")}</Text>
-          <Text style={styles.pendingCount}>
-            {t("pending.count", { count: state.pendingCount })}
-          </Text>
-        </View>
-        <ActionButton
-          disabled={loading}
-          label={loading ? t("action.refreshing") : t("action.refresh")}
-          onPress={() => {
-            void presenter.refresh();
-          }}
-          testID="sync-history-refresh"
-        />
-      </View>
-
-      <View style={styles.workspace} testID="sync-history-workspace">
-        <ScrollView
-          contentContainerStyle={styles.filtersPaneContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator
-          style={styles.filtersPane}
-          testID="sync-history-filters-scroll"
-        >
-          <Text style={styles.paneTitle}>{t("filters.title")}</Text>
-          <Text style={styles.sectionLabel}>{t("filters.status")}</Text>
-          <View style={styles.filterGrid}>
-            <FilterChip
-              label={t("filters.all")}
-              onPress={() => applyFilters([])}
-              selected={state.filters.states.length === 0}
-              testID="sync-history-filter-all"
-            />
-            {FILTER_STATES.map((status) => (
-              <FilterChip
-                key={status}
-                label={t(`status.${status}`)}
-                onPress={() => toggleState(status)}
-                selected={state.filters.states.includes(status)}
-                testID={`sync-history-filter-${status}`}
+    <PosScreenFrame
+      active="sync-history"
+      header={
+        <PosPageHeader
+          actions={
+            <>
+              <View
+                style={styles.pendingCard}
+                testID="sync-history-pending-count"
+              >
+                <Text style={styles.pendingLabel}>{t("pending.label")}</Text>
+                <Text style={styles.pendingCount}>
+                  {t(state.pendingCount === 1 ? "pending.countOne" : "pending.count", { count: state.pendingCount })}
+                </Text>
+              </View>
+              <PosButton
+                disabled={loading}
+                icon="refresh"
+                label={loading ? t("action.refreshing") : t("action.refresh")}
+                loading={loading}
+                onPress={() => {
+                  void presenter.refresh();
+                }}
+                size="medium"
+                testID="sync-history-refresh"
+                tone="quiet"
               />
-            ))}
-          </View>
+            </>
+          }
+          backLabel={t("action.back")}
+          backTestID="sync-history-back"
+          onBack={onBack}
+          subtitle={t("subtitle")}
+          title={t("title")}
+        />
+      }
+      testID="sync-history-screen"
+    >
+      <View style={styles.workspace} testID="sync-history-workspace">
+        {/* 左栏只管筛选：状态大按钮点了立即查，日期改完点「应用筛选」。 */}
+        <View style={styles.filtersPane}>
+          <ScrollView
+            contentContainerStyle={styles.filtersPaneContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+            style={styles.filtersScroll}
+            testID="sync-history-filters-scroll"
+          >
+            <Text style={styles.paneTitle}>{t("filters.title")}</Text>
+            <Text style={styles.sectionLabel}>{t("filters.statusHint")}</Text>
+            <View style={styles.filterGrid}>
+              <FilterChip
+                label={t("filters.all")}
+                onPress={() => applyFilters([])}
+                selected={state.filters.states.length === 0}
+                testID="sync-history-filter-all"
+              />
+              {FILTER_STATES.map((status) => (
+                <FilterChip
+                  key={status}
+                  label={t(`status.${status}`)}
+                  onPress={() => toggleState(status)}
+                  selected={state.filters.states.includes(status)}
+                  testID={`sync-history-filter-${status}`}
+                />
+              ))}
+            </View>
 
-          <DateField
-            label={t("filters.dateFrom")}
-            locale={locale}
-            onChange={setDateFrom}
-            testID="sync-history-date-from"
-            value={dateFrom}
-          />
-          <DateField
-            label={t("filters.dateTo")}
-            locale={locale}
-            onChange={setDateTo}
-            testID="sync-history-date-to"
-            value={dateTo}
-          />
-          <ActionButton
+            <Text style={[styles.sectionLabel, styles.sectionLabelSpaced]}>
+              {t("filters.dates")}
+            </Text>
+            <DateField
+              label={t("filters.dateFrom")}
+              locale={locale}
+              onChange={setDateFrom}
+              testID="sync-history-date-from"
+              value={dateFrom}
+            />
+            <DateField
+              label={t("filters.dateTo")}
+              locale={locale}
+              onChange={setDateTo}
+              testID="sync-history-date-to"
+              value={dateTo}
+            />
+          </ScrollView>
+          {/* 「应用筛选」固定在筛选栏底部，屏幕矮时上面的内容可滚动。 */}
+          <PosButton
             disabled={loading}
+            icon="filter-check-outline"
             label={t("filters.apply")}
             onPress={() => applyFilters()}
+            size="medium"
             testID="sync-history-apply-filters"
-            tone="secondary"
           />
+        </View>
 
-          <View style={styles.divider} />
-          <Text style={styles.selectionCount}>
-            {t("selection.count", { count: selectedCount })}
-          </Text>
-          <ActionButton
-            disabled={loading || !canManualRetransmit || selectedCount === 0}
-            label={t("action.retransmitSelected")}
-            onPress={() => {
-              void presenter.requestRetransmitSelected();
-            }}
-            testID="sync-history-retransmit-selected"
-          />
-          <ActionButton
-            disabled={
-              loading ||
-              !canManualRetransmit ||
-              !dateFrom ||
-              !dateTo
-            }
-            label={t("action.retransmitRange")}
-            onPress={retransmitDateRange}
-            testID="sync-history-retransmit-range"
-            tone="secondary"
-          />
-          <ActionButton
-            disabled={exportStatus === "exporting" || !state.access.canExport}
-            label={
-              exportStatus === "exporting"
-                ? t("action.exporting")
-                : t("action.export")
-            }
-            onPress={() => {
-              void exportSupportBundle();
-            }}
-            testID="sync-history-export"
-            tone="quiet"
-          />
+        <View accessibilityLabel={t("list.title")} style={styles.listPane}>
+          <RetransmitNotices locale={locale} state={state} />
+
+          <View style={styles.listBody}>
+            {state.kind === "loading" && state.rows.length === 0 ? (
+              <CenteredState
+                loading
+                message={t("loading.title")}
+                testID="sync-history-loading"
+              />
+            ) : null}
+            {state.kind === "empty" ? (
+              <CenteredState
+                hint={t("empty.hint")}
+                icon="text-box-search-outline"
+                message={t("empty.title")}
+                testID="sync-history-empty"
+              />
+            ) : null}
+            {state.kind === "failed" ? (
+              <CenteredState
+                actionLabel={t("action.refresh")}
+                hint={t("failed.hint")}
+                icon="alert-circle-outline"
+                message={`${t("failed.title")} · ${state.errorCode}`}
+                onAction={() => {
+                  void presenter.refresh();
+                }}
+                testID="sync-history-failed"
+              />
+            ) : null}
+            {(state.kind === "ready" ||
+              (state.kind === "loading" && state.rows.length > 0)) ? (
+              <FlatList
+                contentContainerStyle={styles.orderList}
+                data={state.rows}
+                keyExtractor={(row) => row.orderGuid}
+                renderItem={({ item }) => (
+                  <SyncHistoryOrderRow
+                    canSelect={
+                      canManualRetransmit &&
+                      item.retransmit.kind === "allowed"
+                    }
+                    locale={locale}
+                    onSelected={(selected) =>
+                      presenter.setSelected(item.orderGuid, selected)
+                    }
+                    row={item}
+                  />
+                )}
+                style={styles.orderListScroll}
+                testID="sync-history-list"
+              />
+            ) : null}
+            {/* 已有列表时的刷新进度浮在列表右上角，不挤动列表。 */}
+            {loading && state.rows.length > 0 ? (
+              <View style={styles.inlineLoading}>
+                <ActivityIndicator
+                  color={posColors.accent}
+                  testID="sync-history-inline-loading"
+                />
+              </View>
+            ) : null}
+          </View>
+
           {exportStatus === "success" ? (
             <Notice
               message={t("export.success")}
@@ -285,84 +336,72 @@ export function SyncHistoryScreen({
               tone="danger"
             />
           ) : null}
-        </ScrollView>
 
-        <View style={styles.listPane}>
-          <View style={styles.listHeader}>
-            <Text style={styles.paneTitle}>{t("list.title")}</Text>
-            {loading && state.rows.length > 0 ? (
-              <ActivityIndicator
-                color={posColors.orange}
-                testID="sync-history-inline-loading"
-              />
-            ) : null}
-          </View>
-
-          <RetransmitNotices locale={locale} state={state} />
-
-          {state.kind === "loading" && state.rows.length === 0 ? (
-            <CenteredState
-              loading
-              message={t("loading.title")}
-              testID="sync-history-loading"
-            />
-          ) : null}
-          {state.kind === "empty" ? (
-            <CenteredState
-              hint={t("empty.hint")}
-              message={t("empty.title")}
-              testID="sync-history-empty"
-            />
-          ) : null}
-          {state.kind === "failed" ? (
-            <CenteredState
-              actionLabel={t("action.refresh")}
-              hint={t("failed.hint")}
-              message={`${t("failed.title")} · ${state.errorCode}`}
-              onAction={() => {
-                void presenter.refresh();
-              }}
-              testID="sync-history-failed"
-            />
-          ) : null}
-          {(state.kind === "ready" ||
-            (state.kind === "loading" && state.rows.length > 0)) ? (
-            <FlatList
-              contentContainerStyle={styles.orderList}
-              data={state.rows}
-              keyExtractor={(row) => row.orderGuid}
-              renderItem={({ item }) => (
-                <SyncHistoryOrderRow
-                  canSelect={
-                    canManualRetransmit &&
-                    item.retransmit.kind === "allowed"
-                  }
-                  locale={locale}
-                  onSelected={(selected) =>
-                    presenter.setSelected(item.orderGuid, selected)
-                  }
-                  row={item}
-                />
-              )}
-              testID="sync-history-list"
-            />
-          ) : null}
-
-          <View style={styles.listFooter}>
-            <ActionButton
-              disabled={loading || state.nextBeforeLocalSequence === null}
-              label={t("action.loadMore")}
+          {/* 三个操作固定在列表下方一排：补传已选是本页唯一的主按钮。 */}
+          <View style={styles.actionBar} testID="sync-history-action-bar">
+            <Text
+              style={styles.selectionCount}
+              testID="sync-history-selection-count"
+            >
+              {selectionPrefix}
+              <Text style={styles.selectionNumber}>{selectionNumber}</Text>
+              {selectionSuffix}
+            </Text>
+            <PosButton
+              disabled={loading || !canManualRetransmit || selectedCount === 0}
+              fill
+              icon="cloud-upload-outline"
+              label={t("action.retransmitSelected")}
               onPress={() => {
-                void presenter.loadNextPage();
+                void presenter.requestRetransmitSelected();
               }}
-              style={styles.loadMore}
-              testID="sync-history-load-more"
+              testID="sync-history-retransmit-selected"
+              tone="primary"
+            />
+            <PosButton
+              disabled={
+                loading ||
+                !canManualRetransmit ||
+                !dateFrom ||
+                !dateTo
+              }
+              icon="calendar-range"
+              label={t("action.retransmitRange")}
+              onPress={retransmitDateRange}
+              style={styles.actionBarSecondary}
+              testID="sync-history-retransmit-range"
+            />
+            <PosButton
+              disabled={exportStatus === "exporting" || !state.access.canExport}
+              icon="export-variant"
+              label={
+                exportStatus === "exporting"
+                  ? t("action.exporting")
+                  : t("action.export")
+              }
+              loading={exportStatus === "exporting"}
+              onPress={() => {
+                void exportSupportBundle();
+              }}
+              style={styles.actionBarSecondary}
+              testID="sync-history-export"
               tone="quiet"
             />
           </View>
+          <PosButton
+            disabled={loading || state.nextBeforeLocalSequence === null}
+            icon="chevron-down"
+            label={t("action.loadMore")}
+            onPress={() => {
+              void presenter.loadNextPage();
+            }}
+            size="medium"
+            testID="sync-history-load-more"
+            tone="quiet"
+          />
         </View>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 
@@ -377,6 +416,7 @@ function SyncHistoryOrderRow({
   onSelected(selected: boolean): void;
   row: SyncHistoryRow;
 }>) {
+  usePosThemeVersion();
   const t = (
     key: SyncHistoryCopyKey,
     values?: Readonly<Record<string, string | number>>,
@@ -384,6 +424,25 @@ function SyncHistoryOrderRow({
   const gateKey = row.retransmit.kind === "blocked"
     ? gateCopyKey(row.retransmit.reason)
     : null;
+  const errorCode = row.outbox?.lastErrorCode ?? null;
+  // 数量异常是需要人工处理的长提示，单独占一行完整显示。
+  const quantityUnsupported = errorCode === "ORDER_SYNC_QUANTITY_UNSUPPORTED";
+  // 补传队列一行：状态 · 已尝试次数 · 下次尝试时间。
+  const outboxSummary = [
+    `${t("list.outbox")}${locale === "zh" ? "：" : ": "}${
+      row.outbox ? t(`outbox.${row.outbox.state}`) : "—"
+    }`,
+    row.outbox
+      ? t(row.outbox.attemptCount === 1 ? "list.attemptsOne" : "list.attempts", { count: row.outbox.attemptCount })
+      : null,
+    row.outbox?.nextAttemptAtIso
+      ? t("list.nextAttempt", {
+          time: formatDateTime(row.outbox.nextAttemptAtIso, locale),
+        })
+      : null,
+  ]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
 
   return (
     <PosPressable
@@ -397,84 +456,95 @@ function SyncHistoryOrderRow({
       onPress={() => onSelected(!row.isSelected)}
       style={({ pressed }) => [
         styles.orderRow,
+        !canSelect && styles.orderRowDisabled,
         row.isSelected && styles.orderRowSelected,
         pressed && styles.pressed,
       ]}
       testID={`sync-history-row-${row.orderGuid}`}
     >
-      <View style={styles.checkbox} testID={`sync-history-select-${row.orderGuid}`}>
-        <Text style={styles.checkboxText}>{row.isSelected ? "✓" : ""}</Text>
+      <View
+        style={[
+          styles.checkbox,
+          !canSelect && styles.checkboxDisabled,
+          row.isSelected && styles.checkboxChecked,
+        ]}
+        testID={`sync-history-select-${row.orderGuid}`}
+      >
+        {row.isSelected ? (
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.onAccent}
+            name="check"
+            size={24}
+          />
+        ) : null}
       </View>
       <View style={styles.orderIdentity}>
         <View style={styles.orderTitleRow}>
-          <Text style={styles.sequence}>
+          <Text numberOfLines={1} style={styles.sequence}>
             {t("list.sequence", { sequence: row.localSequence })}
           </Text>
           <StatusBadge locale={locale} state={row.state} />
         </View>
-        <Text numberOfLines={1} style={styles.orderGuid}>
-          {t("list.order", { orderGuid: row.orderGuid })}
+        <Text numberOfLines={1} style={styles.rowMeta}>
+          {t("list.order", { orderGuid: row.orderGuid })} ·{" "}
+          {formatDateTime(row.soldAtIso, locale)} · {row.storeCode} ·{" "}
+          {row.deviceCode}
         </Text>
-        <Text style={styles.orderTime}>
-          {formatDateTime(row.soldAtIso, locale)}
-        </Text>
-        <Text style={styles.deviceLine}>
-          {row.storeCode} · {row.deviceCode}
-        </Text>
-        {gateKey ? (
+        {/* 不能补传的原因写在行内，后面接补传队列信息。 */}
+        <View style={styles.rowDetailLine}>
+          {gateKey ? (
+            <>
+              <Text
+                style={[
+                  styles.gateText,
+                  row.state === "Rejected" && styles.gateTextDanger,
+                ]}
+                testID={`sync-history-gate-${row.orderGuid}`}
+              >
+                {t(gateKey)}
+              </Text>
+              <Text style={styles.rowMeta}>·</Text>
+            </>
+          ) : null}
+          <Text numberOfLines={1} style={[styles.rowMeta, styles.rowShrink]}>
+            {outboxSummary}
+          </Text>
+          {errorCode && !quantityUnsupported ? (
+            <>
+              <Text style={styles.rowMeta}>·</Text>
+              <Text
+                numberOfLines={1}
+                style={[styles.safeError, styles.rowShrink]}
+                testID={`sync-history-error-${row.orderGuid}`}
+              >
+                {t("list.error", { code: errorCode })}
+              </Text>
+            </>
+          ) : null}
+        </View>
+        {errorCode && quantityUnsupported ? (
           <Text
-            style={[
-              styles.gateText,
-              row.state === "Rejected" && styles.gateTextDanger,
-            ]}
-            testID={`sync-history-gate-${row.orderGuid}`}
+            numberOfLines={4}
+            style={styles.quantityWarning}
+            testID={`sync-history-error-${row.orderGuid}`}
           >
-            {t(gateKey)}
+            {t("list.quantityUnsupported", { code: errorCode })}
           </Text>
         ) : null}
       </View>
       <View style={styles.amountColumn}>
-        <Text style={styles.metaLabel}>{t("list.amount")}</Text>
         <Text style={styles.amount}>
           {formatAud(row.actualAmountCents, locale)}
         </Text>
         {row.discountCents !== 0 ? (
-          <Text style={styles.discount}>
+          <Text style={styles.amountMeta}>
             {t("list.discount")} −{formatAud(row.discountCents, locale)}
           </Text>
         ) : null}
-        <Text numberOfLines={2} style={styles.tender}>
+        <Text numberOfLines={2} style={styles.amountMeta}>
           {t("list.tender")} · {row.tenderSummary || "—"}
         </Text>
-      </View>
-      <View style={styles.outboxColumn}>
-        <Text style={styles.metaLabel}>{t("list.outbox")}</Text>
-        <Text style={styles.outboxState}>
-          {row.outbox ? t(`outbox.${row.outbox.state}`) : "—"}
-        </Text>
-        {row.outbox ? (
-          <Text style={styles.outboxMeta}>
-            {t("list.attempts", { count: row.outbox.attemptCount })}
-          </Text>
-        ) : null}
-        {row.outbox?.lastErrorCode ? (
-          <Text
-            numberOfLines={row.outbox.lastErrorCode === "ORDER_SYNC_QUANTITY_UNSUPPORTED" ? 4 : 1}
-            style={styles.safeError}
-            testID={`sync-history-error-${row.orderGuid}`}
-          >
-            {t(row.outbox.lastErrorCode === "ORDER_SYNC_QUANTITY_UNSUPPORTED"
-              ? "list.quantityUnsupported"
-              : "list.error", { code: row.outbox.lastErrorCode })}
-          </Text>
-        ) : null}
-        {row.outbox?.nextAttemptAtIso ? (
-          <Text numberOfLines={1} style={styles.outboxMeta}>
-            {t("list.nextAttempt", {
-              time: formatDateTime(row.outbox.nextAttemptAtIso, locale),
-            })}
-          </Text>
-        ) : null}
       </View>
     </PosPressable>
   );
@@ -487,6 +557,7 @@ function RetransmitNotices({
   locale: SyncHistoryLocale;
   state: SyncHistoryPresenterState;
 }>) {
+  usePosThemeVersion();
   const result = state.lastRetransmit;
   if (!result) return null;
   const t = (
@@ -529,6 +600,7 @@ function RetransmitNotices({
   );
 }
 
+/** 状态筛选大按钮（高 52，可多选）：选中为深色实底。 */
 function FilterChip({
   label,
   onPress,
@@ -540,6 +612,7 @@ function FilterChip({
   selected: boolean;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityRole="checkbox"
@@ -553,6 +626,7 @@ function FilterChip({
       testID={testID}
     >
       <Text
+        numberOfLines={2}
         style={[
           styles.filterChipText,
           selected && styles.filterChipTextSelected,
@@ -577,9 +651,10 @@ function DateField({
   testID: string;
   value: string | null;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.dateField}>
-      <Text style={styles.sectionLabel}>{label}</Text>
+      <Text style={styles.fieldLabel}>{label}</Text>
       <PosDatePickerField
         accessibilityLabel={label}
         allowClear
@@ -592,47 +667,10 @@ function DateField({
   );
 }
 
-function ActionButton({
-  disabled = false,
-  label,
-  onPress,
-  sound = "tap",
-  style,
-  testID,
-  tone = "primary",
-}: ActionButtonProps) {
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound}
-      style={({ pressed }) => [
-        styles.actionButton,
-        actionToneStyles[tone],
-        disabled && styles.actionButtonDisabled,
-        pressed && !disabled && styles.pressed,
-        style,
-      ]}
-      testID={testID}
-    >
-      <Text
-        style={[
-          styles.actionButtonText,
-          tone !== "primary" && styles.actionButtonTextDark,
-          disabled && styles.actionButtonTextDisabled,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
-  );
-}
-
 function CenteredState({
   actionLabel,
   hint,
+  icon,
   loading = false,
   message,
   onAction,
@@ -640,20 +678,33 @@ function CenteredState({
 }: Readonly<{
   actionLabel?: string;
   hint?: string;
+  icon?: PosIconName;
   loading?: boolean;
   message: string;
   onAction?(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.centeredState} testID={testID}>
-      {loading ? <ActivityIndicator color={posColors.orange} size="large" /> : null}
+      {loading ? (
+        <ActivityIndicator color={posColors.accent} size="large" />
+      ) : icon ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.mutedInk}
+          name={icon}
+          size={44}
+        />
+      ) : null}
       <Text style={styles.centeredTitle}>{message}</Text>
       {hint ? <Text style={styles.centeredHint}>{hint}</Text> : null}
       {actionLabel && onAction ? (
-        <ActionButton
+        <PosButton
+          icon="refresh"
           label={actionLabel}
           onPress={onAction}
+          size="medium"
           style={styles.centeredAction}
           testID={`${testID}-action`}
         />
@@ -661,6 +712,14 @@ function CenteredState({
     </View>
   );
 }
+
+const NOTICE_ICONS: Readonly<
+  Record<"success" | "warning" | "danger", PosIconName>
+> = {
+  danger: "alert-circle-outline",
+  success: "check-circle-outline",
+  warning: "alert-outline",
+};
 
 function Notice({
   message,
@@ -671,6 +730,13 @@ function Notice({
   testID: string;
   tone: "success" | "warning" | "danger";
 }>) {
+  usePosThemeVersion();
+  const color =
+    tone === "success"
+      ? posColors.green
+      : tone === "danger"
+        ? posColors.red
+        : posColors.yellowInk;
   return (
     <View
       accessibilityRole="alert"
@@ -682,15 +748,13 @@ function Notice({
       ]}
       testID={testID}
     >
-      <Text
-        style={[
-          styles.noticeText,
-          tone === "success" && styles.noticeTextSuccess,
-          tone === "danger" && styles.noticeTextDanger,
-        ]}
-      >
-        {message}
-      </Text>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={color}
+        name={NOTICE_ICONS[tone]}
+        size={22}
+      />
+      <Text style={[styles.noticeText, { color }]}>{message}</Text>
     </View>
   );
 }
@@ -702,29 +766,34 @@ function StatusBadge({
   locale: SyncHistoryLocale;
   state: LocalSyncHistoryOrderState;
 }>) {
-  const danger = state === "Rejected";
-  const warning = state === "Blocked403" || state === "PendingSync";
-  const success = state === "Synced";
+  usePosThemeVersion();
+  // 被拒为红，待同步 / 需重新认证为黄，已同步为绿，其余（本地完成、同步中）为蓝。
+  const tone: PosPillTone =
+    state === "Rejected"
+      ? "danger"
+      : state === "Blocked403" || state === "PendingSync"
+        ? "warning"
+        : state === "Synced"
+          ? "good"
+          : "info";
   return (
-    <View
-      style={[
-        styles.statusBadge,
-        warning && styles.statusBadgeWarning,
-        danger && styles.statusBadgeDanger,
-        success && styles.statusBadgeSuccess,
-      ]}
-    >
-      <Text
-        style={[
-          styles.statusBadgeText,
-          danger && styles.statusBadgeTextDanger,
-          success && styles.statusBadgeTextSuccess,
-        ]}
-      >
-        {syncHistoryText(locale, `status.${state}`)}
-      </Text>
-    </View>
+    <PosPill
+      label={syncHistoryText(locale, `status.${state}`)}
+      style={styles.pillInline}
+      tone={tone}
+    />
   );
+}
+
+/** 把带数量的文案拆成「前缀 / 数字 / 后缀」，方便单独放大数字；找不到数字时整句当前缀。 */
+function splitAroundCount(
+  text: string,
+  count: number,
+): readonly [string, string, string] {
+  const token = String(count);
+  const index = text.indexOf(token);
+  if (index < 0) return [text, "", ""];
+  return [text.slice(0, index), token, text.slice(index + token.length)];
 }
 
 function gateCopyKey(
@@ -797,409 +866,347 @@ function formatDateTime(value: string, locale: SyncHistoryLocale): string {
   }).format(date);
 }
 
-const actionToneStyles = StyleSheet.create({
-  primary: {
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
+const styles = createPosStyles((colors) => ({
+  // ---------- 页头：待同步数量 ----------
+  pendingCard: {
+    alignItems: "center",
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: 52,
+    paddingHorizontal: 16,
   },
-  quiet: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
+  pendingLabel: {
+    color: colors.yellowInk,
+    fontSize: 15,
+    fontWeight: "800",
   },
-  secondary: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
+  pendingCount: {
+    color: colors.ink,
+    fontSize: 24,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
   },
-});
 
-const styles = StyleSheet.create({
-  actionButton: {
-    alignItems: "center",
-    borderRadius: 4,
-    borderWidth: 1,
-    justifyContent: "center",
-    minHeight: SYNC_HISTORY_MIN_TOUCH_TARGET,
-    minWidth: SYNC_HISTORY_MIN_TOUCH_TARGET,
-    paddingHorizontal: 14,
-  },
-  actionButtonDisabled: {
-    backgroundColor: "#E4E1DA",
-    borderColor: "#D0CCC2",
-    opacity: 0.72,
-  },
-  actionButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  actionButtonTextDark: {
-    color: posColors.ink,
-  },
-  actionButtonTextDisabled: {
-    color: "#7C8287",
-  },
-  amount: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "900",
-  },
-  amountColumn: {
-    alignItems: "flex-end",
-    gap: 4,
-    width: 160,
-  },
-  centeredAction: {
-    marginTop: 12,
-    minWidth: 150,
-  },
-  centeredHint: {
-    color: posColors.mutedInk,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 5,
-    maxWidth: 440,
-    textAlign: "center",
-  },
-  centeredState: {
-    alignItems: "center",
+  workspace: {
     flex: 1,
-    justifyContent: "center",
-    minHeight: 260,
-    padding: 32,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 0,
+    padding: 12,
   },
-  centeredTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
-    marginTop: 12,
-    textAlign: "center",
-  },
-  checkbox: {
-    alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.mutedInk,
-    borderRadius: 3,
-    borderWidth: 2,
-    height: 26,
-    justifyContent: "center",
-    marginTop: 2,
-    width: 26,
-  },
-  checkboxText: {
-    color: posColors.blue,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  dateField: {
-    gap: 6,
-  },
-  deviceLine: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    marginTop: 3,
-  },
-  discount: {
-    color: posColors.green,
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "700",
-  },
-  divider: {
-    backgroundColor: posColors.border,
-    height: 1,
-    marginVertical: 2,
-  },
-  filterChip: {
-    alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 4,
+
+  // ---------- 左栏：筛选 ----------
+  filtersPane: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
     borderWidth: 1,
-    flexBasis: "47%",
-    flexGrow: 1,
-    justifyContent: "center",
-    minHeight: SYNC_HISTORY_MIN_TOUCH_TARGET,
-    paddingHorizontal: 8,
+    gap: 10,
+    minHeight: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    width: SYNC_HISTORY_FILTERS_WIDTH,
   },
-  filterChipSelected: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
+  filtersScroll: {
+    flex: 1,
+    minHeight: 0,
   },
-  filterChipText: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "700",
-    textAlign: "center",
+  filtersPaneContent: {
+    gap: 8,
   },
-  filterChipTextSelected: {
-    color: posColors.blue,
+  paneTitle: {
+    color: colors.ink,
+    fontSize: 18,
     fontWeight: "900",
+  },
+  sectionLabel: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+    marginHorizontal: 2,
+    marginTop: 2,
+  },
+  sectionLabelSpaced: {
+    marginTop: 8,
   },
   filterGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 8,
   },
-  filtersPane: {
-    backgroundColor: "#F8F6F1",
-    borderColor: posColors.border,
-    borderRadius: 5,
-    borderWidth: 1,
-    minHeight: 0,
-    width: 292,
+  // 两列排布；第 7 个（最后一个）独占一行。
+  filterChip: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexBasis: "47%",
+    flexGrow: 1,
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: 8,
   },
-  filtersPaneContent: {
-    gap: 10,
-    padding: 14,
+  filterChipSelected: {
+    backgroundColor: colors.inverseSurface,
+    borderColor: colors.inverseSurface,
   },
-  gateText: {
-    color: "#8A531A",
-    fontSize: 12,
+  filterChipText: {
+    color: colors.mutedInk,
+    fontSize: 14.5,
     fontWeight: "800",
-    marginTop: 5,
+    textAlign: "center",
   },
-  gateTextDanger: {
-    color: posColors.red,
+  filterChipTextSelected: {
+    color: colors.onInverse,
   },
-  header: {
-    alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderBottomColor: posColors.border,
-    borderBottomWidth: 1,
-    flexDirection: "row",
-    gap: 14,
-    minHeight: 72,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+  dateField: {
+    gap: 5,
   },
-  headerIdentity: {
-    flex: 1,
+  fieldLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
   },
-  listFooter: {
-    alignItems: "center",
-    borderTopColor: posColors.border,
-    borderTopWidth: 1,
-    paddingTop: 10,
-  },
-  listHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    minHeight: SYNC_HISTORY_MIN_TOUCH_TARGET,
-  },
+
+  // ---------- 右栏：列表 + 底部操作 ----------
   listPane: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 5,
-    borderWidth: 1,
     flex: 1,
     gap: 10,
-    minWidth: 520,
-    padding: 14,
+    minHeight: 0,
+    minWidth: 0,
   },
-  loadMore: {
-    minWidth: 180,
+  listBody: {
+    flex: 1,
+    minHeight: 0,
   },
-  metaLabel: {
-    color: posColors.mutedInk,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
+  orderListScroll: {
+    flex: 1,
+    minHeight: 0,
   },
-  notice: {
-    backgroundColor: posColors.orangeSoft,
-    borderColor: posColors.orange,
-    borderLeftWidth: 4,
-    borderRadius: 3,
-    minHeight: SYNC_HISTORY_MIN_TOUCH_TARGET,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  noticeDanger: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
-  },
-  noticeStack: {
+  orderList: {
     gap: 6,
   },
-  noticeSuccess: {
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
+  inlineLoading: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 6,
+    pointerEvents: "none",
+    position: "absolute",
+    right: 10,
+    top: 10,
   },
-  noticeText: {
-    color: "#744024",
-    fontSize: 13,
-    fontWeight: "700",
+  orderRow: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 84,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
   },
-  noticeTextDanger: {
-    color: posColors.red,
+  // 不能补传的行整体置灰。
+  orderRowDisabled: {
+    backgroundColor: colors.surfaceAlt,
   },
-  noticeTextSuccess: {
-    color: posColors.green,
+  // 选中行描边加粗 1pt，内边距相应减 1，避免选中时内容跳动。
+  orderRowSelected: {
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+    borderWidth: 2.5,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
   },
-  noticeWarning: {
-    backgroundColor: posColors.orangeSoft,
-    borderColor: posColors.orange,
+  checkbox: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.small,
+    borderWidth: 2,
+    flexShrink: 0,
+    height: SYNC_HISTORY_CHECKBOX_SIZE,
+    justifyContent: "center",
+    width: SYNC_HISTORY_CHECKBOX_SIZE,
   },
-  orderGuid: {
-    color: posColors.ink,
-    fontSize: 12,
-    fontWeight: "700",
-    marginTop: 5,
+  checkboxChecked: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  checkboxDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
   },
   orderIdentity: {
     flex: 1,
-    minWidth: 220,
-  },
-  orderList: {
-    gap: 8,
-    paddingBottom: 8,
-  },
-  orderRow: {
-    alignItems: "flex-start",
-    backgroundColor: "#FCFBF8",
-    borderColor: posColors.border,
-    borderRadius: 4,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 12,
-    minHeight: 124,
-    padding: 12,
-  },
-  orderRowSelected: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
-  },
-  orderTime: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontVariant: ["tabular-nums"],
-    marginTop: 3,
+    gap: 3,
+    minWidth: 0,
   },
   orderTitleRow: {
     alignItems: "center",
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 7,
+    gap: 8,
+    minWidth: 0,
   },
-  outboxColumn: {
-    gap: 4,
-    width: 196,
-  },
-  outboxMeta: {
-    color: posColors.mutedInk,
-    fontSize: 11,
+  sequence: {
+    color: colors.ink,
+    flexShrink: 1,
+    fontSize: 16,
     fontVariant: ["tabular-nums"],
-  },
-  outboxState: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  paneTitle: {
-    color: posColors.ink,
-    fontSize: 17,
     fontWeight: "900",
   },
-  pendingCard: {
-    alignItems: "flex-end",
-    backgroundColor: posColors.orangeSoft,
-    borderColor: posColors.orange,
-    borderRadius: 4,
-    borderWidth: 1,
-    minWidth: 116,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+  pillInline: {
+    alignSelf: "center",
+    flexShrink: 0,
   },
-  pendingCount: {
-    color: posColors.ink,
+  rowMeta: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "600",
+  },
+  rowShrink: {
+    flexShrink: 1,
+  },
+  rowDetailLine: {
+    alignItems: "center",
+    columnGap: 5,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  gateText: {
+    color: colors.yellowInk,
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  gateTextDanger: {
+    color: colors.red,
+  },
+  safeError: {
+    color: colors.red,
+    fontSize: 12.5,
+    fontWeight: "700",
+  },
+  quantityWarning: {
+    color: colors.red,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  amountColumn: {
+    alignItems: "flex-end",
+    flexShrink: 0,
+    gap: 2,
+    maxWidth: 190,
+  },
+  amount: {
+    color: colors.ink,
     fontSize: 18,
     fontVariant: ["tabular-nums"],
     fontWeight: "900",
   },
-  pendingLabel: {
-    color: "#744024",
-    fontSize: 10,
-    fontWeight: "800",
-    textTransform: "uppercase",
+  amountMeta: {
+    color: colors.mutedInk,
+    fontSize: 12,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "700",
+    textAlign: "right",
+  },
+  actionBar: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
+  actionBarSecondary: {
+    flexShrink: 1,
+  },
+  selectionCount: {
+    color: colors.ink,
+    fontSize: 16,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    minWidth: 96,
+  },
+  selectionNumber: {
+    color: colors.accent,
+    fontSize: 22,
+  },
+
+  // ---------- 提示条 ----------
+  noticeStack: {
+    gap: 6,
+  },
+  notice: {
+    alignItems: "center",
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: SYNC_HISTORY_MIN_TOUCH_TARGET,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  noticeDanger: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+  },
+  noticeSuccess: {
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.greenBorder,
+  },
+  noticeWarning: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  // ---------- 空 / 加载 / 错误 ----------
+  centeredState: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    flex: 1,
+    gap: 12,
+    justifyContent: "center",
+    minHeight: 180,
+    padding: 28,
+  },
+  centeredTitle: {
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  centeredHint: {
+    color: colors.mutedInk,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+    maxWidth: 440,
+    textAlign: "center",
+  },
+  centeredAction: {
+    marginTop: 4,
+    minWidth: 160,
   },
   pressed: {
     opacity: 0.72,
   },
-  safeArea: {
-    backgroundColor: posColors.canvas,
-    flex: 1,
-  },
-  safeError: {
-    color: posColors.red,
-    fontFamily: "Courier",
-    fontSize: 10,
-  },
-  sectionLabel: {
-    color: posColors.ink,
-    fontSize: 12,
-    fontWeight: "800",
-  },
-  selectionCount: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "700",
-  },
-  sequence: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "900",
-  },
-  statusBadge: {
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 3,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  statusBadgeDanger: {
-    backgroundColor: posColors.redSoft,
-  },
-  statusBadgeSuccess: {
-    backgroundColor: posColors.greenSoft,
-  },
-  statusBadgeText: {
-    color: posColors.blue,
-    fontSize: 10,
-    fontWeight: "900",
-  },
-  statusBadgeTextDanger: {
-    color: posColors.red,
-  },
-  statusBadgeTextSuccess: {
-    color: posColors.green,
-  },
-  statusBadgeWarning: {
-    backgroundColor: posColors.orangeSoft,
-  },
-  subtitle: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    marginTop: 3,
-  },
-  tender: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    marginTop: 4,
-  },
-  title: {
-    color: posColors.ink,
-    fontSize: 23,
-    fontWeight: "900",
-  },
-  workspace: {
-    flex: 1,
-    flexDirection: "row",
-    gap: 12,
-    minHeight: 0,
-    padding: 14,
-  },
-});
+}));

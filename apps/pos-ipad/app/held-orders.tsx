@@ -20,6 +20,7 @@ import {
 } from "@/features/shared-held-orders/shared-held-order-coordinator";
 import type { SharedHeldOrderPendingListItem } from "@/features/shared-held-orders/shared-held-order-network-api";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type HeldOrdersPresenterBinding = Readonly<{
   services: ExpoPosRuntimeServices;
@@ -29,6 +30,7 @@ type HeldOrdersPresenterBinding = Readonly<{
 
 /** 组合根持有收银员身份，挂单路由只请求受限 presenter。 */
 export default function HeldOrdersRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);

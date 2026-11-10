@@ -8,6 +8,8 @@ import {
 import { StyleSheet } from "react-native";
 
 import {
+  SYNC_HISTORY_CHECKBOX_SIZE,
+  SYNC_HISTORY_FILTERS_WIDTH,
   SYNC_HISTORY_MIN_TOUCH_TARGET,
   SyncHistoryPresenter,
   SyncHistoryScreen,
@@ -18,6 +20,8 @@ import {
   type LocalSyncHistoryPort,
 } from "./index";
 
+import { posColors } from "@/ui/theme";
+
 const SYNC_HISTORY_ALL_PERMISSIONS = [
   "Permissions.PosTerminal.Audit.View",
   "Permissions.PosTerminal.History.View",
@@ -27,6 +31,8 @@ const SYNC_HISTORY_ALL_PERMISSIONS = [
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: "en", resolvedLanguage: "en" },
+    // 页面外壳自带的顶栏会调用 t()，这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -164,6 +170,17 @@ class ScreenHistoryPort implements LocalSyncHistoryPort {
 
 const mountedPresenters: SyncHistoryPresenter[] = [];
 
+/** 取一个节点下全部文字（含嵌套 Text）。 */
+function textContent(node: { children: readonly unknown[] }): string {
+  return node.children
+    .map((child) =>
+      typeof child === "string"
+        ? child
+        : textContent(child as { children: readonly unknown[] }),
+    )
+    .join("");
+}
+
 function screenPresenter(
   port: LocalSyncHistoryPort,
   pageSize = 50,
@@ -227,6 +244,195 @@ describe("SyncHistoryScreen", () => {
     ).toBe(0);
     expect(screen.getByTestId("sync-history-retransmit-range")).toBeTruthy();
     expect(screen.getByTestId("sync-history-export")).toBeTruthy();
+  });
+
+  it("左栏只管筛选：7 个状态大按钮高 52、点了立即查，「应用筛选」固定在栏底", async () => {
+    const port = new ScreenHistoryPort([order()]);
+    const presenter = screenPresenter(port);
+    const screen = await render(
+      <SyncHistoryScreen
+        onExport={jest.fn<(serializedJson: string) => void>()}
+        presenter={presenter}
+      />,
+    );
+    await screen.findByTestId("sync-history-row-order-100");
+
+    const chipIds = [
+      "sync-history-filter-all",
+      "sync-history-filter-CompletedLocal",
+      "sync-history-filter-PendingSync",
+      "sync-history-filter-Syncing",
+      "sync-history-filter-Synced",
+      "sync-history-filter-Blocked403",
+      "sync-history-filter-Rejected",
+    ];
+    for (const testID of chipIds) {
+      const chip = screen.getByTestId(testID);
+      expect(
+        StyleSheet.flatten(chip.props.style).minHeight,
+      ).toBeGreaterThanOrEqual(52);
+      expect(chip.props.accessibilityRole).toBe("checkbox");
+    }
+    expect(
+      screen.getByTestId("sync-history-filter-all").props.accessibilityState
+        .checked,
+    ).toBe(true);
+    expect(screen.getByText("Status (select any)")).toBeTruthy();
+
+    // 状态可多选，点一下就按新状态查询，不需要再点「应用筛选」。
+    await fireEvent.press(screen.getByTestId("sync-history-filter-PendingSync"));
+    await fireEvent.press(screen.getByTestId("sync-history-filter-Rejected"));
+    await waitFor(() => {
+      expect(port.queries.at(-1)?.filters.states).toEqual([
+        "PendingSync",
+        "Rejected",
+      ]);
+    });
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("sync-history-filter-PendingSync").props
+          .accessibilityState.checked,
+      ).toBe(true);
+    });
+    expect(
+      screen.getByTestId("sync-history-filter-all").props.accessibilityState
+        .checked,
+    ).toBe(false);
+
+    // 筛选栏固定 300 宽；「应用筛选」在滚动区之外，矮屏也始终可见。
+    const filtersScroll = screen.getByTestId("sync-history-filters-scroll");
+    const filtersPane = filtersScroll.parent;
+    expect(StyleSheet.flatten(filtersPane?.props.style).width).toBe(
+      SYNC_HISTORY_FILTERS_WIDTH,
+    );
+    const apply = screen.getByTestId("sync-history-apply-filters");
+    expect(apply.parent).toBe(filtersPane);
+    expect(
+      StyleSheet.flatten(apply.props.style).minHeight,
+    ).toBeGreaterThanOrEqual(56);
+    for (const testID of ["sync-history-date-from", "sync-history-date-to"]) {
+      expect(
+        StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight,
+      ).toBeGreaterThanOrEqual(56);
+    }
+  });
+
+  it("补传已选、按日期范围补传、支持导出固定在列表下方一排，旁边显示已选数量", async () => {
+    const presenter = screenPresenter(
+      new ScreenHistoryPort([
+        order({ localSequence: 102, orderGuid: "first" }),
+        order({ localSequence: 101, orderGuid: "second" }),
+      ]),
+    );
+    const screen = await render(
+      <SyncHistoryScreen
+        onExport={jest.fn<(serializedJson: string) => void>()}
+        presenter={presenter}
+      />,
+    );
+    await screen.findByTestId("sync-history-row-first");
+
+    const bar = screen.getByTestId("sync-history-action-bar");
+    expect(StyleSheet.flatten(bar.props.style).flexDirection).toBe("row");
+    for (const testID of [
+      "sync-history-retransmit-selected",
+      "sync-history-retransmit-range",
+      "sync-history-export",
+    ]) {
+      const button = screen.getByTestId(testID);
+      expect(button.parent).toBe(bar);
+      expect(
+        StyleSheet.flatten(button.props.style).minHeight,
+      ).toBeGreaterThanOrEqual(64);
+    }
+    // 补传已选是主按钮，占满剩余宽度。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("sync-history-retransmit-selected").props.style,
+      ).flex,
+    ).toBe(1);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("sync-history-load-more").props.style,
+      ).minHeight,
+    ).toBeGreaterThanOrEqual(56);
+
+    const selectionText = () =>
+      textContent(screen.getByTestId("sync-history-selection-count"));
+    expect(selectionText()).toBe("0 selected");
+    await fireEvent.press(screen.getByTestId("sync-history-row-first"));
+    await fireEvent.press(screen.getByTestId("sync-history-row-second"));
+    await waitFor(() => {
+      expect(selectionText()).toBe("2 selected");
+    });
+  });
+
+  it("行内勾选框 34×34、整行可点；不能补传的行置灰并在行内写原因", async () => {
+    const presenter = screenPresenter(
+      new ScreenHistoryPort([
+        order({ localSequence: 102, orderGuid: "eligible" }),
+        order({
+          localSequence: 101,
+          orderGuid: "blocked",
+          outbox: {
+            attemptCount: 3,
+            lastErrorCode: "SYNC_403",
+            nextAttemptAtIso: null,
+            state: "blocked403",
+          },
+          state: "Blocked403",
+        }),
+      ]),
+    );
+    const screen = await render(
+      <SyncHistoryScreen
+        onExport={jest.fn<(serializedJson: string) => void>()}
+        presenter={presenter}
+      />,
+    );
+    await screen.findByTestId("sync-history-row-eligible");
+
+    const checkbox = StyleSheet.flatten(
+      screen.getByTestId("sync-history-select-eligible").props.style,
+    );
+    expect(checkbox.width).toBe(SYNC_HISTORY_CHECKBOX_SIZE);
+    expect(checkbox.height).toBe(SYNC_HISTORY_CHECKBOX_SIZE);
+    expect(SYNC_HISTORY_CHECKBOX_SIZE).toBe(34);
+
+    const eligibleRow = screen.getByTestId("sync-history-row-eligible");
+    const blockedRow = screen.getByTestId("sync-history-row-blocked");
+    expect(
+      StyleSheet.flatten(eligibleRow.props.style).minHeight,
+    ).toBeGreaterThanOrEqual(84);
+    expect(StyleSheet.flatten(eligibleRow.props.style).backgroundColor).toBe(
+      posColors.surface,
+    );
+    expect(StyleSheet.flatten(blockedRow.props.style).backgroundColor).toBe(
+      posColors.surfaceAlt,
+    );
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("sync-history-select-blocked").props.style,
+      ).backgroundColor,
+    ).toBe(posColors.disabledSurface);
+    // 原因与补传队列信息都写在行内。
+    expect(
+      textContent(screen.getByTestId("sync-history-gate-blocked")),
+    ).toBe("Re-authenticate before retransmitting");
+    expect(screen.getByText("Outbox: Blocked · 3 attempts")).toBeTruthy();
+    expect(
+      textContent(screen.getByTestId("sync-history-error-blocked")),
+    ).toBe("Safe error: SYNC_403");
+
+    // 点行本身就能勾选，勾上后勾选框变成主操作色实底。
+    await fireEvent.press(eligibleRow);
+    await waitFor(() => {
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId("sync-history-select-eligible").props.style,
+        ).backgroundColor,
+      ).toBe(posColors.accent);
+    });
   });
 
   it("空日期保持不限筛选，选择与清除都不暴露文本输入", async () => {

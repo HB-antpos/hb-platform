@@ -17,6 +17,7 @@ import {
 import { installmentRepaymentPaymentEntry } from "@/features/payments/ui";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type InstallmentsBinding = Readonly<{
   cashier: object;
@@ -29,6 +30,7 @@ type InstallmentsBinding = Readonly<{
  * 活动购物车均封装在零参数 runtime factory 内，路由不接触可伪造的业务输入。
  */
 export default function InstallmentsRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore(

@@ -1,5 +1,7 @@
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -8,13 +10,12 @@ import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   FlatList,
-  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
+  type ScrollView,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
   installmentText,
@@ -33,22 +34,34 @@ import type {
 } from "./installment-presenter";
 
 import type { InstallmentStatus, InstallmentSummary } from "@/core/contracts";
+import { PosButton } from "@/ui/controls/pos-button";
 import { PosDatePickerField } from "@/ui/controls/pos-date-picker-field";
 import {
   PosKeyboardAwareScrollView,
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
+import { PosPill, type PosPillTone } from "@/ui/controls/pos-pill";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosSegmented } from "@/ui/controls/pos-segmented";
+import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  posTouch,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 export const INSTALLMENTS_MIN_TOUCH_TARGET = 44;
 
 const INSTALLMENTS_COMPACT_BREAKPOINT = 900;
+/** 宽屏左侧分期列表的固定宽度；右侧详情占满剩余空间。 */
+const INSTALLMENTS_LIST_WIDTH = 400;
 
 export type InstallmentLayout = Readonly<{
   compact: boolean;
-  listFlex: number;
-  detailsFlex: number;
+  /** 宽屏时列表列的固定宽度；窄屏单栏时为 null，列表占满整行。 */
+  listWidth: number | null;
   pagePadding: number;
   workspaceGap: number;
 }>;
@@ -57,16 +70,14 @@ export function installmentLayoutForWidth(width: number): InstallmentLayout {
   return width < INSTALLMENTS_COMPACT_BREAKPOINT
     ? {
         compact: true,
-        listFlex: 1,
-        detailsFlex: 1,
+        listWidth: null,
         pagePadding: 8,
-        workspaceGap: 0,
+        workspaceGap: 8,
       }
     : {
         compact: false,
-        listFlex: 0.43,
-        detailsFlex: 0.57,
-        pagePadding: 14,
+        listWidth: INSTALLMENTS_LIST_WIDTH,
+        pagePadding: 12,
         workspaceGap: 12,
       };
 }
@@ -116,6 +127,32 @@ type ActionBlockReason =
   | "busy"
   | "recovery"
   | "unavailable";
+/** 状态分段的取值：「全部」对应 presenter 的 null 筛选。 */
+type StatusFilterValue = "all" | InstallmentStatus;
+
+/**
+ * 详情动作区的可用性模型：由服务端逐项放行的 capability、收银员权限和当前阻塞原因算出。
+ * 页面上「滚动区里的表单」和「底部固定的按钮栏」共用同一份结果，避免两处判断不一致。
+ */
+type DetailsActionModel =
+  | Readonly<{
+      kind: "pickup";
+      pickupConfirmable: boolean;
+      cancelRefundable: boolean;
+      pickupBlocked: ActionBlockReason | null;
+      cancelBlocked: ActionBlockReason | null;
+      writable: boolean;
+    }>
+  | Readonly<{
+      kind: "repay";
+      repayable: boolean;
+      cancelRefundable: boolean;
+      voidable: boolean;
+      moreAvailable: boolean;
+      repaymentBlocked: ActionBlockReason | null;
+      moreBlocked: ActionBlockReason | null;
+      writable: boolean;
+    }>;
 
 /**
  * 分期页只负责可见状态、筛选和动作意图；支付准备、UUID 校验与恢复边界仍由
@@ -127,6 +164,7 @@ export function InstallmentScreen({
   onStartRepayment,
   presenter,
 }: InstallmentScreenProps) {
+  usePosThemeVersion();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -181,89 +219,135 @@ export function InstallmentScreen({
     if (!onStartCreate?.()) setRouteFailure(true);
   };
 
-  return (
-    <SafeAreaView style={styles.safeArea} testID="installments-screen">
-      <View style={styles.page}>
-        <Header
-          canCreate={state.access.canCreate}
-          createDraftAvailable={Boolean(state.createDraft)}
-          locale={locale}
-          onBack={onBack}
-          onPrimary={startCreate}
-          onRefresh={() => void presenter.load()}
-          online={state.online}
-          primaryAvailable={Boolean(
-            state.createDraft ? onStartCreate : onBack,
-          )}
-          refreshing={state.kind === "loading"}
-          writeLocked={
-            state.busy ||
-            state.reprint.kind === "submitting" ||
-            state.recoveryRequired ||
-            !state.online
-          }
-        />
+  // 页头右侧主入口：购物车里有草稿时是「新建分期」，没有时是「去销售添加商品」。
+  const createDraftAvailable = Boolean(state.createDraft);
+  const primaryAvailable = Boolean(state.createDraft ? onStartCreate : onBack);
+  const writeLocked =
+    state.busy ||
+    state.reprint.kind === "submitting" ||
+    state.recoveryRequired ||
+    !state.online;
+  const primaryDisabled = createDraftAvailable
+    ? writeLocked || !primaryAvailable
+    : !primaryAvailable;
+  const refreshing = state.kind === "loading";
+  // 窄屏单栏：列表与详情二选一；宽屏两栏同时显示。
+  const showHistory = !(layout.compact && compactDetailsOpen);
+  const showDetails = !layout.compact || compactDetailsOpen;
 
-        {routeFailure ? (
-          <NoticeBanner
-            message={installmentText(locale, "navigation.failed")}
-            testID="installments-navigation-failed"
+  return (
+    <PosScreenFrame
+      active="installments"
+      header={
+        <PosPageHeader
+          actions={
+            <>
+              <ConnectionPill locale={locale} online={state.online} />
+              <PosButton
+                disabled={refreshing || !state.online}
+                icon="refresh"
+                label={installmentText(
+                  locale,
+                  refreshing ? "action.refreshing" : "action.refresh",
+                )}
+                onPress={() => void presenter.load()}
+                size="medium"
+                testID="installments-refresh"
+                tone="quiet"
+              />
+              {state.access.canCreate ? (
+                <PosButton
+                  disabled={primaryDisabled}
+                  icon={createDraftAvailable ? "plus" : "cart-plus"}
+                  label={installmentText(
+                    locale,
+                    createDraftAvailable ? "action.new" : "action.goToSales",
+                  )}
+                  onPress={startCreate}
+                  size="medium"
+                  sound="navigate"
+                  testID="installments-primary-action"
+                />
+              ) : null}
+            </>
+          }
+          backLabel={installmentText(locale, "action.back")}
+          backTestID="installments-back"
+          onBack={onBack}
+          subtitle={installmentText(locale, "subtitle")}
+          testID="installments-header"
+          title={installmentText(locale, "title")}
+        />
+      }
+      testID="installments-screen"
+    >
+      {routeFailure ? (
+        <NoticeBanner
+          message={installmentText(locale, "navigation.failed")}
+          testID="installments-navigation-failed"
+          tone="danger"
+        />
+      ) : null}
+      {state.statusCode && !detailsOwnStatus ? (
+        <StatusBanner locale={locale} statusCode={state.statusCode} />
+      ) : null}
+      {state.recoveryRequired && state.online ? (
+        <View style={styles.recoveryRow}>
+          <Text style={styles.recoveryText}>
+            {installmentText(locale, "blocked.recovery")}
+          </Text>
+          <PosButton
+            disabled={state.busy || state.reprint.kind === "submitting"}
+            label={installmentText(locale, "action.recover")}
+            onPress={() => void presenter.recoverBlocking()}
+            size="medium"
+            sound="danger"
+            testID="installments-recover-blocking-action"
             tone="danger"
           />
-        ) : null}
-        {state.statusCode && !detailsOwnStatus ? (
-          <StatusBanner locale={locale} statusCode={state.statusCode} />
-        ) : null}
-        {state.recoveryRequired && state.online ? (
-          <View style={styles.recoveryRow}>
-            <Text style={styles.recoveryText}>
-              {installmentText(locale, "blocked.recovery")}
-            </Text>
-            <ActionButton
-              disabled={
-                state.busy || state.reprint.kind === "submitting"
-              }
-              label={installmentText(locale, "action.recover")}
-              onPress={() => void presenter.recoverBlocking()}
-              testID="installments-recover-blocking-action"
-              tone="danger"
-            />
-          </View>
-        ) : null}
+        </View>
+      ) : null}
 
-        {!state.online ? (
-          <OfflineWorkspace
-            busy={state.busy}
-            locale={locale}
-            onRetry={() => void presenter.load()}
-          />
-        ) : (
-          <View
-            style={[
-              styles.workspace,
-              {
-                gap: layout.workspaceGap,
-                padding: layout.pagePadding,
-              },
-            ]}
-            testID="installments-workspace"
-          >
-            {layout.compact && compactDetailsOpen ? null : (
+      {!state.online ? (
+        <OfflineWorkspace
+          busy={state.busy}
+          locale={locale}
+          onRetry={() => void presenter.load()}
+        />
+      ) : (
+        <View
+          style={[
+            styles.workspace,
+            {
+              gap: layout.workspaceGap,
+              padding: layout.pagePadding,
+            },
+          ]}
+          testID="installments-workspace"
+        >
+          {showHistory ? (
+            <HistoryFilters
+              compact={layout.compact}
+              locale={locale}
+              presenter={presenter}
+              state={state}
+            />
+          ) : null}
+          <View style={[styles.panes, { gap: layout.workspaceGap }]}>
+            {showHistory ? (
               <HistoryPane
-                compact={layout.compact}
-                flex={layout.listFlex}
+                listWidth={layout.listWidth}
                 locale={locale}
                 onOpenOrder={openOrder}
                 presenter={presenter}
                 state={state}
               />
-            )}
-            {!layout.compact || compactDetailsOpen ? (
+            ) : null}
+            {showDetails ? (
               <DetailsPane
                 compact={layout.compact}
                 confirmation={confirmation}
                 dangerMode={dangerMode}
-                flex={layout.detailsFlex}
                 locale={locale}
                 moreOpen={moreOpen}
                 onBackToList={() => setCompactDetailsOpen(false)}
@@ -277,89 +361,39 @@ export function InstallmentScreen({
               />
             ) : null}
           </View>
-        )}
-      </View>
-    </SafeAreaView>
+        </View>
+      )}
+    </PosScreenFrame>
   );
 }
 
-function Header({
-  canCreate,
-  createDraftAvailable,
+/** 页头里的联网状态标签：分期全部操作都依赖在线服务，所以一直显示。 */
+function ConnectionPill({
   locale,
-  onBack,
-  onPrimary,
-  onRefresh,
   online,
-  primaryAvailable,
-  refreshing,
-  writeLocked,
-}: Readonly<{
-  canCreate: boolean;
-  createDraftAvailable: boolean;
-  locale: InstallmentLocale;
-  onBack: (() => void) | undefined;
-  onPrimary(): void;
-  onRefresh(): void;
-  online: boolean;
-  primaryAvailable: boolean;
-  refreshing: boolean;
-  writeLocked: boolean;
-}>) {
-  const primaryDisabled = createDraftAvailable
-    ? writeLocked || !primaryAvailable
-    : !primaryAvailable;
+}: Readonly<{ locale: InstallmentLocale; online: boolean }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.header} testID="installments-header">
-      {onBack ? (
-        <ActionButton
-          label={installmentText(locale, "action.back")}
-          onPress={onBack}
-          sound="navigate"
-          testID="installments-back"
-          tone="quiet"
-        />
-      ) : null}
-      <View style={styles.headerIdentity}>
-        <Text numberOfLines={1} style={styles.title}>
-          {installmentText(locale, "title")}
-        </Text>
-        <View style={styles.connectionState}>
-          <View
-            style={[
-              styles.connectionDot,
-              online ? styles.connectionDotOnline : styles.connectionDotOffline,
-            ]}
-          />
-          <Text style={styles.connectionText}>
-            {installmentText(locale, online ? "online" : "offlineShort")}
-          </Text>
-        </View>
-      </View>
-      <View style={styles.headerActions}>
-        <ActionButton
-          disabled={refreshing || !online}
-          label={installmentText(
-            locale,
-            refreshing ? "action.refreshing" : "action.refresh",
-          )}
-          onPress={onRefresh}
-          testID="installments-refresh"
-          tone="secondary"
-        />
-        {canCreate ? (
-          <ActionButton
-            disabled={primaryDisabled}
-            label={installmentText(
-              locale,
-              createDraftAvailable ? "action.new" : "action.goToSales",
-            )}
-            onPress={onPrimary}
-            sound="navigate"
-            testID="installments-primary-action"
-          />
-        ) : null}
-      </View>
+    <View
+      style={[
+        styles.connectionPill,
+        online ? styles.connectionPillOnline : styles.connectionPillOffline,
+      ]}
+    >
+      <View
+        style={[
+          styles.connectionDot,
+          online ? styles.connectionDotOnline : styles.connectionDotOffline,
+        ]}
+      />
+      <Text
+        style={[
+          styles.connectionText,
+          online ? styles.connectionTextOnline : styles.connectionTextOffline,
+        ]}
+      >
+        {installmentText(locale, online ? "online" : "offlineShort")}
+      </Text>
     </View>
   );
 }
@@ -373,40 +407,48 @@ function OfflineWorkspace({
   locale: InstallmentLocale;
   onRetry(): void;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.fullState} testID="installments-offline-state">
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors.mutedInk}
+        name="wifi-off"
+        size={44}
+      />
       <Text style={styles.fullStateTitle}>
         {installmentText(locale, "offlineShort")}
       </Text>
       <Text style={styles.fullStateText}>
         {installmentText(locale, "offline")}
       </Text>
-      <ActionButton
+      <PosButton
         disabled={busy}
+        icon="refresh"
         label={installmentText(locale, "action.retry")}
         onPress={onRetry}
         testID="installments-offline-retry"
-        tone="secondary"
       />
     </View>
   );
 }
 
-function HistoryPane({
+/**
+ * 筛选区两行排完：第一行 搜索 + 查询 + 状态分段；第二行 日期分段 + 范围分段。
+ * 选「自定义」时在下面展开起止日期，点「应用」才真正筛选。
+ */
+function HistoryFilters({
   compact,
-  flex,
   locale,
-  onOpenOrder,
   presenter,
   state,
 }: Readonly<{
   compact: boolean;
-  flex: number;
   locale: InstallmentLocale;
-  onOpenOrder(installmentGuid: string): void;
   presenter: InstallmentScreenPresenter;
   state: InstallmentPresenterState;
 }>) {
+  usePosThemeVersion();
   const statuses: readonly {
     label: string;
     status: InstallmentStatus | null;
@@ -438,123 +480,99 @@ function HistoryPane({
     void presenter.setDateFilter({ preset, fromDate: null, toDate: null });
   };
 
-  const filtered = hasActiveFilters(state);
-  const loadingWithoutRows =
-    state.orders.length === 0 &&
-    (state.kind === "idle" || state.kind === "loading");
-  const failedWithoutRows =
-    state.orders.length === 0 && state.kind === "failed";
-  const unauthorizedWithoutRows =
-    state.orders.length === 0 && state.kind === "unauthorized";
+  // 自定义日期展开期间高亮「自定义」：这样再点其它预设才会收起日期选择并立即生效。
+  const datePresetValue: InstallmentDatePreset = customDatesOpen
+    ? "custom"
+    : state.dateFilter.preset;
 
   return (
-    <View
-      style={[styles.pane, styles.historyPane, { flex }]}
-      testID="installments-history-pane"
-    >
-      <View style={styles.panelHeader}>
-        <View>
-          <Text style={styles.panelTitle}>
-            {installmentText(locale, "history.title")}
-          </Text>
-          <Text style={styles.panelMeta} testID="installments-result-count">
-            {installmentText(
-              locale,
-              state.orders.length === 1
-                ? "history.countOne"
-                : "history.count",
-              { count: state.orders.length },
-            )}
-          </Text>
-        </View>
-        {state.kind === "loading" && state.orders.length > 0 ? (
-          <ActivityIndicator color={posColors.orange} />
-        ) : null}
-      </View>
-
+    <View style={styles.filters} testID="installments-filters">
+      {/* 搜索框需置于键盘感知滚动容器内，软键盘弹出时才不会遮挡输入。 */}
       <PosKeyboardAwareScrollView
-        contentContainerStyle={styles.searchRow}
+        contentContainerStyle={[
+          styles.filterRow,
+          compact && styles.filterRowCompact,
+        ]}
+        scrollEnabled={false}
         style={styles.searchKeyboardScroll}
         testID="installment-history-search-keyboard-scroll"
       >
-        <PosKeyboardAwareTextInput
-          accessibilityLabel={installmentText(locale, "search.accessibility")}
-          autoCapitalize="none"
-          autoCorrect={false}
-          onChangeText={(value) => presenter.setSearchQuery(value)}
-          onSubmitEditing={() => void presenter.load()}
-          placeholder={installmentText(locale, "search.placeholder")}
-          placeholderTextColor={posColors.mutedInk}
-          returnKeyType="search"
-          style={styles.searchInput}
-          testID="installments-search"
-          value={state.query}
-        />
-        <ActionButton
+        <View
+          style={[styles.searchField, compact && styles.searchFieldCompact]}
+        >
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.mutedInk}
+            name="magnify"
+            size={22}
+          />
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={installmentText(locale, "search.accessibility")}
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={(value) => presenter.setSearchQuery(value)}
+            onSubmitEditing={() => void presenter.load()}
+            placeholder={installmentText(locale, "search.placeholder")}
+            placeholderTextColor={posColors.placeholder}
+            returnKeyType="search"
+            style={styles.searchInput}
+            testID="installments-search"
+            value={state.query}
+          />
+        </View>
+        <PosButton
           disabled={state.kind === "loading"}
           label={installmentText(locale, "action.search")}
           onPress={() => void presenter.load()}
+          size="medium"
           testID="installments-search-submit"
+        />
+        <PosSegmented<StatusFilterValue>
+          accessibilityLabel={installmentText(locale, "filter.statusLabel")}
+          onChange={(value) =>
+            void presenter.setStatusFilter(value === "all" ? null : value)
+          }
+          options={statuses.map((item) => ({
+            value: item.status ?? "all",
+            label: item.label,
+            testID: `installments-filter-${item.status ?? "all"}`,
+          }))}
+          style={compact ? styles.segmentedFullRow : styles.segmentedFill}
+          value={state.statusFilter ?? "all"}
         />
       </PosKeyboardAwareScrollView>
 
-      <FilterGroup label={installmentText(locale, "filter.statusLabel")}>
-        <ScrollView
-          horizontal
-          contentContainerStyle={styles.filterRow}
-          showsHorizontalScrollIndicator={false}
-        >
-          {statuses.map((item) => (
-            <ActionButton
-              compact
-              key={item.label}
-              label={item.label}
-              onPress={() => void presenter.setStatusFilter(item.status)}
-              selected={state.statusFilter === item.status}
-              testID={`installments-filter-${item.status ?? "all"}`}
-              tone="secondary"
-            />
-          ))}
-        </ScrollView>
-      </FilterGroup>
-
-      <View style={[styles.filterColumns, compact && styles.filterColumnsCompact]}>
-        <FilterGroup label={installmentText(locale, "date.label")}>
-          <ScrollView
-            horizontal
-            contentContainerStyle={styles.filterRow}
-            showsHorizontalScrollIndicator={false}
-          >
-            {(
-              ["all", "today", "last7", "last30", "custom"] as const
-            ).map((preset) => (
-              <ActionButton
-                compact
-                key={preset}
-                label={installmentText(locale, `date.${preset}`)}
-                onPress={() => chooseDatePreset(preset)}
-                selected={state.dateFilter.preset === preset}
-                testID={`installments-date-${preset}`}
-                tone="secondary"
-              />
-            ))}
-          </ScrollView>
-        </FilterGroup>
-        <FilterGroup label={installmentText(locale, "scope.label")}>
-          <View style={styles.filterRow}>
-            {(["store", "device"] as const).map((scope) => (
-              <ActionButton
-                compact
-                key={scope}
-                label={installmentText(locale, `scope.${scope}`)}
-                onPress={() => void presenter.setDeviceScope(scope)}
-                selected={state.deviceScope === scope}
-                testID={`installments-scope-${scope}`}
-                tone="secondary"
-              />
-            ))}
-          </View>
-        </FilterGroup>
+      <View style={[styles.filterRow, compact && styles.filterRowCompact]}>
+        <Text style={styles.filterLabel}>
+          {installmentText(locale, "date.label")}
+        </Text>
+        <PosSegmented<InstallmentDatePreset>
+          accessibilityLabel={installmentText(locale, "date.label")}
+          onChange={chooseDatePreset}
+          options={(
+            ["all", "today", "last7", "last30", "custom"] as const
+          ).map((preset) => ({
+            value: preset,
+            label: installmentText(locale, `date.${preset}`),
+            testID: `installments-date-${preset}`,
+          }))}
+          style={compact ? styles.segmentedFullRow : styles.segmentedFill}
+          value={datePresetValue}
+        />
+        <Text style={styles.filterLabel}>
+          {installmentText(locale, "scope.label")}
+        </Text>
+        <PosSegmented<InstallmentPresenterState["deviceScope"]>
+          accessibilityLabel={installmentText(locale, "scope.label")}
+          onChange={(scope) => void presenter.setDeviceScope(scope)}
+          options={(["store", "device"] as const).map((scope) => ({
+            value: scope,
+            label: installmentText(locale, `scope.${scope}`),
+            testID: `installments-scope-${scope}`,
+          }))}
+          style={compact ? styles.segmentedFill : styles.scopeSegmented}
+          value={state.deviceScope}
+        />
       </View>
 
       {customDatesOpen ? (
@@ -575,8 +593,7 @@ function HistoryPane({
             testID="installments-date-to"
             value={toDate}
           />
-          <ActionButton
-            compact
+          <PosButton
             label={installmentText(locale, "date.apply")}
             onPress={() =>
               void presenter.setDateFilter({
@@ -585,10 +602,63 @@ function HistoryPane({
                 toDate,
               })
             }
+            size="medium"
             testID="installments-date-apply"
           />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function HistoryPane({
+  listWidth,
+  locale,
+  onOpenOrder,
+  presenter,
+  state,
+}: Readonly<{
+  listWidth: number | null;
+  locale: InstallmentLocale;
+  onOpenOrder(installmentGuid: string): void;
+  presenter: InstallmentScreenPresenter;
+  state: InstallmentPresenterState;
+}>) {
+  usePosThemeVersion();
+  const filtered = hasActiveFilters(state);
+  const loadingWithoutRows =
+    state.orders.length === 0 &&
+    (state.kind === "idle" || state.kind === "loading");
+  const failedWithoutRows =
+    state.orders.length === 0 && state.kind === "failed";
+  const unauthorizedWithoutRows =
+    state.orders.length === 0 && state.kind === "unauthorized";
+
+  return (
+    <View
+      style={[
+        styles.historyPane,
+        listWidth === null ? styles.paneFill : { width: listWidth },
+      ]}
+      testID="installments-history-pane"
+    >
+      <View style={styles.panelHeader}>
+        <Text style={styles.panelTitle}>
+          {installmentText(locale, "history.title")}
+        </Text>
+        <PosPill
+          label={installmentText(
+            locale,
+            state.orders.length === 1 ? "history.countOne" : "history.count",
+            { count: state.orders.length },
+          )}
+          style={styles.countPill}
+          testID="installments-result-count"
+        />
+        {state.kind === "loading" && state.orders.length > 0 ? (
+          <ActivityIndicator color={posColors.accent} />
+        ) : null}
+      </View>
 
       <FlatList
         contentContainerStyle={[
@@ -631,24 +701,6 @@ function HistoryPane({
             />
           )
         }
-        ListFooterComponent={
-          state.orders.length > 0 && state.hasMore ? (
-            <View style={styles.loadMoreRow}>
-              <ActionButton
-                disabled={state.loadingMore || state.kind === "loading"}
-                label={installmentText(
-                  locale,
-                  state.loadingMore
-                    ? "action.loadingMore"
-                    : "action.loadMore",
-                )}
-                onPress={() => void presenter.loadMore()}
-                testID="installments-load-more"
-                tone="quiet"
-              />
-            </View>
-          ) : null
-        }
         renderItem={({ item }) => (
           <OrderRow
             locale={locale}
@@ -657,20 +709,24 @@ function HistoryPane({
             selected={state.selectedGuid === item.installmentGuid}
           />
         )}
+        style={styles.orderListScroll}
         testID="installments-list"
       />
-    </View>
-  );
-}
-
-function FilterGroup({
-  children,
-  label,
-}: Readonly<{ children: ReactNode; label: string }>) {
-  return (
-    <View style={styles.filterGroup}>
-      <Text style={styles.filterLabel}>{label}</Text>
-      {children}
+      {/* 「加载更多」固定在列表下方，不用滚到底才看得到。 */}
+      {state.orders.length > 0 && state.hasMore ? (
+        <PosButton
+          disabled={state.loadingMore || state.kind === "loading"}
+          icon="chevron-down"
+          label={installmentText(
+            locale,
+            state.loadingMore ? "action.loadingMore" : "action.loadMore",
+          )}
+          onPress={() => void presenter.loadMore()}
+          size="small"
+          testID="installments-load-more"
+          tone="quiet"
+        />
+      ) : null}
     </View>
   );
 }
@@ -686,6 +742,7 @@ function OrderRow({
   order: InstallmentSummary;
   selected: boolean;
 }>) {
+  usePosThemeVersion();
   return (
     <PosPressable
       accessibilityLabel={[
@@ -706,7 +763,12 @@ function OrderRow({
       testID={`installment-row-${order.installmentGuid}`}
     >
       <View style={styles.orderIdentity}>
-        <Text style={styles.orderNumber}>{order.installmentNumber}</Text>
+        <View style={styles.orderTitleLine}>
+          <Text numberOfLines={1} style={styles.orderNumber}>
+            {order.installmentNumber}
+          </Text>
+          <StatusPill locale={locale} status={order.status} />
+        </View>
         <Text numberOfLines={1} style={styles.orderCustomer}>
           {order.customerName} · {order.customerPhone ?? "—"}
         </Text>
@@ -716,7 +778,6 @@ function OrderRow({
         </Text>
       </View>
       <View style={styles.orderAmounts}>
-        <StatusPill locale={locale} status={order.status} />
         <Text style={styles.balanceAmount}>{money(order.balanceCents)}</Text>
         <Text style={styles.balanceLabel}>
           {installmentText(locale, "balance.label")}
@@ -730,7 +791,6 @@ function DetailsPane({
   compact,
   confirmation,
   dangerMode,
-  flex,
   locale,
   moreOpen,
   onBackToList,
@@ -745,7 +805,6 @@ function DetailsPane({
   compact: boolean;
   confirmation: ConfirmationKind | null;
   dangerMode: DangerMode;
-  flex: number;
   locale: InstallmentLocale;
   moreOpen: boolean;
   onBackToList(): void;
@@ -757,11 +816,26 @@ function DetailsPane({
   setMoreOpen(value: boolean): void;
   state: InstallmentPresenterState;
 }>) {
+  usePosThemeVersion();
+  const detailsScrollRef = useRef<ScrollView>(null);
+
+  // 取货备注和危险操作表单排在详情滚动区的最后。出现确认条或展开危险操作时，
+  // 自动滚到底，让它们紧贴底部按钮栏露出来，不用收银员自己去找。
+  useEffect(() => {
+    if (!dangerMode && !confirmation) return undefined;
+    const frame = requestAnimationFrame(() => {
+      detailsScrollRef.current?.scrollToEnd?.({ animated: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [confirmation, dangerMode]);
+
   const compactBack = compact ? (
     <View style={styles.compactDetailsHeader}>
-      <ActionButton
+      <PosButton
+        icon="arrow-left"
         label={installmentText(locale, "action.back")}
         onPress={onBackToList}
+        size="medium"
         sound="navigate"
         testID="installments-details-back"
         tone="quiet"
@@ -774,7 +848,7 @@ function DetailsPane({
 
   if (state.detailsLoading) {
     return (
-      <View style={[styles.pane, styles.detailsPane, { flex }]} testID="installments-details-pane">
+      <View style={styles.detailsPane} testID="installments-details-pane">
         {compactBack}
         <CenteredState
           loading
@@ -786,7 +860,7 @@ function DetailsPane({
   }
   if (!state.selectedGuid) {
     return (
-      <View style={[styles.pane, styles.detailsPane, { flex }]} testID="installments-details-pane">
+      <View style={styles.detailsPane} testID="installments-details-pane">
         {compactBack}
         <CenteredState
           message={installmentText(locale, "details.empty")}
@@ -800,7 +874,7 @@ function DetailsPane({
       state.statusCode ?? "",
     );
     return (
-      <View style={[styles.pane, styles.detailsPane, { flex }]} testID="installments-details-pane">
+      <View style={styles.detailsPane} testID="installments-details-pane">
         {compactBack}
         <CenteredState
           {...(failed
@@ -824,11 +898,18 @@ function DetailsPane({
   }
 
   const details = state.details;
+  const actions = resolveDetailsActionModel(
+    details,
+    presenter,
+    state,
+    Boolean(onStartRepayment),
+  );
   return (
-    <View style={[styles.pane, styles.detailsPane, { flex }]} testID="installments-details-pane">
+    <View style={styles.detailsPane} testID="installments-details-pane">
       {compactBack}
       <PosKeyboardAwareScrollView
         contentContainerStyle={styles.detailsContent}
+        ref={detailsScrollRef}
         style={styles.detailsScroll}
         testID="installment-details"
       >
@@ -844,21 +925,35 @@ function DetailsPane({
           presenter={presenter}
           state={state}
         />
-        <DetailsActions
+        {/* 带输入框的部分留在键盘感知滚动区里，软键盘弹出时才不会被挡住。 */}
+        <DetailsActionForms
+          actions={actions}
           confirmation={confirmation}
           dangerMode={dangerMode}
-          details={details}
           locale={locale}
           moreOpen={moreOpen}
-          onRouteFailure={onRouteFailure}
-          onStartRepayment={onStartRepayment}
           presenter={presenter}
           setConfirmation={setConfirmation}
           setDangerMode={setDangerMode}
-          setMoreOpen={setMoreOpen}
           state={state}
         />
       </PosKeyboardAwareScrollView>
+      {/* 主按钮栏固定在详情底部，不随内容滚动。 */}
+      <DetailsActionDock
+        actions={actions}
+        confirmation={confirmation}
+        dangerMode={dangerMode}
+        details={details}
+        locale={locale}
+        moreOpen={moreOpen}
+        onRouteFailure={onRouteFailure}
+        onStartRepayment={onStartRepayment}
+        presenter={presenter}
+        setConfirmation={setConfirmation}
+        setDangerMode={setDangerMode}
+        setMoreOpen={setMoreOpen}
+        state={state}
+      />
     </View>
   );
 }
@@ -876,6 +971,7 @@ function InstallmentDetailsContent({
   onReprint(): void;
   reprint: InstallmentPresenterState["reprint"];
 }>) {
+  usePosThemeVersion();
   const reprintBelongsToDetails =
     "installmentGuid" in reprint &&
     reprint.installmentGuid === details.installmentGuid;
@@ -886,32 +982,55 @@ function InstallmentDetailsContent({
     <>
       <View style={styles.detailHeading}>
         <View style={styles.detailIdentity}>
-          <Text style={styles.detailNumber}>{details.installmentNumber}</Text>
+          <View style={styles.detailTitleLine}>
+            <Text numberOfLines={1} style={styles.detailNumber}>
+              {details.installmentNumber}
+            </Text>
+            <StatusPill locale={locale} status={details.status} />
+          </View>
           <Text numberOfLines={1} style={styles.detailCustomer}>
             {details.customerName} · {details.customerPhone ?? "—"}
           </Text>
-        </View>
-        <View style={styles.detailUtilities}>
-          <StatusPill locale={locale} status={details.status} />
-          {showReprint ? (
-            <ActionButton
-              accessibilityHint={installmentText(locale, "reprint.hint")}
-              accessibilityLabel={installmentText(
-                locale,
-                "reprint.accessibility",
-                { installmentNumber: details.installmentNumber },
-              )}
-              disabled={reprintSubmitting}
-              label={installmentText(
-                locale,
-                reprintSubmitting ? "action.reprinting" : "action.reprint",
-              )}
-              onPress={onReprint}
-              testID="installment-reprint"
-              tone="secondary"
+          {/* 原「分期信息」四项并入标题下方一行，不再单占一个分区。 */}
+          <MetaRow>
+            <MetaPair
+              label={installmentText(locale, "field.created")}
+              value={displayDate(details.createdAtIso, locale)}
             />
-          ) : null}
+            <MetaPair
+              label={installmentText(locale, "field.cashier")}
+              value={details.cashierName}
+            />
+            <MetaPair
+              label={installmentText(locale, "field.device")}
+              value={details.deviceCode}
+            />
+            <MetaPair
+              label={installmentText(locale, "field.minimumDownPayment")}
+              value={money(details.minimumDownPaymentCents)}
+            />
+          </MetaRow>
         </View>
+        {showReprint ? (
+          <PosButton
+            accessibilityHint={installmentText(locale, "reprint.hint")}
+            accessibilityLabel={installmentText(
+              locale,
+              "reprint.accessibility",
+              { installmentNumber: details.installmentNumber },
+            )}
+            disabled={reprintSubmitting}
+            icon="printer-outline"
+            label={installmentText(
+              locale,
+              reprintSubmitting ? "action.reprinting" : "action.reprint",
+            )}
+            onPress={onReprint}
+            size="small"
+            testID="installment-reprint"
+            tone="quiet"
+          />
+        ) : null}
       </View>
 
       {reprintBelongsToDetails && reprint.kind === "succeeded" ? (
@@ -944,74 +1063,56 @@ function InstallmentDetailsContent({
         />
         <Metric
           label={installmentText(locale, "metric.paid")}
+          tone="paid"
           value={money(details.paidCents)}
         />
         <Metric
-          emphasized
           label={installmentText(locale, "metric.balance")}
+          tone="balance"
           value={money(details.balanceCents)}
         />
       </View>
 
-      <Section title={installmentText(locale, "section.overview")}>
-        <InfoGrid>
-          <InfoFact
-            label={installmentText(locale, "field.created")}
-            value={displayDate(details.createdAtIso, locale)}
-          />
-          <InfoFact
-            label={installmentText(locale, "field.cashier")}
-            value={details.cashierName}
-          />
-          <InfoFact
-            label={installmentText(locale, "field.device")}
-            value={details.deviceCode}
-          />
-          <InfoFact
-            label={installmentText(locale, "field.minimumDownPayment")}
-            value={money(details.minimumDownPaymentCents)}
-          />
-        </InfoGrid>
-      </Section>
-
       <Section title={installmentText(locale, "section.items")}>
         {details.lines.map((line) => (
           <View key={line.installmentLineGuid} style={styles.detailRecord}>
-            <View style={styles.recordHeading}>
-              <Text style={styles.factPrimary}>{line.displayName}</Text>
-              <Text style={styles.factAmount}>{money(line.actualAmountCents)}</Text>
+            <View style={styles.recordCopy}>
+              <Text style={styles.recordTitle}>{line.displayName}</Text>
+              <MetaRow>
+                <MetaPair
+                  label={installmentText(locale, "field.productCode")}
+                  value={line.productCode}
+                />
+                <MetaPair
+                  label={installmentText(locale, "field.lookupCode")}
+                  value={line.lookupCode}
+                />
+                <MetaPair
+                  label={installmentText(locale, "field.referenceCode")}
+                  value={line.referenceCode ?? "—"}
+                />
+                <MetaPair
+                  label={installmentText(locale, "field.itemNumber")}
+                  value={line.itemNumber ?? "—"}
+                />
+                <MetaPair
+                  label={installmentText(locale, "field.unitPrice")}
+                  value={money(line.unitPriceCents)}
+                />
+                <MetaPair
+                  label={installmentText(locale, "field.discount")}
+                  value={money(line.discountCents)}
+                />
+                <MetaPair
+                  label={installmentText(locale, "field.actual")}
+                  value={money(line.actualAmountCents)}
+                />
+              </MetaRow>
             </View>
-            <Text style={styles.factSecondary}>× {line.quantity}</Text>
-            <InfoGrid>
-              <InfoFact
-                label={installmentText(locale, "field.productCode")}
-                value={line.productCode}
-              />
-              <InfoFact
-                label={installmentText(locale, "field.lookupCode")}
-                value={line.lookupCode}
-              />
-              <InfoFact
-                label={installmentText(locale, "field.referenceCode")}
-                value={line.referenceCode ?? "—"}
-              />
-              <InfoFact
-                label={installmentText(locale, "field.itemNumber")}
-                value={line.itemNumber ?? "—"}
-              />
-              <InfoFact
-                label={installmentText(locale, "field.unitPrice")}
-                value={money(line.unitPriceCents)}
-              />
-              <InfoFact
-                label={installmentText(locale, "field.discount")}
-                value={money(line.discountCents)}
-              />
-              <InfoFact
-                label={installmentText(locale, "field.actual")}
-                value={money(line.actualAmountCents)}
-              />
-            </InfoGrid>
+            <Text style={styles.recordQuantity}>× {line.quantity}</Text>
+            <Text style={styles.recordAmount}>
+              {money(line.actualAmountCents)}
+            </Text>
           </View>
         ))}
       </Section>
@@ -1024,43 +1125,47 @@ function InstallmentDetailsContent({
         ) : (
           details.payments.map((payment) => (
             <View key={payment.paymentGuid} style={styles.detailRecord}>
-              <View style={styles.recordHeading}>
-                <Text style={styles.factPrimary}>
+              <View style={styles.recordCopy}>
+                {/*
+                  标题已包含付款方式与状态，下方只列时间、收银员、设备和卡信息；
+                  「方式」「状态」两个字段名保留给读屏使用。
+                */}
+                <Text
+                  accessibilityLabel={[
+                    `${installmentText(locale, "field.paymentMethod")} ${methodLabel(payment.method, locale)}`,
+                    `${installmentText(locale, "field.paymentStatus")} ${paymentStatusLabel(payment.status, locale)}`,
+                  ].join(", ")}
+                  style={styles.recordTitle}
+                >
                   {methodLabel(payment.method, locale)} ·{" "}
                   {paymentStatusLabel(payment.status, locale)}
                 </Text>
-                <Text style={styles.factAmount}>{money(payment.amountCents)}</Text>
-              </View>
-              <InfoGrid>
-                <InfoFact
-                  label={installmentText(locale, "field.paymentMethod")}
-                  value={methodLabel(payment.method, locale)}
-                />
-                <InfoFact
-                  label={installmentText(locale, "field.paymentStatus")}
-                  value={paymentStatusLabel(payment.status, locale)}
-                />
-                <InfoFact
-                  label={installmentText(locale, "field.paymentTime")}
-                  value={displayDate(payment.recordedAtIso, locale)}
-                />
-                <InfoFact
-                  label={installmentText(locale, "field.cashierId")}
-                  value={payment.cashierId}
-                />
-                <InfoFact
-                  label={installmentText(locale, "field.device")}
-                  value={payment.deviceCode}
-                />
-                {payment.cardType || payment.maskedCardNumber ? (
-                  <InfoFact
-                    label={installmentText(locale, "field.card")}
-                    value={[payment.cardType, payment.maskedCardNumber]
-                      .filter(Boolean)
-                      .join(" · ")}
+                <MetaRow>
+                  <MetaPair
+                    label={installmentText(locale, "field.paymentTime")}
+                    value={displayDate(payment.recordedAtIso, locale)}
                   />
-                ) : null}
-              </InfoGrid>
+                  <MetaPair
+                    label={installmentText(locale, "field.cashierId")}
+                    value={payment.cashierId}
+                  />
+                  <MetaPair
+                    label={installmentText(locale, "field.device")}
+                    value={payment.deviceCode}
+                  />
+                  {payment.cardType || payment.maskedCardNumber ? (
+                    <MetaPair
+                      label={installmentText(locale, "field.card")}
+                      value={[payment.cardType, payment.maskedCardNumber]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    />
+                  ) : null}
+                </MetaRow>
+              </View>
+              <Text style={styles.recordAmount}>
+                {money(payment.amountCents)}
+              </Text>
             </View>
           ))
         )}
@@ -1078,22 +1183,22 @@ function InstallmentDetailsContent({
             <Text style={styles.completedTitle}>
               {installmentText(locale, "completed.picked")}
             </Text>
-            <InfoGrid>
-              <InfoFact
+            <MetaRow>
+              <MetaPair
                 label={installmentText(locale, "field.pickupBy")}
                 value={details.pickupInfo.pickedUpBy}
               />
-              <InfoFact
+              <MetaPair
                 label={installmentText(locale, "field.pickupTime")}
                 value={displayDate(details.pickupInfo.pickedUpAtIso, locale)}
               />
               {details.pickupInfo.note ? (
-                <InfoFact
+                <MetaPair
                   label={installmentText(locale, "field.pickupNote")}
                   value={details.pickupInfo.note}
                 />
               ) : null}
-            </InfoGrid>
+            </MetaRow>
           </View>
         </Section>
       ) : null}
@@ -1104,23 +1209,23 @@ function InstallmentDetailsContent({
             <Text style={styles.completedTitle}>
               {cancellationLabel(details.cancellationInfo.kind, locale)}
             </Text>
-            <InfoGrid>
-              <InfoFact
+            <MetaRow>
+              <MetaPair
                 label={installmentText(locale, "field.cancelledBy")}
                 value={details.cancellationInfo.cancelledBy}
               />
-              <InfoFact
+              <MetaPair
                 label={installmentText(locale, "field.cancelledTime")}
                 value={displayDate(
                   details.cancellationInfo.cancelledAtIso,
                   locale,
                 )}
               />
-              <InfoFact
+              <MetaPair
                 label={installmentText(locale, "field.cancelReason")}
                 value={details.cancellationInfo.reason ?? "—"}
               />
-            </InfoGrid>
+            </MetaRow>
           </View>
         </Section>
       ) : null}
@@ -1128,7 +1233,152 @@ function InstallmentDetailsContent({
   );
 }
 
-function DetailsActions({
+/**
+ * 算出当前详情可以做哪些动作、各自被什么原因阻塞。
+ * 判断条件与改版前逐条一致：已取货 / 已取消没有动作；已付清走取货（可另行退款取消，不提供作废）；
+ * 其余走续付，退款取消和作废收在「更多操作」里。
+ */
+function resolveDetailsActionModel(
+  details: InstallmentDetails,
+  presenter: InstallmentScreenPresenter,
+  state: InstallmentPresenterState,
+  repaymentRouteAvailable: boolean,
+): DetailsActionModel | null {
+  const writable = presenter.capabilities.selectedDetailsWritable;
+  const repayable = presenter.capabilities.selectedDetailsRepayable;
+  const cancelRefundable =
+    presenter.capabilities.selectedDetailsCancelRefundable;
+  const voidable = presenter.capabilities.selectedDetailsVoidable;
+  const pickupConfirmable =
+    presenter.capabilities.selectedDetailsPickupConfirmable;
+  if (details.status === "PickedUp" || details.status === "Cancelled") {
+    return null;
+  }
+
+  if (details.status === "PaidOff") {
+    // 中文注释：已付清未提货可提货，也可取消并全额退款；作废（不退款）不对付清单开放。
+    if (!pickupConfirmable && !cancelRefundable) return null;
+    return {
+      kind: "pickup",
+      pickupConfirmable,
+      cancelRefundable,
+      pickupBlocked: pickupConfirmable
+        ? actionBlockReason(state, state.access.canConfirmPickup, true)
+        : null,
+      cancelBlocked: cancelRefundable
+        ? actionBlockReason(state, state.access.canCancel, true)
+        : null,
+      writable,
+    };
+  }
+
+  if (!repayable && !cancelRefundable && !voidable) return null;
+  const moreAvailable = cancelRefundable || voidable;
+  return {
+    kind: "repay",
+    repayable,
+    cancelRefundable,
+    voidable,
+    moreAvailable,
+    repaymentBlocked: repayable
+      ? actionBlockReason(
+          state,
+          state.access.canAddRepayment,
+          repaymentRouteAvailable,
+        )
+      : null,
+    moreBlocked: moreAvailable
+      ? actionBlockReason(state, state.access.canCancel, true)
+      : null,
+    writable,
+  };
+}
+
+/** 「更多操作」是否已展开且允许显示其内容（菜单或危险操作表单）。 */
+function moreActionsVisible(
+  actions: DetailsActionModel,
+  moreOpen: boolean,
+): boolean {
+  if (!moreOpen) return false;
+  return actions.kind === "pickup"
+    ? !actions.cancelBlocked && actions.cancelRefundable
+    : !actions.moreBlocked;
+}
+
+/**
+ * 详情滚动区末尾的表单：已付清时的取货备注，以及从「更多操作」进入的退款取消 / 作废表单。
+ * 这些都带输入框，必须留在键盘感知滚动区里。
+ */
+function DetailsActionForms({
+  actions,
+  confirmation,
+  dangerMode,
+  locale,
+  moreOpen,
+  presenter,
+  setConfirmation,
+  setDangerMode,
+  state,
+}: Readonly<{
+  actions: DetailsActionModel | null;
+  confirmation: ConfirmationKind | null;
+  dangerMode: DangerMode;
+  locale: InstallmentLocale;
+  moreOpen: boolean;
+  presenter: InstallmentScreenPresenter;
+  setConfirmation(value: ConfirmationKind | null): void;
+  setDangerMode(value: DangerMode): void;
+  state: InstallmentPresenterState;
+}>) {
+  usePosThemeVersion();
+  if (!actions) return null;
+  const showPickupNote = actions.kind === "pickup" && actions.pickupConfirmable;
+  const showDangerPanel =
+    Boolean(dangerMode) && moreActionsVisible(actions, moreOpen);
+  if (!showPickupNote && !showDangerPanel) return null;
+  return (
+    <View style={styles.actionForms} testID="installment-action-forms">
+      {actions.kind === "pickup" && actions.pickupConfirmable ? (
+        <View style={styles.pickupPanel}>
+          <Text style={styles.actionDockTitle}>
+            {installmentText(locale, "pickup.title")}
+          </Text>
+          <PosKeyboardAwareTextInput
+            accessibilityLabel={installmentText(
+              locale,
+              "pickup.noteAccessibility",
+            )}
+            editable={!actions.pickupBlocked}
+            onChangeText={(value) => presenter.setPickupNote(value)}
+            placeholder={installmentText(locale, "pickup.notePlaceholder")}
+            placeholderTextColor={posColors.placeholder}
+            style={styles.textInput}
+            testID="installment-pickup-note"
+            value={state.pickupNote}
+          />
+        </View>
+      ) : null}
+      {showDangerPanel && dangerMode ? (
+        <DangerPanel
+          confirmation={confirmation}
+          dangerMode={dangerMode}
+          locale={locale}
+          presenter={presenter}
+          setConfirmation={setConfirmation}
+          setDangerMode={setDangerMode}
+          state={state}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * 详情底部固定的动作栏：主按钮（继续付款 / 确认已取货）+「更多操作」。
+ * 提示、取货二次确认条和「更多操作」展开的两个入口显示在按钮上方。
+ */
+function DetailsActionDock({
+  actions,
   confirmation,
   dangerMode,
   details,
@@ -1142,6 +1392,7 @@ function DetailsActions({
   setMoreOpen,
   state,
 }: Readonly<{
+  actions: DetailsActionModel | null;
   confirmation: ConfirmationKind | null;
   dangerMode: DangerMode;
   details: InstallmentDetails;
@@ -1155,86 +1406,37 @@ function DetailsActions({
   setMoreOpen(value: boolean): void;
   state: InstallmentPresenterState;
 }>) {
-  const selectedDetailsWritable =
-    presenter.capabilities.selectedDetailsWritable;
-  const selectedDetailsRepayable =
-    presenter.capabilities.selectedDetailsRepayable;
-  const selectedDetailsCancelRefundable =
-    presenter.capabilities.selectedDetailsCancelRefundable;
-  const selectedDetailsVoidable =
-    presenter.capabilities.selectedDetailsVoidable;
-  const selectedDetailsPickupConfirmable =
-    presenter.capabilities.selectedDetailsPickupConfirmable;
-  if (details.status === "PickedUp" || details.status === "Cancelled") {
-    return null;
-  }
+  usePosThemeVersion();
+  if (!actions) return null;
 
-  if (details.status === "PaidOff") {
-    // 中文注释：已付清未提货可提货，也可取消并全额退款；作废（不退款）不对付清单开放。
-    if (!selectedDetailsPickupConfirmable && !selectedDetailsCancelRefundable) {
-      return null;
-    }
-    const blocked = selectedDetailsPickupConfirmable
-      ? actionBlockReason(state, state.access.canConfirmPickup, true)
-      : null;
-    const cancelBlocked = selectedDetailsCancelRefundable
-      ? actionBlockReason(state, state.access.canCancel, true)
-      : null;
+  const toggleMore = (): void => {
+    setMoreOpen(!moreOpen);
+    setDangerMode(null);
+    setConfirmation(null);
+  };
+  // 展开后、尚未选具体危险操作时，在按钮上方列出两个入口；选定后表单显示在滚动区末尾。
+  const showMoreMenu = moreActionsVisible(actions, moreOpen) && !dangerMode;
+  const moreButton = (disabled: boolean): ReactNode => (
+    <PosButton
+      disabled={disabled}
+      label={installmentText(
+        locale,
+        moreOpen ? "action.closeMore" : "action.more",
+      )}
+      onPress={toggleMore}
+      size="large"
+      testID="installment-more-actions"
+      tone="quiet"
+      trailingIcon={moreOpen ? "chevron-down" : "chevron-up"}
+    />
+  );
+
+  if (actions.kind === "pickup") {
+    const blocked = actions.pickupBlocked;
+    const cancelBlocked = actions.cancelBlocked;
     return (
       <View style={styles.actionDock} testID="installment-action-dock">
-        {selectedDetailsPickupConfirmable ? (
-          <>
-            <Text style={styles.actionDockTitle}>
-              {installmentText(locale, "pickup.title")}
-            </Text>
-            <PosKeyboardAwareTextInput
-              accessibilityLabel={installmentText(
-                locale,
-                "pickup.noteAccessibility",
-              )}
-              editable={!blocked}
-              onChangeText={(value) => presenter.setPickupNote(value)}
-              placeholder={installmentText(locale, "pickup.notePlaceholder")}
-              style={styles.textInput}
-              testID="installment-pickup-note"
-              value={state.pickupNote}
-            />
-          </>
-        ) : null}
-        <View style={styles.actionDockButtons}>
-          {selectedDetailsPickupConfirmable ? (
-            <View style={styles.primaryActionGrow}>
-              <ActionButton
-                disabled={Boolean(blocked)}
-                label={installmentText(locale, "action.confirmPickup")}
-                onPress={() => {
-                  setMoreOpen(false);
-                  setDangerMode(null);
-                  setConfirmation("pickup");
-                }}
-                testID="installment-confirm-pickup"
-                wide
-              />
-            </View>
-          ) : null}
-          {selectedDetailsCancelRefundable ? (
-            <ActionButton
-              disabled={Boolean(cancelBlocked)}
-              label={installmentText(
-                locale,
-                moreOpen ? "action.closeMore" : "action.more",
-              )}
-              onPress={() => {
-                setMoreOpen(!moreOpen);
-                setDangerMode(null);
-                setConfirmation(null);
-              }}
-              testID="installment-more-actions"
-              tone="secondary"
-            />
-          ) : null}
-        </View>
-        {!selectedDetailsWritable && selectedDetailsCancelRefundable ? (
+        {!actions.writable && actions.cancelRefundable ? (
           <Text
             style={styles.crossDeviceNotice}
             testID="installment-cross-device-notice"
@@ -1258,89 +1460,51 @@ function DetailsActions({
             }}
           />
         ) : null}
-        {moreOpen && !cancelBlocked && selectedDetailsCancelRefundable ? (
-          <CancellationPanel
+        {showMoreMenu ? (
+          <MoreMenu
             canCancel
             canVoid={false}
-            confirmation={confirmation}
-            dangerMode={dangerMode}
             locale={locale}
-            presenter={presenter}
-            setConfirmation={setConfirmation}
             setDangerMode={setDangerMode}
-            state={state}
           />
         ) : null}
+        <View style={styles.actionDockButtons}>
+          {actions.pickupConfirmable ? (
+            <PosButton
+              disabled={Boolean(blocked)}
+              fill
+              icon="package-variant-closed-check"
+              label={installmentText(locale, "action.confirmPickup")}
+              onPress={() => {
+                setMoreOpen(false);
+                setDangerMode(null);
+                setConfirmation("pickup");
+              }}
+              size="large"
+              testID="installment-confirm-pickup"
+              tone="primary"
+            />
+          ) : null}
+          {actions.cancelRefundable
+            ? moreButton(Boolean(cancelBlocked))
+            : null}
+        </View>
       </View>
     );
   }
 
-  if (
-    !selectedDetailsRepayable &&
-    !selectedDetailsCancelRefundable &&
-    !selectedDetailsVoidable
-  ) {
-    return null;
-  }
-
-  const repaymentBlocked = selectedDetailsRepayable
-    ? actionBlockReason(
-        state,
-        state.access.canAddRepayment,
-        Boolean(onStartRepayment),
-      )
-    : null;
-  const moreAvailable =
-    selectedDetailsCancelRefundable || selectedDetailsVoidable;
-  const moreBlocked = moreAvailable
-    ? actionBlockReason(state, state.access.canCancel, true)
-    : null;
+  const repaymentBlocked = actions.repaymentBlocked;
+  const moreBlocked = actions.moreBlocked;
   return (
     <View style={styles.actionDock} testID="installment-action-dock">
-      <View style={styles.actionDockButtons}>
-        {selectedDetailsRepayable ? (
-          <View style={styles.primaryActionGrow}>
-            <ActionButton
-              disabled={Boolean(repaymentBlocked)}
-              label={installmentText(
-                locale,
-                state.busy ? "action.working" : "action.continuePayment",
-              )}
-              onPress={() => {
-                if (!onStartRepayment?.(details.installmentGuid)) {
-                  onRouteFailure();
-                }
-              }}
-              testID="installment-continue-to-payment"
-              wide
-            />
-          </View>
-        ) : null}
-        {moreAvailable ? (
-          <ActionButton
-            disabled={Boolean(moreBlocked)}
-            label={installmentText(
-              locale,
-              moreOpen ? "action.closeMore" : "action.more",
-            )}
-            onPress={() => {
-              setMoreOpen(!moreOpen);
-              setDangerMode(null);
-              setConfirmation(null);
-            }}
-            testID="installment-more-actions"
-            tone="secondary"
-          />
-        ) : null}
-      </View>
-      {!selectedDetailsWritable ? (
+      {!actions.writable ? (
         <Text
           style={styles.crossDeviceNotice}
           testID="installment-cross-device-notice"
         >
           {installmentText(
             locale,
-            moreAvailable
+            actions.moreAvailable
               ? "details.crossDeviceActionNotice"
               : "details.crossDeviceRepaymentNotice",
           )}
@@ -1351,26 +1515,81 @@ function DetailsActions({
       ) : moreBlocked ? (
         <ActionBlockNotice locale={locale} reason={moreBlocked} />
       ) : null}
-      {moreOpen && !moreBlocked ? (
-        <CancellationPanel
-          canCancel={selectedDetailsCancelRefundable}
-          canVoid={selectedDetailsVoidable}
-          confirmation={confirmation}
-          dangerMode={dangerMode}
+      {showMoreMenu ? (
+        <MoreMenu
+          canCancel={actions.cancelRefundable}
+          canVoid={actions.voidable}
           locale={locale}
-          presenter={presenter}
-          setConfirmation={setConfirmation}
           setDangerMode={setDangerMode}
-          state={state}
+        />
+      ) : null}
+      <View style={styles.actionDockButtons}>
+        {actions.repayable ? (
+          <PosButton
+            disabled={Boolean(repaymentBlocked)}
+            fill
+            icon="cash-plus"
+            label={installmentText(
+              locale,
+              state.busy ? "action.working" : "action.continuePayment",
+            )}
+            onPress={() => {
+              if (!onStartRepayment?.(details.installmentGuid)) {
+                onRouteFailure();
+              }
+            }}
+            size="large"
+            testID="installment-continue-to-payment"
+            tone="primary"
+          />
+        ) : null}
+        {actions.moreAvailable ? moreButton(Boolean(moreBlocked)) : null}
+      </View>
+    </View>
+  );
+}
+
+/** 「更多操作」展开后的两个危险入口；点了才进入对应表单，仍需填原因并二次确认。 */
+function MoreMenu({
+  canCancel,
+  canVoid,
+  locale,
+  setDangerMode,
+}: Readonly<{
+  canCancel: boolean;
+  canVoid: boolean;
+  locale: InstallmentLocale;
+  setDangerMode(value: DangerMode): void;
+}>) {
+  usePosThemeVersion();
+  return (
+    <View style={styles.moreMenu} testID="installment-more-menu">
+      {canCancel ? (
+        <PosButton
+          fill
+          label={installmentText(locale, "action.refundCancel")}
+          onPress={() => setDangerMode("cancel")}
+          sound="danger"
+          testID="installment-more-cancel"
+          tone="danger"
+        />
+      ) : null}
+      {canVoid ? (
+        <PosButton
+          fill
+          label={installmentText(locale, "action.void")}
+          onPress={() => setDangerMode("void")}
+          sound="danger"
+          testID="installment-more-void"
+          tone="danger"
         />
       ) : null}
     </View>
   );
 }
 
-function CancellationPanel({
-  canCancel,
-  canVoid,
+/** 退款取消 / 作废表单：填原因（取消还要选退款方式）→ 点危险按钮 → 二次确认条。 */
+function DangerPanel({
   confirmation,
   dangerMode,
   locale,
@@ -1379,53 +1598,29 @@ function CancellationPanel({
   setDangerMode,
   state,
 }: Readonly<{
-  canCancel: boolean;
-  canVoid: boolean;
   confirmation: ConfirmationKind | null;
-  dangerMode: DangerMode;
+  dangerMode: "cancel" | "void";
   locale: InstallmentLocale;
   presenter: InstallmentScreenPresenter;
   setConfirmation(value: ConfirmationKind | null): void;
   setDangerMode(value: DangerMode): void;
   state: InstallmentPresenterState;
 }>) {
-  if (!dangerMode) {
-    return (
-      <View style={styles.moreMenu} testID="installment-more-menu">
-        {canCancel ? (
-          <ActionButton
-            label={installmentText(locale, "action.refundCancel")}
-            onPress={() => setDangerMode("cancel")}
-            testID="installment-more-cancel"
-            tone="dangerQuiet"
-          />
-        ) : null}
-        {canVoid ? (
-          <ActionButton
-            label={installmentText(locale, "action.void")}
-            onPress={() => setDangerMode("void")}
-            testID="installment-more-void"
-            tone="dangerQuiet"
-          />
-        ) : null}
-      </View>
-    );
-  }
-
+  usePosThemeVersion();
   const cancelMode = dangerMode === "cancel";
   return (
     <View style={styles.dangerPanel} testID={`installment-${dangerMode}-panel`}>
       <View style={styles.dangerPanelHeader}>
-        <Text style={styles.actionDockTitle}>
+        <Text style={[styles.actionDockTitle, styles.grow]}>
           {installmentText(locale, cancelMode ? "cancel.title" : "action.void")}
         </Text>
-        <ActionButton
-          compact
+        <PosButton
           label={installmentText(locale, "action.back")}
           onPress={() => {
             setDangerMode(null);
             setConfirmation(null);
           }}
+          size="small"
           testID="installment-danger-back"
           tone="quiet"
         />
@@ -1444,6 +1639,7 @@ function CancellationPanel({
           locale,
           cancelMode ? "cancel.reasonPlaceholder" : "void.reasonPlaceholder",
         )}
+        placeholderTextColor={posColors.placeholder}
         style={styles.textInput}
         testID={cancelMode ? "installment-cancel-reason" : "installment-void-reason"}
         value={cancelMode ? state.cancelReason : state.voidReason}
@@ -1451,15 +1647,15 @@ function CancellationPanel({
       {cancelMode ? (
         <RefundModeSelector locale={locale} presenter={presenter} />
       ) : null}
-      <ActionButton
+      <PosButton
         label={installmentText(
           locale,
           cancelMode ? "action.refundCancel" : "action.void",
         )}
         onPress={() => setConfirmation(dangerMode)}
+        sound="danger"
         testID={cancelMode ? "installment-cancel-refund" : "installment-void"}
         tone="danger"
-        wide
       />
       {confirmation === dangerMode ? (
         <ConfirmationStrip
@@ -1496,26 +1692,25 @@ function RefundModeSelector({
   locale: InstallmentLocale;
   presenter: InstallmentScreenPresenter;
 }>) {
+  usePosThemeVersion();
   const originalRouteAvailable =
     presenter.capabilities.selectedDetailsOriginalRouteRefundable;
   const refundMode = presenter.capabilities.selectedDetailsCancelRefundMode;
   const options = ["original-route", "voucher"] as const;
   return (
     <View style={styles.refundModeGroup} testID="installment-cancel-refund-mode">
-      <Text style={styles.filterLabel}>
+      <Text style={styles.fieldLabel}>
         {installmentText(locale, "cancel.refundModeLabel")}
       </Text>
       <View style={styles.refundModeOptions}>
         {options.map((option) => (
-          <ActionButton
-            compact
+          <ChoiceButton
             disabled={option === "original-route" && !originalRouteAvailable}
             key={option}
             label={installmentText(locale, `cancel.refundMode.${option}`)}
             onPress={() => presenter.setCancelRefundMode(option)}
             selected={refundMode === option}
             testID={`installment-cancel-refund-mode-${option}`}
-            tone="secondary"
           />
         ))}
       </View>
@@ -1535,6 +1730,52 @@ function RefundModeSelector({
 }
 
 /**
+ * 二选一的选项按钮（退款方式）。保留「按钮 + selected」的无障碍语义，
+ * 已选项再点一次仍会回调，行为与改版前一致。
+ */
+function ChoiceButton({
+  disabled = false,
+  label,
+  onPress,
+  selected,
+  testID,
+}: Readonly<{
+  disabled?: boolean;
+  label: string;
+  onPress(): void;
+  selected: boolean;
+  testID: string;
+}>) {
+  usePosThemeVersion();
+  return (
+    <PosPressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled, selected }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.choice,
+        selected && styles.choiceSelected,
+        disabled && styles.choiceDisabled,
+        pressed && !disabled && styles.pressed,
+      ]}
+      testID={testID}
+    >
+      <Text
+        numberOfLines={2}
+        style={[
+          styles.choiceText,
+          selected && styles.choiceTextSelected,
+          disabled && styles.choiceTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
+    </PosPressable>
+  );
+}
+
+/**
  * 卡状态不明的刷卡续付占用该分期时，让有分期取消权限的主管核实后结案（对齐 WPF #1194）。
  * 只展示安全描述符（金额、通道、发起设备、时间），不含卡引用。没有权限只提示找主管，不展示结案按钮。
  */
@@ -1547,6 +1788,7 @@ function SupervisorResolvePanel({
   presenter: InstallmentScreenPresenter;
   state: InstallmentPresenterState;
 }>) {
+  usePosThemeVersion();
   const pending = state.pendingCardRepayment;
   if (!pending || !state.online) return null;
   const dialog = state.supervisorResolve;
@@ -1572,23 +1814,27 @@ function SupervisorResolvePanel({
       {dialog.kind === "closed" ? (
         state.access.canCancel ? (
           <View style={styles.confirmationActions}>
-            <ActionButton
+            <PosButton
               disabled={state.busy}
+              fill
               label={installmentText(locale, "supervisor.chargedAction")}
               onPress={() => presenter.openSupervisorResolve("charged")}
+              sound="danger"
               testID="installment-supervisor-charged"
               tone="danger"
             />
-            <ActionButton
+            <PosButton
               disabled={state.busy}
+              fill
               label={installmentText(locale, "supervisor.notChargedAction")}
               onPress={() => presenter.openSupervisorResolve("not-charged")}
+              sound="danger"
               testID="installment-supervisor-not-charged"
               tone="danger"
             />
           </View>
         ) : (
-          <Text style={styles.recoveryText} testID="installment-supervisor-needs-permission">
+          <Text style={styles.supervisorNotice} testID="installment-supervisor-needs-permission">
             {installmentText(locale, "supervisor.needsPermission")}
           </Text>
         )
@@ -1614,6 +1860,7 @@ function SupervisorResolvePanel({
             accessibilityLabel={installmentText(locale, "supervisor.reasonAccessibility")}
             onChangeText={(value) => presenter.setSupervisorResolveReason(value)}
             placeholder={installmentText(locale, "supervisor.reasonPlaceholder")}
+            placeholderTextColor={posColors.placeholder}
             style={styles.textInput}
             testID="installment-supervisor-reason"
             value={dialog.reason}
@@ -1622,22 +1869,27 @@ function SupervisorResolvePanel({
             accessibilityLabel={installmentText(locale, "supervisor.referenceAccessibility")}
             onChangeText={(value) => presenter.setSupervisorResolveReference(value)}
             placeholder={installmentText(locale, "supervisor.referencePlaceholder")}
+            placeholderTextColor={posColors.placeholder}
             style={styles.textInput}
             testID="installment-supervisor-reference"
             value={dialog.reference}
           />
           <View style={styles.confirmationActions}>
-            <ActionButton
+            <PosButton
               disabled={state.busy}
               label={installmentText(locale, "action.back")}
               onPress={() => presenter.closeSupervisorResolve()}
+              size="medium"
               testID="installment-supervisor-back"
               tone="quiet"
             />
-            <ActionButton
+            <PosButton
               disabled={state.busy}
+              fill
               label={installmentText(locale, "supervisor.submit")}
               onPress={() => void presenter.confirmSupervisorResolve()}
+              size="medium"
+              sound="danger"
               testID="installment-supervisor-submit"
               tone="danger"
             />
@@ -1669,27 +1921,34 @@ function ConfirmationStrip({
   onCancel(): void;
   onConfirm(): void;
 }>) {
+  usePosThemeVersion();
+  const danger = kind !== "pickup";
   return (
     <View
       accessibilityLiveRegion="assertive"
-      style={styles.confirmation}
+      style={[styles.confirmation, !danger && styles.confirmationNeutral]}
       testID={`installment-confirm-${kind}`}
     >
       <Text style={styles.confirmationText}>
         {installmentText(locale, messageKey ?? `confirmation.${kind}`)}
       </Text>
       <View style={styles.confirmationActions}>
-        <ActionButton
+        <PosButton
           label={installmentText(locale, "action.back")}
           onPress={onCancel}
+          size="medium"
           testID="installment-confirm-operation-cancel"
           tone="quiet"
         />
-        <ActionButton
+        {/* 橙色主按钮每屏只留给底部主操作；这里的确认键用深色（取货）或危险色（取消、作废）。 */}
+        <PosButton
+          fill
           label={installmentText(locale, "action.confirm")}
           onPress={onConfirm}
+          size="medium"
+          sound={danger ? "danger" : "tap"}
           testID="installment-confirm-operation-submit"
-          tone={kind === "pickup" ? "primary" : "danger"}
+          tone={danger ? "danger" : "inverse"}
         />
       </View>
     </View>
@@ -1703,6 +1962,7 @@ function ActionBlockNotice({
   locale: InstallmentLocale;
   reason: ActionBlockReason;
 }>) {
+  usePosThemeVersion();
   return (
     <Text
       accessibilityLiveRegion="polite"
@@ -1727,18 +1987,21 @@ function actionBlockReason(
   return null;
 }
 
-function InfoGrid({ children }: Readonly<{ children: ReactNode }>) {
-  return <View style={styles.infoGrid}>{children}</View>;
+/** 一行「标签 值」小字，放不下自动换行；每个值单独成文本，便于选中复制。 */
+function MetaRow({ children }: Readonly<{ children: ReactNode }>) {
+  usePosThemeVersion();
+  return <View style={styles.metaRow}>{children}</View>;
 }
 
-function InfoFact({
+function MetaPair({
   label,
   value,
 }: Readonly<{ label: string; value: string }>) {
+  usePosThemeVersion();
   return (
-    <View style={styles.infoFact}>
-      <Text style={styles.infoLabel}>{label}</Text>
-      <Text selectable style={styles.infoValue}>
+    <View style={styles.metaPair}>
+      <Text style={styles.metaLabel}>{label}</Text>
+      <Text selectable style={styles.metaValue}>
         {value}
       </Text>
     </View>
@@ -1749,6 +2012,7 @@ function Section({
   children,
   title,
 }: Readonly<{ children: ReactNode; title: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -1758,18 +2022,29 @@ function Section({
 }
 
 function Metric({
-  emphasized = false,
   label,
+  tone = "plain",
   value,
 }: Readonly<{
-  emphasized?: boolean;
   label: string;
+  /** paid：已付金额用绿色；balance：余额卡加粗描边。 */
+  tone?: "plain" | "paid" | "balance";
   value: string;
 }>) {
+  usePosThemeVersion();
   return (
-    <View style={[styles.metric, emphasized && styles.metricEmphasized]}>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
+    <View style={[styles.metric, tone === "balance" && styles.metricBalance]}>
+      <Text numberOfLines={1} style={styles.metricLabel}>
+        {label}
+      </Text>
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        numberOfLines={1}
+        style={[styles.metricValue, tone === "paid" && styles.metricValuePaid]}
+      >
+        {value}
+      </Text>
     </View>
   );
 }
@@ -1778,22 +2053,22 @@ function StatusPill({
   locale,
   status,
 }: Readonly<{ locale: InstallmentLocale; status: InstallmentStatus }>) {
+  usePosThemeVersion();
   return (
-    <View
-      style={[
-        styles.statusPill,
-        status === "Active"
-          ? styles.statusActive
-          : status === "PaidOff"
-            ? styles.statusPaid
-            : status === "PickedUp"
-              ? styles.statusPicked
-              : styles.statusCancelled,
-      ]}
-    >
-      <Text style={styles.statusText}>{statusLabel(status, locale)}</Text>
-    </View>
+    <PosPill
+      label={statusLabel(status, locale)}
+      style={styles.statusPill}
+      tone={statusPillTone(status)}
+    />
   );
+}
+
+/** 进行中=提醒黄，已付清=绿，已取货=蓝，已取消=中性灰。 */
+function statusPillTone(status: InstallmentStatus): PosPillTone {
+  if (status === "Active") return "warning";
+  if (status === "PaidOff") return "good";
+  if (status === "PickedUp") return "info";
+  return "neutral";
 }
 
 function StatusBanner({
@@ -1803,6 +2078,7 @@ function StatusBanner({
   locale: InstallmentLocale;
   statusCode: InstallmentStatusCode;
 }>) {
+  usePosThemeVersion();
   const danger = [
     "action-failed",
     "authorization-declined",
@@ -1851,6 +2127,7 @@ function NoticeBanner({
   testID: string;
   tone: "danger" | "success";
 }>) {
+  usePosThemeVersion();
   return (
     <View
       accessibilityLiveRegion={assertive ? "assertive" : "polite"}
@@ -1878,20 +2155,22 @@ function CenteredState({
   onAction?(): void;
   testID: string;
 }>) {
+  usePosThemeVersion();
   return (
     <View
       accessibilityLiveRegion="polite"
       style={styles.centeredState}
       testID={testID}
     >
-      {loading ? <ActivityIndicator color={posColors.orange} size="large" /> : null}
+      {loading ? <ActivityIndicator color={posColors.accent} size="large" /> : null}
       <Text style={styles.fullStateText}>{message}</Text>
       {actionLabel && onAction ? (
-        <ActionButton
+        <PosButton
+          icon="refresh"
           label={actionLabel}
           onPress={onAction}
+          size="medium"
           testID={`${testID}-action`}
-          tone="secondary"
         />
       ) : null}
     </View>
@@ -1901,92 +2180,42 @@ function CenteredState({
 export function InstallmentsUnavailableScreen({
   onBack,
 }: Readonly<{ onBack(): void }>) {
+  usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale = resolveInstallmentLocale(
     i18n.resolvedLanguage ?? i18n.language,
   );
   return (
-    <SafeAreaView style={styles.safeArea} testID="installments-runtime-unavailable">
+    <PosScreenFrame
+      active="installments"
+      header={<PosPageHeader title={installmentText(locale, "title")} />}
+      testID="installments-runtime-unavailable"
+    >
       <View style={styles.fullState}>
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.mutedInk}
+          name="alert-circle-outline"
+          size={44}
+        />
         <Text style={styles.fullStateTitle}>
           {installmentText(locale, "unavailable.title")}
         </Text>
         <Text style={styles.fullStateText}>
           {installmentText(locale, "unavailable.subtitle")}
         </Text>
-        <ActionButton
+        <PosButton
+          icon="arrow-left"
           label={installmentText(locale, "action.backToSales")}
           onPress={onBack}
+          size="large"
           sound="navigate"
+          style={styles.fullStateAction}
           testID="installments-unavailable-back"
-          wide
+          tone="primary"
         />
       </View>
-    </SafeAreaView>
-  );
-}
-
-function ActionButton({
-  accessibilityHint,
-  accessibilityLabel,
-  compact = false,
-  disabled = false,
-  label,
-  onPress,
-  selected = false,
-  sound,
-  testID,
-  tone = "primary",
-  wide = false,
-}: Readonly<{
-  accessibilityHint?: string;
-  accessibilityLabel?: string;
-  compact?: boolean;
-  disabled?: boolean;
-  label: string;
-  onPress(): void;
-  selected?: boolean;
-  sound?: "tap" | "navigate" | "danger";
-  testID: string;
-  tone?: "primary" | "secondary" | "quiet" | "danger" | "dangerQuiet";
-  wide?: boolean;
-}>) {
-  return (
-    <PosPressable
-      accessibilityHint={accessibilityHint}
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      accessibilityState={{ disabled, selected }}
-      disabled={disabled}
-      onPress={onPress}
-      sound={sound ?? (tone.startsWith("danger") ? "danger" : "tap")}
-      style={({ pressed }) => [
-        styles.button,
-        compact && styles.buttonCompact,
-        wide && styles.buttonWide,
-        tone === "secondary" && styles.buttonSecondary,
-        tone === "quiet" && styles.buttonQuiet,
-        tone === "danger" && styles.buttonDanger,
-        tone === "dangerQuiet" && styles.buttonDangerQuiet,
-        selected && styles.buttonSelected,
-        disabled && styles.disabled,
-        pressed && !disabled && styles.pressed,
-      ]}
-      testID={testID}
-    >
-      <Text
-        numberOfLines={2}
-        style={[
-          styles.buttonText,
-          (tone === "secondary" || tone === "quiet") &&
-            !selected &&
-            styles.buttonTextDark,
-          tone === "dangerQuiet" && styles.buttonTextDanger,
-        ]}
-      >
-        {label}
-      </Text>
-    </PosPressable>
+    </PosScreenFrame>
   );
 }
 
@@ -2051,40 +2280,21 @@ function statusMessage(
   return installmentText(locale, `status.${code}`);
 }
 
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: posColors.canvas,
-  },
-  page: {
-    flex: 1,
-    minHeight: 0,
-  },
-  header: {
-    minHeight: 76,
-    maxHeight: 80,
-    paddingHorizontal: 14,
-    borderBottomColor: posColors.border,
-    borderBottomWidth: 1,
-    backgroundColor: posColors.surface,
+const styles = createPosStyles((colors) => ({
+  // —— 页头里的联网状态 ——
+  connectionPill: {
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderRadius: 17,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 7,
   },
-  headerIdentity: {
-    flex: 1,
-    minWidth: 0,
+  connectionPillOnline: {
+    backgroundColor: colors.greenSoft,
   },
-  title: {
-    color: posColors.ink,
-    fontSize: 24,
-    fontWeight: "800",
-  },
-  connectionState: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 3,
+  connectionPillOffline: {
+    backgroundColor: colors.surfaceSunken,
   },
   connectionDot: {
     width: 8,
@@ -2092,173 +2302,216 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   connectionDotOnline: {
-    backgroundColor: posColors.green,
+    backgroundColor: colors.green,
   },
   connectionDotOffline: {
-    backgroundColor: posColors.mutedInk,
+    backgroundColor: colors.mutedInk,
   },
   connectionText: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "800",
   },
-  headerActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+  connectionTextOnline: {
+    color: colors.green,
   },
+  connectionTextOffline: {
+    color: colors.mutedInk,
+  },
+
+  // —— 骨架：筛选两行在上，下面左列表 + 右详情 ——
   workspace: {
     flex: 1,
     minHeight: 0,
-    flexDirection: "row",
   },
-  pane: {
-    minWidth: 0,
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderWidth: 1,
-  },
-  historyPane: {
-    padding: 12,
-  },
-  detailsPane: {
+  panes: {
+    flex: 1,
     minHeight: 0,
+    flexDirection: "row",
+    alignItems: "stretch",
   },
-  panelHeader: {
+  paneFill: {
+    flex: 1,
+  },
+
+  // —— 筛选区 ——
+  filters: {
+    gap: 10,
+  },
+  searchKeyboardScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  filterRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
+    gap: 10,
   },
-  panelTitle: {
-    color: posColors.ink,
-    fontSize: 18,
-    fontWeight: "800",
+  filterRowCompact: {
+    flexWrap: "wrap",
   },
-  panelMeta: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  searchRow: {
+  searchField: {
+    width: 300,
+    minHeight: posTouch.medium,
+    paddingHorizontal: 12,
+    borderColor: colors.borderStrong,
+    borderWidth: 1.5,
+    borderRadius: posRadius.medium,
+    backgroundColor: colors.surface,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
   },
-  searchKeyboardScroll: {
-    flexGrow: 0,
+  searchFieldCompact: {
+    width: "auto",
+    flex: 1,
+    minWidth: 220,
   },
   searchInput: {
     flex: 1,
-    minHeight: INSTALLMENTS_MIN_TOUCH_TARGET,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    color: posColors.ink,
-    backgroundColor: posColors.canvas,
-    paddingHorizontal: 11,
-    fontSize: 14,
+    minWidth: 0,
+    minHeight: posTouch.medium - 3,
+    paddingVertical: 0,
+    color: colors.ink,
+    fontSize: 16,
   },
-  filterColumns: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 10,
-  },
-  filterColumnsCompact: {
-    flexDirection: "column",
-    gap: 2,
-  },
-  filterGroup: {
+  segmentedFill: {
+    flex: 1,
     minWidth: 0,
   },
-  filterLabel: {
-    color: posColors.mutedInk,
-    fontSize: 10,
-    fontWeight: "800",
-    marginTop: 7,
+  segmentedFullRow: {
+    width: "100%",
   },
-  filterRow: {
-    flexDirection: "row",
-    gap: 6,
-    paddingVertical: 5,
+  scopeSegmented: {
+    width: 220,
+  },
+  filterLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
   },
   customDateRow: {
     flexDirection: "row",
     alignItems: "center",
     flexWrap: "wrap",
-    gap: 7,
-    paddingBottom: 7,
+    gap: 10,
+  },
+
+  // —— 左列表 ——
+  historyPane: {
+    minWidth: 0,
+    minHeight: 0,
+    gap: 8,
+  },
+  panelHeader: {
+    minHeight: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  panelTitle: {
+    color: colors.ink,
+    fontSize: 19,
+    fontWeight: "900",
+  },
+  countPill: {
+    alignSelf: "center",
+  },
+  orderListScroll: {
+    flex: 1,
+    minHeight: 0,
   },
   orderList: {
-    gap: 7,
-    paddingTop: 4,
-    paddingBottom: 10,
+    gap: 8,
+    paddingBottom: 4,
   },
   emptyList: {
     flexGrow: 1,
   },
   orderRow: {
-    minHeight: 82,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    padding: 10,
+    minHeight: 88,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderColor: colors.border,
+    borderWidth: 1.5,
+    borderRadius: posRadius.large,
+    backgroundColor: colors.surface,
     flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
-    backgroundColor: posColors.surface,
   },
   orderRowSelected: {
-    backgroundColor: posColors.orangeSoft,
-    borderColor: posColors.orange,
+    backgroundColor: colors.selectedSurface,
+    borderColor: colors.accent,
+    borderWidth: 2,
   },
   orderIdentity: {
     flex: 1,
     minWidth: 0,
   },
+  orderTitleLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   orderNumber: {
-    color: posColors.ink,
-    fontSize: 15,
+    flexShrink: 1,
+    color: colors.ink,
+    fontSize: 16.5,
     fontWeight: "800",
   },
   orderCustomer: {
-    color: posColors.ink,
-    fontSize: 13,
-    marginTop: 3,
+    color: colors.mutedInk,
+    fontSize: 14,
+    marginTop: 4,
   },
   orderMeta: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    marginTop: 4,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    marginTop: 3,
   },
   orderAmounts: {
     alignItems: "flex-end",
-    minWidth: 102,
   },
   balanceAmount: {
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "800",
-    marginTop: 5,
+    color: colors.ink,
+    fontSize: 20,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
   },
   balanceLabel: {
-    color: posColors.mutedInk,
-    fontSize: 10,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    marginTop: 2,
   },
-  loadMoreRow: {
-    alignItems: "center",
-    paddingVertical: 8,
+  statusPill: {
+    alignSelf: "center",
+    flexShrink: 0,
+  },
+
+  // —— 右详情 ——
+  detailsPane: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflow: "hidden",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: posRadius.large,
   },
   compactDetailsHeader: {
-    minHeight: 58,
+    minHeight: 72,
     paddingHorizontal: 10,
-    borderBottomColor: posColors.border,
+    borderBottomColor: colors.border,
     borderBottomWidth: 1,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 12,
   },
   compactDetailsTitle: {
-    color: posColors.ink,
-    fontSize: 14,
+    color: colors.ink,
+    fontSize: 17,
     fontWeight: "800",
   },
   detailsScroll: {
@@ -2267,7 +2520,7 @@ const styles = StyleSheet.create({
   detailsContent: {
     flexGrow: 1,
     padding: 14,
-    gap: 12,
+    gap: 10,
   },
   detailHeading: {
     flexDirection: "row",
@@ -2279,302 +2532,356 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  detailUtilities: {
-    alignItems: "flex-end",
-    gap: 7,
+  detailTitleLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   detailNumber: {
-    color: posColors.ink,
-    fontSize: 22,
-    fontWeight: "800",
+    flexShrink: 1,
+    color: colors.ink,
+    fontSize: 21,
+    fontWeight: "900",
   },
   detailCustomer: {
-    color: posColors.mutedInk,
-    fontSize: 13,
+    color: colors.mutedInk,
+    fontSize: 14.5,
     marginTop: 3,
+    marginBottom: 3,
   },
   reprintFeedback: {
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: "700",
-    lineHeight: 18,
+    lineHeight: 20,
   },
   reprintSuccess: {
-    color: posColors.green,
+    color: colors.green,
   },
   reprintFailure: {
-    color: posColors.red,
+    color: colors.red,
   },
   metrics: {
     flexDirection: "row",
-    gap: 7,
+    gap: 10,
   },
   metric: {
     flex: 1,
     minWidth: 0,
-    borderColor: posColors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderColor: colors.border,
     borderWidth: 1,
-    padding: 9,
-    backgroundColor: posColors.canvas,
+    borderRadius: posRadius.medium,
+    backgroundColor: colors.surface,
   },
-  metricEmphasized: {
-    backgroundColor: posColors.orangeSoft,
-    borderColor: posColors.orange,
+  // 余额是这张单最要紧的数字：加粗描边，和另外三张卡区分开。
+  metricBalance: {
+    borderColor: colors.ink,
+    borderWidth: 2,
   },
   metricLabel: {
-    color: posColors.mutedInk,
-    fontSize: 10,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "700",
   },
   metricValue: {
-    color: posColors.ink,
-    fontSize: 16,
-    fontWeight: "800",
-    marginTop: 3,
-  },
-  section: {
-    borderTopColor: posColors.border,
-    borderTopWidth: 1,
-    paddingTop: 10,
-    gap: 7,
-  },
-  sectionTitle: {
-    color: posColors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  detailRecord: {
-    borderBottomColor: posColors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 7,
-    gap: 6,
-  },
-  recordHeading: {
-    minHeight: INSTALLMENTS_MIN_TOUCH_TARGET,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  factPrimary: {
-    flex: 1,
-    color: posColors.ink,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  factSecondary: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-  },
-  factAmount: {
-    color: posColors.ink,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  infoGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 7,
-  },
-  infoFact: {
-    minWidth: 126,
-    flexGrow: 1,
-    flexBasis: "30%",
-    borderColor: posColors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    backgroundColor: posColors.canvas,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  infoLabel: {
-    color: posColors.mutedInk,
-    fontSize: 9,
-    fontWeight: "700",
-  },
-  infoValue: {
-    color: posColors.ink,
-    fontSize: 12,
-    fontWeight: "700",
+    color: colors.ink,
+    fontSize: 25,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
     marginTop: 2,
   },
-  noteText: {
-    color: posColors.ink,
+  metricValuePaid: {
+    color: colors.green,
+  },
+  section: {
+    gap: 2,
+  },
+  sectionTitle: {
+    color: colors.mutedInk,
     fontSize: 13,
-    lineHeight: 19,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+    marginTop: 4,
+  },
+  detailRecord: {
+    minHeight: 52,
+    paddingVertical: 8,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  recordCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recordTitle: {
+    color: colors.ink,
+    fontSize: 15.5,
+    fontWeight: "800",
+  },
+  recordQuantity: {
+    color: colors.mutedInk,
+    fontSize: 14.5,
+    fontVariant: ["tabular-nums"],
+  },
+  recordAmount: {
+    minWidth: 84,
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+    textAlign: "right",
+  },
+  metaRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    columnGap: 14,
+    rowGap: 2,
+    marginTop: 2,
+  },
+  metaPair: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 5,
+  },
+  metaLabel: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+  },
+  metaValue: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  noteText: {
+    color: colors.ink,
+    fontSize: 15,
+    lineHeight: 21,
   },
   completedNote: {
-    backgroundColor: posColors.greenSoft,
-    borderLeftColor: posColors.green,
+    backgroundColor: colors.greenSoft,
+    borderLeftColor: colors.green,
     borderLeftWidth: 4,
-    padding: 10,
-    gap: 7,
+    borderRadius: posRadius.small,
+    padding: 12,
+    gap: 4,
   },
   cancelledNote: {
-    backgroundColor: posColors.redSoft,
-    borderLeftColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderLeftColor: colors.red,
     borderLeftWidth: 4,
-    padding: 10,
-    gap: 7,
+    borderRadius: posRadius.small,
+    padding: 12,
+    gap: 4,
   },
   completedTitle: {
-    color: posColors.ink,
-    fontSize: 13,
+    color: colors.ink,
+    fontSize: 15.5,
     fontWeight: "800",
+  },
+  emptyHint: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingVertical: 8,
+  },
+
+  // —— 动作区：表单在滚动区末尾，按钮栏固定在底部 ——
+  actionForms: {
+    marginTop: "auto",
+    gap: 10,
+  },
+  pickupPanel: {
+    gap: 8,
+    paddingTop: 10,
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
   },
   actionDock: {
-    marginTop: "auto",
-    borderColor: posColors.border,
-    borderWidth: 1,
-    backgroundColor: posColors.canvas,
-    padding: 10,
-    gap: 8,
+    padding: 12,
+    gap: 10,
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    backgroundColor: colors.surface,
+  },
+  grow: {
+    flex: 1,
   },
   actionDockTitle: {
-    color: posColors.ink,
-    fontSize: 14,
+    color: colors.ink,
+    fontSize: 16,
     fontWeight: "800",
-  },
-  crossDeviceNotice: {
-    backgroundColor: posColors.blueSoft,
-    borderLeftColor: posColors.blue,
-    borderLeftWidth: 4,
-    color: posColors.ink,
-    fontSize: 12,
-    lineHeight: 18,
-    padding: 8,
   },
   actionDockButtons: {
     flexDirection: "row",
     alignItems: "stretch",
-    gap: 8,
+    gap: 12,
   },
-  primaryActionGrow: {
-    flex: 1,
+  crossDeviceNotice: {
+    backgroundColor: colors.blueSoft,
+    borderLeftColor: colors.blue,
+    borderLeftWidth: 4,
+    borderRadius: posRadius.small,
+    color: colors.ink,
+    fontSize: 14,
+    lineHeight: 20,
+    padding: 10,
+  },
+  blockedText: {
+    color: colors.mutedInk,
+    fontSize: 13.5,
+    lineHeight: 19,
+    fontWeight: "700",
   },
   moreMenu: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    borderTopColor: posColors.border,
-    borderTopWidth: 1,
-    paddingTop: 8,
+    gap: 12,
   },
   dangerPanel: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
     borderWidth: 1,
-    padding: 10,
-    gap: 8,
-  },
-  refundModeGroup: {
-    gap: 6,
-  },
-  refundModeOptions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  refundModeHint: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
+    borderRadius: posRadius.large,
+    padding: 12,
+    gap: 10,
   },
   dangerPanelHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 10,
+  },
+  fieldLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  refundModeGroup: {
     gap: 8,
+  },
+  refundModeOptions: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  refundModeHint: {
+    color: colors.ink,
+    fontSize: 13.5,
+    lineHeight: 19,
+  },
+  choice: {
+    flex: 1,
+    minHeight: posTouch.medium,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: colors.borderStrong,
+    borderWidth: 1.5,
+    borderRadius: posRadius.medium,
+    backgroundColor: colors.surface,
+  },
+  choiceSelected: {
+    backgroundColor: colors.inverseSurface,
+    borderColor: colors.inverseSurface,
+  },
+  choiceDisabled: {
+    backgroundColor: colors.disabledSurface,
+    borderColor: colors.disabledBorder,
+  },
+  choiceText: {
+    color: colors.ink,
+    fontSize: 15.5,
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  choiceTextSelected: {
+    color: colors.onInverse,
+  },
+  choiceTextDisabled: {
+    color: colors.disabledInk,
   },
   textInput: {
-    minHeight: INSTALLMENTS_MIN_TOUCH_TARGET,
-    borderColor: posColors.border,
-    borderWidth: 1,
-    color: posColors.ink,
-    backgroundColor: posColors.surface,
-    paddingHorizontal: 11,
-    fontSize: 14,
+    minHeight: posTouch.medium,
+    paddingHorizontal: 14,
+    borderColor: colors.borderStrong,
+    borderWidth: 1.5,
+    borderRadius: posRadius.medium,
+    color: colors.ink,
+    backgroundColor: colors.surface,
+    fontSize: 16,
   },
   confirmation: {
-    borderTopColor: posColors.red,
+    borderTopColor: colors.redBorder,
     borderTopWidth: 1,
-    paddingTop: 8,
-    gap: 8,
+    paddingTop: 10,
+    gap: 10,
+  },
+  // 取货确认条放在底部按钮栏里，不属于危险操作，用普通提示底色。
+  confirmationNeutral: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderTopColor: colors.border,
+    borderWidth: 1,
+    borderRadius: posRadius.medium,
+    padding: 12,
   },
   confirmationText: {
-    color: posColors.ink,
-    fontSize: 12,
+    color: colors.ink,
+    fontSize: 14.5,
     fontWeight: "700",
-    lineHeight: 18,
+    lineHeight: 21,
   },
   confirmationActions: {
     flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
+    gap: 10,
   },
-  blockedText: {
-    color: posColors.mutedInk,
-    fontSize: 11,
-    lineHeight: 16,
+  supervisorNotice: {
+    color: colors.ink,
+    fontSize: 14.5,
     fontWeight: "700",
+    lineHeight: 21,
   },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-  },
-  statusActive: {
-    backgroundColor: posColors.blueSoft,
-    borderColor: posColors.blue,
-  },
-  statusPaid: {
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
-  },
-  statusPicked: {
-    backgroundColor: posColors.greenSoft,
-    borderColor: posColors.green,
-  },
-  statusCancelled: {
-    backgroundColor: posColors.redSoft,
-    borderColor: posColors.red,
-  },
-  statusText: {
-    color: posColors.ink,
-    fontSize: 10,
-    fontWeight: "800",
-  },
+
+  // —— 横幅与整页状态 ——
   noticeBanner: {
     borderLeftWidth: 4,
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   noticeDanger: {
-    backgroundColor: posColors.redSoft,
-    borderLeftColor: posColors.red,
+    backgroundColor: colors.redSoft,
+    borderLeftColor: colors.red,
   },
   noticeSuccess: {
-    backgroundColor: posColors.greenSoft,
-    borderLeftColor: posColors.green,
+    backgroundColor: colors.greenSoft,
+    borderLeftColor: colors.green,
   },
   noticeText: {
-    color: posColors.ink,
-    fontSize: 12,
+    color: colors.ink,
+    fontSize: 14.5,
     fontWeight: "700",
+    lineHeight: 20,
   },
   recoveryRow: {
-    minHeight: 54,
+    minHeight: 72,
     paddingHorizontal: 14,
+    paddingVertical: 8,
     flexDirection: "row",
     justifyContent: "flex-end",
     alignItems: "center",
-    gap: 10,
-    backgroundColor: posColors.redSoft,
-    borderBottomColor: posColors.red,
+    gap: 12,
+    backgroundColor: colors.redSoft,
+    borderBottomColor: colors.redBorder,
     borderBottomWidth: 1,
   },
   recoveryText: {
     flex: 1,
-    color: posColors.ink,
-    fontSize: 12,
+    color: colors.ink,
+    fontSize: 14.5,
     fontWeight: "700",
+    lineHeight: 20,
   },
   fullState: {
     flex: 1,
@@ -2583,19 +2890,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     maxWidth: 620,
     padding: 28,
-    gap: 12,
+    gap: 14,
   },
   fullStateTitle: {
-    color: posColors.ink,
-    fontSize: 22,
-    fontWeight: "800",
+    color: colors.ink,
+    fontSize: 23,
+    fontWeight: "900",
     textAlign: "center",
   },
   fullStateText: {
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 19,
+    color: colors.mutedInk,
+    fontSize: 15,
+    lineHeight: 22,
     textAlign: "center",
+  },
+  fullStateAction: {
+    alignSelf: "stretch",
+    minWidth: 280,
   },
   centeredState: {
     flex: 1,
@@ -2603,65 +2914,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 20,
-    gap: 10,
-  },
-  emptyHint: {
-    color: posColors.mutedInk,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  button: {
-    minHeight: INSTALLMENTS_MIN_TOUCH_TARGET,
-    minWidth: INSTALLMENTS_MIN_TOUCH_TARGET,
-    paddingHorizontal: 13,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
-    borderWidth: 1,
-  },
-  buttonCompact: {
-    paddingHorizontal: 9,
-  },
-  buttonWide: {
-    width: "100%",
-  },
-  buttonSecondary: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-  },
-  buttonQuiet: {
-    backgroundColor: "transparent",
-    borderColor: posColors.border,
-  },
-  buttonDanger: {
-    backgroundColor: posColors.red,
-    borderColor: posColors.red,
-  },
-  buttonDangerQuiet: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.red,
-  },
-  buttonSelected: {
-    backgroundColor: posColors.orange,
-    borderColor: posColors.orange,
-  },
-  buttonText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  buttonTextDark: {
-    color: posColors.ink,
-  },
-  buttonTextDanger: {
-    color: posColors.red,
-  },
-  disabled: {
-    opacity: 0.42,
+    gap: 12,
   },
   pressed: {
     opacity: 0.72,
   },
-});
+}));

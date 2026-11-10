@@ -3,6 +3,9 @@ import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 
 import SalesRoute from "../../../app/sales";
 
+import { passesPosDestinationGuard } from "@/features/navigation/pos-destination-access";
+import { PosNavigationContext } from "@/ui/shell/pos-navigation-context";
+
 let mockRuntime: any;
 let mockActiveCashier: any;
 let mockSalesScreenProps: any;
@@ -65,11 +68,7 @@ const mockToggleAppLanguage = jest.fn<() => Promise<"en" | "zh">>();
 const mockReadCameraScanMode = jest.fn<() => "single" | "continuous">();
 const mockSaveCameraScanMode =
   jest.fn<(mode: "single" | "continuous") => Promise<void>>();
-const mockReadSalesToolbarOrder = jest.fn<() => string[] | null>();
-const mockSaveSalesToolbarOrder =
-  jest.fn<(order: readonly string[]) => Promise<void>>();
-const mockReconcileSalesToolbarOrder =
-  jest.fn<(order: readonly string[] | null | undefined) => string[]>();
+const mockRequireNoPendingLookupSelections = jest.fn<() => boolean>();
 const mockReleaseCameraContext = jest.fn();
 const mockAcquireScannerContext = jest.fn(
   (_context: string) => mockReleaseCameraContext,
@@ -81,7 +80,6 @@ const mockSubscribeAuthorization = jest.fn<
 >();
 const mockGetAuthorizationState = jest.fn(() => mockAuthorizationState);
 
-const DEFAULT_TOOLBAR_ORDER = ["held-orders", "hold", "language", "lock"];
 
 jest.mock("@/features/scanner-camera/camera-scanner-modal", () => ({
   CameraScannerModal: () => null,
@@ -176,18 +174,10 @@ jest.mock("@/features/sales/ui", () => {
   };
 });
 
-jest.mock("@/features/sales/ui/sales-toolbar-order", () => ({
-  reconcileSalesToolbarOrder: (order: readonly string[] | null | undefined) =>
-    mockReconcileSalesToolbarOrder(order),
-}));
-
 jest.mock("@/ui/preferences/terminal-ui-preferences", () => ({
   readCameraScanMode: () => mockReadCameraScanMode(),
-  readSalesToolbarOrder: () => mockReadSalesToolbarOrder(),
   saveCameraScanMode: (mode: "single" | "continuous") =>
     mockSaveCameraScanMode(mode),
-  saveSalesToolbarOrder: (order: readonly string[]) =>
-    mockSaveSalesToolbarOrder(order),
 }));
 
 jest.mock("@/ui/scanner/scanner-route-bridge", () => {
@@ -278,11 +268,7 @@ beforeEach(() => {
   mockToggleAppLanguage.mockResolvedValue("zh");
   mockReadCameraScanMode.mockReturnValue("single");
   mockSaveCameraScanMode.mockResolvedValue(undefined);
-  mockReadSalesToolbarOrder.mockReturnValue(null);
-  mockSaveSalesToolbarOrder.mockResolvedValue(undefined);
-  mockReconcileSalesToolbarOrder.mockImplementation((order) =>
-    order ? [...order] : [...DEFAULT_TOOLBAR_ORDER],
-  );
+  mockRequireNoPendingLookupSelections.mockReturnValue(true);
   mockActiveCashier = {
     cashierId: "C1",
     cashierName: "Cashier",
@@ -318,6 +304,7 @@ beforeEach(() => {
     getState: () => mockPresenterState,
     prepareOnlineCheckout: mockPrepareOnlineCheckout,
     releasePreparedCheckout: mockReleasePreparedCheckout,
+    requireNoPendingLookupSelections: mockRequireNoPendingLookupSelections,
     setQuery: mockSetQuery,
     subscribe: mockSubscribePresenter,
     subscribeFeedback: mockSubscribeSalesFeedback,
@@ -751,36 +738,62 @@ test("扫码回调不等待后台在线查询，并把实际 HID/相机来源传
   await screen.unmount();
 });
 
-test("销售工具栏同步读取已保存顺序，先更新页面再异步持久化", async () => {
-  const storedOrder = ["lock", "language", "hold"];
-  const updatedOrder = ["language", "hold", "lock"];
-  mockReadSalesToolbarOrder.mockReturnValue(storedOrder);
-  mockReconcileSalesToolbarOrder.mockImplementation((order) =>
-    order ? [...order] : [...DEFAULT_TOOLBAR_ORDER],
-  );
-  mockSaveSalesToolbarOrder.mockRejectedValueOnce(
-    new Error("terminal preferences unavailable"),
-  );
+test("侧栏固定项来自导航桥；没有导航桥时不传，由页面使用默认值", async () => {
+  const withoutBridge = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(withoutBridge.getByTestId("sales-screen")).toBeTruthy();
+  });
+  expect(mockSalesScreenProps.pinnedDestinations).toBeUndefined();
+  expect(mockSalesScreenProps.onPinnedDestinationsChange).toBeUndefined();
+  await withoutBridge.unmount();
 
-  const screen = await render(<SalesRoute />);
-
+  const onPinnedChange = jest.fn();
+  const screen = await render(
+    <PosNavigationContext.Provider
+      value={{
+        appVersionLabel: null,
+        language: "zh",
+        model: { entries: [], onPinnedChange, pinned: ["settings", "returns"] },
+        openSales: jest.fn(),
+        switchLanguage: jest.fn(),
+      }}
+    >
+      <SalesRoute />
+    </PosNavigationContext.Provider>,
+  );
   await waitFor(() => {
     expect(screen.getByTestId("sales-screen")).toBeTruthy();
   });
-  expect(mockReadSalesToolbarOrder).toHaveBeenCalledTimes(1);
-  expect(mockReconcileSalesToolbarOrder).toHaveBeenCalledWith(storedOrder);
-  expect(mockSalesScreenProps.toolbarOrder).toEqual(storedOrder);
 
-  await act(async () => {
-    mockSalesScreenProps.onToolbarOrderChange(updatedOrder);
-    await Promise.resolve();
-  });
-
-  expect(mockSaveSalesToolbarOrder).toHaveBeenCalledWith(updatedOrder);
-  expect(mockSalesScreenProps.toolbarOrder).toEqual(updatedOrder);
-  expect(mockReconcileSalesToolbarOrder).toHaveBeenLastCalledWith(updatedOrder);
+  expect(mockSalesScreenProps.pinnedDestinations).toEqual([
+    "settings",
+    "returns",
+  ]);
+  mockSalesScreenProps.onPinnedDestinationsChange(["returns"]);
+  expect(onPinnedChange).toHaveBeenCalledWith(["returns"]);
 
   await screen.unmount();
+});
+
+test("收银页在场时登记取单前检查，离开后撤销", async () => {
+  expect(passesPosDestinationGuard("held-orders")).toBe(true);
+  expect(mockRequireNoPendingLookupSelections).not.toHaveBeenCalled();
+
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  });
+
+  // 有一码多商品待选时，从任何页面去「挂单管理」都会被拦下
+  mockRequireNoPendingLookupSelections.mockReturnValue(false);
+  expect(passesPosDestinationGuard("held-orders")).toBe(false);
+  expect(mockRequireNoPendingLookupSelections).toHaveBeenCalledTimes(1);
+  // 其他入口不受影响
+  expect(passesPosDestinationGuard("returns")).toBe(true);
+
+  await screen.unmount();
+  expect(passesPosDestinationGuard("held-orders")).toBe(true);
+  expect(mockRequireNoPendingLookupSelections).toHaveBeenCalledTimes(1);
 });
 
 test("相机模式按终端偏好恢复，活动期间独占商品上下文并只提交一次", async () => {

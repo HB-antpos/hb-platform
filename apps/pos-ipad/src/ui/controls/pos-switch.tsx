@@ -5,6 +5,7 @@ import {
   type TouchSoundKind,
   usePosSound,
 } from "@/ui/feedback/pos-sound-context";
+import { usePosThemeVersion } from "@/ui/theme";
 
 export type PosSwitchProps = SwitchProps &
   Readonly<{ sound?: TouchSoundKind | false }>;
@@ -20,6 +21,7 @@ export const PosSwitch = forwardRef<Switch, PosSwitchProps>(
     },
     ref,
   ) {
+    usePosThemeVersion();
     const { play } = usePosSound();
 
     const handleValueChange = useCallback(

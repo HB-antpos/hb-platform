@@ -6,6 +6,7 @@ import {
 } from "react";
 
 import type { ZellerProbeTerminal } from "./zeller-probe-runner";
+import { usePosThemeVersion } from "@/ui/theme";
 
 /**
  * 把 Zeller React Native SDK 接进页面：SDK 只提供 React 组件和 hook
@@ -45,6 +46,7 @@ export type ZellerSdkHostProps = Readonly<{
 }>;
 
 export function ZellerSdkHost({ vendor, children }: ZellerSdkHostProps) {
+  usePosThemeVersion();
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
 
   useEffect(() => {
@@ -89,6 +91,7 @@ function TerminalBridge({
   useTerminal: () => unknown;
   children: (state: ZellerSdkHostState) => ReactNode;
 }>) {
+  usePosThemeVersion();
   // SDK 的客户端在结构上满足验证页用到的方法；真实返回值都按 unknown 交给转换层检查。
   const terminal = useTerminal() as ZellerProbeTerminal;
   return <>{children({ status: "ready", terminal })}</>;

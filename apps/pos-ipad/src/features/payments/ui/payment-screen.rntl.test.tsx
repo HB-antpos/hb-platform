@@ -52,6 +52,8 @@ import type {
   PaymentProviderAvailability,
 } from "@/features/payments/runtime/payment-provider-registry";
 import { installmentCreatePaymentEntry } from "@/features/payments/ui/unified-payment-entry";
+import { PosNavigationContext } from "@/ui/shell/pos-navigation-context";
+import { applyPosTheme, posColors } from "@/ui/theme";
 
 let mockPrintStateWrite: ((value: unknown) => void) | null = null;
 
@@ -102,7 +104,14 @@ async function openPaymentEntry(
   await fireEvent.press(screen.getByTestId(`payment-method-${method}`));
 }
 
-test("点击付款方式后才打开金额输入弹窗", async () => {
+/** 右栏是否处于“已点选付款方式、可以输入金额”的状态：只有这时才显示「取消录入」。 */
+function paymentEntryArmed(
+  screen: Awaited<ReturnType<typeof render>>,
+): boolean {
+  return screen.queryByTestId("payment-entry-cancel") !== null;
+}
+
+test("金额键盘常驻右栏，点击付款方式后才可输入和提交", async () => {
   const { presenter, spies } = createUiPresenter({
     selectedMethod: "cash",
     total: aud(1_000),
@@ -112,30 +121,65 @@ test("点击付款方式后才打开金额输入弹窗", async () => {
     <PaymentScreen locale="zh" presenter={presenter} showStatusStrip={false} />,
   );
 
+  // 不再弹窗：金额、键盘和主按钮一直在右栏，但未点选付款方式前全部置灰。
+  expect(screen.queryByTestId("payment-entry-native-modal")).toBeNull();
   expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
-  expect(screen.queryByTestId("payment-entry-pane")).toBeNull();
-  expect(screen.queryByTestId("payment-amount")).toBeNull();
+  expect(screen.getByTestId("payment-entry-pane")).toBeTruthy();
+  expect(paymentEntryArmed(screen)).toBe(false);
+  expect(screen.getByTestId("payment-amount").props).toMatchObject({
+    editable: false,
+    value: "",
+  });
+  expect(
+    screen.getByTestId("payment-key-1").props.accessibilityState,
+  ).toMatchObject({ disabled: true });
+  expect(
+    screen.getByTestId("payment-cash-quick-50").props.accessibilityState,
+  ).toMatchObject({ disabled: true });
+  expect(screen.getByTestId("payment-submit").props.accessibilityState).toEqual(
+    { disabled: true },
+  );
+  // presenter 默认选中的方式不能被当成“已经选好”：不高亮，也不能直接提交。
+  expect(
+    StyleSheet.flatten(screen.getByTestId("payment-method-cash").props.style)
+      .borderWidth,
+  ).toBe(1.5);
+  await fireEvent.press(screen.getByTestId("payment-key-1"));
+  await fireEvent.press(screen.getByTestId("payment-cash-quick-50"));
+  await fireEvent.press(screen.getByTestId("payment-submit"));
+  expect(spies.setAmountText).not.toHaveBeenCalled();
+  expect(spies.submitSelected).not.toHaveBeenCalled();
 
   await fireEvent.press(screen.getByTestId("payment-method-cash"));
 
   expect(spies.selectMethod).toHaveBeenCalledWith("cash");
-  expect(screen.getByTestId("payment-entry-modal")).toBeTruthy();
-  expect(screen.getByTestId("payment-entry-pane")).toBeTruthy();
-  expect(screen.getByTestId("payment-amount").props.value).toBe("10.00");
-
-  await act(async () => {
-    screen.getByTestId("payment-entry-native-modal").props.onRequestClose();
+  expect(paymentEntryArmed(screen)).toBe(true);
+  expect(screen.getByTestId("payment-amount").props).toMatchObject({
+    editable: true,
+    value: "10.00",
   });
-  expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
+  expect(
+    StyleSheet.flatten(screen.getByTestId("payment-method-cash").props.style)
+      .borderWidth,
+  ).toBe(2.5);
+  // 主按钮带本次金额，按之前再确认一眼。
+  expect(screen.getByTestId("payment-submit")).toHaveTextContent(
+    `开始支付 · ${formatAud(1_000, "zh")}`,
+  );
+  expect(screen.getByTestId("payment-submit").props.accessibilityState).toEqual(
+    { disabled: false },
+  );
 
-  await openPaymentEntry(screen, "cash");
+  // 取消录入只退出金额输入，不取消支付。
   await fireEvent.press(screen.getByTestId("payment-entry-cancel"));
-  expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
+  expect(paymentEntryArmed(screen)).toBe(false);
+  expect(screen.getByTestId("payment-amount").props.editable).toBe(false);
   expect(spies.cancel).not.toHaveBeenCalled();
+  expect(spies.submitSelected).not.toHaveBeenCalled();
 });
 
 test.each(["cash", "square", "linkly-cloud", "voucher"] as const)(
-  "%s 金额弹窗支持 iPad 横屏，关闭再打开不会发起付款",
+  "%s 点选后取消录入再点选，不会发起付款",
   async (method) => {
     const { presenter, spies } = createUiPresenter();
     const screen = await render(
@@ -144,21 +188,22 @@ test.each(["cash", "square", "linkly-cloud", "voucher"] as const)(
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       await openPaymentEntry(screen, method);
+      expect(paymentEntryArmed(screen)).toBe(true);
       expect(
-        screen.getByTestId("payment-entry-native-modal").props.supportedOrientations,
-      ).toEqual(["landscape-left", "landscape-right"]);
-      expect(screen.getByTestId("payment-entry-modal")).toBeTruthy();
+        screen.getByTestId(`payment-method-${method}`).props.accessibilityState,
+      ).toEqual({ disabled: false, selected: true });
       await fireEvent.press(screen.getByTestId("payment-entry-cancel"));
-      expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
+      expect(paymentEntryArmed(screen)).toBe(false);
     }
 
+    expect(spies.selectMethod).toHaveBeenCalledTimes(2);
     expect(spies.submitSelected).not.toHaveBeenCalled();
     expect(spies.cancel).not.toHaveBeenCalled();
     await screen.unmount();
   },
 );
 
-test("提交失败时保留金额弹窗并宣告字段错误", async () => {
+test("提交失败时保留金额录入状态并宣告字段错误", async () => {
   const harness = createUiPresenter({
     selectedMethod: "cash",
     total: aud(1_000),
@@ -183,8 +228,13 @@ test("提交失败时保留金额弹窗并宣告字段错误", async () => {
   await fireEvent.press(screen.getByTestId("payment-submit"));
 
   await waitFor(() =>
-    expect(screen.getByTestId("payment-entry-modal")).toBeTruthy(),
+    expect(harness.spies.submitSelected).toHaveBeenCalledTimes(1),
   );
+  await waitFor(() =>
+    expect(screen.getByTestId("payment-field-error")).toBeTruthy(),
+  );
+  expect(paymentEntryArmed(screen)).toBe(true);
+  expect(screen.getByTestId("payment-amount").props.editable).toBe(true);
   expect(screen.getByTestId("payment-field-error").props.accessibilityRole).toBe(
     "alert",
   );
@@ -1497,7 +1547,7 @@ test.each(
       label: `${viewport.label} ${flow}`,
     })),
   ),
-)("$label 横屏双栏与金额弹窗各自滚动且关键付款动作固定底部", async ({
+)("$label 横屏三栏各自滚动，金额键盘常驻右栏且关键付款动作固定底部", async ({
   flow,
   height,
   width,
@@ -1554,19 +1604,20 @@ test.each(
     flex: 1,
     flexDirection: "row",
     minHeight: 0,
-    overflow: "hidden",
   });
+  // 左栏订单、右栏键盘定宽（1024 宽的旧款 iPad 收窄一档），中栏付款方式吃掉剩余宽度。
+  const narrowLandscape = width < 1100;
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-context-pane").props.style)
-      .flex,
-  ).toBe(30);
+      .width,
+  ).toBe(narrowLandscape ? 270 : 318);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-entry-pane").props.style)
-      .flex,
-  ).toBe(0);
+      .width,
+  ).toBe(narrowLandscape ? 350 : 392);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-summary").props.style).flex,
-  ).toBe(28);
+  ).toBe(1);
 
   for (const scrollTestId of [
     "payment-context-lines",
@@ -1584,32 +1635,48 @@ test.each(
     });
   }
 
+  // 提交按钮不在滚动区里：固定在右栏底部，键盘再高也不会把它顶出屏幕。
   const entryPane = screen.getByTestId("payment-entry-pane");
   const entryActions = screen.getByTestId("payment-entry-actions");
   expect(entryActions.parent).toBe(entryPane);
+  expect(
+    within(screen.getByTestId("payment-entry-scroll")).queryByTestId(
+      "payment-submit",
+    ),
+  ).toBeNull();
+  expect(
+    within(screen.getByTestId("payment-entry-scroll")).getByTestId(
+      "payment-keypad",
+    ),
+  ).toBeTruthy();
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-entry-cancel").props.style)
       .minHeight,
   ).toBeGreaterThanOrEqual(PAYMENT_MIN_TOUCH_TARGET);
   expect(
-    StyleSheet.flatten(screen.getByTestId("payment-submit").props.style)
+    StyleSheet.flatten(screen.getByTestId("payment-key-1").props.style)
       .minHeight,
-  ).toBeGreaterThanOrEqual(PAYMENT_MIN_TOUCH_TARGET);
+  ).toBeGreaterThanOrEqual(56);
 
+  // 每屏只有一个 88 高的主按钮：有待确认的分期收款时是「确认」，否则是右下角的提交。
+  const submitHeight = StyleSheet.flatten(
+    screen.getByTestId("payment-submit").props.style,
+  ).minHeight;
   if (installment) {
-    const summary = screen.getByTestId("payment-summary");
     const summaryActionDock = screen.getByTestId(
       "payment-summary-action-dock",
     );
     const summaryFooter = screen.getByTestId("payment-summary-footer");
-    expect(summaryActionDock.parent).toBe(summary);
+    expect(summaryActionDock.parent).toBe(entryPane);
     expect(summaryFooter.parent).toBe(summaryActionDock);
     expect(
       StyleSheet.flatten(screen.getByTestId("payment-confirm").props.style)
         .minHeight,
-    ).toBeGreaterThanOrEqual(PAYMENT_MIN_TOUCH_TARGET);
+    ).toBe(88);
+    expect(submitHeight).toBe(72);
   } else {
     expect(screen.queryByTestId("payment-summary-footer")).toBeNull();
+    expect(submitHeight).toBe(88);
   }
 
   await screen.unmount();
@@ -1692,7 +1759,7 @@ test.each([
   await screen.unmount();
 });
 
-test("统一支付保持交易与汇总双栏，并在金额弹窗提供五个现金快捷金额", async () => {
+test("统一支付三栏布局，右栏常驻数字键盘并提供五个纸币快捷金额", async () => {
   setPaymentWindowSize(1366, 1024);
   const { presenter, spies } = createUiPresenter({
     selectedMethod: "cash",
@@ -1708,24 +1775,24 @@ test("统一支付保持交易与汇总双栏，并在金额弹窗提供五个�
 
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-context-pane").props.style)
-      .flex,
-  ).toBe(30);
+      .width,
+  ).toBe(318);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-entry-pane").props.style)
-      .flex,
-  ).toBe(0);
+      .width,
+  ).toBe(392);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-summary").props.style).flex,
-  ).toBe(28);
+  ).toBe(1);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-workspace").props.style)
       .flexDirection,
   ).toBe("row");
   expect(
-    StyleSheet.flatten(screen.getByTestId("payment-entry-pane").props.style)
-      .padding,
-  ).toBe(20);
-  expect(screen.getByTestId("payment-keypad")).toBeTruthy();
+    within(screen.getByTestId("payment-entry-pane")).getByTestId(
+      "payment-keypad",
+    ),
+  ).toBeTruthy();
   for (const key of [
     "1",
     "2",
@@ -1744,10 +1811,14 @@ test("统一支付保持交易与汇总双栏，并在金额弹窗提供五个�
   }
   expect(screen.getByTestId("payment-amount").props.showSoftInputOnFocus)
     .toBe(false);
+  // 数字键随右栏高度伸缩，最矮 56、最高 86（设计图的键高）。
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-key-1").props.style)
       .minHeight,
-  ).toBe(54);
+  ).toBe(56);
+  expect(
+    StyleSheet.flatten(screen.getByTestId("payment-key-1").parent?.props.style),
+  ).toMatchObject({ maxHeight: 86, minHeight: 56 });
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-cash-quick").props.style)
       .flexWrap,
@@ -1767,8 +1838,11 @@ test("统一支付保持交易与汇总双栏，并在金额弹窗提供五个�
     expect(
       StyleSheet.flatten(
         screen.getByTestId(`payment-cash-quick-${amount}`).props.style,
-      ).backgroundColor,
-    ).toBe(banknoteColors[amount]);
+      ),
+    ).toMatchObject({
+      backgroundColor: banknoteColors[amount],
+      minHeight: 60,
+    });
   }
   expect(screen.queryByText(/exacta?/i)).toBeNull();
 
@@ -1780,7 +1854,7 @@ test("统一支付保持交易与汇总双栏，并在金额弹窗提供五个�
   setPaymentWindowSize(750, 1334);
 });
 
-test("11 英寸横屏现金支付使用紧凑高度，数字键盘和支付动作保持首屏可达", async () => {
+test("11 英寸横屏现金支付的数字键、纸币键和主按钮都达到大按钮尺寸", async () => {
   setPaymentWindowSize(1194, 834);
   const { presenter } = createUiPresenter({
     selectedMethod: "cash",
@@ -1796,16 +1870,21 @@ test("11 英寸横屏现金支付使用紧凑高度，数字键盘和支付动�
 
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-entry-pane").props.style)
-      .padding,
-  ).toBe(20);
+      .width,
+  ).toBe(392);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-key-1").props.style)
       .minHeight,
-  ).toBe(PAYMENT_MIN_TOUCH_TARGET);
+  ).toBe(56);
   expect(
     StyleSheet.flatten(screen.getByTestId("payment-cash-quick").props.style)
       .flexWrap,
   ).toBe("nowrap");
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("payment-cash-quick-5").props.style,
+    ).minHeight,
+  ).toBe(60);
   expect(
     StyleSheet.flatten(
       screen.getByTestId("payment-cash-quick-5").props.style,
@@ -1816,7 +1895,11 @@ test("11 英寸横屏现金支付使用紧凑高度，数字键盘和支付动�
       screen.getByTestId("payment-cash-quick-5").props.style,
     ).flexBasis,
   ).toBe(0);
-  expect(screen.getByTestId("payment-submit")).toBeTruthy();
+  // 「开始支付」是这一屏唯一的主按钮，高 88。
+  expect(
+    StyleSheet.flatten(screen.getByTestId("payment-submit").props.style)
+      .minHeight,
+  ).toBe(88);
 
   await screen.unmount();
   setPaymentWindowSize(750, 1334);
@@ -1825,7 +1908,7 @@ test("11 英寸横屏现金支付使用紧凑高度，数字键盘和支付动�
 test.each([
   { height: 768, label: "1024×768", width: 1024 },
   { height: 834, label: "1194×834", width: 1194 },
-])("$label 支付错误下的恢复与终端操作集中在摘要栏固定动作区", async ({
+])("$label 支付错误下恢复固定在右栏动作区、取消支付在左栏底部、终端操作在右栏", async ({
   height,
   width,
 }) => {
@@ -1866,8 +1949,9 @@ test.each([
           .contentContainerStyle,
       ).flex,
     ).toBe(1);
+    // 恢复按钮在右栏底部的固定动作区，不随滚动区移动；此时它是本屏唯一的主按钮。
     const actionDock = screen.getByTestId("payment-summary-action-dock");
-    expect(actionDock.parent).toBe(screen.getByTestId("payment-summary"));
+    expect(actionDock.parent).toBe(screen.getByTestId("payment-entry-pane"));
     expect(StyleSheet.flatten(actionDock.props.style).flexShrink).toBe(0);
     expect(
       within(screen.getByTestId("payment-summary-scroll")).queryByTestId(
@@ -1880,25 +1964,34 @@ test.each([
       ),
     ).toBeNull();
     expect(within(actionDock).getByTestId("payment-recovery-actions")).toBeTruthy();
-    expect(within(actionDock).getByTestId("payment-linkly-controls")).toBeTruthy();
     expect(
-      StyleSheet.flatten(
-        screen.getByTestId("payment-recovery-actions").props.style,
-      ).marginTop,
-    ).toBe(8);
+      StyleSheet.flatten(screen.getByTestId("payment-recover").props.style)
+        .minHeight,
+    ).toBe(72);
+    // Linkly 终端操作区占用右栏原本放键盘的位置，内容多时可滚动。
+    expect(
+      within(screen.getByTestId("payment-entry-scroll")).getByTestId(
+        "payment-linkly-controls",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("payment-entry-form")).toBeNull();
+    expect(
+      StyleSheet.flatten(screen.getByTestId("payment-linkly-ok").props.style)
+        .minHeight,
+    ).toBe(64);
 
     const back = screen.getByTestId("payment-back");
     expect(back.props.accessibilityState).toMatchObject({ disabled: true });
     await fireEvent.press(back);
     expect(onBack).not.toHaveBeenCalled();
 
-    const cancel = screen.getByTestId("payment-cancel");
+    // 「取消支付」在左栏底部，和右下角的主按钮分开，避免误触。
+    const cancel = within(
+      screen.getByTestId("payment-context-pane"),
+    ).getByTestId("payment-cancel");
+    expect(within(actionDock).queryByTestId("payment-cancel")).toBeNull();
     expect(cancel.props.accessibilityState).toMatchObject({ disabled: false });
-    expect(StyleSheet.flatten(cancel.props.style)).toMatchObject({
-      flexBasis: "46%",
-      flexGrow: 1,
-      marginTop: 0,
-    });
+    expect(StyleSheet.flatten(cancel.props.style).minHeight).toBe(64);
     await fireEvent.press(cancel);
     expect(spies.cancel).toHaveBeenCalledTimes(1);
   } finally {
@@ -1941,7 +2034,7 @@ test("支付失败关闭错误提示后不恢复过期的正在保存状态", as
   }
 });
 
-test("1024×768 恢复支付草稿时取消动作保留在摘要栏固定动作区", async () => {
+test("1024×768 恢复支付草稿时取消支付保留在左栏底部，录入金额时仍可点", async () => {
   setPaymentWindowSize(1024, 768);
   const { presenter, spies } = createUiPresenter({
     phase: "draft-prepared",
@@ -1965,18 +2058,23 @@ test("1024×768 恢复支付草稿时取消动作保留在摘要栏固定动作�
   await openPaymentEntry(screen, "linkly-cloud");
 
   try {
-    const actionDock = screen.getByTestId("payment-summary-action-dock");
-    expect(within(actionDock).getByTestId("payment-cancel")).toBeTruthy();
+    expect(
+      within(screen.getByTestId("payment-context-pane")).getByTestId(
+        "payment-cancel",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("payment-summary-action-dock")).toBeNull();
     expect(screen.getByTestId("payment-entry-actions")).toBeTruthy();
+    expect(paymentEntryArmed(screen)).toBe(true);
     expect(
       StyleSheet.flatten(
         screen.getByTestId("payment-content-scroll").props
           .contentContainerStyle,
       ),
     ).toMatchObject({
-      gap: 6,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+      flex: 1,
+      gap: 12,
+      padding: 12,
     });
     await fireEvent.press(screen.getByTestId("payment-cancel"));
     expect(spies.cancel).toHaveBeenCalledTimes(1);
@@ -3063,7 +3161,7 @@ test("无 Cancel 权限时不可确认 Prepared 保持恢复阻断且不显示�
   await screen.unmount();
 });
 
-test("付款金额弹窗点击遮罩关闭，busy 时遮罩保留原门禁不关闭", async () => {
+test("取消录入退出金额输入，busy 时保留原门禁不能退出", async () => {
   const harness = createUiPresenter({
     selectedMethod: "cash",
     total: aud(1_000),
@@ -3078,24 +3176,35 @@ test("付款金额弹窗点击遮罩关闭，busy 时遮罩保留原门禁不关
   );
 
   await openPaymentEntry(screen, "cash");
-  expect(screen.getByTestId("payment-entry-modal")).toBeTruthy();
-  await fireEvent.press(screen.getByTestId("payment-entry-backdrop"));
-  expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
+  expect(paymentEntryArmed(screen)).toBe(true);
+  await fireEvent.press(screen.getByTestId("payment-entry-cancel"));
+  expect(paymentEntryArmed(screen)).toBe(false);
 
   await openPaymentEntry(screen, "cash");
   await act(async () => {
     harness.publish({ ...harness.presenter.getState(), busy: true });
   });
-  await act(async () => {
-    screen.getByTestId("payment-entry-native-modal").props.onRequestClose();
-  });
-  expect(screen.getByTestId("payment-entry-modal")).toBeTruthy();
-  await fireEvent.press(screen.getByTestId("payment-entry-backdrop"));
-  expect(screen.getByTestId("payment-entry-modal")).toBeTruthy();
+  // 支付动作进行中：取消录入、键盘和提交都禁用，录入状态保持不变。
+  expect(
+    screen.getByTestId("payment-entry-cancel").props.accessibilityState,
+  ).toEqual({ disabled: true });
+  expect(
+    screen.getByTestId("payment-key-1").props.accessibilityState,
+  ).toMatchObject({ disabled: true });
+  expect(screen.getByTestId("payment-submit").props.accessibilityState).toEqual(
+    { disabled: true },
+  );
+  await fireEvent.press(screen.getByTestId("payment-entry-cancel"));
+  expect(paymentEntryArmed(screen)).toBe(true);
+  expect(harness.spies.setManualCardConfirmed).not.toHaveBeenCalledWith(true);
 
   await act(async () => {
     harness.publish({ ...harness.presenter.getState(), busy: false });
   });
+  await fireEvent.press(screen.getByTestId("payment-entry-cancel"));
+  expect(paymentEntryArmed(screen)).toBe(false);
+  expect(harness.spies.submitSelected).not.toHaveBeenCalled();
+  expect(harness.spies.cancel).not.toHaveBeenCalled();
   await screen.unmount();
 });
 
@@ -3277,7 +3386,8 @@ test.each(["en", "zh"] as const)("%s 手动刷卡固定余额并要求确认，�
   expect(screen.getByTestId("payment-submit").props.accessibilityState.disabled).toBe(false);
   await fireEvent.press(screen.getByTestId("payment-submit"));
   expect(spies.submitSelected).toHaveBeenCalledTimes(1);
-  expect(screen.queryByTestId("payment-entry-modal")).toBeNull();
+  // 提交成功后退出录入状态，下一笔必须重新点选付款方式。
+  await waitFor(() => expect(paymentEntryArmed(screen)).toBe(false));
   await screen.unmount();
 });
 
@@ -3410,6 +3520,371 @@ test("现金续付就绪态不受影响：仍是现金确认文案，不出现�
   expect(screen.getByText("Confirm cash received")).toBeTruthy();
   expect(screen.queryByTestId("payment-manual-card-prepared-hint")).toBeNull();
   await screen.unmount();
+});
+
+test("付款页不显示左侧栏，防止收款中途跳走", async () => {
+  const { presenter } = createUiPresenter();
+  const screen = await render(
+    <PosNavigationContext.Provider
+      value={{
+        appVersionLabel: null,
+        language: "zh",
+        model: { entries: [], pinned: [] },
+        openSales: jest.fn(),
+        switchLanguage: jest.fn(),
+      }}
+    >
+      <PaymentScreen locale="zh" presenter={presenter} showStatusStrip={false} />
+    </PosNavigationContext.Provider>,
+  );
+
+  expect(screen.getByTestId("payment-screen")).toBeTruthy();
+  expect(screen.queryByTestId("pos-rail")).toBeNull();
+  expect(screen.queryByTestId("pos-rail-sales")).toBeNull();
+  await screen.unmount();
+});
+
+test("付款方式大块高 92 并带一句说明，分期开关与付款方式同在网格内", async () => {
+  setPaymentWindowSize(1180, 820);
+  const harness = createUiPresenter({ selectedMethod: "cash" });
+  const screen = await render(
+    <PaymentScreen
+      installmentModeControl={{
+        enabled: false,
+        locked: false,
+        issue: null,
+        onToggle: jest.fn(),
+      }}
+      locale="zh"
+      presenter={harness.presenter}
+      showStatusStrip={false}
+    />,
+  );
+
+  try {
+    const cash = screen.getByTestId("payment-method-cash");
+    expect(StyleSheet.flatten(cash.props.style).minHeight).toBe(92);
+    expect(within(cash).getByText("现金")).toBeTruthy();
+    expect(within(cash).getByText("钱箱收款，可找零")).toBeTruthy();
+    expect(
+      within(screen.getByTestId("payment-method-voucher")).getByText(
+        "扫描或输入礼品卡码",
+      ),
+    ).toBeTruthy();
+
+    const toggle = screen.getByTestId("payment-installment-toggle");
+    expect(toggle.parent).toBe(cash.parent);
+    expect(StyleSheet.flatten(toggle.props.style).minHeight).toBe(92);
+    expect(within(toggle).getByText("分期")).toBeTruthy();
+    expect(within(toggle).getByText("先收首付，余款分期")).toBeTruthy();
+
+    // 已有现金付款后现金不能再选：置灰并写明「不可用」，而不是悄悄点不动。
+    await act(async () => {
+      harness.publish({
+        ...harness.presenter.getState(),
+        tenders: [
+          {
+            tenderGuid: "cash-already-active",
+            method: "cash",
+            amount: aud(400),
+            reversible: true,
+          },
+        ],
+        remaining: aud(600),
+      });
+    });
+    const disabledCash = screen.getByTestId("payment-method-cash");
+    expect(disabledCash.props.accessibilityState).toMatchObject({
+      disabled: true,
+    });
+    expect(within(disabledCash).getByText("不可用")).toBeTruthy();
+    expect(StyleSheet.flatten(disabledCash.props.style).backgroundColor).toBe(
+      posColors.disabledSurface,
+    );
+    // 已提交的付款行高 78，移除按钮不小于 48。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("payment-tender-cash-already-active").props.style,
+      ).minHeight,
+    ).toBe(78);
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("payment-remove-cash-already-active").props.style,
+      ).minHeight,
+    ).toBe(48);
+  } finally {
+    await screen.unmount();
+    setPaymentWindowSize(750, 1334);
+  }
+});
+
+test("剩余应付是 58 号大数字，支付状态并入同一张卡片并按状态变色", async () => {
+  const harness = createUiPresenter({
+    phase: "ready",
+    total: aud(3_948),
+    remaining: aud(3_948),
+  });
+  const screen = await render(
+    <PaymentScreen
+      locale="zh"
+      presenter={harness.presenter}
+      showStatusStrip={false}
+    />,
+  );
+
+  const dueCard = screen.getByTestId("payment-due-card");
+  expect(within(dueCard).getByText("剩余应付")).toBeTruthy();
+  expect(within(dueCard).getByTestId("payment-status-ready")).toBeTruthy();
+  expect(screen.getByTestId("payment-remaining")).toHaveTextContent(
+    formatAud(3_948, "zh"),
+  );
+  expect(
+    StyleSheet.flatten(screen.getByTestId("payment-remaining").props.style),
+  ).toMatchObject({ fontSize: 58, fontVariant: ["tabular-nums"] });
+  expect(StyleSheet.flatten(dueCard.props.style).backgroundColor).toBe(
+    posColors.surface,
+  );
+
+  await act(async () => {
+    harness.publish({
+      ...harness.presenter.getState(),
+      phase: "unknown",
+      runtimeStatus: "unknown",
+      allowedActions: actions({ recover: true }),
+    });
+  });
+  const warningCard = screen.getByTestId("payment-due-card");
+  expect(within(warningCard).getByTestId("payment-status-unknown")).toBeTruthy();
+  expect(StyleSheet.flatten(warningCard.props.style)).toMatchObject({
+    backgroundColor: posColors.yellowSoft,
+    borderColor: posColors.yellowBorder,
+  });
+
+  await act(async () => {
+    harness.publish({
+      ...harness.presenter.getState(),
+      phase: "declined",
+      runtimeStatus: "declined",
+      allowedActions: actions({ start: true, changeProvider: true }),
+    });
+  });
+  expect(
+    StyleSheet.flatten(screen.getByTestId("payment-due-card").props.style)
+      .backgroundColor,
+  ).toBe(posColors.redSoft);
+  await screen.unmount();
+});
+
+test("左栏订单明细带订单总额与已付款，返回收银与取消支付上下分开", async () => {
+  setPaymentWindowSize(1180, 820);
+  const onBack = jest.fn();
+  const { presenter } = createUiPresenter({
+    phase: "partial",
+    orderGuid: "order-left-pane",
+    total: aud(1_000),
+    remaining: aud(400),
+    tenders: [
+      {
+        tenderGuid: "left-pane-card",
+        method: "card",
+        amount: aud(600),
+        reversible: false,
+      },
+    ],
+    checkout: {
+      flow: "regular",
+      lines: [
+        {
+          lineKey: "left-pane-line",
+          displayName: "Left pane item",
+          quantity: "2",
+          actualAmountCents: 1_000,
+        },
+      ],
+      installmentCustomer: null,
+      cash: { tenderedCents: 0, appliedCents: 0, changeCents: 0 },
+      canConfirm: false,
+      fullInstallmentConfirmationRequired: false,
+    },
+  });
+  const screen = await render(
+    <PaymentScreen
+      locale="zh"
+      onBack={onBack}
+      presenter={presenter}
+      showStatusStrip={false}
+    />,
+  );
+
+  try {
+    const contextPane = screen.getByTestId("payment-context-pane");
+    expect(within(contextPane).getByText("Left pane item")).toBeTruthy();
+    expect(within(contextPane).getByText("订单总额")).toBeTruthy();
+    // 同一金额出现两次：商品行小计一次、订单总额一次。
+    expect(
+      within(contextPane).getAllByText(formatAud(1_000, "zh")),
+    ).toHaveLength(2);
+    expect(within(contextPane).getByText("已付款")).toBeTruthy();
+    expect(within(contextPane).getByText(formatAud(600, "zh"))).toBeTruthy();
+
+    const back = within(contextPane).getByTestId("payment-back");
+    const cancel = within(contextPane).getByTestId("payment-cancel");
+    expect(StyleSheet.flatten(back.props.style).minHeight).toBe(64);
+    expect(StyleSheet.flatten(cancel.props.style).minHeight).toBe(64);
+    // 返回在最上、取消在最下，中间隔着整张订单卡片。
+    const children = contextPane.children;
+    expect(children[0]).toBe(back);
+    expect(children[children.length - 1]).toBe(cancel);
+    expect(children.length).toBeGreaterThanOrEqual(3);
+  } finally {
+    await screen.unmount();
+    setPaymentWindowSize(750, 1334);
+  }
+});
+
+test("支付完成页：绿色结果条、找零是全屏最大的数字、打印 72 与开始下一单 88", async () => {
+  setPaymentWindowSize(1180, 820);
+  const { presenter } = createUiPresenter({
+    phase: "success",
+    selectedMethod: "cash",
+    orderGuid: "order-success-layout",
+    total: aud(3_950),
+    remaining: aud(0),
+    tenders: [
+      {
+        tenderGuid: "cash-success-layout",
+        method: "cash",
+        amount: aud(3_950),
+        reversible: true,
+      },
+    ],
+    allowedActions: actions(),
+    checkout: {
+      flow: "regular",
+      lines: [
+        {
+          lineKey: "success-layout-line",
+          displayName: "Success layout item",
+          quantity: "3",
+          actualAmountCents: 3_950,
+        },
+      ],
+      installmentCustomer: null,
+      cash: {
+        tenderedCents: 5_000,
+        appliedCents: 3_950,
+        changeCents: 1_050,
+      },
+      canConfirm: false,
+      fullInstallmentConfirmationRequired: false,
+    },
+  });
+  const screen = await render(
+    <PaymentScreen
+      locale="zh"
+      onComplete={jest.fn()}
+      onPrintReceipt={jest.fn(async () => "completed" as const)}
+      presenter={presenter}
+      showStatusStrip={false}
+    />,
+  );
+
+  try {
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("payment-success-layout").props.style,
+      ).flexDirection,
+    ).toBe("row");
+    expect(screen.getByTestId("payment-content-scroll").props.scrollEnabled).toBe(
+      false,
+    );
+    expect(
+      StyleSheet.flatten(screen.getByTestId("payment-status-success").props.style),
+    ).toMatchObject({
+      backgroundColor: posColors.greenSoft,
+      borderColor: posColors.greenBorder,
+    });
+
+    const changeStyle = StyleSheet.flatten(
+      screen.getByTestId("payment-success-change").props.style,
+    );
+    expect(screen.getByTestId("payment-success-change")).toHaveTextContent(
+      formatAud(1_050, "zh"),
+    );
+    expect(changeStyle).toMatchObject({
+      color: posColors.accent,
+      fontSize: 72,
+    });
+    for (const amount of [formatAud(5_000, "zh"), formatAud(3_950, "zh")]) {
+      for (const node of screen.getAllByText(amount)) {
+        expect(
+          StyleSheet.flatten(node.props.style).fontSize,
+        ).toBeLessThan(72);
+      }
+    }
+
+    // 右下两个按钮固定在右栏，不在左侧滚动区里。
+    const print = screen.getByTestId("payment-success-print");
+    const complete = screen.getByTestId("payment-complete");
+    expect(StyleSheet.flatten(print.props.style).minHeight).toBe(72);
+    expect(StyleSheet.flatten(complete.props.style)).toMatchObject({
+      backgroundColor: posColors.accent,
+      minHeight: 88,
+    });
+    expect(print.parent).toBe(complete.parent);
+    const summary = screen.getByTestId("payment-success-summary");
+    expect(summary.props.scrollEnabled).toBe(true);
+    expect(within(summary).queryByTestId("payment-complete")).toBeNull();
+    expect(
+      within(summary).getByTestId("payment-success-transaction-qr"),
+    ).toBeTruthy();
+
+    // 二维码保持白底，不随主题变色。
+    expect(
+      StyleSheet.flatten(
+        screen.getByTestId("payment-success-transaction-qr-matrix", {
+          includeHiddenElements: true,
+        }).props.style,
+      ).backgroundColor,
+    ).toBe("#FFFFFF");
+  } finally {
+    await screen.unmount();
+    setPaymentWindowSize(750, 1334);
+  }
+});
+
+test("付款页跟随主题切换，纸币快捷键与二维码保持固定颜色", async () => {
+  const { presenter } = createUiPresenter({ selectedMethod: "cash" });
+  const screen = await render(
+    <PaymentScreen locale="zh" presenter={presenter} showStatusStrip={false} />,
+  );
+
+  try {
+    const classicSurface = StyleSheet.flatten(
+      screen.getByTestId("payment-due-card").props.style,
+    ).backgroundColor;
+    await act(async () => {
+      applyPosTheme("dark");
+    });
+    const darkSurface = StyleSheet.flatten(
+      screen.getByTestId("payment-due-card").props.style,
+    ).backgroundColor;
+    expect(darkSurface).toBe(posColors.surface);
+    expect(darkSurface).not.toBe(classicSurface);
+    expect(
+      StyleSheet.flatten(screen.getByTestId("payment-key-1").props.style)
+        .backgroundColor,
+    ).toBe(posColors.disabledSurface);
+    expect(
+      StyleSheet.flatten(screen.getByTestId("payment-cash-quick-50").props.style)
+        .backgroundColor,
+    ).toBe("#F4DB7F");
+  } finally {
+    await act(async () => {
+      applyPosTheme("classic");
+    });
+    await screen.unmount();
+  }
 });
 
 function createUiPresenter(

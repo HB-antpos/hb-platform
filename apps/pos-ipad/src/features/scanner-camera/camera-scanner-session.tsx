@@ -8,7 +8,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
-  StyleSheet,
   Text,
   View,
   type StyleProp,
@@ -17,10 +16,22 @@ import {
 
 import type { CameraScannerCopyKey } from "./camera-scanner-copy";
 
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton } from "@/ui/controls/pos-button";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
-export const CAMERA_SCANNER_MIN_TOUCH_TARGET = 44;
+/** 相机扫码界面里按钮与状态条的最小高度（收银场景的常规按钮从 56 起）。 */
+export const CAMERA_SCANNER_MIN_TOUCH_TARGET = 56;
+/**
+ * 取景框固定深色底、白色对准框，不跟随主题：相机画面没出来之前和画面四周都应该是暗的，
+ * 对准框压在实时画面上，只有白色在各种商品包装上都看得清。
+ */
+export const CAMERA_SCANNER_PREVIEW_BACKGROUND = "#0A1723";
+export const CAMERA_SCANNER_TARGET_BORDER = "#FFFFFF";
 export const CAMERA_SCANNER_SUPPORTED_ORIENTATIONS = [
   "landscape-left",
   "landscape-right",
@@ -242,6 +253,7 @@ export function CameraScannerCameraView({
   style: StyleProp<ViewStyle>;
   testID?: string;
 }>) {
+  usePosThemeVersion();
   return (
     <CameraView
       accessibilityLabel={accessibilityLabel}
@@ -273,6 +285,7 @@ export function CameraScannerState({
   stateStyle?: StyleProp<ViewStyle>;
   t: CameraScannerTranslate;
 }>) {
+  usePosThemeVersion();
   if (permissionDenied) {
     return (
       <View
@@ -307,20 +320,15 @@ export function CameraScannerState({
       >
         <Text style={styles.stateTitle}>{t("permission.required.title")}</Text>
         <Text style={styles.stateCopy}>{t("permission.required.body")}</Text>
-        <PosPressable
-          accessibilityLabel={t("action.allowCamera")}
-          accessibilityRole="button"
+        <PosButton
+          icon="camera-outline"
+          label={t("action.allowCamera")}
           onPress={onRequestPermission}
-          style={({ pressed }) => [
-            styles.permissionButton,
-            pressed && styles.buttonPressed,
-          ]}
+          size="medium"
+          style={styles.permissionButton}
           testID="camera-scanner-request-permission"
-        >
-          <Text style={styles.permissionButtonLabel}>
-            {t("action.allowCamera")}
-          </Text>
-        </PosPressable>
+          tone="primary"
+        />
       </View>
     );
   }
@@ -350,31 +358,26 @@ export function CameraScannerState({
   );
 }
 
-const styles = StyleSheet.create({
-  buttonPressed: { opacity: 0.8 },
+const styles = createPosStyles((colors) => ({
   permissionButton: {
-    alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: posColors.orange,
-    borderRadius: 2,
-    justifyContent: "center",
-    marginTop: 18,
+    marginTop: 16,
     minHeight: CAMERA_SCANNER_MIN_TOUCH_TARGET,
-    paddingHorizontal: 18,
   },
-  permissionButtonLabel: { color: "#FFFFFF", fontSize: 16, fontWeight: "800" },
   state: {
     alignItems: "flex-start",
-    backgroundColor: posColors.canvas,
+    backgroundColor: colors.canvas,
+    borderRadius: posRadius.medium,
     justifyContent: "center",
     minHeight: 200,
-    padding: 22,
+    padding: 20,
   },
   stateCopy: {
-    color: posColors.mutedInk,
+    color: colors.mutedInk,
     fontSize: 15,
+    fontWeight: "600",
     lineHeight: 22,
     marginTop: 8,
   },
-  stateTitle: { color: posColors.ink, fontSize: 18, fontWeight: "800" },
-});
+  stateTitle: { color: colors.ink, fontSize: 18, fontWeight: "900" },
+}));

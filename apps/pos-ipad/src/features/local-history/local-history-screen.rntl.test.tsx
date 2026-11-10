@@ -17,6 +17,7 @@ import type {
   LocalHistoryReprintState,
 } from "./local-history-presenter";
 import {
+  LOCAL_HISTORY_LIST_WIDTH,
   LOCAL_HISTORY_MIN_TOUCH_TARGET,
   LocalHistoryScreen,
   LocalHistoryUnavailableScreen,
@@ -34,6 +35,8 @@ jest.mock("react-i18next", () => ({
       language: mockLanguage,
       resolvedLanguage: mockLanguage,
     },
+    // 页面外壳自带的顶栏会调用 t()，这里原样返回键名即可。
+    t: (key: string) => key,
   }),
 }));
 
@@ -229,7 +232,7 @@ beforeEach(() => {
   });
 });
 
-test("本机历史沿用高密度双栏，展示商品、付款、金额并保持主要操作 44pt", async () => {
+test("本机历史左列表右详情，展示商品、付款、金额，主要操作不低于 56pt", async () => {
   const presenter = createPresenter();
   const onBack = jest.fn();
   const screen = await render(
@@ -260,23 +263,32 @@ test("本机历史沿用高密度双栏，展示商品、付款、金额并保�
   ]) {
     expect(order.props.accessibilityLabel).toContain(expected);
   }
+  // 同步状态用状态标签显示：待同步是黄底深黄字。
   expect(
     StyleSheet.flatten(screen.getAllByText("Pending sync")[0]?.props.style)
       .color,
-  ).toBe(posColors.ink);
+  ).toBe(posColors.yellowInk);
   expect(
     StyleSheet.flatten(screen.getByTestId("local-history-workspace").props.style),
   ).toEqual(
     expect.objectContaining({
       flexDirection: "row",
-      gap: 14,
-      padding: 14,
+      gap: 12,
+      padding: 12,
     }),
   );
+  // 左列表固定 420 宽，右详情占满剩余宽度。
   expect(
-    StyleSheet.flatten(screen.getByTestId("local-history-details").props.style)
-      .minWidth,
-  ).toBe(400);
+    StyleSheet.flatten(screen.getByTestId("local-history-list-pane").props.style)
+      .width,
+  ).toBe(LOCAL_HISTORY_LIST_WIDTH);
+  expect(
+    StyleSheet.flatten(screen.getByTestId("local-history-details").props.style),
+  ).toEqual(expect.objectContaining({ flex: 1, minWidth: 0 }));
+  // 列表行高不低于 84，整行可点。
+  expect(
+    StyleSheet.flatten(order.props.style).minHeight,
+  ).toBeGreaterThanOrEqual(84);
 
   await fireEvent.press(screen.getByTestId("local-history-back"));
   await fireEvent.press(screen.getByTestId("local-history-refresh"));
@@ -289,18 +301,74 @@ test("本机历史沿用高密度双栏，展示商品、付款、金额并保�
   for (const testID of [
     "local-history-back",
     "local-history-refresh",
+    "local-history-quick-today",
+    "local-history-quick-yesterday",
+    "local-history-quick-last7days",
+    "local-history-date-from",
+    "local-history-date-to",
     "local-history-apply-filters",
     "local-history-load-more",
     "local-history-reprint",
   ]) {
     const style = StyleSheet.flatten(screen.getByTestId(testID).props.style);
-    expect(style.minHeight).toBeGreaterThanOrEqual(
-      LOCAL_HISTORY_MIN_TOUCH_TARGET,
+    expect(style.minHeight).toBeGreaterThanOrEqual(56);
+  }
+  // 「重打小票」固定在详情底部，宽 230。
+  expect(
+    StyleSheet.flatten(screen.getByTestId("local-history-reprint").props.style)
+      .width,
+  ).toBe(230);
+});
+
+test("筛选条一行排完：快捷范围高亮当前日期范围，搜索框留在键盘感知容器内", async () => {
+  // 只伪造 Date：2026-07-27T05:00Z = 布里斯班 07-27 15:00，筛选默认就是“今天”。
+  jest.useFakeTimers({
+    now: new Date("2026-07-27T05:00:00.000Z"),
+    doNotFake: [
+      "setTimeout", "clearTimeout", "setInterval", "clearInterval",
+      "setImmediate", "clearImmediate", "queueMicrotask", "nextTick",
+      "requestAnimationFrame", "cancelAnimationFrame", "performance",
+    ],
+  });
+  try {
+    const screen = await render(
+      <LocalHistoryScreen presenter={createPresenter()} />,
     );
+    const filters = screen.getByTestId("local-history-filters-keyboard-scroll");
+
+    expect(
+      StyleSheet.flatten(filters.props.contentContainerStyle),
+    ).toEqual(expect.objectContaining({ flexDirection: "row" }));
+    expect(
+      screen.getByTestId("local-history-quick-today").props.accessibilityState
+        .selected,
+    ).toBe(true);
+    expect(
+      screen.getByTestId("local-history-quick-yesterday").props
+        .accessibilityState.selected,
+    ).toBe(false);
+
+    await fireEvent.press(screen.getByTestId("local-history-quick-yesterday"));
+    expect(
+      screen.getByTestId("local-history-quick-yesterday").props
+        .accessibilityState.selected,
+    ).toBe(true);
+    expect(
+      screen.getByTestId("local-history-quick-today").props.accessibilityState
+        .selected,
+    ).toBe(false);
+
+    // 搜索框没有可见标签，靠无障碍标签说明用途。
+    expect(
+      screen.getByTestId("local-history-keyword").props.accessibilityLabel,
+    ).toBe("Order or product");
+    expect(screen.getByText("to")).toBeTruthy();
+  } finally {
+    jest.useRealTimers();
   }
 });
 
-test("1366×1024 横屏保持双栏、双标签和 44pt 触控区", async () => {
+test("1366×1024 横屏保持双栏，两个页签是整宽分段按钮（高 56）", async () => {
   Dimensions.set({
     window: { width: 1_366, height: 1_024, scale: 2, fontScale: 1 },
     screen: { width: 1_366, height: 1_024, scale: 2, fontScale: 1 },
@@ -315,10 +383,12 @@ test("1366×1024 横屏保持双栏、双标签和 44pt 触控区", async () => 
     "local-history-details-tab",
     "local-history-receipt-preview-tab",
   ]) {
-    const style = StyleSheet.flatten(screen.getByTestId(testID).props.style);
-    expect(style.minHeight).toBeGreaterThanOrEqual(
-      LOCAL_HISTORY_MIN_TOUCH_TARGET,
-    );
+    const tab = screen.getByTestId(testID);
+    const style = StyleSheet.flatten(tab.props.style);
+    expect(style.minHeight).toBeGreaterThanOrEqual(56);
+    // 两段平分整宽。
+    expect(style.flex).toBe(1);
+    expect(tab.props.accessibilityRole).toBe("radio");
   }
 });
 
@@ -535,9 +605,10 @@ test("右栏默认显示订单详情，切换小票预览后选择另一单仍�
     <LocalHistoryScreen presenter={presenter} />,
   );
 
+  // 页签是分段按钮（radio），选中态用 checked 表达。
   expect(
     screen.getByTestId("local-history-details-tab").props
-      .accessibilityState.selected,
+      .accessibilityState.checked,
   ).toBe(true);
   expect(screen.queryByTestId("local-history-receipt-paper")).toBeNull();
 
@@ -564,7 +635,7 @@ test("右栏默认显示订单详情，切换小票预览后选择另一单仍�
   expect(presenter.selectOrder).toHaveBeenCalledWith(anotherOrderGuid);
   expect(
     screen.getByTestId("local-history-receipt-preview-tab").props
-      .accessibilityState.selected,
+      .accessibilityState.checked,
   ).toBe(true);
   expect(screen.getByText("Loading receipt preview…")).toBeTruthy();
   expect(screen.getByTestId("local-history-reprint")).toBeTruthy();
@@ -573,21 +644,25 @@ test("右栏默认显示订单详情，切换小票预览后选择另一单仍�
 test("目标横屏与较窄视口均保持双栏，窄视口压缩间距和筛选字段", async () => {
   expect(localHistoryLayoutForWidth(1_366)).toEqual({
     compact: false,
-    workspaceGap: 14,
-    workspacePadding: 14,
-    filterWidth: 150,
+    workspaceGap: 12,
+    workspacePadding: 12,
+    filterWidth: 166,
+    listWidth: LOCAL_HISTORY_LIST_WIDTH,
   });
+  // 1024 宽时日期框收窄一档，筛选条仍能一行排完。
   expect(localHistoryLayoutForWidth(1_024)).toEqual({
     compact: false,
-    workspaceGap: 14,
-    workspacePadding: 14,
+    workspaceGap: 12,
+    workspacePadding: 12,
     filterWidth: 150,
+    listWidth: LOCAL_HISTORY_LIST_WIDTH,
   });
   expect(localHistoryLayoutForWidth(760)).toEqual({
     compact: true,
     workspaceGap: 8,
     workspacePadding: 8,
     filterWidth: 142,
+    listWidth: null,
   });
 
   Dimensions.set({
@@ -607,10 +682,12 @@ test("目标横屏与较窄视口均保持双栏，窄视口压缩间距和筛�
       padding: 8,
     }),
   );
-  expect(
-    StyleSheet.flatten(screen.getByTestId("local-history-list-pane").props.style)
-      .minWidth,
-  ).toBe(0);
+  // 紧凑模式不再固定列表宽度，两栏按比例分并允许收窄。
+  const listPaneStyle = StyleSheet.flatten(
+    screen.getByTestId("local-history-list-pane").props.style,
+  );
+  expect(listPaneStyle.minWidth).toBe(0);
+  expect(listPaneStyle.width).toBeUndefined();
   expect(
     StyleSheet.flatten(screen.getByTestId("local-history-details").props.style)
       .minWidth,

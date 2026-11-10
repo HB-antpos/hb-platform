@@ -285,3 +285,26 @@ test("英文界面显示目标中文字形图标，并使用英文无障碍文�
   ).toBe("中");
   expect(screen.queryByText("中文")).toBeNull();
 });
+
+test("顶栏可显示品牌名与版本号，未传时两者都不占位", async () => {
+  const plain = await render(<PosStatusStrip language="zh" />);
+  expect(plain.queryByTestId("status-strip-brand")).toBeNull();
+  expect(plain.queryByTestId("status-strip-app-version")).toBeNull();
+  await plain.unmount();
+
+  const screen = await render(
+    <PosStatusStrip
+      appVersionLabel="Version 1.0.12 · Build 66"
+      language="zh"
+      showBrand
+    />,
+  );
+  expect(screen.getByTestId("status-strip-brand").props.children).toBe(
+    "HB POS",
+  );
+  const version = screen.getByTestId("status-strip-app-version");
+  expect(version.props.children).toBe("Version 1.0.12 · Build 66");
+  expect(version.props.numberOfLines).toBe(1);
+  // 版本号不能把状态指示挤掉：它自己不收缩，由中间的弹性空白让位。
+  expect(StyleSheet.flatten(version.props.style).flexShrink).toBe(0);
+});

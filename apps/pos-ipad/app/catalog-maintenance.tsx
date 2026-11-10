@@ -15,6 +15,7 @@ import {
   CatalogMaintenanceScreen,
 } from "@/features/catalog/maintenance";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 type CatalogMaintenanceBinding = Readonly<{
   services: ExpoPosRuntimeServices;
@@ -24,6 +25,7 @@ type CatalogMaintenanceBinding = Readonly<{
 
 /** 目录更新只能使用当前已认证设备的门店，界面不能覆盖 storeCode。 */
 export default function CatalogMaintenanceRoute() {
+  usePosThemeVersion();
   const router = useRouter();
   const runtime = usePosRuntime();
   const activeCashier = useCashierLoginStore((state) => state.activeCashier);

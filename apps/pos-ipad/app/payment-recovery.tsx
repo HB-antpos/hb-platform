@@ -15,9 +15,11 @@ import { PaymentRecoveryScreen } from "@/features/payment-recovery/payment-recov
 import { PAYMENT_PERMISSION } from "@/features/payments/runtime/payment-checkout-runtime";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { usePosThemeVersion } from "@/ui/theme";
 
 /** 每次进入重新核实设备与收银员，恢复操作只通过受保护的生产业务接口。 */
 export default function PaymentRecoveryRoute() {
+  usePosThemeVersion();
   const { push, dismissTo } = useRouter();
   const runtime = usePosRuntime();
   const { i18n } = useTranslation();

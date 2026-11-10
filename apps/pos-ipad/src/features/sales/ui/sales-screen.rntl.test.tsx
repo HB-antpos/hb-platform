@@ -517,14 +517,14 @@ describe("SalesScreen", () => {
     expect(flattenedStyle(searchAction)).toMatchObject({
       backgroundColor: posColors.surface,
       borderColor: posColors.ink,
-      height: 48,
-      width: 48,
+      height: 64,
+      width: 64,
     });
     expect(flattenedStyle(keyboardAction)).toMatchObject({
       backgroundColor: posColors.surface,
       borderColor: posColors.ink,
-      height: 48,
-      width: 48,
+      height: 64,
+      width: 64,
     });
     expect(screen.getByTestId("sales-keyboard-icon").props.children).toBe(
       "keyboard-outline",
@@ -907,9 +907,11 @@ describe("SalesScreen", () => {
     await fireEvent.press(screen.getByTestId("sales-open-item-button"));
     await dismissVisibleModal();
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-discount"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     expectLandscapeModal();
-    await fireEvent.press(screen.getByTestId("sales-line-discount-amount"));
+    await fireEvent.press(
+      screen.getByTestId("sales-line-edit-discount-amount"),
+    );
     await dismissVisibleModal();
 
     await fireEvent.press(screen.getByTestId("sales-order-discount"));
@@ -987,7 +989,7 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
-  it("分期管理迁入工具栏，本机历史占用原功能区位置，并保持 44pt 触控目标", async () => {
+  it("常用入口固定在左侧栏，其余入口在「全部功能」面板，均保持 44pt 以上触控目标", async () => {
     const onOpenHeldOrders = jest.fn();
     const onOpenDailyClose = jest.fn();
     const onOpenLocalHistory = jest.fn();
@@ -1017,40 +1019,47 @@ describe("SalesScreen", () => {
       />,
     );
 
-    const heldOrders = screen.getByTestId("sales-open-held-orders");
-    expect(screen.getByText("挂单管理")).toBeTruthy();
-    expect(screen.queryByTestId("sales-open-held-orders-layout")).toBeNull();
+    // 默认固定在左侧栏的五个常用入口
+    const pinnedEntries = [
+      ["sales-open-held-orders", "挂单管理", onOpenHeldOrders],
+      ["sales-open-returns", "退货", onOpenReturns],
+      ["sales-open-installments", "分期管理", onOpenInstallments],
+      ["sales-open-local-history", "本机历史", onOpenLocalHistory],
+      ["sales-open-daily-close", "日结", onOpenDailyClose],
+    ] as const;
+    for (const [testID, label, handler] of pinnedEntries) {
+      const tile = screen.getByTestId(testID);
+      expect(screen.getByText(label)).toBeTruthy();
+      expect(
+        StyleSheet.flatten(tile.props.style).minHeight,
+      ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+      await fireEvent.press(tile);
+      expect(handler).toHaveBeenCalledTimes(1);
+    }
     expect(
-      StyleSheet.flatten(heldOrders.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(heldOrders);
-    expect(onOpenHeldOrders).toHaveBeenCalledTimes(1);
+      descendantTestIds(screen.getByTestId("pos-rail")).filter((testID) =>
+        testID.startsWith("sales-open-"),
+      ),
+    ).toEqual(pinnedEntries.map(([testID]) => testID));
 
-    const dailyClose = screen.getByTestId("sales-open-daily-close");
-    expect(screen.getByText("日结")).toBeTruthy();
-    expect(
-      StyleSheet.flatten(dailyClose.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(dailyClose);
-    expect(onOpenDailyClose).toHaveBeenCalledTimes(1);
+    // 其余入口不占侧栏，从「全部功能」面板进入；点进去后面板自动关闭
+    const moreEntries = [
+      ["remote-history", "sales-open-remote-history", "远程历史", onOpenRemoteHistory],
+      ["sync-history", "sales-open-sync-history", "同步历史", onOpenSyncHistory],
+      ["catalog-maintenance", "sales-open-catalog-maintenance", "目录更新", onOpenCatalogMaintenance],
+      ["settings", "sales-open-settings", "设置", onOpenSettings],
+    ] as const;
+    for (const [id, railTestID, label, handler] of moreEntries) {
+      expect(screen.queryByTestId(railTestID)).toBeNull();
+      await fireEvent.press(screen.getByTestId("pos-rail-more"));
+      const tile = screen.getByTestId(`pos-more-${id}`);
+      expect(screen.getByText(label)).toBeTruthy();
+      await fireEvent.press(tile);
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(screen.queryByTestId("pos-more")).toBeNull();
+    }
 
-    const returns = screen.getByTestId("sales-open-returns");
-    expect(screen.getByText("退货")).toBeTruthy();
-    expect(screen.queryByTestId("sales-open-returns-layout")).toBeNull();
-    expect(
-      StyleSheet.flatten(returns.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(returns);
-    expect(onOpenReturns).toHaveBeenCalledTimes(1);
-
-    const remoteHistory = screen.getByTestId("sales-open-remote-history");
-    expect(screen.getByText("远程历史")).toBeTruthy();
-    expect(
-      StyleSheet.flatten(remoteHistory.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(remoteHistory);
-    expect(onOpenRemoteHistory).toHaveBeenCalledTimes(1);
-
+    // 特殊商品留在右侧「商品录入」；每个功能只出现一处
     const specialProducts = screen.getByTestId("sales-open-special-products");
     expect(screen.getByText("特殊商品")).toBeTruthy();
     expect(
@@ -1059,78 +1068,25 @@ describe("SalesScreen", () => {
     await fireEvent.press(specialProducts);
     expect(onOpenSpecialProducts).toHaveBeenCalledTimes(1);
 
-    const installments = screen.getByTestId("sales-open-installments");
-    expect(screen.getByText("分期管理")).toBeTruthy();
-    expect(screen.getByTestId("sales-open-installments-layout")).toBeTruthy();
-    expect(
-      StyleSheet.flatten(installments.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(installments);
-    expect(onOpenInstallments).toHaveBeenCalledTimes(1);
-
-    const localHistory = screen.getByTestId("sales-open-local-history");
-    expect(screen.getByText("本机历史")).toBeTruthy();
-    expect(screen.queryByTestId("sales-open-local-history-layout")).toBeNull();
-    expect(
-      StyleSheet.flatten(localHistory.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(localHistory);
-    expect(onOpenLocalHistory).toHaveBeenCalledTimes(1);
-
-    expect(
-      descendantTestIds(screen.getByTestId("sales-toolbar")).filter(
-        (testID) =>
-          testID === "sales-open-remote-history" ||
-          testID === "sales-open-installments",
-      ),
-    ).toEqual([
-      "sales-open-remote-history",
-      "sales-open-installments",
-    ]);
     expect(
       descendantTestIds(
         screen.getByTestId("sales-transaction-functions"),
-      ).filter(
-        (testID) =>
-          testID === "sales-open-returns" ||
-          testID === "sales-open-local-history" ||
-          testID === "sales-open-held-orders",
-      ),
+      ).filter((testID) => testID.startsWith("sales-")),
     ).toEqual([
-      "sales-open-returns",
-      "sales-open-local-history",
-      "sales-open-held-orders",
+      "sales-transaction-functions",
+      "sales-hold",
+      "sales-order-discount",
+      "sales-reprint-receipt",
+      "sales-open-cash-drawer",
     ]);
-
-    const settings = screen.getByTestId("sales-open-settings");
-    expect(screen.getByText("设置")).toBeTruthy();
     expect(
-      StyleSheet.flatten(settings.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(settings);
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
-
-    const syncHistory = screen.getByTestId("sales-open-sync-history");
-    expect(screen.getByText("同步历史")).toBeTruthy();
-    expect(
-      StyleSheet.flatten(syncHistory.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(syncHistory);
-    expect(onOpenSyncHistory).toHaveBeenCalledTimes(1);
-
-    const catalogMaintenance = screen.getByTestId(
-      "sales-open-catalog-maintenance",
-    );
-    expect(screen.getByText("目录更新")).toBeTruthy();
-    expect(
-      StyleSheet.flatten(catalogMaintenance.props.style).minHeight,
-    ).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
-    await fireEvent.press(catalogMaintenance);
-    expect(onOpenCatalogMaintenance).toHaveBeenCalledTimes(1);
+      descendantTestIds(screen.getByTestId("sales-function-pane")).filter(
+        (testID) => testID.startsWith("sales-open-") && testID.endsWith("s"),
+      ),
+    ).toEqual(["sales-open-special-products"]);
 
     expect(screen.queryByTestId("sales-open-camera-scanner")).toBeNull();
     expect(screen.getByTestId("sales-hold")).toBeTruthy();
-    expect(screen.queryByTestId("sales-hold-layout")).toBeNull();
     expect(screen.getByTestId("sales-lock")).toBeTruthy();
 
     salesPresenter.destroy();
@@ -1181,7 +1137,7 @@ describe("SalesScreen", () => {
     await withoutNavigation.unmount();
   });
 
-  it("横屏主工作区为双栏，购物车图片与交易汇总都属于当前交易区域", async () => {
+  it("横屏主工作区为双栏，购物车在左，交易汇总在右侧紧贴收款按钮", async () => {
     const resolveCartProductImage = jest.fn(
       async (_input: { productCode: string; lookupCode: string }) =>
         "https://pos.example.test/images/P-001.png",
@@ -1207,10 +1163,10 @@ describe("SalesScreen", () => {
       />,
     );
 
-    const transactionPane = screen.getByTestId("sales-transaction-pane");
-    expect(screen.getByTestId("sales-function-pane")).toBeTruthy();
+    expect(screen.getByTestId("sales-transaction-pane")).toBeTruthy();
+    const functionPane = screen.getByTestId("sales-function-pane");
     expect(
-      transactionPane.children.some(
+      functionPane.children.some(
         (child) =>
           typeof child !== "string" &&
           child.props.testID === "sales-summary-pane",
@@ -2996,8 +2952,6 @@ describe("SalesScreen", () => {
     for (const testID of [
       "sales-line-line-1-decrease",
       "sales-line-line-1-increase",
-      "sales-line-line-1-edit",
-      "sales-line-line-1-discount",
       "sales-line-line-1-remove",
       "sales-order-discount",
       "sales-clear-cart",
@@ -3037,9 +2991,10 @@ describe("SalesScreen", () => {
     await fireEvent.press(screen.getByTestId("sales-line-line-1-increase"));
     expect(salesPresenter.getState().cart.lines[0]?.quantity).toBe("2");
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-discount"));
-    expect(screen.getByTestId("sales-discount-modal")).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
+    expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
     await fireEvent.press(screen.getByTestId("sales-discount-1000"));
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
     expect(cart.discounts).toEqual([{ lineId: "line-1", basisPoints: 1_000 }]);
 
     expect(
@@ -3133,7 +3088,7 @@ describe("SalesScreen", () => {
       />,
     );
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     await pressKeypadKeys(screen, "sales-line-edit", ["backspace", "3"]);
     expect(
       screen.getByTestId("sales-line-edit-value").props.accessibilityValue,
@@ -3144,6 +3099,74 @@ describe("SalesScreen", () => {
     expect(
       screen.getByTestId("sales-line-edit-value").props.accessibilityValue,
     ).toEqual({ text: "12.35" });
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("点商品行直接打开合并后的编辑弹窗：显示当前值，快捷折扣与删除都在弹窗内", async () => {
+    const cart = new ScreenCartPort(cartSnapshot(995));
+    const salesPresenter = presenter(cart);
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    // 行上只留 −/＋，不再有单独的「编辑」「折扣」按钮
+    expect(screen.queryByTestId("sales-line-line-1-edit")).toBeNull();
+    expect(screen.queryByTestId("sales-line-line-1-discount")).toBeNull();
+    expect(
+      descendantTestIds(screen.getByTestId("sales-line-line-1-controls")),
+    ).toEqual([
+      "sales-line-line-1-controls",
+      "sales-line-line-1-decrease",
+      "sales-line-line-1-increase",
+    ]);
+
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
+    const modal = screen.getByTestId("sales-line-edit-modal");
+    expect(descendantTestIds(modal)).toEqual(
+      expect.arrayContaining([
+        "sales-line-edit-quantity",
+        "sales-line-edit-price",
+        "sales-line-edit-discount-amount",
+        "sales-line-edit-discount-percent",
+        "sales-discount-0",
+        "sales-discount-5000",
+        "sales-line-edit-value",
+        "sales-line-edit-remove",
+        "sales-line-edit-cancel",
+        "sales-line-edit-confirm",
+      ]),
+    );
+    // 打开时停在「数量」，各编辑项直接显示现在的值
+    expect(
+      screen.getByTestId("sales-line-edit-quantity").props.accessibilityState,
+    ).toMatchObject({ selected: true });
+    expect(
+      screen.getByTestId("sales-line-edit-price").props.accessibilityState,
+    ).toMatchObject({ selected: false });
+    expect(
+      screen.getByTestId("sales-line-edit-quantity").props.accessibilityLabel,
+    ).toBe("数量: 1");
+    expect(
+      screen.getByTestId("sales-line-edit-price").props.accessibilityLabel,
+    ).toBe("单价: $9.95");
+    expect(screen.getAllByText("Fresh milk")).toHaveLength(2);
+
+    await fireEvent.press(screen.getByTestId("sales-line-edit-cancel"));
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    expect(cart.edits).toEqual([]);
+
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
+    await fireEvent.press(screen.getByTestId("sales-line-edit-remove"));
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    await waitFor(() =>
+      expect(salesPresenter.getState().cart.lines).toHaveLength(0),
+    );
 
     salesPresenter.destroy();
     await screen.unmount();
@@ -3178,7 +3201,7 @@ describe("SalesScreen", () => {
     await fireEvent.press(screen.getByTestId("sales-open-item-confirm"));
     expect(addOpenItem).toHaveBeenCalledWith(1_234);
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
     expect(
       screen.getByTestId("sales-line-edit-value").props.onChangeText,
@@ -3188,7 +3211,7 @@ describe("SalesScreen", () => {
     await pressKeypadKeys(screen, "sales-line-edit", ["3"]);
     await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
     await pressKeypadKeys(screen, "sales-line-edit", ["quick-99"]);
     expect(
@@ -3198,8 +3221,10 @@ describe("SalesScreen", () => {
     await pressKeypadKeys(screen, "sales-line-edit", ["8", "quick-50"]);
     await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-discount"));
-    await fireEvent.press(screen.getByTestId("sales-line-discount-amount"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
+    await fireEvent.press(
+      screen.getByTestId("sales-line-edit-discount-amount"),
+    );
     await pressKeypadKeys(screen, "sales-line-edit", [
       "1",
       "decimal",
@@ -3208,8 +3233,10 @@ describe("SalesScreen", () => {
     ]);
     await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-discount"));
-    await fireEvent.press(screen.getByTestId("sales-line-discount-percent"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
+    await fireEvent.press(
+      screen.getByTestId("sales-line-edit-discount-percent"),
+    );
     await pressKeypadKeys(screen, "sales-line-edit", [
       "1",
       "2",
@@ -3334,7 +3361,7 @@ describe("SalesScreen", () => {
       />,
     );
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
     await pressKeypadKeys(screen, "sales-line-edit", [
       "9",
@@ -3376,7 +3403,7 @@ describe("SalesScreen", () => {
     expect(cart.edits).toEqual([]);
 
     // 恰好 9999 允许改价。
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
     await pressKeypadKeys(screen, "sales-line-edit", ["9", "9", "9", "9"]);
     await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
@@ -3639,16 +3666,7 @@ describe("SalesScreen", () => {
     );
     expect(screen.queryByTestId("sales-open-item-modal")).toBeNull();
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-discount"));
-    expect(screen.getByTestId("sales-discount-modal")).toBeTruthy();
-    await fireEvent.press(
-      screen.getByTestId("sales-discount-backdrop", {
-        includeHiddenElements: true,
-      }),
-    );
-    expect(screen.queryByTestId("sales-discount-modal")).toBeNull();
-
-    await fireEvent.press(screen.getByTestId("sales-line-line-1-edit"));
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
     await fireEvent.press(
       screen.getByTestId("sales-line-edit-backdrop", {
@@ -4020,15 +4038,15 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
-  it("头部在「收银工作台」下方显示路由传入的版本号与 Build，未传时不占位", async () => {
+  it("路由传入的版本号与 Build 显示在顶栏，未传时不占位", async () => {
     const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
     const defaultProps = {
       locale: "zh" as const,
       presenter: salesPresenter,
-      showStatusStrip: false,
     };
     const screen = await render(<SalesScreen {...defaultProps} />);
-    expect(screen.queryByTestId("sales-app-version")).toBeNull();
+    expect(mockStatusStripProps.appVersionLabel).toBeNull();
+    expect(mockStatusStripProps.showBrand).toBe(true);
 
     await screen.rerender(
       <SalesScreen
@@ -4036,9 +4054,9 @@ describe("SalesScreen", () => {
         appVersionLabel="Version 0.2.0 · Build 12"
       />,
     );
-    const version = screen.getByTestId("sales-app-version");
-    expect(version.props.children).toBe("Version 0.2.0 · Build 12");
-    expect(version.props.numberOfLines).toBe(1);
+    expect(mockStatusStripProps.appVersionLabel).toBe(
+      "Version 0.2.0 · Build 12",
+    );
 
     salesPresenter.destroy();
     await screen.unmount();

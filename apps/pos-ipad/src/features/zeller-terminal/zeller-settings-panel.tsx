@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { mapZellerSdkPairingResponse } from "@hb/pos-payments-core/features/payments/zeller/zeller-sdk-mapper";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 
 import {
   zellerSettingsText,
@@ -11,8 +11,15 @@ import {
 import type { ZellerTerminalBoundaryState } from "./zeller-terminal-boundary";
 
 import type { ZellerProbeTerminal } from "@/features/zeller-probe/zeller-probe-runner";
-import { PosPressable } from "@/ui/controls/pos-pressable";
-import { posColors } from "@/ui/theme";
+import { PosButton, type PosButtonTone } from "@/ui/controls/pos-button";
+import {
+  createPosStyles,
+  posColors,
+  posRadius,
+  posTouch,
+  type PosPalette,
+  usePosThemeVersion,
+} from "@/ui/theme";
 
 type IconName = keyof typeof MaterialCommunityIcons.glyphMap;
 
@@ -67,19 +74,21 @@ type PanelView =
   | "unpaired"
   | "offline";
 
-const PILL: Record<PanelView, Readonly<{ key: ZellerSettingsCopyKey; icon: IconName | null; soft: string }>> = {
-  loading: { key: "pill.loading", icon: null, soft: posColors.blueSoft },
-  loadFailed: { key: "pill.loadFailed", icon: "alert-circle-outline", soft: posColors.redSoft },
-  checking: { key: "pill.checking", icon: null, soft: posColors.blueSoft },
-  pairing: { key: "pill.pairing", icon: null, soft: posColors.blueSoft },
-  paired: { key: "pill.paired", icon: "check-circle", soft: posColors.greenSoft },
-  active: { key: "pill.paired", icon: "check-circle", soft: posColors.greenSoft },
-  unpaired: { key: "pill.unpaired", icon: "link-variant-off", soft: "#EFEDE7" },
-  offline: { key: "pill.offline", icon: "wifi-off", soft: posColors.redSoft },
+// soft 只存色名：色值在渲染时按当前主题读取。
+const PILL: Record<PanelView, Readonly<{ key: ZellerSettingsCopyKey; icon: IconName | null; soft: keyof PosPalette }>> = {
+  loading: { key: "pill.loading", icon: null, soft: "blueSoft" },
+  loadFailed: { key: "pill.loadFailed", icon: "alert-circle-outline", soft: "redSoft" },
+  checking: { key: "pill.checking", icon: null, soft: "blueSoft" },
+  pairing: { key: "pill.pairing", icon: null, soft: "blueSoft" },
+  paired: { key: "pill.paired", icon: "check-circle", soft: "greenSoft" },
+  active: { key: "pill.paired", icon: "check-circle", soft: "greenSoft" },
+  unpaired: { key: "pill.unpaired", icon: "link-variant-off", soft: "surfaceSunken" },
+  offline: { key: "pill.offline", icon: "wifi-off", soft: "redSoft" },
 };
 
 /**
  * 设置页「支付设置」里的 Zeller 面板：左边是配对状态和操作，右边是配对步骤。
+ * 它嵌在「刷卡终端」卡片里，所以两栏用浅底内嵌块，不再各自画一张卡。
  *
  * 中文注释：
  * 1. 配对和启用是两步。配对成功不会切换这台 iPad 的刷卡通道，必须再点一次「启用 Zeller」，
@@ -96,6 +105,7 @@ export function ZellerSettingsPanel({
   onOpenNetworkCheck,
   now = () => new Date(),
 }: ZellerSettingsPanelProps) {
+  usePosThemeVersion();
   const t = useCallback(
     (key: ZellerSettingsCopyKey, values?: Readonly<Record<string, string | number>>) =>
       zellerSettingsText(locale, key, values),
@@ -213,20 +223,21 @@ export function ZellerSettingsPanel({
   const paired = view === "paired" || view === "active";
 
   return (
-    <View testID="settings-zeller-panel">
+    <View style={styles.panel} testID="settings-zeller-panel">
       <View style={styles.columns}>
-        <View style={[styles.card, styles.statusCard]}>
-          <Text style={styles.eyebrow}>{t("card.eyebrow")}</Text>
-          <Text style={styles.cardTitle}>Zeller</Text>
-          <View style={[styles.pill, { backgroundColor: pill.soft }]}>
-            {spinning ? (
-              <ActivityIndicator color={posColors.blue} size="small" />
-            ) : pill.icon ? (
-              <MaterialCommunityIcons color={posColors.ink} name={pill.icon} size={14} />
-            ) : null}
-            <Text style={styles.pillText} testID="settings-zeller-status">
-              {t(pill.key)}
-            </Text>
+        <View style={[styles.block, styles.statusBlock]}>
+          <View style={styles.titleRow}>
+            <Text style={styles.blockTitle}>Zeller</Text>
+            <View style={[styles.pill, { backgroundColor: posColors[pill.soft] }]}>
+              {spinning ? (
+                <ActivityIndicator color={posColors.blue} size="small" />
+              ) : pill.icon ? (
+                <MaterialCommunityIcons color={posColors.ink} name={pill.icon} size={16} />
+              ) : null}
+              <Text style={styles.pillText} testID="settings-zeller-status">
+                {t(pill.key)}
+              </Text>
+            </View>
           </View>
           <Text style={styles.copy} testID="settings-zeller-copy">
             {copy}
@@ -328,7 +339,7 @@ export function ZellerSettingsPanel({
             <Banner
               hint={t("enable.lockedHint")}
               icon="lock-outline"
-              soft="#F3F1EC"
+              soft={posColors.surfaceSunken}
               testID="settings-zeller-banner"
               title={t("enable.lockedTitle")}
             >
@@ -343,9 +354,8 @@ export function ZellerSettingsPanel({
           )}
         </View>
 
-        <View style={[styles.card, styles.stepsCard]}>
-          <Text style={styles.eyebrow}>{t("steps.eyebrow")}</Text>
-          <Text style={styles.cardTitle}>{t("steps.title")}</Text>
+        <View style={[styles.block, styles.stepsBlock]}>
+          <Text style={styles.blockTitle}>{t("steps.title")}</Text>
           <Step done={paired} index={1} text={t("steps.one")} />
           <Step current={view === "unpaired" || view === "pairing"} done={paired} index={2} text={t("steps.two")} />
           <Step current={view === "paired"} done={view === "active"} index={3} text={t("steps.three")} />
@@ -363,6 +373,7 @@ function formatClock(date: Date): string {
 }
 
 function Row({ label, testID, value }: Readonly<{ label: string; testID: string; value: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -379,11 +390,12 @@ function Step({
   index,
   text,
 }: Readonly<{ current?: boolean; done?: boolean; index: number; text: string }>) {
+  usePosThemeVersion();
   return (
     <View style={styles.step}>
       <View style={[styles.stepBadge, done && styles.stepBadgeDone, current && !done && styles.stepBadgeCurrent]}>
         {done ? (
-          <MaterialCommunityIcons color={posColors.green} name="check" size={16} />
+          <MaterialCommunityIcons color={posColors.green} name="check" size={18} />
         ) : (
           <Text style={[styles.stepNumber, current && styles.stepNumberCurrent]}>{index}</Text>
         )}
@@ -408,6 +420,7 @@ function Banner({
   testID: string;
   title: string;
 }>) {
+  usePosThemeVersion();
   return (
     <View style={[styles.banner, { backgroundColor: soft }]} testID={testID}>
       <MaterialCommunityIcons color={posColors.ink} name={icon} size={24} />
@@ -424,6 +437,13 @@ function Banner({
   );
 }
 
+const PANEL_BUTTON_TONES: Record<"primary" | "secondary" | "blue", PosButtonTone> = {
+  primary: "primary",
+  secondary: "secondary",
+  blue: "info",
+};
+
+/** 面板里的操作按钮：统一走 PosButton（56 高），沿用原来的三种色调。 */
 function PanelButton({
   disabled = false,
   icon,
@@ -441,129 +461,101 @@ function PanelButton({
   testID: string;
   tone: "primary" | "secondary" | "blue";
 }>) {
-  const ink = tone === "secondary" ? posColors.ink : "#FFFFFF";
+  usePosThemeVersion();
   return (
-    <PosPressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
+    <PosButton
       disabled={disabled}
+      label={label}
       onPress={onPress}
+      size="medium"
       sound={sound}
-      style={({ pressed }) => [
-        styles.button,
-        tone === "primary" && styles.buttonPrimary,
-        tone === "blue" && styles.buttonBlue,
-        disabled && styles.buttonDisabled,
-        pressed && !disabled && styles.buttonPressed,
-      ]}
       testID={testID}
-    >
-      {icon ? <MaterialCommunityIcons color={ink} name={icon} size={18} /> : null}
-      <Text style={[styles.buttonLabel, { color: ink }]}>{label}</Text>
-    </PosPressable>
+      tone={PANEL_BUTTON_TONES[tone]}
+      {...(icon ? { icon } : {})}
+    />
   );
 }
 
-// 圆角、字号、间距沿用 settings-screen.tsx 里 sectionCard / availability / paymentFooter 的现有数值。
-const styles = StyleSheet.create({
-  columns: { alignItems: "stretch", flexDirection: "row", gap: 14 },
-  card: {
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 12,
+// 尺寸与设置页其余卡片一致：标题 17、正文 15、说明 12.5–13，按钮 56 高，圆角 10。
+const styles = createPosStyles((colors) => ({
+  panel: { gap: 8 },
+  columns: { alignItems: "stretch", flexDirection: "row", gap: 10 },
+  block: {
+    backgroundColor: colors.surfaceAlt,
+    borderColor: colors.border,
+    borderRadius: posRadius.medium,
     borderWidth: 1,
-    padding: 20,
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  statusCard: { flex: 1.15 },
-  stepsCard: { flex: 1 },
-  eyebrow: {
-    color: posColors.blue,
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 1.1,
-    marginBottom: 4,
+  statusBlock: { flex: 1.15 },
+  stepsBlock: { flex: 1 },
+  titleRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
   },
-  cardTitle: { color: posColors.ink, fontSize: 21, fontWeight: "800", marginBottom: 6 },
+  blockTitle: { color: colors.ink, fontSize: 17, fontWeight: "900" },
   pill: {
     alignItems: "center",
-    alignSelf: "flex-start",
-    borderRadius: 999,
+    borderRadius: 13,
     flexDirection: "row",
     gap: 6,
-    marginBottom: 10,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
+    minHeight: 26,
+    paddingHorizontal: 10,
   },
-  pillText: { color: posColors.ink, fontSize: 12, fontWeight: "800" },
-  copy: { color: posColors.mutedInk, fontSize: 15, lineHeight: 22 },
+  pillText: { color: colors.ink, fontSize: 12.5, fontWeight: "800" },
+  copy: { color: colors.mutedInk, fontSize: 15, fontWeight: "600", lineHeight: 22 },
   rows: {
-    borderTopColor: posColors.border,
+    borderTopColor: colors.border,
     borderTopWidth: 1,
-    marginBottom: 14,
-    marginTop: 12,
   },
   row: {
-    borderBottomColor: posColors.border,
+    alignItems: "center",
+    borderBottomColor: colors.border,
     borderBottomWidth: 1,
     flexDirection: "row",
     gap: 12,
     justifyContent: "space-between",
-    paddingVertical: 10,
+    minHeight: posTouch.min,
+    paddingVertical: 8,
   },
-  rowLabel: { color: posColors.mutedInk, fontSize: 15 },
-  rowValue: { color: posColors.ink, flexShrink: 1, fontSize: 15, fontWeight: "700", textAlign: "right" },
+  rowLabel: { color: colors.mutedInk, fontSize: 14, fontWeight: "700" },
+  rowValue: { color: colors.ink, flexShrink: 1, fontSize: 15, fontWeight: "800", textAlign: "right" },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  button: {
-    alignItems: "center",
-    backgroundColor: posColors.surface,
-    borderColor: posColors.border,
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "center",
-    minHeight: 48,
-    paddingHorizontal: 18,
-  },
-  buttonPrimary: { backgroundColor: posColors.orange, borderColor: posColors.orange },
-  buttonBlue: { backgroundColor: posColors.blue, borderColor: posColors.blue },
-  buttonDisabled: { opacity: 0.45 },
-  buttonPressed: { opacity: 0.62 },
-  buttonLabel: { fontSize: 16, fontWeight: "800" },
   banner: {
     alignItems: "center",
-    borderRadius: 8,
+    borderRadius: posRadius.medium,
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: 12,
-    marginTop: 14,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  bannerCopy: { flex: 1, minWidth: 0 },
-  bannerTitle: { color: posColors.ink, fontSize: 16, fontWeight: "800" },
-  bannerHint: { color: posColors.mutedInk, fontSize: 13, lineHeight: 19, marginTop: 2 },
-  step: { flexDirection: "row", gap: 12, paddingVertical: 9 },
+  bannerCopy: { flex: 1, minWidth: 160 },
+  bannerTitle: { color: colors.ink, fontSize: 16, fontWeight: "900" },
+  bannerHint: { color: colors.mutedInk, fontSize: 13, fontWeight: "600", lineHeight: 19, marginTop: 2 },
+  step: { alignItems: "flex-start", flexDirection: "row", gap: 12, paddingVertical: 6 },
   stepBadge: {
     alignItems: "center",
-    backgroundColor: posColors.blueSoft,
-    borderRadius: 13,
-    height: 26,
+    backgroundColor: colors.blueSoft,
+    borderRadius: 15,
+    height: 30,
     justifyContent: "center",
-    width: 26,
+    width: 30,
   },
-  stepBadgeDone: { backgroundColor: posColors.greenSoft },
-  stepBadgeCurrent: { backgroundColor: posColors.blue },
-  stepNumber: { color: posColors.blue, fontSize: 14, fontWeight: "800" },
-  stepNumberCurrent: { color: "#FFFFFF" },
-  stepText: { color: posColors.ink, flex: 1, fontSize: 15, lineHeight: 22 },
-  stepTextCurrent: { fontWeight: "700" },
+  stepBadgeDone: { backgroundColor: colors.greenSoft },
+  stepBadgeCurrent: { backgroundColor: colors.inverseSurface },
+  stepNumber: { color: colors.blue, fontSize: 15, fontVariant: ["tabular-nums"], fontWeight: "900" },
+  stepNumberCurrent: { color: colors.onInverse },
+  stepText: { color: colors.ink, flex: 1, fontSize: 15, fontWeight: "600", lineHeight: 22, paddingTop: 4 },
+  stepTextCurrent: { fontWeight: "900" },
   footer: {
-    borderTopColor: posColors.border,
-    borderTopWidth: 1,
-    color: posColors.mutedInk,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 14,
-    paddingTop: 10,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "600",
+    lineHeight: 18,
   },
-});
+}));
