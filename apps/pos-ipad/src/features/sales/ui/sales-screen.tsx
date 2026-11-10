@@ -2933,7 +2933,14 @@ const CartLineRow = memo(function CartLineRow({
                 ) : null}
               </Text>
             </View>
-            <View
+            {/*
+              加减区整列（含按钮之间、数量上、按钮上下的空白）都接住点击但什么也不做：
+              整行点一下就开编辑弹窗，点偏一点（−/＋ 旁边）不能再落到行上。
+            */}
+            <PosPressable
+              accessible={false}
+              onPress={ignoreLineControlsPress}
+              sound={false}
               style={styles.lineControls}
               testID={`sales-line-${item.lineId}-controls`}
             >
@@ -2963,7 +2970,7 @@ const CartLineRow = memo(function CartLineRow({
                 testID={`sales-line-${item.lineId}-increase`}
                 tone="secondary"
               />
-            </View>
+            </PosPressable>
             <Text
               adjustsFontSizeToFit
               minimumFontScale={0.7}
@@ -2978,6 +2985,9 @@ const CartLineRow = memo(function CartLineRow({
     </View>
   );
 }, cartLineRowPropsEqual);
+
+/** 加减区空白处的点击：有意什么都不做，只是不让它冒泡成「点整行 → 打开编辑弹窗」。 */
+function ignoreLineControlsPress(): void {}
 
 function cartLineRowPropsEqual(
   previous: CartLineRowProps,
@@ -3845,8 +3855,10 @@ const styles = createPosStyles((colors) => ({
   },
   lineControls: {
     alignItems: "center",
+    alignSelf: "stretch",
     flexDirection: "row",
     flexShrink: 0,
+    paddingHorizontal: 8,
   },
   lockIcon: {
     alignItems: "center",
@@ -4136,7 +4148,7 @@ const styles = createPosStyles((colors) => ({
   quantityValue: {
     alignItems: "center",
     justifyContent: "center",
-    width: 52,
+    width: 48,
   },
   runtimeBanner: {
     backgroundColor: colors.blueSoft,
@@ -4440,9 +4452,9 @@ const styles = createPosStyles((colors) => ({
     marginLeft: "auto",
   },
   lineStepButton: {
-    minHeight: 52,
+    minHeight: 64,
     paddingHorizontal: 0,
-    width: 52,
+    width: 60,
   },
   lineEditModal: {
     backgroundColor: colors.canvas,

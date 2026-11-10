@@ -186,9 +186,20 @@ describe("SettingsScreen", () => {
       expect.objectContaining({ checked: false }),
     );
     for (const toggle of [buttonToggle, specialNodeToggle]) {
-      expect(
-        StyleSheet.flatten(toggle.props.style).minHeight,
-      ).toBeGreaterThanOrEqual(SETTINGS_MIN_TOUCH_TARGET);
+      const style = StyleSheet.flatten(toggle.props.style);
+      // 不能给 Switch 设 minWidth / minHeight：iOS 会把 ios_backgroundColor 铺满撑大后的整块视图，
+      // 在轨道后面露出一块比轨道大的灰色圆角底。44pt 触控目标靠 hitSlop：
+      // 原生开关高 31，乘以纵向缩放，再加上下扩展。
+      expect(style.minHeight).toBeUndefined();
+      expect(style.minWidth).toBeUndefined();
+      const scaleY =
+        (style.transform as ReadonlyArray<Record<string, number>> | undefined)
+          ?.map((entry) => entry.scaleY)
+          .find((value) => typeof value === "number") ?? 1;
+      const slop = toggle.props.hitSlop as { top: number; bottom: number };
+      expect(31 * scaleY + slop.top + slop.bottom).toBeGreaterThanOrEqual(
+        SETTINGS_MIN_TOUCH_TARGET,
+      );
     }
 
     await fireEvent(buttonToggle, "valueChange", false);
