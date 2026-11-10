@@ -201,6 +201,7 @@
       "notes": "Notes"
     },
     "detail": {
+      "invalidAddress": "This order form link is incomplete, so its details cannot be loaded. Please reopen it from the list.",
       "backToList": "Back to list",
       "stats": "{{items}} items · {{enabled}} stores enabled · Submitted {{submitted}} · Draft {{draft}} · Not started {{notStarted}}",
       "totals": "Total {{cartons}} ctns · {{amount}} · {{cbm}} m³",
