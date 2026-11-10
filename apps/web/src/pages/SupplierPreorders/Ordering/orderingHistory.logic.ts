@@ -311,9 +311,17 @@ export function sparklinePaths(
  */
 export type HistoryCellState = 'data' | 'noStore' | 'pending' | 'failed' | 'none'
 
+/** 去年历史快照还没算好（未排队 / 排队中 / 计算中）：没有数据的行显示「计算中」，页面要定时重拉直到算完 */
+export function isOrderingHistoryPending(status: SupplierPreorderHistoryState | null | undefined): boolean {
+  return status === 'None' || status === 'Queued' || status === 'Running'
+}
+
+/** 快照计算期间重拉上下文（含历史状态）的间隔：与订单表详情页一致 15 秒 */
+export const ORDERING_HISTORY_POLL_INTERVAL_MS = 15_000
+
 export function historyCellState(history: SupplierPreorderItemHistory | null | undefined, status: SupplierPreorderHistoryState | null | undefined): HistoryCellState {
   if (history) return history.hasStoreData ? 'data' : 'noStore'
-  if (status === 'None' || status === 'Queued' || status === 'Running') return 'pending'
+  if (isOrderingHistoryPending(status)) return 'pending'
   if (status === 'Failed') return 'failed'
   return 'none'
 }

@@ -33,7 +33,7 @@ import type {
 
 import { createLineSaveQueue, makeLineKey, parseLineKey, type LineSaveQueue } from './lineSaveQueue.logic'
 import { buildOrderingColumns } from './orderingColumns'
-import { windowDayCount } from './orderingHistory.logic'
+import { ORDERING_HISTORY_POLL_INTERVAL_MS, isOrderingHistoryPending, windowDayCount } from './orderingHistory.logic'
 import OrderingHistoryExpand, { type HistoryDetailEntry } from './OrderingHistoryExpand'
 import './orderingMessages'
 import {
@@ -301,6 +301,34 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
       queue.flushAll()
     }
   }, [formGuid, contextReloadKey, storage, queue, t])
+
+  // ---------- 去年历史快照计算中：定时重拉，算完自动刷新商品行 ----------
+  // 关键：历史状态只在「加载上下文」时读一次；快照排队 / 计算中打开页面时，没有历史的行会一直显示「去年数据计算中…」，
+  // 即使后台早已算完也不会变（必须整页重开）。这里在计算期间每 15 秒只重拉上下文里的历史状态，
+  // 状态变为已完成 / 失败 / 无窗口后重新拉商品列表（各行的去年数据随快照返回）；页面隐藏时不发请求，回到前台立即补一次。
+  const historyPending = isOrderingHistoryPending(context?.history?.status)
+  useEffect(() => {
+    if (!historyPending) return undefined
+    const controller = new AbortController()
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return
+      getSupplierPreorderOrderingContext(formGuid, controller.signal)
+        .then((result) => {
+          if (controller.signal.aborted) return
+          // 只替换历史状态，不整体替换上下文：分店汇总可能已被保存结果更新得比这次响应更新
+          setContext((prev) => (prev ? { ...prev, history: result.history } : prev))
+          if (!isOrderingHistoryPending(result.history?.status)) setItemsReloadKey((value) => value + 1)
+        })
+        .catch(() => undefined) // 轮询失败不打扰下单，15 秒后再试
+    }
+    const timer = window.setInterval(tick, ORDERING_HISTORY_POLL_INTERVAL_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      controller.abort()
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [historyPending, formGuid])
 
   // ---------- 截止时钟（按服务器时间校正） ----------
   const deadlineAtUtc = context?.form.deadlineAtUtc ?? null
@@ -765,7 +793,16 @@ function SupplierPreorderOrderFormInner({ formGuid }: { formGuid: string }) {
               setPage(1)
             }}
           />
-          <Button type="link" size="small" onClick={() => { setItemsReloadKey((value) => value + 1); setSummaryReloadKey((value) => value + 1) }}>
+          {/* 刷新要连上下文一起重拉：去年历史的计算状态在上下文里，只刷新商品列表会让「计算中」一直不消失 */}
+          <Button
+            type="link"
+            size="small"
+            onClick={() => {
+              setContextReloadKey((value) => value + 1)
+              setItemsReloadKey((value) => value + 1)
+              setSummaryReloadKey((value) => value + 1)
+            }}
+          >
             {t(`${NS}.page.refresh`)}
           </Button>
           <HistoryWindowNote t={t} history={historyStatus} />
