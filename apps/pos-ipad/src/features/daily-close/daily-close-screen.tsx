@@ -501,7 +501,7 @@ function SummaryCard({
           <Text style={styles.cardTitle}>
             {dailyCloseText(locale, "summary.title")}
           </Text>
-          <Text numberOfLines={1} style={styles.summaryHint}>
+          <Text numberOfLines={2} style={styles.summaryHint}>
             {dailyCloseText(locale, "summary.hint")}
           </Text>
         </View>
@@ -581,7 +581,7 @@ function TenderTable({
     <View testID={testID}>
       <View style={styles.tenderHeader}>
         <Text
-          numberOfLines={1}
+          numberOfLines={2}
           style={[styles.tenderHeadText, styles.tenderMethodCell]}
         >
           {firstColumnLabel}
@@ -630,7 +630,7 @@ function TenderRow({
   return (
     <View style={styles.tenderRow} testID={testID}>
       <Text
-        numberOfLines={1}
+        numberOfLines={2}
         style={[styles.tenderText, styles.tenderMethodCell]}
       >
         {tenderName(tender.method, locale)}
@@ -1064,15 +1064,15 @@ const styles = createPosStyles((colors) => ({
   },
   tenderSalesCell: {
     textAlign: "right",
-    width: 110,
+    width: 98,
   },
   tenderRefundCell: {
     textAlign: "right",
-    width: 96,
+    width: 90,
   },
   tenderNetCell: {
     textAlign: "right",
-    width: 110,
+    width: 98,
   },
   tenderRefunded: {
     color: colors.red,

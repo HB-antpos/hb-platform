@@ -2172,6 +2172,7 @@ function PaymentInstallmentToggle({
         onPress={() => control.onToggle(!control.enabled)}
         style={({ pressed }) => [
           styles.methodButton,
+          styles.installmentToggleTile,
           control.locked && styles.methodButtonDisabled,
           pressed && !control.locked && styles.pressed,
         ]}
@@ -2194,7 +2195,7 @@ function PaymentInstallmentToggle({
             {t("installment.toggle")}
           </Text>
           <Text
-            numberOfLines={1}
+            numberOfLines={2}
             style={[
               styles.methodHint,
               control.locked && styles.methodTextDisabled,
@@ -2484,7 +2485,7 @@ function PaymentMethodButton({
           {label}
         </Text>
         <Text
-          numberOfLines={1}
+          numberOfLines={2}
           style={[
             styles.methodHint,
             disabled && styles.methodTextDisabled,
@@ -3197,6 +3198,11 @@ const styles = createPosStyles((colors) => ({
     top: 8,
     right: 10,
   },
+  // 开关块独占一行（两列网格里本来只占半行，英文文字区不够用）。
+  installmentToggleTile: {
+    maxWidth: "100%",
+    flexBasis: "100%",
+  },
   installmentToggleTrack: {
     width: 54,
     height: 32,
@@ -3339,17 +3345,20 @@ const styles = createPosStyles((colors) => ({
     borderWidth: 2,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
+    // 上下两行：标签与「退出录入」在上，金额独占整行宽度。
+    // 英文按钮名（Clear entry）比中文长得多，并排会把 $12,345.67 的小数位挤掉。
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: 4,
   },
   amountBoxArmed: {
     borderColor: colors.borderStrong,
   },
   amountBoxMeta: {
-    flexShrink: 1,
-    alignItems: "flex-start",
-    gap: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
   amountBoxLabel: {
     color: colors.mutedInk,
@@ -3357,8 +3366,7 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "800",
   },
   amountValueRow: {
-    flex: 1,
-    minWidth: 120,
+    alignSelf: "stretch",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",

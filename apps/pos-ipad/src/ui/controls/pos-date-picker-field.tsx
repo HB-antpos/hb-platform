@@ -266,7 +266,7 @@ const styles = createPosStyles((colors) => ({
   },
   triggerText: {
     color: colors.ink,
-    flex: 1,
+    flexShrink: 1,
     fontSize: 15,
     fontVariant: ["tabular-nums"],
     fontWeight: "700",

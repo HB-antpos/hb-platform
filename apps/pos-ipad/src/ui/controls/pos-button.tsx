@@ -84,7 +84,7 @@ export const PosButton = forwardRef<View, PosButtonProps>(function PosButton(
     labelStyle,
     labelTestID,
     loading = false,
-    numberOfLines = 1,
+    numberOfLines,
     size = "button",
     style,
     tone = "secondary",
@@ -95,6 +95,10 @@ export const PosButton = forwardRef<View, PosButtonProps>(function PosButton(
 ) {
   const inactive = disabled || loading;
   const foreground = inactive ? posColors.disabledInk : foregroundColor(tone);
+  // 默认最多两行：英文文案比中文长得多，单行 + 缩字会在 0.8 倍后静默省略，
+  // 而金额、「主管取消」这类关键信息偏偏常在末尾。按钮只定 minHeight，折行会自然撑高。
+  // 只有一个单词（没有空格）的文案保持单行：它没处可换，折行只会把单词从中间劈开（Remov / e）。
+  const maxLines = numberOfLines ?? (/\s/.test(label.trim()) ? 2 : 1);
 
   return (
     <PosPressable
@@ -131,7 +135,7 @@ export const PosButton = forwardRef<View, PosButtonProps>(function PosButton(
       <Text
         adjustsFontSizeToFit
         minimumFontScale={0.8}
-        numberOfLines={numberOfLines}
+        numberOfLines={maxLines}
         style={[
           styles.label,
           { color: foreground, fontSize: FONT[size] },

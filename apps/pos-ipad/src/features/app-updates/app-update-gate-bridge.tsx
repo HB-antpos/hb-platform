@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  StatusBar,
   StyleSheet,
   Text,
   View,
@@ -28,6 +29,7 @@ import {
   createPosStyles,
   posColors,
   posRadius,
+  usePosTheme,
   usePosThemeVersion,
 } from "@/ui/theme";
 
@@ -55,6 +57,7 @@ const RECOVERY_DOCK_PATH = "/update-recovery";
 
 export function AppUpdateGateBridge() {
   usePosThemeVersion();
+  const themeId = usePosTheme().id;
   const runtime = usePosRuntime();
   const { i18n } = useTranslation();
   const pathname = usePathname();
@@ -220,6 +223,13 @@ export function AppUpdateGateBridge() {
           : "app-update-optional-prompt"
       }
     >
+      {required && !docked && !preserveRecoveryAccess ? (
+        // 强制更新的全屏门盖住了整页（包括顶栏），系统状态栏（时间、电量）默认是浅色字，
+        // 落在浅色画布上看不见：按当前主题明暗换成深色字（暗色主题保持浅色字）。
+        <StatusBar
+          barStyle={themeId === "dark" ? "light-content" : "dark-content"}
+        />
+      ) : null}
       {docked ? (
         <View accessibilityRole="alert" style={styles.dockedCard}>
           <MaterialCommunityIcons

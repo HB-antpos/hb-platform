@@ -357,7 +357,7 @@ export function NetworkCheckScreen({
                     testID={`network-check-entry-${entry.kind}`}
                   >
                     <View style={styles.entryHeader}>
-                      <Text numberOfLines={1} style={styles.entryName}>
+                      <Text numberOfLines={2} style={styles.entryName}>
                         {entryName(locale, entry.kind)}
                       </Text>
                       <PosPill
@@ -451,7 +451,7 @@ function CheckRow({
   return (
     <View style={[styles.checkRow, first && styles.checkRowFirst]} testID={testID}>
       <View style={styles.checkRowTop}>
-        <Text numberOfLines={1} style={styles.checkLabel}>
+        <Text numberOfLines={2} style={styles.checkLabel}>
           {label}
         </Text>
         {row.ms !== null ? (

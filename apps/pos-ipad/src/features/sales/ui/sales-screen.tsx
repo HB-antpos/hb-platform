@@ -1217,7 +1217,7 @@ export function SalesScreen({
           <View style={styles.cartHeader}>
             <Text style={styles.paneTitle}>{t("cart.title")}</Text>
             <Text style={styles.cartCount}>
-              {t("cart.items", { count: state.cart.lines.length })}
+              {t(state.cart.lines.length === 1 ? "cart.itemsOne" : "cart.items", { count: state.cart.lines.length })}
             </Text>
             <View style={styles.cartHeaderActions}>
               <ActionButton

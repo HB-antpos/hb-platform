@@ -277,7 +277,7 @@ function AuditWorkspace({
       <View style={styles.auditHeading}>
         <Text style={styles.panelTitle}>{t("audit.title")}</Text>
         <PosPill
-          label={t("audit.resultCount", { count: audit.rows.length })}
+          label={t(audit.rows.length === 1 ? "audit.resultCountOne" : "audit.resultCount", { count: audit.rows.length })}
           style={styles.headingPill}
         />
       </View>

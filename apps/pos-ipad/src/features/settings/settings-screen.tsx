@@ -3,6 +3,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
+  Keyboard,
   Linking,
   Modal,
   ScrollView,
@@ -195,6 +196,26 @@ const NAV_ITEMS: readonly Readonly<{
   { pane: "hardware", label: "navigation.hardware", icon: "test-tube" },
 ];
 
+/**
+ * 软键盘当前占用的高度（没有键盘为 0）。确认弹窗带「员工条码」输入框且文案很长（英文尤甚），
+ * 居中的卡片会被键盘盖住下半截；把遮罩层的底部内边距加上键盘高度，
+ * 卡片就在键盘之上的可见区域里居中，标题、说明、输入框和按钮都不被盖住。
+ */
+function useKeyboardHeight(): number {
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardWillShow", (event) =>
+      setHeight(event.endCoordinates.height),
+    );
+    const hide = Keyboard.addListener("keyboardWillHide", () => setHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  return height;
+}
+
 /** 窄屏 iPad 上线路管理需要更宽的工作区，分区目录在这个宽度以下收窄。 */
 const SETTINGS_COMPACT_NAVIGATION_WIDTH = 1100;
 
@@ -212,6 +233,7 @@ export function SettingsScreen({
   scanner,
 }: SettingsScreenProps) {
   usePosThemeVersion();
+  const keyboardHeight = useKeyboardHeight();
   const state = useSyncExternalStore(
     presenter.subscribe,
     presenter.getState,
@@ -382,7 +404,13 @@ export function SettingsScreen({
         transparent
         visible={state.confirmation !== null}
       >
-        <View accessibilityViewIsModal style={styles.confirmationOverlay}>
+        <View
+          accessibilityViewIsModal
+          style={[
+            styles.confirmationOverlay,
+            keyboardHeight > 0 && { paddingBottom: 24 + keyboardHeight },
+          ]}
+        >
           <PosPressable
             accessible={false}
             onPress={cancelConfirmation}

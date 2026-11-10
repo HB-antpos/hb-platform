@@ -97,7 +97,8 @@ export function PosSegmented<T extends string>({
             <Text
               adjustsFontSizeToFit
               minimumFontScale={0.8}
-              numberOfLines={1}
+              // 有空格或连字符才允许折两行；单个长词折行只会被从中间劈开。
+              numberOfLines={/[\s-]/.test(option.label.trim()) ? 2 : 1}
               style={[
                 styles.label,
                 small && styles.labelSmall,
@@ -150,6 +151,8 @@ const styles = createPosStyles((colors) => ({
     flexShrink: 1,
     fontSize: 15.5,
     fontWeight: "800",
+    // 折行时居中，两行标签不会一行靠左一行靠右。
+    textAlign: "center",
   },
   labelSmall: {
     fontSize: 14,

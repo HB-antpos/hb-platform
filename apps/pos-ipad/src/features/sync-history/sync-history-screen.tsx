@@ -172,7 +172,7 @@ export function SyncHistoryScreen({
               >
                 <Text style={styles.pendingLabel}>{t("pending.label")}</Text>
                 <Text style={styles.pendingCount}>
-                  {t("pending.count", { count: state.pendingCount })}
+                  {t(state.pendingCount === 1 ? "pending.countOne" : "pending.count", { count: state.pendingCount })}
                 </Text>
               </View>
               <PosButton
@@ -433,7 +433,7 @@ function SyncHistoryOrderRow({
       row.outbox ? t(`outbox.${row.outbox.state}`) : "—"
     }`,
     row.outbox
-      ? t("list.attempts", { count: row.outbox.attemptCount })
+      ? t(row.outbox.attemptCount === 1 ? "list.attemptsOne" : "list.attempts", { count: row.outbox.attemptCount })
       : null,
     row.outbox?.nextAttemptAtIso
       ? t("list.nextAttempt", {

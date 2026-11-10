@@ -508,7 +508,7 @@ function OrderRow({
         </Text>
         <View style={styles.rowBottom}>
           <Text style={styles.rowMeta}>
-            {t("list.items", { count: row.lineCount })}
+            {t(row.lineCount === 1 ? "list.itemsOne" : "list.items", { count: row.lineCount })}
           </Text>
           <Text style={styles.rowMeta}>·</Text>
           <Text numberOfLines={1} style={[styles.rowMeta, styles.rowShrink]}>

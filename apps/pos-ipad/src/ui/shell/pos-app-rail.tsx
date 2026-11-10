@@ -481,8 +481,9 @@ function MoreTile({
           />
         </View>
         <View style={styles.moreTileCopy}>
+          {/* 英文入口名更长（如 Catalog update），放不下时折成两行，不用省略号吃掉名称。 */}
           <Text
-            numberOfLines={1}
+            numberOfLines={2}
             style={[styles.moreTileLabel, disabled && styles.textDisabled]}
           >
             {label}

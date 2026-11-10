@@ -285,7 +285,7 @@ export function SpecialProductsScreen({
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{t("catalog.title")}</Text>
             <PosPill
-              label={t("catalog.itemCount", { count: state.items.length })}
+              label={t(state.items.length === 1 ? "catalog.itemCountOne" : "catalog.itemCount", { count: state.items.length })}
               style={styles.sectionPill}
             />
             {loading ? (
@@ -1135,15 +1135,18 @@ const styles = createPosStyles((colors) => ({
     paddingBottom: 8,
     paddingHorizontal: 8,
   },
+  // 上下移动键固定窄宽，「Remove」独占剩余宽度：均分时英文的 Remove 被挤成 Remov / e。
   manageArrow: {
-    flex: 1,
+    flexGrow: 0,
+    flexShrink: 0,
+    width: 48,
     paddingHorizontal: 0,
   },
   manageArrowLabel: {
     fontSize: 22,
   },
   manageRemove: {
-    flex: 1.3,
+    flex: 1,
     paddingHorizontal: 4,
   },
   manageRemoveLabel: {

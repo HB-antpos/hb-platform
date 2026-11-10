@@ -539,7 +539,7 @@ function HeldOrderRow({
     : null;
   const meta = [
     row.local ? remoteSource : null,
-    t("list.items", { count: itemCount }),
+    t(itemCount === 1 ? "list.itemsOne" : "list.items", { count: itemCount }),
     t("list.heldAt", { time: formatTime(heldAtIso, locale) }),
   ].filter((part): part is string => part !== null);
   const amountText = formatAud(amountCents, locale);
