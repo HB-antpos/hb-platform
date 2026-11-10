@@ -7631,6 +7631,81 @@ const M58 = (() => {
   return parts.join("prior.provider IN ('square', 'linkly-cloud', 'manual-card', 'zeller')");
 })();
 
+/**
+ * M59 恢复中心的「已付款」对账认识 Zeller：放宽 payment_recovery_reconciliations.provider 的 CHECK。
+ *
+ * 中文注释：主管在恢复中心确认「已付款」时，会先登记一条对原交易的只读对账（payment_recovery_reconciliations），
+ * 这张表的 CHECK 只允许 square / linkly-cloud。不放宽的话，Zeller 的结果未知交易只能确认「未付款」，
+ * 顾客确实被扣了款的那一种反而结不了案。
+ * SQLite 不能直接改 CHECK，只能重建表。payment_recovery_actions 用外键引用它，manual_payment_tender_bindings
+ * 又引用 actions，所以三张表一起重建：暂存 → 先删子表再删父表 → 按原定义重建（只改这一处 CHECK）→ 按显式列回灌
+ * → 重建索引和不可变触发器。不用 ALTER TABLE RENAME：重命名时 SQLite 会检查触发器体里引用的表，容易失败。
+ * 建表语句、索引和触发器都直接从 M45 的文本里取，避免手抄出错；取不到或 CHECK 对不上就在加载时失败。
+ * 触发器放在回灌之后再建，与 M55 / M57 的顺序一致。
+ */
+const M59 = (() => {
+  const statement = (start: string, end: string): string => {
+    const from = M45.indexOf(start);
+    const to = from < 0 ? -1 : M45.indexOf(end, from);
+    if (from < 0 || to < 0 || M45.indexOf(start, from + 1) >= 0) {
+      throw new Error(`M59 cannot locate a unique M45 statement: ${start}`);
+    }
+    return M45.slice(from, to + end.length);
+  };
+  const table = (name: string) => statement(`CREATE TABLE ${name} (`, "\n);");
+  const trigger = (name: string) => statement(`CREATE TRIGGER ${name}\n`, "END;");
+  const index = (name: string) => statement(`CREATE INDEX ${name}\n`, ";");
+
+  const oldCheck = "CHECK (provider IN ('square', 'linkly-cloud'))";
+  const reconciliations = table("payment_recovery_reconciliations");
+  if (reconciliations.split(oldCheck).length !== 2) {
+    throw new Error("M59 expects exactly one provider CHECK on payment_recovery_reconciliations.");
+  }
+  const triggers = [
+    "trg_payment_recovery_actions_immutable",
+    "trg_payment_recovery_actions_no_delete",
+    "trg_payment_recovery_reconciliations_immutable",
+    "trg_payment_recovery_reconciliations_no_delete",
+    "trg_manual_payment_tender_bindings_immutable",
+    "trg_manual_payment_tender_bindings_no_delete",
+  ];
+  return [
+    ...triggers.map((name) => `DROP TRIGGER ${name};`),
+    "CREATE TABLE m59_reconciliations_stash AS SELECT * FROM payment_recovery_reconciliations;",
+    "CREATE TABLE m59_actions_stash AS SELECT * FROM payment_recovery_actions;",
+    "CREATE TABLE m59_bindings_stash AS SELECT * FROM manual_payment_tender_bindings;",
+    // 先删引用别人的，再删被引用的，外键才不会拦。
+    "DROP TABLE manual_payment_tender_bindings;",
+    "DROP TABLE payment_recovery_actions;",
+    "DROP TABLE payment_recovery_reconciliations;",
+    reconciliations.replace(oldCheck, "CHECK (provider IN ('square', 'linkly-cloud', 'zeller'))"),
+    table("payment_recovery_actions"),
+    table("manual_payment_tender_bindings"),
+    `INSERT INTO payment_recovery_reconciliations (
+  reconciliation_id, record_id, order_guid, attempt_id, provider, observed_state, observed_at_iso
+) SELECT reconciliation_id, record_id, order_guid, attempt_id, provider, observed_state, observed_at_iso
+  FROM m59_reconciliations_stash;`,
+    `INSERT INTO payment_recovery_actions (
+  action_id, record_id, request_signature, finding, verified_amount_cents, evidence_reference, note,
+  authorization_id, supervisor_actor_json, requesting_actor_json, reconciliation_id,
+  attempt_state_snapshot, created_at_iso
+) SELECT action_id, record_id, request_signature, finding, verified_amount_cents, evidence_reference, note,
+  authorization_id, supervisor_actor_json, requesting_actor_json, reconciliation_id,
+  attempt_state_snapshot, created_at_iso
+  FROM m59_actions_stash;`,
+    `INSERT INTO manual_payment_tender_bindings (
+  tender_guid, record_id, action_id, attempt_id, created_at_iso
+) SELECT tender_guid, record_id, action_id, attempt_id, created_at_iso
+  FROM m59_bindings_stash;`,
+    "DROP TABLE m59_reconciliations_stash;",
+    "DROP TABLE m59_actions_stash;",
+    "DROP TABLE m59_bindings_stash;",
+    index("ix_payment_recovery_actions_record_time"),
+    index("ix_payment_recovery_reconciliations_record_time"),
+    ...triggers.map(trigger),
+  ].join("\n");
+})();
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7690,6 +7765,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 56, name: "M56_daily_close_installments", sql: M56 },
   { version: 57, name: "M57_installment_attempts_zeller_manual", sql: M57 },
   { version: 58, name: "M58_terminal_blocking_zeller", sql: M58 },
+  { version: 59, name: "M59_recovery_reconciliation_zeller", sql: M59 },
 ];
 
 export async function applyMigrations(

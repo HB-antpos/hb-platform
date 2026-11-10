@@ -444,3 +444,81 @@ test("原路退款还没有接入：refund 不调用 SDK，返回结果未知", 
   assert.equal(result.state, "Unknown");
   assert.equal(result.responseCode, "ZELLER_REFUND_UNSUPPORTED");
 });
+
+test("恢复中心的只读查询：只有真的从 Zeller 拿到答复才算核实过，且不发起扣款或取消", async () => {
+  const h = harness();
+
+  // 查到 0 笔：查过了，但结论仍是结果未知。
+  const notFound = await h.adapter.queryExistingPayment(attempt({ state: "Unknown" }));
+  assert.equal(notFound.state, "Unknown");
+  assert.equal(notFound.queryVerified, true);
+
+  // 查询失败：没查成。
+  h.setQuery(() => sdkError("Network Failure"));
+  const failed = await h.adapter.queryExistingPayment(attempt({ state: "Unknown" }));
+  assert.equal(failed.state, "Unknown");
+  assert.equal(failed.queryVerified, false);
+
+  // 查到批准：核实过，系统直接采用批准，不需要主管人工确认。
+  h.setQuery(() => [sdkTransaction()]);
+  const approved = await h.adapter.queryExistingPayment(attempt({ state: "Unknown" }));
+  assert.equal(approved.state, "Approved");
+  assert.equal(approved.queryVerified, true);
+  assert.equal(h.purchases.length, 0);
+
+  // 终端不在：没查成。
+  const offline = harness();
+  offline.unregister();
+  const noTerminal = await offline.adapter.queryExistingPayment(attempt({ state: "Unknown" }));
+  assert.equal(noTerminal.queryVerified, false);
+
+  // 这笔扣款还在刷卡机上进行：不算核实过，也不会去取消它。
+  const busy = harness();
+  await busy.adapter.submit(attempt());
+  const inFlight = await busy.adapter.queryExistingPayment(attempt({ state: "Pending" }));
+  assert.equal(inFlight.state, "Pending");
+  assert.equal(inFlight.queryVerified, false);
+  assert.equal(busy.purchases[0]!.call.state.cancels, 0);
+});
+
+test("需要终端而 SDK 还没加载时，会通知界面层去加载；登记后下一次就能用", async () => {
+  const registry = new ZellerTerminalRegistry();
+  let notified = 0;
+  registry.subscribe(() => {
+    notified += 1;
+  });
+  const adapter = new ZellerPaymentAdapter({ terminals: registry });
+  assert.equal(registry.isWanted(), false);
+
+  // 重启后有一笔 Zeller 付款要核实：这一次查不了，但已经提出需要终端。
+  const held = await adapter.recover(attempt({ state: "Unknown" }));
+  assert.equal(held.responseCode, "ZELLER_TERMINAL_UNAVAILABLE");
+  assert.equal(registry.isWanted(), true);
+  assert.equal(notified, 1);
+  // 重复提出不会重复通知。
+  await adapter.recover(attempt({ state: "Unknown" }));
+  assert.equal(notified, 1);
+
+  // 界面层加载好并登记后，下一次轮询就能查询。
+  const unregister = registry.register({
+    initialise: () => Promise.resolve(true),
+    setup: () => Promise.resolve(true),
+    purchase: () => Promise.resolve(null),
+    refund: () => Promise.resolve(null),
+    getTransactions: () => Promise.resolve([sdkTransaction()]),
+  });
+  assert.equal((await adapter.recover(attempt({ state: "Unknown" }))).state, "Approved");
+
+  // 只注销自己登记的那一个：旧界面卸载不能清掉新界面刚登记的终端。
+  const second = registry.register({
+    initialise: () => Promise.resolve(true),
+    setup: () => Promise.resolve(true),
+    purchase: () => Promise.resolve(null),
+    refund: () => Promise.resolve(null),
+    getTransactions: () => Promise.resolve([]),
+  });
+  unregister();
+  assert.notEqual(registry.current(), null);
+  second();
+  assert.equal(registry.current(), null);
+});

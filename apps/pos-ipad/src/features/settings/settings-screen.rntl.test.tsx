@@ -1045,7 +1045,7 @@ describe("SettingsScreen", () => {
     await presenter.load();
     const activate = jest.fn();
     const screen = await render(
-      <ZellerTerminalBoundaryContext.Provider value={{ state: { status: "idle" }, activate }}>
+      <ZellerTerminalBoundaryContext.Provider value={{ state: { status: "idle" }, activate, settingsTabAvailable: true }}>
         <SettingsScreen locale="zh" presenter={presenter} />
       </ZellerTerminalBoundaryContext.Provider>,
     );
@@ -1074,7 +1074,7 @@ describe("SettingsScreen", () => {
     };
     const screen = await render(
       <ZellerTerminalBoundaryContext.Provider
-        value={{ state: { status: "ready", terminal: terminal as never }, activate: jest.fn() }}
+        value={{ state: { status: "ready", terminal: terminal as never }, activate: jest.fn(), settingsTabAvailable: true }}
       >
         <SettingsScreen locale="zh" presenter={presenter} />
       </ZellerTerminalBoundaryContext.Provider>,

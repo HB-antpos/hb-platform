@@ -4,6 +4,7 @@ import * as SplashScreen from "expo-splash-screen";
 
 import { AppProviders } from "@/app-providers";
 import "@/core/peripherals/customer-display/native";
+import { ZellerAppBoundary } from "@/features/zeller-terminal/zeller-app-boundary";
 import { ScannerRouteProvider } from "@/ui/scanner/scanner-route-bridge";
 
 // 外接客显会创建第二个 React surface；主路由加载后显式移除启动遮罩，
@@ -17,7 +18,10 @@ export default function RootLayout() {
   return (
     <AppProviders>
       <ScannerRouteProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        {/* 全 App 唯一的 Zeller SDK 挂载点：默认不加载，设置里用到或运行时需要时才加载。 */}
+        <ZellerAppBoundary>
+          <Stack screenOptions={{ headerShown: false }} />
+        </ZellerAppBoundary>
       </ScannerRouteProvider>
     </AppProviders>
   );

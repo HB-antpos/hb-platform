@@ -51,7 +51,7 @@ export async function readManualPaymentSyncEvidence(
       row.case_state !== "manual-paid" || row.finding !== "paid" || row.method !== "card" || row.operation !== "purchase" ||
       row.attempt_amount !== input.amountCents || row.tender_amount !== input.amountCents || row.verified_amount_cents !== input.amountCents ||
       input.amountCents <= 0 || !Number.isSafeInteger(input.amountCents) ||
-      (row.provider !== "linkly-cloud" && row.provider !== "square") ||
+      (row.provider !== "linkly-cloud" && row.provider !== "square" && row.provider !== "zeller") ||
       typeof row.authorization_id !== "string" || !row.authorization_id.trim() ||
       typeof row.supervisor_actor_json !== "string" ||
       row.authorization_record_id !== row.record_id || row.authorization_order !== input.orderGuid ||
@@ -77,7 +77,8 @@ export async function readManualPaymentSyncEvidence(
   // MANUAL 明确表示主管结论；不构造支付方批准码、授权码、原 RFN 或卡号。
   return {
     version: 1, provider: row.provider, operation: "purchase",
-    processor: row.provider === "square" ? "Square" : "ANZ",
+    // Processor 必须与通道一一对应（卡同步证据契约会校验），否则这笔订单永远传不上去。
+    processor: row.provider === "square" ? "Square" : row.provider === "zeller" ? "Zeller" : "ANZ",
     txnRef: null, authCode: null, cardType: null, cardBin: null, maskedCardNumber: null, merchantId: null,
     responseCode: "MANUAL", responseText: "Supervisor confirmed payment; not provider approval",
     stan: null, bankDateTimeIso: null, amountCents: input.amountCents, refundReference: null,

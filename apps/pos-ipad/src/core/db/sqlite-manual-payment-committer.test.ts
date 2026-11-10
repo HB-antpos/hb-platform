@@ -9,7 +9,9 @@ import type {
 } from "@hb/pos-db/core/db/types";
 import type { LocalOrder } from "@hb/pos-domain/core/contracts/order";
 
-import { applyMigrations } from "./migrations";
+import { normalizeCardSyncEvidence } from "@hb/pos-domain/core/contracts/payment";
+
+import { applyMigrations, POS_DATABASE_MIGRATIONS } from "./migrations";
 import {
   SqliteManualPaymentOrderCommitter,
   type ManualPaymentOrderCommit,
@@ -98,6 +100,161 @@ test("真实 SQLite：人工已收款绑定原 attempt，完整付款原子完�
       outboxes: 1,
     });
   });
+});
+
+test("真实 SQLite：Zeller 的结果未知交易经主管确认已收款后能完成订单，同步证据的 Processor 是 Zeller", async () => {
+  await withDatabase(async (connection) => {
+    await seedRecovery(connection, { provider: "zeller" });
+    const committer = new SqliteManualPaymentOrderCommitter(connection, () => T1);
+
+    const first = await committer.completeManualPaymentOrder(command());
+    assert.equal(first.completed, true);
+    assert.equal(first.signedTenderAmountCents, 900);
+    assert.equal((await committer.completeManualPaymentOrder(command())).replayed, true);
+
+    const evidence = await readManualPaymentSyncEvidence(connection, {
+      tenderGuid: "manual-tender-1",
+      orderGuid: "order-1",
+      storeCode: "STORE-1",
+      deviceCode: "DEVICE-1",
+      amountCents: 900,
+    });
+    assert.equal(evidence?.provider, "zeller");
+    assert.equal(evidence?.processor, "Zeller");
+    assert.equal(evidence?.responseCode, "MANUAL");
+    // 订单同步会用卡证据契约再校验一遍；通道和 Processor 对不上的话这笔订单永远传不上去。
+    assert.doesNotThrow(() => normalizeCardSyncEvidence(evidence));
+  });
+});
+
+test("真实 SQLite：M59 重建恢复中心三张表后数据、索引、触发器和外键都完好，对账表接受 zeller", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  const connection = new TestConnection(database);
+  const tables = [
+    "payment_recovery_reconciliations",
+    "payment_recovery_actions",
+    "manual_payment_tender_bindings",
+  ] as const;
+  const snapshot = async () =>
+    Object.fromEntries(
+      await Promise.all(
+        tables.map(async (table) => [
+          table,
+          (await connection.getAll<Record<string, unknown>>(`SELECT * FROM ${table} ORDER BY 1`)).map(
+            (row) => ({ ...row }),
+          ),
+        ]),
+      ),
+    );
+  const objects = async (type: "trigger" | "index") =>
+    (await connection.getAll<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = ? AND tbl_name IN (${tables.map(() => "?").join(",")})
+         AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name`,
+      [type, ...tables],
+    )).map((row) => row.name);
+  const insertReconciliation = (id: string, provider: string) =>
+    connection.run(
+      `INSERT INTO payment_recovery_reconciliations (
+        reconciliation_id, record_id, order_guid, attempt_id, provider, observed_state, observed_at_iso
+      ) VALUES (?, 'record-1', 'order-1', 'attempt-1', ?, 'Unknown', ?)`,
+      [id, provider, T1],
+    );
+  try {
+    // 先停在 M58，用真实流程造出三张表都有数据的历史：一笔 Linkly 的主管确认已收款。
+    database.exec(
+      POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 58)
+        .map((migration) => migration.sql)
+        .join("\n"),
+    );
+    await seedRecovery(connection);
+    await new SqliteManualPaymentOrderCommitter(connection, () => T1).completeManualPaymentOrder(command());
+    const before = await snapshot();
+    for (const table of tables) assert.equal(before[table]?.length, 1, table);
+    const triggersBefore = await objects("trigger");
+    const indexesBefore = await objects("index");
+    assert.equal(triggersBefore.length, 6);
+    // 升级前对账表不认 zeller。
+    await assert.rejects(() => insertReconciliation("reconcile-zeller-before", "zeller"), /CHECK/i);
+
+    const M59 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 59);
+    assert.ok(M59);
+    database.exec(`BEGIN;\n${M59.sql}\nCOMMIT;`);
+
+    assert.deepEqual(await snapshot(), before);
+    assert.deepEqual(await objects("trigger"), triggersBefore);
+    assert.deepEqual(await objects("index"), indexesBefore);
+    assert.deepEqual(await connection.getAll("PRAGMA foreign_key_check"), []);
+    assert.deepEqual(
+      await connection.getAll("SELECT name FROM sqlite_master WHERE name LIKE 'm59_%'"),
+      [],
+    );
+
+    // 新约束：接受 zeller，仍然拒绝不认识的通道。
+    await insertReconciliation("reconcile-zeller-after", "zeller");
+    await assert.rejects(() => insertReconciliation("reconcile-bogus", "bogus"), /CHECK/i);
+    // 不可变触发器仍然生效。
+    await assert.rejects(
+      () => connection.run("UPDATE payment_recovery_reconciliations SET provider = 'square'"),
+      /PAYMENT_RECOVERY_RECONCILIATION_IMMUTABLE/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM payment_recovery_actions"),
+      /PAYMENT_RECOVERY_ACTION_IMMUTABLE/,
+    );
+    await assert.rejects(
+      () => connection.run("DELETE FROM manual_payment_tender_bindings"),
+      /MANUAL_PAYMENT_TENDER_BINDING_IMMUTABLE/,
+    );
+    // 外键链仍然连着：对账记录被 action 引用时删不掉（先被不可变触发器拦下也算守住）。
+    await assert.rejects(() => connection.run("DELETE FROM payment_recovery_reconciliations"));
+  } finally {
+    database.close();
+  }
+});
+
+test("真实 SQLite：M59 中途失败时整体回滚，三张表和旧约束原样保留", async () => {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  const connection = new TestConnection(database);
+  try {
+    database.exec(
+      POS_DATABASE_MIGRATIONS.filter((migration) => migration.version <= 58)
+        .map((migration) => migration.sql)
+        .join("\n"),
+    );
+    await seedRecovery(connection);
+    await new SqliteManualPaymentOrderCommitter(connection, () => T1).completeManualPaymentOrder(command());
+    const M59 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 59);
+    assert.ok(M59);
+
+    assert.throws(() => database.exec(`BEGIN;\n${M59.sql}\nCREATE TABL invalid_m59;\nCOMMIT;`));
+    database.exec("ROLLBACK");
+
+    for (const table of [
+      "payment_recovery_reconciliations",
+      "payment_recovery_actions",
+      "manual_payment_tender_bindings",
+    ]) {
+      const row = await connection.getFirst<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table}`);
+      assert.equal(Number(row?.count), 1, table);
+    }
+    assert.deepEqual(
+      await connection.getAll("SELECT name FROM sqlite_master WHERE name LIKE 'm59_%'"),
+      [],
+    );
+    await assert.rejects(
+      () => connection.run(
+        `INSERT INTO payment_recovery_reconciliations (
+          reconciliation_id, record_id, order_guid, attempt_id, provider, observed_state, observed_at_iso
+        ) VALUES ('reconcile-zeller', 'record-1', 'order-1', 'attempt-1', 'zeller', 'Unknown', ?)`,
+        [T1],
+      ),
+      /CHECK/i,
+    );
+  } finally {
+    database.close();
+  }
 });
 
 test("真实 SQLite：跨 scope、错误授权及人工金额与原 attempt 不符均失败关闭", async () => {
@@ -365,7 +522,9 @@ async function seedRecovery(connection: SqliteConnectionPort, overrides: Partial
   localSequence: number; recallBinding: unknown; supervisorActorJson: string;
   authorizationActionId: string;
   reconciliationObservedAtIso: string;
+  provider: "linkly-cloud" | "square" | "zeller";
 }> = {}): Promise<void> {
+  const provider = overrides.provider ?? "linkly-cloud";
   const orderGuid = overrides.orderGuid ?? "order-1";
   const attemptId = overrides.attemptId ?? "attempt-1";
   const recordId = overrides.recordId ?? "record-1";
@@ -410,9 +569,9 @@ async function seedRecovery(connection: SqliteConnectionPort, overrides: Partial
       state, checkout_id, payment_id, session_id, txn_ref, rfn,
       provider_payload_ciphertext, provider_receipt_ciphertext, provider_response_code,
       created_at_iso, updated_at_iso, last_error_code
-    ) VALUES (?, ?, ?, 'linkly-cloud', 'purchase', ?, 'Unknown', NULL, NULL, NULL,
+    ) VALUES (?, ?, ?, ?, 'purchase', ?, 'Unknown', NULL, NULL, NULL,
       NULL, NULL, NULL, NULL, NULL, ?, ?, NULL)`,
-    [attemptId, `idem-${attemptId}`, orderGuid, amountCents, T0, T0],
+    [attemptId, `idem-${attemptId}`, orderGuid, provider, amountCents, T0, T0],
   );
   await connection.run(
     `INSERT INTO payment_recovery_cases (
@@ -435,8 +594,8 @@ async function seedRecovery(connection: SqliteConnectionPort, overrides: Partial
     `INSERT INTO payment_recovery_reconciliations (
       reconciliation_id, record_id, order_guid, attempt_id, provider,
       observed_state, observed_at_iso
-    ) VALUES (?, ?, ?, ?, 'linkly-cloud', 'Unknown', ?)`,
-    [`reconcile-${actionId}`, recordId, orderGuid, attemptId,
+    ) VALUES (?, ?, ?, ?, ?, 'Unknown', ?)`,
+    [`reconcile-${actionId}`, recordId, orderGuid, attemptId, provider,
       overrides.reconciliationObservedAtIso ?? T1],
   );
   await connection.run(
