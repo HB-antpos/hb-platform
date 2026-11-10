@@ -21,6 +21,9 @@ import {
   SPECIAL_NODE_SOUND_PREFERENCE_KEY,
   THEME_PREFERENCE_KEY,
   TOUCH_SOUND_PREFERENCE_KEY,
+  readZellerHideSdkUi,
+  saveZellerHideSdkUi,
+  ZELLER_HIDE_SDK_UI_PREFERENCE_KEY,
 } from "./terminal-ui-preferences";
 
 import type { CameraScanMode } from "@/core/contracts/scanner";
@@ -234,4 +237,35 @@ test("侧栏固定项只接受字符串数组，损坏数据与存储故障一�
 
   mockSetItem.mockRejectedValue(new Error("disk full"));
   await expect(savePinnedDestinations(["returns"])).resolves.toBeUndefined();
+});
+
+test("Zeller 隐藏 SDK 窗口偏好：只有明确保存过 true 才为 true，缺失 / 损坏 / 存储故障一律保持弹窗", async () => {
+  // 默认（缺失）：false。
+  mockGetItemSync.mockReturnValue(null);
+  expect(readZellerHideSdkUi()).toBe(false);
+  expect(mockGetItemSync).toHaveBeenCalledWith(ZELLER_HIDE_SDK_UI_PREFERENCE_KEY);
+
+  mockGetItemSync.mockReturnValue("true");
+  expect(readZellerHideSdkUi()).toBe(true);
+  mockGetItemSync.mockReturnValue("false");
+  expect(readZellerHideSdkUi()).toBe(false);
+
+  // 损坏的值不能被当成 true。
+  for (const corrupted of ["1", "yes", "TRUE", ""]) {
+    mockGetItemSync.mockReturnValue(corrupted);
+    expect(readZellerHideSdkUi()).toBe(false);
+  }
+  mockGetItemSync.mockImplementation(() => {
+    throw new Error("storage unavailable");
+  });
+  expect(readZellerHideSdkUi()).toBe(false);
+
+  await saveZellerHideSdkUi(true);
+  expect(mockSetItem).toHaveBeenLastCalledWith(ZELLER_HIDE_SDK_UI_PREFERENCE_KEY, "true");
+  await saveZellerHideSdkUi(false);
+  expect(mockSetItem).toHaveBeenLastCalledWith(ZELLER_HIDE_SDK_UI_PREFERENCE_KEY, "false");
+
+  // 写入失败不抛出，也不影响当前选择。
+  mockSetItem.mockRejectedValue(new Error("disk full"));
+  await expect(saveZellerHideSdkUi(true)).resolves.toBeUndefined();
 });

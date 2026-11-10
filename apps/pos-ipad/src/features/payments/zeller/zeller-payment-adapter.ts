@@ -132,8 +132,15 @@ export class ZellerPaymentAdapter implements OnlinePaymentPort {
       return this.notSubmitted(attempt, "ZELLER_NOT_SUBMITTED_BELOW_MINIMUM");
     }
     const amountCents = attempt.amount.cents;
+    // 中文注释：设置里打开「收款时不弹出 Zeller 窗口」才带 unattended；没打开时请求与以前完全一致。
+    // 隐藏窗口后收银员看付款页自己的「等待支付终端」和「取消支付」；退款没有这个选项，配对必须弹窗。
+    const hideSdkUi = this.terminals.hideSdkUi?.() === true;
     const started = await this.start(attempt, (terminal) =>
-      terminal.purchase({ amount: amountCents, reference }),
+      terminal.purchase({
+        amount: amountCents,
+        reference,
+        ...(hideSdkUi ? { unattended: true } : {}),
+      }),
     );
     // 已经发起过的只收结果；没发出去的按「没有发出」收尾。
     if (started.kind === "existing") return this.recover(attempt);

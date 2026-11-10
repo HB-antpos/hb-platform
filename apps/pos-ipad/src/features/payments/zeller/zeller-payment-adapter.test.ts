@@ -166,6 +166,7 @@ function harness() {
   const adapter = new ZellerPaymentAdapter({ terminals: registry, nowMs: () => now });
   return {
     adapter,
+    registry,
     purchases,
     refunds,
     queries,
@@ -779,4 +780,86 @@ test("扣款前先确认配对：没配对或查不了配对时请求不发出�
   await paired.adapter.submit(attempt());
   await paired.adapter.recover(attempt({ state: "Pending" }));
   assert.equal(paired.pairingChecks(), 1);
+});
+
+
+test("设置里打开「收款时不弹出 Zeller 窗口」：扣款带 unattended，改动立刻对下一笔生效；默认与关闭时请求不带它", async () => {
+  const h = harness();
+
+  // 默认：请求与以前完全一致，不带 unattended。
+  await h.adapter.submit(attempt());
+  assert.deepEqual(h.purchases[0]!.options, { amount: 1_250, reference: REFERENCE });
+  await h.purchases[0]!.call.resolve(sdkTransaction());
+  await h.adapter.recover(attempt({ state: "Pending" }));
+
+  // 打开开关（无需重建适配器）：下一笔扣款隐藏 SDK 窗口。
+  const secondId = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const secondReference = "HBZ-0f8fad5bd9cb469fa16570867728950e";
+  const second = attempt({
+    attemptId: secondId,
+    references: { ...attempt().references, txnRef: secondReference },
+  });
+  h.registry.setHideSdkUi(true);
+  await h.adapter.submit(second);
+  assert.deepEqual(h.purchases[1]!.options, {
+    amount: 1_250,
+    reference: secondReference,
+    unattended: true,
+  });
+  await h.purchases[1]!.call.resolve(sdkTransaction({ externalReference: secondReference }));
+  await h.adapter.recover({ ...second, state: "Pending" });
+
+  // 再关闭：又恢复弹窗。
+  const thirdId = "1a2b3c4d-1111-4222-8333-444455556666";
+  const thirdReference = "HBZ-1a2b3c4d111142228333444455556666";
+  const third = attempt({
+    attemptId: thirdId,
+    references: { ...attempt().references, txnRef: thirdReference },
+  });
+  h.registry.setHideSdkUi(false);
+  await h.adapter.submit(third);
+  assert.deepEqual(h.purchases[2]!.options, { amount: 1_250, reference: thirdReference });
+});
+
+test("打开隐藏窗口后，退款仍然不带 unattended（SDK 的退款没有这个选项，窗口照常弹出）", async () => {
+  const h = harness();
+  h.registry.setHideSdkUi(true);
+
+  const refunding = h.adapter.refund(refundAttempt());
+  await flush();
+  assert.deepEqual(h.refunds.map((refund) => refund.options), [
+    { amount: 500, purchase: UUID, reference: REFUND_REFERENCE },
+  ]);
+  await h.refunds[0]!.call.resolve(sdkRefund());
+  await refunding;
+});
+
+test("终端来源没有提供隐藏窗口开关（旧组合）：按弹窗处理，不带 unattended", async () => {
+  const purchases: unknown[] = [];
+  const terminal: ZellerProbeTerminal = {
+    initialise: () => Promise.resolve(true) as ZellerProbeOperation,
+    setup: () => {
+      throw new Error("unexpected SDK call");
+    },
+    refund: () => {
+      throw new Error("unexpected SDK call");
+    },
+    purchase: (options) => {
+      purchases.push(options);
+      return deferredOperation().operation;
+    },
+    getTransactions: () => Promise.resolve([]) as ZellerProbeOperation,
+  };
+  const adapter = new ZellerPaymentAdapter({ terminals: { current: () => terminal } });
+  await adapter.submit(attempt());
+  assert.deepEqual(purchases, [{ amount: 1_250, reference: REFERENCE }]);
+});
+
+test("终端登记处：隐藏窗口开关默认关闭，可以开关", () => {
+  const registry = new ZellerTerminalRegistry();
+  assert.equal(registry.hideSdkUi(), false);
+  registry.setHideSdkUi(true);
+  assert.equal(registry.hideSdkUi(), true);
+  registry.setHideSdkUi(false);
+  assert.equal(registry.hideSdkUi(), false);
 });

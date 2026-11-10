@@ -3,6 +3,7 @@ import { type Href, useRouter } from "expo-router";
 import { useEffect, useMemo, useSyncExternalStore, type ReactNode } from "react";
 
 import { isZellerSettingsAvailable } from "./zeller-availability";
+import { useZellerHideSdkUiControl } from "./zeller-hide-sdk-ui";
 import { ZellerTerminalBoundary, useZellerTerminalBoundary } from "./zeller-terminal-boundary";
 
 import { zellerTerminalRegistry } from "@/features/payments/zeller/zeller-terminal-registry";
@@ -41,8 +42,11 @@ export function ZellerAppBoundary({ children }: Readonly<{ children: ReactNode }
     [],
   );
   const openNetworkCheck = useMemo(() => () => router.push("/network-check" as Href), [router]);
+  // 「收款时不弹出 Zeller 窗口」：本机设置，随根组件一起读取并同步给运行时。
+  const hideSdkUi = useZellerHideSdkUiControl();
   return (
     <ZellerTerminalBoundary
+      hideSdkUi={hideSdkUi}
       onOpenNetworkCheck={openNetworkCheck}
       settingsTabAvailable={ZELLER_SETTINGS_AVAILABLE}
       vendor={vendor}

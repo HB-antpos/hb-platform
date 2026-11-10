@@ -10,6 +10,8 @@ import {
 } from "react";
 import { View } from "react-native";
 
+import type { ZellerHideSdkUiControl } from "./zeller-hide-sdk-ui";
+
 import type { ZellerProbeTerminal } from "@/features/zeller-probe/zeller-probe-runner";
 import {
   ZellerSdkHost,
@@ -40,6 +42,8 @@ export type ZellerTerminalBoundaryValue = Readonly<{
   onOpenNetworkCheck?: () => void;
   /** 设置页是否显示 Zeller 页签（配对与启用）。正式构建暂不显示。 */
   settingsTabAvailable: boolean;
+  /** 「收款时不弹出 Zeller 窗口」开关；界面测试直接提供上下文时可以不给。 */
+  hideSdkUi?: ZellerHideSdkUiControl;
 }>;
 
 const ZellerTerminalContext = createContext<ZellerTerminalBoundaryValue | null>(null);
@@ -59,6 +63,7 @@ export type ZellerTerminalBoundaryProps = Readonly<{
   vendor: ZellerSdkVendor;
   onOpenNetworkCheck?: () => void;
   settingsTabAvailable: boolean;
+  hideSdkUi?: ZellerHideSdkUiControl;
   children: ReactNode;
 }>;
 
@@ -66,6 +71,7 @@ export function ZellerTerminalBoundary({
   vendor,
   onOpenNetworkCheck,
   settingsTabAvailable,
+  hideSdkUi,
   children,
 }: ZellerTerminalBoundaryProps) {
   usePosThemeVersion();
@@ -78,8 +84,9 @@ export function ZellerTerminalBoundary({
       activate,
       settingsTabAvailable,
       ...(onOpenNetworkCheck ? { onOpenNetworkCheck } : {}),
+      ...(hideSdkUi ? { hideSdkUi } : {}),
     }),
-    [activate, onOpenNetworkCheck, settingsTabAvailable, state],
+    [activate, hideSdkUi, onOpenNetworkCheck, settingsTabAvailable, state],
   );
 
   return (

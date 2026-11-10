@@ -14,6 +14,8 @@ export const SPECIAL_NODE_SOUND_PREFERENCE_KEY =
 export const TOUCH_SOUND_PREFERENCE_KEY = "hb.pos.touch-sound.v1";
 export const THEME_PREFERENCE_KEY = "hb.pos.theme.v1";
 export const NAV_PINNED_PREFERENCE_KEY = "hb.pos.nav-pinned.v1";
+/** Zeller 扣款时是否隐藏 SDK 自带的全屏窗口（本机设置，默认不隐藏）。 */
+export const ZELLER_HIDE_SDK_UI_PREFERENCE_KEY = "hb.pos.zeller-hide-sdk-ui.v1";
 
 function isAppLanguage(value: unknown): value is AppLanguage {
   return value === "zh" || value === "en";
@@ -120,6 +122,34 @@ export async function saveSpecialNodeSoundEnabled(
   enabled: boolean,
 ): Promise<void> {
   await saveSoundEnabled(SPECIAL_NODE_SOUND_PREFERENCE_KEY, enabled);
+}
+
+/**
+ * 同步读取「Zeller 扣款时不弹出 SDK 窗口」。只有明确保存过 true 才返回 true；
+ * 缺失、损坏或存储故障一律返回 false（保持弹窗），宁可多弹一个窗口也不能让收银员看不到流程。
+ */
+export function readZellerHideSdkUi(): boolean {
+  try {
+    return (
+      parseStoredBoolean(
+        Storage.getItemSync(ZELLER_HIDE_SDK_UI_PREFERENCE_KEY),
+      ) === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** 写入失败不回滚内存里的当前选择，也不阻断收银。 */
+export async function saveZellerHideSdkUi(hidden: boolean): Promise<void> {
+  try {
+    await Storage.setItem(
+      ZELLER_HIDE_SDK_UI_PREFERENCE_KEY,
+      hidden ? "true" : "false",
+    );
+  } catch {
+    // 偏好持久化失败不应阻断 POS 界面。
+  }
 }
 
 /** 同步读取界面主题；缺失、损坏或存储故障时返回 null，由调用方使用默认主题。 */
