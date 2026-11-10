@@ -31,6 +31,12 @@ public sealed class StaffNotificationOptions
 
         return DefaultPublicBaseUrl;
     }
+
+    /// <summary>
+    /// 公开下载短链页 /app（手机打开自动跳商店 / 最新 APK，电脑显示二维码），永远指向最新版。
+    /// 员工通知模板的 {{app_link}} 与新建员工的账号邮件共用这一个地址，避免两处各拼一份。
+    /// </summary>
+    public string ResolveAppLink() => $"{ResolveBaseUrl()}/app";
 }
 
 /// <summary>模板里 {{app_link}} / {{download_buttons}} 用到的三个地址。</summary>
@@ -70,7 +76,7 @@ internal sealed class StaffNotificationLinkProvider : IStaffNotificationLinkProv
     public async Task<StaffNotificationLinks> GetAsync(CancellationToken cancellationToken = default)
     {
         var baseUrl = _options.ResolveBaseUrl();
-        var appLink = $"{baseUrl}/app";
+        var appLink = _options.ResolveAppLink();
         var androidUrl = $"{baseUrl}{AndroidDownloadPath}";
         var iosUrl = appLink;
 

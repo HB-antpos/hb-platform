@@ -1,3 +1,4 @@
+using System;
 using System.Text.RegularExpressions;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.Myob;
@@ -51,6 +52,55 @@ public sealed class EnglishOnlyEmailTemplatesTests
             Assert.Contains("Init-Pass-9", body);
             Assert.Contains("choose your own password", body);
         }
+    }
+
+    private const string AppLink = "https://hotbargain.vip/app";
+
+    [Fact]
+    public void 新建员工的初始密码邮件_带App下载短链_纯文本与HTML都有_且仍只有英文()
+    {
+        var content = AccountPasswordEmailSender.BuildInitialPassword("Alex", "alex.login", "Init-Pass-9", isReset: false, appLink: AppLink);
+
+        AssertEnglishOnly(content);
+        Assert.Contains($"Get the latest HB app (iPhone and Android): {AppLink}\n", content.Text);
+        Assert.Contains($"<a href=\"{AppLink}\">{AppLink}</a>", content.Html);
+        // 下载入口放在「登录说明」之后、「不要分享密码」之前，密码仍在正文里。
+        Assert.True(content.Text.IndexOf(AppLink, StringComparison.Ordinal) < content.Text.IndexOf("Do not share", StringComparison.Ordinal));
+        Assert.Contains("Init-Pass-9", content.Text);
+    }
+
+    [Fact]
+    public void 重置密码邮件_不带下载短链_员工已经装过App()
+    {
+        var content = AccountPasswordEmailSender.BuildInitialPassword("Alex", "alex.login", "Ab3x", isReset: true, appLink: AppLink);
+
+        Assert.DoesNotContain(AppLink, content.Text);
+        Assert.DoesNotContain(AppLink, content.Html);
+    }
+
+    [Theory]
+    [InlineData(true, true)]   // 邀请设置密码 = 账号刚创建，带下载短链
+    [InlineData(false, false)] // 自助找回密码，不带
+    public void 验证码邮件_只有邀请文案带下载短链(bool invite, bool expectLink)
+    {
+        var content = AccountPasswordEmailSender.BuildPasswordCode("Alex", "alex.login", "123456", "30 minutes", invite, AppLink);
+
+        AssertEnglishOnly(content);
+        Assert.Equal(expectLink, content.Text.Contains(AppLink, StringComparison.Ordinal));
+        Assert.Equal(expectLink, content.Html.Contains($"href=\"{AppLink}\"", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void 没有下载短链时_正文不出现空的下载行(string? appLink)
+    {
+        var content = AccountPasswordEmailSender.BuildInitialPassword("Alex", "alex.login", "Init-Pass-9", isReset: false, appLink: appLink);
+
+        Assert.DoesNotContain("Get the latest HB app", content.Text);
+        Assert.DoesNotContain("Get the latest HB app", content.Html);
+        Assert.DoesNotContain("href", content.Html);
     }
 
     [Fact]
