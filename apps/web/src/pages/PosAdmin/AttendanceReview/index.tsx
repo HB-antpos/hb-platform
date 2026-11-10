@@ -272,8 +272,8 @@ export default function AttendanceReviewPage({ embedded = false }: AttendanceRev
       )
       sub = item.adjustment.reason
     } else if (category === 'Overtime') {
+      // 后端 detail 是写死的中文「候选 N 分钟」，英文界面会漏出中文，且与主句重复，这里不再显示
       main = t('attendanceReview.summary.overtime', { minutes: item.candidateOvertimeMinutes ?? 0 })
-      sub = item.detail
     } else if (category === 'MealBreak' && item.mealClaim) {
       main = t('attendanceReview.summary.mealBreak', {
         expected: item.mealClaim.expectedCount,
