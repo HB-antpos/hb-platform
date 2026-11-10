@@ -220,6 +220,8 @@ export const settingsEnglishCopy = {
   "linkly.lineManagementHint": "Test, assign and re-pair each line independently",
   "linkly.pairCodeSteps": "On the terminal: FUNC → 8880 → OK / Enter",
   "payments.manageSubtitle": "Manage checkout payment methods, terminal connections and this iPad’s assignment",
+  "payments.catalogBusy":
+    "The catalog is refreshing. Payment settings, Zeller pairing and enabling are unavailable until it finishes.",
   "payments.enableProvider": "Enable {{provider}}",
   "payments.enabledProvider": "{{provider}} selected",
   "payments.manageProvider": "Manage {{provider}}",
@@ -742,6 +744,7 @@ export const settingsChineseCopy = {
   "linkly.lineManagementHint": "每条线路独立测试、绑定和重新配对",
   "linkly.pairCodeSteps": "刷卡机操作：功能键 → 8880 → 确认键",
   "payments.manageSubtitle": "管理收银支付方式、刷卡机连接与本机绑定",
+  "payments.catalogBusy": "商品目录正在更新，更新完成前不能修改支付设置，也不能配对或启用 Zeller，完成后会自动恢复。",
   "payments.enableProvider": "启用 {{provider}}",
   "payments.enabledProvider": "已选择 {{provider}}",
   "payments.manageProvider": "管理 {{provider}}",
