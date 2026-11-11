@@ -79,8 +79,9 @@ namespace BlazorApp.Api.Services
                     // 页内按各标签原权限显示（与 Web routes.tsx 的 *_NAV_GROUP 保持一致）。仅管理员的标签（RustDesk 远程维护、Linkly 结算）不列权限码。
                     // 设备与远程：设备管理 / 紧急登录密钥 / RustDesk 远程维护。
                     new() { Path = "/system/devices", TitleKey = "menu.groupDevicesRemote", Icon = "BuildOutlined", AnyPermissions = new List<string> { Permissions.DeviceRegistration.View, Permissions.System.ManageSettings } },
-                    // 账号与权限：员工个人信息 / 用户 / 角色 / 权限。Web 用户管理只认 Users.ViewWebConsole；Users.View 继续点亮移动端「员工列表」「用户管理」。
-                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.ViewManagedStore, Permissions.Users.ViewWebConsole, Permissions.Roles.View } },
+                    // 账号与权限：员工个人信息 / 用户 / 角色 / 权限 / 员工通知。Web 用户管理只认 Users.ViewWebConsole；Users.View 继续点亮移动端「员工列表」「用户管理」。
+                    // 「员工通知」页签（发邮件 / 短信，账号已开通会发放随机密码）认 Users.ResetPassword：只有这个权限的账号也要能看到合并页，才进得了该页签。
+                    new() { Path = "/system/accounts", TitleKey = "menu.groupAccounts", Icon = "TeamOutlined", AnyPermissions = new List<string> { Permissions.EmployeeProfiles.ViewManagedStore, Permissions.Users.ViewWebConsole, Permissions.Roles.View, Permissions.Users.ResetPassword } },
                     // 系统监控：中心日志 / 性能质量基线 / 定时统计任务。
                     new() { Path = "/system/monitoring", TitleKey = "menu.groupMonitoring", Icon = "FileTextOutlined", AnyPermissions = new List<string> { Permissions.System.ViewLogs, Permissions.System.ViewPerformanceBaseline, Permissions.System.ManageScheduledTasks } },
                     // 支付与发票：支付终端配置 / 发票邮箱配置。
@@ -332,6 +333,16 @@ namespace BlazorApp.Api.Services
                 // 移动端「自动价格策略」：与 Web /pos-admin/pricing-strategies 同一对权限码；入口只认 View，
                 // 新建 / 修改 / 删除 / 启停由接口按 PricingStrategy.Edit 再校验。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
                 Permission = Permissions.PricingStrategy.View,
+                Order = 50,
+            },
+            new()
+            {
+                RouteName = "special-product-categories",
+                TitleKey = "tabs.specialProductCategories",
+                Icon = "shape-outline",
+                // 移动端「特殊商品分类」：分店级分类的新建 / 改名 / 排序 / 同步只在手机里做，入口与接口写操作共用 Manage；
+                // 查看接口另认 View。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.PosTerminal.SpecialProducts.Manage,
                 Order = 50,
             },
             new()
