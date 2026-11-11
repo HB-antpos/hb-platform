@@ -1,14 +1,13 @@
 {
   "list": {
     "title": "敏感资料审核",
-    "subtitle": "审核你所管理分店员工提交的敏感资料变更。",
     "minorEmployment": "未成年用工合规",
     "loading": "正在加载敏感资料审核申请",
     "loadingMore": "正在加载更多审核申请",
     "loadMoreFailed": "重试加载更多申请",
     "pendingCount": "{{count}} 条待审核申请",
     "empty": "暂无待审核申请",
-    "emptyDescription": "员工提交的新申请会显示在这里。",
+    "emptyDescription": "审核你所管理分店员工提交的敏感资料变更；新申请会显示在这里。",
     "openRequest": "审核 {{name}} 的申请",
     "storeUnavailable": "分店信息不可用",
     "searchPlaceholder": "搜索员工姓名或用户名",
@@ -16,7 +15,14 @@
     "processedEmpty": "暂无已处理申请",
     "processedEmptyDescription": "批准、驳回、撤回或失效的申请会显示在这里。",
     "searchEmpty": "没有匹配的申请",
-    "searchEmptyDescription": "换个关键词再试试。"
+    "searchEmptyDescription": "换个关键词再试试。",
+    "minorEmploymentShort": "未成年合规",
+    "pendingSummary": "{{count}} 条待审核 · 等得最久的在前",
+    "processedSummary": "{{count}} 条已处理 · 最近处理的在前",
+    "moreStores": "等 {{count}} 家",
+    "moreStoresAccessibility": "查看全部 {{count}} 家分店",
+    "storeSheetTitle": "{{name}} 所在分店",
+    "storeSheetSubtitle": "共 {{count}} 家"
   },
   "detail": {
     "title": "审核敏感资料",
@@ -94,5 +100,27 @@
   "segments": {
     "pending": "待审核",
     "processed": "已处理"
+  },
+  "wait": {
+    "today": "今天",
+    "yesterday": "昨天",
+    "days_one": "已等 {{count}} 天",
+    "days_other": "已等 {{count}} 天",
+    "accessibility_one": "已等待 {{count}} 天",
+    "accessibility_other": "已等待 {{count}} 天"
+  },
+  "groups": {
+    "birthday": "生日",
+    "birthdayAffectsAge": "生日 · 影响年龄",
+    "bank": "银行账户",
+    "superannuation": "养老金",
+    "identity": "证件"
+  },
+  "handled": {
+    "Approved": "{{date}} 处理",
+    "Rejected": "{{date}} 处理",
+    "Withdrawn": "{{date}} 撤回",
+    "Superseded": "{{date}} 失效",
+    "Pending": "{{date}} 提交"
   }
 }

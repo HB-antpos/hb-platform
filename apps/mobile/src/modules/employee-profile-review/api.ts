@@ -88,6 +88,8 @@ function normalizeSummary(payload: unknown): EmployeeProfileReviewSummary | null
     requestId,
     userGuid,
     username: asString(read(data, "username", "Username")),
+    // 姓名只是识别用的非敏感字段；旧后端没有该字段时为 undefined，界面回退到用户名。
+    displayName: asOptionalString(read(data, "displayName", "DisplayName")),
     status,
     baseSensitiveRevision: asNonNegativeInteger(
       read(data, "baseSensitiveRevision", "BaseSensitiveRevision")
@@ -177,6 +179,7 @@ export function createEmployeeProfileReviewApi(client: ReviewHttpClient) {
           pageSize: query.pageSize ?? 20,
           status: query.status,
           search: query.search?.trim() || undefined,
+          sort: query.sort,
           userGuid: query.userGuid?.trim() || undefined,
         },
       });

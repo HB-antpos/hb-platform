@@ -28,6 +28,8 @@ export interface EmployeeProfileReviewSummary {
   requestId: number;
   userGuid: string;
   username: string;
+  /** 员工姓名（后端可选返回）；没有或与用户名相同时缺省，界面回退显示 username。旧后端不返回该字段。 */
+  displayName?: string;
   status: EmployeeProfileReviewStatus;
   baseSensitiveRevision: number;
   submittedAt: string;
@@ -72,6 +74,8 @@ export interface EmployeeProfileReviewQuery {
   pageSize?: number;
   status?: EmployeeProfileReviewStatusFilter;
   search?: string;
+  /** oldest = 提交最早的在前（待审核分段用）；缺省 = 后端默认的最新提交在前。 */
+  sort?: "oldest";
   /** 按员工精确过滤（员工详情页查询该员工是否有待审申请）；仍受后端审核范围约束。 */
   userGuid?: string;
 }
