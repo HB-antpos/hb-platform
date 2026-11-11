@@ -123,5 +123,27 @@
     "rest": "Not rostered",
     "cashOut": "Cash-out",
     "birthday": "Birthday"
+  },
+  "zeroHours": {
+    "periodWeek": "this week",
+    "periodFortnight": "this fortnight",
+    "hiddenTitle_one": "{{count}} person with 0 hours {{period}} — hidden",
+    "hiddenTitle_other": "{{count}} people with 0 hours {{period}} — hidden",
+    "add": "Add",
+    "addA11y": "Add staff with 0 hours to the list",
+    "sheetTitle": "Add to hours list",
+    "sheetHint": "These staff have 0 hours {{period}}. Ticked staff stay on the list (remembered on this device for this store).",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "selectAll": "Select all",
+    "clearAll": "Clear",
+    "scheduledNoPunch": "Rostered, not clocked in",
+    "noActivity": "No roster or punches",
+    "confirm_one": "Add {{count}}",
+    "confirm_other": "Add {{count}}",
+    "confirmNone": "Add",
+    "manualBadge": "Added",
+    "remove": "Remove",
+    "removeA11y": "Remove {{name}} from the hours list"
   }
 }

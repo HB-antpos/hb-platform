@@ -468,6 +468,47 @@
         "notApplicable": "Not applicable",
         "confirm": "Confirm {{hours}} h",
         "invalidHours": "Hours must be more than 0 and no more than 24"
+      },
+      "punchInfo": {
+        "reason": {
+          "Late": "Late {{minutes}} min",
+          "LateNoMinutes": "Late",
+          "EarlyLeave": "Left {{minutes}} min early",
+          "EarlyLeaveNoMinutes": "Left early",
+          "NoSchedule": "No roster",
+          "Duplicate": "Duplicate punch"
+        },
+        "line": "{{punch}} {{time}}",
+        "source": {
+          "PosQr": "Scanned till QR code",
+          "ManualAdjustment": "Entered by manager",
+          "SystemAutoClockOut": "System auto clock-out",
+          "other": "Punch"
+        },
+        "device": "Device {{code}}",
+        "location": "Location ±{{meters}}m",
+        "locationNoAccuracy": "Location attached",
+        "locationNone": "No location",
+        "noSchedule": "No roster that day",
+        "coveredBy": "Approving punch fix {{index}} cancels this automatically",
+        "employeeReason": "Reason from staff",
+        "groupPending_one": "{{count}} pending",
+        "groupPending_other": "{{count}} pending",
+        "groupProcessed_one": "{{count}} item",
+        "groupProcessed_other": "{{count}} items",
+        "detailTitle": "Punch review",
+        "thisPunch": "This punch",
+        "method": "Method",
+        "deviceLabel": "Device",
+        "locationLabel": "Location",
+        "timeLabel": "Time",
+        "impactTitle": "Effect on hours",
+        "impactPending": "While this is pending, the day shows as pending in Hours; hours are recalculated once it is handled.",
+        "impactProcessed": "Handled — Hours already reflect the result.",
+        "noDayRecords": "No roster that day, so only this punch is shown.",
+        "openDetailA11y": "View {{name}}'s punches that day",
+        "remarkOptional": "Review note (optional)",
+        "current": "This one"
       }
     }
   },

@@ -575,9 +575,28 @@ export interface AttendanceApproval {
   leave?: AttendanceApprovalLeaveDetail;
   /** sourceType 为 PublicHolidayPay 时的带薪公假确认信息。 */
   publicHolidayPay?: AttendanceApprovalPublicHolidayPay;
+  /** sourceType 为 Punch 时被审核的那次打卡（时间、异常原因与分钟数、打卡方式）；旧后端不返回。 */
+  punch?: AttendanceApprovalPunch;
 }
 
 /** 全职 / 兼职公假当天没排班、但过去 N 周同一星期几排班够多次时生成的确认。 */
+/** 打卡异常审核要展示的那次打卡。 */
+export interface AttendanceApprovalPunch {
+  punchGuid: string;
+  punchType: string;
+  /** 门店本地时间 YYYY-MM-DDTHH:mm:ss。 */
+  punchTimeLocal?: string;
+  /** 异常原因：Late / EarlyLeave / NoSchedule / Duplicate。 */
+  status: string;
+  lateMinutes?: number;
+  earlyLeaveMinutes?: number;
+  /** PosQr = 员工手机扫收银台考勤码。 */
+  source?: string;
+  posDeviceCode?: string;
+  hasLocation: boolean;
+  locationAccuracy?: number;
+}
+
 export interface AttendanceApprovalPublicHolidayPay {
   holidayDate: string;
   holidayName?: string;

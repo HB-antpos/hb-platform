@@ -6,9 +6,12 @@ import {
   type KnownAttendanceApprovalSourceType,
 } from "@/modules/attendance/attendance-approval";
 import {
+  findCoveringAdjustment,
+  groupApprovalsByPerson,
   groupApprovalsByWorkDate,
   isSelfApproval,
 } from "@/modules/attendance/approval-board";
+import { toAttendanceUtcMillis } from "@/modules/attendance/attendance-device-time";
 import { DEFAULT_ATTENDANCE_LEAVE_RULES } from "@/modules/attendance/leave-types";
 import type {
   AttendanceApproval,
@@ -19,6 +22,8 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { listSeparator } from "@/shared/i18n/punctuation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { ApprovalCard, type ApprovalDetailKind } from "./approvals/ApprovalCard";
+import { ApprovalPersonCard } from "./approvals/ApprovalPersonCard";
+import { PunchReviewDetail } from "./approvals/PunchReviewDetail";
 import { MissingClockOutDetail } from "./approvals/MissingClockOutDetail";
 import { OvertimeReviewDetail } from "./approvals/OvertimeReviewDetail";
 import { SickLeaveReviewDetail } from "./approvals/SickLeaveReviewDetail";
@@ -88,6 +93,8 @@ export function ManagerApprovalList({
   const [tab, setTab] = useState<BoardTab>("pending");
   const [filter, setFilter] = useState<ApprovalFilter>("all");
   const [detail, setDetail] = useState<{ kind: ApprovalDetailKind; approvalGuid: string }>();
+  // 打卡异常详情：待审与已处理都能打开（已处理只读）。
+  const [punchDetailGuid, setPunchDetailGuid] = useState<string>();
   // 相对时间每分钟刷新一次即可（「刚刚」→「1 分钟前」）。
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -113,10 +120,12 @@ export function ManagerApprovalList({
   const visible = activeFilter === "all" ? source : source.filter((item) => item.sourceType === activeFilter);
   const groups = useMemo(() => groupApprovalsByWorkDate(visible), [visible]);
   const detailApproval = detail ? approvals.find((item) => item.approvalGuid === detail.approvalGuid) : undefined;
+  const punchDetailApproval = punchDetailGuid ? source.find((item) => item.approvalGuid === punchDetailGuid && item.punch) : undefined;
 
   const switchTab = (next: BoardTab) => {
     setTab(next);
     setFilter("all");
+    setPunchDetailGuid(undefined);
     if (next === "processed") onShowProcessed?.();
   };
 
@@ -224,21 +233,44 @@ export function ManagerApprovalList({
               ].filter(Boolean).join(" · ")}
             </Text>
           </View>
-          {group.items.map((item) => (
-            <ApprovalCard
-              key={item.approvalGuid}
-              item={item}
-              submittedLabel={submittedLabel(item.submittedAt, now)}
-              isSelf={isSelfApproval(item, currentUserGuid)}
-              canReview={canReview}
-              canReviewSelf={canReviewSelf}
-              isBusy={isBusy}
-              processed={tab === "processed"}
-              onOpenDetail={(kind) => setDetail({ kind, approvalGuid: item.approvalGuid })}
-              onApprove={onApprove}
-              onReject={onReject}
-            />
-          ))}
+          {groupApprovalsByPerson(group.items).map((person) => {
+            const renderCard = (item: AttendanceApproval, grouped?: { index: number }) => {
+              const covering = grouped ? findCoveringAdjustment(person.items, item) : undefined;
+              return (
+                <ApprovalCard
+                  key={item.approvalGuid}
+                  item={item}
+                  submittedLabel={submittedLabel(item.submittedAt, now)}
+                  isSelf={isSelfApproval(item, currentUserGuid)}
+                  canReview={canReview}
+                  canReviewSelf={canReviewSelf}
+                  isBusy={isBusy}
+                  processed={tab === "processed"}
+                  grouped={grouped}
+                  coveredByIndex={covering ? person.items.indexOf(covering) + 1 : undefined}
+                  onOpenDetail={(kind) => setDetail({ kind, approvalGuid: item.approvalGuid })}
+                  onOpenPunchDetail={() => setPunchDetailGuid(item.approvalGuid)}
+                  onApprove={onApprove}
+                  onReject={onReject}
+                />
+              );
+            };
+            // 同一人同一天只有 1 条：照旧一张卡；2 条以上合并成一张，逐条编号。
+            if (person.items.length === 1) return renderCard(person.items[0]);
+            const latest = person.items.reduce((current, item) =>
+              (toAttendanceUtcMillis(item.submittedAt) ?? 0) > (toAttendanceUtcMillis(current.submittedAt) ?? 0) ? item : current);
+            return (
+              <ApprovalPersonCard
+                key={person.key}
+                items={person.items}
+                isSelf={isSelfApproval(person.items[0], currentUserGuid)}
+                processed={tab === "processed"}
+                submittedLabel={submittedLabel(latest.submittedAt, now)}
+              >
+                {person.items.map((item, index) => renderCard(item, { index: index + 1 }))}
+              </ApprovalPersonCard>
+            );
+          })}
         </View>
       ))}
 
@@ -273,6 +305,20 @@ export function ManagerApprovalList({
           onClose={() => setDetail(undefined)}
           onReject={onReject}
           onResolved={onMissingClockOutResolved}
+        />
+      ) : null}
+      {punchDetailApproval ? (
+        <PunchReviewDetail
+          approval={punchDetailApproval}
+          coveringAdjustment={findCoveringAdjustment(source, punchDetailApproval)}
+          storeCode={storeCode}
+          storeName={storeName}
+          canReview={canReview && (!isSelfApproval(punchDetailApproval, currentUserGuid) || canReviewSelf)}
+          processed={tab === "processed"}
+          isBusy={isBusy}
+          onClose={() => setPunchDetailGuid(undefined)}
+          onApprove={onApprove}
+          onReject={onReject}
         />
       ) : null}
       {detail && detailApproval && detail.kind === "sickLeave" ? (

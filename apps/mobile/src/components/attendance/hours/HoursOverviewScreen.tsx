@@ -18,6 +18,7 @@ import {
 } from "@/modules/attendance/payroll-hours";
 import { getPayrollHours, payrollHoursQueryKey } from "@/modules/attendance/payroll-hours-api";
 import type { PayrollHoursEmployee, PayrollHoursQuery, PayrollHoursReport } from "@/modules/attendance/payroll-hours-types";
+import { splitHoursEmployees } from "@/modules/attendance/payroll-hours-visibility";
 import { getPosEnabledStores } from "@/modules/shop/store-scope";
 import type { Store } from "@/modules/shop/types";
 import { useStores } from "@/modules/shop/use-stores";
@@ -26,6 +27,7 @@ import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
 import { HoursAlerts } from "./HoursAlerts";
 import { HoursEmployeeCard } from "./HoursEmployeeCard";
+import { HoursAddZeroEmployeesSheet, HoursHiddenEmployeesBar } from "./HoursZeroEmployees";
 import {
   Hatch,
   HOURS_COLORS,
@@ -41,6 +43,7 @@ import {
   WeeksSegment,
 } from "./hours-ui";
 import { firstParam, parseWeeksParam } from "./hours-params";
+import { usePinnedHoursEmployees } from "./use-pinned-hours-employees";
 import { useHoursGuard } from "./use-hours-guard";
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -144,6 +147,8 @@ export function HoursOverviewContent({
   const [mergeStores, setMergeStores] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [manualRefreshing, setManualRefreshing] = useState(false);
+  // 0 工时默认收起；店长手动加进来的人按门店记在本机。
+  const pinnedEmployees = usePinnedHoursEmployees(storeCode);
 
   const query: PayrollHoursQuery | null = storeCode ? { storeCode, periodStart, weeks, mergeStores } : null;
   const hours = useQuery({
@@ -236,6 +241,9 @@ export function HoursOverviewContent({
             onToggleMerge={setMergeStores}
             onOpenApprovals={onOpenApprovals}
             onOpenEmployee={openEmployee}
+            pinned={pinnedEmployees.pinned}
+            onPin={pinnedEmployees.add}
+            onUnpin={pinnedEmployees.remove}
             stale={hours.isError}
             onRetry={() => void hours.refetch()}
           />
@@ -324,6 +332,9 @@ function ReportBody({
   onToggleMerge,
   onOpenApprovals,
   onOpenEmployee,
+  pinned,
+  onPin,
+  onUnpin,
   stale,
   onRetry,
 }: {
@@ -333,10 +344,16 @@ function ReportBody({
   onToggleMerge: (next: boolean) => void;
   onOpenApprovals?: () => void;
   onOpenEmployee?: (employee: PayrollHoursEmployee) => void;
+  /** 本机记住的「手动添加」名单。 */
+  pinned: ReadonlySet<string>;
+  onPin: (userGuids: string[]) => void;
+  onUnpin: (userGuid: string) => void;
   stale: boolean;
   onRetry: () => void;
 }) {
   const unit = (value: number) => t("summary.hours", { value: formatHours(value) });
+  const [addVisible, setAddVisible] = useState(false);
+  const { visible, pinnedGuids, hidden } = useMemo(() => splitHoursEmployees(report.employees, pinned), [pinned, report.employees]);
   return (
     <View style={styles.body}>
       <SummaryTiles
@@ -361,11 +378,38 @@ function ReportBody({
           <Text style={styles.emptyText}>{t("messages.empty")}</Text>
         </HoursCard>
       ) : (
-        report.employees.map((employee) => (
-          <HoursEmployeeCard key={employee.userGuid} employee={employee} periodStart={report.periodStart} weeks={report.weeks} onPress={onOpenEmployee} />
+        visible.map((employee) => (
+          <HoursEmployeeCard
+            key={employee.userGuid}
+            employee={employee}
+            periodStart={report.periodStart}
+            weeks={report.weeks}
+            onPress={onOpenEmployee}
+            manual={
+              pinnedGuids.has(employee.userGuid)
+                ? {
+                    label: t("zeroHours.manualBadge"),
+                    removeLabel: t("zeroHours.remove"),
+                    removeA11y: t("zeroHours.removeA11y", { name: employee.name }),
+                    onRemove: () => onUnpin(employee.userGuid),
+                  }
+                : undefined
+            }
+          />
         ))
       )}
-      {report.employees.length > 0 ? <Legend t={t} /> : null}
+      {hidden.length > 0 ? <HoursHiddenEmployeesBar employees={hidden} weeks={report.weeks} onAdd={() => setAddVisible(true)} /> : null}
+      {visible.length > 0 ? <Legend t={t} /> : null}
+      <HoursAddZeroEmployeesSheet
+        visible={addVisible && hidden.length > 0}
+        employees={hidden}
+        weeks={report.weeks}
+        onDismiss={() => setAddVisible(false)}
+        onConfirm={(guids) => {
+          setAddVisible(false);
+          onPin(guids);
+        }}
+      />
     </View>
   );
 }

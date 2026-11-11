@@ -105,6 +105,43 @@ async function run() {
   assert.equal(board.workDayMinutesToLocal("2026-10-19", 1291), "2026-10-19T21:31");
   assert.equal(board.workDayMinutesToLocal("2026-10-19", 1445), "2026-10-20T00:05");
   assert.equal(board.clockToMinutes("21:30:00"), 1290);
+
+  // 同一工作日按人合并：组顺序沿用传入顺序；组内按事件时间，上班异常 → 对应补卡 → 下班异常。
+  {
+    const day = "2026-11-11";
+    const lateIn = approval({
+      approvalGuid: "late-in", sourceType: "Punch", sourceGuid: "p-in", applicantUserGuid: "PAIGE", workDate: day,
+      scheduleStartTime: "10:00", scheduleEndTime: "18:00",
+      punch: { punchGuid: "p-in", punchType: "ClockIn", punchTimeLocal: `${day}T10:26:14`, status: "Late", lateMinutes: 26, hasLocation: true },
+    });
+    const earlyOut = approval({
+      approvalGuid: "early-out", sourceType: "Punch", sourceGuid: "p-out", applicantUserGuid: "paige", workDate: day,
+      punch: { punchGuid: "p-out", punchType: "ClockOut", punchTimeLocal: `${day}T16:40:00`, status: "EarlyLeave", earlyLeaveMinutes: 80, hasLocation: false },
+    });
+    const fix = approval({
+      approvalGuid: "fix", sourceType: "PunchAdjustment", applicantUserGuid: "paige", workDate: day,
+      adjustment: {
+        adjustmentGuid: "adj", punchType: "ClockIn", originalPunchGuid: "P-IN",
+        originalPunchTimeLocal: `${day}T10:26:14`, requestedPunchTimeLocal: `${day}T10:00:00`, reason: "Forgot", status: "Pending",
+      } as AttendanceApproval["adjustment"],
+    });
+    const other = approval({ approvalGuid: "birgit", sourceType: "Punch", applicantUserGuid: "birgit", workDate: day });
+    const persons = board.groupApprovalsByPerson([earlyOut, other, fix, lateIn]);
+    assert.deepEqual(persons.map((group) => group.key), ["paige", "birgit"]);
+    assert.deepEqual(persons[0].items.map((item) => item.approvalGuid), ["late-in", "fix", "early-out"]);
+
+    // 补卡改的正是这次异常打卡（大小写不敏感）→ 批准补卡后这条异常会被后端自动取消。
+    assert.equal(board.findCoveringAdjustment(persons[0].items, lateIn)?.approvalGuid, "fix");
+    assert.equal(board.findCoveringAdjustment(persons[0].items, earlyOut), undefined);
+
+    // 时间条：排班窗口取组内任一条，刻度含异常打卡（红）与补卡申请时间（蓝），轴按整点对齐。
+    const strip = board.buildPunchDayStrip(persons[0].items);
+    assert.deepEqual(strip?.schedule, { start: 600, end: 1080 });
+    assert.deepEqual(strip?.markers.map((marker) => [marker.minutes, marker.tone]), [[626, "anomaly"], [600, "request"], [1000, "anomaly"]]);
+    assert.deepEqual(strip?.range, { start: 540, end: 1140 });
+    // 没有排班窗口（如无排班打卡）不画。
+    assert.equal(board.buildPunchDayStrip([earlyOut]), undefined);
+  }
 }
 
 void run();
