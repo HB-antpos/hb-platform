@@ -16,7 +16,7 @@ import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { fetchLegacyLogContext, fetchPosLogContext, reviewLegacyLog, reviewPosLog } from "./api";
 import { LegacyScreenMessage, useLegacyLogsGuard, usePosOperationLabel } from "./LegacyEmployeeLogsScreen";
-import { activeReview, clockOf, describeFlagEvidence, formatAmountImpact, productThumbnailUri, storeDisplayName } from "./logic";
+import { activeReview, clockOf, describeFlagEvidence, formatAmountImpact, LEGACY_LOG_SOURCE_ENABLED, productThumbnailUri, storeDisplayName } from "./logic";
 import { notifyLegacyLogReviewed } from "./review-events";
 import type { LegacyLogContext, LegacyLogItem, LogSource } from "./types";
 import { withCode } from "@/shared/i18n/punctuation";
@@ -34,6 +34,8 @@ export function LegacyEmployeeLogDetailScreen() {
   const source: LogSource = first(params.source) === "pos" ? "pos" : "legacy";
   const goBack = () => (router.canGoBack() ? router.back() : router.replace("/(shell)/legacy-employee-logs"));
   if (blocked) return <LegacyScreenMessage message={blocked} onBack={goBack} />;
+  // 老收银来源已关闭：旧深链（只带 id 或 source=legacy）不再打开老收银详情。
+  if (source === "legacy" && !LEGACY_LOG_SOURCE_ENABLED) return <LegacyScreenMessage message={t("messages.notAllowed")} onBack={goBack} />;
   if (!id) return <LegacyScreenMessage message={t("states.detailNotFound")} onBack={goBack} />;
   return <DetailContent key={`${source}:${id}`} id={id} source={source} onBack={goBack} />;
 }

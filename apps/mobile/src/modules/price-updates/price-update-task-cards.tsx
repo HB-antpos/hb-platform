@@ -14,6 +14,7 @@ import {
   resolveHqSyncChipKey,
   resolveInitiatorName,
   resolveInitiatorSourceLabel,
+  resolveTaskStoreLabel,
 } from "./presentation";
 import type { StorePriceUpdateTask } from "./types";
 
@@ -27,15 +28,21 @@ const TONE_COLORS: Record<Tone, { background: string; text: string }> = {
   neutral: { background: HB_COLORS.surfaceMuted, text: HB_COLORS.textSecondary },
 };
 
-function Tag({ label, tone }: { label: string; tone: Tone }) {
+function Tag({ label, tone, icon }: { label: string; tone: Tone; icon?: keyof typeof MaterialCommunityIcons.glyphMap }) {
   const colors = TONE_COLORS[tone];
   return (
-    <View style={[styles.tag, { backgroundColor: colors.background }]}>
+    <View style={[styles.tag, icon ? styles.tagWithIcon : null, { backgroundColor: colors.background }]}>
+      {icon ? <MaterialCommunityIcons name={icon} size={13} color={colors.text} /> : null}
       <Text variant="labelSmall" style={[styles.tagText, { color: colors.text }]} numberOfLines={1}>
         {label}
       </Text>
     </View>
   );
+}
+
+/** 任务所属分店：在多家分店之间来回切换时，一眼就能看出这条是哪家店的。 */
+function StoreTag({ task }: { task: StorePriceUpdateTask }) {
+  return <Tag label={resolveTaskStoreLabel(task)} tone="neutral" icon="storefront-outline" />;
 }
 
 /** 固定尺寸缩略图：无图或加载失败都显示同尺寸占位，保证行高稳定、列表不跳动。 */
@@ -187,7 +194,7 @@ export const PendingTaskCard = memo(function PendingTaskCard({
       mode="outlined"
       style={[styles.card, task.isOverdue ? styles.cardOverdue : null, selected ? styles.cardSelected : null]}
       onPress={selecting ? () => onToggleSelected(task) : undefined}
-      accessibilityLabel={title}
+      accessibilityLabel={`${title} · ${resolveTaskStoreLabel(task)}`}
     >
       <Card.Content style={selecting ? styles.cardContentCompact : styles.cardContent}>
         <View style={styles.topRow}>
@@ -227,6 +234,9 @@ export const PendingTaskCard = memo(function PendingTaskCard({
           </View>
         </View>
 
+        <View style={styles.tagRow}>
+          <StoreTag task={task} />
+        </View>
         <ComparisonStrip task={task} />
         <InitiatorRow task={task} now={now} />
 
@@ -363,6 +373,7 @@ export const CompletedTaskCard = memo(function CompletedTaskCard({
           </View>
         </View>
         <View style={styles.tagRow}>
+          <StoreTag task={task} />
           <Tag
             label={t(`completed.status.${statusKey}`)}
             tone={statusKey === "markedReplaced" || statusKey === "keptStorePrice" ? "neutral" : "success"}
@@ -422,6 +433,7 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "flex-start", gap: HB_SPACING.xs },
   title: { flex: 1, fontWeight: "700", color: HB_COLORS.textPrimary },
   tag: { paddingHorizontal: HB_SPACING.xs, paddingVertical: 2, borderRadius: HB_RADIUS.control, alignSelf: "flex-start" },
+  tagWithIcon: { flexDirection: "row", alignItems: "center", gap: 4 },
   tagText: { fontWeight: "600" },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
   secondary: { color: HB_COLORS.textSecondary },
