@@ -296,6 +296,40 @@ export interface SupplierPreorderMatrixQuery {
   /** 传了就以它为准（忽略 onlyOrdered） */
   filter?: SupplierPreorderMatrixFilter
   category?: string
+  /** 排序，不传 = seq（原表序号）；没有数据的商品一律排最后，同值按序号 */
+  sort?: SupplierPreorderMatrixSort
+  /** sort 为 storeCartonsDesc / storeCartonsAsc 时必填：按这家店的箱数排 */
+  sortStoreGuid?: string
+}
+
+/**
+ * seq 原表序号 / totalCartonsDesc 今年合计箱数 / lastYearSalesDesc 去年全店销量 / sellThroughDesc 去年售罄率 /
+ * ratioAsc 今年÷去年销量（订得最少的在前，找漏订）/ priceAsc、priceDesc 进价 / codeAsc 货号 /
+ * storeCartonsDesc、storeCartonsAsc 某家分店的箱数
+ */
+export type SupplierPreorderMatrixSort =
+  | 'seq'
+  | 'totalCartonsDesc'
+  | 'lastYearSalesDesc'
+  | 'sellThroughDesc'
+  | 'ratioAsc'
+  | 'priceAsc'
+  | 'priceDesc'
+  | 'codeAsc'
+  | 'storeCartonsDesc'
+  | 'storeCartonsAsc'
+
+/** 订货汇总「添加分店」下拉里的未开启分店 */
+export interface SupplierPreorderStoreCandidate {
+  storeGuid: string
+  storeCode: string
+  storeName: string
+  /** 能替这家店下单的人；空 = 没人能替它下单 */
+  orderers: string[]
+  /** 去年历史窗口内，本订单表商品在该店的销量合计（件） */
+  lastYearSalesQty: number
+  /** 去年在该店有记录的商品款数 */
+  lastYearItemCount: number
 }
 
 /** 总部改过某店某商品数量留下的标记；分店自己再改这一行后清除 */

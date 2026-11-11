@@ -371,6 +371,27 @@ public sealed class SupplierPreorderMatrixQueryDto
     /// </summary>
     public string? Filter { get; set; }
     public string? Category { get; set; }
+    /// <summary>
+    /// 排序：seq（默认，原表序号）/ totalCartonsDesc 今年合计箱数 / lastYearSalesDesc 去年全店销量 / sellThroughDesc 去年售罄率 /
+    /// ratioAsc 今年÷去年销量（订得最少的在前，找漏订）/ priceAsc / priceDesc 进价 / codeAsc 货号 /
+    /// storeCartonsDesc / storeCartonsAsc 某家分店的箱数（要同时传 SortStoreGuid）。没有数据的一律排最后，同值按序号。
+    /// </summary>
+    public string? Sort { get; set; }
+    public string? SortStoreGuid { get; set; }
+}
+
+/// <summary>订货汇总「添加分店」下拉里的未开启分店：去年这批商品在该店卖了多少、谁能替它下单，帮助判断要不要开启。</summary>
+public sealed class SupplierPreorderStoreCandidateDto
+{
+    public string StoreGuid { get; set; } = string.Empty;
+    public string StoreCode { get; set; } = string.Empty;
+    public string StoreName { get; set; } = string.Empty;
+    /// <summary>下单人员授权里能替这家店下单的人；空 = 没人能替它下单。</summary>
+    public List<string> Orderers { get; set; } = new();
+    /// <summary>去年历史窗口内，本订单表商品（含参考商品）在该店的销量合计（件）；没有历史快照时为 0。</summary>
+    public decimal LastYearSalesQty { get; set; }
+    /// <summary>去年在该店有记录的商品款数。</summary>
+    public int LastYearItemCount { get; set; }
 }
 
 /// <summary>总部（有管理权限的人）改过某店某商品数量留下的标记；分店自己再改这一行后标记清除。</summary>

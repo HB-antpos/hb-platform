@@ -20,6 +20,8 @@ for (const [name, value] of [
 assert.ok(backendModels.includes('public const string Order = "Order";'), '后端缺少 Scope = Order 常量')
 // 后端 WriteAuthLogAsync 里写的管理类动作名，前端也都要有文案
 const backendWrites = [...read('../../services/backend/BlazorApp.Api/Services/React/SupplierPreorders/SupplierPreorderService.Forms.cs').matchAll(/WriteAuthLogAsync\("FormStore", (?:[a-z]+ \? )?"(\w+)"/g)].map((match) => match[1])
+// 订货汇总里「开启并下单」写的 StoreEnabled（Scope = FormStore，管理类记录）必须有前端文案
+assert.ok((AUTH_LOG_ACTIONS as readonly string[]).includes('StoreEnabled'), '前端动作清单缺少 StoreEnabled（订货汇总开启分店）')
 for (const action of backendWrites) assert.ok((AUTH_LOG_ACTIONS as readonly string[]).includes(action), `管理类动作 ${action} 缺少前端文案`)
 
 // 2) 前端：详情页「操作记录」页签用带视图切换的面板；表格把 scope / keyword 传给接口；授权页不传 scope（仍是管理类记录）

@@ -115,6 +115,14 @@ public sealed class SupplierPreorderAdminController : ControllerBase
     public Task<IActionResult> UpdateFormStores(string formGuid, [FromBody] SupplierPreorderUpdateFormStoresDto request) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.UpdateFormStoresAsync(formGuid, request), "开启分店已保存");
 
+    [HttpGet("forms/{formGuid}/stores/candidates")]
+    public Task<IActionResult> GetStoreCandidates(string formGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.GetStoreCandidatesAsync(formGuid));
+
+    [HttpPost("forms/{formGuid}/stores/{storeGuid}/enable")]
+    public Task<IActionResult> EnableFormStore(string formGuid, string storeGuid) =>
+        SupplierPreorderResponses.ExecuteAsync(this, () => _service.EnableFormStoreAsync(formGuid, storeGuid), "分店已开启");
+
     [HttpPost("forms/{formGuid}/stores/copy-from-previous")]
     public Task<IActionResult> CopyStores(string formGuid) =>
         SupplierPreorderResponses.ExecuteAsync(this, () => _service.CopyStoresFromPreviousAsync(formGuid));

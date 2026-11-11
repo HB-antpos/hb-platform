@@ -20,12 +20,14 @@ export const HOLIDAY_TYPES: SupplierPreorderHolidayType[] = ['Christmas', 'Hallo
  * 操作记录里有文案的动作名（后端 WriteAuthLogAsync / SupplierPreorderLogActions 写入的动作名；新增动作要同步中英文案）。
  * LineChanged / LineAdjusted / OrderSubmitted 属于「订货数量」范围（Scope = Order），其余是管理类记录。
  * LineAdjusted = 总部在「订货汇总」里直接改了某分店某商品的箱数。
+ * StoreEnabled = 总部在「订货汇总」的分店下拉里「开启并下单」，只开启了一家分店（Scope = FormStore，管理类记录）。
  */
 export const AUTH_LOG_ACTIONS = [
   'StatusChanged',
   'FormDeleted',
   'StoresUpdated',
   'StoresCopied',
+  'StoreEnabled',
   'FormRevised',
   'Reminded',
   'OrdererAdded',

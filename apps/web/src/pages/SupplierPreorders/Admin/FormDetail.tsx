@@ -135,6 +135,12 @@ export default function SupplierPreorderFormDetailPage() {
     setLogsRefreshKey((value) => value + 1)
   }, [loadDetail])
 
+  // 在订货汇总里「开启并下单」：同样要刷新页头 / 矩阵 / 操作记录，另外「分店开启」页签（可能已打开过）也要重拉
+  const handleSummaryStoreEnabled = useCallback(() => {
+    handleStoresChanged()
+    setStoresRefreshKey((value) => value + 1)
+  }, [handleStoresChanged])
+
   // 订货汇总里改了数量：页头合计、操作记录要跟着刷新（保存队列清空后才调用，不会每改一格刷新一次）
   const handleSummaryEdited = useCallback(() => {
     loadDetail()
@@ -458,11 +464,13 @@ export default function SupplierPreorderFormDetailPage() {
             ),
             children: (
               <FormSummaryPanel
+                key={formGuid}
                 formGuid={formGuid}
                 refreshKey={matrixRefreshKey}
                 containerType={detail.containerType}
                 containerCapacityCbm={detail.containerCapacityCbm}
                 onEdited={handleSummaryEdited}
+                onStoresChanged={handleSummaryStoreEnabled}
               />
             ),
           },

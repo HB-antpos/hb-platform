@@ -488,4 +488,113 @@ public sealed class SupplierPreorderServiceSqliteTests : IDisposable
         var missing = await Assert.ThrowsAsync<SupplierPreorderException>(() => admin.GetAdminItemHistoryAsync(formGuid, "no-such-item"));
         Assert.Equal(404, missing.StatusCode);
     }
+
+    // ---------------- 订货汇总 v2：排序、候选分店、单店开启 ----------------
+
+    [Fact]
+    public async Task 矩阵排序_进价货号合计箱数分店箱数_没有数据排最后_同值按序号_按分店排序必须选已开启分店()
+    {
+        var admin = CreateService("admin-1", Permissions.SupplierPreorder.Manage);
+        var formGuid = await CreateOpenFormAsync(admin); // 开启 S1、S2；A=XD0001815 进价 1.10，B=XD0001817 进价 2
+        var itemA = (await _db.Queryable<SupplierPreorderFormItem>().FirstAsync(i => i.SupplierItemCode == "XD0001815")).ItemGuid;
+        var itemB = (await _db.Queryable<SupplierPreorderFormItem>().FirstAsync(i => i.SupplierItemCode == "XD0001817")).ItemGuid;
+        await admin.AdminSaveLineAsync(formGuid, "S1", itemA, new SupplierPreorderSaveLineDto { Cartons = 1 });
+        await admin.AdminSaveLineAsync(formGuid, "S1", itemB, new SupplierPreorderSaveLineDto { Cartons = 5 });
+        await admin.AdminSaveLineAsync(formGuid, "S2", itemB, new SupplierPreorderSaveLineDto { Cartons = 2 });
+
+        async Task<string[]> Order(string? sort, string? storeGuid = null) =>
+            (await admin.GetMatrixAsync(formGuid, new SupplierPreorderMatrixQueryDto { Filter = "all", Sort = sort, SortStoreGuid = storeGuid }))
+                .Rows.Items!.Select(r => r.SupplierItemCode).ToArray();
+
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order(null));                    // 默认：原表序号
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("seq"));
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("priceAsc"));
+        Assert.Equal(new[] { "XD0001817", "XD0001815" }, await Order("priceDesc"));
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("codeAsc"));
+        Assert.Equal(new[] { "XD0001817", "XD0001815" }, await Order("totalCartonsDesc"));      // B 合计 7 箱，A 1 箱
+        Assert.Equal(new[] { "XD0001817", "XD0001815" }, await Order("storeCartonsDesc", "S2")); // S2 只订了 B
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("storeCartonsAsc", "S2"));  // 没订的（A）在前
+        // 没有历史快照：去年销量 / 售罄率 / 今年÷去年都没有数据，全部排最后 → 退化为原表序号，不报错
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("lastYearSalesDesc"));
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("sellThroughDesc"));
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("ratioAsc"));
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("乱写的排序"));              // 未知排序值当作默认
+
+        // 按分店排序：没传分店是调用方错误；传了但那家店没开启（比如本机记住的分店后来被关掉）回退成默认序号，不报错
+        var missing = await Assert.ThrowsAsync<SupplierPreorderException>(() => Order("storeCartonsDesc"));
+        Assert.Equal("SORT_STORE_INVALID", missing.ErrorCode);
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("storeCartonsDesc", "S3"));
+        Assert.Equal(new[] { "XD0001815", "XD0001817" }, await Order("storeCartonsAsc", "已被删掉的分店"));
+
+        // 排序在分页之前：每页 1 款时第 1 页就是排序后的第一款
+        var page1 = await admin.GetMatrixAsync(formGuid, new SupplierPreorderMatrixQueryDto { Filter = "all", Sort = "totalCartonsDesc", PageSize = 50 });
+        Assert.Equal("XD0001817", page1.Rows.Items![0].SupplierItemCode);
+        // 矩阵行带原表序号，前端据此显示「序号」列：按合计箱数排时序号不再递增（B 的序号大于 A）
+        Assert.True(page1.Rows.Items![0].Seq > page1.Rows.Items![1].Seq);
+    }
+
+    [Fact]
+    public async Task 添加分店候选_只列未开启的活跃分店_带授权下单人_没有历史快照时销量为0()
+    {
+        var admin = CreateService("admin-1", Permissions.SupplierPreorder.Manage);
+        var formGuid = await CreateOpenFormAsync(admin); // 开启 S1、S2；S3 没开启
+        await admin.SaveOrdererAsync("user-1", new SupplierPreorderSaveOrdererDto { StoreGuids = new() { "S3" } });
+
+        var candidates = await admin.GetStoreCandidatesAsync(formGuid);
+        var s3 = Assert.Single(candidates);
+        Assert.Equal("S3", s3.StoreGuid);
+        Assert.Equal("Peninsula", s3.StoreName);
+        Assert.Equal(new[] { "王店长" }, s3.Orderers);
+        Assert.Equal(0m, s3.LastYearSalesQty);
+        Assert.Equal(0, s3.LastYearItemCount);
+
+        // 停用的分店不出现在候选里
+        await _db.Updateable<Store>().SetColumns(x => x.IsActive == false).Where(x => x.StoreGUID == "S3").ExecuteCommandAsync();
+        Assert.Empty(await admin.GetStoreCandidatesAsync(formGuid));
+    }
+
+    [Fact]
+    public async Task 单店开启_只开这一家_幂等_记录StoreEnabled_无效分店拒绝_开启后马上可代下单且订单为草稿()
+    {
+        var admin = CreateService("admin-1", Permissions.SupplierPreorder.Manage);
+        var formGuid = await CreateOpenFormAsync(admin); // 开启 S1、S2
+        var itemA = (await _db.Queryable<SupplierPreorderFormItem>().FirstAsync(i => i.SupplierItemCode == "XD0001815")).ItemGuid;
+
+        // 开启前不能给 S3 填数量
+        await Assert.ThrowsAsync<SupplierPreorderException>(() =>
+            admin.AdminSaveLineAsync(formGuid, "S3", itemA, new SupplierPreorderSaveLineDto { Cartons = 2 }));
+
+        var enabled = await admin.EnableFormStoreAsync(formGuid, "S3");
+        Assert.True(enabled.Enabled);
+        Assert.Equal("S3", enabled.StoreGuid);
+        Assert.Equal("None", enabled.OrderStatus);
+        // 其他分店不受影响：S1、S2 仍开启，没有被覆盖掉
+        var stores = await admin.GetFormStoresAsync(formGuid);
+        Assert.Equal(new[] { "S1", "S2", "S3" }, stores.Where(s => s.Enabled).Select(s => s.StoreGuid).OrderBy(x => x));
+        Assert.Contains("S3", (await admin.GetMatrixAsync(formGuid, new SupplierPreorderMatrixQueryDto { Filter = "all" })).Stores.Select(s => s.StoreGuid));
+
+        // 幂等：再开一次不报错、不重复记录
+        await admin.EnableFormStoreAsync(formGuid, "S3");
+        var logs = await admin.GetAuthLogsAsync(new SupplierPreorderAuthLogQueryDto { FormGuid = formGuid, PageSize = 50 });
+        var enabledLogs = logs.Items!.Where(l => l.Action == "StoreEnabled").ToList();
+        var log = Assert.Single(enabledLogs);
+        Assert.Contains("开启：Peninsula", log.Detail);
+        Assert.Equal("FormStore", log.Scope);
+
+        // 开启后马上可以代它下单：订单建为草稿，数量计入合计
+        var saved = await admin.AdminSaveLineAsync(formGuid, "S3", itemA, new SupplierPreorderSaveLineDto { Cartons = 2 });
+        Assert.Equal(2, saved.Totals.StoreCartons["S3"]);
+        var matrix = await admin.GetMatrixAsync(formGuid, new SupplierPreorderMatrixQueryDto { Filter = "ordered" });
+        Assert.Equal("Draft", matrix.StoreStatuses["S3"]);
+        Assert.Equal(2, Assert.Single(matrix.Rows.Items!).StoreCartons["S3"]);
+
+        // 无效分店：不存在 / 空 / 已停用都拒绝（STORE_INVALID）
+        var unknown = await Assert.ThrowsAsync<SupplierPreorderException>(() => admin.EnableFormStoreAsync(formGuid, "NOPE"));
+        Assert.Equal("STORE_INVALID", unknown.ErrorCode);
+        var empty = await Assert.ThrowsAsync<SupplierPreorderException>(() => admin.EnableFormStoreAsync(formGuid, " "));
+        Assert.Equal("STORE_INVALID", empty.ErrorCode);
+        await _db.Insertable(new Store { StoreGUID = "S4", StoreCode = "1004", StoreName = "Closed Store", IsActive = false }).ExecuteCommandAsync();
+        var inactive = await Assert.ThrowsAsync<SupplierPreorderException>(() => admin.EnableFormStoreAsync(formGuid, "S4"));
+        Assert.Equal("STORE_INVALID", inactive.ErrorCode);
+    }
 }

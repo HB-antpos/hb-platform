@@ -112,6 +112,66 @@ public sealed partial class SupplierPreorderService
         }
 
         items = FilterByKeyword(items, query.Keyword);
+
+        // 排序：没有数据的商品一律排最后，同值按原表序号（SortOrder）
+        var sortStoreGuid = query.SortStoreGuid?.Trim();
+        var sortKey = (query.Sort ?? string.Empty).Trim();
+        Dictionary<string, int>? sortStoreCartons = null;
+        if (sortKey is "storeCartonsDesc" or "storeCartonsAsc")
+        {
+            if (string.IsNullOrEmpty(sortStoreGuid))
+            {
+                throw new SupplierPreorderException("按分店排序需要选择一家分店", "SORT_STORE_INVALID");
+            }
+
+            // 前端会把「按某店排序」记在本机；那家店后来被关掉（或订单表换了）时回退成默认序号，不让整页加载失败
+            if (!snapshot.EnabledStoreGuids.Contains(sortStoreGuid))
+            {
+                sortKey = "seq";
+            }
+        }
+
+        if (sortKey is "storeCartonsDesc" or "storeCartonsAsc")
+        {
+            sortStoreCartons = counted
+                .Where(x => string.Equals(x.Order.StoreGuid, sortStoreGuid, StringComparison.OrdinalIgnoreCase))
+                .GroupBy(x => x.Item.ItemGuid)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Line.Cartons));
+        }
+
+        decimal? LastYearSalesOrNull(SupplierPreorderFormItem item) =>
+            sources[item.ItemGuid] is { } source && AllStores(history, source.ProductCode) is { HasAny: true } all ? all.SalesQty : null;
+        decimal? SellThroughOrNull(SupplierPreorderFormItem item) =>
+            sources[item.ItemGuid] is { } source && AllStores(history, source.ProductCode) is { HasAny: true } all
+                ? SupplierPreorderHistoryRules.SellThrough(all.SalesQty, all.PurchaseQty)
+                : null;
+        // 今年订得有多少相对去年卖的：订得越少越靠前，用来找漏订；去年没卖过的没有比值
+        decimal? RatioOrNull(SupplierPreorderFormItem item)
+        {
+            var sales = LastYearSalesOrNull(item);
+            return sales is > 0 ? (byItem.TryGetValue(item.ItemGuid, out var rows) ? rows.Sum(x => x.Line.Cartons) : 0) * item.CartonQty / sales : null;
+        }
+
+        static IEnumerable<SupplierPreorderFormItem> OrderNullsLast(IEnumerable<SupplierPreorderFormItem> source, Func<SupplierPreorderFormItem, decimal?> key, bool descending) =>
+            (descending
+                ? source.OrderBy(i => key(i) is null ? 1 : 0).ThenByDescending(i => key(i) ?? 0m)
+                : source.OrderBy(i => key(i) is null ? 1 : 0).ThenBy(i => key(i) ?? 0m))
+            .ThenBy(i => i.SortOrder);
+
+        items = sortKey switch
+        {
+            "totalCartonsDesc" => OrderNullsLast(items, i => byItem.TryGetValue(i.ItemGuid, out var r) ? r.Sum(x => x.Line.Cartons) : 0, true),
+            "lastYearSalesDesc" => OrderNullsLast(items, LastYearSalesOrNull, true),
+            "sellThroughDesc" => OrderNullsLast(items, SellThroughOrNull, true),
+            "ratioAsc" => OrderNullsLast(items, RatioOrNull, false),
+            "priceAsc" => OrderNullsLast(items, i => i.Price, false),
+            "priceDesc" => OrderNullsLast(items, i => i.Price, true),
+            "codeAsc" => items.OrderBy(i => i.SupplierItemCode, StringComparer.OrdinalIgnoreCase).ThenBy(i => i.SortOrder),
+            "storeCartonsDesc" => OrderNullsLast(items, i => sortStoreCartons!.GetValueOrDefault(i.ItemGuid), true),
+            "storeCartonsAsc" => OrderNullsLast(items, i => sortStoreCartons!.GetValueOrDefault(i.ItemGuid), false),
+            _ => items,
+        };
+
         var paged = Page(items.ToList(), query.Page, query.PageSize);
         var images = await LoadProductImagesAsync(paged.Items!);
         // 借用参考商品的行，展示参考商品的货号
@@ -207,6 +267,59 @@ public sealed partial class SupplierPreorderService
                 }).ToList(),
             },
         };
+    }
+
+    // ---------------- 添加分店：候选与单店开启 ----------------
+
+    /// <summary>
+    /// 「添加分店」下拉里的未开启分店：附上去年这批商品（含参考商品）在该店的销量与授权下单人，帮助判断值不值得开启。
+    /// 没有历史快照时销量为 0，不影响开启。
+    /// </summary>
+    public async Task<List<SupplierPreorderStoreCandidateDto>> GetStoreCandidatesAsync(string formGuid)
+    {
+        var form = await RequireFormAsync(formGuid);
+        var candidates = (await BuildFormStoreStatusesAsync(form)).Where(s => !s.Enabled).ToList();
+        if (candidates.Count == 0)
+        {
+            return new();
+        }
+
+        var snapshot = await LoadSnapshotAsync(form);
+        var history = await LoadHistoryStateAsync(form, candidates.Select(c => c.StoreCode.Trim()).Append(AllStoresKey).ToList());
+        var sources = snapshot.Items.Where(i => i.IsActive).Select(i => ResolveItemSource(i, history)).Where(x => x is not null).Select(x => x!.Value.ProductCode.Trim()).ToList();
+        return candidates.Select(c =>
+        {
+            var payloads = sources
+                .Select(code => history.Payloads.GetValueOrDefault((c.StoreCode.Trim(), code)))
+                .Where(p => p?.HasAny == true)
+                .ToList();
+            return new SupplierPreorderStoreCandidateDto
+            {
+                StoreGuid = c.StoreGuid,
+                StoreCode = c.StoreCode,
+                StoreName = c.StoreName,
+                Orderers = c.Orderers,
+                LastYearSalesQty = payloads.Sum(p => p!.SalesQty),
+                LastYearItemCount = payloads.Count,
+            };
+        })
+        .OrderByDescending(c => c.LastYearSalesQty)
+        .ThenBy(c => c.StoreCode)
+        .ToList();
+    }
+
+    /// <summary>只开启一家分店（不影响其他分店）：已开启则原样返回；记录动作 StoreEnabled。</summary>
+    public async Task<SupplierPreorderFormStoreStatusDto> EnableFormStoreAsync(string formGuid, string storeGuid)
+    {
+        var form = await RequireFormAsync(formGuid);
+        if (string.IsNullOrWhiteSpace(storeGuid))
+        {
+            throw new SupplierPreorderException("包含不存在或已停用的分店", "STORE_INVALID");
+        }
+
+        await ApplyFormStoresAsync(form, new[] { storeGuid.Trim() }, replace: false, logAction: "StoreEnabled");
+        return (await BuildFormStoreStatusesAsync(form)).FirstOrDefault(s => string.Equals(s.StoreGuid, storeGuid.Trim(), StringComparison.OrdinalIgnoreCase))
+               ?? throw new SupplierPreorderException("包含不存在或已停用的分店", "STORE_INVALID");
     }
 
     // ---------------- 总部直接改分店数量 ----------------

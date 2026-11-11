@@ -33,6 +33,8 @@ export interface SummaryCellProps {
   /** 直接敲数字进入编辑时的首个字符 */
   seed?: string
   busy: boolean
+  /** 所在列的状态：拖动中的列淡化（drag），刚开启的列浅蓝高亮（fresh） */
+  tone?: 'drag' | 'fresh'
   /** 键盘焦点所在格（roving tabindex：整张表只有一个 Tab 停靠点） */
   active: boolean
   onStart: (rowIndex: number, colIndex: number, seed?: string) => void
@@ -53,7 +55,7 @@ export const SummaryCell = memo(function SummaryCell(props: SummaryCellProps) {
   const unitLabel = t(`spAdmin.summary.unit.${unit}`)
   const ariaLabel = t('spAdmin.summary.cellAria', { store: store.storeName, item: row.supplierItemCode, value: formatMatrixValue(value, unit), unit: unitLabel })
 
-  const className = ['sp-admin-sum-td', 'sp-admin-sum-store-td', mark ? 'has-mark' : '', busy ? 'is-saving' : '', editing ? 'is-editing' : ''].filter(Boolean).join(' ')
+  const className = ['sp-admin-sum-td', 'sp-admin-sum-store-td', props.tone ? `is-tone-${props.tone}` : '', mark ? 'has-mark' : '', busy ? 'is-saving' : '', editing ? 'is-editing' : ''].filter(Boolean).join(' ')
 
   const body = editing ? (
     <CellEditor

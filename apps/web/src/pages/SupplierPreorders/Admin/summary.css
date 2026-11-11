@@ -59,13 +59,15 @@
 .sp-admin-sum-row:hover > td { background: #f7faff; }
 .sp-admin-sum-row.is-selected > td { background: #eaf3ff; }
 .sp-admin-sum-row.is-selected > td:first-child { box-shadow: inset 3px 0 0 #1677ff; }
-/* 固定列：左侧缩略图 + 商品；右侧三列合计。偏移量 = 前面固定列宽度之和（SummaryTable.tsx 里的列宽常量） */
+/* 固定列：左侧缩略图 + 序号 + 商品；右侧三列合计。偏移量 = 前面固定列宽度之和（SummaryTable.tsx 里的列宽常量） */
 .is-sticky-l1 { position: sticky; left: 0; z-index: 2; }
-.is-sticky-l2 { position: sticky; left: 50px; z-index: 2; }
+.is-sticky-lseq { position: sticky; left: 50px; z-index: 2; }
+.is-sticky-l2 { position: sticky; left: 94px; z-index: 2; }
 .is-sticky-r1 { position: sticky; right: 0; z-index: 2; }
 .is-sticky-r2 { position: sticky; right: 62px; z-index: 2; }
 .is-sticky-r3 { position: sticky; right: 158px; z-index: 2; }
 .sp-admin-sum-th.is-sticky-l1,
+.sp-admin-sum-th.is-sticky-lseq,
 .sp-admin-sum-th.is-sticky-l2,
 .sp-admin-sum-th.is-sticky-r1,
 .sp-admin-sum-th.is-sticky-r2,
@@ -202,6 +204,133 @@
 .sp-admin-sum-dfoot { display: flex; align-items: center; gap: 4px; padding: 10px 18px; color: #667085; font-size: 12px; }
 .sp-admin-sum-drawer .ant-drawer-footer { padding: 0; }
 
+/* ---------- v2：排序 / 分店列 / 拖拽 / 开启分店 ---------- */
+.sp-admin-sum-seq { padding: 0; color: #98a2b3; font-size: 12px; text-align: center; }
+.sp-admin-sum-th.is-sticky-lseq { padding: 4px 2px; text-align: center; }
+.sp-admin-sum-inner { position: relative; }
+
+/* 工具条：分店按钮 / 排序框 */
+.sp-admin-sum-storebtn { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border: 1px solid #d9dde5; border-radius: 6px; background: #fff; color: #344054; font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; transition: border-color 0.15s; }
+.sp-admin-sum-storebtn:hover,
+.sp-admin-sum-storebtn.is-open { border-color: #1677ff; }
+.sp-admin-sum-storebtn:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; }
+.sp-admin-sum-storebtn-sep { color: #d0d5dd; font-style: normal; }
+.sp-admin-sum-storebtn-add { color: #1677ff; }
+.sp-admin-sum-sort.ant-select { width: 212px; }
+.sp-admin-sum-sort-prefix { color: #667085; }
+.sp-admin-sum-sort-opt { display: flex; align-items: baseline; gap: 12px; }
+.sp-admin-sum-sort-desc { color: #667085; font-size: 12px; white-space: nowrap; }
+.sp-admin-sum-sort-foot { margin-top: 4px; padding: 8px 12px 4px; border-top: 1px solid #eef0f4; color: #667085; font-size: 12px; }
+
+/* 分店列头：⋮⋮ 把手（悬停 / 聚焦列头时出现）+ 点名字排序 */
+.sp-admin-sum-th.is-store { position: sticky; }
+.sp-admin-sum-store-top { display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+.sp-admin-sum-sortbtn { display: inline-flex; align-items: center; gap: 3px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.sp-admin-sum-sortbtn.is-store { max-width: 100%; }
+.sp-admin-sum-sortbtn:hover .sp-admin-sum-store-name { color: #1554c0; }
+.sp-admin-sum-sortbtn:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; border-radius: 3px; }
+.sp-admin-sum-sortbtn.is-seq { justify-content: center; width: 100%; height: 100%; color: #4b5563; font-size: 12px; font-weight: 500; }
+.sp-admin-sum-arrow { flex: none; color: #98a2b3; font-size: 9px; font-style: normal; line-height: 1; }
+.sp-admin-sum-arrow.is-on { color: #1677ff; }
+.sp-admin-sum-grip { flex: none; width: 11px; color: #b4bac5; font-size: 12px; letter-spacing: -2px; line-height: 1; text-align: center; cursor: grab; user-select: none; }
+.sp-admin-sum-grip:active { cursor: grabbing; }
+.sp-admin-sum-grip:hover { color: #1677ff; }
+.sp-admin-sum-th.is-store .sp-admin-sum-grip { position: absolute; top: 7px; left: 3px; opacity: 0; transition: opacity 0.12s; }
+.sp-admin-sum-th.is-store:hover .sp-admin-sum-grip,
+.sp-admin-sum-th.is-store:focus-within .sp-admin-sum-grip,
+.sp-admin-sum-th.is-tone-drag .sp-admin-sum-grip { color: #1677ff; opacity: 1; }
+.sp-admin-sum-grip.is-list { opacity: 1; }
+
+/* 列状态：被拖的列淡化；刚开启的列浅蓝高亮 + 顶部蓝线，几秒后淡出 */
+.sp-admin-sum-th.is-store,
+.sp-admin-sum-store-td,
+.sp-admin-sum-foot > td.is-store-total { transition: background-color 0.9s ease; }
+.sp-admin-sum-th.is-tone-drag { background: #eaf3ff; box-shadow: inset 0 0 0 1.5px #91caff; }
+.sp-admin-sum-td.is-tone-drag { background: #f4f9ff; box-shadow: inset 1px 0 0 #bcd9ff, inset -1px 0 0 #bcd9ff; }
+.sp-admin-sum-td.is-tone-drag .sp-admin-sum-cell { opacity: 0.45; }
+.sp-admin-sum-th.is-tone-fresh { background: #e6f4ff; }
+.sp-admin-sum-td.is-tone-fresh { background: #f5f9ff; }
+.sp-admin-sum-foot > td.is-tone-fresh { background: #eef6ff; }
+.sp-admin-sum-fresh-bar { position: absolute; top: 0; right: 0; left: 0; height: 3px; background: #1677ff; }
+.sp-admin-sum-fresh-tag { display: inline-flex; align-items: center; height: 16px; padding: 0 4px; border: 1px solid #91caff; border-radius: 4px; background: #e6f4ff; color: #0958d9; font-size: 10.5px; line-height: 14px; }
+
+/* 表头最右的「＋ 添加分店」虚线列 */
+.sp-admin-sum-addcol-th { padding: 4px 6px; border-left: 1px solid #f0f2f5; }
+.sp-admin-sum-addcol { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 40px; border: 1px dashed #91caff; border-radius: 6px; background: #f5faff; color: #1677ff; font: inherit; font-size: 12px; line-height: 1.25; cursor: pointer; }
+.sp-admin-sum-addcol small { color: #69b1ff; font-size: 10.5px; }
+.sp-admin-sum-addcol:hover { border-color: #1677ff; background: #e6f4ff; }
+.sp-admin-sum-addcol:focus-visible { outline: 2px solid #1677ff; outline-offset: 1px; }
+.sp-admin-sum-td.sp-admin-sum-addcol-td,
+.sp-admin-sum-row:hover > td.sp-admin-sum-addcol-td,
+.sp-admin-sum-row.is-selected > td.sp-admin-sum-addcol-td { padding: 0; background: repeating-linear-gradient(135deg, #f8f9fc 0 6px, #f1f4f9 6px 12px); }
+.sp-admin-sum-foot > td.sp-admin-sum-addcol-td { background: #f8f9fb; }
+
+/* 拖动：落点竖线贯穿整张表，提示条跟着鼠标 */
+.sp-admin-sum-dropline { position: absolute; top: 0; bottom: 0; z-index: 6; width: 3px; border-radius: 2px; background: #1677ff; box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.18); pointer-events: none; }
+.sp-admin-sum-droptip { position: fixed; z-index: 1100; padding: 5px 10px; border-radius: 6px; background: #1f2430; color: #fff; font-size: 12px; white-space: nowrap; box-shadow: 0 6px 16px rgba(16, 24, 40, 0.22); pointer-events: none; }
+.sp-admin-sum-ghost { position: absolute; top: -1000px; left: -1000px; display: flex; flex-direction: column; gap: 1px; min-width: 150px; padding: 7px 12px 8px; border: 1px solid #91caff; border-radius: 8px; background: #fff; box-shadow: 0 12px 28px rgba(16, 24, 40, 0.24); color: #1f2430; font-size: 13px; }
+.sp-admin-sum-ghost-title { font-weight: 600; }
+.sp-admin-sum-ghost-meta { color: #667085; font-size: 11px; }
+.sp-admin-sum-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; border: 0; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+/* 提示条：分店列说明 / 刚开启分店 */
+.sp-admin-sum-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 6px 14px; border-bottom: 1px solid #eef0f4; background: #fafbfc; color: #4b5563; font-size: 12px; }
+.sp-admin-sum-hint b { color: #1f2430; }
+.sp-admin-sum-hint .ant-btn-link { height: auto; padding: 0 2px; font-size: 12px; }
+.sp-admin-sum-hint-note { color: #667085; }
+.sp-admin-sum-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 7px 14px; border-bottom: 1px solid #bae0ff; background: #e6f4ff; color: #0958d9; font-size: 12px; }
+.sp-admin-sum-banner-x { margin-left: auto; padding: 2px 4px; border: 0; background: none; color: #69b1ff; font-size: 12px; cursor: pointer; }
+.sp-admin-sum-banner-x:hover { color: #1677ff; }
+.sp-admin-sum-banner-x:focus-visible { outline: 2px solid #1677ff; border-radius: 3px; }
+
+/* 分店下拉 */
+.sp-admin-sum-picker-pop .ant-popover-inner { padding: 6px; }
+.sp-admin-sum-picker { width: 460px; max-width: calc(100vw - 48px); max-height: min(70vh, 640px); overflow-y: auto; font-size: 13px; }
+.sp-admin-sum-picker-search.ant-input-affix-wrapper { margin: 2px 2px 4px; width: calc(100% - 4px); }
+.sp-admin-sum-pg { display: flex; align-items: center; gap: 6px; padding: 8px 10px 4px; color: #667085; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.sp-admin-sum-pg.is-sep { margin-top: 4px; border-top: 1px solid #eef0f4; }
+.sp-admin-sum-pg-cnt { color: #98a2b3; font-weight: 400; }
+.sp-admin-sum-pg .ant-btn-link { height: auto; padding: 0 2px; font-size: 12px; }
+.sp-admin-sum-pr { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; }
+.sp-admin-sum-pr:hover { background: #f5f9ff; }
+.sp-admin-sum-pr.is-dragging { opacity: 0.45; }
+.sp-admin-sum-pr.is-drop-before::before,
+.sp-admin-sum-pr.is-drop-after::after { content: ''; position: absolute; right: 6px; left: 6px; height: 2px; border-radius: 1px; background: #1677ff; }
+.sp-admin-sum-pr.is-drop-before::before { top: -1px; }
+.sp-admin-sum-pr.is-drop-after::after { bottom: -1px; }
+.sp-admin-sum-pr-name.ant-checkbox-wrapper { flex: 1; min-width: 0; font-weight: 500; }
+.sp-admin-sum-pr-name .ant-checkbox + span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-admin-sum-pr-text { display: flex; flex-direction: column; min-width: 0; }
+.sp-admin-sum-pr-text small { overflow: hidden; color: #667085; font-size: 11px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.sp-admin-sum-pr-text small.is-warn { color: #b45309; }
+.sp-admin-sum-pr-right { display: inline-flex; flex: none; align-items: center; gap: 6px; color: #667085; font-size: 12px; white-space: nowrap; }
+.sp-admin-sum-pr-btn.ant-btn { color: #1677ff; border-color: #91caff; }
+.sp-admin-sum-picker-note { padding: 6px 10px; color: #98a2b3; font-size: 12px; }
+.sp-admin-sum-picker-note.is-error { color: #b45309; }
+.sp-admin-sum-picker-foot { margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid #eef0f4; color: #667085; font-size: 12px; }
+
+/* 开启并下单确认框 */
+.sp-admin-sum-em-head { display: flex; align-items: flex-start; gap: 12px; }
+.sp-admin-sum-em-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.sp-admin-sum-em-head p { margin: 3px 0 0; color: #667085; font-size: 13px; font-weight: 400; }
+.sp-admin-sum-em-icon { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%; background: #e6f4ff; color: #1677ff; }
+.sp-admin-sum-em-body { padding-left: 40px; }
+.sp-admin-sum-em-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 4px 0 12px; }
+.sp-admin-sum-em-facts > div { padding: 8px 10px; border: 1px solid #eef0f4; border-radius: 8px; background: #fafbfc; }
+.sp-admin-sum-em-facts span { display: block; color: #667085; font-size: 12px; }
+.sp-admin-sum-em-facts b { font-size: 16px; font-weight: 600; }
+.sp-admin-sum-em-facts small { margin-left: 2px; color: #667085; font-size: 12px; font-weight: 400; }
+.sp-admin-sum-em-list { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.sp-admin-sum-em-list li { position: relative; padding-left: 18px; color: #344054; font-size: 13px; line-height: 1.5; }
+.sp-admin-sum-em-list li::before { content: '●'; position: absolute; top: 0; left: 0; color: #1677ff; font-size: 10px; }
+.sp-admin-sum-em-list li.is-warn::before { color: #d97706; }
+.sp-admin-sum-em-list li.is-alert { color: #b45309; }
+.sp-admin-sum-em-list li.is-alert::before { color: #d97706; }
+.sp-admin-sum-em-list b { color: #1f2430; }
+.sp-admin-sum-em-list li.is-alert b { color: #b45309; }
+.sp-admin-sum-em-foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid #f0f2f5; }
+.sp-admin-sum-em-foot .ant-checkbox-wrapper { font-size: 12px; }
+
 /* ---------- 响应式 ---------- */
 @media (max-width: 1100px) {
   /* 数字指标一排，分店进度与体积各占一整行 */
@@ -223,6 +352,12 @@
   .sp-admin-sum-caret { transition: none; }
   .sp-admin-sum-store-td.is-saving::after,
   .sp-admin-sum-qty-spin { animation: none; }
+  /* 减少动态效果：新开启列的高亮不做淡出过渡，到点直接消失；拖动把手不做渐显 */
+  .sp-admin-sum-th.is-store,
+  .sp-admin-sum-store-td,
+  .sp-admin-sum-foot > td.is-store-total,
+  .sp-admin-sum-th.is-store .sp-admin-sum-grip,
+  .sp-admin-sum-storebtn { transition: none; }
 }
 
 /* 页签上的「新」小标签 */

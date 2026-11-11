@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { SORT_OPTION_VALUES } from './summarySort.logic'
 import { AUTH_LOG_ACTIONS, HOLIDAY_TYPES, OPTIONAL_MAPPING_KEYS, REQUIRED_MAPPING_KEYS } from './supplierPreorderAdmin.logic'
 
 // 管理端与下单人员授权页的文案都在页面级消息文件里（随页面懒注册）。键名写错不会报错、界面会直接显示原始键名，
@@ -71,6 +72,8 @@ const templateKeys = [
     (value) => `spAdmin.revision.count.${value}`,
   ),
   ...AUTH_LOG_ACTIONS.map((value) => `spAdmin.logs.action.${value}`),
+  // 订货汇总排序下拉：每个选项的收起文字 / 下拉文字 / 说明
+  ...SORT_OPTION_VALUES.flatMap((value) => [`spAdmin.summary.sortShort.${value}`, `spAdmin.summary.sortLabel.${value}`, `spAdmin.summary.sortDesc.${value}`]),
 ]
 assert.deepEqual(
   templateKeys.filter((key) => !allKeys.has(key)),
