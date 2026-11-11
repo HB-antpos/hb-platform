@@ -1,14 +1,13 @@
 {
   "list": {
     "title": "Sensitive details review",
-    "subtitle": "Review pending changes for employees in stores you manage.",
     "minorEmployment": "Minor employment compliance",
     "loading": "Loading sensitive details review requests",
     "loadingMore": "Loading more review requests",
     "loadMoreFailed": "Retry loading more requests",
     "pendingCount": "{{count}} pending requests",
     "empty": "No pending requests",
-    "emptyDescription": "New employee submissions will appear here.",
+    "emptyDescription": "Review sensitive-detail changes from employees in stores you manage. New submissions appear here.",
     "openRequest": "Review request from {{name}}",
     "storeUnavailable": "Store unavailable",
     "searchPlaceholder": "Search employee name or username",
@@ -16,7 +15,14 @@
     "processedEmpty": "No processed requests",
     "processedEmptyDescription": "Approved, rejected, withdrawn or superseded requests appear here.",
     "searchEmpty": "No matching requests",
-    "searchEmptyDescription": "Try a different keyword."
+    "searchEmptyDescription": "Try a different keyword.",
+    "minorEmploymentShort": "Under-18",
+    "pendingSummary": "{{count}} pending · Oldest first",
+    "processedSummary": "{{count}} processed · Latest first",
+    "moreStores": "+{{hidden}} more",
+    "moreStoresAccessibility": "View all {{count}} stores",
+    "storeSheetTitle": "Stores for {{name}}",
+    "storeSheetSubtitle": "{{count}} stores"
   },
   "detail": {
     "title": "Review sensitive details",
@@ -94,5 +100,27 @@
   "segments": {
     "pending": "Pending",
     "processed": "Processed"
+  },
+  "wait": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "accessibility_one": "Waiting {{count}} day",
+    "accessibility_other": "Waiting {{count}} days"
+  },
+  "groups": {
+    "birthday": "Birthday",
+    "birthdayAffectsAge": "Birthday · affects age",
+    "bank": "Bank",
+    "superannuation": "Super",
+    "identity": "ID"
+  },
+  "handled": {
+    "Approved": "Processed {{date}}",
+    "Rejected": "Processed {{date}}",
+    "Withdrawn": "Withdrawn {{date}}",
+    "Superseded": "Superseded {{date}}",
+    "Pending": "Submitted {{date}}"
   }
 }

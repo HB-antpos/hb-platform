@@ -33,6 +33,7 @@ assert.deepEqual(list.items[0], {
   requestId: 42,
   userGuid: "user-42",
   username: "employee42",
+  displayName: undefined,
   status: "Pending",
   baseSensitiveRevision: 3,
   submittedAt: "2026-07-16T10:00:00Z",
@@ -115,7 +116,7 @@ assert.deepEqual(calls, [
   {
     method: "GET",
     path: "/EmployeeProfiles/review/change-requests",
-    params: { page: 2, pageSize: 10, status: "Pending", search: undefined, userGuid: undefined },
+    params: { page: 2, pageSize: 10, status: "Pending", search: undefined, sort: undefined, userGuid: undefined },
   },
   { method: "GET", path: "/EmployeeProfiles/review/change-requests/42", params: undefined },
   {
@@ -133,7 +134,7 @@ assert.deepEqual(calls, [
 // 「已处理」分段与员工详情页按 userGuid 过滤：参数原样传给后端，后端仍按审核范围裁决。
 calls.length = 0;
 await api.getRequests({ status: "Processed", search: " amy ", userGuid: " user-42 " });
-assert.deepEqual(calls[0]?.params, { page: 1, pageSize: 20, status: "Processed", search: "amy", userGuid: "user-42" });
+assert.deepEqual(calls[0]?.params, { page: 1, pageSize: 20, status: "Processed", search: "amy", sort: undefined, userGuid: "user-42" });
 
 // 员工撤回的申请必须保留在已处理列表中，不能因未知状态被丢弃。
 const withdrawnList = normalizeEmployeeProfileReviewList({
@@ -141,6 +142,23 @@ const withdrawnList = normalizeEmployeeProfileReviewList({
   total: 1,
 });
 assert.equal(withdrawnList.items[0]?.status, "Withdrawn");
+
+// 待审核分段传 sort=oldest；旧后端忽略它，新后端「等得最久的在前」。
+calls.length = 0;
+await api.getRequests({ status: "Pending", sort: "oldest" });
+assert.deepEqual(calls[0]?.params, { page: 1, pageSize: 20, status: "Pending", search: undefined, sort: "oldest", userGuid: undefined });
+
+// 员工姓名：后端新字段，PascalCase / camelCase 都认；空白当没有；旧后端没有该字段时为 undefined。
+const named = normalizeEmployeeProfileReviewList({
+  items: [
+    { requestId: 7, userGuid: "u7", username: "alice.w", displayName: " Alice Wong ", status: "Pending", submittedAt: "2026-10-01T00:00:00Z" },
+    { RequestId: 8, UserGuid: "u8", Username: "bob", DisplayName: "Bob Nguyen", Status: "Pending", SubmittedAt: "2026-10-01T00:00:00Z" },
+    { requestId: 9, userGuid: "u9", username: "carol", displayName: "   ", status: "Pending", submittedAt: "2026-10-01T00:00:00Z" },
+    { requestId: 10, userGuid: "u10", username: "dave", status: "Pending", submittedAt: "2026-10-01T00:00:00Z" },
+  ],
+  total: 4,
+});
+assert.deepEqual(named.items.map((item) => item.displayName), ["Alice Wong", "Bob Nguyen", undefined, undefined]);
 
 }
 

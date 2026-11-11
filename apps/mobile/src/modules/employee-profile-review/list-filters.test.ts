@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   EMPLOYEE_PROFILE_REVIEW_SEGMENTS,
   getEmployeeProfileReviewListQueryKey,
+  getEmployeeProfileReviewSort,
   getEmployeeProfileReviewStatusFilter,
   normalizeEmployeeProfileReviewSearch,
 } from "./list-filters";
@@ -24,3 +25,7 @@ assert.notDeepEqual(
 );
 
 console.log("list-filters tests passed");
+
+// 待审核等得最久的在前；已处理沿用后端默认顺序（不传 sort）。排序由分段决定，所以不进查询键。
+assert.equal(getEmployeeProfileReviewSort("pending"), "oldest");
+assert.equal(getEmployeeProfileReviewSort("processed"), undefined);

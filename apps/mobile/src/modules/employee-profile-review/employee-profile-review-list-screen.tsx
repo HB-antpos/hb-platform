@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, RefreshControl, StyleSheet, View } from "react-native";
 import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useFocusEffect, useRouter } from "expo-router";
-import { ActivityIndicator, Badge, Button, Card, Chip, Searchbar, SegmentedButtons, Text, useTheme } from "react-native-paper";
+import { ActivityIndicator, Button, Searchbar, Text, useTheme } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { BUSINESS_UI } from "@/components/ui/business-ui";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -10,39 +10,22 @@ import { getEmployeeProfileReviewAccess } from "./access";
 import { getEmployeeProfileReviewRequestsApi } from "./api";
 import {
   EMPLOYEE_PROFILE_REVIEW_SEARCH_DEBOUNCE_MS,
-  EMPLOYEE_PROFILE_REVIEW_SEGMENTS,
   getEmployeeProfileReviewListQueryKey,
+  getEmployeeProfileReviewSort,
   getEmployeeProfileReviewStatusFilter,
   normalizeEmployeeProfileReviewSearch,
   type EmployeeProfileReviewSegment,
 } from "./list-filters";
 import { clearEmployeeProfileReviewListCache } from "./review-cache";
 import { getReviewFailureKind } from "./review-logic";
+import { getReviewPersonLabel } from "./review-list-presentation";
+import { ReviewRequestCard, ReviewSegmentControl, ReviewStoreSheet } from "./review-list-parts";
 import { mergeUniqueEmployeeProfileReviewPages } from "./pagination";
-import type { EmployeeProfileReviewStatus, EmployeeProfileReviewSummary } from "./types";
+import type { EmployeeProfileReviewSummary } from "./types";
 import { useAppNavigationStore } from "@/modules/navigation/store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_SPACING } from "@/shared/theme/tokens";
 import { useAuthStore } from "@/store/auth-store";
-
-const STATUS_ICONS: Record<EmployeeProfileReviewStatus, string> = {
-  Pending: "clock-outline",
-  Approved: "check-circle-outline",
-  Rejected: "close-circle-outline",
-  Superseded: "minus-circle-outline",
-  Withdrawn: "undo-variant",
-};
-
-function formatDateTime(value: string, language: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat(language, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
 
 export function EmployeeProfileReviewListScreen() {
   const router = useRouter();
@@ -58,6 +41,8 @@ export function EmployeeProfileReviewListScreen() {
   const [segment, setSegment] = useState<EmployeeProfileReviewSegment>("pending");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  // 分店多（例如总部账号挂了几十家店）时卡片只写第一家，点「等 N 家」在弹层里看全部。
+  const [storeSheet, setStoreSheet] = useState<{ name: string; storeNames: string[] } | null>(null);
   const listQueryKey = useMemo(
     () => getEmployeeProfileReviewListQueryKey(segment, search),
     [search, segment]
@@ -90,6 +75,8 @@ export function EmployeeProfileReviewListScreen() {
       page: pageParam,
       pageSize: 50,
       status: getEmployeeProfileReviewStatusFilter(segment),
+      // 待审核「等得最久的在前」；已处理沿用后端默认顺序。旧后端忽略 sort，只是顺序仍是最新在前。
+      sort: getEmployeeProfileReviewSort(segment),
       search: search || undefined,
     }),
     getNextPageParam: (lastPage) =>
@@ -144,6 +131,10 @@ export function EmployeeProfileReviewListScreen() {
     });
   };
 
+  const openStores = (item: EmployeeProfileReviewSummary) => {
+    setStoreSheet({ name: getReviewPersonLabel(item).primary, storeNames: item.storeNames });
+  };
+
   if (listPrivacyHidden || listScopeInvalidated) {
     return <SafeAreaView style={styles.centered} edges={["top"]} />;
   }
@@ -183,6 +174,8 @@ export function EmployeeProfileReviewListScreen() {
   const items = mergeUniqueEmployeeProfileReviewPages(reviewQuery.data?.pages ?? []);
   const total = reviewQuery.data?.pages[0]?.total ?? 0;
   const isProcessed = segment === "processed";
+  // 搜索时 total 只是命中数，不能当作「待审核总数」展示在页签上。
+  const pendingCountForTab = !isProcessed && !search ? total : null;
   const emptyTitle = search ? t("list.searchEmpty") : t(isProcessed ? "list.processedEmpty" : "list.empty");
   const emptyDescription = search
     ? t("list.searchEmptyDescription")
@@ -191,31 +184,22 @@ export function EmployeeProfileReviewListScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={["top"]}>
       <View style={styles.header}>
         <View style={styles.titleRow}>
-          <Text variant="headlineSmall" selectable>{t("list.title")}</Text>
-          <Badge accessibilityLabel={t(isProcessed ? "list.processedCount" : "list.pendingCount", { count: total })}>
-            {total}
-          </Badge>
-          {reviewQuery.isPlaceholderData ? <ActivityIndicator size="small" /> : null}
+          <Text style={styles.title} numberOfLines={2} accessibilityRole="header" selectable>
+            {t("list.title")}
+          </Text>
+          {/* 未成年用工合规是另一条审核队列，降为页头右侧的小入口，不再占一整行。 */}
+          <Button
+            icon="shield-account-outline"
+            mode="outlined"
+            compact
+            style={styles.minorButton}
+            contentStyle={styles.minorButtonContent}
+            onPress={() => router.push("/(shell)/employee-minor-employment-review" as never)}
+          >
+            {t("list.minorEmploymentShort")}
+          </Button>
         </View>
-        <Button
-          icon="shield-account-outline"
-          mode="outlined"
-          compact
-          onPress={() => router.push("/(shell)/employee-minor-employment-review" as never)}
-        >
-          {t("list.minorEmployment")}
-        </Button>
-        <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }} selectable>
-          {t("list.subtitle")}
-        </Text>
-        <SegmentedButtons
-          value={segment}
-          onValueChange={(value) => setSegment(value as EmployeeProfileReviewSegment)}
-          buttons={EMPLOYEE_PROFILE_REVIEW_SEGMENTS.map((value) => ({
-            value,
-            label: t(`segments.${value}`),
-          }))}
-        />
+        <ReviewSegmentControl value={segment} onChange={setSegment} t={t} pendingCount={pendingCountForTab} />
         <Searchbar
           value={searchInput}
           onChangeText={setSearchInput}
@@ -223,7 +207,14 @@ export function EmployeeProfileReviewListScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           style={styles.searchbar}
+          inputStyle={styles.searchInput}
         />
+      </View>
+      <View style={styles.metaRow}>
+        <Text style={styles.metaText} accessibilityLiveRegion="polite">
+          {t(isProcessed ? "list.processedSummary" : "list.pendingSummary", { count: total })}
+        </Text>
+        {reviewQuery.isPlaceholderData ? <ActivityIndicator size="small" /> : null}
       </View>
       <FlatList
         data={items}
@@ -268,46 +259,16 @@ export function EmployeeProfileReviewListScreen() {
           />
         )}
         renderItem={({ item }) => (
-          <Card
-            mode="outlined"
-            style={styles.requestCard}
-            onPress={() => openDetail(item)}
-            accessibilityLabel={t("list.openRequest", { name: item.username || item.userGuid })}
-          >
-            <Card.Content style={styles.cardContent}>
-              <View style={styles.cardTitleRow}>
-                <View style={styles.employeeText}>
-                  <Text variant="titleMedium" selectable numberOfLines={1}>
-                    {item.username || item.userGuid}
-                  </Text>
-                  <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }} selectable>
-                    {item.storeNames.length ? item.storeNames.join(" · ") : t("list.storeUnavailable")}
-                  </Text>
-                </View>
-                <Chip compact icon={STATUS_ICONS[item.status]}>{t(`statuses.${item.status}`)}</Chip>
-              </View>
-              <View style={styles.chips}>
-                {item.changedFields.map((field) => (
-                  <Chip compact key={field}>{t(`fields.${field}`)}</Chip>
-                ))}
-              </View>
-              <View style={styles.footerRow}>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }} selectable>
-                  {formatDateTime(item.submittedAt, language)}
-                </Text>
-                <Button
-                  compact
-                  mode="text"
-                  contentStyle={styles.touchTarget}
-                  onPress={() => openDetail(item)}
-                >
-                  {t(item.status === "Pending" ? "actions.review" : "actions.view")}
-                </Button>
-              </View>
-            </Card.Content>
-          </Card>
+          <ReviewRequestCard
+            item={item}
+            language={language}
+            t={t}
+            onOpen={openDetail}
+            onOpenStores={openStores}
+          />
         )}
       />
+      <ReviewStoreSheet target={storeSheet} onDismiss={() => setStoreSheet(null)} t={t} />
     </SafeAreaView>
   );
 }
@@ -316,16 +277,16 @@ const styles = StyleSheet.create({
   container: BUSINESS_UI.screen,
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: HB_SPACING.lg },
   header: { ...BUSINESS_UI.header, backgroundColor: HB_COLORS.white, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: HB_COLORS.outlineMuted },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
-  searchbar: { backgroundColor: HB_COLORS.surfaceMuted, elevation: 0 },
-  list: { ...BUSINESS_UI.content, paddingBottom: HB_SPACING.xl },
+  titleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: HB_SPACING.xs, minHeight: 44 },
+  title: { ...BUSINESS_UI.title, flex: 1 },
+  minorButton: { borderRadius: 18 },
+  minorButtonContent: { minHeight: 36 },
+  searchbar: { backgroundColor: HB_COLORS.surfaceMuted, elevation: 0, height: 44, borderRadius: 10 },
+  searchInput: { minHeight: 0, alignSelf: "center" },
+  metaRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: HB_SPACING.md, paddingTop: HB_SPACING.sm - 2, paddingBottom: HB_SPACING.xxs },
+  metaText: { fontSize: 13, lineHeight: 18, color: HB_COLORS.textSecondary },
+  list: { paddingHorizontal: HB_SPACING.sm + 2, paddingTop: HB_SPACING.xxs, paddingBottom: HB_SPACING.xl, gap: HB_SPACING.xs },
   emptyList: { flexGrow: 1, justifyContent: "center", padding: HB_SPACING.md },
-  requestCard: BUSINESS_UI.section,
-  cardContent: { ...BUSINESS_UI.sectionContent, paddingVertical: HB_SPACING.sm },
-  cardTitleRow: { flexDirection: "row", alignItems: "flex-start", gap: HB_SPACING.sm },
-  employeeText: { flex: 1, gap: HB_SPACING.xxs },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
-  footerRow: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: HB_SPACING.xs },
   touchTarget: { minHeight: 48 },
   pageLoader: { paddingVertical: HB_SPACING.md },
 });
