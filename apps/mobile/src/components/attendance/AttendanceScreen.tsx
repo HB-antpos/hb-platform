@@ -14,6 +14,8 @@ import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   Button,
+  Card,
+  Icon,
   SegmentedButtons,
   Snackbar,
   Text,
@@ -29,7 +31,10 @@ import {
   ManagementTitleBar,
 } from "@/components/attendance/management/ManagementHeader";
 import { ManagerApprovalList } from "@/components/attendance/ManagerApprovalList";
-import { MonthDatePickerField } from "@/components/attendance/MonthDatePicker";
+import { HB_COLORS } from "@/shared/theme/tokens";
+import { PersonalNextShift } from "@/components/attendance/personal/PersonalNextShift";
+import { PersonalWeekStrip } from "@/components/attendance/personal/PersonalWeekStrip";
+import { nextShiftAfter } from "@/modules/attendance/attendance-punch-hero";
 import { PunchAdjustmentCard } from "@/components/attendance/PunchAdjustmentCard";
 import { ScheduleManagementCard } from "@/components/attendance/ScheduleManagementCard";
 import { TodayPunchCard } from "@/components/attendance/TodayPunchCard";
@@ -402,7 +407,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     queryKey: attendanceKeys.week(selectedStoreCode, employeeWeekStartDate),
     queryFn: () =>
       getMyAttendanceWeek(selectedStoreCode, employeeWeekStartDate),
-    enabled: Boolean(isAuthenticated && user && isAvailabilityWeekTab),
+    // 打卡页的本周日期条与「下一个班」也用这份数据。
+    enabled: Boolean(isAuthenticated && user && (isAvailabilityWeekTab || isPunchRecordsTab)),
   });
   const availabilityQuery = useQuery({
     queryKey: attendanceKeys.availability(
@@ -906,6 +912,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     // 员工列表只服务「登记请假」，它的错误在登记区域内提示，不挡住审核列表。
     (isLeaveManagementTab && approvalsQuery.error);
 
+  const nextShift = useMemo(() => nextShiftAfter(weekQuery.data, todayDate), [todayDate, weekQuery.data]);
   const pendingApprovals = useMemo(
     () => approvalsQuery.data?.items ?? [],
     [approvalsQuery.data],
@@ -1651,43 +1658,37 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 
         {isPersonalTab ? (
           <>
-            <SegmentedButtons
+            {/* 员工端页签：今天 / 我的排班 / 我的申请（下划线式，与考勤管理一致） */}
+            <ManagementTabBar<PersonalAttendanceTab>
               value={activePersonalTab}
-              onValueChange={(value) =>
-                setActivePersonalTab(value as PersonalAttendanceTab)
-              }
-              buttons={[
-                {
-                  value: "punchRecords",
-                  label: t("tabs.short.punchSelf"),
-                },
-                {
-                  value: "availabilityWeek",
-                  label: t("tabs.short.mySchedule"),
-                },
-                {
-                  value: "requests",
-                  label: t("tabs.short.myRequests"),
-                },
+              onChange={setActivePersonalTab}
+              tabs={[
+                { key: "punchRecords", label: t("tabs.personal.today") },
+                { key: "availabilityWeek", label: t("tabs.personal.mySchedule") },
+                { key: "requests", label: t("tabs.personal.myRequests") },
               ]}
-              style={styles.sectionTabs}
             />
             {isPunchRecordsTab ? (
               // 看过往日期后一键回到今天（今天才能打卡），与店长端打卡记录的「今天」快捷一致。
-              <View style={styles.punchDateRow}>
-                <MonthDatePickerField
-                  label={t("datePicker.selectDate")}
-                  value={selectedDate}
-                  onChange={setSelectedDate}
-                  style={styles.punchDateField}
+              // 本周日期条代替日期选择框：每天写自己的班，点哪天看哪天；看过往日期后一键回到今天（今天才能打卡）。
+              <View style={styles.personalWeek}>
+                <PersonalWeekStrip
+                  weekStartDate={employeeWeekStartDate}
+                  selectedDate={selectedDate}
+                  today={todayDate}
+                  week={weekQuery.data}
+                  onSelect={setSelectedDate}
+                  onPreviousWeek={() => setSelectedDate((current) => shiftDate(current, -7))}
+                  onNextWeek={() => setSelectedDate((current) => shiftDate(current, 7))}
                 />
                 {selectedDate !== todayDate ? (
                   <Button
-                    mode="outlined"
+                    mode="text"
                     icon="calendar-today"
                     compact
                     onPress={() => setSelectedDate(todayDate)}
                     accessibilityLabel={t("datePicker.backToToday")}
+                    style={styles.backToToday}
                   >
                     {t("datePicker.backToToday")}
                   </Button>
@@ -1719,7 +1720,10 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 onStartMealBreak={(storeCode) => mealBreakMutation.mutate({ action: "start", storeCode })}
                 onEndMealBreak={(storeCode) => mealBreakMutation.mutate({ action: "end", storeCode })}
                 />
+                <View style={styles.personalLinks}>
                 <PunchAdjustmentCard
+                  compact
+                  style={styles.personalLinkTile}
                   today={todayQuery.data}
                   selectedDate={selectedDate}
                   storeCode={selectedStoreCode}
@@ -1736,6 +1740,25 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                     await createPunchAdjustmentMutation.mutateAsync(payload);
                   }}
                 />
+                  {/* 请假：跳到「我的申请」页签里申请 */}
+                  <Card
+                    mode="outlined"
+                    style={[styles.personalLeaveTile, styles.personalLinkTile]}
+                    onPress={() => setActivePersonalTab("requests")}
+                    accessibilityRole="button"
+                  >
+                    <Card.Content style={styles.personalLeaveContent}>
+                      <Icon source="umbrella-outline" size={20} color={HB_COLORS.action} />
+                      <View style={styles.personalLeaveText}>
+                        <Text variant="titleSmall">{t("personal.leaveTile")}</Text>
+                        <Text variant="bodySmall" style={styles.muted} numberOfLines={1}>{t("personal.leaveTileHint")}</Text>
+                      </View>
+                    </Card.Content>
+                  </Card>
+                </View>
+                {nextShift && selectedDate === todayDate ? (
+                  <PersonalNextShift schedule={nextShift} weekdayIndex={(new Date(`${nextShift.workDate.slice(0, 10)}T00:00:00Z`).getUTCDay() + 6) % 7} />
+                ) : null}
               </>
             ) : null}
             {isAvailabilityWeekTab ? (
@@ -2154,14 +2177,19 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 export default AttendanceScreen;
 
 const styles = StyleSheet.create({
-  punchDateRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
+  personalWeek: { gap: 2 },
+  backToToday: { alignSelf: "flex-end" },
+  personalLinks: { flexDirection: "row", gap: 8 },
+  personalLinkTile: { flex: 1 },
+  personalLeaveTile: {
+    backgroundColor: "#FFFFFF",
+    borderColor: "#E4E7EC",
+    borderRadius: 12,
+    borderWidth: 0.5,
+    elevation: 0,
   },
-  punchDateField: {
-    flex: 1,
-  },
+  personalLeaveContent: { alignItems: "center", flexDirection: "row", gap: 12 },
+  personalLeaveText: { flex: 1 },
   registerLeaveButton: {
     alignSelf: "stretch",
   },
