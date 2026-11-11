@@ -1,4 +1,4 @@
-// 订货汇总顶部指标条：已下单款数 / 合计箱数 / 件数 / 金额 / 分店进度 / 体积与装柜进度。
+// 订货汇总顶部指标条：已下单款数 / 合计箱数 / 金额 / 开启分店（含显示列数） / 分店进度 / 体积与装柜进度。
 // 数字全部来自矩阵的 totals / counts / storeStatuses；保存期间由 applyPendingEdits 与保存结果即时刷新。
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -16,9 +16,11 @@ interface SummaryMetricsProps {
   matrix: SupplierPreorderMatrix
   containerType?: string | null
   containerCapacityCbm?: number | null
+  /** 表格当前显示的分店列数（只是视图，不影响下面任何合计） */
+  shownColumnCount: number
 }
 
-export default function SummaryMetrics({ matrix, containerType, containerCapacityCbm }: SummaryMetricsProps) {
+export default function SummaryMetrics({ matrix, containerType, containerCapacityCbm, shownColumnCount }: SummaryMetricsProps) {
   const { t } = useTranslation()
   const { totals, counts } = matrix
   const progress = useMemo(() => countStoreProgress(matrix.stores, matrix.storeStatuses), [matrix.stores, matrix.storeStatuses])
@@ -47,15 +49,15 @@ export default function SummaryMetrics({ matrix, containerType, containerCapacit
         </div>
       </div>
       <div className="sp-admin-sum-metric">
-        <div className="sp-admin-sum-metric-label">{t('spAdmin.summary.metricPieces')}</div>
-        <div className="sp-admin-sum-metric-value">
-          {formatInteger(totals.totalPieces)}
-          <small>{t('spAdmin.summary.pcs')}</small>
-        </div>
-      </div>
-      <div className="sp-admin-sum-metric">
         <div className="sp-admin-sum-metric-label">{t('spAdmin.summary.metricAmount')}</div>
         <div className="sp-admin-sum-metric-value">{formatMoney(totals.totalAmount)}</div>
+      </div>
+      <div className="sp-admin-sum-metric">
+        <div className="sp-admin-sum-metric-label">{t('spAdmin.summary.metricEnabledStores')}</div>
+        <div className="sp-admin-sum-metric-value">
+          {formatInteger(matrix.stores.length)}
+          <small>{t('spAdmin.summary.enabledStoresUnit', { shown: shownColumnCount })}</small>
+        </div>
       </div>
       <div className="sp-admin-sum-metric is-progress">
         <div className="sp-admin-sum-metric-label">{t('spAdmin.summary.metricStores', { count: matrix.stores.length })}</div>

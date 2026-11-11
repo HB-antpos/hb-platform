@@ -44,6 +44,8 @@ public interface ISupplierPreorderService
     Task<List<SupplierPreorderFormStoreStatusDto>> UpdateFormStoresAsync(string formGuid, SupplierPreorderUpdateFormStoresDto request);
     Task<SupplierPreorderCopyStoresResultDto> CopyStoresFromPreviousAsync(string formGuid);
     Task<SupplierPreorderMatrixDto> GetMatrixAsync(string formGuid, SupplierPreorderMatrixQueryDto query);
+    Task<List<SupplierPreorderStoreCandidateDto>> GetStoreCandidatesAsync(string formGuid);
+    Task<SupplierPreorderFormStoreStatusDto> EnableFormStoreAsync(string formGuid, string storeGuid);
     Task<SupplierPreorderAdminSaveLineResultDto> AdminSaveLineAsync(string formGuid, string storeGuid, string itemGuid, SupplierPreorderSaveLineDto request);
     Task<SupplierPreorderItemHistoryDetailDto> GetAdminItemHistoryAsync(string formGuid, string itemGuid);
     Task<SupplierPreorderExportFile> ExportAsync(string formGuid, string format);

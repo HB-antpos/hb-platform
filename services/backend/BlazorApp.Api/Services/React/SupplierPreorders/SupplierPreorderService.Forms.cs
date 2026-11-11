@@ -347,7 +347,7 @@ public sealed partial class SupplierPreorderService
     }
 
     /// <summary>replace=true 整体覆盖；false 只增加（复制去年授权时用，不会关掉已开启的分店）。</summary>
-    private async Task<(List<string> Added, List<string> Removed)> ApplyFormStoresAsync(SupplierPreorderForm form, IEnumerable<string> storeGuids, bool replace)
+    private async Task<(List<string> Added, List<string> Removed)> ApplyFormStoresAsync(SupplierPreorderForm form, IEnumerable<string> storeGuids, bool replace, string? logAction = null)
     {
         var activeStores = (await LoadActiveStoresAsync()).ToDictionary(s => s.StoreGUID, StringComparer.OrdinalIgnoreCase);
         var target = storeGuids.Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -396,7 +396,7 @@ public sealed partial class SupplierPreorderService
             added.Count > 0 ? "开启：" + string.Join("、", added) : null,
             removed.Count > 0 ? "关闭：" + string.Join("、", removed) : null,
         }.Where(x => x is not null));
-        await WriteAuthLogAsync("FormStore", replace ? "StoresUpdated" : "StoresCopied", detail, form.FormGuid);
+        await WriteAuthLogAsync("FormStore", logAction ?? (replace ? "StoresUpdated" : "StoresCopied"), detail, form.FormGuid);
         return (added, removed);
     }
 

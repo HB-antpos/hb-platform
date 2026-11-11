@@ -22,6 +22,7 @@ import type {
   SupplierPreorderSetRefPayload,
   SupplierPreorderMatrix,
   SupplierPreorderMatrixQuery,
+  SupplierPreorderStoreCandidate,
   SupplierPreorderOrderersOverview,
   SupplierPreorderOrderer,
   SupplierPreorderOrderingContext,
@@ -138,6 +139,16 @@ export async function getSupplierPreorderMatrix(
   signal?: AbortSignal,
 ): Promise<SupplierPreorderMatrix> {
   return unwrapApiData(await request.get(`${ADMIN_BASE}/forms/${formGuid}/matrix`, { params: { ...query }, signal }))
+}
+
+/** 订货汇总「添加分店」下拉：这张订单表还没开启的活跃分店（含去年销量与授权下单人，帮助判断要不要开启） */
+export async function getSupplierPreorderStoreCandidates(formGuid: string, signal?: AbortSignal): Promise<SupplierPreorderStoreCandidate[]> {
+  return unwrapApiData(await request.get(`${ADMIN_BASE}/forms/${formGuid}/stores/candidates`, { signal }))
+}
+
+/** 只开启这一家分店（幂等，不影响其他分店）；分店不存在 / 已停用时后端返回 STORE_INVALID */
+export async function enableSupplierPreorderFormStore(formGuid: string, storeGuid: string): Promise<SupplierPreorderFormStoreStatus> {
+  return unwrapApiData(await request.post(`${ADMIN_BASE}/forms/${formGuid}/stores/${storeGuid}/enable`))
 }
 
 /**
