@@ -466,6 +466,32 @@ namespace BlazorApp.Shared.DTOs
         public AttendanceApprovalLeaveDto? Leave { get; set; }
         /// <summary>SourceType = PublicHolidayPay 时的带薪公假确认信息。</summary>
         public AttendanceApprovalPublicHolidayPayDto? PublicHolidayPay { get; set; }
+        /// <summary>SourceType = Punch 时被审核的那次打卡：时间、异常原因与分钟数、打卡方式、设备与定位精度。</summary>
+        public AttendanceApprovalPunchDto? Punch { get; set; }
+        /// <summary>当天排班窗口（门店本地 HH:mm）：打卡异常 / 补卡 / 加班 / 漏下班能关联到排班时填。</summary>
+        public string? ScheduleStartTime { get; set; }
+        public string? ScheduleEndTime { get; set; }
+    }
+
+    /// <summary>打卡异常审核卡片要展示的打卡信息（只读，不含经纬度等原始定位）。</summary>
+    public class AttendanceApprovalPunchDto
+    {
+        public string PunchGuid { get; set; } = string.Empty;
+        public string PunchType { get; set; } = string.Empty;
+        public DateTime PunchTimeLocal { get; set; }
+        /// <summary>异常原因：Late / EarlyLeave / NoSchedule / Duplicate（与 RequiresApproval 一致）。</summary>
+        public string Status { get; set; } = string.Empty;
+        /// <summary>Late：比排班开始晚几分钟。</summary>
+        public int? LateMinutes { get; set; }
+        /// <summary>EarlyLeave：比排班结束早几分钟。</summary>
+        public int? EarlyLeaveMinutes { get; set; }
+        /// <summary>打卡方式：PosQr（员工手机扫收银台考勤码）/ ManualAdjustment / SystemAutoClockOut 等。</summary>
+        public string Source { get; set; } = string.Empty;
+        /// <summary>扫的是哪台收银设备的考勤码。</summary>
+        public string? PosDeviceCode { get; set; }
+        /// <summary>打卡时手机是否带了定位，以及定位精度（米）。</summary>
+        public bool HasLocation { get; set; }
+        public double? LocationAccuracy { get; set; }
     }
 
     public class AttendanceApprovalLeaveDto

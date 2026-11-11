@@ -123,5 +123,27 @@
     "rest": "没排班",
     "cashOut": "年假发放",
     "birthday": "生日"
+  },
+  "zeroHours": {
+    "periodWeek": "本周",
+    "periodFortnight": "这两周",
+    "hiddenTitle_one": "{{count}} 人{{period}} 0 工时，已收起",
+    "hiddenTitle_other": "{{count}} 人{{period}} 0 工时，已收起",
+    "add": "添加",
+    "addA11y": "把 0 工时的员工加到列表",
+    "sheetTitle": "添加到工时列表",
+    "sheetHint": "以下员工{{period}} 0 工时。勾选后会固定显示在列表里（本机、本门店记住）。",
+    "selected_one": "已选 {{count}} 人",
+    "selected_other": "已选 {{count}} 人",
+    "selectAll": "全选",
+    "clearAll": "全不选",
+    "scheduledNoPunch": "有排班，还没打卡",
+    "noActivity": "没有排班和打卡",
+    "confirm_one": "添加 {{count}} 人",
+    "confirm_other": "添加 {{count}} 人",
+    "confirmNone": "添加",
+    "manualBadge": "手动添加",
+    "remove": "移除",
+    "removeA11y": "把 {{name}} 移出工时列表"
   }
 }

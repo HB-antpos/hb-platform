@@ -1735,6 +1735,115 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetApprovalsAsync_打卡异常带打卡时间原因分钟方式与排班窗口()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("punch-display", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active",
+                new TimeSpan(10, 0, 0), new TimeSpan(18, 0, 0));
+            var late = CreateStoredPunchForSchedule("punch-display-late", "punch-display", "BRI", "staff-user", "ClockIn",
+                new DateTime(2026, 5, 18, 10, 26, 14));
+            late.Status = "Late";
+            late.Source = "PosQr";
+            late.PosDeviceCode = "POS-02";
+            late.LocationLatitude = -27.47;
+            late.LocationLongitude = 153.02;
+            late.LocationAccuracyMeters = 12;
+            var early = CreateStoredPunchForSchedule("punch-display-early", "punch-display", "BRI", "staff-user", "ClockOut",
+                new DateTime(2026, 5, 18, 16, 40, 0));
+            early.Status = "EarlyLeave";
+            early.Source = "PosQr";
+            // 无排班打卡：没有排班窗口，也不算分钟。
+            var noSchedule = CreateStoredPunchForSchedule("punch-display-none", "missing-schedule", "BRI", "staff-user", "ClockIn",
+                new DateTime(2026, 5, 19, 13, 5, 0));
+            noSchedule.ScheduleGuid = null;
+            noSchedule.Status = "NoSchedule";
+            await _db.Insertable(new[] { late, early, noSchedule }).ExecuteCommandAsync();
+            await _db.Insertable(new AttendancePunchAdjustment
+            {
+                AdjustmentGuid = "punch-display-adjustment",
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                ScheduleGuid = "punch-display",
+                OriginalPunchGuid = "punch-display-late",
+                PunchType = "ClockIn",
+                RequestedPunchTimeLocal = new DateTime(2026, 5, 18, 10, 0, 0),
+                RequestedPunchTimeUtc = new DateTime(2026, 5, 18, 0, 0, 0, DateTimeKind.Utc),
+                Reason = "Forgot to clock in/out",
+                Status = "Pending",
+                RequestedByUserGuid = "staff-user",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            AttendanceApproval Pending(string guid, string sourceType, string sourceGuid) => new()
+            {
+                ApprovalGuid = guid,
+                SourceType = sourceType,
+                SourceGuid = sourceGuid,
+                StoreCode = "BRI",
+                ApplicantUserGuid = "staff-user",
+                ReviewStatus = "Pending",
+                CreatedAt = DateTime.UtcNow,
+            };
+            await _db.Insertable(new[]
+            {
+                Pending("a-late", "Punch", "punch-display-late"),
+                Pending("a-early", "Punch", "punch-display-early"),
+                Pending("a-none", "Punch", "punch-display-none"),
+                Pending("a-adjust", "PunchAdjustment", "punch-display-adjustment"),
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetApprovalsAsync(new AttendanceApprovalQueryDto { StoreCode = "BRI", ReviewStatus = "Pending" });
+
+            Assert.True(result.Success, result.Message);
+            var lateDto = Assert.Single(result.Data!, item => item.ApprovalGuid == "a-late");
+            Assert.NotNull(lateDto.Punch);
+            Assert.Equal("Late", lateDto.Punch!.Status);
+            Assert.Equal(26, lateDto.Punch.LateMinutes);
+            Assert.Null(lateDto.Punch.EarlyLeaveMinutes);
+            Assert.Equal(new DateTime(2026, 5, 18, 10, 26, 14), lateDto.Punch.PunchTimeLocal);
+            Assert.Equal("PosQr", lateDto.Punch.Source);
+            Assert.Equal("POS-02", lateDto.Punch.PosDeviceCode);
+            Assert.True(lateDto.Punch.HasLocation);
+            Assert.Equal(12, lateDto.Punch.LocationAccuracy);
+            Assert.Equal("10:00", lateDto.ScheduleStartTime);
+            Assert.Equal("18:00", lateDto.ScheduleEndTime);
+
+            var earlyDto = Assert.Single(result.Data!, item => item.ApprovalGuid == "a-early");
+            Assert.Equal(80, earlyDto.Punch!.EarlyLeaveMinutes);
+            Assert.False(earlyDto.Punch.HasLocation);
+
+            var noneDto = Assert.Single(result.Data!, item => item.ApprovalGuid == "a-none");
+            Assert.Equal("NoSchedule", noneDto.Punch!.Status);
+            Assert.Null(noneDto.Punch.LateMinutes);
+            Assert.Null(noneDto.ScheduleStartTime);
+
+            // 补卡也带排班窗口，移动端据此把补卡与同一天的打卡异常合并到一张卡。
+            var adjustDto = Assert.Single(result.Data!, item => item.ApprovalGuid == "a-adjust");
+            Assert.Equal("10:00", adjustDto.ScheduleStartTime);
+            Assert.Equal("punch-display-late", adjustDto.Adjustment!.OriginalPunchGuid);
+        }
+
+        [Fact]
+        public void ToApprovalPunchDto_跨午夜排班的早退分钟按次日结束计算()
+        {
+            var schedule = new AttendanceSchedule
+            {
+                ScheduleGuid = "overnight",
+                WorkDate = new DateTime(2026, 5, 18),
+                StartTime = new TimeSpan(22, 0, 0),
+                EndTime = new TimeSpan(6, 0, 0),
+            };
+            var punch = CreateStoredPunchForSchedule("overnight-out", "overnight", "BRI", "staff-user", "ClockOut",
+                new DateTime(2026, 5, 19, 5, 30, 0));
+            punch.Status = "EarlyLeave";
+
+            var dto = AttendanceReactService.ToApprovalPunchDto(punch, schedule);
+
+            Assert.Equal(30, dto.EarlyLeaveMinutes);
+            Assert.Null(dto.LateMinutes);
+        }
+
+        [Fact]
         public async Task PunchAsync_ActiveSchedule_AllowsTwoSegmentsAndTreatsMiddleOutAsBreak()
         {
             await SeedStoreScopeAsync();

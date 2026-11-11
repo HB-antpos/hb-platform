@@ -13,6 +13,7 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import type { AttendanceStatusTone } from "../AdjustmentFormControls";
 import { PersonAvatar, SELF_REVIEW_TONE, TypeTag } from "./approval-ui";
+import { punchClock, punchMetaLine, punchReason } from "./punch-labels";
 
 export type ApprovalDetailKind = "overtime" | "missingClockOut" | "sickLeave";
 
@@ -59,6 +60,9 @@ export function ApprovalCard({
   isBusy,
   processed,
   onOpenDetail,
+  onOpenPunchDetail,
+  grouped,
+  coveredByIndex,
   onApprove,
   onReject,
 }: {
@@ -71,6 +75,12 @@ export function ApprovalCard({
   /** 已处理页签：只读，显示结果与审核人。 */
   processed?: boolean;
   onOpenDetail: (kind: ApprovalDetailKind) => void;
+  /** 打卡异常：点卡片看当天打卡详情（仍保留卡片上的拒绝 / 批准）。 */
+  onOpenPunchDetail?: () => void;
+  /** 同一人同一天合并成一张卡时的第几条：不再画头像姓名，改成编号 + 类型。 */
+  grouped?: { index: number };
+  /** 同组里改的正是这次异常打卡的补卡编号：批准那条补卡后，这条会被后端自动取消。 */
+  coveredByIndex?: number;
   onApprove: (payload: AttendanceApprovalPayload) => Promise<void>;
   onReject: (payload: AttendanceApprovalPayload) => Promise<void>;
 }) {
@@ -118,7 +128,10 @@ export function ApprovalCard({
             <Text variant="bodyLarge" style={styles.strong}>{requested ?? "--:--"}</Text>
           </Text>
           {adjustment.reason ? (
-            <Text variant="bodyMedium" style={styles.bodySecondary}>{t("approvals.board.reasonLine", { reason: adjustment.reason })}</Text>
+            <View style={styles.quote}>
+              <Text variant="labelSmall" style={styles.quoteLabel}>{t("approvals.board.punchInfo.employeeReason")}</Text>
+              <Text variant="bodyMedium" style={styles.bodyLine}>{adjustment.reason}</Text>
+            </View>
           ) : null}
         </>
       );
@@ -221,6 +234,29 @@ export function ApprovalCard({
         </>
       );
     }
+    if (item.sourceType === "Punch" && item.punch) {
+      const punch = item.punch;
+      const reason = punchReason(punch, t);
+      return (
+        <>
+          <View style={styles.punchLine}>
+            <Text variant="bodyLarge" style={styles.strong}>
+              {t("approvals.board.punchInfo.line", {
+                punch: t(`punchTypes.${punch.punchType}`, punch.punchType),
+                time: punchClock(punch.punchTimeLocal) ?? "--:--",
+              })}
+            </Text>
+            <TypeTag label={reason.label} tone={reason.tone} />
+          </View>
+          <Text variant="bodySmall" style={styles.bodySecondary}>{punchMetaLine(punch, t)}</Text>
+          {coveredByIndex !== undefined && !processed ? (
+            <Text variant="bodySmall" style={styles.linkedText}>
+              {`↳ ${t("approvals.board.punchInfo.coveredBy", { index: coveredByIndex })}`}
+            </Text>
+          ) : null}
+        </>
+      );
+    }
     return (
       <Text variant="bodyLarge" style={styles.bodyLine}>
         {item.sourceType === "Punch" && item.title
@@ -274,7 +310,7 @@ export function ApprovalCard({
     if (processed) return null;
     if (isSelf && !canReviewSelf) {
       return (
-        <View style={styles.lockRow}>
+        <View style={[styles.lockRow, grouped ? styles.groupedIndent : null]}>
           <Icon source="lock-outline" size={16} color={HB_COLORS.textSecondary} />
           <Text variant="bodySmall" style={styles.bodySecondary}>{t("approvals.board.selfReview.locked")}</Text>
         </View>
@@ -284,13 +320,13 @@ export function ApprovalCard({
     if (detailKind) {
       const icon = detailKind === "missingClockOut" ? "clock-edit-outline" : detailKind === "sickLeave" ? "file-image-outline" : "chart-timeline-variant";
       return (
-        <Button mode="contained" icon={icon} disabled={isBusy} onPress={() => onOpenDetail(detailKind)}>
+        <Button mode="contained" icon={icon} disabled={isBusy} style={grouped ? styles.groupedIndent : undefined} onPress={() => onOpenDetail(detailKind)}>
           {t(`approvals.board.openDetail.${detailKind}`)}
         </Button>
       );
     }
     return (
-      <View style={styles.actionRow}>
+      <View style={[styles.actionRow, grouped ? styles.groupedIndent : null]}>
         <Button
           mode="outlined"
           textColor={HB_COLORS.danger}
@@ -322,13 +358,44 @@ export function ApprovalCard({
   const statusKey = item.status.toLowerCase() === "approved" ? "approved" : item.status.toLowerCase() === "rejected" ? "rejected" : "other";
   const reviewedLocal = toAttendanceDeviceLocalTime(item.reviewedAt);
 
+  const opensDetail = Boolean(detailKind) && !processed && !(isSelf && !canReviewSelf);
+  const opensPunch = !detailKind && item.sourceType === "Punch" && Boolean(item.punch) && Boolean(onOpenPunchDetail);
+  const submittedOrResult = processed ? (
+    <TypeTag
+      label={t(`approvals.board.result.${statusKey}`, item.status)}
+      tone={statusKey === "approved" ? "success" : statusKey === "rejected" ? "danger" : "neutral"}
+    />
+  ) : (
+    <Text variant="bodySmall" style={styles.submitted}>{submittedLabel}</Text>
+  );
+
   return (
     <Pressable
-      accessibilityRole={detailKind && !processed ? "button" : undefined}
-      disabled={!detailKind || processed || (isSelf && !canReviewSelf)}
-      onPress={() => detailKind && onOpenDetail(detailKind)}
-      style={[styles.card, isSelf && !processed ? styles.selfCard : null]}
+      accessibilityRole={opensDetail || opensPunch ? "button" : undefined}
+      accessibilityLabel={opensPunch ? t("approvals.board.punchInfo.openDetailA11y", { name: item.employeeName ?? "" }) : undefined}
+      disabled={!opensDetail && !opensPunch}
+      onPress={() => {
+        if (detailKind) onOpenDetail(detailKind);
+        else onOpenPunchDetail?.();
+      }}
+      style={grouped
+        ? styles.groupedItem
+        : [styles.card, isSelf && !processed ? styles.selfCard : null]}
     >
+      {grouped ? (
+        <View style={styles.groupedHeader}>
+          <View style={styles.indexBadge}>
+            <Text variant="labelSmall" style={styles.indexText}>{grouped.index}</Text>
+          </View>
+          <View style={styles.groupedTags}>
+            <TypeTag label={typeLabel} tone={typeTone} />
+            {selfReview && !processed ? <TypeTag label={t("approvals.board.selfReview.tag")} custom={SELF_REVIEW_TONE} /> : null}
+            {processed && item.isSelfReview ? <TypeTag label={t("approvals.board.selfReview.recorded")} custom={SELF_REVIEW_TONE} /> : null}
+          </View>
+          {/* 提交时间已写在合并卡头，这里只在已处理时显示结果。 */}
+          {processed ? submittedOrResult : null}
+        </View>
+      ) : (
       <View style={styles.header}>
         <PersonAvatar name={item.employeeName} />
         <View style={styles.headerBody}>
@@ -344,17 +411,11 @@ export function ApprovalCard({
             {[roleLabel, scheduleText].filter(Boolean).join(" · ")}
           </Text>
         </View>
-        {processed ? (
-          <TypeTag
-            label={t(`approvals.board.result.${statusKey}`, item.status)}
-            tone={statusKey === "approved" ? "success" : statusKey === "rejected" ? "danger" : "neutral"}
-          />
-        ) : (
-          <Text variant="bodySmall" style={styles.submitted}>{submittedLabel}</Text>
-        )}
+        {submittedOrResult}
       </View>
+      )}
 
-      <View style={styles.body}>{renderBody()}</View>
+      <View style={[styles.body, grouped ? styles.groupedBody : null]}>{renderBody()}</View>
 
       {processed ? (
         <Text variant="bodySmall" style={styles.bodySecondary}>
@@ -399,6 +460,35 @@ const styles = StyleSheet.create({
   dangerText: { color: HB_COLORS.danger },
   header: { alignItems: "flex-start", flexDirection: "row", gap: HB_SPACING.sm },
   hoursInput: { marginTop: HB_SPACING.xxs, width: 160 },
+  // 合并卡里的一条：外层卡片负责边框与头像，这里只留编号行、正文与按钮。
+  groupedItem: { gap: HB_SPACING.xs, paddingVertical: HB_SPACING.sm },
+  groupedHeader: { alignItems: "center", flexDirection: "row", gap: HB_SPACING.xs },
+  groupedTags: { flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  groupedBody: { paddingLeft: 28 },
+  groupedIndent: { marginLeft: 28, paddingLeft: 0 },
+  indexBadge: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderRadius: 10,
+    height: 20,
+    justifyContent: "center",
+    width: 20,
+  },
+  indexText: { color: HB_COLORS.textSecondary, fontWeight: "700" },
+  linkedText: { color: HB_COLORS.success, marginTop: 2 },
+  punchLine: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  quote: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderBottomRightRadius: 8,
+    borderLeftColor: HB_COLORS.brand,
+    borderLeftWidth: 3,
+    borderTopRightRadius: 8,
+    gap: 1,
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  quoteLabel: { color: HB_COLORS.textSecondary },
   headerBody: { flex: 1, gap: 2, minWidth: 0 },
   lockRow: { alignItems: "center", flexDirection: "row", gap: 6, paddingLeft: 52 },
   name: { color: HB_COLORS.textPrimary, flexShrink: 1, fontWeight: "600" },

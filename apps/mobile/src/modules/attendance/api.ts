@@ -8,6 +8,7 @@ import type {
   AttendanceApproval,
   AttendanceApprovalLeaveDetail,
   AttendanceApprovalPublicHolidayPay,
+  AttendanceApprovalPunch,
   AttendanceApprovalPayload,
   AttendanceApprovalReconcileSummary,
   AttendancePendingApprovalBoard,
@@ -477,6 +478,23 @@ function normalizeApproval(raw: ApiRecord): AttendanceApproval {
     isSelfReview: asBoolean(pick(raw, "isSelfReview", "IsSelfReview")),
     leave: normalizeApprovalLeave(pick(raw, "leave", "Leave")),
     publicHolidayPay,
+    punch: normalizeApprovalPunch(pick(raw, "punch", "Punch")),
+  };
+}
+
+function normalizeApprovalPunch(value: unknown): AttendanceApprovalPunch | undefined {
+  if (!isRecord(value)) return undefined;
+  return {
+    punchGuid: asString(pick(value, "punchGuid", "PunchGuid")),
+    punchType: asString(pick(value, "punchType", "PunchType")),
+    punchTimeLocal: asOptionalString(pick(value, "punchTimeLocal", "PunchTimeLocal")),
+    status: asString(pick(value, "status", "Status")),
+    lateMinutes: asOptionalNumber(pick(value, "lateMinutes", "LateMinutes")),
+    earlyLeaveMinutes: asOptionalNumber(pick(value, "earlyLeaveMinutes", "EarlyLeaveMinutes")),
+    source: asOptionalString(pick(value, "source", "Source")),
+    posDeviceCode: asOptionalString(pick(value, "posDeviceCode", "PosDeviceCode")),
+    hasLocation: asBoolean(pick(value, "hasLocation", "HasLocation")),
+    locationAccuracy: asOptionalNumber(pick(value, "locationAccuracy", "LocationAccuracy")),
   };
 }
 
