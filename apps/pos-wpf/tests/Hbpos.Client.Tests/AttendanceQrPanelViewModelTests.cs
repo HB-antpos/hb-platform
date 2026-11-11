@@ -536,6 +536,68 @@ public sealed class AttendanceQrPanelViewModelTests
     }
 
     [Fact]
+    public async Task Pending_device_authorization_skips_registration_and_registers_as_soon_as_authorized()
+    {
+        // 启动时设备授权要等服务端校验完才写入；此前登记必然 401，不能显示「启用失败」再空等 15 秒。
+        var fixture = new Fixture(online: true) { AuthorizationState = new DeviceAuthorizationState() };
+        using var viewModel = fixture.CreateViewModel();
+
+        await viewModel.RefreshAsync();
+
+        Assert.Empty(fixture.Api.Registrations);
+        Assert.Null(viewModel.QrToken);
+        Assert.Equal("Connect online once to enable offline attendance QR.", viewModel.MessageText);
+
+        // startTimer=false：没有刷新循环，只能靠授权写入事件触发这次登记。
+        fixture.AuthorizationState!.Set(new DeviceAuthorizationContext("POS-01", "1002", "HW-01", "auth"));
+
+        await WaitUntilAsync(
+            () => viewModel.QrToken is not null && viewModel.IsOnlineVerified,
+            TimeSpan.FromSeconds(2));
+        Assert.Single(fixture.Api.Registrations);
+        Assert.Equal("Scan to clock in / out", viewModel.MessageText);
+    }
+
+    [Fact]
+    public async Task Pending_device_authorization_keeps_issuing_offline_qr_from_saved_identity()
+    {
+        var fixture = new Fixture(online: true);
+        using (var first = fixture.CreateViewModel())
+        {
+            await first.RefreshAsync();
+        }
+
+        fixture.AuthorizationState = new DeviceAuthorizationState();
+        using var restarted = fixture.CreateViewModel();
+
+        await restarted.RefreshAsync();
+
+        // 重启后授权未就绪：沿用本机已登记的身份离线出码，不清码、不重新登记。
+        Assert.NotNull(restarted.QrToken);
+        Assert.False(restarted.IsOnlineVerified);
+        Assert.Single(fixture.Api.Registrations);
+
+        fixture.AuthorizationState!.Set(new DeviceAuthorizationContext("POS-01", "1002", "HW-01", "auth"));
+
+        await WaitUntilAsync(() => restarted.IsOnlineVerified, TimeSpan.FromSeconds(2));
+        Assert.Equal(2, fixture.Api.Registrations.Count);
+        Assert.NotNull(restarted.QrToken);
+    }
+
+    [Fact]
+    public async Task Disposed_panel_ignores_later_device_authorization()
+    {
+        var fixture = new Fixture(online: true) { AuthorizationState = new DeviceAuthorizationState() };
+        var viewModel = fixture.CreateViewModel();
+        viewModel.Dispose();
+
+        fixture.AuthorizationState!.Set(new DeviceAuthorizationContext("POS-01", "1002", "HW-01", "auth"));
+        await Task.Delay(100);
+
+        Assert.Empty(fixture.Api.Registrations);
+    }
+
+    [Fact]
     public async Task Reregistered_device_authorization_requires_a_new_attendance_key()
     {
         var fixture = new Fixture(online: true);
@@ -734,6 +796,9 @@ public sealed class AttendanceQrPanelViewModelTests
 
         public LocalDeviceCache Device { get; set; } = new("POS-01", "1002", "Main Store", "HW-01", 1, true, null, DateTimeOffset.UtcNow, "auth");
 
+        // 为 null 时面板不等设备授权（保持既有用例行为）；设置后模拟启动阶段授权晚到。
+        public DeviceAuthorizationState? AuthorizationState { get; set; }
+
         public AttendanceQrPanelViewModel CreateViewModel(
             bool startTimer = false,
             TimeSpan? tickInterval = null,
@@ -748,7 +813,8 @@ public sealed class AttendanceQrPanelViewModelTests
             Time,
             startTimer,
             tickInterval: tickInterval,
-            refreshInterval: refreshInterval);
+            refreshInterval: refreshInterval,
+            authorizationState: AuthorizationState);
     }
 
     private sealed class FakeAttendanceApi : IAttendanceSigningKeyApiClient
