@@ -1,4 +1,4 @@
-import { router, type Href } from "expo-router";
+import { router, type Href, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -10,9 +10,14 @@ import {
 } from "@/core/runtime/native-app-version";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import {
+  resolveAttendanceAuditRuntimeFactory,
+  type AttendanceQrDisplaySource,
+} from "@/features/attendance-audit/attendance-audit-runtime";
+import {
   type CashierLoginVersionInfo,
   CashierLoginController,
   CashierLoginScreen,
+  isCashierLoginRuntimeReady,
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import { toggleAppLanguage } from "@/i18n";
@@ -76,6 +81,36 @@ export default function LoginRoute() {
     void toggleAppLanguage();
   }, []);
 
+  // 员工到店时 iPad 常停在登录页：设备级考勤码不依赖收银员会话，只在设备已授权时运行。
+  // 只在登录页聚焦时存在：登录进入收银页、进入网络检测页时销毁，由收银页的考勤码接力，
+  // 保证同一时刻只有一个控制器在用本机签名身份。
+  const attendanceFactory = runtime.services
+    ? resolveAttendanceAuditRuntimeFactory(runtime.services)
+    : null;
+  const deviceReady = isCashierLoginRuntimeReady(runtime);
+  const [attendanceQr, setAttendanceQr] =
+    useState<AttendanceQrDisplaySource | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (!deviceReady || !attendanceFactory?.createDeviceQrController) {
+        return undefined;
+      }
+      let source: AttendanceQrDisplaySource;
+      try {
+        source = attendanceFactory.createDeviceQrController();
+      } catch {
+        // 创建失败：不显示考勤码，不影响收银员登录。
+        return undefined;
+      }
+      source.start();
+      setAttendanceQr(source);
+      return () => {
+        source.destroy();
+        setAttendanceQr((current) => (current === source ? null : current));
+      };
+    }, [attendanceFactory, deviceReady]),
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -93,6 +128,7 @@ export default function LoginRoute() {
         path="/login"
       />
       <CashierLoginScreen
+        attendanceQr={attendanceQr}
         language={i18n.resolvedLanguage ?? i18n.language}
         onManualInputFocusChange={handleManualInputFocusChange}
         onOpenNetworkCheck={() => router.push("/network-check" as Href)}

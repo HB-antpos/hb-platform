@@ -211,7 +211,11 @@ public sealed class MainWindowXamlTests
                 string.Equals(attribute.Name.LocalName, "AutomationProperties.AutomationId", StringComparison.Ordinal) &&
                 string.Equals(attribute.Value, "CashierLoginOverlay", StringComparison.Ordinal))));
 
-        var scrollViewers = overlay.Descendants(presentation + "ScrollViewer").ToArray();
+        // 只检查右栏叠放的两个 ScrollViewer（父级都是 Grid）；左栏上半部分（含员工打卡二维码）
+        // 另有自己的 ScrollViewer，父级是 DockPanel，由下面的左栏测试覆盖。
+        var scrollViewers = overlay.Descendants(presentation + "ScrollViewer")
+            .Where(scrollViewer => scrollViewer.Parent?.Name == presentation + "Grid")
+            .ToArray();
         Assert.Equal(2, scrollViewers.Length);
         foreach (var scrollViewer in scrollViewers)
         {
@@ -224,6 +228,68 @@ public sealed class MainWindowXamlTests
             var content = Assert.Single(scrollViewer.Elements(presentation + "StackPanel"));
             Assert.Null(content.Element(presentation + "StackPanel.Style"));
         }
+    }
+
+    [Fact]
+    public void Cashier_login_overlay_left_rail_shows_staff_attendance_qr_without_a_cashier_session()
+    {
+        var document = XDocument.Load(Path.Combine(
+            FindRepoRoot(),
+            "apps",
+            "pos-wpf",
+            "src",
+            "Hbpos.Client.Wpf",
+            "MainWindow.xaml"));
+        XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
+
+        var overlay = Assert.Single(document.Descendants(presentation + "Grid").Where(
+            element => GetAttributeValue(element, "AutomationProperties.AutomationId") == "CashierLoginOverlay"));
+
+        // 对话框 800 × 620 → 960 × 680，左栏 272 → 320：放得下 228px 的码，窗口 1366 × 768 内仍留边距。
+        var dialog = Assert.Single(overlay.Elements(presentation + "Border"));
+        Assert.Equal("960", (string?)dialog.Attribute("MaxWidth"));
+        Assert.Equal("680", (string?)dialog.Attribute("MaxHeight"));
+        var columns = dialog.Descendants(presentation + "Grid.ColumnDefinitions").First()
+            .Elements(presentation + "ColumnDefinition")
+            .Select(column => (string?)column.Attribute("Width"))
+            .ToArray();
+        Assert.Equal(["320", "*"], columns);
+
+        // 卡片绑定在 MainViewModel 上、按「是否有考勤面板」显示，不依赖收银员会话（Session.CashierSession）。
+        var card = Assert.Single(overlay.Descendants(presentation + "Border").Where(
+            element => GetAttributeValue(element, "AutomationProperties.AutomationId") == "CashierLoginAttendanceQrCard"));
+        Assert.Contains("HasAttendanceQrPanel", (string?)card.Attribute("Visibility"), StringComparison.Ordinal);
+        Assert.DoesNotContain("Session", card.ToString(), StringComparison.Ordinal);
+
+        // 码图：整数像素渲染、不插值（NearestNeighbor + Stretch=None），否则扫码边缘会被模糊。
+        var image = Assert.Single(card.Descendants(presentation + "Image"));
+        Assert.Equal("None", (string?)image.Attribute("Stretch"));
+        Assert.Equal("NearestNeighbor", GetAttributeValue(image, "RenderOptions.BitmapScalingMode"));
+        Assert.Equal("{Binding AttendanceQrPanel.QrImage}", (string?)image.Attribute("Source"));
+        Assert.Equal("228", (string?)image.Attribute("Width"));
+        Assert.Equal("228", (string?)image.Attribute("Height"));
+
+        // 左栏：底部区（服务器地址 / 退出）先声明并停靠底部，上半部分（含二维码）在可滚动区里填满剩余空间，
+        // 窗口较矮时只滚动上半部分，服务器地址与退出始终可见。
+        var rail = Assert.Single(overlay.Descendants(presentation + "DockPanel"));
+        Assert.Equal("True", (string?)rail.Attribute("LastChildFill"));
+        var railChildren = rail.Elements().ToArray();
+        Assert.Equal(2, railChildren.Length);
+        var bottom = railChildren[0];
+        Assert.Equal(presentation + "StackPanel", bottom.Name);
+        Assert.Equal("Bottom", (string?)bottom.Attribute("DockPanel.Dock"));
+        Assert.Contains(bottom.Descendants(presentation + "ToggleButton"),
+            toggle => (string?)toggle.Attribute(xaml + "Name") == "CashierLoginServerToggle");
+        Assert.Contains(bottom.Descendants(presentation + "Button"),
+            button => GetAttributeValue(button, "AutomationProperties.AutomationId") == "CashierLoginExitButton");
+        var scroll = railChildren[1];
+        Assert.Equal(presentation + "ScrollViewer", scroll.Name);
+        Assert.Contains(scroll.Descendants(presentation + "Border"),
+            element => GetAttributeValue(element, "AutomationProperties.AutomationId") == "CashierLoginAttendanceQrCard");
+        // 上半部分保留身份与连接状态。
+        Assert.Contains(scroll.Descendants(presentation + "TextBlock"),
+            element => GetAttributeValue(element, "AutomationProperties.AutomationId") == "CashierLoginStoreInfo");
     }
 
     [Fact]

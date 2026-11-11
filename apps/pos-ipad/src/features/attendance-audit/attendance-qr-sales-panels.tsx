@@ -1,7 +1,14 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
-import { ActivityIndicator, Image, Modal, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Image,
+  Modal,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import Svg, { Circle } from "react-native-svg";
 
 import {
@@ -188,11 +195,14 @@ function QrWithCountdown({
 }
 
 function QrPlaceholder({
+  dark = false,
   qrSize,
   state,
   t,
   testID,
 }: Readonly<{
+  /** 登录页左栏是深色底：占位框与文字改用反色。 */
+  dark?: boolean;
   qrSize: number;
   state: AttendanceQrState;
   t: Translate;
@@ -204,7 +214,11 @@ function QrPlaceholder({
   return (
     <View
       accessibilityLiveRegion="polite"
-      style={[styles.placeholder, { height: qrSize, width: qrSize }]}
+      style={[
+        styles.placeholder,
+        dark && styles.placeholderDark,
+        { height: qrSize, width: qrSize },
+      ]}
       testID={testID}
     >
       {kind === "preparing" ? (
@@ -212,7 +226,15 @@ function QrPlaceholder({
       ) : (
         <MaterialCommunityIcons
           accessible={false}
-          color={warning ? posColors.red : posColors.yellowInk}
+          color={
+            dark
+              ? warning
+                ? "#FF8E86"
+                : "#F2CD6B"
+              : warning
+                ? posColors.red
+                : posColors.yellowInk
+          }
           name={
             kind === "clock-rollback"
               ? "clock-alert-outline"
@@ -223,10 +245,10 @@ function QrPlaceholder({
           size={44}
         />
       )}
-      <Text style={styles.placeholderTitle}>
+      <Text style={[styles.placeholderTitle, dark && styles.placeholderTitleDark]}>
         {t(`panel.state.${kind}.title`)}
       </Text>
-      <Text style={styles.placeholderBody}>
+      <Text style={[styles.placeholderBody, dark && styles.placeholderBodyDark]}>
         {t(`panel.state.${kind}.body`)}
       </Text>
     </View>
@@ -301,6 +323,72 @@ function TerminalMeta({
           </Text>
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/**
+ * 登录页左栏的「员工打卡」区：员工到店时 iPad 常停在登录页，没人登录也能直接扫。
+ * 码尺寸随窗口高度收缩（小屏 iPad 左栏放不下 268pt 时缩到最小 176pt），
+ * 倒计时圆标同比缩放；深色底上码仍是白底黑码。
+ */
+export function AttendanceQrLoginCard({
+  language,
+  state,
+}: Readonly<{ language?: string; state: AttendanceQrState }>) {
+  usePosThemeVersion();
+  const t = useAttendanceQrCopy(language);
+  const { height } = useWindowDimensions();
+  const qrSize = Math.min(
+    ATTENDANCE_SALES_QR_SIZE,
+    Math.max(176, height - 516),
+  );
+  const badgeSize = Math.round(qrSize * 0.216);
+  return (
+    <View style={styles.loginCard} testID="login-attendance-qr-card">
+      <View style={styles.titleRow}>
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.accent}
+          name="account-clock-outline"
+          size={30}
+        />
+        <Text style={styles.loginTitle}>{t("panel.title")}</Text>
+      </View>
+      <Text style={styles.loginHint}>{t("panel.loginHint")}</Text>
+      {hasImage(state) ? (
+        <View style={[styles.qrFrame, styles.loginQrFrame]}>
+          <QrWithCountdown
+            badgeSize={badgeSize}
+            imageTestID="login-attendance-qr-image"
+            qrSize={qrSize}
+            state={state}
+            t={t}
+          />
+        </View>
+      ) : (
+        <QrPlaceholder
+          dark
+          qrSize={qrSize + 32}
+          state={state}
+          t={t}
+          testID="login-attendance-qr-placeholder"
+        />
+      )}
+      <View style={styles.loginMetaRow}>
+        <StatusPill state={state} t={t} />
+        <View style={styles.flexSpacer} />
+        <View style={styles.loginMetaColumn}>
+          {hasImage(state) ? (
+            <Text style={styles.loginMetaText}>{t("panel.rotate")}</Text>
+          ) : null}
+          {state.deviceText ? (
+            <Text numberOfLines={1} style={styles.loginMetaText}>
+              {t("panel.device", { device: state.deviceText })}
+            </Text>
+          ) : null}
+        </View>
+      </View>
     </View>
   );
 }
@@ -745,6 +833,55 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "600",
     lineHeight: 20,
     textAlign: "center",
+  },
+  placeholderDark: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderColor: "rgba(255,255,255,0.28)",
+    borderRadius: posRadius.large,
+    borderStyle: "dashed",
+    borderWidth: 1.5,
+  },
+  placeholderBodyDark: {
+    color: colors.onInverse,
+    opacity: 0.8,
+  },
+  placeholderTitleDark: {
+    color: colors.onInverse,
+  },
+  loginCard: {
+    gap: 12,
+  },
+  loginHint: {
+    color: colors.onInverse,
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 22,
+    opacity: 0.86,
+  },
+  loginMetaColumn: {
+    alignItems: "flex-end",
+    gap: 3,
+    minWidth: 0,
+  },
+  loginMetaRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
+  loginMetaText: {
+    color: colors.onInverse,
+    fontSize: 12.5,
+    fontWeight: "700",
+    opacity: 0.72,
+  },
+  loginQrFrame: {
+    alignSelf: "center",
+    padding: 16,
+  },
+  loginTitle: {
+    color: colors.onInverse,
+    fontSize: 26,
+    fontWeight: "900",
   },
   placeholderTitle: {
     color: "#10253A",

@@ -23,6 +23,12 @@ export interface AttendanceAuditRuntimeFactory {
    * 同一时刻只能有一个控制器在跑（共用本机签名身份与缓存），由页面在聚焦时创建、失焦时销毁。
    */
   createQrController?(): AttendanceQrDisplaySource;
+  /**
+   * 登录页用的设备级考勤码：不需要收银员会话（员工到店时 iPad 常停在登录页）。
+   * 与 createQrController 共用同一套本机签名身份，所以同样必须同一时刻只跑一个：
+   * 登录页聚焦时创建、失焦（登录进入收银页）时销毁。可选：没有提供时登录页不显示考勤码。
+   */
+  createDeviceQrController?(): AttendanceQrDisplaySource;
 }
 
 export function resolveAttendanceAuditRuntimeFactory(

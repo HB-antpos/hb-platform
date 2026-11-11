@@ -29,6 +29,7 @@ test("公开服务只提供零参数 presenter 工厂，初始 online 来自组�
 
   assert.deepEqual(Object.keys(harness.runtime), [
     "createPresenter",
+    "createDeviceQrController",
     "createQrController",
   ]);
   assert.equal(harness.presenter.getState().audit.online, false);
@@ -138,6 +139,57 @@ test("收银页考勤码：没有已登录收银员时拒绝创建", () => {
   assert.throws(() => harness.runtime.createQrController!());
 });
 
+test("登录页设备级考勤码：没有收银员会话也能用本机身份离线出码", async () => {
+  const harness = createHarness({ online: false });
+  // 登录页没有收银员：先把会话清掉，控制器仍然可以创建并出码。
+  harness.currentCashier.clear();
+  const qr = harness.runtime.createDeviceQrController!();
+  qr.start();
+  await flush();
+
+  expectReadyOfflineQr(qr.getState());
+  const cancellationsBefore = harness.scheduler.cancellations;
+  qr.destroy();
+  assert.equal(harness.scheduler.cancellations - cancellationsBefore, 2);
+  // destroy 只停定时器，不删 Keychain 里的 A256 密钥（收银页接力还要用）。
+  assert.equal(harness.crypto.destroyCalls, 0);
+});
+
+test("登录页设备级考勤码：设备上下文的门店 / 设备编号与终端不一致时不出码", async () => {
+  const harness = createHarness({ online: false, contextStoreCode: "OTHER-STORE" });
+  harness.currentCashier.clear();
+  const qr = harness.runtime.createDeviceQrController!();
+  qr.start();
+  await flush();
+
+  assert.equal(qr.getState().qrImageUri, null);
+  assert.notEqual(qr.getState().kind, "ready");
+  qr.destroy();
+});
+
+test("登录页设备级考勤码：联网时用设备身份登记密钥（不需要收银员）", async () => {
+  const harness = createHarness({ online: true });
+  harness.currentCashier.clear();
+  const qr = harness.runtime.createDeviceQrController!();
+  qr.start();
+  await flush();
+
+  assert.equal(qr.getState().kind, "ready");
+  assert.equal(qr.getState().online, true);
+  assert.equal(harness.security.registerCalls > 0, true);
+  qr.destroy();
+});
+
+function expectReadyOfflineQr(state: {
+  kind: string;
+  statusCode: string;
+  qrImageUri: string | null;
+}): void {
+  assert.equal(state.kind, "ready");
+  assert.equal(state.statusCode, "offline-signed");
+  assert.equal(state.qrImageUri, "data:image/png;base64,QQ==");
+}
+
 class MemoryCache implements AttendanceQrCachePort {
   public loadCalls = 0;
 
@@ -243,6 +295,8 @@ function createHarness(options: Readonly<{
   online?: boolean;
   permissions?: readonly string[];
   localRecords?: readonly OperationAuditRawRecord[];
+  /** 设备上下文返回的门店编号（默认与终端一致），用来验证门店 / 设备范围校验。 */
+  contextStoreCode?: string;
 }> = {}) {
   const currentCashier = new CurrentCashierSession();
   activateCashier(currentCashier, options.permissions ?? [AUDIT_VIEW_PERMISSION]);
@@ -259,7 +313,7 @@ function createHarness(options: Readonly<{
         deviceCode: DEVICE_CODE,
         hardwareId: "hardware-1",
         isAllowed: true,
-        storeCode: STORE_CODE,
+        storeCode: options.contextStoreCode ?? STORE_CODE,
         storeName: "Store One",
       };
     },

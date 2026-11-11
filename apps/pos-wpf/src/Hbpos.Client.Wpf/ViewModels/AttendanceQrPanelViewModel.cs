@@ -107,7 +107,21 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
     public string StoreText { get => _storeText; private set => SetProperty(ref _storeText, value); }
     public string DeviceText { get => _deviceText; private set => SetProperty(ref _deviceText, value); }
     public string MessageText { get => _messageText; private set => SetProperty(ref _messageText, value); }
-    public string VerificationStatusText { get => _verificationStatusText; private set => SetProperty(ref _verificationStatusText, value); }
+    public string VerificationStatusText
+    {
+        get => _verificationStatusText;
+        private set
+        {
+            if (SetProperty(ref _verificationStatusText, value))
+            {
+                // 状态文字随在线 / 离线切换，同步通知「是否在线验证」，界面据此给标签换色。
+                OnPropertyChanged(nameof(IsOnlineVerified));
+            }
+        }
+    }
+
+    /// <summary>true 表示本次码经在线验证；false 表示离线签名（登录框里的标签改为黄色提示）。</summary>
+    public bool IsOnlineVerified => _isOnline;
     public int SecondsRemaining { get => _secondsRemaining; private set => SetProperty(ref _secondsRemaining, value); }
 
     public async Task RefreshAsync(CancellationToken cancellationToken = default)

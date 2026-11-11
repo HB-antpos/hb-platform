@@ -1402,6 +1402,8 @@
   <data name="attendance.qr.closeHelp" xml:space="preserve"><value>Close the Attendance QR scan dialog</value></data>
   <data name="attendance.qr.device" xml:space="preserve"><value>POS device</value></data>
   <data name="attendance.qr.seconds" xml:space="preserve"><value>seconds</value></data>
+  <data name="attendance.qr.untilNextCode" xml:space="preserve"><value>sec until next code</value></data>
+  <data name="shell.cashierLogin.attendanceTitle" xml:space="preserve"><value>Staff clock-in</value></data>
   <data name="cardRecovery.refund.section.title" xml:space="preserve"><value>Supervisor refund reconciliation</value></data>
   <data name="cardRecovery.refund.section.instructions" xml:space="preserve"><value>Check the bank or terminal record before choosing one outcome. The refund remains locked until a supervisor decision is saved.</value></data>
   <data name="cardRecovery.refund.field.processor" xml:space="preserve"><value>PROCESSOR</value></data>
