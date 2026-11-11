@@ -36,6 +36,7 @@ export type AppTabPath =
   | "/(shell)/product-insights"
   | "/(shell)/price-updates"
   | "/(shell)/pricing-strategies"
+  | "/(shell)/special-product-categories"
   | "/(shell)/warehouse-product-insights"
   | "/(shell)/seasonal-product-insights"
   | "/(shell)/container-new-products"
@@ -87,6 +88,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   "product-insights": "/(shell)/product-insights",
   "price-updates": "/(shell)/price-updates",
   "pricing-strategies": "/(shell)/pricing-strategies",
+  "special-product-categories": "/(shell)/special-product-categories",
   "warehouse-product-insights": "/(shell)/warehouse-product-insights",
   "seasonal-product-insights": "/(shell)/seasonal-product-insights",
   "container-new-products": "/(shell)/container-new-products",
@@ -141,6 +143,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   "daily-closes",
   // 自动价格策略按账号的 PricingStrategy.View / Edit 授权，设备会话没有用户账号，设备模式不展示入口。
   "pricing-strategies",
+  // 特殊商品分类按账号的 SpecialProducts.Manage 授权，且接口拒绝设备会话，设备模式不展示入口。
+  "special-product-categories",
   // 收银用户条码按操作人账号的可管理分店授权，设备会话不展示入口。
   "cash-register-users",
   // 设备会话没有用户账号，现金接口按账号权限与可操作分店授权，设备模式不展示入口。
