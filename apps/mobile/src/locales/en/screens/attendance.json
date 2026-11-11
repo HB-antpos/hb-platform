@@ -654,8 +654,8 @@
     },
     "cell": {
       "leave": "Leave",
-      "available": "Avail",
-      "unavailable": "No",
+      "available": "Available",
+      "unavailable": "Unavailable",
       "mealBadge": "M{{count}}",
       "conflictA11y": "Conflicts with the times the employee reported"
     },
@@ -702,7 +702,11 @@
       "save": "Save ({{hours}} h)",
       "addShift": "Add another shift",
       "conflictUnavailable": "Overlaps a time the employee marked unavailable",
-      "conflictOutside": "Outside the times the employee marked available"
+      "conflictOutside": "Outside the times the employee marked available",
+      "paidSummary": "Paid {{paid}} h ({{total}} h − {{meal}} min meal)",
+      "weekTotal": "Week total {{hours}} h",
+      "minorTitle": "Minor employment reminders (advice only)",
+      "sameShiftDays": "Also roster on"
     },
     "copyPreviousWeek": "Copy last week",
     "copyConfirmTitle": "Copy last week's roster",
@@ -740,7 +744,27 @@
       "undoFailed": "Undo failed, please fix manually",
       "failed": "Not placed: {{reason}}",
       "closeA11y": "Delete shift {{shift}}"
-    }
+    },
+    "dayPeople": "{{count}} on",
+    "draftCount": "{{count}} drafts unpublished",
+    "uncoveredNamed": "Nobody on {{days}}",
+    "publishWithDrafts": "Publish week · {{count}} drafts",
+    "view": {
+      "week": "Week",
+      "day": "Day"
+    },
+    "weekSummary": "{{people}} rostered · {{hours}} total ({{weekend}} weekend)",
+    "dayView": {
+      "staffingTitle": "{{date}} · staff per hour",
+      "gapNone": "Nobody {{start}}–{{end}}",
+      "gapOne": "Only 1 person {{start}}–{{end}}",
+      "noGap": "At least 2 people on all day",
+      "empty": "Nothing rostered this day",
+      "available": "Available {{range}}",
+      "rest": "Off",
+      "tapHint": "Tap a row to add or edit; use Week view to drag shifts"
+    },
+    "weekBoxLabel": "Week {{week}} · {{start}} – {{end}}"
   },
   "adjustment": {
     "title": "Punch correction",
