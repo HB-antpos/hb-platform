@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { Button, Card, Icon, Text } from "react-native-paper";
+import { Button, Icon, Text } from "react-native-paper";
 import type {
   AttendancePunch,
   AttendancePunchVerificationState,
@@ -22,6 +22,13 @@ import {
   resolveAttendanceMealPanelState,
 } from "@/modules/attendance/attendance-meal-break";
 import { MEAL_BREAK_MINUTES } from "@/modules/attendance/attendance-my-week";
+import {
+  lastClockIn,
+  liveWorkedMinutes,
+  minutesToShiftStart,
+  shiftProgress,
+  shiftWindow,
+} from "@/modules/attendance/attendance-punch-hero";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
@@ -47,6 +54,11 @@ function formatClockTime(value: Date) {
 function formatDuration(minutes?: number) {
   const total = Math.max(0, Math.round(minutes ?? 0));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** 计薪小时：最多 2 位小数，去掉末尾 0（7.5、8、7.25）。 */
+function formatHoursValue(minutes: number) {
+  return String(Number((Math.max(0, minutes) / 60).toFixed(2)));
 }
 
 const STATUS_TONES: Record<string, AttendanceStatusTone> = {
@@ -128,7 +140,6 @@ export function TodayPunchCard({
   const status = resolveAttendanceTodayStatus(today, allowPunch);
   const allSessions = display.stores.flatMap((store) => store.sessions);
   const primarySession = allSessions.find((session) => session.scheduleState !== "NoSchedule");
-  const workedTotal = allSessions.reduce((sum, session) => sum + (session.workedMinutes ?? 0), 0);
 
   // 主按钮文案跟随当前状态，员工不用先读状态再判断该打哪种卡。
   const scanLabel = isPunching
@@ -141,7 +152,6 @@ export function TodayPunchCard({
 
   // 前台只展示网络校验；定位仅用于后台采集与打卡提交，不在今日卡显示（见二维码契约测试）。
   const networkStatus = verification.network.status;
-  const networkTone: AttendanceStatusTone = networkStatus === "available" ? "success" : "warning";
   const networkLabel = `${t("today.info.network")} · ${
     isVerificationRefreshing ? t("today.verification.refreshing") : t(`today.verification.statuses.${networkStatus}`)
   }`;
@@ -166,51 +176,207 @@ export function TodayPunchCard({
         ? t("today.dailyRecords.alertNoSchedule")
         : undefined;
 
-  return (
-    <Card mode="outlined" style={styles.card}>
-      <Card.Content style={styles.content}>
-        <View style={styles.hero}>
-          <View style={styles.rowBetween}>
-            <StatusPill label={t(`today.statusShort.${status}`)} tone={STATUS_TONES[status] ?? "neutral"} />
-            <Text variant="labelMedium" style={styles.muted}>
-              {title ?? t("sections.today")} · {cardSubtitle}
-            </Text>
-          </View>
-          <Text variant="displaySmall" style={styles.clockText} accessibilityRole="timer">
-            {formatClockTime(currentTime).slice(0, 5)}
-            <Text variant="titleMedium" style={styles.clockSeconds}>
-              {formatClockTime(currentTime).slice(5)}
-            </Text>
-          </Text>
-          <Text variant="bodyMedium" style={styles.muted}>
-            {primarySession
-              ? t("today.hero.shift", {
-                  start: formatTime(primarySession.startTime),
-                  end: formatTime(primarySession.endTime),
-                })
-              : isLoading ? t("common:loading") : t("today.hero.noShift")}
-            {status === "readyToClockOut" ? ` · ${t("today.hero.worked", { duration: formatDuration(workedTotal) })}` : ""}
-          </Text>
+  // ── 主卡片按状态换样式：上班前蓝色（大圆按钮扫码上班）、工作中绿色（已工作时长 + 班次进度 + 扫码下班 / 用餐）、
+  // 其余（已完成 / 假期 / 历史日期）白色汇总。扫码可不可点仍只由 canOpenAttendanceQrScanner 决定。
+  const nowMs = currentTime.getTime();
+  const allSegments = allSessions.flatMap((session) => session.segments);
+  const liveWorked = liveWorkedMinutes(allSegments, nowMs);
+  const window = primarySession
+    ? shiftWindow(today?.workDate ?? selectedDate ?? "", primarySession.startTime, primarySession.endTime)
+    : undefined;
+  const latestClockIn = lastClockIn(allSegments);
+  const firstClockInText = formatTime(resolveAttendancePunchDisplayTime(allSegments.find((segment) => segment.clockIn)?.clockIn));
+  const lastRealClockOut = [...allSegments].reverse().find((segment) => segment.clockOut && !segment.clockOut.isSystemAutoClockOut)?.clockOut;
+  const paidTotal = allSessions.reduce((sum, session) => sum + (session.paidMinutes ?? session.workedMinutes ?? 0), 0);
+  const breakTotal = allSessions.reduce((sum, session) => sum + (session.breakMinutes ?? 0), 0);
+  const overtimeTotal = allSessions.reduce((sum, session) => sum + (session.overtime.approvedMinutes || session.overtime.candidateMinutes), 0);
+  const mealDeductionTotal = allSessions.reduce((sum, session) => sum + (session.mealDeductionMinutes ?? 0), 0);
+  const isOnBreak = mealPanel?.kind === "onBreak";
+  const heroVariant = status === "readyToClockOut" || isOnBreak ? "working" : status === "readyToClockIn" && allowPunch ? "before" : "summary";
+  const canStartMeal = Boolean(mealSession && mealPanel && mealPanel.kind !== "done" && !isOnBreak && mealSession.hasOpenSegment && onStartMealBreak);
+  const clockText = formatClockTime(currentTime);
 
+  // 上班前副行：班次 + 离上班还有多久 / 已过上班时间多久；已经打过卡（中间休息）时写已工作。
+  const beforeLine = (() => {
+    if (!primarySession) return isLoading ? t("common:loading") : t("today.hero.noShift");
+    const shift = t("today.hero.shift", { start: formatTime(primarySession.startTime), end: formatTime(primarySession.endTime) });
+    if (liveWorked > 0) return `${shift} · ${t("today.hero.worked", { duration: formatDuration(liveWorked) })}`;
+    if (!window) return shift;
+    const minutes = minutesToShiftStart(window, nowMs);
+    if (minutes > 0) return `${shift} · ${t("today.hero.startsIn", { duration: formatExceptionDuration(minutes) })}`;
+    if (minutes < 0) return `${shift} · ${t("today.hero.startedAgo", { duration: formatExceptionDuration(-minutes) })}`;
+    return shift;
+  })();
+
+  const networkChips = (
+    <View style={styles.heroChips}>
+      <View style={[styles.heroChip, networkStatus !== "available" ? styles.heroChipWarn : null]}>
+        <Text style={styles.heroChipText}>{`${networkStatus === "available" ? "✓ " : ""}${networkLabel}`}</Text>
+      </View>
+      {today?.storeTimeZone ? (
+        <View style={styles.heroChip}><Text style={styles.heroChipText}>{today.storeTimeZone}</Text></View>
+      ) : null}
+    </View>
+  );
+
+  const renderHero = () => {
+    if (heroVariant === "before") {
+      return (
+        <View style={[styles.hero, styles.heroBefore]}>
+          <View style={styles.rowBetween}>
+            <View style={styles.heroPill}><Text style={styles.heroPillText}>{t(`today.statusShort.${status}`)}</Text></View>
+            <Text style={styles.heroMeta} numberOfLines={1}>{title ?? t("sections.today")} · {cardSubtitle}</Text>
+          </View>
+          <Text style={styles.heroClock} accessibilityRole="timer">
+            {clockText.slice(0, 5)}
+            <Text style={styles.heroClockSeconds}>{clockText.slice(5)}</Text>
+          </Text>
+          <Text style={styles.heroLine}>{beforeLine}</Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityState={{
-              disabled: !canScan,
-            }}
+            accessibilityState={{ disabled: !canScan }}
             disabled={!canScan}
-            style={({ pressed }) => [
-              styles.punchButton,
-              !canScan ? styles.punchButtonDisabled : null,
-              pressed ? styles.punchButtonPressed : null,
-            ]}
             onPress={onScan}
+            style={({ pressed }) => [styles.bigButtonHalo, pressed ? styles.punchButtonPressed : null]}
           >
-            <Icon source="qrcode-scan" size={22} color={HB_COLORS.white} />
-            <Text variant="titleMedium" style={styles.punchButtonText}>
-              {scanLabel}
-            </Text>
+            <View style={[styles.bigButton, !canScan ? styles.bigButtonDisabled : null]}>
+              <Icon source="qrcode-scan" size={40} color={canScan ? HB_COLORS.action : "#98A2B3"} />
+              <Text style={[styles.bigButtonText, !canScan ? styles.bigButtonTextDisabled : null]}>{scanLabel}</Text>
+              <Text style={styles.bigButtonHint}>{t("today.hero.scanHint")}</Text>
+            </View>
           </Pressable>
+          {networkChips}
+        </View>
+      );
+    }
+    if (heroVariant === "working") {
+      const progress = window ? shiftProgress(window, nowMs) : undefined;
+      return (
+        <View style={[styles.hero, styles.heroWorking]}>
+          <View style={styles.rowBetween}>
+            <View style={styles.heroPill}>
+              <Text style={styles.heroPillText}>{isOnBreak ? t("today.meal.onBreak") : t(`today.statusShort.${status}`)}</Text>
+            </View>
+            <Text style={styles.heroMeta} numberOfLines={1}>
+              {latestClockIn
+                ? [
+                    t("today.hero.clockedInAt", { time: formatTime(resolveAttendancePunchDisplayTime(latestClockIn)) }),
+                    latestClockIn.posDeviceCode,
+                  ].filter(Boolean).join(" · ")
+                : `${title ?? t("sections.today")} · ${cardSubtitle}`}
+            </Text>
+          </View>
+          <Text style={styles.heroClock} accessibilityRole="timer">
+            {formatDuration(liveWorked)}
+            <Text style={styles.heroClockSuffix}>{` ${t("today.hero.workedSuffix")}`}</Text>
+          </Text>
+          {progress && window ? (
+            <View style={styles.progress}>
+              <View style={styles.progressTrack}>
+                <View style={[styles.progressFill, { width: `${Math.round(progress.ratio * 100)}%` }]} />
+              </View>
+              <View style={styles.rowBetween}>
+                <Text style={styles.progressText}>{formatTime(primarySession?.startTime)}</Text>
+                <Text style={styles.progressText}>
+                  {progress.remainingMinutes > 0
+                    ? t("today.hero.remaining", { duration: formatExceptionDuration(progress.remainingMinutes) })
+                    : t("today.hero.shiftEnded")}
+                </Text>
+                <Text style={styles.progressText}>{formatTime(primarySession?.endTime)}</Text>
+              </View>
+            </View>
+          ) : null}
+          <View style={styles.heroActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canScan }}
+              disabled={!canScan}
+              onPress={onScan}
+              style={({ pressed }) => [styles.heroPrimary, !canScan ? styles.heroPrimaryDisabled : null, pressed ? styles.punchButtonPressed : null]}
+            >
+              <Icon source="qrcode-scan" size={20} color={canScan ? HB_COLORS.success : "#98A2B3"} />
+              <Text style={[styles.heroPrimaryText, !canScan ? styles.bigButtonTextDisabled : null]}>{scanLabel}</Text>
+            </Pressable>
+            {mealSession && isOnBreak && onEndMealBreak ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={isMealBreakBusy}
+                onPress={() => onEndMealBreak(mealSession.storeCode)}
+                style={({ pressed }) => [styles.heroSecondary, pressed ? styles.punchButtonPressed : null]}
+              >
+                <Icon source="coffee-outline" size={18} color={HB_COLORS.white} />
+                <Text style={styles.heroSecondaryText}>{t("today.meal.end")}</Text>
+              </Pressable>
+            ) : mealSession && canStartMeal && onStartMealBreak ? (
+              <Pressable
+                accessibilityRole="button"
+                disabled={isMealBreakBusy || isPunching}
+                onPress={() => onStartMealBreak(mealSession.storeCode)}
+                style={({ pressed }) => [styles.heroSecondary, pressed ? styles.punchButtonPressed : null]}
+              >
+                <Icon source="coffee-outline" size={18} color={HB_COLORS.white} />
+                <Text style={styles.heroSecondaryText}>{t("today.meal.start")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {networkStatus !== "available" ? networkChips : null}
+        </View>
+      );
+    }
+    const hasPunches = allSegments.some((segment) => segment.clockIn || segment.clockOut);
+    return (
+      <View style={[styles.hero, styles.heroSummary]}>
+        <View style={styles.rowBetween}>
+          <StatusPill label={t(`today.statusShort.${status}`)} tone={STATUS_TONES[status] ?? "neutral"} />
+          <Text variant="labelMedium" style={styles.muted} numberOfLines={1}>{title ?? t("sections.today")} · {cardSubtitle}</Text>
+        </View>
+        {hasPunches ? (
+          <>
+            <View style={styles.summaryHead}>
+              <View style={styles.checkCircle}><Icon source="check" size={26} color={HB_COLORS.success} /></View>
+              <View style={styles.flexText}>
+                <Text style={styles.summaryTitle}>{t("today.hero.paidTotal", { hours: formatHoursValue(paidTotal) })}</Text>
+                <Text variant="bodySmall" style={styles.muted}>
+                  {[
+                    lastRealClockOut
+                      ? t("today.hero.inOut", { in: firstClockInText, out: formatTime(resolveAttendancePunchDisplayTime(lastRealClockOut)) })
+                      : t("today.hero.clockedInAt", { time: firstClockInText }),
+                    mealDeductionTotal > 0 ? t("today.hero.mealDeducted", { duration: formatExceptionDuration(mealDeductionTotal) }) : undefined,
+                  ].filter(Boolean).join(" · ")}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.summary}>
+              <View style={styles.summaryTile}>
+                <Text variant="labelSmall" style={styles.muted}>{t("today.summary.worked")}</Text>
+                <Text variant="titleMedium" style={styles.tabularText}>{formatDuration(liveWorked)}</Text>
+              </View>
+              <View style={styles.summaryTile}>
+                <Text variant="labelSmall" style={styles.muted}>{t("today.summary.break")}</Text>
+                <Text variant="titleMedium" style={styles.tabularText}>{formatDuration(breakTotal)}</Text>
+              </View>
+              <View style={styles.summaryTile}>
+                <Text variant="labelSmall" style={styles.muted}>{t("today.summary.overtime")}</Text>
+                <Text variant="titleMedium" style={[styles.tabularText, overtimeTotal ? null : styles.mutedTime]}>{formatDuration(overtimeTotal)}</Text>
+              </View>
+            </View>
+          </>
+        ) : (
+          <Text variant="bodyMedium" style={styles.muted}>{beforeLine}</Text>
+        )}
+        {/* 已完成 / 假期当天仍可能要再打一段：保留一个次要的扫码入口 */}
+        {allowPunch ? (
+          <Button mode="outlined" icon="qrcode-scan" disabled={!canScan} onPress={onScan} style={styles.summaryScan}>
+            {scanLabel}
+          </Button>
+        ) : null}
+      </View>
+    );
+  };
 
+  return (
+    <View style={styles.root}>
+      {renderHero()}
           {/* 用餐区：休息中显示计时；满 4 小时显示提醒横幅；未到时只给一行提示。不扫码，一键开始/结束。 */}
           {mealSession && mealPanel ? (
             <View
@@ -267,21 +433,12 @@ export function TodayPunchCard({
                   </Text>
                 )}
               </View>
-              {mealPanel.kind === "onBreak" && onEndMealBreak ? (
+              {/* 开始 / 结束用餐的常用入口在主卡片里；这里只在「该吃饭了」时再给一个醒目的按钮。 */}
+              {mealPanel.kind === "due" && mealSession.hasOpenSegment && onStartMealBreak ? (
                 <Button
                   compact
-                  mode="outlined"
-                  disabled={isMealBreakBusy}
-                  loading={isMealBreakBusy}
-                  onPress={() => onEndMealBreak(mealSession.storeCode)}
-                >
-                  {t("today.meal.end")}
-                </Button>
-              ) : mealPanel.kind !== "done" && mealPanel.kind !== "onBreak"
-                && mealSession.hasOpenSegment && onStartMealBreak ? (
-                <Button
-                  compact
-                  mode={mealPanel.kind === "due" ? "contained" : "text"}
+                  mode="contained"
+                  buttonColor={HB_COLORS.warning}
                   icon="coffee-outline"
                   disabled={isMealBreakBusy || isPunching}
                   loading={isMealBreakBusy}
@@ -293,10 +450,6 @@ export function TodayPunchCard({
             </View>
           ) : null}
 
-          <View style={styles.pillRow}>
-            <StatusPill label={networkLabel} tone={networkTone} />
-            {today?.storeTimeZone ? <StatusPill label={today.storeTimeZone} tone="neutral" /> : null}
-          </View>
           {verificationIssue ? (
             <Text variant="bodySmall" style={styles.warningText}>{verificationIssue}</Text>
           ) : null}
@@ -332,8 +485,6 @@ export function TodayPunchCard({
               ) : null}
             </View>
           ) : null}
-        </View>
-
         {display.relatedStoreAlerts.map((alert) => (
           <View key={`${alert.missingStoreCode}-${alert.activeStoreCode}`} style={styles.banner}>
             <Icon source="store-alert-outline" size={16} color={HB_COLORS.warning} />
@@ -352,6 +503,8 @@ export function TodayPunchCard({
           </View>
         ))}
 
+      <View style={styles.timelineCard}>
+        <Text variant="titleSmall" style={styles.timelineTitle}>{t("today.hero.timelineTitle")}</Text>
         {display.stores.map((store) => (
           <View key={store.storeCode || store.storeName} style={styles.storeGroup}>
             <View style={styles.rowBetween}>
@@ -420,6 +573,9 @@ export function TodayPunchCard({
                             />
                           ) : null}
                         </View>
+                        {segment.clockIn?.posDeviceCode ? (
+                          <Text variant="labelSmall" style={styles.deviceText}>{t("today.hero.viaDevice", { device: segment.clockIn.posDeviceCode })}</Text>
+                        ) : null}
                         <View style={styles.timelineRow}>
                           <Text
                             variant="bodyMedium"
@@ -440,6 +596,9 @@ export function TodayPunchCard({
                             />
                           ) : null}
                         </View>
+                        {segment.clockOut?.posDeviceCode ? (
+                          <Text variant="labelSmall" style={styles.deviceText}>{t("today.hero.viaDevice", { device: segment.clockOut.posDeviceCode })}</Text>
+                        ) : null}
                         {segment.isBreakAfter ? (
                           <View style={styles.breakRow}>
                             <Icon source="coffee-outline" size={14} color={HB_COLORS.textSecondary} />
@@ -451,6 +610,8 @@ export function TodayPunchCard({
                   })}
                 </View>
 
+                {/* 只有一个班次时，工时 / 休息 / 加班已在主卡片里实时显示，这里不再重复（后端汇总值不随时间走，会和主卡片矛盾）。 */}
+                {allSessions.length > 1 ? (
                 <View style={styles.summary}>
                   <View style={styles.summaryTile}>
                     <Text variant="titleMedium" style={styles.tabularText}>{formatDuration(session.workedMinutes)}</Text>
@@ -467,6 +628,7 @@ export function TodayPunchCard({
                     <Text variant="labelSmall" style={styles.muted}>{t("today.summary.overtime")}</Text>
                   </View>
                 </View>
+                ) : null}
                 {/* 计薪工时说明：排班有用餐扣除或有加回申请时才显示，员工能看到扣了多少、待审多少。 */}
                 {(session.mealDeductionMinutes ?? 0) > 0
                   || (session.pendingMealAddBackMinutes ?? 0) > 0
@@ -501,12 +663,104 @@ export function TodayPunchCard({
             ))}
           </View>
         ))}
-      </Card.Content>
-    </Card>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { gap: HB_SPACING.sm },
+  // 主卡片：上班前蓝、工作中绿、其余白色汇总
+  hero: { borderRadius: 20, gap: 6, overflow: "hidden", padding: HB_SPACING.md },
+  heroBefore: { backgroundColor: "#0958D9" },
+  heroWorking: { backgroundColor: "#067647" },
+  heroSummary: {
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outlineMuted,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: HB_SPACING.sm,
+  },
+  heroPill: { backgroundColor: "rgba(255,255,255,0.18)", borderRadius: 10, paddingHorizontal: 9, paddingVertical: 3 },
+  heroPillText: { color: HB_COLORS.white, fontSize: 12, fontWeight: "700" },
+  heroMeta: { color: "rgba(255,255,255,0.88)", flexShrink: 1, fontSize: 12.5 },
+  heroClock: { color: HB_COLORS.white, fontSize: 46, fontVariant: ["tabular-nums"], fontWeight: "800", letterSpacing: -1, marginTop: 4 },
+  heroClockSeconds: { color: "rgba(255,255,255,0.72)", fontSize: 20, fontWeight: "600" },
+  heroClockSuffix: { color: "rgba(255,255,255,0.85)", fontSize: 20, fontWeight: "700" },
+  heroLine: { color: HB_COLORS.white, fontSize: 14 },
+  bigButtonHalo: {
+    alignSelf: "center",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    borderRadius: 104,
+    marginTop: HB_SPACING.sm,
+    padding: 18,
+  },
+  bigButton: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.white,
+    borderRadius: 84,
+    gap: 4,
+    height: 168,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    width: 168,
+  },
+  bigButtonDisabled: { backgroundColor: "#F2F4F7" },
+  bigButtonText: { color: HB_COLORS.action, fontSize: 18, fontWeight: "800", textAlign: "center" },
+  bigButtonTextDisabled: { color: "#98A2B3" },
+  bigButtonHint: { color: HB_COLORS.textSecondary, fontSize: 11, textAlign: "center" },
+  heroChips: { flexDirection: "row", flexWrap: "wrap", gap: 6, justifyContent: "center", marginTop: HB_SPACING.xs },
+  heroChip: { backgroundColor: "rgba(255,255,255,0.16)", borderRadius: 9, paddingHorizontal: 8, paddingVertical: 3 },
+  heroChipWarn: { backgroundColor: "#FEF0C7" },
+  heroChipText: { color: HB_COLORS.white, fontSize: 11.5 },
+  progress: { gap: 4, marginTop: HB_SPACING.xs },
+  progressTrack: { backgroundColor: "rgba(255,255,255,0.22)", borderRadius: 4, height: 8, overflow: "hidden" },
+  progressFill: { backgroundColor: HB_COLORS.white, borderRadius: 4, height: 8 },
+  progressText: { color: "rgba(255,255,255,0.88)", fontSize: 11.5, fontVariant: ["tabular-nums"] },
+  heroActions: { flexDirection: "row", gap: HB_SPACING.xs, marginTop: HB_SPACING.sm },
+  heroPrimary: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.white,
+    borderRadius: 24,
+    flex: 1,
+    flexDirection: "row",
+    gap: 6,
+    height: 48,
+    justifyContent: "center",
+  },
+  heroPrimaryDisabled: { backgroundColor: "#F2F4F7" },
+  heroPrimaryText: { color: HB_COLORS.success, fontSize: 16, fontWeight: "800" },
+  heroSecondary: {
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: 24,
+    flexDirection: "row",
+    gap: 6,
+    height: 48,
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  heroSecondaryText: { color: HB_COLORS.white, fontSize: 15, fontWeight: "700" },
+  summaryHead: { alignItems: "center", flexDirection: "row", gap: HB_SPACING.sm },
+  checkCircle: {
+    alignItems: "center",
+    backgroundColor: "#ECFDF3",
+    borderRadius: 26,
+    height: 52,
+    justifyContent: "center",
+    width: 52,
+  },
+  summaryTitle: { color: HB_COLORS.textPrimary, fontSize: 22, fontWeight: "800" },
+  summaryScan: { alignSelf: "flex-start" },
+  timelineCard: {
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: HB_RADIUS.surface + 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: HB_SPACING.sm,
+    padding: HB_SPACING.sm,
+  },
+  timelineTitle: { color: HB_COLORS.textPrimary, fontWeight: "700" },
+  deviceText: { color: HB_COLORS.textSecondary, paddingLeft: 72 },
   banner: {
     alignItems: "flex-start",
     alignSelf: "stretch",
@@ -533,7 +787,6 @@ const styles = StyleSheet.create({
   dotEmpty: { borderColor: HB_COLORS.outline, borderStyle: "dashed", borderWidth: 1.5 },
   dotFilled: { backgroundColor: HB_COLORS.success },
   flexText: { flex: 1 },
-  hero: { gap: HB_SPACING.xs },
   lastScan: {
     backgroundColor: HB_COLORS.surfaceMuted,
     borderRadius: HB_RADIUS.control,
@@ -583,10 +836,10 @@ const styles = StyleSheet.create({
   storeGroup: { gap: HB_SPACING.xs },
   summary: { flexDirection: "row", gap: 6 },
   summaryTile: {
-    alignItems: "center",
     backgroundColor: HB_COLORS.surfaceMuted,
     borderRadius: HB_RADIUS.control,
     flex: 1,
+    paddingHorizontal: 10,
     paddingVertical: 6,
   },
   tabularText: { fontVariant: ["tabular-nums"] },

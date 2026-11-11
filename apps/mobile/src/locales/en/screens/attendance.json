@@ -35,6 +35,11 @@
       "myRequests": "Requests",
       "approvals": "Inbox",
       "approvalsWithCount": "Inbox {{count}}"
+    },
+    "personal": {
+      "today": "Today",
+      "mySchedule": "My roster",
+      "myRequests": "My requests"
     }
   },
   "today": {
@@ -134,7 +139,19 @@
     "hero": {
       "shift": "Shift {{start}} – {{end}}",
       "noShift": "No shift today",
-      "worked": "Worked {{duration}}"
+      "worked": "Worked {{duration}}",
+      "startsIn": "starts in {{duration}}",
+      "startedAgo": "{{duration}} past start time",
+      "scanHint": "Point at the QR code on the till screen",
+      "workedSuffix": "worked",
+      "remaining": "{{duration}} left",
+      "shiftEnded": "Shift ended",
+      "clockedInAt": "In at {{time}}",
+      "paidTotal": "Paid {{hours}} h",
+      "inOut": "{{in}} in → {{out}} out",
+      "mealDeducted": "{{duration}} meal deducted",
+      "timelineTitle": "Today's punches",
+      "viaDevice": "Scanned till QR · {{device}}"
     },
     "summary": {
       "worked": "Worked",
@@ -818,7 +835,8 @@
       "device": "Device fault",
       "shiftChanged": "Shift changed",
       "other": "Other"
-    }
+    },
+    "tileTitle": "Missed a punch?"
   },
   "datePicker": {
     "selectDate": "Select date",
@@ -1136,5 +1154,16 @@
     "openApprovals": "Approvals ›",
     "weekHours": "Hours this week",
     "openHours": "Hours ›"
+  },
+  "personal": {
+    "previousWeek": "Previous week",
+    "nextWeek": "Next week",
+    "dayRest": "Off",
+    "dayLeave": "Lv",
+    "leaveTile": "Leave",
+    "leaveTileHint": "Annual / sick",
+    "nextShift": "Next shift {{start}}–{{end}}",
+    "nextShiftDraft": "Draft · counts once the manager publishes",
+    "nextShiftPublished": "Published"
   }
 }

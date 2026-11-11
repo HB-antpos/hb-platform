@@ -20,7 +20,7 @@ assert.match(screen, /canAdjustPunch=\{access\.canAdjustAttendancePunch\}/,
   "漏下班在审核详情里直接补下班卡，必须按修改打卡权限放行");
 assert.match(screen, /canReviewSelf=\{access\.canReviewOwnAttendance\}/,
   "本人审核只认 Attendance.Approval.ReviewSelf");
-assert.match(screen, /value: "requests"/, "员工端必须提供「申请」页签");
+assert.match(screen, /key: "requests"/, "员工端必须提供「申请」页签");
 
 assert.match(availabilitySheet, /AvailabilityBatchSaveError/,
   "可上班时间保存失败必须保留未保存日期");
