@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Hbpos.Client.Wpf.Services.Zeller;
 using Microsoft.Extensions.Time.Testing;
 
@@ -597,8 +598,38 @@ public sealed class ZellerTerminalGatewayTests
         var timing = Assert.Single(lines, line => line.StartsWith("timing purchase ", StringComparison.Ordinal));
         Assert.Equal(
             "timing purchase result=Completed cold=yes blockedBy=- gateWaitMs=0 terminalMs=0 uiQueueMs=0 sdkStartMs=0 " +
-            "issuedAtMs=0 awaitingCardAtMs=2300 processingAtMs=7300 sdkToAwaitingMs=2300 recycleMs=0 totalMs=8300",
+            "issuedAtMs=0 promptAtMs=2300 processingAtMs=7300 sdkToAwaitingMs=2300 recycleMs=0 totalMs=8300",
             timing);
+    }
+
+    [Fact]
+    public async Task Timing_log_keys_avoid_the_names_the_central_log_redacts()
+    {
+        // 2026-11-11 实测：旧键名 awaitingCardAtMs 含 card，中心日志入库时整个值被抹成 [REDACTED]。
+        // 服务端按「键名含这些片段」抹值（BlazorApp.Api 的 ApplicationLogService.SensitiveKeyFragments），
+        // 所以日志里的键名不能含它们。这里复制了那份清单；服务端新增片段时请同步这里。
+        string[] redactedFragments =
+        [
+            "authorization", "bearer", "password", "pin", "apikey", "token", "secret", "credential", "cvv", "pan", "card",
+            "cardnumber", "voucher", "vouchercode", "cookie", "header", "employeebarcode", "customeremail", "customerphone",
+            "customeraddress", "customername", "requestbody", "responsebody", "rawrequest", "rawresponse"
+        ];
+        using var harness = new Harness();
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        var operation = await harness.NextPurchaseAsync();
+        operation.Emit(ZellerTerminalEventKind.AwaitingPaymentMethod);
+        operation.Emit(ZellerTerminalEventKind.Processing);
+        operation.Complete(ZellerCallResult.FromTransaction(Approved));
+        await purchase;
+
+        var keys = harness.LogLines
+            .Where(line => line.StartsWith("timing ", StringComparison.Ordinal) || line.StartsWith("event ", StringComparison.Ordinal))
+            .SelectMany(line => Regex.Matches(line, "(?<key>[A-Za-z]+)=").Select(match => match.Groups["key"].Value))
+            .Distinct()
+            .ToArray();
+        Assert.Contains("promptAtMs", keys);
+        var clashes = keys.Where(key => redactedFragments.Any(fragment => key.ToLowerInvariant().Contains(fragment, StringComparison.Ordinal))).ToArray();
+        Assert.True(clashes.Length == 0, $"these log keys would be redacted by the central log: {string.Join(", ", clashes)}");
     }
 
     [Fact]
