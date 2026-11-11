@@ -12,7 +12,6 @@ import {
 } from "react-native";
 import {
   Button,
-  Card,
   Chip,
   IconButton,
   Text,
@@ -25,6 +24,8 @@ import {
   type AttendanceStatusTone,
 } from "./AdjustmentFormControls";
 import { ScheduleExportSheet } from "./ScheduleExportSheet";
+import { PatternFill } from "./approvals/approval-ui";
+import { ScheduleDayView } from "./schedule/ScheduleDayView";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { useAuthStore } from "@/store/auth-store";
 import {
@@ -38,6 +39,8 @@ import {
 import {
   availabilityKey,
   classifyScheduleGridCell,
+  countDraftShifts,
+  countScheduledPeopleByDay,
   countUncoveredDays,
   employmentTypeCode,
   type EmploymentTypeCode,
@@ -50,6 +53,7 @@ import {
   shiftEditorMinutes,
   stepClockTime,
   summarizeSchedulePublishState,
+  todayScrollOffset,
   type ScheduleGridCell,
   type SchedulePublishState,
 } from "@/modules/attendance/schedule-grid";
@@ -87,8 +91,10 @@ import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 const ROW_HEADER_WIDTH = 104;
 const HEADER_HEIGHT = 52;
-const MIN_CELL_WIDTH = 56;
-const CELL_HEIGHT = 52;
+// 格子放大：竖屏每格至少 76pt 宽、68pt 高（一屏 3～4 天，左右滑看其余几天）；横屏全屏 58pt 高、一屏放下 7 天。
+const MIN_CELL_WIDTH = 76;
+const CARD_CELL_HEIGHT = 68;
+const FULLSCREEN_CELL_HEIGHT = 58;
 /** 长按多久后拿起班次开始拖动（毫秒）。 */
 const DRAG_LONG_PRESS_MS = 280;
 /** 拖动时跟手的小浮标尺寸；浮标显示在手指上方，避免被手指挡住。 */
@@ -433,6 +439,11 @@ export function ScheduleManagementCard({
   // 员工模式存日期、日期模式存员工 GUID。
   const [batchSelection, setBatchSelection] = useState<ReadonlySet<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // 周表 / 日视图；日视图默认选今天（不在本周时选周一）。
+  const [viewMode, setViewMode] = useState<"week" | "day">("week");
+  // 新建班次时「同时排到」本周其他几天（只能选空格或仅有可上班的格子）。
+  const [extraDays, setExtraDays] = useState<ReadonlySet<string>>(() => new Set());
+  const [dayIndex, setDayIndex] = useState(0);
   const [isExportOpen, setIsExportOpen] = useState(false);
   // 「点选目标格」：拿起一个班次（移动 / 复制）或常用班次（添加）后，点格子放下
   const [placement, setPlacement] = useState<PlacementSource | null>(null);
@@ -498,6 +509,12 @@ export function ScheduleManagementCard({
 
   const days = useMemo(() => buildWeekDates(weekStartDate), [weekStartDate]);
   const today = toLocalDateString(new Date());
+  const autoScrolledWeekRef = useRef<Record<GridVariant, string>>({ card: "", fullscreen: "" });
+  useEffect(() => {
+    setDayIndex(Math.max(0, days.indexOf(today)));
+    // 只在换周时重置；today 在一次会话内基本不变。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekStartDate]);
 
   // 店长默认只看到自己；其他店长由筛选开关控制，店员始终在表中。
   const currentUser = useAuthStore((state) => state.user);
@@ -575,6 +592,8 @@ export function ScheduleManagementCard({
     () => summarizeSchedulePublishState(schedules),
     [schedules],
   );
+  const peopleByDay = useMemo(() => countScheduledPeopleByDay(days, schedules), [days, schedules]);
+  const draftCount = useMemo(() => countDraftShifts(schedules), [schedules]);
 
   const weekEndDate = days[6] || "";
   const weekRangeLabel = formatWeekRange(weekStartDate, weekEndDate);
@@ -618,6 +637,7 @@ export function ScheduleManagementCard({
     if (!storeCode) {
       return;
     }
+    setExtraDays(new Set());
     setEditingTarget({
       daySchedules,
       userGuid: row.userGuid,
@@ -680,6 +700,7 @@ export function ScheduleManagementCard({
   };
 
   const closeEditor = () => {
+    setExtraDays(new Set());
     setEditingTarget(null);
     setBatchTarget(null);
     setBatchSelection(new Set());
@@ -773,6 +794,24 @@ export function ScheduleManagementCard({
     place();
   };
 
+  // 网格量到宽度、换周或打开全屏后，本周第一次显示时横向滚到今天（左边留出前一天）；
+  // 之后店长自己滑到哪就停在哪，不再自动跳。
+  useEffect(() => {
+    (["card", "fullscreen"] as const).forEach((variant) => {
+      const node = scrollRefs.current[variant];
+      if (!gridWidths[variant] || !node || !rows.length || autoScrolledWeekRef.current[variant] === weekStartDate) return;
+      autoScrolledWeekRef.current[variant] = weekStartDate;
+      const x = todayScrollOffset(days, today, cellWidthOf(variant));
+      scrollXRef.current[variant] = x;
+      // 首次布局时立刻 scrollTo 可能被忽略，放到下一帧。
+      requestAnimationFrame(() => node.scrollTo({ x, animated: false }));
+    });
+    // cellWidthOf 只依赖 gridWidths。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [days, gridWidths, isFullscreen, rows.length, today, viewMode, weekStartDate]);
+
+  const cellHeightOf = (variant: GridVariant) => (variant === "card" ? CARD_CELL_HEIGHT : FULLSCREEN_CELL_HEIGHT);
+
   const cellWidthOf = (variant: GridVariant) =>
     Math.max(MIN_CELL_WIDTH, Math.floor((gridWidths[variant] - ROW_HEADER_WIDTH - 2) / 7));
 
@@ -790,7 +829,7 @@ export function ScheduleManagementCard({
         originY: runtime.contentY,
         cellWidth: cellWidthOf(runtime.variant),
         headerHeight: HEADER_HEIGHT,
-        cellHeight: CELL_HEIGHT,
+        cellHeight: cellHeightOf(runtime.variant),
         rowCount: rows.length,
         dayCount: days.length,
       };
@@ -1066,16 +1105,22 @@ export function ScheduleManagementCard({
         resetMealBreakCount: form.mealBreakCount == null,
       });
     } else {
-      onCreate({
+      const payload = {
         workDate: normalized.workDate,
         startTime: normalized.startTime,
         endTime: normalized.endTime,
-        status: "Draft",
+        status: "Draft" as AttendanceScheduleStatus,
         remark: normalized.remark,
         mealBreakCount: form.mealBreakCount,
         storeCode,
         userGuid: editingTarget.userGuid,
-      });
+      };
+      const others = days.filter((day) => extraDays.has(day) && day !== editingTarget.workDate);
+      if (others.length) {
+        onCreateBatch([payload, ...others.map((workDate) => ({ ...payload, workDate }))]);
+      } else {
+        onCreate(payload);
+      }
     }
     closeEditor();
   };
@@ -1118,6 +1163,12 @@ export function ScheduleManagementCard({
   };
 
   const canSubmit = Boolean(form.startTime.trim() && form.endTime.trim());
+  const editorTotalMinutes = shiftEditorMinutes(form.startTime, form.endTime, 0);
+  const editorPaidMinutes = shiftEditorMinutes(form.startTime, form.endTime, form.mealBreakCount);
+  const editingOriginalMinutes = editingTarget?.schedule ? computeScheduleHourStats([editingTarget.schedule]).totalMinutes : 0;
+  const extraDayCount = editingTarget && !editingTarget.schedule
+    ? days.filter((day) => extraDays.has(day) && day !== editingTarget.workDate).length
+    : 0;
   // 编辑器显示的用餐次数：店长指定值优先，否则按当前起止时间（不扣用餐的总时长）推算默认次数，调时间时实时变化。
   const mealBreakCount = form.mealBreakCount
     ?? defaultMealBreakCount(shiftEditorMinutes(form.startTime, form.endTime, 0));
@@ -1209,12 +1260,25 @@ export function ScheduleManagementCard({
   );
 
   // 全屏横屏宽度够，图例与状态同一行；竖屏卡片里图例放到网格下方。
+  const uncoveredNames = days
+    .map((day, index) => (peopleByDay[index] === 0 ? t(`weekdays.${index}`) : ""))
+    .filter(Boolean);
   const renderStatusLine = (withLegend = false) => (
     <View style={styles.statusLine}>
       <StatusPill
-        label={t(`scheduleManagement.publishState.${publishState}`)}
+        label={publishState === "draft"
+          ? t("scheduleManagement.draftCount", { count: draftCount })
+          : t(`scheduleManagement.publishState.${publishState}`)}
         tone={PUBLISH_STATE_TONES[publishState]}
       />
+      {uncoveredDays > 0 && rows.length > 0 && publishState !== "empty" ? (
+        <StatusPill
+          label={uncoveredNames.length <= 2
+            ? t("scheduleManagement.uncoveredNamed", { days: uncoveredNames.join("、") })
+            : t("scheduleManagement.uncoveredDays", { count: uncoveredDays })}
+          tone="danger"
+        />
+      ) : null}
       {canExportImage ? (
         <Button
           compact
@@ -1225,11 +1289,6 @@ export function ScheduleManagementCard({
         >
           {t("scheduleManagement.export.action")}
         </Button>
-      ) : null}
-      {uncoveredDays > 0 && rows.length > 0 ? (
-        <Text variant="labelSmall" style={styles.uncoveredText}>
-          {t("scheduleManagement.uncoveredDays", { count: uncoveredDays })}
-        </Text>
       ) : null}
       {otherManagerCount > 0 ? (
         <Chip
@@ -1245,12 +1304,15 @@ export function ScheduleManagementCard({
     </View>
   );
 
+  // 格子内容：班次写成两行大字（开始 / 结束），底行计薪小时与用餐；草稿虚线框；
+  // 与员工上报冲突或未成年提醒时右上角橙色「!」。空格：可上班「+ 可上班」，不能上班斜纹，请假写假别。
   const renderCellContent = (cell: ScheduleGridCell) => {
     if (cell.kind === "leave") {
+      const leaveType = cell.schedules.find((item) => item.leaveType)?.leaveType;
       return (
         <View style={[styles.cellChip, styles.leaveChip]}>
-          <Text style={styles.leaveText} numberOfLines={1}>
-            {t("scheduleManagement.cell.leave")}
+          <Text style={styles.leaveText} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>
+            {leaveType ? t(`leaveTypes.${leaveType}`, t("scheduleManagement.cell.leave")) : t("scheduleManagement.cell.leave")}
           </Text>
         </View>
       );
@@ -1268,47 +1330,58 @@ export function ScheduleManagementCard({
       );
       // 用餐小标记：手动指定的（含 0）醒目，按时长自动扣的（≥4.5h 1 次、>9h 2 次）弱化显示，合计为 0 的自动班次不显示
       const mealBadge = getCellMealBadge(cell.schedules);
+      const paidMinutes = computeScheduleHourStats(cell.schedules).totalMinutes;
       return (
         <View style={[styles.cellChip, styles.shiftChip, isDraft ? styles.shiftChipDraft : null]}>
-          <Text
-            style={styles.shiftText}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.75}
-          >
-            {formatShiftShort(first.startTime, first.endTime)}
-          </Text>
-          {cell.schedules.length > 1 ? (
-            <Text style={styles.moreText}>+{cell.schedules.length - 1}</Text>
-          ) : null}
-          {mealBadge ? (
-            <Text style={[styles.mealBadge, mealBadge.manual ? null : styles.mealBadgeAuto]}>
-              {t("scheduleManagement.cell.mealBadge", { count: mealBadge.count })}
+          <View>
+            <Text style={styles.shiftText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {normalizeClockTime(first.startTime)}
             </Text>
-          ) : null}
-          {/* 与员工上报的不能上班 / 可上班时间冲突：只提醒不拦截，小三角标记 */}
+            <Text style={styles.shiftEndText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+              {normalizeClockTime(first.endTime)}
+            </Text>
+          </View>
+          <View style={styles.shiftFoot}>
+            <Text style={styles.shiftHours} numberOfLines={1}>
+              {t("scheduleManagement.hoursShort", { hours: formatScheduleHours(paidMinutes) })}
+              {cell.schedules.length > 1 ? <Text style={styles.moreText}>{` +${cell.schedules.length - 1}`}</Text> : null}
+            </Text>
+            {mealBadge ? (
+              <Text style={[styles.mealBadge, mealBadge.manual ? null : styles.mealBadgeAuto]}>
+                {t("scheduleManagement.cell.mealBadge", { count: mealBadge.count })}
+              </Text>
+            ) : null}
+          </View>
+          {/* 与员工上报的不能上班 / 可上班时间冲突、未成年用工合规：只提醒不拦截，右上角橙色圆点「!」 */}
           {hasAvailabilityConflict ? (
-            <Text style={styles.conflictMark} accessibilityLabel={t("scheduleManagement.cell.conflictA11y")}>⚠︎</Text>
-          ) : null}
-          {/* 未成年用工合规只提醒不拦截：格子里用小标记提示店长，详情在提醒待办里看。 */}
-          {hasMinorFindings ? (
-            <Text style={styles.minorWarning} accessibilityLabel={t("minorCompliance.cellWarning")}>!</Text>
+            <Text style={styles.conflictMark} accessibilityLabel={t("scheduleManagement.cell.conflictA11y")}>!</Text>
+          ) : hasMinorFindings ? (
+            <Text style={[styles.conflictMark, styles.minorWarning]} accessibilityLabel={t("minorCompliance.cellWarning")}>!</Text>
           ) : null}
         </View>
       );
     }
     if (cell.kind === "available") {
+      const first = cell.availability.find((item) => !item.isUnavailable);
+      const range = first
+        ? isAllDayRange(first.startTime, first.endTime)
+          ? t("availability.allDay")
+          : `${normalizeClockTime(first.startTime)}–${normalizeClockTime(first.endTime)}`
+        : "";
       return (
         <View style={[styles.cellChip, styles.availableChip]}>
+          <Text style={styles.availablePlus}>+</Text>
           <Text style={styles.availableText} numberOfLines={1}>
             {t("scheduleManagement.cell.available")}
           </Text>
+          {range ? <Text style={styles.availableRange} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>{range}</Text> : null}
         </View>
       );
     }
     if (cell.kind === "unavailable") {
       return (
         <View style={[styles.cellChip, styles.unavailableChip]}>
+          <PatternFill color="#D0D5DD" variant="diagonal" />
           <Text style={styles.unavailableText} numberOfLines={1}>
             {t("scheduleManagement.cell.unavailable")}
           </Text>
@@ -1442,6 +1515,7 @@ export function ScheduleManagementCard({
                 style={({ pressed }) => [
                   styles.bodyCell,
                   styles.rowHeader,
+                  { height: cellHeightOf(variant) },
                   pressed ? styles.cellPressed : null,
                 ]}
               >
@@ -1515,6 +1589,10 @@ export function ScheduleManagementCard({
                       >
                         {shortDate(day)}
                       </Text>
+                      {/* 这天排了几个人；0 人标红，一眼看出哪天没人排 */}
+                      <Text style={[styles.dayCount, peopleByDay[index] === 0 ? styles.dayCountZero : null]}>
+                        {t("scheduleManagement.dayPeople", { count: peopleByDay[index] ?? 0 })}
+                      </Text>
                     </Pressable>
                   );
                 })}
@@ -1542,7 +1620,7 @@ export function ScheduleManagementCard({
                         style={({ pressed }) => [
                           styles.bodyCell,
                           styles.dayCell,
-                          { width: cellWidth },
+                          { width: cellWidth, height: cellHeightOf(variant) },
                           day === today ? styles.todayColumn : null,
                           // 放置 / 拖动模式：可放蓝 / 提醒琥珀 / 不能放红，与 Web 拖拽的落点提示一致
                           verdict?.state === "ok" ? styles.placementOk : null,
@@ -1620,7 +1698,7 @@ export function ScheduleManagementCard({
         textColor={HB_COLORS.white}
         style={compact ? null : styles.primaryAction}
       >
-        {t("actions.publishWeek")}
+        {draftCount > 0 ? t("scheduleManagement.publishWithDrafts", { count: draftCount }) : t("actions.publishWeek")}
       </Button>
     </>
   );
@@ -1812,17 +1890,33 @@ export function ScheduleManagementCard({
                 : "scheduleManagement.editor.conflictOutside")}
             </Text>
           ) : null}
-          <View style={styles.infoRow}>
-            <Text variant="bodySmall" style={styles.muted}>
-              {t("scheduleManagement.editor.weekHoursLabel")}
-            </Text>
-            <Text variant="bodyMedium" style={styles.infoValue}>
-              {t("scheduleManagement.editor.hoursValue", {
-                hours: formatScheduleHours(rowMinutes.get(editingTarget.userGuid) ?? 0),
-              })}
-            </Text>
-          </View>
         </View>
+
+        {/* 计薪小时（扣用餐）与本周合计：随起止时间、用餐次数实时变化 */}
+        <View style={styles.paidSummary}>
+          <Text variant="bodyMedium" style={styles.paidSummaryText}>
+            {t("scheduleManagement.editor.paidSummary", {
+              paid: formatScheduleHours(editorPaidMinutes),
+              total: formatScheduleHours(editorTotalMinutes),
+              meal: editorTotalMinutes - editorPaidMinutes,
+            })}
+          </Text>
+          <Text variant="bodyMedium" style={styles.paidSummaryText}>
+            {t("scheduleManagement.editor.weekTotal", {
+              hours: formatScheduleHours(
+                Math.max(0, (rowMinutes.get(editingTarget.userGuid) ?? 0) - editingOriginalMinutes + (editingTarget.daySchedules.some((item) => item.leaveType) ? 0 : editorPaidMinutes) * (1 + extraDayCount)),
+              ),
+            })}
+          </Text>
+        </View>
+        {editingTarget.schedule?.minorCompliance?.hasFindings ? (
+          <View style={styles.minorNotice}>
+            <Text variant="labelMedium" style={styles.minorNoticeTitle}>{t("scheduleManagement.editor.minorTitle")}</Text>
+            {editingTarget.schedule.minorCompliance.findings.map((finding, index) => (
+              <Text key={`${finding.ruleId}-${index}`} variant="bodySmall" style={styles.minorNoticeText}>{`▲ ${finding.message}`}</Text>
+            ))}
+          </View>
+        ) : null}
 
         {editingTarget.daySchedules.length && row ? (
           // 同一天的班次都列在这里切换；每个班次块右侧的「×」直接删除（先确认）；也可以给同一员工再加一班。
@@ -1888,6 +1982,41 @@ export function ScheduleManagementCard({
         ) : null}
 
         {renderShiftFields()}
+
+        {!editingTarget.schedule && row ? (
+          // 同时排到：把同一个班次一次排到本周多天；已有班次 / 请假 / 不能上班的日子置灰。
+          <View style={styles.editorSection}>
+            <Text variant="labelMedium" style={styles.muted}>{t("scheduleManagement.editor.sameShiftDays")}</Text>
+            <View style={styles.dayChips}>
+              {days.map((day, index) => {
+                const current = day === editingTarget.workDate;
+                const enabled = !current && isBatchSchedulableCell(cellOf(row, day));
+                const selected = current || extraDays.has(day);
+                return (
+                  <Pressable
+                    key={day}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: selected, disabled: !enabled }}
+                    disabled={!enabled}
+                    onPress={() =>
+                      setExtraDays((currentSet) => {
+                        const next = new Set(currentSet);
+                        if (next.has(day)) next.delete(day);
+                        else next.add(day);
+                        return next;
+                      })
+                    }
+                    style={[styles.dayChip, selected ? styles.dayChipOn : null, !enabled && !current ? styles.dayChipOff : null]}
+                  >
+                    <Text style={[styles.dayChipText, selected ? styles.dayChipTextOn : null, !enabled && !current ? styles.dayChipTextOff : null]}>
+                      {t(`weekdays.${index}`)}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
       </>
     );
   };
@@ -1932,11 +2061,13 @@ export function ScheduleManagementCard({
         textColor={HB_COLORS.white}
         style={styles.primaryAction}
       >
-        {t("scheduleManagement.editor.save", {
-          hours: formatScheduleHours(
-            shiftEditorMinutes(form.startTime, form.endTime, form.mealBreakCount),
-          ),
-        })}
+        {extraDayCount > 0
+          ? t("scheduleManagement.batch.save", { count: extraDayCount + 1, hours: formatScheduleHours(editorPaidMinutes) })
+          : t("scheduleManagement.editor.save", {
+              hours: formatScheduleHours(
+                shiftEditorMinutes(form.startTime, form.endTime, form.mealBreakCount),
+              ),
+            })}
       </Button>
     </View>
   );
@@ -1953,47 +2084,81 @@ export function ScheduleManagementCard({
 
   return (
     <>
-      <Card mode="outlined" style={styles.card}>
-        <Card.Title
-          title={t("sections.scheduleManagement")}
-          subtitle={storeLabel}
-          right={(props) => (
+      <View style={styles.content}>
+          <View style={styles.toolbar}>
+            <View style={styles.weekBox}>
+              <IconButton
+                icon="chevron-left"
+                size={20}
+                style={styles.weekArrow}
+                accessibilityLabel={t("scheduleManagement.previousWeek")}
+                onPress={onPreviousWeek}
+                disabled={isBusy}
+              />
+              <Text style={styles.weekBoxText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+                {weekInfo
+                  ? t("scheduleManagement.weekBoxLabel", { week: weekInfo.week, start: shortDate(weekStartDate), end: shortDate(weekEndDate) })
+                  : weekRangeLabel}
+              </Text>
+              <IconButton
+                icon="chevron-right"
+                size={20}
+                style={styles.weekArrow}
+                accessibilityLabel={t("scheduleManagement.nextWeek")}
+                onPress={onNextWeek}
+                disabled={isBusy}
+              />
+            </View>
+            {/* 周表 / 日视图（日视图看某天每小时几个人，找人手缺口） */}
+            <View style={styles.viewSwitch} accessibilityRole="tablist">
+              {(["week", "day"] as const).map((mode) => (
+                <Pressable
+                  key={mode}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: viewMode === mode }}
+                  onPress={() => setViewMode(mode)}
+                  style={[styles.viewSwitchItem, viewMode === mode ? styles.viewSwitchItemOn : null]}
+                >
+                  <Text style={[styles.viewSwitchText, viewMode === mode ? styles.viewSwitchTextOn : null]}>
+                    {t(`scheduleManagement.view.${mode}`)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
             <IconButton
-              {...props}
               icon="fullscreen"
+              mode="outlined"
+              size={18}
+              style={styles.fullscreenButton}
               accessibilityLabel={t("scheduleManagement.fullscreen")}
               onPress={() => setIsFullscreen(true)}
             />
-          )}
-        />
-        <Card.Content style={styles.content}>
-          <View style={styles.toolbar}>
-            <IconButton
-              icon="chevron-left"
-              mode="outlined"
-              accessibilityLabel={t("scheduleManagement.previousWeek")}
-              onPress={onPreviousWeek}
-              disabled={isBusy}
-            />
-            <View style={styles.weekTitle}>
-              <Text variant="titleMedium">{weekNumberLabel}</Text>
-              <Text variant="bodySmall" style={styles.muted}>
-                {weekRangeLabel}
-              </Text>
-            </View>
-            <IconButton
-              icon="chevron-right"
-              mode="outlined"
-              accessibilityLabel={t("scheduleManagement.nextWeek")}
-              onPress={onNextWeek}
-              disabled={isBusy}
-            />
           </View>
 
-          {renderStats()}
           {renderStatusLine()}
-          {renderScheduleArea("card")}
-          {storeCode && rows.length ? (
+          <Text variant="labelSmall" style={styles.muted}>
+            {t("scheduleManagement.weekSummary", {
+              people: `${scheduledPeople}/${rows.length}`,
+              hours: hoursShort(hourStats.totalMinutes),
+              weekend: hoursShort(hourStats.weekendMinutes),
+            })}
+          </Text>
+          {viewMode === "day" && storeCode && rows.length ? (
+            <ScheduleDayView
+              days={days}
+              today={today}
+              dayIndex={dayIndex}
+              onSelectDay={setDayIndex}
+              rows={rows}
+              peopleByDay={peopleByDay}
+              cellOf={cellOf}
+              disabled={!storeCode || isBusy || Boolean(placement)}
+              onOpenCell={(row, day, index, cell) => openCell(row, day, index, cell)}
+            />
+          ) : (
+            renderScheduleArea("card")
+          )}
+          {viewMode === "week" && storeCode && rows.length ? (
             <View style={styles.gridFooter}>
               {renderLegend()}
               <Text variant="labelSmall" style={styles.hint}>
@@ -2003,8 +2168,7 @@ export function ScheduleManagementCard({
           ) : null}
 
           <View style={styles.weekActions}>{renderWeekActions()}</View>
-        </Card.Content>
-      </Card>
+      </View>
 
       <BusinessSheet
         visible={isEditorOpen && !isFullscreen}
@@ -2147,28 +2311,30 @@ export function ScheduleManagementCard({
 
 const styles = StyleSheet.create({
   availableChip: {
-    borderColor: HB_COLORS.outline,
+    borderColor: "#A6F4C5",
     borderStyle: "dashed",
-    borderWidth: 1,
+    borderWidth: 1.5,
+    flexDirection: "column",
+    gap: 0,
   },
   availableText: {
-    color: "#98A2B3",
-    fontSize: 12,
+    color: "#039855",
+    fontSize: 11,
     fontWeight: "600",
   },
   unavailableChip: {
-    backgroundColor: UNAVAILABLE.background,
+    backgroundColor: "#F9FAFB",
+    overflow: "hidden",
   },
   unavailableText: {
-    color: UNAVAILABLE.text,
-    fontSize: 12,
+    color: "#667085",
+    fontSize: 11,
     fontWeight: "600",
   },
   bodyCell: {
     borderColor: HB_COLORS.outlineMuted,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderTopWidth: StyleSheet.hairlineWidth,
-    height: CELL_HEIGHT,
   },
   card: {
     backgroundColor: HB_COLORS.white,
@@ -2179,7 +2345,7 @@ const styles = StyleSheet.create({
   },
   cellChip: {
     alignItems: "center",
-    borderRadius: 6,
+    borderRadius: 8,
     flex: 1,
     flexDirection: "row",
     gap: 2,
@@ -2368,14 +2534,42 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   shiftChip: {
+    alignItems: "stretch",
     backgroundColor: ACCENT.background,
     borderColor: "#B2DDFF",
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: "column",
+    justifyContent: "space-between",
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
-  minorWarning: { color: "#B54708", fontSize: 11, fontWeight: "700", marginLeft: 2 },
-  conflictMark: { color: "#D46B08", fontSize: 11, fontWeight: "700", marginLeft: 1 },
+  shiftEndText: { color: "#2E90FA", fontSize: 13, fontVariant: ["tabular-nums"], fontWeight: "700", lineHeight: 15 },
+  shiftFoot: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
+  shiftHours: { color: "#1570EF", fontSize: 10.5, fontVariant: ["tabular-nums"], fontWeight: "700" },
+  dayCount: { color: HB_COLORS.textSecondary, fontSize: 10.5, fontWeight: "700" },
+  dayCountZero: { color: HB_COLORS.danger },
+  availablePlus: { color: "#12B76A", fontSize: 18, fontWeight: "700", lineHeight: 20 },
+  availableRange: { color: "#12B76A", fontSize: 10 },
+  minorWarning: { backgroundColor: "#B54708" },
+  conflictMark: {
+    backgroundColor: "#F79009",
+    borderRadius: 8,
+    color: HB_COLORS.white,
+    fontSize: 10,
+    fontWeight: "800",
+    height: 16,
+    lineHeight: 16,
+    overflow: "hidden",
+    position: "absolute",
+    // 放到格子外角（格子有 4pt 内边距），不压住开始时间。
+    right: -4,
+    textAlign: "center",
+    top: -4,
+    width: 16,
+  },
   conflictNotice: { color: "#B54708" },
-  mealBadge: { bottom: 0, color: "#667085", fontSize: 9, fontWeight: "700", position: "absolute", right: 2 },
+  mealBadge: { color: "#1570EF", fontSize: 10, fontWeight: "700" },
   // 自动扣餐：比手动指定的更浅更细，一眼能分辨
   mealBadgeAuto: { color: "#98A2B3", fontWeight: "500" },
   placementActions: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.xs },
@@ -2417,15 +2611,17 @@ const styles = StyleSheet.create({
   trayBar: { gap: HB_SPACING.xs },
   // 草稿班次：同样浅蓝底，用虚线描边区分未发布。
   shiftChipDraft: {
+    backgroundColor: HB_COLORS.white,
     borderColor: "#53B1FD",
     borderStyle: "dashed",
-    borderWidth: 1,
+    borderWidth: 1.5,
   },
   shiftText: {
     color: ACCENT.text,
-    flexShrink: 1,
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 15,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+    lineHeight: 17,
   },
   sidePanel: {
     backgroundColor: HB_COLORS.white,
@@ -2582,6 +2778,46 @@ const styles = StyleSheet.create({
     gap: HB_SPACING.xs,
     justifyContent: "space-between",
   },
+  weekBox: {
+    alignItems: "center",
+    backgroundColor: HB_COLORS.white,
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: HB_RADIUS.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+    flexDirection: "row",
+    height: 40,
+    minWidth: 0,
+  },
+  weekArrow: { margin: 0 },
+  weekBoxText: { color: HB_COLORS.textPrimary, flex: 1, fontSize: 13.5, fontWeight: "600", textAlign: "center" },
+  viewSwitch: { backgroundColor: HB_COLORS.surfaceMuted, borderRadius: 10, flexDirection: "row", padding: 3 },
+  viewSwitchItem: { borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
+  viewSwitchItemOn: { backgroundColor: HB_COLORS.white },
+  viewSwitchText: { color: HB_COLORS.textSecondary, fontSize: 13.5 },
+  viewSwitchTextOn: { color: HB_COLORS.textPrimary, fontWeight: "700" },
+  fullscreenButton: { margin: 0 },
+  paidSummary: {
+    backgroundColor: HB_COLORS.surfaceMuted,
+    borderRadius: HB_RADIUS.control,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: HB_SPACING.xs,
+    justifyContent: "space-between",
+    paddingHorizontal: HB_SPACING.sm,
+    paddingVertical: HB_SPACING.xs,
+  },
+  paidSummaryText: { color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"], fontWeight: "600" },
+  minorNotice: { backgroundColor: "#FDF2FA", borderColor: "#FCCEEE", borderRadius: HB_RADIUS.control, borderWidth: 1, gap: 2, padding: HB_SPACING.sm },
+  minorNoticeTitle: { color: "#9E165F" },
+  minorNoticeText: { color: "#9E165F" },
+  dayChips: { flexDirection: "row", gap: 5 },
+  dayChip: { alignItems: "center", borderColor: HB_COLORS.outline, borderRadius: 8, borderWidth: 1, flex: 1, paddingVertical: 6 },
+  dayChipOn: { backgroundColor: HB_COLORS.textPrimary, borderColor: HB_COLORS.textPrimary },
+  dayChipOff: { borderStyle: "dashed" },
+  dayChipText: { color: HB_COLORS.textPrimary, fontSize: 12.5 },
+  dayChipTextOn: { color: HB_COLORS.white, fontWeight: "700" },
+  dayChipTextOff: { color: "#D0D5DD" },
   uncoveredText: {
     color: HB_COLORS.warning,
   },
