@@ -211,8 +211,10 @@ public sealed class ZellerCardTerminalClient
             ?? throw new InvalidOperationException($"Zeller attempt {attemptGuid} is already active.");
 
         // 中文注释：先落库再扣款。这一步失败就直接抛出，刷卡机没有收到任何请求。
+        var createStartedAt = _time.GetTimestamp();
         await _attempts.CreateAsync(pending, CancellationToken.None).ConfigureAwait(false);
-        Log($"attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents");
+        // 中文注释：createMs 是本机落库耗时，用来和网关的 timing 日志一起拼出「点击到刷卡机提示刷卡」的各段。
+        Log($"attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, createMs={ElapsedMs(createStartedAt)}");
 
         return await RunAsync(
             pending,
@@ -277,6 +279,7 @@ public sealed class ZellerCardTerminalClient
 
         using var lease = Activity.TryEnter(attemptGuid)
             ?? throw new InvalidOperationException($"Zeller attempt {attemptGuid} is already active.");
+        var createStartedAt = _time.GetTimestamp();
         if (businessKey is null)
         {
             await _attempts.CreateAsync(pending, CancellationToken.None).ConfigureAwait(false);
@@ -292,8 +295,8 @@ public sealed class ZellerCardTerminalClient
         }
 
         Log(originalTransactionUuid is null
-            ? $"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, UNMATCHED (card present, no original transaction)"
-            : $"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, original {originalTransactionUuid}");
+            ? $"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, UNMATCHED (card present, no original transaction), createMs={ElapsedMs(createStartedAt)}"
+            : $"refund attempt {attemptGuid} created, reference {reference}, amount {context.AmountCents} cents, original {originalTransactionUuid}, createMs={ElapsedMs(createStartedAt)}");
         return await RunAsync(
             pending,
             (events, token) => _gateway.RefundAsync(new ZellerRefundRequest(context.AmountCents, reference, originalTransactionUuid), events, token),
@@ -318,8 +321,11 @@ public sealed class ZellerCardTerminalClient
             return Outcome(canceled, ZellerPaymentState.NotPaid);
         }
 
+        var submitStartedAt = _time.GetTimestamp();
         var submitted = await SaveAsync(pending, pending with { Status = ZellerAttemptStatus.Submitted }).ConfigureAwait(false);
         progress?.Report(new ZellerPaymentProgress(ZellerPaymentProgressKind.Submitted, AttemptGuid: attemptGuid));
+        // 中文注释：这是请求交给网关之前的最后一次本机写库；它和 createMs 加起来就是我们这边的本机前置耗时。
+        Log($"attempt {attemptGuid}: marked submitted, saveMs={ElapsedMs(submitStartedAt)}");
 
         ZellerCallResult result;
         try
@@ -658,6 +664,11 @@ public sealed class ZellerCardTerminalClient
         new(state, attempt.AttemptGuid, attempt.Reference, attempt.AmountCents, attempt.FailureKind, attempt.UnknownReason, transaction, attempt.OperationKind);
 
     private void Log(string message) => _log?.Invoke(message);
+
+    /// <summary>从 <paramref name="startTimestamp"/> 到现在的毫秒数（取自注入的时钟，测试里是假时钟），只用于诊断日志。</summary>
+    private string ElapsedMs(long startTimestamp) =>
+        Math.Max(0L, (long)Math.Round(_time.GetElapsedTime(startTimestamp).TotalMilliseconds))
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>SDK 错误原文最多存这么多字符，防止异常堆栈之类的长文本撑大本地库。</summary>
     internal const int MaximumCallErrorMessageLength = 1_000;

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Hbpos.Client.Wpf.Services.Zeller;
 
 /// <summary>
@@ -28,6 +30,9 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     private TaskCompletionSource? _abandon;
     private int _terminalsCreated;
 
+    // 中文注释：当前占着串行门的操作名，只用来在耗时日志里说明「后来的调用被谁挡住了」，不参与任何判断。
+    private string? _activeOperation;
+
     public ZellerTerminalGateway(
         IZellerSdkTerminalFactory factory,
         IZellerUiDispatcher dispatcher,
@@ -52,6 +57,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     public async Task<ZellerPairingResult> InitialiseAsync(CancellationToken cancellationToken = default)
     {
         var run = await RunAsync(
+            "initialise",
             terminal => terminal.Initialise(),
             new CallLimits(_options.InitialiseTimeout, null),
             progress: null,
@@ -65,6 +71,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     {
         // 中文注释：配对要等店长在 Zeller 的页面里登录，所以没有总时长，只响应调用方的取消。
         var run = await RunAsync(
+            "setup",
             terminal => terminal.Setup(),
             new CallLimits(null, null),
             progress: null,
@@ -82,6 +89,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         ArgumentNullException.ThrowIfNull(request);
         var evidence = new CallEvidence();
         var run = await RunAsync(
+            "purchase",
             terminal => terminal.Purchase(request),
             new CallLimits(_options.TransactionTimeout, _options.AfterProcessingTimeout),
             progress,
@@ -99,6 +107,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         ArgumentNullException.ThrowIfNull(request);
         var evidence = new CallEvidence();
         var run = await RunAsync(
+            "refund",
             terminal => terminal.Refund(request),
             new CallLimits(_options.TransactionTimeout, _options.AfterProcessingTimeout),
             progress,
@@ -112,6 +121,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reference);
         var run = await RunAsync(
+            "query",
             terminal => terminal.GetTransactions(reference),
             new CallLimits(_options.QueryTimeout, null),
             progress: null,
@@ -166,6 +176,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     // ───────────── 核心：串行执行一次 SDK 调用 ─────────────
 
     private async Task<GatewayRun<T>> RunAsync<T>(
+        string operationName,
         Func<IZellerSdkTerminal, IZellerSdkOperation<T>> start,
         CallLimits limits,
         IProgress<ZellerTerminalEvent>? progress,
@@ -173,20 +184,30 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         Func<T, bool> leavesBrokenSdkState,
         CancellationToken cancellationToken)
     {
+        // 中文注释：耗时计时从调用方发起的这一刻开始。串行门正被别的调用占着时，先记下占着它的是谁
+        // （例如取消后 60 秒的迟到复查正在查询），好在日志里解释「为什么这次等了这么久」；读到的值只用于诊断。
+        var timings = new CallTimings(_time);
+        var blockedBy = _gate.CurrentCount == 0 ? Volatile.Read(ref _activeOperation) : null;
         try
         {
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
+            // 调用方在排队时就取消了：这段排队时间正是我们想看到的，所以也写一行。
+            timings.MarkGateAcquired();
+            LogTiming(operationName, nameof(RunKind.NotStarted), timings, blockedBy, TimeSpan.Zero);
             return GatewayRun<T>.NotStarted();
         }
 
+        timings.MarkGateAcquired();
+        Volatile.Write(ref _activeOperation, operationName);
         var abandon = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
             if (cancellationToken.IsCancellationRequested)
             {
+                LogTiming(operationName, nameof(RunKind.NotStarted), timings, blockedBy, TimeSpan.Zero);
                 return GatewayRun<T>.NotStarted();
             }
 
@@ -195,7 +216,8 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
                 _abandon = abandon;
             }
 
-            var run = await ExecuteAsync(start, limits, progress, evidence, abandon, cancellationToken).ConfigureAwait(false);
+            var run = await ExecuteAsync(start, limits, progress, evidence, abandon, timings, cancellationToken).ConfigureAwait(false);
+            timings.MarkFinished();
             var reason = run.Kind switch
             {
                 RunKind.Abandoned => "the call was abandoned",
@@ -203,11 +225,16 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
                 RunKind.Completed when leavesBrokenSdkState(run.Value!) => "the SDK reported a broken internal state",
                 _ => null
             };
+            // 中文注释：重建 Terminal 发生在放开串行门之前，它的耗时会算进下一次调用的 gateWaitMs，所以单独记一项。
+            var recycleElapsed = TimeSpan.Zero;
             if (reason is not null)
             {
+                var recycleStartedAt = _time.GetTimestamp();
                 await RecycleAsync(reason).ConfigureAwait(false);
+                recycleElapsed = _time.GetElapsedTime(recycleStartedAt);
             }
 
+            LogTiming(operationName, run.Kind.ToString(), timings, blockedBy, recycleElapsed);
             return run;
         }
         finally
@@ -220,6 +247,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
                 }
             }
 
+            Volatile.Write(ref _activeOperation, null);
             _gate.Release();
         }
     }
@@ -230,6 +258,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         IProgress<ZellerTerminalEvent>? progress,
         CallEvidence evidence,
         TaskCompletionSource abandon,
+        CallTimings timings,
         CancellationToken cancellationToken)
     {
         // 中文注释：所有时限都从事件发生的那一刻算起，而不是从计时器登记的那一刻。
@@ -239,6 +268,12 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
 
         void OnEvent(ZellerTerminalEvent terminalEvent)
         {
+            // 中文注释：事件到达的时刻要最先记下。AwaitingPaymentMethod 就是刷卡机已显示金额、提示刷卡的那一刻，
+            // 它和「SDK 调用发出」之间的间隔，就是「点击 Zeller 到刷卡机显示金额」里我们看不到的那一段（云端中转 + 刷卡机）。
+            // 事件名是 SDK 的枚举名，不含金额、卡号等内容。
+            timings.MarkEvent(terminalEvent.Kind);
+            Log($"event {terminalEvent.Name} atMs={timings.SinceRequestMs()}");
+
             switch (terminalEvent.Kind)
             {
                 case ZellerTerminalEventKind.AwaitingPaymentMethod:
@@ -269,13 +304,18 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         IZellerSdkOperation<T> operation;
         try
         {
-            var terminal = await EnsureTerminalAsync().ConfigureAwait(false);
+            var terminal = await EnsureTerminalAsync(timings).ConfigureAwait(false);
+            timings.MarkTerminalReady();
 
             // 中文注释：发起调用和登记事件回调放在界面线程的同一次调度里，事件不会在两者之间漏掉。
+            // 计时：「请求调度」到 lambda 开始执行是界面线程的排队时间（界面忙时会变长）；
+            // lambda 里 start() 的耗时是 SDK 的同步部分（首次调用时可能包含 WebView2 的创建）。
             operation = await _dispatcher.InvokeAsync(() =>
             {
+                timings.MarkDispatchStarted();
                 var created = start(terminal);
                 created.OnEvent(OnEvent);
+                timings.MarkIssued();
                 return created;
             }).ConfigureAwait(false);
         }
@@ -348,13 +388,15 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         return GatewayRun<T>.Abandoned();
     }
 
-    private async Task<IZellerSdkTerminal> EnsureTerminalAsync()
+    private async Task<IZellerSdkTerminal> EnsureTerminalAsync(CallTimings timings)
     {
         if (_terminal is { } existing)
         {
             return existing;
         }
 
+        // 中文注释：这次调用要新建 Terminal（程序刚启动后的第一次、或上次作废之后），在耗时日志里标成冷启动。
+        timings.MarkCold();
         var created = await _dispatcher.InvokeAsync(_factory.Create).ConfigureAwait(false);
         _terminal = created;
         var number = Interlocked.Increment(ref _terminalsCreated);
@@ -474,6 +516,13 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
 
     private void Log(string message) => _log?.Invoke(message);
 
+    /// <summary>每次调用结束时写一行耗时汇总；调用方在排队时就取消的也写（那段排队时间正是要看的）。</summary>
+    private void LogTiming(string operationName, string result, CallTimings timings, string? blockedBy, TimeSpan recycleElapsed)
+    {
+        timings.MarkFinished();
+        Log(timings.Describe(operationName, result, blockedBy, recycleElapsed));
+    }
+
     // ───────────── 内部类型 ─────────────
 
     private readonly record struct CallLimits(TimeSpan? Total, TimeSpan? AfterProcessing);
@@ -498,6 +547,88 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         public static GatewayRun<T> Abandoned() => new(RunKind.Abandoned);
 
         public static GatewayRun<T> Faulted(string message) => new(RunKind.Faulted, Message: message);
+    }
+
+    /// <summary>一次 SDK 调用各环节的时间点，只用来写诊断日志，不参与任何判断。</summary>
+    /// <remarks>
+    /// 中文注释：用来回答「点击 Zeller 到刷卡机显示金额」慢在哪一段，各项依次是：
+    /// gateWaitMs（排队等串行门）→ terminalMs（新建 Terminal，冷启动才有）→ uiQueueMs（界面线程排队）
+    /// → sdkStartMs（SDK 的同步部分）→ sdkToAwaitingMs（SDK 调用发出到刷卡机提示刷卡 = 云端中转 + 刷卡机）。
+    /// awaitingCardAtMs、processingAtMs、totalMs 都是从调用方发起算起；取不到的环节写 "-"。
+    /// 所有时间点取自注入的 TimeProvider（测试里是假时钟）。事件可能在任意线程上到达，所以每个时间点都只记第一次。
+    /// </remarks>
+    private sealed class CallTimings(TimeProvider time)
+    {
+        private const long Unset = long.MinValue;
+        private readonly long _requested = time.GetTimestamp();
+        private long _gateAcquired = Unset;
+        private long _terminalReady = Unset;
+        private long _dispatchStarted = Unset;
+        private long _issued = Unset;
+        private long _awaitingCard = Unset;
+        private long _processing = Unset;
+        private long _finished = Unset;
+        private volatile bool _cold;
+
+        public void MarkCold() => _cold = true;
+
+        public void MarkGateAcquired() => Mark(ref _gateAcquired);
+
+        public void MarkTerminalReady() => Mark(ref _terminalReady);
+
+        public void MarkDispatchStarted() => Mark(ref _dispatchStarted);
+
+        public void MarkIssued() => Mark(ref _issued);
+
+        public void MarkFinished() => Mark(ref _finished);
+
+        public void MarkEvent(ZellerTerminalEventKind kind)
+        {
+            switch (kind)
+            {
+                case ZellerTerminalEventKind.AwaitingPaymentMethod:
+                    Mark(ref _awaitingCard);
+                    break;
+                case ZellerTerminalEventKind.Processing:
+                    Mark(ref _processing);
+                    break;
+            }
+        }
+
+        /// <summary>从调用方发起到现在，毫秒。</summary>
+        public long SinceRequestMs() => ToMs(_requested, time.GetTimestamp());
+
+        public string Describe(string operationName, string result, string? blockedBy, TimeSpan recycleElapsed)
+        {
+            var gateAcquired = Read(ref _gateAcquired);
+            var terminalReady = Read(ref _terminalReady);
+            var dispatchStarted = Read(ref _dispatchStarted);
+            var issued = Read(ref _issued);
+            var awaiting = Read(ref _awaitingCard);
+            var processing = Read(ref _processing);
+            var finished = Read(ref _finished);
+            var cold = _cold ? "yes" : "no";
+
+            // 事件可能在 SDK 调用刚发出的同一时刻到达，时间点顺序略有颠倒时按 0 计，不会出现负数。
+            return $"timing {operationName} result={result} cold={cold} blockedBy={blockedBy ?? "-"} " +
+                $"gateWaitMs={Between(_requested, gateAcquired)} terminalMs={Between(gateAcquired, terminalReady)} " +
+                $"uiQueueMs={Between(terminalReady, dispatchStarted)} sdkStartMs={Between(dispatchStarted, issued)} " +
+                $"issuedAtMs={Between(_requested, issued)} awaitingCardAtMs={Between(_requested, awaiting)} " +
+                $"processingAtMs={Between(_requested, processing)} sdkToAwaitingMs={Between(issued, awaiting)} " +
+                $"recycleMs={FormatMs(Math.Max(0L, (long)Math.Round(recycleElapsed.TotalMilliseconds)))} " +
+                $"totalMs={Between(_requested, finished)}";
+        }
+
+        // 只记第一次：重复的事件或重复的标记不能改写已经记下的时间点。
+        private void Mark(ref long slot) => Interlocked.CompareExchange(ref slot, time.GetTimestamp(), Unset);
+
+        private static long Read(ref long slot) => Interlocked.Read(ref slot);
+
+        private long ToMs(long from, long to) => Math.Max(0L, (long)Math.Round(time.GetElapsedTime(from, to).TotalMilliseconds));
+
+        private string Between(long from, long to) => from == Unset || to == Unset ? "-" : FormatMs(ToMs(from, to));
+
+        private static string FormatMs(long milliseconds) => milliseconds.ToString(CultureInfo.InvariantCulture);
     }
 
     /// <summary>调用期间收集的证据和时间点。事件和取消可能在任意线程上到达。</summary>

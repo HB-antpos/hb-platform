@@ -570,6 +570,102 @@ public sealed class ZellerTerminalGatewayTests
         Assert.Empty(harness.Sdk.Terminals);
     }
 
+    // ── 耗时日志（2026-11-11：「点击 Zeller 到刷卡机显示金额偶尔慢」要靠它分段定位）──
+
+    [Fact]
+    public async Task Timing_log_reports_the_cold_start_and_when_the_terminal_prompted_for_a_card()
+    {
+        // 「刷卡机已提示刷卡」就是刷卡机显示金额的那一刻：SDK 调用发出到它之间的间隔，是我们看不到的云端中转 + 刷卡机那一段。
+        var dispatcher = new SignalingDispatcher();
+        using var harness = new Harness(dispatcher: dispatcher);
+
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        var operation = await harness.NextPurchaseAsync();
+        // 冷启动共两次界面线程调度：创建 Terminal、发起调用。都执行完才拨时钟，计时点就不会和测试赛跑。
+        await WaitUntilAsync(() => dispatcher.CompletedActions >= 2);
+        harness.Time.Advance(TimeSpan.FromMilliseconds(2300));
+        operation.Emit(ZellerTerminalEventKind.AwaitingPaymentMethod);
+        harness.Time.Advance(TimeSpan.FromSeconds(5));
+        operation.Emit(ZellerTerminalEventKind.Processing);
+        harness.Time.Advance(TimeSpan.FromSeconds(1));
+        operation.Complete(ZellerCallResult.FromTransaction(Approved));
+        await purchase;
+
+        var lines = harness.LogLines;
+        Assert.Contains("event AwaitingPaymentMethod atMs=2300", lines);
+        Assert.Contains("event Processing atMs=7300", lines);
+        var timing = Assert.Single(lines, line => line.StartsWith("timing purchase ", StringComparison.Ordinal));
+        Assert.Equal(
+            "timing purchase result=Completed cold=yes blockedBy=- gateWaitMs=0 terminalMs=0 uiQueueMs=0 sdkStartMs=0 " +
+            "issuedAtMs=0 awaitingCardAtMs=2300 processingAtMs=7300 sdkToAwaitingMs=2300 recycleMs=0 totalMs=8300",
+            timing);
+    }
+
+    [Fact]
+    public async Task Timing_log_marks_only_the_first_call_after_the_terminal_was_created_as_cold()
+    {
+        using var harness = new Harness();
+
+        var first = harness.Gateway.PurchaseAsync(Request);
+        (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+        await first;
+        var second = harness.Gateway.PurchaseAsync(Request);
+        (await harness.NextPurchaseAsync(1)).Complete(ZellerCallResult.FromTransaction(Approved));
+        await second;
+
+        var timings = harness.LogLines.Where(line => line.StartsWith("timing purchase ", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, timings.Length);
+        Assert.Contains("cold=yes", timings[0], StringComparison.Ordinal);
+        Assert.Contains("cold=no", timings[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Timing_log_names_the_call_that_held_the_serial_gate_and_how_long_the_caller_waited()
+    {
+        // 取消后 60 秒的迟到复查（一次查询）占着串行门时，新扣款要排在它后面；日志要能看出等了多久、被谁挡住。
+        var dispatcher = new SignalingDispatcher();
+        using var harness = new Harness(dispatcher: dispatcher);
+        var query = harness.Gateway.GetTransactionsAsync(Reference);
+        var queryOperation = await harness.NextQueryAsync();
+        await WaitUntilAsync(() => dispatcher.CompletedActions >= 2);
+
+        // PurchaseAsync 在串行门前才第一次让出线程，所以它返回时「发起时刻」和「谁占着门」都已经记下。
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        harness.Time.Advance(TimeSpan.FromSeconds(3));
+        queryOperation.Complete(ZellerQueryResult.Found(Approved));
+        await query;
+        (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+        await purchase;
+
+        var timing = Assert.Single(harness.LogLines, line => line.StartsWith("timing purchase ", StringComparison.Ordinal));
+        Assert.Contains("blockedBy=query", timing, StringComparison.Ordinal);
+        Assert.Contains("gateWaitMs=3000", timing, StringComparison.Ordinal);
+        Assert.Contains("cold=no", timing, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Caller_cancelled_while_queued_still_logs_the_wait_as_not_started()
+    {
+        using var harness = new Harness();
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        var operation = await harness.NextPurchaseAsync();
+        using var cancellation = new CancellationTokenSource();
+
+        var query = harness.Gateway.GetTransactionsAsync(Reference, cancellation.Token);
+        harness.Time.Advance(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+        await query;
+        operation.Complete(ZellerCallResult.FromTransaction(Approved));
+        await purchase;
+
+        var timing = Assert.Single(harness.LogLines, line => line.StartsWith("timing query ", StringComparison.Ordinal));
+        Assert.Contains("result=NotStarted", timing, StringComparison.Ordinal);
+        Assert.Contains("blockedBy=purchase", timing, StringComparison.Ordinal);
+        Assert.Contains("gateWaitMs=2000", timing, StringComparison.Ordinal);
+        Assert.Contains("terminalMs=- ", timing, StringComparison.Ordinal);
+        Assert.Empty(harness.Sdk.Current.Queries.ToArray());
+    }
+
     // ── 辅助 ──
 
     private static async Task WaitUntilAsync(Func<bool> condition)
@@ -587,13 +683,36 @@ public sealed class ZellerTerminalGatewayTests
         Assert.Fail("Condition was not met within 5 seconds.");
     }
 
+    /// <summary>在调用线程上立即执行，并数一数已经执行完的调度次数，让测试知道「SDK 调用已发出」之后再去拨假时钟。</summary>
+    private sealed class SignalingDispatcher : IZellerUiDispatcher
+    {
+        private readonly ImmediateZellerDispatcher _inner = new();
+        private int _completedActions;
+
+        public int CompletedActions => Volatile.Read(ref _completedActions);
+
+        public Task<T> InvokeAsync<T>(Func<T> action)
+        {
+            var task = _inner.InvokeAsync(action);
+            Interlocked.Increment(ref _completedActions);
+            return task;
+        }
+
+        public Task InvokeAsync(Action action)
+        {
+            var task = _inner.InvokeAsync(action);
+            Interlocked.Increment(ref _completedActions);
+            return task;
+        }
+    }
+
     private sealed class Harness : IDisposable
     {
         private readonly SafeList<string> _log = new();
 
-        public Harness(ZellerGatewayOptions? options = null)
+        public Harness(ZellerGatewayOptions? options = null, IZellerUiDispatcher? dispatcher = null)
         {
-            Gateway = new ZellerTerminalGateway(Sdk, new ImmediateZellerDispatcher(), options, Time, _log.Add);
+            Gateway = new ZellerTerminalGateway(Sdk, dispatcher ?? new ImmediateZellerDispatcher(), options, Time, _log.Add);
         }
 
         public FakeZellerSdk Sdk { get; } = new();
