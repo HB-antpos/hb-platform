@@ -554,7 +554,9 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     /// 中文注释：用来回答「点击 Zeller 到刷卡机显示金额」慢在哪一段，各项依次是：
     /// gateWaitMs（排队等串行门）→ terminalMs（新建 Terminal，冷启动才有）→ uiQueueMs（界面线程排队）
     /// → sdkStartMs（SDK 的同步部分）→ sdkToAwaitingMs（SDK 调用发出到刷卡机提示刷卡 = 云端中转 + 刷卡机）。
-    /// awaitingCardAtMs、processingAtMs、totalMs 都是从调用方发起算起；取不到的环节写 "-"。
+    /// promptAtMs（刷卡机提示刷卡）、processingAtMs、totalMs 都是从调用方发起算起；取不到的环节写 "-"。
+    /// 键名不能含 card / pan / pin / token / secret 等片段：服务端入库时按键名抹值（ApplicationLogService.SensitiveKeyFragments），
+    /// 曾因 awaitingCardAtMs 含 card 在中心日志里整个值变成 [REDACTED]（2026-11-11 实测发现）。
     /// 所有时间点取自注入的 TimeProvider（测试里是假时钟）。事件可能在任意线程上到达，所以每个时间点都只记第一次。
     /// </remarks>
     private sealed class CallTimings(TimeProvider time)
@@ -613,7 +615,7 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
             return $"timing {operationName} result={result} cold={cold} blockedBy={blockedBy ?? "-"} " +
                 $"gateWaitMs={Between(_requested, gateAcquired)} terminalMs={Between(gateAcquired, terminalReady)} " +
                 $"uiQueueMs={Between(terminalReady, dispatchStarted)} sdkStartMs={Between(dispatchStarted, issued)} " +
-                $"issuedAtMs={Between(_requested, issued)} awaitingCardAtMs={Between(_requested, awaiting)} " +
+                $"issuedAtMs={Between(_requested, issued)} promptAtMs={Between(_requested, awaiting)} " +
                 $"processingAtMs={Between(_requested, processing)} sdkToAwaitingMs={Between(issued, awaiting)} " +
                 $"recycleMs={FormatMs(Math.Max(0L, (long)Math.Round(recycleElapsed.TotalMilliseconds)))} " +
                 $"totalMs={Between(_requested, finished)}";
