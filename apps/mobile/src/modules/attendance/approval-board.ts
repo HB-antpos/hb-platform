@@ -279,3 +279,105 @@ export function workDayMinutesToLocal(workDate: string, minutes: number) {
   const dayOffset = Math.floor(minutes / 1440);
   return `${shiftDateOnly(workDate.slice(0, 10), dayOffset)}T${formatClockMinutes(minutes)}`;
 }
+
+// ───────────────────────── 按人合并（同一工作日） ─────────────────────────
+
+export interface ApprovalPersonGroup {
+  /** 申请人（不区分大小写）；没有申请人时退回姓名，再退回单条审批号。 */
+  key: string;
+  /** 组内按事件时间排（上班异常 → 对应补卡 → 下班异常），卡片据此编号 1、2、3。 */
+  items: AttendanceApproval[];
+}
+
+function personKey(item: AttendanceApproval) {
+  return item.applicantUserGuid?.trim().toLowerCase() || item.employeeName?.trim() || item.approvalGuid;
+}
+
+/** 审批对应的「当天第几分钟」：打卡异常取打卡时间，补卡取被改的原卡时间（没有就取申请时间）。 */
+export function approvalEventMinutes(item: AttendanceApproval) {
+  const workDate = item.workDate?.slice(0, 10);
+  if (!workDate) return undefined;
+  if (item.sourceType === "Punch") return minutesFromWorkDay(item.punch?.punchTimeLocal, workDate);
+  if (item.sourceType === "PunchAdjustment" && item.adjustment) {
+    return minutesFromWorkDay(item.adjustment.originalPunchTimeLocal ?? item.adjustment.requestedPunchTimeLocal, workDate);
+  }
+  return undefined;
+}
+
+/**
+ * 同一工作日内按人合并：组的先后沿用传入顺序（已按提交时间倒序），
+ * 组内按事件时间升序，同一时刻打卡异常排在补卡前；没有事件时间的排最后、保持原顺序。
+ */
+export function groupApprovalsByPerson(items: AttendanceApproval[]): ApprovalPersonGroup[] {
+  const groups = new Map<string, AttendanceApproval[]>();
+  for (const item of items) {
+    const key = personKey(item);
+    groups.set(key, [...(groups.get(key) ?? []), item]);
+  }
+  return Array.from(groups.entries()).map(([key, groupItems]) => ({
+    key,
+    items: groupItems
+      .map((item, index) => ({ item, index, at: approvalEventMinutes(item) }))
+      .sort((left, right) => {
+        if (left.at === undefined || right.at === undefined) {
+          return left.at === undefined && right.at === undefined ? left.index - right.index : left.at === undefined ? 1 : -1;
+        }
+        if (left.at !== right.at) return left.at - right.at;
+        const rank = (value: AttendanceApproval) => (value.sourceType === "Punch" ? 0 : 1);
+        return rank(left.item) - rank(right.item) || left.index - right.index;
+      })
+      .map((entry) => entry.item),
+  }));
+}
+
+/** 改的就是这次异常打卡的补卡（后端批准补卡后会自动取消这条异常）；同组找不到返回 undefined。 */
+export function findCoveringAdjustment(items: AttendanceApproval[], punchItem: AttendanceApproval) {
+  if (punchItem.sourceType !== "Punch") return undefined;
+  const target = (punchItem.punch?.punchGuid || punchItem.sourceGuid).toLowerCase();
+  return items.find(
+    (item) => item.sourceType === "PunchAdjustment" && item.adjustment?.originalPunchGuid?.toLowerCase() === target,
+  );
+}
+
+export interface PunchDayStripMarker {
+  key: string;
+  minutes: number;
+  /** anomaly = 异常打卡（红），request = 补卡申请的时间（蓝）。 */
+  tone: "anomaly" | "request";
+}
+
+export interface PunchDayStrip {
+  schedule: { start: number; end: number };
+  markers: PunchDayStripMarker[];
+  range: { start: number; end: number };
+}
+
+/**
+ * 合并卡片顶部的小时间条：排班窗口 + 异常打卡 / 补卡时间的刻度。
+ * 只在有排班窗口、且至少有一个能定位的时间时返回；轴按整点对齐，覆盖排班和全部刻度。
+ */
+export function buildPunchDayStrip(items: AttendanceApproval[]): PunchDayStrip | undefined {
+  const withWindow = items.find((item) => item.scheduleStartTime && item.scheduleEndTime);
+  const start = clockToMinutes(withWindow?.scheduleStartTime);
+  let end = clockToMinutes(withWindow?.scheduleEndTime);
+  if (start === undefined || end === undefined) return undefined;
+  if (end <= start) end += 1440;
+  const markers: PunchDayStripMarker[] = [];
+  for (const item of items) {
+    const workDate = item.workDate?.slice(0, 10);
+    if (!workDate) continue;
+    if (item.sourceType === "Punch") {
+      const at = minutesFromWorkDay(item.punch?.punchTimeLocal, workDate);
+      if (at !== undefined) markers.push({ key: item.approvalGuid, minutes: at, tone: "anomaly" });
+    } else if (item.sourceType === "PunchAdjustment" && item.adjustment) {
+      const at = minutesFromWorkDay(item.adjustment.requestedPunchTimeLocal, workDate);
+      if (at !== undefined) markers.push({ key: item.approvalGuid, minutes: at, tone: "request" });
+    }
+  }
+  if (!markers.length) return undefined;
+  const points = [start, end, ...markers.map((marker) => marker.minutes)];
+  // 两端各留至少 30 分钟，刻度不会贴着边。
+  const rangeStart = Math.max(0, Math.floor((Math.min(...points) - 30) / 60) * 60);
+  const rangeEnd = Math.max(rangeStart + 60, Math.ceil((Math.max(...points) + 30) / 60) * 60);
+  return { schedule: { start, end }, markers, range: { start: rangeStart, end: rangeEnd } };
+}

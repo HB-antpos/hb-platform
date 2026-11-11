@@ -29,7 +29,8 @@ export function ApprovalTimelineBar({
   actualLabel,
 }: {
   timeline: ApprovalTimeline;
-  mode: "overtime" | "missingClockOut";
+  /** plain：只画排班与实际打卡段（打卡异常详情用）。 */
+  mode: "overtime" | "missingClockOut" | "plain";
   /** 漏下班：系统自动下班的分钟（通常 1440 = 次日 00:00）。 */
   autoClockOutAt?: number;
   scheduleLabel?: string;

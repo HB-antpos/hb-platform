@@ -1,6 +1,7 @@
 // 列表页每人一张卡：头像 + 姓名 + 类型角标，右侧总小时与分档小计；下面每天一个小格（2 周时分两行，每行一周）。
 import { memo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { Text } from "react-native-paper";
 import {
   fillPeriodDays,
@@ -124,11 +125,14 @@ export const HoursEmployeeCard = memo(function HoursEmployeeCard({
   periodStart,
   weeks,
   onPress,
+  manual,
 }: {
   employee: PayrollHoursEmployee;
   periodStart: string;
   weeks: 1 | 2;
   onPress?: (employee: PayrollHoursEmployee) => void;
+  /** 0 工时、由店长手动加进列表的人：姓名旁标「手动添加」并给「移除」。 */
+  manual?: { label: string; removeLabel: string; removeA11y: string; onRemove: () => void };
 }) {
   const { t } = useAppTranslation("attendanceHours");
   const days = fillPeriodDays(employee.days, periodStart, weeks);
@@ -152,6 +156,21 @@ export const HoursEmployeeCard = memo(function HoursEmployeeCard({
             {employeeBadges(employee, t).map((badge) => (
               <HoursBadge key={badge.key} label={badge.label} tone={badge.tone} />
             ))}
+            {manual ? (
+              <>
+                <HoursBadge label={manual.label} tone="info" />
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={manual.removeA11y}
+                  onPress={manual.onRemove}
+                  hitSlop={8}
+                  style={styles.removeChip}
+                >
+                  <MaterialCommunityIcons name="close" size={11} color={HB_COLORS.textSecondary} />
+                  <Text style={styles.removeText}>{manual.removeLabel}</Text>
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </View>
         <View style={styles.totals}>
@@ -188,6 +207,16 @@ const styles = StyleSheet.create({
   nameBlock: { flex: 1, minWidth: 0, gap: 3, paddingTop: 1 },
   name: { fontSize: 15.5, fontWeight: "600", color: HB_COLORS.textPrimary },
   badges: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
+  removeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingHorizontal: 6,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: HB_COLORS.outline,
+  },
+  removeText: { fontSize: 11.5, color: HB_COLORS.textSecondary },
   totals: { alignItems: "flex-end", flexShrink: 0, maxWidth: "52%" },
   total: { fontSize: 20, fontWeight: "700", color: HB_COLORS.textPrimary },
   tier: { fontSize: 12, color: HOURS_COLORS.tierText, marginTop: 1 },

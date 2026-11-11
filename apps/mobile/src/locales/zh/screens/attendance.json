@@ -468,6 +468,47 @@
         "notApplicable": "不适用",
         "confirm": "确认 {{hours}} h",
         "invalidHours": "工时要大于 0、不超过 24"
+      },
+      "punchInfo": {
+        "reason": {
+          "Late": "迟到 {{minutes}} 分钟",
+          "LateNoMinutes": "迟到",
+          "EarlyLeave": "早退 {{minutes}} 分钟",
+          "EarlyLeaveNoMinutes": "早退",
+          "NoSchedule": "无排班",
+          "Duplicate": "重复打卡"
+        },
+        "line": "{{punch}} {{time}}",
+        "source": {
+          "PosQr": "扫收银台考勤码",
+          "ManualAdjustment": "店长补录",
+          "SystemAutoClockOut": "系统自动下班",
+          "other": "打卡"
+        },
+        "device": "设备 {{code}}",
+        "location": "定位 ±{{meters}}m",
+        "locationNoAccuracy": "已带定位",
+        "locationNone": "未带定位",
+        "noSchedule": "当天没有排班",
+        "coveredBy": "批准第 {{index}} 条补卡后，这条会自动取消",
+        "employeeReason": "员工填写的原因",
+        "groupPending_one": "{{count}} 项待审",
+        "groupPending_other": "{{count}} 项待审",
+        "groupProcessed_one": "{{count}} 项",
+        "groupProcessed_other": "{{count}} 项",
+        "detailTitle": "打卡审核",
+        "thisPunch": "这次打卡",
+        "method": "打卡方式",
+        "deviceLabel": "设备",
+        "locationLabel": "定位",
+        "timeLabel": "打卡时间",
+        "impactTitle": "对工时的影响",
+        "impactPending": "这条还没处理时，工时统计里这一天标「待审」；处理后工时会自动重新计算。",
+        "impactProcessed": "已处理，工时统计已按处理结果计算。",
+        "noDayRecords": "当天没有排班记录，只能看到这一次打卡。",
+        "openDetailA11y": "查看 {{name}} 当天的打卡",
+        "remarkOptional": "审核备注（选填）",
+        "current": "本条"
       }
     }
   },

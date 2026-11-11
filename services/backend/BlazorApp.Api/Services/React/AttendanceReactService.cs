@@ -5040,6 +5040,13 @@ namespace BlazorApp.Api.Services.React
                 : await _db.Queryable<AttendancePunch>()
                     .Where(item => originalPunchGuids.Contains(item.PunchGuid))
                     .ToListAsync();
+            // 打卡异常 / 补卡关联的排班一起批量查，卡片要写「排班 10:00–18:00」并算迟到 / 早退分钟。
+            scheduleGuids = scheduleGuids
+                .Concat(punches.Select(item => item.ScheduleGuid ?? string.Empty))
+                .Concat(adjustments.Select(item => item.ScheduleGuid ?? string.Empty))
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             var schedules = scheduleGuids.Count == 0
                 ? new List<AttendanceSchedule>()
                 : await _db.Queryable<AttendanceSchedule>()
@@ -5080,6 +5087,9 @@ namespace BlazorApp.Api.Services.React
                     approval.WorkDate = punch.WorkDate;
                     approval.Title = punch.PunchType;
                     approval.Detail = $"{punch.PunchType} · {punch.Status}";
+                    var punchSchedule = scheduleMap.GetValueOrDefault(punch.ScheduleGuid ?? string.Empty);
+                    approval.Punch = ToApprovalPunchDto(punch, punchSchedule);
+                    ApplyApprovalScheduleWindow(approval, punchSchedule);
                 }
                 else if (approval.SourceType.Equals("Leave", StringComparison.OrdinalIgnoreCase)
                     && leaveMap.TryGetValue(approval.SourceGuid, out var leave))
@@ -5098,12 +5108,16 @@ namespace BlazorApp.Api.Services.React
                     approval.Adjustment = ToDto(
                         adjustment,
                         originalPunchMap.GetValueOrDefault(adjustment.OriginalPunchGuid ?? string.Empty));
+                    ApplyApprovalScheduleWindow(
+                        approval,
+                        scheduleMap.GetValueOrDefault(adjustment.ScheduleGuid ?? string.Empty));
                 }
                 else if (approval.SourceType.Equals("Overtime", StringComparison.OrdinalIgnoreCase))
                 {
                     if (scheduleMap.TryGetValue(approval.SourceGuid, out var schedule))
                     {
                         approval.WorkDate = schedule.WorkDate;
+                        ApplyApprovalScheduleWindow(approval, schedule);
                     }
                     approval.Title = "加班审批";
                     approval.Detail = $"候选 {approval.CandidateOvertimeMinutes ?? 0} 分钟";
@@ -5113,6 +5127,7 @@ namespace BlazorApp.Api.Services.React
                     if (scheduleMap.TryGetValue(approval.SourceGuid, out var schedule))
                     {
                         approval.WorkDate = schedule.WorkDate;
+                        ApplyApprovalScheduleWindow(approval, schedule);
                     }
                     approval.Title = "漏下班待处理";
                     approval.Detail = "排班结束后仍存在未闭合班段";
@@ -5136,6 +5151,57 @@ namespace BlazorApp.Api.Services.React
             }
 
             await PopulatePaidLeaveApprovalFieldsAsync(approvals);
+        }
+
+        private static void ApplyApprovalScheduleWindow(AttendanceApprovalDto approval, AttendanceSchedule? schedule)
+        {
+            if (schedule == null)
+            {
+                return;
+            }
+            approval.ScheduleStartTime = schedule.StartTime.ToString(@"hh\:mm");
+            approval.ScheduleEndTime = schedule.EndTime.ToString(@"hh\:mm");
+        }
+
+        /// <summary>
+        /// 打卡异常卡片要的打卡信息。迟到 / 早退分钟按排班窗口现算（向下取整，与卡片「迟到 26 分钟」口径一致）；
+        /// 排班跨午夜（结束 ≤ 开始）时结束时间落到次日。
+        /// </summary>
+        internal static AttendanceApprovalPunchDto ToApprovalPunchDto(AttendancePunch punch, AttendanceSchedule? schedule)
+        {
+            int? lateMinutes = null;
+            int? earlyLeaveMinutes = null;
+            if (schedule != null)
+            {
+                var start = schedule.WorkDate.Date.Add(schedule.StartTime);
+                var end = schedule.WorkDate.Date.Add(schedule.EndTime);
+                if (end <= start)
+                {
+                    end = end.AddDays(1);
+                }
+                if (punch.Status == "Late")
+                {
+                    lateMinutes = Math.Max(0, (int)Math.Floor((punch.PunchTimeLocal - start).TotalMinutes));
+                }
+                else if (punch.Status == "EarlyLeave")
+                {
+                    earlyLeaveMinutes = Math.Max(0, (int)Math.Floor((end - punch.PunchTimeLocal).TotalMinutes));
+                }
+            }
+
+            return new AttendanceApprovalPunchDto
+            {
+                PunchGuid = punch.PunchGuid,
+                PunchType = punch.PunchType,
+                PunchTimeLocal = punch.PunchTimeLocal,
+                Status = punch.Status,
+                LateMinutes = lateMinutes,
+                EarlyLeaveMinutes = earlyLeaveMinutes,
+                Source = punch.Source,
+                PosDeviceCode = punch.PosDeviceCode,
+                HasLocation = punch.LocationLatitude.HasValue && punch.LocationLongitude.HasValue,
+                LocationAccuracy = punch.LocationAccuracyMeters,
+            };
         }
 
         private string ResolveCurrentUserGuid()
