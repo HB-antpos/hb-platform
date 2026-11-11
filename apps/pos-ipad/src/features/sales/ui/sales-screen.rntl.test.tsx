@@ -22,6 +22,7 @@ import {
 import { SalesScreen } from "./sales-screen";
 
 import { createAud, type CartLine, type CartSnapshot } from "@/core/contracts";
+import type { AttendanceQrState } from "@/features/attendance-audit/attendance-qr-controller";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { posColors } from "@/ui/theme";
 
@@ -4091,6 +4092,286 @@ describe("SalesScreen", () => {
     expect(mockStatusStripProps.appVersionLabel).toBe(
       "Version 0.2.0 · Build 12",
     );
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+});
+
+/** 考勤码假数据源：测试里直接推送控制器状态，不涉及密钥、缓存或网络。 */
+class FakeAttendanceQrSource {
+  public started = 0;
+  public destroyed = 0;
+  private readonly listeners = new Set<() => void>();
+  public constructor(private state: AttendanceQrState) {}
+  public readonly getState = (): AttendanceQrState => this.state;
+  public readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  public start(): void {
+    this.started += 1;
+  }
+  public destroy(): void {
+    this.destroyed += 1;
+  }
+  public publish(patch: Partial<AttendanceQrState>): void {
+    this.state = { ...this.state, ...patch };
+    for (const listener of this.listeners) listener();
+  }
+}
+
+function readyAttendanceQr(
+  overrides: Partial<AttendanceQrState> = {},
+): AttendanceQrState {
+  return {
+    deviceText: "IPAD-02",
+    kind: "ready",
+    online: true,
+    qrImageUri: "data:image/png;base64,QQ==",
+    requiresOnlineResync: false,
+    secondsRemaining: 12,
+    statusCode: "online-verified",
+    storeText: "Hot Bargain Springfield (1042)",
+    ...overrides,
+  };
+}
+
+describe("SalesScreen 员工打卡二维码", () => {
+  afterEach(() => {
+    usePosShellStore.getState().setConnectivity("online");
+  });
+
+  it("空购物车直接显示大码，正中是剩余秒数；侧栏同时有「考勤」入口", async () => {
+    const source = new FakeAttendanceQrSource(readyAttendanceQr());
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const screen = await render(
+      <SalesScreen
+        attendanceQr={source}
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    expect(screen.getByTestId("sales-cart-empty")).toBeTruthy();
+    expect(screen.getByTestId("sales-attendance-qr-card")).toBeTruthy();
+    const image = screen.getByTestId("sales-attendance-qr-image");
+    expect(image.props.source).toEqual({ uri: "data:image/png;base64,QQ==" });
+    expect(StyleSheet.flatten(image.props.style)).toMatchObject({
+      height: 268,
+      width: 268,
+    });
+    expect(
+      screen.getByTestId("sales-attendance-qr-image-countdown").props
+        .accessibilityLabel,
+    ).toBe("剩余 12 秒");
+    expect(screen.getByText("员工打卡")).toBeTruthy();
+    expect(screen.getByText("在线验证")).toBeTruthy();
+    expect(screen.getByText("POS 设备 IPAD-02")).toBeTruthy();
+    expect(screen.getByTestId("sales-attendance-qr-rail")).toBeTruthy();
+
+    // 换码后倒计时跟着刷新。
+    await act(async () => {
+      source.publish({ secondsRemaining: 7 });
+    });
+    expect(
+      screen.getByTestId("sales-attendance-qr-image-countdown").props
+        .accessibilityLabel,
+    ).toBe("剩余 7 秒");
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("有商品时大码收起、购物车不变；点侧栏「考勤」弹出放大码，点关闭收起", async () => {
+    const source = new FakeAttendanceQrSource(readyAttendanceQr());
+    const salesPresenter = presenter(new ScreenCartPort(cartSnapshot()));
+    const screen = await render(
+      <SalesScreen
+        attendanceQr={source}
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    expect(screen.queryByTestId("sales-attendance-qr-card")).toBeNull();
+    expect(screen.getByTestId("sales-cart-list")).toBeTruthy();
+    expect(screen.queryByTestId("sales-attendance-qr-modal")).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("sales-attendance-qr-rail"));
+    });
+    const modalImage = screen.getByTestId("sales-attendance-qr-modal-image");
+    expect(StyleSheet.flatten(modalImage.props.style)).toMatchObject({
+      height: 356,
+      width: 356,
+    });
+    expect(
+      screen.getByTestId("sales-attendance-qr-rail").props.accessibilityState,
+    ).toMatchObject({ expanded: true });
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("sales-attendance-qr-modal-done"));
+    });
+    expect(screen.queryByTestId("sales-attendance-qr-modal")).toBeNull();
+    // 打开、关闭弹窗都不碰购物车。
+    expect(salesPresenter.getState().cart.lines).toHaveLength(1);
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("点弹窗外空白处关闭；考勤码被销毁（离开收银页）时弹窗自动关闭", async () => {
+    const source = new FakeAttendanceQrSource(readyAttendanceQr());
+    const salesPresenter = presenter(new ScreenCartPort(cartSnapshot()));
+    const screen = await render(
+      <SalesScreen
+        attendanceQr={source}
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("sales-attendance-qr-rail"));
+    });
+    await act(async () => {
+      // 遮罩在 accessibilityViewIsModal 之外，对读屏是隐藏的，只供手指点空白处关闭。
+      fireEvent.press(
+        screen.getByTestId("sales-attendance-qr-modal-backdrop", {
+          includeHiddenElements: true,
+        }),
+      );
+    });
+    expect(screen.queryByTestId("sales-attendance-qr-modal")).toBeNull();
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId("sales-attendance-qr-rail"));
+    });
+    expect(screen.getByTestId("sales-attendance-qr-modal")).toBeTruthy();
+    await screen.rerender(
+      <SalesScreen
+        attendanceQr={null}
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+    expect(screen.queryByTestId("sales-attendance-qr-modal")).toBeNull();
+    expect(screen.queryByTestId("sales-attendance-qr-rail")).toBeNull();
+
+    // 重新聚焦（新的考勤码）后不会自己弹出。
+    await screen.rerender(
+      <SalesScreen
+        attendanceQr={new FakeAttendanceQrSource(readyAttendanceQr())}
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+    expect(screen.getByTestId("sales-attendance-qr-rail")).toBeTruthy();
+    expect(screen.queryByTestId("sales-attendance-qr-modal")).toBeNull();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("没有码图时按状态显示说明：联网启用 / 时钟回拨 / 启用失败 / 准备中", async () => {
+    const source = new FakeAttendanceQrSource(
+      readyAttendanceQr({
+        kind: "unavailable",
+        online: false,
+        qrImageUri: null,
+        secondsRemaining: 0,
+        statusCode: "enable-online",
+      }),
+    );
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const screen = await render(
+      <SalesScreen
+        attendanceQr={source}
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    expect(screen.getByTestId("sales-attendance-qr-placeholder")).toBeTruthy();
+    expect(screen.queryByTestId("sales-attendance-qr-image")).toBeNull();
+    expect(screen.getByText("请先联网启用")).toBeTruthy();
+    // 没有码时不显示在线 / 离线标签，避免误导。
+    expect(screen.queryByTestId("attendance-qr-status")).toBeNull();
+
+    await act(async () => {
+      source.publish({
+        kind: "clock-invalid",
+        requiresOnlineResync: true,
+        statusCode: "clock-rollback",
+      });
+    });
+    expect(screen.getByText("时钟变化，需要校时")).toBeTruthy();
+
+    await act(async () => {
+      source.publish({
+        kind: "setup-failed",
+        requiresOnlineResync: false,
+        statusCode: "setup-failed",
+      });
+    });
+    expect(screen.getByText("启用失败，正在自动重试")).toBeTruthy();
+
+    await act(async () => {
+      source.publish({ kind: "initializing", statusCode: "enable-online" });
+    });
+    expect(screen.getByText("正在准备考勤码…")).toBeTruthy();
+
+    // 离线签名出码后，标签显示「离线签名」。
+    await act(async () => {
+      source.publish(
+        readyAttendanceQr({ online: false, statusCode: "offline-signed" }),
+      );
+    });
+    expect(screen.getByText("离线签名")).toBeTruthy();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("英文界面跟随收银页语言", async () => {
+    const source = new FakeAttendanceQrSource(readyAttendanceQr());
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const screen = await render(
+      <SalesScreen
+        attendanceQr={source}
+        locale="en"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    expect(screen.getByText("Staff clock-in")).toBeTruthy();
+    expect(screen.getByText("Verified online")).toBeTruthy();
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("不传考勤码时保持原来的空购物车提示，侧栏没有「考勤」格子", async () => {
+    const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    expect(screen.getByTestId("sales-cart-empty")).toBeTruthy();
+    expect(screen.queryByTestId("sales-attendance-qr-card")).toBeNull();
+    expect(screen.queryByTestId("sales-attendance-qr-rail")).toBeNull();
 
     salesPresenter.destroy();
     await screen.unmount();

@@ -22,6 +22,10 @@ import {
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import type { PosAuthorizedFulfilmentActionResult } from "@/core/runtime/production-pos-service-composition";
 import {
+  resolveAttendanceAuditRuntimeFactory,
+  type AttendanceQrDisplaySource,
+} from "@/features/attendance-audit/attendance-audit-runtime";
+import {
   resolveProtectedSalesRouteGate,
   useCashierLoginStore,
 } from "@/features/cashier-login";
@@ -147,6 +151,34 @@ export default function SalesRoute() {
         setCameraScannerActive(false);
       };
     }, [presenter]),
+  );
+  const attendanceFactory = runtime.services
+    ? resolveAttendanceAuditRuntimeFactory(runtime.services)
+    : null;
+  const [attendanceQr, setAttendanceQr] =
+    useState<AttendanceQrDisplaySource | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      // 考勤码只在收银页聚焦时运行：进考勤页、付款页或锁屏时销毁，
+      // 保证同一时刻只有一个控制器使用本机签名身份与缓存（考勤页有自己的那一个）。
+      // 有 presenter 说明收银员与设备绑定已核对；控制器内部再按收银员 lease 守卫。
+      if (!presenter || !attendanceFactory?.createQrController) {
+        return undefined;
+      }
+      let source: AttendanceQrDisplaySource;
+      try {
+        source = attendanceFactory.createQrController();
+      } catch {
+        // 没有可用的收银员 lease 等：不显示考勤码，不影响收银。
+        return undefined;
+      }
+      source.start();
+      setAttendanceQr(source);
+      return () => {
+        source.destroy();
+        setAttendanceQr((current) => (current === source ? null : current));
+      };
+    }, [attendanceFactory, presenter]),
   );
   const addScannedProduct = useCallback(
     (
@@ -430,6 +462,7 @@ export default function SalesRoute() {
       <SalesSoundBridge presenter={presenter} />
       <SalesScreen
         appVersionLabel={appVersionLabel}
+        attendanceQr={attendanceQr}
         {...(scanner
           ? {
               cameraScanner: {

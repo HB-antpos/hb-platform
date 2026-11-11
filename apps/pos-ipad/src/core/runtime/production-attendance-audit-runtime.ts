@@ -7,7 +7,10 @@ import {
 import {
   AttendanceAuditPresenter,
 } from "@/features/attendance-audit/attendance-audit-presenter";
-import type { AttendanceAuditRuntimeFactory } from "@/features/attendance-audit/attendance-audit-runtime";
+import type {
+  AttendanceAuditRuntimeFactory,
+  AttendanceQrDisplaySource,
+} from "@/features/attendance-audit/attendance-audit-runtime";
 import {
   AttendanceQrController,
   type AttendanceConnectivityPort,
@@ -78,15 +81,7 @@ export function createProductionAttendanceAuditRuntime(
         lease,
         terminal,
       });
-      const qr = new AttendanceQrController({
-        cache: guarded.cache,
-        clock: input.clock,
-        connectivity: guarded.connectivity,
-        crypto: guarded.crypto,
-        deviceContext: guarded.deviceContext,
-        remote: guarded.attendanceSecurity,
-        scheduler: guarded.scheduler,
-      });
+      const qr = createLeaseBoundQrController(input, guarded);
       const audit = new OperationAuditPresenter({
         // 中文注释：在线初值来自 runtime 的受信任连通性快照，不接收 route 参数。
         initialOnline: input.connectivity.currentOnline(),
@@ -97,6 +92,31 @@ export function createProductionAttendanceAuditRuntime(
       });
       return new AttendanceAuditPresenter({ audit, qr });
     },
+    createQrController(): AttendanceQrDisplaySource {
+      // 中文注释：收银页的考勤码与考勤页同一套 lease 守卫——登出、换人或换设备后
+      // 定时器不再签发，端口调用直接抛错，不会用旧收银员身份继续出码。
+      const lease = input.currentCashier.createLease();
+      requireScopedLease(lease, terminal);
+      return createLeaseBoundQrController(
+        input,
+        new LeaseBoundAttendancePorts({ input, lease, terminal }),
+      );
+    },
+  });
+}
+
+function createLeaseBoundQrController(
+  input: ProductionAttendanceAuditRuntimeDependencies,
+  guarded: LeaseBoundAttendancePorts,
+): AttendanceQrController {
+  return new AttendanceQrController({
+    cache: guarded.cache,
+    clock: input.clock,
+    connectivity: guarded.connectivity,
+    crypto: guarded.crypto,
+    deviceContext: guarded.deviceContext,
+    remote: guarded.attendanceSecurity,
+    scheduler: guarded.scheduler,
   });
 }
 
