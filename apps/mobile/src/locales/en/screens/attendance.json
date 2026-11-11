@@ -1101,7 +1101,21 @@
       "submit_one": "Submit {{count}} day",
       "submitUnavailable_one": "Submit {{count}} unavailable day",
       "submitUnavailable_other": "Submit {{count}} unavailable days",
-      "submit_other": "Submit {{count}} days"
+      "submit_other": "Submit {{count}} days",
+      "anyTime": "Any time",
+      "customHint": "Set your own",
+      "summaryLine": "Will submit: {{days}} · {{type}} · {{time}}",
+      "day": "Day",
+      "pickDays": "Pick days",
+      "timeRange": "Hours",
+      "presets": {
+        "allDay": "All day",
+        "morning": "Morning",
+        "afternoon": "Afternoon",
+        "evening": "Evening",
+        "daytime": "Daytime",
+        "custom": "Custom"
+      }
     },
     "requests": {
       "adjustmentTitle": "Correction · {{punchType}} {{time}}",
@@ -1120,7 +1134,46 @@
         "cancelled": "Withdrawn"
       },
       "days_one": "{{count}} day",
-      "days_other": "{{count}} days"
+      "days_other": "{{count}} days",
+      "correctionHint": "Missed or wrong punch",
+      "leaveHint": "Sick, annual and more",
+      "filterAll": "All",
+      "hoursAmount": "{{hours}} h",
+      "submittedAt": "Submitted {{time}}",
+      "waited": {
+        "minutes_one": "Waiting {{count}} min",
+        "minutes_other": "Waiting {{count}} min",
+        "hours_one": "Waiting {{count}} hour",
+        "hours_other": "Waiting {{count}} hours",
+        "days_one": "Waiting {{count}} day",
+        "days_other": "Waiting {{count}} days"
+      },
+      "attachments_one": "{{count}} certificate photo",
+      "attachments_other": "{{count}} certificate photos",
+      "steps": {
+        "submitted": "Submitted",
+        "review": "Manager review",
+        "effective": "Applied"
+      },
+      "detail": {
+        "title": "Request details",
+        "date": "Date",
+        "amount": "Length",
+        "store": "Store",
+        "reason": "Reason",
+        "attachments": "Certificate",
+        "progress": "Progress",
+        "waiting": "Waiting for manager",
+        "withdrawHint": "Withdraw to edit and resubmit",
+        "afterApproval": "Takes effect once approved",
+        "withdraw": "Withdraw request"
+      },
+      "leavePicker": {
+        "title": "What kind of leave?",
+        "hint": "Rules are set by the company. Pick one to open its form.",
+        "paid": "Paid",
+        "other": "Other"
+      }
     },
     "leaveSheet": {
       "previousDay": "{{label}}: previous day",
@@ -1131,7 +1184,48 @@
       "submit_one": "Submit {{count}} day",
       "submit_other": "Submit {{count}} days"
     },
-    "weekHoursSplit": "Weekdays {{weekday}} · Weekend {{weekend}} h"
+    "weekHoursSplit": "Weekdays {{weekday}} · Weekend {{weekend}} h",
+    "weekTag": {
+      "current": "This week",
+      "next": "Next week",
+      "previous": "Last week"
+    },
+    "weekdayShort": {
+      "0": "M",
+      "1": "T",
+      "2": "W",
+      "3": "T",
+      "4": "F",
+      "5": "S",
+      "6": "S"
+    },
+    "summary": {
+      "shifts_one": "{{count}} shift",
+      "shifts_other": "{{count}} shifts",
+      "hoursUnit": "h",
+      "done_one": "{{count}} done · {{hours}} h",
+      "done_other": "{{count}} done · {{hours}} h"
+    },
+    "outcome": {
+      "completed": "Done {{hours}}h",
+      "missingClockOut": "No clock-out",
+      "absent": "No punches",
+      "working": "Working · {{time}} so far",
+      "onBreak": "On break · {{time}} so far"
+    },
+    "goPunch": "Clock in/out",
+    "paidHours": "Paid {{hours}}h",
+    "fill": {
+      "title": "{{week}}: roster not out yet",
+      "hint": "Tell your manager which days you can and can't work. They'll see it when building the roster.",
+      "progress": "{{filled}} / {{total}} days filled",
+      "due": "Before the roster",
+      "remaining_one": "Fill the last {{count}} day",
+      "remaining_other": "Fill the remaining {{count}} days",
+      "unfilled": "Not filled",
+      "tapToFill": "Tap to fill in",
+      "edit": "Edit"
+    }
   },
   "mealCheck": {
     "title": "Meal break check",

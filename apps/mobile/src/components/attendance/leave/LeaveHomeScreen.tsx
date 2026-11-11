@@ -157,7 +157,7 @@ function EmployeeCard({ options }: { options: AttendanceMyLeaveOptions }) {
   );
 }
 
-function PaidLeaveCards({ rules, onOpen }: { rules: AttendanceLeaveRules; onOpen: (type: PaidLeaveType) => void }) {
+export function PaidLeaveCards({ rules, onOpen }: { rules: AttendanceLeaveRules; onOpen: (type: PaidLeaveType) => void }) {
   const { t } = useAppTranslation("attendanceLeave");
   const days = (count: number) => t("units.days", { count });
   const weeks = (count: number) => t("units.weeks", { count });
@@ -194,7 +194,7 @@ function PaidLeaveCards({ rules, onOpen }: { rules: AttendanceLeaveRules; onOpen
   );
 }
 
-function LeaveTypeCard({
+export function LeaveTypeCard({
   tone,
   icon,
   title,

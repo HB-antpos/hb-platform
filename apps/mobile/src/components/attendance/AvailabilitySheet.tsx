@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
-import { Button, Chip, SegmentedButtons, Text, TextInput } from "react-native-paper";
+import { Button, SegmentedButtons, Text, TextInput } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { AvailabilityBatchSaveError } from "@/modules/attendance/availability-batch";
 import {
@@ -19,6 +19,16 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { ATTENDANCE_STATUS_TONES } from "./AdjustmentFormControls";
 import { listSeparator } from "@/shared/i18n/punctuation";
+
+/** 常用时间段：选中即填好起止时间；「自定义」才显示 ±30 分钟微调。 */
+const TIME_PRESETS = [
+  { key: "morning", start: "09:00", end: "13:00" },
+  { key: "afternoon", start: "13:00", end: "18:00" },
+  { key: "evening", start: "17:00", end: "22:00" },
+  { key: "daytime", start: "09:00", end: "17:00" },
+] as const;
+type PresetKey = "allDay" | (typeof TIME_PRESETS)[number]["key"] | "custom";
+
 
 function shiftTime(value: string, deltaMinutes: number) {
   const match = /^(\d{1,2}):(\d{2})/.exec(value);
@@ -77,6 +87,7 @@ export function AvailabilitySheet({
   weekStartDate,
   today,
   initialDates,
+  filledDates = [],
   editingItem,
   isBusy,
   onCreate,
@@ -89,6 +100,8 @@ export function AvailabilitySheet({
   weekStartDate: string;
   today: string;
   initialDates: string[];
+  /** 这一周已经填过可上班 / 不能上班的日子，日期格下面带绿点。 */
+  filledDates?: string[];
   editingItem?: AttendanceAvailability;
   isBusy: boolean;
   onCreate: (payload: AttendanceAvailabilityBatchPayload) => Promise<unknown>;
@@ -106,6 +119,8 @@ export function AvailabilitySheet({
     note: "",
     unavailable: false,
   });
+  // 用户点了「自定义」：即使时间正好等于某个预设也保持自定义，避免微调按钮突然消失。
+  const [customMode, setCustomMode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -134,6 +149,7 @@ export function AvailabilitySheet({
     } else {
       setForm({ workDates: initialDates, allDay: true, startTime: "09:00", endTime: "17:30", note: "", unavailable: false });
     }
+    setCustomMode(false);
     setSaveFailed(false);
     setVerification(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -212,6 +228,35 @@ export function AvailabilitySheet({
   };
 
   const summaryTime = form.allDay ? t("availability.allDay") : `${form.startTime}–${form.endTime}`;
+  const activePreset: PresetKey = form.allDay
+    ? "allDay"
+    : customMode
+      ? "custom"
+      : TIME_PRESETS.find((preset) => preset.start === form.startTime && preset.end === form.endTime)?.key ?? "custom";
+  const choosePreset = (key: PresetKey) => {
+    if (locked) return;
+    setCustomMode(key === "custom");
+    if (key === "allDay") {
+      setForm((current) => ({ ...current, allDay: true }));
+      return;
+    }
+    const preset = TIME_PRESETS.find((item) => item.key === key);
+    setForm((current) => ({
+      ...current,
+      allDay: false,
+      startTime: preset?.start ?? current.startTime,
+      endTime: preset?.end ?? current.endTime,
+    }));
+  };
+  const selectedWeekdays = weekDates
+    .map((date, index) => (form.workDates.includes(date) ? t(`weekdays.${index}`) : undefined))
+    .filter(Boolean)
+    .join(listSeparator());
+  const presetOptions: { key: PresetKey; hint: string }[] = [
+    { key: "allDay", hint: t("myAttendance.availabilitySheet.anyTime") },
+    ...TIME_PRESETS.map((preset) => ({ key: preset.key as PresetKey, hint: `${preset.start}–${preset.end}` })),
+    { key: "custom", hint: t("myAttendance.availabilitySheet.customHint") },
+  ];
 
   return (
     <BusinessSheet
@@ -222,53 +267,72 @@ export function AvailabilitySheet({
       subtitle={`${weekDates[0] ?? ""} – ${weekDates[6] ?? ""}`}
       onDismiss={onDismiss}
       footer={(
-        <View style={styles.footer}>
-          {editingItem ? (
+        <View style={styles.footerWrap}>
+          {!editingItem && form.workDates.length ? (
+            <Text variant="bodySmall" style={styles.footerSummary} numberOfLines={2}>
+              {t("myAttendance.availabilitySheet.summaryLine", {
+                days: selectedWeekdays,
+                type: t(form.unavailable ? "availability.typeUnavailable" : "availability.typeAvailable"),
+                time: summaryTime,
+              })}
+            </Text>
+          ) : null}
+          <View style={styles.footer}>
+            {editingItem ? (
+              <Button
+                mode="outlined"
+                textColor={HB_COLORS.danger}
+                style={styles.footerButton}
+                disabled={busy}
+                onPress={() => {
+                  onCancelItem(editingItem.availabilityGuid);
+                  onDismiss();
+                }}
+              >
+                {t("myAttendance.availabilitySheet.remove")}
+              </Button>
+            ) : null}
+            {verification ? (
+              <Button mode="outlined" style={styles.footerButton} disabled={busy} onPress={() => void verifySave()}>
+                {t("availability.verifySave")}
+              </Button>
+            ) : null}
             <Button
-              mode="outlined"
-              textColor={HB_COLORS.danger}
-              style={styles.footerButton}
-              disabled={busy}
-              onPress={() => {
-                onCancelItem(editingItem.availabilityGuid);
-                onDismiss();
-              }}
+              mode="contained"
+              style={styles.footerButtonWide}
+              disabled={Boolean(validationError) || locked}
+              loading={busy}
+              onPress={() => void submit()}
             >
-              {t("myAttendance.availabilitySheet.remove")}
+              {editingItem
+                ? t("common:actions.save")
+                : t(form.unavailable
+                  ? "myAttendance.availabilitySheet.submitUnavailable"
+                  : "myAttendance.availabilitySheet.submit", { count: form.workDates.length })}
             </Button>
-          ) : null}
-          {verification ? (
-            <Button mode="outlined" style={styles.footerButton} disabled={busy} onPress={() => void verifySave()}>
-              {t("availability.verifySave")}
-            </Button>
-          ) : null}
-          <Button
-            mode="contained"
-            style={styles.footerButtonWide}
-            disabled={Boolean(validationError) || locked}
-            loading={busy}
-            onPress={() => void submit()}
-          >
-            {editingItem
-              ? t("common:actions.save")
-              : t(form.unavailable
-                ? "myAttendance.availabilitySheet.submitUnavailable"
-                : "myAttendance.availabilitySheet.submit", { count: form.workDates.length })}
-          </Button>
+          </View>
         </View>
       )}
     >
       <View style={styles.content}>
-        {/* 先选类型：可上班，或员工无法到岗的不能上班时间（店长排班时据此避开）。 */}
-        <SegmentedButtons
-          value={form.unavailable ? "unavailable" : "available"}
-          onValueChange={(value) => setForm((current) => ({ ...current, unavailable: value === "unavailable" }))}
-          buttons={[
-            { value: "available", label: t("availability.typeAvailable"), icon: "check-circle-outline", disabled: locked },
-            { value: "unavailable", label: t("availability.typeUnavailable"), icon: "close-circle-outline", disabled: locked },
-          ]}
-          density="small"
-        />
+        <View style={styles.sectionRow}>
+          <Text variant="labelMedium" style={styles.sectionLabel}>
+            {editingItem ? t("myAttendance.availabilitySheet.day") : t("myAttendance.availabilitySheet.pickDays")}
+          </Text>
+          {!editingItem ? (
+            <View style={styles.quickLinks}>
+              {([
+                ["selectWholeWeek", [0, 1, 2, 3, 4, 5, 6]],
+                ["selectWorkdays", [0, 1, 2, 3, 4]],
+                ["selectWeekend", [5, 6]],
+              ] as const).map(([key, indexes]) => (
+                <Pressable key={key} accessibilityRole="button" disabled={locked} onPress={() => selectDates([...indexes])} hitSlop={6}>
+                  <Text style={styles.quickLink}>{t(`availability.${key}`)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
+        </View>
         <View style={styles.dayRow}>
           {weekDates.map((date, index) => {
             const selected = form.workDates.includes(date);
@@ -288,35 +352,44 @@ export function AvailabilitySheet({
                 <Text variant="titleSmall" style={selected ? styles.daySelectedText : undefined}>
                   {Number(date.slice(8, 10))}
                 </Text>
+                <View style={[styles.filledDot, filledDates.includes(date) ? null : styles.filledDotHidden]} />
               </Pressable>
             );
           })}
         </View>
-        {!editingItem ? (
-          <View style={styles.quickRow}>
-            <Chip compact onPress={() => selectDates([0, 1, 2, 3, 4, 5, 6])}>{t("availability.selectWholeWeek")}</Chip>
-            <Chip compact onPress={() => selectDates([0, 1, 2, 3, 4])}>{t("availability.selectWorkdays")}</Chip>
-            <Chip compact onPress={() => selectDates([5, 6])}>{t("availability.selectWeekend")}</Chip>
-            <Text variant="labelSmall" style={styles.muted}>
-              {t("availability.selectedCount", { count: form.workDates.length })}
-            </Text>
-          </View>
-        ) : null}
 
+        {/* 这几天：可上班，或员工无法到岗的不能上班时间（店长排班时据此避开）。 */}
         <SegmentedButtons
-          value={form.allDay ? "allDay" : "specific"}
-          onValueChange={(value) => setForm((current) => ({ ...current, allDay: value === "allDay" }))}
+          value={form.unavailable ? "unavailable" : "available"}
+          onValueChange={(value) => setForm((current) => ({ ...current, unavailable: value === "unavailable" }))}
           buttons={[
-            { value: "allDay", label: t("availability.allDay"), disabled: locked },
-            { value: "specific", label: t("availability.specificTime"), disabled: locked },
+            { value: "available", label: t("availability.typeAvailable"), icon: "check-circle-outline", disabled: locked },
+            { value: "unavailable", label: t("availability.typeUnavailable"), icon: "close-circle-outline", disabled: locked },
           ]}
           density="small"
         />
-        {form.allDay ? (
-          <Text variant="bodySmall" style={styles.muted}>
-            {t(form.unavailable ? "availability.unavailableAllDayHint" : "availability.allDayHint")}
-          </Text>
-        ) : (
+        <Text variant="labelMedium" style={styles.sectionLabel}>{t("myAttendance.availabilitySheet.timeRange")}</Text>
+        <View style={styles.presetGrid}>
+          {presetOptions.map((option) => {
+            const selected = activePreset === option.key;
+            return (
+              <Pressable
+                key={option.key}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: selected, disabled: locked }}
+                disabled={locked}
+                onPress={() => choosePreset(option.key)}
+                style={({ pressed }) => [styles.preset, selected && styles.presetSelected, pressed && styles.pressed]}
+              >
+                <Text style={[styles.presetTitle, selected && styles.presetSelectedText]}>
+                  {t(`myAttendance.availabilitySheet.presets.${option.key}`)}
+                </Text>
+                <Text style={[styles.presetHint, selected && styles.presetSelectedText]}>{option.hint}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        {activePreset === "custom" ? (
           <View style={styles.timeBoxes}>
             <TimeStepperBox
               label={t("fields.startTime")}
@@ -331,7 +404,11 @@ export function AvailabilitySheet({
               onChange={(endTime) => setForm((current) => ({ ...current, endTime }))}
             />
           </View>
-        )}
+        ) : form.allDay ? (
+          <Text variant="bodySmall" style={styles.muted}>
+            {t(form.unavailable ? "availability.unavailableAllDayHint" : "availability.allDayHint")}
+          </Text>
+        ) : null}
         {validationError && validationError !== "datesRequired" ? (
           <Text accessibilityRole="alert" style={styles.error}>{t(`availability.${validationError}`)}</Text>
         ) : null}
@@ -347,12 +424,6 @@ export function AvailabilitySheet({
           maxLength={500}
         />
 
-        <View style={styles.summary}>
-          <Text variant="labelSmall" style={styles.muted}>{t("myAttendance.availabilitySheet.willSubmit")}</Text>
-          <Text variant="bodyMedium">
-            {t("availability.summary", { count: form.workDates.length, time: summaryTime })}
-          </Text>
-        </View>
         {saveFailed ? (
           <Text accessibilityRole="alert" style={styles.error}>
             {verification
@@ -384,12 +455,34 @@ const styles = StyleSheet.create({
   daySelectedText: { color: ATTENDANCE_STATUS_TONES.accent.text },
   error: { color: HB_COLORS.danger, fontSize: 13 },
   footer: { flexDirection: "row", gap: HB_SPACING.xs },
+  footerSummary: { color: HB_COLORS.textSecondary, textAlign: "center" },
+  footerWrap: { gap: HB_SPACING.xs },
+  filledDot: { backgroundColor: "#12B76A", borderRadius: 3, height: 5, marginTop: 2, width: 5 },
+  filledDotHidden: { backgroundColor: "transparent" },
+  preset: {
+    borderColor: HB_COLORS.outline,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    // 每行 3 个并均分整行宽度（30% × 3 + 间距 < 100%，第 4 个自动换行）。
+    flexBasis: "30%",
+    flexGrow: 1,
+    gap: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  presetGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  presetHint: { color: HB_COLORS.textSecondary, fontSize: 11, fontVariant: ["tabular-nums"] },
+  presetSelected: { backgroundColor: ATTENDANCE_STATUS_TONES.accent.background, borderColor: HB_COLORS.action, borderWidth: 1 },
+  presetSelectedText: { color: ATTENDANCE_STATUS_TONES.accent.text },
+  presetTitle: { color: HB_COLORS.textPrimary, fontSize: 13, fontWeight: "600" },
+  quickLink: { color: HB_COLORS.action, fontSize: 12.5, fontWeight: "600" },
+  quickLinks: { flexDirection: "row", gap: HB_SPACING.sm },
+  sectionLabel: { color: HB_COLORS.textSecondary, fontWeight: "700" },
+  sectionRow: { alignItems: "center", flexDirection: "row", justifyContent: "space-between" },
   footerButton: { flex: 1 },
   footerButtonWide: { flex: 1.6 },
   muted: { color: HB_COLORS.textSecondary },
   pressed: { backgroundColor: HB_COLORS.surfaceMuted },
-  quickRow: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  summary: { backgroundColor: HB_COLORS.surfaceMuted, borderRadius: HB_RADIUS.control, gap: 2, padding: HB_SPACING.sm },
   timeBox: {
     borderColor: HB_COLORS.outline,
     borderRadius: HB_RADIUS.control,

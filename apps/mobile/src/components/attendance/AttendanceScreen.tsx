@@ -1778,11 +1778,18 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                   onNextWeek={() => setSelectedDate((current) => shiftDate(current, 7))}
                   onFillAvailability={(dates) => setAvailabilitySheet({ dates })}
                   onEditAvailability={(item) => setAvailabilitySheet({ dates: [item.workDate], item })}
+                  onGoToToday={() => {
+                    setSelectedDate(todayDate);
+                    setActivePersonalTab("punchRecords");
+                  }}
                 />
                 <AvailabilitySheet
                   visible={availabilitySheet !== null}
                   weekStartDate={employeeWeekStartDate}
                   today={todayDate}
+                  filledDates={(availabilityQuery.data ?? [])
+                    .filter((item) => item.status.toLowerCase() !== "cancelled")
+                    .map((item) => item.workDate.slice(0, 10))}
                   initialDates={availabilitySheet?.dates ?? []}
                   editingItem={availabilitySheet?.item}
                   isBusy={isAvailabilityBusy}
