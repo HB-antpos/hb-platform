@@ -70,6 +70,34 @@ public interface ILocalCatalogRepository
         bool isSpecialProduct,
         CancellationToken cancellationToken = default);
 
+    // 中文注释：分店级特殊商品分类快照（服务端权威，整体覆盖式落库）。
+    // 默认实现按"没有分类"处理，既有测试替身无需实现。
+    Task<SpecialProductCategorySnapshot> LoadSpecialProductCategorySnapshotAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(SpecialProductCategorySnapshot.Empty(storeCode));
+    }
+
+    Task ReplaceSpecialProductCategorySnapshotAsync(
+        SpecialProductCategorySnapshot snapshot,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product category caching is not supported by this repository.");
+    }
+
+    /// <summary>
+    /// 按分类取特殊商品：真实分类按服务器 SortOrder、商品编码稳定排序；
+    /// <see cref="SpecialProductCategorySnapshot.UncategorizedId"/> 取没有归属的特殊商品，沿用本机顺序。
+    /// </summary>
+    Task<IReadOnlyList<SellableItemDto>> LoadSpecialProductItemsByCategoryAsync(
+        string storeCode,
+        string categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<IReadOnlyList<SellableItemDto>>([]);
+    }
+
     Task<int> ClearSpecialProductFlagsExceptAsync(
         string storeCode,
         IEnumerable<string> productCodesToKeep,
@@ -392,6 +420,210 @@ public sealed class LocalCatalogRepository(LocalSqliteStore store) : ILocalCatal
         }
 
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<SpecialProductCategorySnapshot> LoadSpecialProductCategorySnapshotAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            return SpecialProductCategorySnapshot.Empty(string.Empty);
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        var categories = new List<SpecialProductCategoryDto>();
+        await using (var categoryCommand = connection.CreateCommand())
+        {
+            categoryCommand.CommandText = """
+                SELECT CategoryId, Name, Color, SortOrder
+                FROM LocalSpecialProductCategory
+                WHERE StoreCode = $StoreCode
+                ORDER BY SortOrder, CategoryId;
+                """;
+            categoryCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            await using var reader = await categoryCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                categories.Add(new SpecialProductCategoryDto(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetInt32(3)));
+            }
+        }
+
+        var assignments = new List<SpecialProductCategoryAssignmentDto>();
+        if (categories.Count > 0)
+        {
+            await using var itemCommand = connection.CreateCommand();
+            itemCommand.CommandText = """
+                SELECT ProductCode, CategoryId, SortOrder
+                FROM LocalSpecialProductCategoryItem
+                WHERE StoreCode = $StoreCode
+                ORDER BY CategoryId, SortOrder, ProductCode;
+                """;
+            itemCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            await using var reader = await itemCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                assignments.Add(new SpecialProductCategoryAssignmentDto(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetInt32(2)));
+            }
+        }
+
+        return new SpecialProductCategorySnapshot(normalizedStoreCode, categories, assignments).Normalize();
+    }
+
+    public async Task ReplaceSpecialProductCategorySnapshotAsync(
+        SpecialProductCategorySnapshot snapshot,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var normalizedStoreCode = NormalizeStoreCode(snapshot.StoreCode);
+        if (string.IsNullOrEmpty(normalizedStoreCode))
+        {
+            return;
+        }
+
+        // 落库前先整理（去重、丢弃指向不存在分类的归属），本机表里不会留下坏数据。
+        var normalized = snapshot.Normalize();
+        var updatedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        // 关键逻辑：覆盖式——先清掉这家店旧的分类与归属，再写入新快照，两张表在同一事务里，
+        // 任何一步失败整体回滚，读取方永远看不到「新分类 + 旧归属」的混合状态。
+        foreach (var table in new[] { "LocalSpecialProductCategory", "LocalSpecialProductCategoryItem" })
+        {
+            await using var deleteCommand = connection.CreateCommand();
+            deleteCommand.Transaction = transaction;
+            deleteCommand.CommandText = $"DELETE FROM {table} WHERE StoreCode = $StoreCode;";
+            deleteCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var category in normalized.Categories)
+        {
+            await using var insertCommand = connection.CreateCommand();
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = """
+                INSERT INTO LocalSpecialProductCategory (StoreCode, CategoryId, Name, Color, SortOrder, UpdatedAt)
+                VALUES ($StoreCode, $CategoryId, $Name, $Color, $SortOrder, $UpdatedAt);
+                """;
+            insertCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            insertCommand.Parameters.AddWithValue("$CategoryId", category.CategoryId);
+            insertCommand.Parameters.AddWithValue("$Name", category.Name);
+            insertCommand.Parameters.AddWithValue("$Color", (object?)category.Color ?? DBNull.Value);
+            insertCommand.Parameters.AddWithValue("$SortOrder", category.SortOrder);
+            insertCommand.Parameters.AddWithValue("$UpdatedAt", updatedAt);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var assignment in normalized.Assignments)
+        {
+            await using var insertCommand = connection.CreateCommand();
+            insertCommand.Transaction = transaction;
+            insertCommand.CommandText = """
+                INSERT INTO LocalSpecialProductCategoryItem (StoreCode, ProductCode, CategoryId, SortOrder, UpdatedAt)
+                VALUES ($StoreCode, $ProductCode, $CategoryId, $SortOrder, $UpdatedAt);
+                """;
+            insertCommand.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+            insertCommand.Parameters.AddWithValue("$ProductCode", assignment.ProductCode);
+            insertCommand.Parameters.AddWithValue("$CategoryId", assignment.CategoryId);
+            insertCommand.Parameters.AddWithValue("$SortOrder", assignment.SortOrder);
+            insertCommand.Parameters.AddWithValue("$UpdatedAt", updatedAt);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SellableItemDto>> LoadSpecialProductItemsByCategoryAsync(
+        string storeCode,
+        string categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedStoreCode = NormalizeStoreCode(storeCode);
+        var normalizedCategoryId = (categoryId ?? string.Empty).Trim();
+        if (string.IsNullOrEmpty(normalizedStoreCode) || string.IsNullOrEmpty(normalizedCategoryId))
+        {
+            return [];
+        }
+
+        if (string.Equals(normalizedCategoryId, SpecialProductCategorySnapshot.UncategorizedId, StringComparison.OrdinalIgnoreCase))
+        {
+            // 未分类：本机顺序的特殊商品里，去掉归属在「存在的分类」里的那些。
+            var snapshot = await LoadSpecialProductCategorySnapshotAsync(normalizedStoreCode, cancellationToken);
+            var categorized = snapshot.Assignments
+                .Select(assignment => NormalizeProductCode(assignment.ProductCode))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var allSpecial = await LoadSpecialProductItemsAsync(normalizedStoreCode, cancellationToken);
+            return allSpecial
+                .Where(item => !categorized.Contains(NormalizeProductCode(item.ProductCode)))
+                .ToArray();
+        }
+
+        await using var connection = await store.OpenConnectionAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        // 与 LocalSpecialProductCategory 内连接：归属指向已不存在的分类时不算该分类的商品；
+        // 与 IsSpecialProduct = 1 求交集：取消特殊标记不删归属行，但读取时必须过滤掉。
+        command.CommandText = """
+            SELECT
+                l.StoreCode,
+                l.ProductCode,
+                l.ReferenceCode,
+                l.DisplayName,
+                l.LookupCode,
+                l.ItemNumber,
+                l.Barcode,
+                l.ProductImage,
+                l.DiscountRate,
+                l.IsSpecialProduct,
+                l.RetailPrice,
+                l.PriceSource,
+                l.PriceSourceLabel,
+                l.QuantityFactor,
+                l.UpdatedAt,
+                ci.SortOrder AS CategorySortOrder
+            FROM LocalSellableItemIndex l
+            INNER JOIN LocalSpecialProductCategoryItem ci
+              ON ci.StoreCode = l.StoreCode
+             AND ci.ProductCode = l.ProductCode
+            INNER JOIN LocalSpecialProductCategory c
+              ON c.StoreCode = ci.StoreCode
+             AND c.CategoryId = ci.CategoryId
+            WHERE l.StoreCode = $StoreCode
+              AND l.IsSpecialProduct = 1
+              AND ci.CategoryId = $CategoryId;
+            """;
+        command.Parameters.AddWithValue("$StoreCode", normalizedStoreCode);
+        command.Parameters.AddWithValue("$CategoryId", normalizedCategoryId);
+
+        var rows = new List<(SellableItemDto Item, int SortOrder)>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            rows.Add((ReadSellableItem(reader), ReadNullableInt32(reader, "CategorySortOrder") ?? int.MaxValue));
+        }
+
+        // 同一商品可能有多条查码行：与 LoadSpecialProductItemsAsync 一样按偏好的查码行折成一个商品，
+        // 再按（分类内 SortOrder，商品编码）稳定排序。
+        return rows
+            .GroupBy(row => NormalizeProductCode(row.Item.ProductCode), StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderBy(row => PreferredSpecialLookupRank(row.Item))
+                .ThenBy(row => row.Item.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(row => row.Item.LookupCode, StringComparer.OrdinalIgnoreCase)
+                .First())
+            .OrderBy(row => row.SortOrder)
+            .ThenBy(row => row.Item.ProductCode, StringComparer.OrdinalIgnoreCase)
+            .Select(row => row.Item)
+            .ToArray();
     }
 
     public async Task<int> UpdateSpecialProductFlagAsync(

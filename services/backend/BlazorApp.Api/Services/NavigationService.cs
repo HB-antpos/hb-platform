@@ -337,6 +337,16 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "special-product-categories",
+                TitleKey = "tabs.specialProductCategories",
+                Icon = "shape-outline",
+                // 移动端「特殊商品分类」：分店级分类的新建 / 改名 / 排序 / 同步只在手机里做，入口与接口写操作共用 Manage；
+                // 查看接口另认 View。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                Permission = Permissions.PosTerminal.SpecialProducts.Manage,
+                Order = 50,
+            },
+            new()
+            {
                 RouteName = "product-insights",
                 TitleKey = "tabs.productInsights",
                 Icon = "chart-timeline-variant",

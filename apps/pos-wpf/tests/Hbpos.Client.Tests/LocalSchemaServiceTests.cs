@@ -626,6 +626,129 @@ public sealed class LocalSchemaServiceTests
         }
     }
 
+    [Fact]
+    public async Task InitializeAsync_creates_special_product_category_tables_idempotently_without_bumping_schema_version()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-category-schema-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            var schema = new LocalSchemaService(store);
+
+            await schema.InitializeAsync();
+            // 第二次初始化（每次启动都会跑）不能因表 / 索引已存在而失败，也不能清掉已有数据。
+            await using (var seed = await store.OpenConnectionAsync())
+            {
+                await ExecuteAsync(seed, "INSERT INTO LocalSpecialProductCategory (StoreCode, CategoryId, Name, Color, SortOrder, UpdatedAt) VALUES ('S1', 'C1', 'Balloons', NULL, 0, 'x');");
+                await ExecuteAsync(seed, "INSERT INTO LocalSpecialProductCategoryItem (StoreCode, ProductCode, CategoryId, SortOrder, UpdatedAt) VALUES ('S1', 'P1', 'C1', 0, 'x');");
+            }
+
+            await schema.InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            foreach (var column in new[] { "StoreCode", "CategoryId", "Name", "Color", "SortOrder", "UpdatedAt" })
+            {
+                Assert.True(await HasColumnAsync(verification, "LocalSpecialProductCategory", column), column);
+            }
+
+            foreach (var column in new[] { "StoreCode", "ProductCode", "CategoryId", "SortOrder", "UpdatedAt" })
+            {
+                Assert.True(await HasColumnAsync(verification, "LocalSpecialProductCategoryItem", column), column);
+            }
+
+            // 主键含 StoreCode：分类 (StoreCode, CategoryId)，归属 (StoreCode, ProductCode)——一个商品在一家店只属于一个分类。
+            Assert.Equal(["StoreCode", "CategoryId"], await ReadPrimaryKeyAsync(verification, "LocalSpecialProductCategory"));
+            Assert.Equal(["StoreCode", "ProductCode"], await ReadPrimaryKeyAsync(verification, "LocalSpecialProductCategoryItem"));
+            Assert.Equal(1, await CountAsync(verification, "LocalSpecialProductCategory"));
+            Assert.Equal(1, await CountAsync(verification, "LocalSpecialProductCategoryItem"));
+            Assert.Equal(1, await CountAsync(
+                verification,
+                "sqlite_master WHERE type = 'index' AND name = 'IX_LocalSpecialProductCategoryItem_Store_Category_Sort'"));
+
+            // 新表无需回填：user_version 仍是 LocalDatabaseSchemaVersion，不会让所有库白跑一遍商品表回填。
+            await using var versionCommand = verification.CreateCommand();
+            versionCommand.CommandText = "PRAGMA user_version;";
+            Assert.Equal((long)LocalSchemaService.LocalDatabaseSchemaVersion, Convert.ToInt64(await versionCommand.ExecuteScalarAsync()));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var path in new[] { databasePath, $"{databasePath}-wal", $"{databasePath}-shm" })
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_adds_category_tables_to_a_database_created_by_an_older_version()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"hbpos-category-upgrade-{Guid.NewGuid():N}.db");
+
+        try
+        {
+            var store = new LocalSqliteStore(databasePath);
+            // 旧版本地库：只有本机排序表，没有分类表。
+            await using (var legacy = await store.OpenConnectionAsync())
+            {
+                await ExecuteAsync(legacy, "CREATE TABLE LocalSpecialProductSortOrder (StoreCode TEXT NOT NULL, ProductCode TEXT NOT NULL, SortOrder INTEGER NOT NULL, UpdatedAt TEXT NOT NULL, PRIMARY KEY (StoreCode, ProductCode));");
+                await ExecuteAsync(legacy, "INSERT INTO LocalSpecialProductSortOrder VALUES ('S1', 'P1', 0, 'x');");
+            }
+
+            await new LocalSchemaService(store).InitializeAsync();
+
+            await using var verification = await store.OpenConnectionAsync();
+            Assert.Equal(0, await CountAsync(verification, "LocalSpecialProductCategory"));
+            Assert.Equal(0, await CountAsync(verification, "LocalSpecialProductCategoryItem"));
+            // 旧数据不受影响。
+            Assert.Equal(1, await CountAsync(verification, "LocalSpecialProductSortOrder"));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var path in new[] { databasePath, $"{databasePath}-wal", $"{databasePath}-shm" })
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+        }
+    }
+
+    private static async Task ExecuteAsync(SqliteConnection connection, string sql)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<long> CountAsync(SqliteConnection connection, string fromClause)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM {fromClause};";
+        return Convert.ToInt64(await command.ExecuteScalarAsync());
+    }
+
+    private static async Task<string[]> ReadPrimaryKeyAsync(SqliteConnection connection, string table)
+    {
+        await using var command = connection.CreateCommand();
+        // table_info 的 pk 列：0 = 非主键，其余是主键内的次序（从 1 开始）。
+        command.CommandText = $"SELECT name FROM pragma_table_info('{table}') WHERE pk > 0 ORDER BY pk;";
+        var names = new List<string>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            names.Add(reader.GetString(0));
+        }
+
+        return names.ToArray();
+    }
+
     private static async Task<bool> HasColumnAsync(
         SqliteConnection connection,
         string tableName,

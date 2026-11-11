@@ -1118,10 +1118,11 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(47, menu.Count);
+        Assert.Equal(48, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "payslips");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
+        Assert.Contains(menu, item => item.RouteName == "special-product-categories");
         Assert.Contains(menu, item => item.RouteName == "face-hub");
         Assert.Contains(menu, item => item.RouteName == "face-unwelcome");
         Assert.Contains(menu, item => item.RouteName == "face-match-settings");
@@ -1898,6 +1899,29 @@ public class NavigationServiceTests
             );
         }
         Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), menu => menu.RouteName == "pricing-strategies");
+    }
+
+    [Fact]
+    public void BuildAppMenu_特殊商品分类仅凭收银端特殊商品管理权限可见_设备会话不可见()
+    {
+        var manager = CreateUser(new Claim("permission", Permissions.PosTerminal.SpecialProducts.Manage));
+        var item = Assert.Single(_service.BuildAppMenu(manager), menu => menu.RouteName == "special-product-categories");
+        Assert.Equal("tabs.specialProductCategories", item.TitleKey);
+
+        // 只有查看 / 加购物车权限、或分店商品权限，都不能单独打开入口（分类的新建 / 排序 / 同步都需要 Manage）。
+        foreach (var permission in new[]
+                 {
+                     Permissions.PosTerminal.SpecialProducts.View,
+                     Permissions.PosTerminal.SpecialProducts.AddToCart,
+                     Permissions.StoreProducts.View,
+                 })
+        {
+            Assert.DoesNotContain(
+                _service.BuildAppMenu(CreateUser(new Claim("permission", permission))),
+                menu => menu.RouteName == "special-product-categories"
+            );
+        }
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), menu => menu.RouteName == "special-product-categories");
     }
 
     [Fact]

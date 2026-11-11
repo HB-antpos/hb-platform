@@ -65,6 +65,18 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     private CancellationTokenSource? _searchCts;
     private long _searchVersion;
 
+    // ---- 分店级特殊商品分类（Categories 为空时整个功能不可见，下面的状态都不参与任何逻辑）----
+    private SpecialProductCategorySnapshot _categorySnapshot = SpecialProductCategorySnapshot.Empty(string.Empty);
+    // 商品编码 → 所属分类 Id（只含归属在「存在的分类」里的商品；不在里面 = 未分类）。
+    private Dictionary<string, string> _categoryByProduct = new(StringComparer.OrdinalIgnoreCase);
+    // 当前分类：null = 全部，UncategorizedCategoryId = 未分类，其余是服务器分类 Id。
+    private string? _currentCategoryId;
+    // 已从本机还原过「当前分类」的分店；同一分店只还原一次，之后以内存里的选择为准。
+    private string? _restoredCategoryStoreCode;
+    // 当前分类范围内的卡片（按显示顺序）缓存；卡片重建、快照变化、切换分类时作废。
+    private List<SpecialProductCardViewModel>? _scopeCardsCache;
+    private SellableItemDto? _categoryPickerTarget;
+
     [ObservableProperty]
     private PosSessionState _session;
 
@@ -128,6 +140,10 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     [ObservableProperty]
     private SellableItemDto? _selectedSearchResult;
+
+    /// <summary>编辑模式「移到分类」弹层是否打开。</summary>
+    [ObservableProperty]
+    private bool _isCategoryPickerOpen;
 
     public SpecialProductsViewModel(
         LocalSellableItemIndex priceIndex,
@@ -196,6 +212,10 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         PriceBackspaceCommand = new RelayCommand(BackspacePrice);
         PriceClearCommand = new RelayCommand(ClearPrice);
         SavePriceCommand = new AsyncRelayCommand(SavePriceAsync, CanSavePrice);
+        SelectCategoryCommand = new RelayCommand<SpecialCategoryEntryViewModel>(SelectCategory);
+        OpenCategoryPickerCommand = new RelayCommand<SellableItemDto>(OpenCategoryPicker, CanMoveToCategory);
+        CloseCategoryPickerCommand = new RelayCommand(CloseCategoryPicker);
+        PickCategoryCommand = new AsyncRelayCommand<SpecialCategoryChoice>(PickCategoryAsync);
 
         _localization.CultureChanged += OnCultureChanged;
         _cart.CartChanged += OnCartChanged;
@@ -207,6 +227,9 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     /// <summary>新增、改价、排序后请求视图把指定商品滚动到可见区域（参数为商品编码）。</summary>
     public event EventHandler<string>? FocusProductRequested;
 
+    /// <summary>切换分类后请求视图把商品网格滚回顶部。</summary>
+    public event EventHandler? ScrollToTopRequested;
+
     public ObservableCollection<SellableItemDto> SpecialItems { get; } = [];
 
     /// <summary>网格实际显示的卡片（已套用筛选与「显示更多」上限）。</summary>
@@ -216,6 +239,12 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     public ObservableCollection<SpecialCartSummaryLine> CartSummaryLines { get; } = [];
 
     public ObservableCollection<SellableItemDto> SearchResults { get; } = [];
+
+    /// <summary>左侧分类栏：全部、各分类（带数量）、未分类（数量为 0 时不出现）。没有分类时为空。</summary>
+    public ObservableCollection<SpecialCategoryEntryViewModel> CategoryEntries { get; } = [];
+
+    /// <summary>「移到分类」弹层里的选项：各分类 + 未分类，当前所在的打勾。</summary>
+    public ObservableCollection<SpecialCategoryChoice> CategoryChoices { get; } = [];
 
     public IRelayCommand BackCommand { get; }
 
@@ -269,6 +298,14 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     public IAsyncRelayCommand<SellableItemDto> MoveDownCommand { get; }
 
+    public IRelayCommand<SpecialCategoryEntryViewModel> SelectCategoryCommand { get; }
+
+    public IRelayCommand<SellableItemDto> OpenCategoryPickerCommand { get; }
+
+    public IRelayCommand CloseCategoryPickerCommand { get; }
+
+    public IAsyncRelayCommand<SpecialCategoryChoice> PickCategoryCommand { get; }
+
     public string TitleText => T("specialProducts.title");
 
     public string SubtitleText => string.Format(
@@ -295,7 +332,9 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     public string BrowseHintText => T("specialProducts.hint.browse");
 
-    public string FilterEmptyText => T("specialProducts.filter.empty");
+    public string FilterEmptyText => IsCategoryScopeActive && string.IsNullOrWhiteSpace(FilterText) && !IsCartFilterActive
+        ? T("specialProducts.category.empty")
+        : T("specialProducts.filter.empty");
 
     public string CartTitleText => T("specialProducts.cart.title");
 
@@ -360,10 +399,33 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         T("specialProducts.countFormat"),
         SpecialItems.Count);
 
-    public string AllChipText => string.Format(
-        _localization.CurrentCulture,
-        T("specialProducts.chip.all"),
-        SpecialItems.Count);
+    /// <summary>
+    /// 筛选条第一个标签：没有分类（或当前是「全部」）时保持原文案「全部 N」；
+    /// 选中某个分类 / 未分类时改为显示该分类的名称与数量。
+    /// </summary>
+    public string AllChipText
+    {
+        get
+        {
+            if (IsCategoryScopeActive)
+            {
+                var entry = CategoryEntries.FirstOrDefault(item => item.IsSelected);
+                if (entry is not null)
+                {
+                    return string.Format(
+                        _localization.CurrentCulture,
+                        T("specialProducts.chip.category"),
+                        entry.Name,
+                        entry.Count);
+                }
+            }
+
+            return string.Format(
+                _localization.CurrentCulture,
+                T("specialProducts.chip.all"),
+                SpecialItems.Count);
+        }
+    }
 
     public string InCartChipText => string.Format(
         _localization.CurrentCulture,
@@ -422,13 +484,32 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             }
 
             var index = SpecialItems.IndexOf(selected);
+            if (!HasCategories)
+            {
+                return string.Format(
+                    _localization.CurrentCulture,
+                    T("specialProducts.edit.selected"),
+                    selected.DisplayName,
+                    index + 1);
+            }
+
+            // 有分类时带上商品所属分类，位置取它在当前显示范围里的序号（卡片上的 # 同一口径）。
+            var key = NormalizeProductCode(selected.ProductCode);
+            var position = _cardsByProduct.TryGetValue(key, out var card) ? card.Position : index + 1;
             return string.Format(
                 _localization.CurrentCulture,
-                T("specialProducts.edit.selected"),
+                T("specialProducts.edit.selectedInCategory"),
                 selected.DisplayName,
-                index + 1);
+                GetCategoryNameOfProduct(key),
+                position);
         }
     }
+
+    public string MoveToCategoryText => T("specialProducts.moveToCategory");
+
+    public string CategoryPickerTitleText => T("specialProducts.moveToCategory");
+
+    public string CategoryPickerProductName => _categoryPickerTarget?.DisplayName ?? string.Empty;
 
     public string AddText => T("specialProducts.add");
 
@@ -514,6 +595,9 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         {
             var result = await _workflowService.EnsureLoadedAsync(Session.StoreCode, cancellationToken);
             ApplySpecialItems(result.SpecialItems, resetToFirstPage: SpecialItems.Count == 0);
+            await LoadLocalCategoriesAsync(cancellationToken);
+            // 进入页面（在线）后台拉一次分类快照；失败不影响已显示的列表。
+            _ = RefreshCategoriesQuietlyAsync(CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -542,6 +626,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         FilterText = string.Empty;
         IsCartFilterActive = false;
         ClosePriceEditor();
+        CloseCategoryPicker();
         HideToast();
         _lastAdd = null;
         _pendingRevealLine = null;
@@ -563,6 +648,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         {
             var result = await _workflowService.PreloadAsync(Session.StoreCode, cancellationToken);
             ApplySpecialItems(result.SpecialItems, resetToFirstPage: true);
+            await LoadLocalCategoriesAsync(cancellationToken);
         }
         catch (Exception ex)
         {
@@ -583,6 +669,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         {
             var result = await _workflowService.LoadAsync(Session.StoreCode, cancellationToken);
             ApplySpecialItems(result.SpecialItems, resetToFirstPage: true);
+            await LoadLocalCategoriesAsync(cancellationToken);
             SetStatus("specialProducts.status.loaded", SpecialItems.Count);
         }
         catch (Exception ex)
@@ -598,6 +685,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     partial void OnSessionChanged(PosSessionState value)
     {
         CancelSearch();
+        ResetCategoriesWhenStoreChanged(value);
         if (value.CashierSession is not null)
         {
             _cashierSessionContext.SetCurrent(value.CashierSession);
@@ -635,6 +723,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             ClearSearch();
             SelectedSpecialItem = null;
             ClosePriceEditor();
+            CloseCategoryPicker();
             ClearRemoveConfirmations();
         }
         else
@@ -954,6 +1043,9 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
                 0,
                 0));
 
+            // 「下载更新」时一并拉取分类快照（尽力而为：失败不影响特殊商品本身的下载与显示）。
+            await RefreshCategoriesQuietlyAsync(cancellationToken);
+
             var progress = new Progress<SpecialProductDownloadProgress>(ApplyDownloadProgress);
             var serviceStopwatch = Stopwatch.StartNew();
             // 关键逻辑：下载写完本地库后，工作流先回调这里，立刻把特殊商品列表显示出来，
@@ -1111,7 +1203,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     private async Task MoveToFrontAsync(SellableItemDto? item)
     {
-        var index = item is null ? -1 : SpecialItems.IndexOf(item);
+        var index = item is null ? -1 : GetScopeIndex(item);
         if (index <= 0)
         {
             return;
@@ -1135,6 +1227,24 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         if (itemSnapshot is null || IsBusy || !IsEditMode)
         {
             return;
+        }
+
+        if (IsRealCategoryScope)
+        {
+            // 选中某个真实分类：分类内顺序由服务器统一，走 order 接口（需要联网）。
+            await MoveInCategoryAsync(itemSnapshot, delta);
+            return;
+        }
+
+        if (IsCategoryScopeActive)
+        {
+            // 「未分类」视图沿用本机排序，但「上移 / 下移」要相对视图里看得见的邻居：
+            // 把视图内的步数换算成全量本机顺序里的步数，这样移动后在未分类视图里一定看得出变化。
+            delta = TranslateUncategorizedDelta(itemSnapshot, delta);
+            if (delta == 0)
+            {
+                return;
+            }
         }
 
         var currentIndex = SpecialItems.IndexOf(itemSnapshot);
@@ -1247,8 +1357,18 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
             card.IsSelected = selectedKey.Length > 0 &&
                 string.Equals(NormalizeProductCode(card.ProductCode), selectedKey, StringComparison.OrdinalIgnoreCase);
         }
+
+        // 商品列表变了：分类里的数量、范围内卡片与位置都要跟着重算（没有分类时这里什么都不做）。
+        SyncCategoryState();
     }
 
+    /// <summary>
+    /// 当前显示范围的筛选规则（写清楚，测试逐条覆盖）：
+    /// 1. 「已在购物车」标签与分类无关：开启时在全部特殊商品里取在购物车的（跨分类），与设计图「标签不变、仍是跨分类」一致；
+    /// 2. 筛选框有内容时始终在全部特殊商品里找，不受当前分类限制（与「已在购物车」同时开启时两者取交集）；
+    /// 3. 只有筛选框为空且没开「已在购物车」时，才按当前分类显示：真实分类 = 该分类商品按服务器顺序，
+    ///    未分类 = 没有归属的商品（本机顺序），全部 = 现有完整列表；没有分类时这一条恒为「全部」。
+    /// </summary>
     private IEnumerable<SpecialProductCardViewModel> FilterCards()
     {
         IEnumerable<SpecialProductCardViewModel> cards = _allCards;
@@ -1260,7 +1380,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         var text = (FilterText ?? string.Empty).Trim();
         if (text.Length == 0)
         {
-            return cards;
+            return IsCategoryScopeActive && !IsCartFilterActive ? GetScopeCards() : cards;
         }
 
         return cards.Where(card =>
@@ -1292,6 +1412,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         OnPropertyChanged(nameof(InCartChipText));
         OnPropertyChanged(nameof(InCartCount));
         OnPropertyChanged(nameof(SelectedPositionText));
+        OnPropertyChanged(nameof(FilterEmptyText));
         ShowMoreCommand.NotifyCanExecuteChanged();
         RefreshCommandStates();
     }
@@ -1312,6 +1433,704 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
     {
         _displayLimit += DisplayChunkSize;
         RefreshDisplayedCards();
+    }
+
+    // ================= 分店级特殊商品分类 =================
+    // 约定：Categories 为空 = 这家店没建分类，下面所有入口都不产生任何效果，页面与旧版完全一致。
+
+    private const string OrderConflictErrorCode = "SPECIAL_PRODUCT_CATEGORY_ORDER_CONFLICT";
+
+    // 两台收银机同时首次归类同一商品时服务端返回（HTTP 409）：处理方式与排序冲突一致，先刷新再提示重新操作。
+    private const string AssignConflictErrorCode = "SPECIAL_PRODUCT_CATEGORY_ASSIGN_CONFLICT";
+
+    // 这几类服务端错误说明本机快照已过期（别的收银机 / 手机刚改过），提示后要立刻刷新快照。
+    private static readonly string[] StaleCategoryErrorCodes =
+    [
+        OrderConflictErrorCode,
+        AssignConflictErrorCode,
+        "SPECIAL_PRODUCT_CATEGORY_NOT_FOUND",
+        "SPECIAL_PRODUCT_NOT_SPECIAL",
+    ];
+
+    public bool HasCategories => _categorySnapshot.HasCategories;
+
+    /// <summary>当前分类：null = 全部，<see cref="SpecialProductCategorySnapshot.UncategorizedId"/> = 未分类，其余是分类 Id。</summary>
+    public string? CurrentCategoryId => _currentCategoryId;
+
+    /// <summary>有分类且选中了「全部」以外的范围（真实分类或未分类）。</summary>
+    public bool IsCategoryScopeActive => HasCategories && _currentCategoryId is not null;
+
+    /// <summary>选中了某个真实分类：此时上移 / 下移 / 移到最前走服务器 order 接口。</summary>
+    public bool IsRealCategoryScope => IsCategoryScopeActive && !IsUncategorizedScope;
+
+    private bool IsUncategorizedScope => string.Equals(
+        _currentCategoryId,
+        SpecialProductCategorySnapshot.UncategorizedId,
+        StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>当前分类范围内的卡片，按显示顺序：真实分类 = 服务器顺序，未分类 / 全部 = 本机顺序。不受筛选框影响。</summary>
+    private List<SpecialProductCardViewModel> GetScopeCards()
+    {
+        if (!IsCategoryScopeActive)
+        {
+            return _allCards;
+        }
+
+        var cached = _scopeCardsCache;
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        List<SpecialProductCardViewModel> result;
+        if (IsUncategorizedScope)
+        {
+            result = _allCards
+                .Where(card => !_categoryByProduct.ContainsKey(NormalizeProductCode(card.ProductCode)))
+                .ToList();
+        }
+        else
+        {
+            // 服务器给出的顺序里，本机没有的商品（本机特殊商品列表还没更新）直接跳过。
+            result = [];
+            foreach (var code in _categorySnapshot.GetOrderedProductCodes(_currentCategoryId!))
+            {
+                if (_cardsByProduct.TryGetValue(NormalizeProductCode(code), out var card))
+                {
+                    result.Add(card);
+                }
+            }
+        }
+
+        _scopeCardsCache = result;
+        return result;
+    }
+
+    private int GetScopeCount() => IsCategoryScopeActive ? GetScopeCards().Count : SpecialItems.Count;
+
+    private int GetScopeIndex(SellableItemDto item)
+    {
+        if (!IsCategoryScopeActive)
+        {
+            return SpecialItems.IndexOf(item);
+        }
+
+        var key = NormalizeProductCode(item.ProductCode);
+        var scope = GetScopeCards();
+        for (var index = 0; index < scope.Count; index++)
+        {
+            if (string.Equals(NormalizeProductCode(scope[index].ProductCode), key, StringComparison.OrdinalIgnoreCase))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private string GetCategoryNameOfProduct(string productKey)
+    {
+        if (_categoryByProduct.TryGetValue(productKey, out var categoryId))
+        {
+            var category = _categorySnapshot.Categories.FirstOrDefault(item => string.Equals(
+                item.CategoryId, categoryId, StringComparison.OrdinalIgnoreCase));
+            if (category is not null)
+            {
+                return category.Name;
+            }
+        }
+
+        return T("specialProducts.category.uncategorized");
+    }
+
+    /// <summary>
+    /// 「未分类」视图里的上移 / 下移仍改本机顺序，但步数要相对视图里看得见的邻居：
+    /// 返回把该商品挪到「视图里目标邻居」当前位置所需的、在全量本机顺序里的步数（0 = 不用动 / 到头了）。
+    /// </summary>
+    private int TranslateUncategorizedDelta(SellableItemDto item, int delta)
+    {
+        var scope = GetScopeCards();
+        var key = NormalizeProductCode(item.ProductCode);
+        var scopeIndex = scope.FindIndex(card => string.Equals(
+            NormalizeProductCode(card.ProductCode), key, StringComparison.OrdinalIgnoreCase));
+        var targetIndex = scopeIndex + delta;
+        if (scopeIndex < 0 || delta == 0 || targetIndex < 0 || targetIndex >= scope.Count)
+        {
+            return 0;
+        }
+
+        var from = SpecialItems.IndexOf(item);
+        var to = SpecialItems.IndexOf(scope[targetIndex].Item);
+        return from < 0 || to < 0 ? 0 : to - from;
+    }
+
+    /// <summary>
+    /// 在服务器给的完整分类顺序里挪动一个商品：目标位置取「当前显示范围里的邻居」所在的位置，
+    /// 这样即使本机列表缺少个别商品，也不会出现「点了上移却看不出变化」；返回新的完整顺序（发给服务器的排列），
+    /// 无法移动（到头、商品不在顺序里）返回 null。
+    /// </summary>
+    private static IReadOnlyList<string>? ComputeReorderedCategory(
+        IReadOnlyList<string> fullOrder,
+        IReadOnlyList<string> visibleOrder,
+        string productCode,
+        int delta)
+    {
+        static int IndexOf(IReadOnlyList<string> list, string code)
+        {
+            for (var index = 0; index < list.Count; index++)
+            {
+                if (string.Equals(list[index], code, StringComparison.OrdinalIgnoreCase))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        var visibleIndex = IndexOf(visibleOrder, productCode);
+        var targetVisibleIndex = visibleIndex + delta;
+        if (visibleIndex < 0 || delta == 0 || targetVisibleIndex < 0 || targetVisibleIndex >= visibleOrder.Count)
+        {
+            return null;
+        }
+
+        var result = fullOrder.ToList();
+        var from = IndexOf(result, productCode);
+        var to = IndexOf(result, visibleOrder[targetVisibleIndex]);
+        if (from < 0 || to < 0)
+        {
+            return null;
+        }
+
+        var moved = result[from];
+        result.RemoveAt(from);
+        result.Insert(to, moved);
+        return result;
+    }
+
+    /// <summary>卡片 / 快照 / 当前分类任一变化后，统一重算：范围缓存、当前分类有效性、分类栏、卡片位置。</summary>
+    private void SyncCategoryState()
+    {
+        _scopeCardsCache = null;
+        NormalizeCurrentCategory();
+        RefreshCategoryEntries();
+        ApplyCardPositions();
+    }
+
+    /// <summary>
+    /// 当前分类失效时回到「全部」并把这个结果记到本机：分类被删除、整个功能被关掉（Categories 为空），
+    /// 或「未分类」已经没有商品（该行会被隐藏）。
+    /// </summary>
+    private void NormalizeCurrentCategory()
+    {
+        if (_currentCategoryId is null)
+        {
+            return;
+        }
+
+        var valid = HasCategories &&
+            (IsUncategorizedScope
+                ? ComputeCategoryCounts().Uncategorized > 0
+                : _categorySnapshot.Categories.Any(category => string.Equals(
+                    category.CategoryId, _currentCategoryId, StringComparison.OrdinalIgnoreCase)));
+        if (valid)
+        {
+            return;
+        }
+
+        _currentCategoryId = null;
+        _scopeCardsCache = null;
+        _displayLimit = DisplayChunkSize;
+        _ = PersistSelectedCategoryAsync(null);
+    }
+
+    private (Dictionary<string, int> PerCategory, int Uncategorized) ComputeCategoryCounts()
+    {
+        var perCategory = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var uncategorized = 0;
+        foreach (var card in _allCards)
+        {
+            if (_categoryByProduct.TryGetValue(NormalizeProductCode(card.ProductCode), out var categoryId))
+            {
+                perCategory[categoryId] = perCategory.GetValueOrDefault(categoryId) + 1;
+            }
+            else
+            {
+                uncategorized++;
+            }
+        }
+
+        return (perCategory, uncategorized);
+    }
+
+    private void RefreshCategoryEntries()
+    {
+        if (!HasCategories)
+        {
+            if (CategoryEntries.Count > 0)
+            {
+                CategoryEntries.Clear();
+            }
+
+            RaiseCategoryProperties();
+            return;
+        }
+
+        var (perCategory, uncategorized) = ComputeCategoryCounts();
+        var entries = new List<SpecialCategoryEntryViewModel>
+        {
+            new(null, T("specialProducts.category.all"), null, _allCards.Count, isAll: true),
+        };
+        foreach (var category in _categorySnapshot.Categories)
+        {
+            entries.Add(new SpecialCategoryEntryViewModel(
+                category.CategoryId,
+                category.Name,
+                category.Color,
+                perCategory.GetValueOrDefault(category.CategoryId),
+                isAll: false));
+        }
+
+        // 「未分类」没有商品时不显示这一行。
+        if (uncategorized > 0)
+        {
+            entries.Add(new SpecialCategoryEntryViewModel(
+                SpecialProductCategorySnapshot.UncategorizedId,
+                T("specialProducts.category.uncategorized"),
+                null,
+                uncategorized,
+                isAll: false));
+        }
+
+        foreach (var entry in entries)
+        {
+            entry.IsSelected = string.Equals(entry.Id, _currentCategoryId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        CategoryEntries.ReplaceWith(entries);
+        RaiseCategoryProperties();
+    }
+
+    private void RaiseCategoryProperties()
+    {
+        OnPropertyChanged(nameof(HasCategories));
+        OnPropertyChanged(nameof(CurrentCategoryId));
+        OnPropertyChanged(nameof(IsCategoryScopeActive));
+        OnPropertyChanged(nameof(IsRealCategoryScope));
+        OnPropertyChanged(nameof(AllChipText));
+        OnPropertyChanged(nameof(FilterEmptyText));
+    }
+
+    /// <summary>
+    /// 卡片上的「# 位置」：当前选中分类 / 未分类时，范围内的卡片按它们在该范围里的顺序编号；
+    /// 其余卡片（以及「全部」）保持在全部特殊商品里的全局位置。
+    /// </summary>
+    private void ApplyCardPositions()
+    {
+        for (var index = 0; index < _allCards.Count; index++)
+        {
+            _allCards[index].Position = index + 1;
+        }
+
+        if (!IsCategoryScopeActive)
+        {
+            return;
+        }
+
+        var scope = GetScopeCards();
+        for (var index = 0; index < scope.Count; index++)
+        {
+            scope[index].Position = index + 1;
+        }
+    }
+
+    /// <summary>用快照覆盖内存里的分类状态（来自本机库、联网拉取、或在线调整成功后的返回值）。</summary>
+    private void ApplyCategorySnapshot(SpecialProductCategorySnapshot snapshot)
+    {
+        if (!string.Equals(snapshot.StoreCode.Trim(), Session.StoreCode.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            // 异步返回时已经切换了分店：丢弃，避免把别家店的分类套到当前页面上。
+            Log($"categories snapshot ignored store={snapshot.StoreCode} current={Session.StoreCode}");
+            return;
+        }
+
+        lock (_specialItemsGate)
+        {
+            var normalized = snapshot.Normalize();
+            _categorySnapshot = normalized;
+            _categoryByProduct = normalized.Assignments.ToDictionary(
+                assignment => NormalizeProductCode(assignment.ProductCode),
+                assignment => assignment.CategoryId,
+                StringComparer.OrdinalIgnoreCase);
+            SyncCategoryState();
+            RefreshDisplayedCards();
+        }
+    }
+
+    private void ResetCategoriesWhenStoreChanged(PosSessionState session)
+    {
+        var newStoreCode = session.StoreCode.Trim();
+        if (_categorySnapshot.StoreCode.Length == 0 ||
+            string.Equals(_categorySnapshot.StoreCode, newStoreCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // 换了分店：旧店的分类、当前分类和「已还原」标记都作废，等新店的快照到来再还原。
+        _categorySnapshot = SpecialProductCategorySnapshot.Empty(newStoreCode);
+        _categoryByProduct = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _currentCategoryId = null;
+        _restoredCategoryStoreCode = null;
+        SyncCategoryState();
+        RefreshDisplayedCards();
+    }
+
+    /// <summary>读本机的分类快照并还原当前分类（每家店只还原一次）。本机读取失败只记日志，不影响列表显示。</summary>
+    private async Task LoadLocalCategoriesAsync(CancellationToken cancellationToken)
+    {
+        var storeCode = Session.StoreCode;
+        try
+        {
+            var snapshot = await _workflowService.LoadCategorySnapshotAsync(storeCode, cancellationToken);
+            var restore = !string.Equals(_restoredCategoryStoreCode, storeCode.Trim(), StringComparison.OrdinalIgnoreCase);
+            string? savedCategoryId = null;
+            if (restore)
+            {
+                savedCategoryId = await _workflowService.LoadSelectedCategoryIdAsync(storeCode, cancellationToken);
+            }
+
+            if (_disposed || !string.Equals(storeCode, Session.StoreCode, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (restore)
+            {
+                _restoredCategoryStoreCode = storeCode.Trim();
+                _currentCategoryId = string.IsNullOrWhiteSpace(savedCategoryId) ? null : savedCategoryId.Trim();
+            }
+
+            // 恢复出来的分类若已不存在（被删除、或整个功能被关），SyncCategoryState 会把它收回「全部」。
+            ApplyCategorySnapshot(snapshot);
+        }
+        catch (Exception ex)
+        {
+            Log($"categories local load failed store={storeCode} error={ex.Message}");
+        }
+    }
+
+    /// <summary>联网拉取分类快照并套用；任何失败（离线、老服务端没有接口、超时）都只记日志，保留现有显示。</summary>
+    private async Task<bool> RefreshCategoriesQuietlyAsync(CancellationToken cancellationToken)
+    {
+        if (_disposed || !Session.IsOnline)
+        {
+            return false;
+        }
+
+        var storeCode = Session.StoreCode;
+        try
+        {
+            var snapshot = await _workflowService.RefreshCategorySnapshotAsync(storeCode, cancellationToken);
+            if (snapshot is null || _disposed)
+            {
+                return false;
+            }
+
+            ApplyCategorySnapshot(snapshot);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"categories refresh failed store={storeCode} error={ex.Message}");
+            return false;
+        }
+    }
+
+    private void SelectCategory(SpecialCategoryEntryViewModel? entry)
+    {
+        if (entry is null || !HasCategories)
+        {
+            return;
+        }
+
+        // 点分类 = 回到「按分类浏览」：清掉筛选框与「已在购物车」，否则它们会盖过分类。
+        if (!string.IsNullOrEmpty(FilterText))
+        {
+            FilterText = string.Empty;
+        }
+
+        if (IsCartFilterActive)
+        {
+            SetCartFilter(false);
+        }
+
+        SetCurrentCategory(entry.Id, persist: true);
+        ScrollToTopRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void SetCurrentCategory(string? categoryId, bool persist)
+    {
+        if (string.Equals(_currentCategoryId, categoryId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _currentCategoryId = categoryId;
+        _scopeCardsCache = null;
+        _displayLimit = DisplayChunkSize;
+        ApplyCardPositions();
+        foreach (var entry in CategoryEntries)
+        {
+            entry.IsSelected = string.Equals(entry.Id, _currentCategoryId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        RaiseCategoryProperties();
+        ClearSelectionWhenOutOfScope();
+        RefreshDisplayedCards();
+        if (persist)
+        {
+            _ = PersistSelectedCategoryAsync(categoryId);
+        }
+    }
+
+    /// <summary>编辑模式里选中的商品若不在当前分类范围内（切换分类、或刚被移走），取消选中，避免操作条指向看不见的商品。</summary>
+    private void ClearSelectionWhenOutOfScope()
+    {
+        var selected = SelectedSpecialItem;
+        if (selected is null || !IsCategoryScopeActive)
+        {
+            return;
+        }
+
+        if (GetScopeIndex(selected) < 0)
+        {
+            SelectedSpecialItem = null;
+        }
+    }
+
+    private async Task PersistSelectedCategoryAsync(string? categoryId)
+    {
+        try
+        {
+            await _workflowService.SaveSelectedCategoryIdAsync(Session.StoreCode, categoryId, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log($"categories selection save failed error={ex.Message}");
+        }
+    }
+
+    // ---- 编辑模式：移到分类 ----
+
+    private bool CanMoveToCategory(SellableItemDto? item)
+    {
+        return item is not null && IsEditMode && HasCategories && Session.IsOnline && !IsBusy;
+    }
+
+    private void OpenCategoryPicker(SellableItemDto? item)
+    {
+        if (item is null || !IsEditMode || !HasCategories || IsBusy)
+        {
+            return;
+        }
+
+        if (!EnsureOnlineMutationAllowed("specialProducts.status.categoryOnlineRequired"))
+        {
+            return;
+        }
+
+        _categoryPickerTarget = item;
+        _categoryByProduct.TryGetValue(NormalizeProductCode(item.ProductCode), out var currentCategoryId);
+        var choices = _categorySnapshot.Categories
+            .Select(category => new SpecialCategoryChoice(
+                category.CategoryId,
+                category.Name,
+                SpecialCategoryEntryViewModel.NormalizeColor(category.Color),
+                string.Equals(category.CategoryId, currentCategoryId, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        // 最后一项「未分类」：把商品移出分类，当前就在未分类里时打勾。
+        choices.Add(new SpecialCategoryChoice(null, T("specialProducts.category.uncategorized"), null, currentCategoryId is null));
+        CategoryChoices.ReplaceWith(choices);
+        IsCategoryPickerOpen = true;
+        OnPropertyChanged(nameof(CategoryPickerProductName));
+    }
+
+    private void CloseCategoryPicker()
+    {
+        if (!IsCategoryPickerOpen && _categoryPickerTarget is null)
+        {
+            return;
+        }
+
+        IsCategoryPickerOpen = false;
+        _categoryPickerTarget = null;
+        CategoryChoices.Clear();
+        OnPropertyChanged(nameof(CategoryPickerProductName));
+    }
+
+    private async Task PickCategoryAsync(SpecialCategoryChoice? choice, CancellationToken cancellationToken)
+    {
+        var target = _categoryPickerTarget;
+        if (choice is null || target is null)
+        {
+            return;
+        }
+
+        CloseCategoryPicker();
+        if (choice.IsCurrent)
+        {
+            // 选了当前所在的分类：什么都不用改。
+            return;
+        }
+
+        using var authorization = await AuthorizeAsync(
+            Permissions.PosTerminal.SpecialProducts.Manage,
+            "move-to-category",
+            cancellationToken);
+        if (authorization is null)
+        {
+            return;
+        }
+        using var authorizationActivation = authorization.Activate();
+
+        if (!IsEditMode || IsBusy || !EnsureOnlineMutationAllowed("specialProducts.status.categoryOnlineRequired"))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            Log($"operation=move-to-category store={Session.StoreCode} productCode={target.ProductCode} category={choice.CategoryId ?? "<none>"} stage=start");
+            // 关键逻辑：归属以服务端为准，先在线写入成功，再用服务器返回的最新全量快照覆盖本机与页面；失败时页面不变。
+            var snapshot = await _workflowService.AssignProductToCategoryAsync(
+                Session.StoreCode,
+                target.ProductCode,
+                choice.CategoryId,
+                cancellationToken);
+            ApplyCategorySnapshot(snapshot);
+            ClearSelectionWhenOutOfScope();
+            SetStatus("specialProducts.status.categoryMoved", target.DisplayName, choice.Name);
+            stopwatch.Stop();
+            Log($"operation=move-to-category store={Session.StoreCode} productCode={target.ProductCode} category={choice.CategoryId ?? "<none>"} stage=completed totalElapsedMs={stopwatch.ElapsedMilliseconds}");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Log($"operation=move-to-category store={Session.StoreCode} productCode={target.ProductCode} stage=canceled");
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"operation=move-to-category store={Session.StoreCode} productCode={target.ProductCode} category={choice.CategoryId ?? "<none>"} stage=failed totalElapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            if (IsAssignConflict(ex))
+            {
+                // 别处刚把同一商品归了类：先刷新到服务器最新状态，再提示重新操作。
+                await RefreshCategoriesQuietlyAsync(CancellationToken.None);
+                SetStatus("specialProducts.status.categoryAssignConflict");
+            }
+            else
+            {
+                SetStatusText(string.Format(_localization.CurrentCulture, T("specialProducts.status.categoryMoveFailed"), ex.Message));
+                if (IsStaleCategoryError(ex))
+                {
+                    // 分类被删 / 商品已不是特殊商品：本机快照过期，拉一次最新的，页面立刻对齐服务器。
+                    await RefreshCategoriesQuietlyAsync(CancellationToken.None);
+                }
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    // ---- 编辑模式：真实分类内的顺序（走服务器）----
+
+    private async Task MoveInCategoryAsync(SellableItemDto item, int delta)
+    {
+        var categoryId = _currentCategoryId!;
+        var productCode = NormalizeProductCode(item.ProductCode);
+        var visibleOrder = GetScopeCards().Select(card => NormalizeProductCode(card.ProductCode)).ToArray();
+        var fullOrder = _categorySnapshot.GetOrderedProductCodes(categoryId).Select(NormalizeProductCode).ToArray();
+        var reordered = ComputeReorderedCategory(fullOrder, visibleOrder, productCode, delta);
+        if (reordered is null)
+        {
+            return;
+        }
+
+        if (!EnsureOnlineMutationAllowed("specialProducts.status.categoryOnlineRequired"))
+        {
+            return;
+        }
+
+        IsBusy = true;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            Log($"operation=category-order store={Session.StoreCode} category={categoryId} productCode={productCode} delta={delta} stage=start");
+            // ProductCodes 是该分类当前全部商品的新排列；服务端发现与它自己的数据对不上会返回冲突，不会静默覆盖。
+            var snapshot = await _workflowService.ReorderCategoryProductsAsync(
+                Session.StoreCode,
+                categoryId,
+                reordered,
+                CancellationToken.None);
+            ApplyCategorySnapshot(snapshot);
+            EnsureProductWithinDisplayLimit(productCode);
+            FocusProductRequested?.Invoke(this, item.ProductCode);
+            SetStatus("specialProducts.status.categoryOrderSaved");
+            stopwatch.Stop();
+            Log($"operation=category-order store={Session.StoreCode} category={categoryId} productCode={productCode} stage=completed totalElapsedMs={stopwatch.ElapsedMilliseconds}");
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            Log($"operation=category-order store={Session.StoreCode} category={categoryId} productCode={productCode} stage=failed totalElapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            if (IsOrderConflict(ex))
+            {
+                // 冲突：别的收银机或手机刚改过这个分类。先刷新到服务器最新状态，再提示重新调整。
+                await RefreshCategoriesQuietlyAsync(CancellationToken.None);
+                SetStatus("specialProducts.status.categoryOrderConflict");
+            }
+            else
+            {
+                SetStatusText(string.Format(_localization.CurrentCulture, T("specialProducts.status.categoryOrderFailed"), ex.Message));
+                if (IsStaleCategoryError(ex))
+                {
+                    await RefreshCategoriesQuietlyAsync(CancellationToken.None);
+                }
+            }
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static bool IsOrderConflict(Exception exception) =>
+        exception is CatalogApiException api &&
+        string.Equals(api.ErrorCode, OrderConflictErrorCode, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsAssignConflict(Exception exception) =>
+        exception is CatalogApiException api &&
+        string.Equals(api.ErrorCode, AssignConflictErrorCode, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsStaleCategoryError(Exception exception) =>
+        exception is CatalogApiException api &&
+        api.ErrorCode is not null &&
+        StaleCategoryErrorCodes.Contains(api.ErrorCode, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>排序后目标商品若落在「显示更多」之外，扩大渲染上限让它可见（与新增 / 改价后的定位一致）。</summary>
+    private void EnsureProductWithinDisplayLimit(string productCode)
+    {
+        var index = GetScopeCards().FindIndex(card => string.Equals(
+            NormalizeProductCode(card.ProductCode), productCode, StringComparison.OrdinalIgnoreCase));
+        if (index >= _displayLimit)
+        {
+            _displayLimit = index + 1;
+            RefreshDisplayedCards();
+        }
     }
 
     // ================= 购物车联动 =================
@@ -1797,13 +2616,18 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
 
     private bool CanMoveUp(SellableItemDto? item)
     {
-        return item is not null && IsEditMode && !IsBusy && SpecialItems.IndexOf(item) > 0;
+        // 真实分类内的顺序存在服务器上，离线时置灰；「全部 / 未分类」只改本机，离线也可用。
+        return item is not null && IsEditMode && !IsBusy &&
+            (!IsRealCategoryScope || Session.IsOnline) &&
+            GetScopeIndex(item) > 0;
     }
 
     private bool CanMoveDown(SellableItemDto? item)
     {
-        var index = item is null ? -1 : SpecialItems.IndexOf(item);
-        return index >= 0 && IsEditMode && !IsBusy && index < SpecialItems.Count - 1;
+        var index = item is null ? -1 : GetScopeIndex(item);
+        return index >= 0 && IsEditMode && !IsBusy &&
+            (!IsRealCategoryScope || Session.IsOnline) &&
+            index < GetScopeCount() - 1;
     }
 
     private void RefreshCommandStates()
@@ -1817,6 +2641,7 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         MoveToFrontCommand.NotifyCanExecuteChanged();
         BeginRemoveCommand.NotifyCanExecuteChanged();
         OpenPriceEditorCommand.NotifyCanExecuteChanged();
+        OpenCategoryPickerCommand.NotifyCanExecuteChanged();
         SavePriceCommand.NotifyCanExecuteChanged();
         RefreshCommand.NotifyCanExecuteChanged();
     }
@@ -1966,6 +2791,10 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         OnPropertyChanged(nameof(NoSearchResultsText));
         OnPropertyChanged(nameof(OnlineStateText));
         OnPropertyChanged(nameof(SelectedSpecialItemText));
+        OnPropertyChanged(nameof(MoveToCategoryText));
+        OnPropertyChanged(nameof(CategoryPickerTitleText));
+        // 分类栏里「全部 / 未分类」的名称是本地化文案，切换语言后重建。
+        RefreshCategoryEntries();
     }
 
     private string T(string key)
@@ -2017,8 +2846,10 @@ public sealed partial class SpecialProductsViewModel : ObservableObject, IScanne
         AddSpecialProductCommand.Cancel();
         RemoveSpecialProductCommand.Cancel();
         SavePriceCommand.Cancel();
+        PickCategoryCommand.Cancel();
         CancelSearch();
         ClosePriceEditor();
+        CloseCategoryPicker();
         HideToast();
         // 本次访问里加入过商品：回到收银台后定位到最后加入的购物车行（与旧「加购即返回」的定位一致）。
         var reveal = _pendingRevealLine;

@@ -4324,6 +4324,82 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 分店特殊商品分类两张表_新表_同店名称唯一_归属主键_可重复执行_识别漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54470。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql));
+        Assert.Equal(54470, missing.Number);
+
+        // 新建、可重复执行；审计列 IsDeleted 默认 0、SortOrder 默认 0。
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreSpecialProductCategory (Guid, StoreCode, Name, Color, SortOrder, CreatedAt)
+            VALUES (N'c-1', N'1042', N'Toys', N'#E65A2F', 0, SYSUTCDATETIME());
+            INSERT dbo.StoreSpecialProductCategoryItem (StoreCode, ProductCode, CategoryGuid, CreatedAt)
+            VALUES (N'1042', N'P-1', N'c-1', SYSUTCDATETIME());
+            """);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.StoreSpecialProductCategory WHERE Guid = N'c-1' AND IsDeleted = 0 AND SortOrder = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.StoreSpecialProductCategoryItem WHERE ProductCode = N'P-1' AND CategoryGuid = N'c-1' AND SortOrder = 0 AND IsDeleted = 0"));
+
+        // 同店名称唯一（不区分大小写）；换一家店可以重名。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreSpecialProductCategory (Guid, StoreCode, Name, SortOrder, CreatedAt)
+            VALUES (N'c-2', N'1042', N'TOYS', 1, SYSUTCDATETIME());
+            """));
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreSpecialProductCategory (Guid, StoreCode, Name, SortOrder, CreatedAt)
+            VALUES (N'c-3', N'1043', N'Toys', 0, SYSUTCDATETIME());
+            """);
+
+        // 一个商品在一家店只属于一个分类：同 (StoreCode, ProductCode) 第二次插入被主键拒绝。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.StoreSpecialProductCategoryItem (StoreCode, ProductCode, CategoryGuid, CreatedAt)
+            VALUES (N'1042', N'P-1', N'c-3', SYSUTCDATETIME());
+            """));
+
+        // 列宽漂移 → 54471（选没有索引依赖的 Color 列）；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreSpecialProductCategory ALTER COLUMN Color nvarchar(20) NULL;");
+        var width = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql));
+        Assert.Equal(54471, width.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreSpecialProductCategory ALTER COLUMN Color nvarchar(16) NULL;");
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql);
+
+        // 同店名称唯一索引缺失 → 54473；重新执行迁移补回，数据仍在。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_StoreSpecialProductCategory_Store_Name ON dbo.StoreSpecialProductCategory;");
+        var noUnique = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql));
+        Assert.Equal(54473, noUnique.Number);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql);
+
+        // 归属表分类内顺序索引缺失 → 54474；重新执行迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_StoreSpecialProductCategoryItem_Store_Category_Sort ON dbo.StoreSpecialProductCategoryItem;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql));
+        Assert.Equal(54474, noIndex.Number);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.ApplySql);
+        await ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql);
+        Assert.Equal(2, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StoreSpecialProductCategory"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.StoreSpecialProductCategoryItem"));
+
+        // 归属表主键缺失 → 54472。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.StoreSpecialProductCategoryItem DROP CONSTRAINT PK_StoreSpecialProductCategoryItem;");
+        var noPrimaryKey = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, StoreSpecialProductCategorySchema.VerifySql));
+        Assert.Equal(54472, noPrimaryKey.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 员工通知三张表_新表_可重复执行_模板键唯一_识别列漂移缺表和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

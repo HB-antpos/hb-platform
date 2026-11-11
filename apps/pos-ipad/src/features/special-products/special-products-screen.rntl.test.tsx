@@ -6,13 +6,24 @@ import {
   resolveSpecialProductsAccess,
   SPECIAL_PRODUCTS_ADD_TO_CART_PERMISSION,
   SPECIAL_PRODUCTS_MANAGE_PERMISSION,
+  SPECIAL_PRODUCTS_CATEGORY_RAIL_WIDTH,
+  SPECIAL_PRODUCTS_CATEGORY_ROW_HEIGHT,
   SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
   SPECIAL_PRODUCTS_VIEW_PERMISSION,
+  specialProductsDragTargetIndex,
+  specialProductsGridColumns,
   SpecialProductsScreen,
   SpecialProductsUnavailableScreen,
   type SpecialProductsScreenPresenter,
   type SpecialProductsState,
 } from "./index";
+
+import { deriveSpecialProductsCategoryView } from "./special-product-categories-view";
+
+import type {
+  SpecialProductCategory,
+  SpecialProductCategoryAssignment,
+} from "@hb/pos-domain/core/contracts/special-product-categories";
 
 import type { SpecialProductItem } from "@/core/contracts";
 
@@ -647,10 +658,458 @@ describe("SpecialProductsScreen", () => {
     expect(screen.queryByTestId("special-products-add-modal")).toBeNull();
     await screen.unmount();
   });
+
+  describe("分店级特殊商品分类", () => {
+    const categories: SpecialProductCategory[] = [
+      { categoryId: "C1", color: "#1D6FB8", name: "Balloons", sortOrder: 0 },
+      { categoryId: "C2", color: null, name: "Cards", sortOrder: 1 },
+    ];
+    const items = ["A", "B", "C", "D", "E", "F"].map((code) => product(code));
+    const assignments: SpecialProductCategoryAssignment[] = [
+      { categoryId: "C1", productCode: "A", sortOrder: 0 },
+      { categoryId: "C1", productCode: "B", sortOrder: 1 },
+      { categoryId: "C2", productCode: "C", sortOrder: 0 },
+    ];
+
+    it("没有任何分类时不显示分类栏与搜索框，网格仍是 5 列，整理里没有「移到分类」", async () => {
+      const presenter = new ScreenPresenter({
+        items: [product("A"), product("B")],
+        online: true,
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+
+      expect(screen.queryByTestId("special-products-category-rail")).toBeNull();
+      expect(screen.queryByTestId("special-products-filter-input")).toBeNull();
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId("special-product-card-A-shell").props.style,
+        ).width,
+      ).toBe("19.2%");
+      expect(specialProductsGridColumns(false)).toBe(5);
+      await fireEvent.press(screen.getByTestId("special-products-organize"));
+      expect(
+        screen.queryByTestId("special-products-move-category-A"),
+      ).toBeNull();
+      expect(
+        screen.getByText(
+          "整理模式：用 ↑ ↓ 或长按拖动调整顺序，「取消标记」把商品移出特殊商品。此时点卡片不会加购。",
+        ),
+      ).toBeTruthy();
+      await screen.unmount();
+    });
+
+    it("有分类时显示分类栏（带数量）与搜索框，网格收为 4 列，行高 ≥ 58 整行可点", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+
+      expect(screen.getByTestId("special-products-category-rail")).toBeTruthy();
+      // 栏内可滚动
+      expect(
+        screen.getByTestId("special-products-category-rail-scroll"),
+      ).toBeTruthy();
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId("special-products-category-rail").props.style,
+        ).width,
+      ).toBe(SPECIAL_PRODUCTS_CATEGORY_RAIL_WIDTH);
+      for (const [testID, label] of [
+        ["special-products-category-all", "全部 6"],
+        ["special-products-category-C1", "Balloons 2"],
+        ["special-products-category-C2", "Cards 1"],
+        ["special-products-category-uncategorized", "未分类 3"],
+      ] as const) {
+        const row = screen.getByTestId(testID);
+        expect(row.props.accessibilityLabel).toBe(label);
+        expect(StyleSheet.flatten(row.props.style).minHeight).toBeGreaterThanOrEqual(
+          SPECIAL_PRODUCTS_CATEGORY_ROW_HEIGHT,
+        );
+      }
+      expect(
+        screen.getByTestId("special-products-category-all").props
+          .accessibilityState,
+      ).toMatchObject({ selected: true });
+      expect(
+        screen.getByTestId("special-products-category-C1").props
+          .accessibilityState,
+      ).toMatchObject({ selected: false });
+      expect(screen.getByTestId("special-products-filter-input")).toBeTruthy();
+      expect(
+        StyleSheet.flatten(
+          screen.getByTestId("special-product-card-A-shell").props.style,
+        ).width,
+      ).toBe("24%");
+      expect(specialProductsGridColumns(true)).toBe(4);
+      expect(screen.getByText("在全部 6 项里找")).toBeTruthy();
+      await screen.unmount();
+    });
+
+    it("「未分类」数量为 0 时该行隐藏；分类栏提示只对有管理权限者显示", async () => {
+      const allAssigned = items.map((item, index) => ({
+        categoryId: index % 2 === 0 ? "C1" : "C2",
+        productCode: item.productCode,
+        sortOrder: index,
+      }));
+      const manager = new ScreenPresenter({
+        assignments: allAssigned,
+        categories,
+        items,
+        online: true,
+      });
+      const withHint = await render(
+        <SpecialProductsScreen presenter={manager} />,
+      );
+      expect(
+        withHint.queryByTestId("special-products-category-uncategorized"),
+      ).toBeNull();
+      expect(withHint.getByTestId("special-products-category-hint")).toBeTruthy();
+      expect(
+        withHint.getByText("分类在手机 App「特殊商品分类」里新建、改名、排序"),
+      ).toBeTruthy();
+      await withHint.unmount();
+
+      const viewer = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+        permissions: [SPECIAL_PRODUCTS_VIEW_PERMISSION],
+      });
+      const withoutHint = await render(
+        <SpecialProductsScreen presenter={viewer} />,
+      );
+      expect(withoutHint.getByTestId("special-products-category-rail")).toBeTruthy();
+      expect(
+        withoutHint.queryByTestId("special-products-category-hint"),
+      ).toBeNull();
+      await withoutHint.unmount();
+    });
+
+    it("点分类行切换视图：只显示该分类的商品，标题与数量跟随", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+
+      await fireEvent.press(screen.getByTestId("special-products-category-C1"));
+      expect(presenter.selectCalls).toEqual(["C1"]);
+      expect(screen.getByTestId("special-product-card-A")).toBeTruthy();
+      expect(screen.getByTestId("special-product-card-B")).toBeTruthy();
+      expect(screen.queryByTestId("special-product-card-C")).toBeNull();
+      expect(screen.getByText("2 项")).toBeTruthy();
+      expect(
+        screen.getByTestId("special-products-category-C1").props
+          .accessibilityState,
+      ).toMatchObject({ selected: true });
+
+      await fireEvent.press(
+        screen.getByTestId("special-products-category-uncategorized"),
+      );
+      expect(screen.getByTestId("special-product-card-D")).toBeTruthy();
+      expect(screen.queryByTestId("special-product-card-A")).toBeNull();
+      await screen.unmount();
+    });
+
+    it("搜索框在全部特殊商品里过滤；无命中显示空状态；清除按钮回到原分类", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+        selectedCategoryId: "C2",
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+      expect(screen.queryByTestId("special-product-card-A")).toBeNull();
+
+      await fireEvent.changeText(
+        screen.getByTestId("special-products-filter-input"),
+        "lookup-a",
+      );
+      expect(presenter.searchTexts).toEqual(["lookup-a"]);
+      // 搜索不受当前分类（C2）限制：A 在 C1 也能搜到
+      expect(screen.getByTestId("special-product-card-A")).toBeTruthy();
+      expect(screen.getByText("搜索结果")).toBeTruthy();
+
+      await fireEvent.changeText(
+        screen.getByTestId("special-products-filter-input"),
+        "不存在的商品",
+      );
+      expect(screen.getByTestId("special-products-view-empty")).toBeTruthy();
+      expect(screen.getByText("没有匹配的特殊商品")).toBeTruthy();
+
+      await fireEvent.press(screen.getByTestId("special-products-filter-clear"));
+      expect(presenter.searchTexts.at(-1)).toBe("");
+      expect(screen.queryByTestId("special-products-view-empty")).toBeNull();
+      expect(screen.getByTestId("special-product-card-C")).toBeTruthy();
+      expect(screen.queryByTestId("special-product-card-A")).toBeNull();
+      await screen.unmount();
+    });
+
+    it("整理模式：每张卡片多「移到分类」（≥44pt）；点开清单，当前分类打勾，选中即提交", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+        selectedCategoryId: "C1",
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+
+      await fireEvent.press(screen.getByTestId("special-products-organize"));
+      expect(
+        screen.getByText(
+          "整理模式：用 ↑ ↓ 或长按拖动调整「Balloons」里的顺序（全店收银机一致），「移到分类」换分类。此时点卡片不会加购。",
+        ),
+      ).toBeTruthy();
+      const move = screen.getByTestId("special-products-move-category-A");
+      expect(StyleSheet.flatten(move.props.style).minHeight).toBeGreaterThanOrEqual(
+        SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
+      );
+      expect(move.props.accessibilityState).toEqual({ disabled: false });
+
+      await fireEvent.press(move);
+      expect(screen.getByTestId("special-products-move-sheet")).toBeTruthy();
+      // 卡片与清单标题各有一处商品名
+      expect(screen.getAllByText("Product A")).toHaveLength(2);
+      // 各分类 + 未分类，当前分类（C1）打勾
+      expect(
+        screen.getByTestId("special-products-move-option-C1-check"),
+      ).toBeTruthy();
+      expect(
+        screen.queryByTestId("special-products-move-option-C2-check"),
+      ).toBeNull();
+      expect(
+        screen.getByTestId("special-products-move-option-uncategorized"),
+      ).toBeTruthy();
+      for (const testID of [
+        "special-products-move-option-C1",
+        "special-products-move-option-C2",
+        "special-products-move-option-uncategorized",
+      ]) {
+        expect(
+          StyleSheet.flatten(screen.getByTestId(testID).props.style).minHeight,
+        ).toBeGreaterThanOrEqual(SPECIAL_PRODUCTS_MIN_TOUCH_TARGET);
+      }
+
+      // 选中另一个分类：提交并关闭清单
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-option-C2"),
+      );
+      expect(presenter.assignCalls).toEqual([
+        { categoryId: "C2", productCode: "A" },
+      ]);
+      expect(screen.queryByTestId("special-products-move-sheet")).toBeNull();
+
+      // 移到「未分类」= null；选回当前分类不请求
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-category-A"),
+      );
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-option-uncategorized"),
+      );
+      expect(presenter.assignCalls.at(-1)).toEqual({
+        categoryId: null,
+        productCode: "A",
+      });
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-category-A"),
+      );
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-option-C1"),
+      );
+      expect(presenter.assignCalls).toHaveLength(2);
+
+      // 点遮罩关闭
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-category-A"),
+      );
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-sheet-backdrop"),
+      );
+      expect(screen.queryByTestId("special-products-move-sheet")).toBeNull();
+      await screen.unmount();
+    });
+
+    it("整理中掉线：「移到分类」与清单选项都禁用，不提交", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+      await fireEvent.press(screen.getByTestId("special-products-organize"));
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-category-A"),
+      );
+      // 清单开着时掉线：选项禁用
+      await act(async () => {
+        presenter.setOnline(false);
+      });
+      const option = screen.getByTestId("special-products-move-option-C2");
+      expect(option.props.accessibilityState).toEqual({
+        disabled: true,
+        selected: false,
+      });
+      await fireEvent.press(option);
+      expect(presenter.assignCalls).toEqual([]);
+      await fireEvent.press(
+        screen.getByTestId("special-products-move-sheet-close"),
+      );
+      expect(
+        screen.getByTestId("special-products-move-category-A").props
+          .accessibilityState,
+      ).toEqual({ disabled: true });
+      await screen.unmount();
+    });
+
+    it("没有 Manage 权限的收银员整理入口不存在，也不会弹出移动清单", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+        permissions: [
+          SPECIAL_PRODUCTS_VIEW_PERMISSION,
+          SPECIAL_PRODUCTS_ADD_TO_CART_PERMISSION,
+        ],
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+      expect(screen.queryByTestId("special-products-organize")).toBeNull();
+      expect(
+        screen.queryByTestId("special-products-move-category-A"),
+      ).toBeNull();
+      await screen.unmount();
+    });
+
+    it("搜索中整理：↑ ↓ 禁用并提示，移到分类仍可用；拖动不可用", async () => {
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+      await fireEvent.press(screen.getByTestId("special-products-organize"));
+      await fireEvent.changeText(
+        screen.getByTestId("special-products-filter-input"),
+        "product",
+      );
+
+      expect(
+        screen.getByText(/^整理模式：搜索时不能调整顺序/),
+      ).toBeTruthy();
+      expect(
+        screen.getByTestId("special-products-move-down-A").props
+          .accessibilityState,
+      ).toEqual({ disabled: true });
+      expect(
+        screen.getByTestId("special-products-move-up-B").props
+          .accessibilityState,
+      ).toEqual({ disabled: true });
+      expect(
+        screen.getByTestId("special-products-move-category-A").props
+          .accessibilityState,
+      ).toEqual({ disabled: false });
+      expect(
+        screen.getByTestId("special-product-card-A").props.onLongPress,
+      ).toBeUndefined();
+      await screen.unmount();
+    });
+
+    it("4 列网格的拖动按 4 列换算目标索引（与渲染用同一个列数）", async () => {
+      // 纯函数：从索引 0 向下拖一整行，4 列 → 4，5 列 → 5
+      expect(specialProductsDragTargetIndex(0, 0, 252, 4, 85.6, 252, 20)).toBe(4);
+      expect(specialProductsDragTargetIndex(0, 0, 252, 5, 85.6, 252, 20)).toBe(5);
+
+      const presenter = new ScreenPresenter({
+        assignments,
+        categories,
+        items,
+        online: true,
+      });
+      const screen = await render(
+        <SpecialProductsScreen presenter={presenter} />,
+      );
+      await fireEvent.press(screen.getByTestId("special-products-organize"));
+      const cardA = screen.getByTestId("special-product-card-A");
+      const shellA = screen.getByTestId("special-product-card-A-shell");
+      await act(async () => {
+        shellA.props.onLayout({
+          nativeEvent: { layout: { height: 242, width: 85.6 } },
+        });
+      });
+      const gesture = (pageX: number, pageY: number) => ({
+        nativeEvent: {
+          changedTouches: [{ pageX, pageY }],
+          identifier: 0,
+          touches: [{ pageX, pageY }],
+        },
+        touchHistory: {
+          indexOfSingleActiveTouch: 0,
+          mostRecentTimeStamp: 100,
+          numberActiveTouches: 1,
+          touchBank: [
+            {
+              currentPageX: pageX,
+              currentPageY: pageY,
+              currentTimeStamp: 100,
+              previousPageX: 0,
+              previousPageY: 0,
+              previousTimeStamp: 0,
+              startPageX: 0,
+              startPageY: 0,
+              startTimeStamp: 0,
+              touchActive: true,
+            },
+          ],
+        },
+      });
+      await fireEvent(cardA, "longPress");
+      await act(async () => {
+        shellA.props.onResponderGrant(gesture(0, 0));
+        shellA.props.onResponderMove(gesture(0, 252));
+        shellA.props.onResponderRelease(gesture(0, 252));
+      });
+      // 6 个商品、4 列：向下拖一行 → 索引 4（5 列时会是 5）
+      expect(presenter.moveToCalls).toEqual([{ productCode: "A", toIndex: 4 }]);
+      await screen.unmount();
+    });
+  });
 });
 
 class ScreenPresenter implements SpecialProductsScreenPresenter {
   public readonly addToCartCalls: string[] = [];
+  public readonly assignCalls: {
+    productCode: string;
+    categoryId: string | null;
+  }[] = [];
+  public readonly selectCalls: string[] = [];
+  public readonly searchTexts: string[] = [];
+  private requestedSelection = "all";
   public downloadCalls = 0;
   public readonly markCalls: {
     productCode: string;
@@ -671,13 +1130,17 @@ class ScreenPresenter implements SpecialProductsScreenPresenter {
 
   public constructor(
     options: Partial<{
+      assignments: readonly SpecialProductCategoryAssignment[];
       candidates: readonly SpecialProductItem[];
+      categories: readonly SpecialProductCategory[];
       items: readonly SpecialProductItem[];
       online: boolean;
       permissions: readonly string[];
+      selectedCategoryId: string;
       statusCode: SpecialProductsState["statusCode"];
     }> = {},
   ) {
+    this.requestedSelection = options.selectedCategoryId ?? "all";
     this.state = {
       access: resolveSpecialProductsAccess(
         options.permissions ?? [
@@ -686,15 +1149,61 @@ class ScreenPresenter implements SpecialProductsScreenPresenter {
           SPECIAL_PRODUCTS_ADD_TO_CART_PERMISSION,
         ],
       ),
+      assignments: options.assignments ?? [],
       busy: false,
       candidates: options.candidates ?? [],
+      categories: options.categories ?? [],
+      categoryCounts: { all: 0, byCategory: {}, uncategorized: 0 },
       items: options.items ?? [],
       kind: "ready",
       online: options.online ?? false,
+      search: "",
       searching: false,
       searchQuery: "",
+      selectedCategoryId: "all",
       statusCode: options.statusCode ?? null,
+      visibleItems: [],
     };
+    this.derive();
+  }
+
+  /** 与真实 presenter 同一个纯函数派生分类视图，保证 fake 与生产口径一致。 */
+  private derive(): void {
+    const view = deriveSpecialProductsCategoryView({
+      assignments: this.state.assignments,
+      categories: this.state.categories,
+      items: this.state.items,
+      search: this.state.search,
+      selection: this.requestedSelection,
+    });
+    this.state = {
+      ...this.state,
+      categoryCounts: view.counts,
+      selectedCategoryId: view.selectedCategoryId,
+      visibleItems: view.visibleItems,
+    };
+  }
+
+  public selectCategory(selection: string): void {
+    this.selectCalls.push(selection);
+    this.requestedSelection = selection;
+    this.state = { ...this.state, search: "" };
+    this.derive();
+    for (const listener of this.listeners) listener();
+  }
+
+  public setSearch(search: string): void {
+    this.searchTexts.push(search);
+    this.state = { ...this.state, search };
+    this.derive();
+    for (const listener of this.listeners) listener();
+  }
+
+  public async assignToCategory(
+    productCode: string,
+    categoryId: string | null,
+  ): Promise<void> {
+    this.assignCalls.push({ productCode, categoryId });
   }
 
   public readonly getState = () => this.state;

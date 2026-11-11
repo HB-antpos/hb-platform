@@ -25,6 +25,35 @@ public interface ISpecialProductService
     {
         throw new NotSupportedException("Special product price update is not supported by this service.");
     }
+
+    // 中文注释：分店级特殊商品分类。以下三个都是「联网取回服务器的最新全量快照并整体覆盖本机」；
+    // 默认实现按"不支持"处理，既有测试替身无需实现。
+    Task<SpecialProductCategorySnapshot> RefreshCategoriesAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product categories are not supported by this service.");
+    }
+
+    /// <summary>把商品移到某分类（追加到该分类末尾）；categoryId 为 null = 移出分类回到「未分类」。</summary>
+    Task<SpecialProductCategorySnapshot> AssignProductToCategoryAsync(
+        string storeCode,
+        string productCode,
+        string? categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product categories are not supported by this service.");
+    }
+
+    /// <summary>重排某分类内的商品顺序；productCodes 必须恰好是该分类当前全部商品的一个排列。</summary>
+    Task<SpecialProductCategorySnapshot> ReorderCategoryProductsAsync(
+        string storeCode,
+        string categoryId,
+        IReadOnlyList<string> productCodes,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product categories are not supported by this service.");
+    }
 }
 
 public sealed record SpecialProductDownloadResult(
@@ -157,6 +186,107 @@ public sealed class SpecialProductService(
             Log($"price failed store={storeCode} productCode={productCode} price={retailPrice} totalElapsedMs={totalStopwatch.ElapsedMilliseconds} error={ex.Message}");
             throw;
         }
+    }
+
+    public async Task<SpecialProductCategorySnapshot> RefreshCategoriesAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"categories refresh start store={storeCode}");
+        try
+        {
+            var response = await catalogApiClient.GetSpecialProductCategoriesAsync(storeCode, cancellationToken);
+            var snapshot = await ApplyCategorySnapshotAsync(storeCode, response, cancellationToken);
+            Log($"categories refresh completed store={storeCode} categories={snapshot.Categories.Count} assignments={snapshot.Assignments.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            Log($"categories refresh failed store={storeCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<SpecialProductCategorySnapshot> AssignProductToCategoryAsync(
+        string storeCode,
+        string productCode,
+        string? categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        ArgumentException.ThrowIfNullOrWhiteSpace(productCode);
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"category assign start store={storeCode} productCode={productCode} category={categoryId ?? "<none>"}");
+        try
+        {
+            // 关键逻辑：归属只以服务端为准，必须先在线写入成功，才用服务器返回的最新全量快照覆盖本机；失败时本机不变。
+            var response = await catalogApiClient.AssignSpecialProductCategoryAsync(
+                new CatalogSpecialProductCategoryAssignRequest(storeCode, productCode, categoryId),
+                cancellationToken);
+            var snapshot = await ApplyCategorySnapshotAsync(storeCode, response, cancellationToken);
+            Log($"category assign completed store={storeCode} productCode={productCode} category={categoryId ?? "<none>"} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            Log($"category assign failed store={storeCode} productCode={productCode} category={categoryId ?? "<none>"} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task<SpecialProductCategorySnapshot> ReorderCategoryProductsAsync(
+        string storeCode,
+        string categoryId,
+        IReadOnlyList<string> productCodes,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeCode);
+        ArgumentException.ThrowIfNullOrWhiteSpace(categoryId);
+        ArgumentNullException.ThrowIfNull(productCodes);
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"category order start store={storeCode} category={categoryId} products={productCodes.Count}");
+        try
+        {
+            var response = await catalogApiClient.OrderSpecialProductCategoryAsync(
+                new CatalogSpecialProductCategoryOrderRequest(storeCode, categoryId, productCodes),
+                cancellationToken);
+            var snapshot = await ApplyCategorySnapshotAsync(storeCode, response, cancellationToken);
+            Log($"category order completed store={storeCode} category={categoryId} products={productCodes.Count} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return snapshot;
+        }
+        catch (Exception ex)
+        {
+            // 冲突（SPECIAL_PRODUCT_CATEGORY_ORDER_CONFLICT）等错误原样上抛，由调用方刷新并提示。
+            Log($"category order failed store={storeCode} category={categoryId} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 服务端已成功返回快照后覆盖本机。本机写库失败不能让「服务端已写入」被当成失败：
+    /// 记日志后仍把服务器快照交给界面（下次进入页面或下载会再覆盖本机）。
+    /// </summary>
+    private async Task<SpecialProductCategorySnapshot> ApplyCategorySnapshotAsync(
+        string storeCode,
+        CatalogSpecialProductCategoriesResponse response,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = SpecialProductCategorySnapshot.FromResponse(storeCode, response).Normalize();
+        try
+        {
+            await localCatalogRepository.ReplaceSpecialProductCategorySnapshotAsync(snapshot, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"categories local save failed store={storeCode} error={ex.Message}");
+        }
+
+        return snapshot;
     }
 
     public async Task<SpecialProductDownloadResult> DownloadSpecialProductsAsync(

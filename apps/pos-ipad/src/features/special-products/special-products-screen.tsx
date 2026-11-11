@@ -14,6 +14,7 @@ import {
   Image,
   Modal,
   PanResponder,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -30,6 +31,12 @@ import {
   type SpecialProductsStatusCode,
   type SpecialProductsState,
 } from "./special-products-presenter";
+
+import {
+  SPECIAL_PRODUCT_CATEGORY_ALL,
+  SPECIAL_PRODUCT_CATEGORY_UNCATEGORIZED,
+  type SpecialProductCategory,
+} from "@hb/pos-domain/core/contracts/special-product-categories";
 
 import type { SpecialProductItem } from "@/core/contracts";
 import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
@@ -50,8 +57,21 @@ import {
 } from "@/ui/theme";
 
 export const SPECIAL_PRODUCTS_MIN_TOUCH_TARGET = 44;
+/** 没有分类栏时的网格列数（与分类功能上线前一致）。 */
 export const SPECIAL_PRODUCTS_GRID_COLUMNS = 5;
+/** 有分类栏时分类栏占掉一列宽度，网格收为 4 列（卡片尺寸保持不变）。 */
+export const SPECIAL_PRODUCTS_GRID_COLUMNS_WITH_CATEGORIES = 4;
 const SPECIAL_PRODUCTS_GRID_GAP = 10;
+/** 分类栏宽度与行高（pt）：行高 58 整行可点，远超 44pt 最低触控线。 */
+export const SPECIAL_PRODUCTS_CATEGORY_RAIL_WIDTH = 212;
+export const SPECIAL_PRODUCTS_CATEGORY_ROW_HEIGHT = 58;
+
+/** 网格列数：渲染（numColumns / 卡片宽度）与拖动换算必须用同一个值，统一从这里取。 */
+export function specialProductsGridColumns(showCategoryBar: boolean): number {
+  return showCategoryBar
+    ? SPECIAL_PRODUCTS_GRID_COLUMNS_WITH_CATEGORIES
+    : SPECIAL_PRODUCTS_GRID_COLUMNS;
+}
 
 /**
  * 由拖拽位移计算目标网格索引（行列整数格取整，越界收敛到有效范围）。
@@ -92,7 +112,8 @@ function clampInt(value: number, lower: number, upper: number): number {
 
 /** 拖拽中实时计算目标插槽索引；网格尺寸未知时返回 null（不高亮）。 */
 function dragTargetIndex(
-  state: SpecialProductsState,
+  itemCount: number,
+  columns: number,
   drag: Readonly<{
     code: string;
     dx: number;
@@ -107,10 +128,10 @@ function dragTargetIndex(
     drag.fromIndex,
     drag.dx,
     drag.dy,
-    SPECIAL_PRODUCTS_GRID_COLUMNS,
+    columns,
     width,
     height,
-    state.items.length,
+    itemCount,
   );
 }
 
@@ -127,6 +148,7 @@ type SpecialProductsTranslate = (
 export type SpecialProductsScreenPresenter = Pick<
   SpecialProductsPresenter,
   | "addToCart"
+  | "assignToCategory"
   | "download"
   | "getState"
   | "load"
@@ -134,6 +156,8 @@ export type SpecialProductsScreenPresenter = Pick<
   | "moveTo"
   | "reorder"
   | "searchCandidates"
+  | "selectCategory"
+  | "setSearch"
   | "setSearchQuery"
   | "subscribe"
 > & Readonly<{ getState(): SpecialProductsState }>;
@@ -160,6 +184,8 @@ export function SpecialProductsScreen({
   }> | null>(null);
   const [cellWidth, setCellWidth] = useState(0);
   const [cellHeight, setCellHeight] = useState(0);
+  // 「移到分类」清单当前针对的商品；null = 清单关闭。
+  const [moveTarget, setMoveTarget] = useState<SpecialProductItem | null>(null);
   const locale = resolveSpecialProductsLocale(
     i18n.resolvedLanguage ?? i18n.language,
   );
@@ -181,6 +207,36 @@ export function SpecialProductsScreen({
   // 卡片不会停在「点了不加购」的状态。
   const organizeActive = organizing && state.access.canManage;
   const loading = state.kind === "loading";
+  // 有分类（Categories 非空）才显示分类栏与搜索框；没有任何分类时页面与分类功能上线前完全一致。
+  const hasCategories = state.categories.length > 0;
+  const columns = specialProductsGridColumns(hasCategories);
+  const searchActive = state.search.trim().length > 0;
+  const visibleItems = state.visibleItems;
+  const selectedCategory = state.categories.find(
+    (category) => category.categoryId === state.selectedCategoryId,
+  );
+  // 搜索时视图只是「全部」的子集合，不提供排序（↑ ↓ / 拖动）；其余视图的排序规则见 presenter.reorderInView。
+  const canReorder = !searchActive;
+  const moveTargetCategoryId = moveTarget
+    ? (state.assignments.find(
+        (assignment) => assignment.productCode === moveTarget.productCode,
+      )?.categoryId ?? null)
+    : null;
+
+  const sectionTitle = searchActive
+    ? t("search.resultsTitle")
+    : hasCategories && state.selectedCategoryId === SPECIAL_PRODUCT_CATEGORY_UNCATEGORIZED
+      ? t("categories.uncategorized")
+      : hasCategories && selectedCategory
+        ? selectedCategory.name
+        : t("catalog.title");
+  const organizeBanner: string = !hasCategories
+    ? t("organize.banner")
+    : searchActive
+      ? t("organize.bannerSearching")
+      : selectedCategory
+        ? t("organize.bannerCategory", { category: selectedCategory.name })
+        : t("organize.bannerCategories");
 
   return (
     <PosScreenFrame
@@ -251,140 +307,190 @@ export function SpecialProductsScreen({
       testID="special-products-screen"
     >
       <View style={styles.page}>
-        {!state.online ? (
-          <NoticeBanner
-            icon="wifi-off"
-            liveRegion
-            testID="special-products-offline-note"
-            text={t("offlineNote")}
-            tone="info"
+        {hasCategories ? (
+          <SpecialProductCategoryRail
+            categories={state.categories}
+            counts={state.categoryCounts}
+            onSelect={(selection) => presenter.selectCategory(selection)}
+            selectedCategoryId={state.selectedCategoryId}
+            showMaintainHint={state.access.canManage}
+            t={t}
           />
         ) : null}
+        <View style={styles.main}>
+          {!state.online ? (
+            <NoticeBanner
+              icon="wifi-off"
+              liveRegion
+              testID="special-products-offline-note"
+              text={t("offlineNote")}
+              tone="info"
+            />
+          ) : null}
 
-        {state.statusCode ? (
-          <StatusBanner statusCode={state.statusCode} t={t} />
-        ) : null}
+          {state.statusCode ? (
+            <StatusBanner statusCode={state.statusCode} t={t} />
+          ) : null}
 
-        {organizeActive ? (
-          // 整理状态：黄色提示条取代小标题行，明确告诉收银员此时点卡片不会加购。
-          <NoticeBanner
-            icon="sort-variant"
-            testID="special-products-organize-banner"
-            text={t("organize.banner")}
-            tone="warning"
-            trailing={
-              loading ? (
+          {hasCategories ? (
+            <SpecialProductsSearchBox
+              onChange={(text) => presenter.setSearch(text)}
+              t={t}
+              totalCount={state.categoryCounts.all}
+              value={state.search}
+            />
+          ) : null}
+
+          {organizeActive ? (
+            // 整理状态：黄色提示条取代小标题行，明确告诉收银员此时点卡片不会加购。
+            <NoticeBanner
+              icon="sort-variant"
+              testID="special-products-organize-banner"
+              text={organizeBanner}
+              tone="warning"
+              trailing={
+                loading ? (
+                  <ActivityIndicator
+                    color={posColors.accent}
+                    testID="special-products-loading"
+                  />
+                ) : null
+              }
+            />
+          ) : (
+            <View style={styles.sectionHeader}>
+              <Text numberOfLines={1} style={styles.sectionTitle}>
+                {sectionTitle}
+              </Text>
+              <PosPill
+                label={t(
+                  visibleItems.length === 1
+                    ? "catalog.itemCountOne"
+                    : "catalog.itemCount",
+                  { count: visibleItems.length },
+                )}
+                style={styles.sectionPill}
+              />
+              {loading ? (
                 <ActivityIndicator
                   color={posColors.accent}
                   testID="special-products-loading"
                 />
-              ) : null
-            }
-          />
-        ) : (
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t("catalog.title")}</Text>
-            <PosPill
-              label={t(state.items.length === 1 ? "catalog.itemCountOne" : "catalog.itemCount", { count: state.items.length })}
-              style={styles.sectionPill}
-            />
-            {loading ? (
-              <ActivityIndicator
-                color={posColors.accent}
-                testID="special-products-loading"
-              />
-            ) : null}
-            {state.access.canAddToCart && state.items.length > 0 ? (
-              <Text numberOfLines={1} style={styles.sectionHint}>
-                {t("catalog.tapHint")}
-              </Text>
-            ) : null}
-          </View>
-        )}
+              ) : null}
+              {state.access.canAddToCart && visibleItems.length > 0 ? (
+                <Text numberOfLines={1} style={styles.sectionHint}>
+                  {t("catalog.tapHint")}
+                </Text>
+              ) : null}
+            </View>
+          )}
 
-        {state.kind === "unauthorized" ? (
-          <EmptyState
-            icon="lock-outline"
-            message={t("catalog.unauthorized")}
-            testID="special-products-unauthorized"
-          />
-        ) : null}
-        {state.kind === "failed" && state.items.length === 0 ? (
-          <EmptyState
-            icon="alert-circle-outline"
-            message={t("catalog.failed")}
-            testID="special-products-failed"
-          />
-        ) : null}
-        {state.kind === "ready" && state.items.length === 0 ? (
-          <EmptyState
-            icon="star-outline"
-            message={t("catalog.empty")}
-            testID="special-products-empty"
-          />
-        ) : null}
-        {state.items.length > 0 ? (
-          <FlatList
-            columnWrapperStyle={styles.productCardRow}
-            contentContainerStyle={styles.productList}
-            data={state.items}
-            keyExtractor={(item) => item.productCode}
-            numColumns={SPECIAL_PRODUCTS_GRID_COLUMNS}
-            renderItem={({ item, index }) => (
-              <SpecialProductCard
-                canAddToCart={state.access.canAddToCart}
-                // 长按拖动排序只在整理状态下启用，日常状态长按不会抬起卡片。
-                canDrag={organizeActive && !managementLocked}
-                cellHeight={cellHeight}
-                disabled={state.busy}
-                drag={drag}
-                dragTargetIndex={
-                  drag
-                    ? dragTargetIndex(state, drag, cellWidth, cellHeight)
-                    : null
-                }
-                index={index}
-                item={item}
-                itemCount={state.items.length}
-                online={state.online}
-                onAddToCart={() => void presenter.addToCart(item.productCode)}
-                onDragEnd={(code, fromIndex, dx, dy) => {
-                  const targetIndex = specialProductsDragTargetIndex(
-                    fromIndex,
-                    dx,
-                    dy,
-                    SPECIAL_PRODUCTS_GRID_COLUMNS,
-                    cellWidth,
-                    cellHeight,
-                    state.items.length,
-                  );
-                  setDrag(null);
-                  if (targetIndex !== fromIndex) {
-                    void presenter.moveTo(code, targetIndex);
+          {state.kind === "unauthorized" ? (
+            <EmptyState
+              icon="lock-outline"
+              message={t("catalog.unauthorized")}
+              testID="special-products-unauthorized"
+            />
+          ) : null}
+          {state.kind === "failed" && state.items.length === 0 ? (
+            <EmptyState
+              icon="alert-circle-outline"
+              message={t("catalog.failed")}
+              testID="special-products-failed"
+            />
+          ) : null}
+          {state.kind === "ready" && state.items.length === 0 ? (
+            <EmptyState
+              icon="star-outline"
+              message={t("catalog.empty")}
+              testID="special-products-empty"
+            />
+          ) : null}
+          {state.items.length > 0 && visibleItems.length === 0 ? (
+            // 有商品但当前视图为空：搜索没有命中，或分类里还没放商品。
+            <EmptyState
+              icon={searchActive ? "magnify" : "folder-outline"}
+              message={
+                searchActive ? t("search.empty") : t("catalog.categoryEmpty")
+              }
+              testID="special-products-view-empty"
+            />
+          ) : null}
+          {visibleItems.length > 0 ? (
+            <FlatList
+              // numColumns 不能在运行中改变，列数变化（出现 / 消失分类栏）时重建列表。
+              key={`special-products-grid-${columns}`}
+              columnWrapperStyle={styles.productCardRow}
+              contentContainerStyle={styles.productList}
+              data={visibleItems}
+              keyExtractor={(item) => item.productCode}
+              numColumns={columns}
+              renderItem={({ item, index }) => (
+                <SpecialProductCard
+                  canAddToCart={state.access.canAddToCart}
+                  // 长按拖动排序只在整理状态下启用，日常状态长按不会抬起卡片。
+                  canDrag={organizeActive && !managementLocked && canReorder}
+                  canMoveToCategory={hasCategories}
+                  canReorder={canReorder}
+                  cellHeight={cellHeight}
+                  columns={columns}
+                  disabled={state.busy}
+                  drag={drag}
+                  dragTargetIndex={
+                    drag
+                      ? dragTargetIndex(
+                          visibleItems.length,
+                          columns,
+                          drag,
+                          cellWidth,
+                          cellHeight,
+                        )
+                      : null
                   }
-                }}
-                onDragMove={(code, fromIndex, dx, dy) =>
-                  setDrag({ code, fromIndex, dx, dy })
-                }
-                onDragStart={(code, fromIndex) =>
-                  setDrag({ code, fromIndex, dx: 0, dy: 0 })
-                }
-                onMeasureCell={(width, height) => {
-                  // 从卡片实测尺寸推导网格单元格（宽=列宽，高=卡片高+行距）
-                  if (width > 0) setCellWidth(width);
-                  if (height > 0) setCellHeight(height + SPECIAL_PRODUCTS_GRID_GAP);
-                }}
-                onMoveDown={() => void presenter.reorder(item.productCode, 1)}
-                onMoveUp={() => void presenter.reorder(item.productCode, -1)}
-                onRemove={() => void presenter.mark(item.productCode, false)}
-                organizing={organizeActive}
-                t={t}
-              />
-            )}
-            style={styles.productListFrame}
-            testID="special-products-list"
-          />
-        ) : null}
+                  index={index}
+                  item={item}
+                  itemCount={visibleItems.length}
+                  online={state.online}
+                  onAddToCart={() => void presenter.addToCart(item.productCode)}
+                  onDragEnd={(code, fromIndex, dx, dy) => {
+                    const targetIndex = specialProductsDragTargetIndex(
+                      fromIndex,
+                      dx,
+                      dy,
+                      columns,
+                      cellWidth,
+                      cellHeight,
+                      visibleItems.length,
+                    );
+                    setDrag(null);
+                    if (targetIndex !== fromIndex) {
+                      void presenter.moveTo(code, targetIndex);
+                    }
+                  }}
+                  onDragMove={(code, fromIndex, dx, dy) =>
+                    setDrag({ code, fromIndex, dx, dy })
+                  }
+                  onDragStart={(code, fromIndex) =>
+                    setDrag({ code, fromIndex, dx: 0, dy: 0 })
+                  }
+                  onMeasureCell={(width, height) => {
+                    // 从卡片实测尺寸推导网格单元格（宽=列宽，高=卡片高+行距）
+                    if (width > 0) setCellWidth(width);
+                    if (height > 0) setCellHeight(height + SPECIAL_PRODUCTS_GRID_GAP);
+                  }}
+                  onMoveDown={() => void presenter.reorder(item.productCode, 1)}
+                  onMoveToCategory={() => setMoveTarget(item)}
+                  onMoveUp={() => void presenter.reorder(item.productCode, -1)}
+                  onRemove={() => void presenter.mark(item.productCode, false)}
+                  organizing={organizeActive}
+                  t={t}
+                />
+              )}
+              style={styles.productListFrame}
+              testID="special-products-list"
+            />
+          ) : null}
+        </View>
       </View>
 
       {state.access.canManage ? (
@@ -403,6 +509,24 @@ export function SpecialProductsScreen({
           searching={state.searching}
           t={t}
           visible={addModalVisible}
+        />
+      ) : null}
+      {state.access.canManage && moveTarget ? (
+        <SpecialProductCategoryMoveSheet
+          categories={state.categories}
+          currentCategoryId={moveTargetCategoryId}
+          disabled={managementLocked}
+          item={moveTarget}
+          onClose={() => setMoveTarget(null)}
+          onSelect={(categoryId) => {
+            const target = moveTarget;
+            setMoveTarget(null);
+            // 选中即提交；结果由页面状态横幅呈现。选回当前分类不请求服务端。
+            if (categoryId !== moveTargetCategoryId) {
+              void presenter.assignToCategory(target.productCode, categoryId);
+            }
+          }}
+          t={t}
         />
       ) : null}
     </PosScreenFrame>
@@ -602,7 +726,10 @@ function SpecialProductsAddModal({
 function SpecialProductCard({
   canAddToCart,
   canDrag,
+  canMoveToCategory,
+  canReorder,
   cellHeight,
+  columns,
   disabled,
   drag,
   dragTargetIndex,
@@ -616,6 +743,7 @@ function SpecialProductCard({
   onDragStart,
   onMeasureCell,
   onMoveDown,
+  onMoveToCategory,
   onMoveUp,
   onRemove,
   organizing,
@@ -623,7 +751,13 @@ function SpecialProductCard({
 }: Readonly<{
   canAddToCart: boolean;
   canDrag: boolean;
+  /** 有分类时，整理状态下卡片多一个「移到分类」按钮。 */
+  canMoveToCategory: boolean;
+  /** false（例如搜索中）时 ↑ ↓ 禁用。 */
+  canReorder: boolean;
   cellHeight: number;
+  /** 当前网格列数：决定卡片宽度（5 列 19.2% / 4 列 24%）。 */
+  columns: number;
   disabled: boolean;
   drag: Readonly<{
     code: string;
@@ -652,6 +786,7 @@ function SpecialProductCard({
   onDragStart(productCode: string, fromIndex: number): void;
   onMeasureCell(width: number, height: number): void;
   onMoveDown(): void;
+  onMoveToCategory(): void;
   onMoveUp(): void;
   onRemove(): void;
   /** 整理状态：显示 ↑ / ↓ / 取消标记，点卡片不加购，只保留长按拖动。 */
@@ -699,6 +834,8 @@ function SpecialProductCard({
       panHandlers={panHandlers}
       style={[
         styles.productCard,
+        columns === SPECIAL_PRODUCTS_GRID_COLUMNS_WITH_CATEGORIES &&
+          styles.productCardFourColumns,
         dragTargetIndex !== null &&
           dragTargetIndex === index &&
           dragTargetIndex !== drag?.fromIndex &&
@@ -763,38 +900,405 @@ function SpecialProductCard({
       </PosPressable>
       {organizing ? (
         <View style={styles.productCardActions}>
-          <PosButton
-            disabled={managementDisabled || index === 0}
-            label="↑"
-            labelStyle={styles.manageArrowLabel}
-            onPress={onMoveUp}
-            size="small"
-            style={styles.manageArrow}
-            testID={`special-products-move-up-${item.productCode}`}
-          />
-          <PosButton
-            disabled={managementDisabled || index === itemCount - 1}
-            label="↓"
-            labelStyle={styles.manageArrowLabel}
-            onPress={onMoveDown}
-            size="small"
-            style={styles.manageArrow}
-            testID={`special-products-move-down-${item.productCode}`}
-          />
-          <PosButton
-            disabled={managementDisabled}
-            label={t("row.remove")}
-            labelStyle={styles.manageRemoveLabel}
-            onPress={onRemove}
-            size="small"
-            sound="danger"
-            style={styles.manageRemove}
-            testID={`special-products-remove-${item.productCode}`}
-            tone="danger"
-          />
+          <View style={styles.productCardActionRow}>
+            <PosButton
+              disabled={managementDisabled || !canReorder || index === 0}
+              label="↑"
+              labelStyle={styles.manageArrowLabel}
+              onPress={onMoveUp}
+              size="small"
+              style={styles.manageArrow}
+              testID={`special-products-move-up-${item.productCode}`}
+            />
+            <PosButton
+              disabled={managementDisabled || !canReorder || index === itemCount - 1}
+              label="↓"
+              labelStyle={styles.manageArrowLabel}
+              onPress={onMoveDown}
+              size="small"
+              style={styles.manageArrow}
+              testID={`special-products-move-down-${item.productCode}`}
+            />
+            <PosButton
+              disabled={managementDisabled}
+              label={t("row.remove")}
+              labelStyle={styles.manageRemoveLabel}
+              onPress={onRemove}
+              size="small"
+              sound="danger"
+              style={styles.manageRemove}
+              testID={`special-products-remove-${item.productCode}`}
+              tone="danger"
+            />
+          </View>
+          {canMoveToCategory ? (
+            <PosButton
+              disabled={managementDisabled}
+              icon="folder-move-outline"
+              label={t("row.moveToCategory")}
+              onPress={onMoveToCategory}
+              size="small"
+              testID={`special-products-move-category-${item.productCode}`}
+              tone="secondary"
+            />
+          ) : null}
         </View>
       ) : null}
     </PosPanResponderView>
+  );
+}
+
+/**
+ * 左侧分类栏：全部、各分类（带数量）、未分类（数量为 0 时隐藏）。
+ * 整行可点（行高 58）；选中项主题色浅底 + 左色条；栏内可滚动；分类自带的颜色只用于色点。
+ */
+function SpecialProductCategoryRail({
+  categories,
+  counts,
+  onSelect,
+  selectedCategoryId,
+  showMaintainHint,
+  t,
+}: Readonly<{
+  categories: readonly SpecialProductCategory[];
+  counts: SpecialProductsState["categoryCounts"];
+  onSelect(selection: string): void;
+  selectedCategoryId: string;
+  /** 只对有管理权限的收银员提示「分类在手机 App 里维护」。 */
+  showMaintainHint: boolean;
+  t: SpecialProductsTranslate;
+}>) {
+  usePosThemeVersion();
+  return (
+    <View
+      accessibilityLabel={t("categories.listLabel")}
+      style={styles.rail}
+      testID="special-products-category-rail"
+    >
+      <ScrollView
+        style={styles.railScroll}
+        testID="special-products-category-rail-scroll"
+      >
+        <SpecialProductCategoryRow
+          count={counts.all}
+          icon="view-grid-outline"
+          label={t("categories.all")}
+          onPress={() => onSelect(SPECIAL_PRODUCT_CATEGORY_ALL)}
+          selected={selectedCategoryId === SPECIAL_PRODUCT_CATEGORY_ALL}
+          testID="special-products-category-all"
+        />
+        {categories.map((category) => (
+          <SpecialProductCategoryRow
+            color={category.color}
+            count={counts.byCategory[category.categoryId] ?? 0}
+            key={category.categoryId}
+            label={category.name}
+            onPress={() => onSelect(category.categoryId)}
+            selected={selectedCategoryId === category.categoryId}
+            testID={`special-products-category-${category.categoryId}`}
+          />
+        ))}
+        {counts.uncategorized > 0 ? (
+          <SpecialProductCategoryRow
+            count={counts.uncategorized}
+            label={t("categories.uncategorized")}
+            muted
+            onPress={() => onSelect(SPECIAL_PRODUCT_CATEGORY_UNCATEGORIZED)}
+            selected={selectedCategoryId === SPECIAL_PRODUCT_CATEGORY_UNCATEGORIZED}
+            testID="special-products-category-uncategorized"
+          />
+        ) : null}
+      </ScrollView>
+      {showMaintainHint ? (
+        <View style={styles.railFoot} testID="special-products-category-hint">
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.mutedInk}
+            name="cellphone"
+            size={16}
+          />
+          <Text style={styles.railFootText}>{t("categories.maintainHint")}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function SpecialProductCategoryRow({
+  color,
+  count,
+  icon,
+  label,
+  muted = false,
+  onPress,
+  selected,
+  testID,
+}: Readonly<{
+  /** 分类自带颜色（#RRGGBB），仅用于色点；缺省用主题中性色。 */
+  color?: string | null;
+  count: number;
+  icon?: PosIconName;
+  label: string;
+  muted?: boolean;
+  onPress(): void;
+  selected: boolean;
+  testID: string;
+}>) {
+  usePosThemeVersion();
+  return (
+    <PosPressable
+      accessibilityLabel={`${label} ${count}`}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      sound="navigate"
+      style={({ pressed }) => [
+        styles.railRow,
+        selected && styles.railRowSelected,
+        pressed && styles.railRowPressed,
+      ]}
+      testID={testID}
+    >
+      {selected ? <View style={styles.railRowBar} /> : null}
+      {icon ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.mutedInk}
+          name={icon}
+          size={20}
+        />
+      ) : (
+        <View
+          style={[
+            styles.railDot,
+            muted || !color
+              ? styles.railDotNeutral
+              : { backgroundColor: color },
+          ]}
+        />
+      )}
+      <Text
+        numberOfLines={1}
+        style={[styles.railRowLabel, muted && styles.railRowLabelMuted]}
+      >
+        {label}
+      </Text>
+      <View style={[styles.railCount, selected && styles.railCountSelected]}>
+        <Text
+          style={[
+            styles.railCountText,
+            selected && styles.railCountTextSelected,
+          ]}
+        >
+          {count}
+        </Text>
+      </View>
+    </PosPressable>
+  );
+}
+
+/**
+ * 页面搜索框：始终在全部特殊商品里过滤（纯本地、离线可用），清空后回到原分类。
+ * 软键盘输入必须位于键盘感知滚动容器内（见 scripts/check-keyboard-avoidance-coverage），
+ * 这里用一个不可滚动、高度随内容的 PosKeyboardAwareScrollView 承载：搜索框在页面顶部，
+ * 不会被键盘遮挡，容器只是满足统一的键盘避让约定。
+ */
+function SpecialProductsSearchBox({
+  onChange,
+  t,
+  totalCount,
+  value,
+}: Readonly<{
+  onChange(text: string): void;
+  t: SpecialProductsTranslate;
+  totalCount: number;
+  value: string;
+}>) {
+  usePosThemeVersion();
+  return (
+    <PosKeyboardAwareScrollView
+      scrollEnabled={false}
+      style={styles.filterScroll}
+      testID="special-products-filter-scroll"
+    >
+      <View style={styles.filterBox}>
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.ink}
+          name="magnify"
+          size={24}
+        />
+        <PosKeyboardAwareTextInput
+          accessibilityLabel={t("search.label")}
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={onChange}
+          placeholder={t("search.placeholder")}
+          placeholderTextColor={posColors.placeholder}
+          returnKeyType="search"
+          selectionColor={posColors.accent}
+          style={styles.filterInput}
+          testID="special-products-filter-input"
+          value={value}
+        />
+        {value.length > 0 ? (
+          <PosPressable
+            accessibilityLabel={t("search.clear")}
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => onChange("")}
+            sound="navigate"
+            style={styles.filterClear}
+            testID="special-products-filter-clear"
+          >
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.mutedInk}
+              name="close-circle"
+              size={22}
+            />
+          </PosPressable>
+        ) : (
+          <Text style={styles.filterScope}>
+            {t("search.scope", { count: totalCount })}
+          </Text>
+        )}
+      </View>
+    </PosKeyboardAwareScrollView>
+  );
+}
+
+/** 「移到分类」清单：各分类 + 未分类，当前所在分类打勾，点一下即提交；离线 / 处理中禁用。 */
+function SpecialProductCategoryMoveSheet({
+  categories,
+  currentCategoryId,
+  disabled,
+  item,
+  onClose,
+  onSelect,
+  t,
+}: Readonly<{
+  categories: readonly SpecialProductCategory[];
+  /** 商品当前所在分类 id；null = 未分类。 */
+  currentCategoryId: string | null;
+  disabled: boolean;
+  item: SpecialProductItem;
+  onClose(): void;
+  onSelect(categoryId: string | null): void;
+  t: SpecialProductsTranslate;
+}>) {
+  usePosThemeVersion();
+  const options: readonly Readonly<{
+    categoryId: string | null;
+    color: string | null;
+    label: string;
+    testID: string;
+  }>[] = [
+    ...categories.map((category) => ({
+      categoryId: category.categoryId,
+      color: category.color,
+      label: category.name,
+      testID: `special-products-move-option-${category.categoryId}`,
+    })),
+    {
+      categoryId: null,
+      color: null,
+      label: t("categories.uncategorized"),
+      testID: "special-products-move-option-uncategorized",
+    },
+  ];
+  return (
+    <Modal
+      animationType="fade"
+      onRequestClose={onClose}
+      presentationStyle="overFullScreen"
+      statusBarTranslucent
+      supportedOrientations={["landscape-left", "landscape-right"]}
+      transparent
+      visible
+    >
+      <View
+        accessibilityViewIsModal
+        style={styles.modalOverlay}
+        testID="special-products-move-sheet"
+      >
+        <PosPressable
+          accessible={false}
+          onPress={onClose}
+          sound="navigate"
+          style={styles.backdropDismissArea}
+          testID="special-products-move-sheet-backdrop"
+        />
+        <View style={styles.moveSheet}>
+          <View style={styles.moveSheetHeader}>
+            <View style={styles.modalTitleGroup}>
+              <Text style={styles.moveSheetEyebrow}>
+                {t("moveSheet.title")}
+              </Text>
+              <Text numberOfLines={2} style={styles.moveSheetProduct}>
+                {item.displayName}
+              </Text>
+            </View>
+            <PosButton
+              icon="close"
+              label={t("action.close")}
+              onPress={onClose}
+              size="medium"
+              sound="navigate"
+              testID="special-products-move-sheet-close"
+              tone="quiet"
+            />
+          </View>
+          <ScrollView style={styles.moveSheetList}>
+            {options.map((option) => {
+              const current = option.categoryId === currentCategoryId;
+              return (
+                <PosPressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled, selected: current }}
+                  disabled={disabled}
+                  key={option.categoryId ?? "uncategorized"}
+                  onPress={() => onSelect(option.categoryId)}
+                  style={({ pressed }) => [
+                    styles.moveOption,
+                    current && styles.moveOptionCurrent,
+                    pressed && !disabled && styles.railRowPressed,
+                    disabled && styles.moveOptionDisabled,
+                  ]}
+                  testID={option.testID}
+                >
+                  <View
+                    style={[
+                      styles.railDot,
+                      option.color
+                        ? { backgroundColor: option.color }
+                        : styles.railDotNeutral,
+                    ]}
+                  />
+                  <Text numberOfLines={1} style={styles.moveOptionLabel}>
+                    {option.label}
+                  </Text>
+                  {current ? (
+                    <View
+                      accessibilityLabel={t("moveSheet.current")}
+                      accessible
+                      testID={`${option.testID}-check`}
+                    >
+                      <MaterialCommunityIcons
+                        accessible={false}
+                        color={posColors.accent}
+                        name="check"
+                        size={24}
+                      />
+                    </View>
+                  ) : null}
+                </PosPressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -936,6 +1440,8 @@ function StatusBanner({
   usePosThemeVersion();
   const failure =
     statusCode.endsWith("-failed") ||
+    statusCode === "order-conflict" ||
+    statusCode === "assign-conflict" ||
     statusCode === "online-required" ||
     statusCode === "permission-required";
   return (
@@ -974,11 +1480,203 @@ function formatAud(cents: number): string {
 }
 
 const styles = createPosStyles((colors) => ({
+  // 页面是「分类栏（可选）+ 主区」的横向布局；没有分类栏时主区独占，视觉与旧版一致。
   page: {
     flex: 1,
+    flexDirection: "row",
     gap: 10,
     minHeight: 0,
     padding: 12,
+  },
+  main: {
+    flex: 1,
+    gap: 10,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  rail: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.large,
+    borderWidth: 1,
+    overflow: "hidden",
+    width: SPECIAL_PRODUCTS_CATEGORY_RAIL_WIDTH,
+  },
+  railScroll: {
+    flex: 1,
+  },
+  railRow: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: SPECIAL_PRODUCTS_CATEGORY_ROW_HEIGHT,
+    paddingLeft: 14,
+    paddingRight: 12,
+  },
+  railRowSelected: {
+    backgroundColor: colors.accentSoft,
+  },
+  railRowPressed: {
+    opacity: 0.72,
+  },
+  // 选中项左侧色条：主题主操作色，不用分类自带颜色。
+  railRowBar: {
+    backgroundColor: colors.accent,
+    borderBottomRightRadius: 3,
+    borderTopRightRadius: 3,
+    bottom: 8,
+    left: 0,
+    position: "absolute",
+    top: 8,
+    width: 4,
+  },
+  railDot: {
+    borderRadius: 5,
+    height: 10,
+    width: 10,
+  },
+  railDotNeutral: {
+    backgroundColor: colors.disabledInk,
+  },
+  railRowLabel: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  railRowLabelMuted: {
+    color: colors.mutedInk,
+  },
+  railCount: {
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: 10,
+    minWidth: 30,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  railCountSelected: {
+    backgroundColor: colors.accent,
+  },
+  railCountText: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  railCountTextSelected: {
+    color: colors.onAccent,
+  },
+  railFoot: {
+    backgroundColor: colors.surfaceAlt,
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  railFootText: {
+    color: colors.mutedInk,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    lineHeight: 17,
+  },
+  // 仅承载搜索框的不可滚动容器：不抢占主区的伸缩空间。
+  filterScroll: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  filterBox: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: posRadius.medium,
+    borderWidth: 1.5,
+    flexDirection: "row",
+    gap: 10,
+    minHeight: posTouch.medium,
+    paddingHorizontal: 14,
+  },
+  filterInput: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "600",
+    minHeight: posTouch.medium - 4,
+    paddingVertical: 8,
+  },
+  filterScope: {
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: posRadius.small,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "800",
+    overflow: "hidden",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  filterClear: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
+    minWidth: SPECIAL_PRODUCTS_MIN_TOUCH_TARGET,
+  },
+  moveSheet: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: posRadius.sheet,
+    borderWidth: 1,
+    maxHeight: 680,
+    overflow: "hidden",
+    width: 380,
+  },
+  moveSheetHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 12,
+    justifyContent: "space-between",
+    padding: 16,
+  },
+  moveSheetEyebrow: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  moveSheetProduct: {
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: "900",
+    lineHeight: 22,
+    marginTop: 2,
+  },
+  moveSheetList: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+  },
+  moveOption: {
+    alignItems: "center",
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: posTouch.medium,
+    paddingHorizontal: 18,
+  },
+  moveOptionCurrent: {
+    backgroundColor: colors.accentSoft,
+  },
+  moveOptionDisabled: {
+    opacity: 0.5,
+  },
+  moveOptionLabel: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "800",
   },
   banner: {
     alignItems: "center",
@@ -1052,6 +1750,10 @@ const styles = createPosStyles((colors) => ({
     // 一行 5 张 + 4 个 10pt 间距，19.2% × 5 留出的 4% 正好放间距，放不下时再收缩。
     flexShrink: 1,
     width: "19.2%",
+  },
+  // 有分类栏时一行 4 张 + 3 个 10pt 间距：24% × 4 留出的 4% 放间距，放不下时再收缩。
+  productCardFourColumns: {
+    width: "24%",
   },
   productCardMain: {
     borderRadius: posRadius.medium,
@@ -1130,10 +1832,13 @@ const styles = createPosStyles((colors) => ({
     paddingTop: 2,
   },
   productCardActions: {
-    flexDirection: "row",
     gap: 6,
     paddingBottom: 8,
     paddingHorizontal: 8,
+  },
+  productCardActionRow: {
+    flexDirection: "row",
+    gap: 6,
   },
   // 上下移动键固定窄宽，「Remove」独占剩余宽度：均分时英文的 Remove 被挤成 Remov / e。
   manageArrow: {

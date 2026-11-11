@@ -1388,6 +1388,11 @@ builder.Services.AddScoped<IBrowserExtensionAccessService, BrowserExtensionAcces
 builder.Services.AddScoped<IBrowserExtensionService, BrowserExtensionService>();
 builder.Services.AddScoped<ILocalSupplierCategoryCaptureService, LocalSupplierCategoryCaptureService>();
 builder.Services.AddScoped<ILocalSupplierCategoryReactService, LocalSupplierCategoryReactService>();
+// 分店级特殊商品分类（手机 App 维护；表由迁移 20261111.002 建立）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Services.StoreSpecialProductCategories.IStoreSpecialProductCategoryService,
+    BlazorApp.Api.Services.StoreSpecialProductCategories.StoreSpecialProductCategoryService
+>();
 // 使用帮助 FAQ 公开读服务（缓存在共享的 IMemoryCache 里，P2 写操作后调用 Invalidate）。
 builder.Services.AddScoped<
     BlazorApp.Api.Services.HelpFaq.IHelpFaqPublicService,

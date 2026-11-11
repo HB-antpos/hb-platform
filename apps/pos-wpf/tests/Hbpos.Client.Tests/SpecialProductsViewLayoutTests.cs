@@ -170,12 +170,16 @@ public sealed class SpecialProductsViewLayoutTests
             "{Binding ClosePriceEditorCommand}",
             "{Binding DataContext.AddSpecialProductCommand, RelativeSource={RelativeSource AncestorType=ListBox}}",
             "{Binding DataContext.CancelRemoveCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}",
+            "{Binding DataContext.PickCategoryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}",
             "{Binding DataContext.RemoveSpecialProductCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}",
+            "{Binding DataContext.SelectCategoryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}",
             "{Binding DataContext.SpecialItemCardCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}",
+            "{Binding CloseCategoryPickerCommand}",
             "{Binding DownloadCommand}",
             "{Binding MoveDownCommand}",
             "{Binding MoveToFrontCommand}",
             "{Binding MoveUpCommand}",
+            "{Binding OpenCategoryPickerCommand}",
             "{Binding OpenPriceEditorCommand}",
             "{Binding PriceBackspaceCommand}",
             "{Binding PriceClearCommand}",
@@ -254,6 +258,168 @@ public sealed class SpecialProductsViewLayoutTests
                  })
         {
             Assert.Contains(binding, editorBindings);
+        }
+    }
+
+    [Fact]
+    public void Category_bar_sits_left_of_the_grid_panel_and_only_shows_when_categories_exist()
+    {
+        var view = LoadView();
+        var bar = FindNamedElement(view, "SpecialCategoryBar");
+
+        // 分类栏宽 188，没有分类时整栏不显示（网格占满，与旧版一致）。
+        Assert.Equal("188", (string?)bar.Attribute("Width"));
+        Assert.Equal("{Binding HasCategories, Converter={StaticResource BoolToVis}}", (string?)bar.Attribute("Visibility"));
+        Assert.Equal("{StaticResource SpecialPanelStyle}", (string?)bar.Attribute("Style"));
+
+        // 主体三列：分类栏（Auto）| 商品网格（*）| 右侧购物车 / 添加面板（Auto）；分类栏是第 0 列，网格面板是第 1 列。
+        var body = bar.Parent!;
+        var columns = body.Element(Presentation + "Grid.ColumnDefinitions")!
+            .Elements(Presentation + "ColumnDefinition")
+            .Select(column => (string)column.Attribute("Width")!)
+            .ToArray();
+        Assert.Equal(["Auto", "*", "Auto"], columns);
+        Assert.Equal("0", (string?)bar.Attribute("Grid.Column"));
+        var gridPanel = body.Elements(Presentation + "Border").Single(border =>
+            border.Descendants().Any(child => (string?)child.Attribute(Xaml + "Name") == "SpecialProductGrid"));
+        Assert.Equal("1", (string?)gridPanel.Attribute("Grid.Column"));
+        Assert.Equal("2", (string?)FindNamedElement(view, "SpecialCartRail").Parent!.Attribute("Grid.Column"));
+
+        // 分类多了在栏内触控滚动。
+        var scroller = Assert.Single(bar.Descendants(Presentation + "ScrollViewer"));
+        Assert.Equal("{StaticResource PosVerticalTouchScrollViewerStyle}", (string?)scroller.Attribute("Style"));
+        var list = FindNamedElement(view, "SpecialCategoryList");
+        Assert.Equal("{Binding CategoryEntries}", (string?)list.Attribute("ItemsSource"));
+    }
+
+    [Fact]
+    public void Category_rows_follow_the_touch_rules_and_use_theme_resources_for_selection()
+    {
+        var view = LoadView();
+        var list = FindNamedElement(view, "SpecialCategoryList");
+
+        // 行高 48（按钮基样式下限，行样式显式声明），字号 16（名称）/ 14（数量）。
+        var rowStyle = FindStyle(view, "SpecialCategoryRowButtonStyle");
+        AssertSetter(rowStyle, "MinHeight", "48");
+        var row = Assert.Single(list.Descendants(Presentation + "Button"));
+        Assert.Equal("{StaticResource SpecialCategoryRowButtonStyle}", (string?)row.Attribute("Style"));
+        Assert.Equal("{Binding}", (string?)row.Attribute("CommandParameter"));
+        var name = Assert.Single(row.Descendants(Presentation + "TextBlock").Where(text =>
+            (string?)text.Attribute("Text") == "{Binding Name}"));
+        Assert.Equal("16", (string?)name.Attribute("FontSize"));
+        var count = Assert.Single(row.Descendants(Presentation + "TextBlock").Where(text =>
+            (string?)text.Attribute("Text") == "{Binding CountText}"));
+        Assert.Equal("14", (string?)count.Attribute("FontSize"));
+
+        // 选中项：主题浅色底 + 左侧主题色条，全部是 DynamicResource，跟随 8 套主题。
+        var trigger = Assert.Single(list.Descendants(Presentation + "DataTrigger").Where(item =>
+            (string?)item.Attribute("Binding") == "{Binding IsSelected}"));
+        AssertTriggerSetter(trigger, "Background", "{DynamicResource PosPrimarySoftBrush}");
+        AssertTriggerSetter(trigger, "Visibility", "Visible");
+        var selectedBar = FindNamedElement(view, "SpecialCategorySelectedBar");
+        Assert.Equal("4", (string?)selectedBar.Attribute("Width"));
+        Assert.Equal("{DynamicResource PosPrimaryBrush}", (string?)selectedBar.Attribute("Background"));
+
+        // 色点：中性底点 + 分类自己的颜色点（来自视图模型已校验的 #RRGGBB），没有颜色时只显示中性点。
+        Assert.Contains(list.Descendants(Presentation + "Ellipse"), ellipse =>
+            (string?)ellipse.Attribute("Fill") == "{Binding ColorHex}" &&
+            (string?)ellipse.Attribute("Visibility") == "{Binding HasColor, Converter={StaticResource BoolToVis}}");
+    }
+
+    [Fact]
+    public void Filter_bar_keeps_its_two_chips_and_the_first_one_shows_the_current_category()
+    {
+        var view = LoadView();
+        var bar = FindNamedElement(view, "SpecialFilterBar");
+
+        // 第一个标签仍绑 AllChipText（有分类时由视图模型改成「分类名 + 数量」），第二个「已在购物车」不变。
+        var chips = bar.Descendants(Presentation + "Button").ToArray();
+        Assert.Equal(2, chips.Length);
+        Assert.Equal("{Binding ShowAllCommand}", (string?)chips[0].Attribute("Command"));
+        Assert.Equal("{Binding AllChipText}", (string?)chips[0].Attribute("Content"));
+        Assert.Equal("{Binding ShowInCartCommand}", (string?)chips[1].Attribute("Command"));
+        Assert.Equal("{Binding InCartChipText}", (string?)chips[1].Attribute("Content"));
+    }
+
+    [Fact]
+    public void Edit_action_bar_has_a_move_to_category_button_that_only_shows_with_categories()
+    {
+        var view = LoadView();
+        var actionBar = FindNamedElement(view, "SpecialEditActionBar");
+        var button = FindNamedElement(view, "SpecialMoveToCategoryButton");
+
+        Assert.Contains(actionBar.Descendants(), element => ReferenceEquals(element, button));
+        Assert.Equal("{Binding OpenCategoryPickerCommand}", (string?)button.Attribute("Command"));
+        Assert.Equal("{Binding SelectedSpecialItem}", (string?)button.Attribute("CommandParameter"));
+        Assert.Equal("{Binding HasCategories, Converter={StaticResource BoolToVis}}", (string?)button.Attribute("Visibility"));
+        Assert.Equal("14", (string?)button.Attribute("FontSize"));
+        Assert.Contains(button.Descendants(Presentation + "TextBlock"), text =>
+            (string?)text.Attribute("Text") == "{Binding MoveToCategoryText}");
+
+        // 有分类时分类栏占去一列宽度，按钮组换到第二行（样式触发器改 Grid.Row）；没有分类时保持原来的一行。
+        var buttons = FindNamedElement(view, "SpecialEditActionButtons");
+        var trigger = Assert.Single(buttons.Descendants(Presentation + "DataTrigger"));
+        Assert.Equal("{Binding HasCategories}", (string?)trigger.Attribute("Binding"));
+        AssertTriggerSetter(trigger, "Grid.Row", "1");
+        // 位置只能由样式 Setter 给出（本地属性会压过触发器）。
+        Assert.Null(buttons.Attribute("Grid.Row"));
+        Assert.Null(buttons.Attribute("Grid.Column"));
+    }
+
+    [Fact]
+    public void Category_picker_lists_choices_with_a_check_mark_and_meets_touch_rules()
+    {
+        var view = LoadView();
+        var picker = FindNamedElement(view, "SpecialCategoryPicker");
+
+        Assert.Equal(
+            "{Binding IsCategoryPickerOpen, Converter={StaticResource BoolToVis}}",
+            (string?)picker.Attribute("Visibility"));
+        var choices = FindNamedElement(view, "SpecialCategoryChoices");
+        Assert.Equal("{Binding CategoryChoices}", (string?)choices.Attribute("ItemsSource"));
+        var choice = Assert.Single(choices.Descendants(Presentation + "Button"));
+        Assert.Equal("{Binding}", (string?)choice.Attribute("CommandParameter"));
+        Assert.True(double.Parse((string)choice.Attribute("MinHeight")!, System.Globalization.CultureInfo.InvariantCulture) >= 44);
+        // 当前所在分类打勾。
+        var check = Assert.Single(choice.Descendants().Where(element => (string?)element.Attribute("Kind") == "Check"));
+        Assert.Equal("{Binding IsCurrent, Converter={StaticResource BoolToVis}}", (string?)check.Attribute("Visibility"));
+        Assert.Contains(picker.Descendants(Presentation + "TextBlock"), text =>
+            (string?)text.Attribute("Text") == "{Binding CategoryPickerTitleText}");
+        Assert.Contains(picker.Descendants(Presentation + "TextBlock"), text =>
+            (string?)text.Attribute("Text") == "{Binding CategoryPickerProductName}");
+        // 选项多时在弹层内触控滚动。
+        var scroller = Assert.Single(picker.Descendants(Presentation + "ScrollViewer"));
+        Assert.Equal("{StaticResource PosVerticalTouchScrollViewerStyle}", (string?)scroller.Attribute("Style"));
+    }
+
+    [Fact]
+    public void Category_ui_uses_theme_resources_and_no_hard_coded_colors()
+    {
+        var view = LoadView();
+        var regions = new[]
+        {
+            FindNamedElement(view, "SpecialCategoryBar"),
+            FindNamedElement(view, "SpecialCategoryPicker"),
+            FindNamedElement(view, "SpecialMoveToCategoryButton"),
+            FindStyle(view, "SpecialCategoryRowButtonStyle"),
+        };
+
+        foreach (var region in regions)
+        {
+            foreach (var attribute in region.DescendantsAndSelf().SelectMany(element => element.Attributes()))
+            {
+                // 颜色一律走 DynamicResource（Transparent 例外）；不得出现 #RRGGBB 之类的字面颜色，
+                // 分类自己的色点只允许绑定视图模型里已校验的 ColorHex。
+                Assert.DoesNotMatch("^#[0-9A-Fa-f]{3,8}$", attribute.Value);
+                if (attribute.Name.LocalName is "Background" or "Foreground" or "Fill" or "BorderBrush")
+                {
+                    Assert.True(
+                        attribute.Value.StartsWith("{DynamicResource ", StringComparison.Ordinal) ||
+                        attribute.Value == "{Binding ColorHex}" ||
+                        attribute.Value == "Transparent",
+                        $"{attribute.Name.LocalName}={attribute.Value} 不是主题资源。");
+                }
+            }
         }
     }
 

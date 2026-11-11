@@ -103,6 +103,18 @@
             <Setter Property="Padding" Value="20,0" />
         </Style>
 
+        <!-- 分类栏的一行：整行可点、48 高、左对齐；选中态（浅底 + 左侧色条）由条目模板里的 DataTrigger 切换。 -->
+        <Style x:Key="SpecialCategoryRowButtonStyle"
+               TargetType="Button"
+               BasedOn="{StaticResource SpecialFlatButtonBaseStyle}">
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="Padding" Value="14,0,12,0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        </Style>
+
         <Style x:Key="SpecialKeypadKeyStyle"
                TargetType="Button"
                BasedOn="{StaticResource SpecialFlatButtonBaseStyle}">
@@ -373,14 +385,96 @@
                            Foreground="{DynamicResource PosTextSecondaryBrush}" />
             </Grid>
 
-            <!-- 主体：左商品网格 + 右侧（浏览：购物车摘要；编辑：添加商品） -->
+            <!-- 主体：左分类栏（仅有分类时显示）+ 商品网格 + 右侧（浏览：购物车摘要；编辑：添加商品） -->
             <Grid Grid.Row="4">
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" Margin="0,0,16,0" Style="{StaticResource SpecialPanelStyle}">
+                <!-- 分类栏：宽 188、行高 48、字号 16；分类多了在栏内触控滚动。没建分类的分店整栏不显示，网格占满，与旧版一致。 -->
+                <Border x:Name="SpecialCategoryBar"
+                        Grid.Column="0"
+                        Width="188"
+                        Margin="0,0,12,0"
+                        Style="{StaticResource SpecialPanelStyle}"
+                        ClipToBounds="True"
+                        Visibility="{Binding HasCategories, Converter={StaticResource BoolToVis}}">
+                    <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Padding="0,6">
+                        <ItemsControl x:Name="SpecialCategoryList"
+                                      ItemsSource="{Binding CategoryEntries}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="6,0,6,2">
+                                        <Button x:Name="SpecialCategoryRow"
+                                                Command="{Binding DataContext.SelectCategoryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource SpecialCategoryRowButtonStyle}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="22" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <!-- 「全部」用图标，其余用分类色点；没有颜色的分类退回中性灰点。 -->
+                                                <materialDesign:PackIcon Kind="ViewGridOutline"
+                                                                         Width="18"
+                                                                         Height="18"
+                                                                         Foreground="{DynamicResource PosIconBrush}"
+                                                                         HorizontalAlignment="Left"
+                                                                         VerticalAlignment="Center"
+                                                                         Visibility="{Binding IsAll, Converter={StaticResource BoolToVis}}" />
+                                                <Grid Visibility="{Binding ShowsDot, Converter={StaticResource BoolToVis}}"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Center">
+                                                    <Ellipse Width="10"
+                                                             Height="10"
+                                                             Fill="{DynamicResource PosBorderStrongBrush}" />
+                                                    <Ellipse Width="10"
+                                                             Height="10"
+                                                             Fill="{Binding ColorHex}"
+                                                             Visibility="{Binding HasColor, Converter={StaticResource BoolToVis}}" />
+                                                </Grid>
+                                                <TextBlock Grid.Column="1"
+                                                           Text="{Binding Name}"
+                                                           FontSize="16"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="2"
+                                                           Text="{Binding CountText}"
+                                                           Margin="6,0,0,0"
+                                                           FontSize="14"
+                                                           Foreground="{DynamicResource PosTextSecondaryBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Button>
+                                        <Border x:Name="SpecialCategorySelectedBar"
+                                                Width="4"
+                                                Margin="-6,6,0,6"
+                                                HorizontalAlignment="Left"
+                                                CornerRadius="0,3,3,0"
+                                                Background="{DynamicResource PosPrimaryBrush}"
+                                                IsHitTestVisible="False"
+                                                Visibility="Collapsed" />
+                                    </Grid>
+                                    <DataTemplate.Triggers>
+                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                            <Setter TargetName="SpecialCategoryRow" Property="Background" Value="{DynamicResource PosPrimarySoftBrush}" />
+                                            <Setter TargetName="SpecialCategoryRow" Property="Foreground" Value="{DynamicResource PosPrimaryTextBrush}" />
+                                            <Setter TargetName="SpecialCategorySelectedBar" Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </DataTemplate.Triggers>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+
+                <Border Grid.Column="1" Margin="0,0,16,0" Style="{StaticResource SpecialPanelStyle}">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*" />
@@ -414,7 +508,8 @@
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource PosTextSecondaryBrush}" />
 
-                            <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                            <ScrollViewer x:Name="SpecialProductScroller"
+                                          Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
                                           VerticalScrollBarVisibility="Auto"
                                           HorizontalScrollBarVisibility="Disabled"
                                           Padding="16,16,6,16">
@@ -641,6 +736,11 @@
                                 CornerRadius="12"
                                 Visibility="{Binding IsEditMode, Converter={StaticResource BoolToVis}}">
                             <Grid>
+                                <!-- 第 0 行占满高度（与原来单行布局一致，内容垂直居中）；第 1 行仅在有分类、按钮组换行时才有内容。 -->
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
@@ -653,7 +753,24 @@
                                            TextWrapping="Wrap"
                                            TextTrimming="CharacterEllipsis"
                                            MaxHeight="44" />
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <!-- 有分类时分类栏占去 200 宽，一行放不下 6 个按钮：按钮组换到第二行（无分类时保持原来的一行）。 -->
+                                <StackPanel x:Name="SpecialEditActionButtons" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <StackPanel.Style>
+                                        <Style TargetType="StackPanel">
+                                            <!-- 默认在第一行第二列；位置用样式 Setter 而不是本地属性，触发器才压得过它。 -->
+                                            <Setter Property="Grid.Row" Value="0" />
+                                            <Setter Property="Grid.Column" Value="1" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasCategories}" Value="True">
+                                                    <Setter Property="Grid.Row" Value="1" />
+                                                    <Setter Property="Grid.Column" Value="0" />
+                                                    <Setter Property="Grid.ColumnSpan" Value="2" />
+                                                    <Setter Property="HorizontalAlignment" Value="Right" />
+                                                    <Setter Property="Margin" Value="0,6,0,0" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </StackPanel.Style>
                                     <Button Command="{Binding MoveToFrontCommand}"
                                             CommandParameter="{Binding SelectedSpecialItem}"
                                             Style="{StaticResource SpecialFlatButtonBaseStyle}"
@@ -685,6 +802,20 @@
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="{Binding MoveDownText}" VerticalAlignment="Center" />
                                             <materialDesign:PackIcon Kind="ChevronRight" Width="18" Height="18" Margin="4,0,0,0" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <!-- 移到分类：仅有分类时出现；必须在线，离线时置灰 -->
+                                    <Button x:Name="SpecialMoveToCategoryButton"
+                                            Command="{Binding OpenCategoryPickerCommand}"
+                                            CommandParameter="{Binding SelectedSpecialItem}"
+                                            Style="{StaticResource SpecialSoftButtonStyle}"
+                                            Margin="8,0,0,0"
+                                            Padding="12,0"
+                                            FontSize="14"
+                                            Visibility="{Binding HasCategories, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="FolderMoveOutline" Width="18" Height="18" Margin="0,0,6,0" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding MoveToCategoryText}" VerticalAlignment="Center" />
                                         </StackPanel>
                                     </Button>
                                     <!-- 改价：必须在线，离线时按钮置灰 -->
@@ -747,7 +878,7 @@
                     </Grid>
                 </Border>
 
-                <Grid Grid.Column="1">
+                <Grid Grid.Column="2">
                     <!-- 浏览模式：购物车摘要，随时看总额，一键回收银 -->
                     <Border x:Name="SpecialCartRail"
                             Width="296"
@@ -1048,6 +1179,102 @@
                     </Border>
                 </Grid>
             </Grid>
+        </Grid>
+
+        <!-- 移到分类弹层：各分类 + 未分类，当前所在的打勾；点任一项即执行并关闭 -->
+        <Grid x:Name="SpecialCategoryPicker"
+              Panel.ZIndex="10"
+              Visibility="{Binding IsCategoryPickerOpen, Converter={StaticResource BoolToVis}}">
+            <Border Background="{DynamicResource PosInverseSurfaceBrush}" Opacity="0.55" />
+            <Border Width="420"
+                    MaxHeight="560"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Padding="24"
+                    Background="{DynamicResource PosSurfaceBrush}"
+                    BorderBrush="{DynamicResource PosDividerBrush}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{Binding CategoryPickerTitleText}"
+                                   FontSize="22"
+                                   FontWeight="Bold"
+                                   VerticalAlignment="Center" />
+                        <Button Grid.Column="1"
+                                Command="{Binding CloseCategoryPickerCommand}"
+                                Style="{StaticResource SpecialIconButtonStyle}"
+                                ToolTip="{Binding CancelText}"
+                                AutomationProperties.Name="{Binding CancelText}">
+                            <materialDesign:PackIcon Kind="Close" Width="22" Height="22" />
+                        </Button>
+                    </Grid>
+                    <TextBlock Grid.Row="1"
+                               Text="{Binding CategoryPickerProductName}"
+                               Margin="0,8,0,12"
+                               FontSize="16"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap"
+                               TextTrimming="CharacterEllipsis"
+                               MaxHeight="44" />
+                    <ScrollViewer Grid.Row="2"
+                                  Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl x:Name="SpecialCategoryChoices" ItemsSource="{Binding CategoryChoices}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Command="{Binding DataContext.PickCategoryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                            CommandParameter="{Binding}"
+                                            Style="{StaticResource SpecialFlatButtonBaseStyle}"
+                                            MinHeight="48"
+                                            Margin="0,0,0,6"
+                                            Padding="14,0"
+                                            HorizontalContentAlignment="Stretch">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="22" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Grid HorizontalAlignment="Left" VerticalAlignment="Center">
+                                                <Ellipse Width="10"
+                                                         Height="10"
+                                                         Fill="{DynamicResource PosBorderStrongBrush}" />
+                                                <Ellipse Width="10"
+                                                         Height="10"
+                                                         Fill="{Binding ColorHex}"
+                                                         Visibility="{Binding HasColor, Converter={StaticResource BoolToVis}}" />
+                                            </Grid>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{Binding Name}"
+                                                       FontSize="16"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       VerticalAlignment="Center" />
+                                            <materialDesign:PackIcon Grid.Column="2"
+                                                                     Kind="Check"
+                                                                     Width="22"
+                                                                     Height="22"
+                                                                     Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                     VerticalAlignment="Center"
+                                                                     Visibility="{Binding IsCurrent, Converter={StaticResource BoolToVis}}" />
+                                        </Grid>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
         </Grid>
 
         <!-- 改价弹窗：数字键盘 + 联网提示；保存失败时保持打开以便重试 -->

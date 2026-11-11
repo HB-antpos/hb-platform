@@ -13,6 +13,9 @@ export const PERMISSIONS = {
   PosTerminal: {
     // 后端常量本身带 Permissions. 前缀，与 PosTerminal.* 其余收银权限同一命名空间。
     AuditView: "Permissions.PosTerminal.Audit.View",
+    // 特殊商品（收银端特价商品页）：手机「特殊商品分类」维护页要求 Manage；读接口后端按 View 授权。
+    SpecialProductsView: "Permissions.PosTerminal.SpecialProducts.View",
+    SpecialProductsManage: "Permissions.PosTerminal.SpecialProducts.Manage",
   },
   LegacyEmployeeLogs: {
     View: "LegacyEmployeeLogs.View",

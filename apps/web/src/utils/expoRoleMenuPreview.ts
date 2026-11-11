@@ -1,6 +1,9 @@
 import type { AccessControl } from '../types/auth'
 import { P } from '../types/permissions'
 
+// 后端 Permissions.PosTerminal.SpecialProducts.Manage；Web 的 P 常量里没有收银端权限码，这里只为菜单预览单独声明。
+const SPECIAL_PRODUCTS_MANAGE = 'Permissions.PosTerminal.SpecialProducts.Manage'
+
 export type ExpoAppMenuTranslate = (key: string, fallback?: string) => string
 
 export interface ExpoAppMenuDefinition {
@@ -175,6 +178,7 @@ const TAB_PATHS: Record<string, string> = {
   'product-query': '/(shell)/product-query',
   'price-updates': '/(shell)/price-updates',
   'pricing-strategies': '/(shell)/pricing-strategies',
+  'special-product-categories': '/(shell)/special-product-categories',
   'product-insights': '/(shell)/product-insights',
   'warehouse-product-insights': '/(shell)/warehouse-product-insights',
   'seasonal-product-insights': '/(shell)/seasonal-product-insights',
@@ -225,6 +229,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'product-query': { zhTitle: '商品维护', enTitle: 'Products' },
   'price-updates': { zhTitle: '价格和标签', enTitle: 'Prices & labels' },
   'pricing-strategies': { zhTitle: '自动价格策略', enTitle: 'Pricing rules' },
+  'special-product-categories': { zhTitle: '特殊商品分类', enTitle: 'Special product categories' },
   'product-insights': { zhTitle: '商品进销', enTitle: 'Product Insights' },
   'warehouse-product-insights': { zhTitle: '仓库商品进销', enTitle: 'Warehouse Insights' },
   'seasonal-product-insights': { zhTitle: '季节商品查询', enTitle: 'Seasonal Products' },
@@ -381,6 +386,15 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.PricingStrategy.View],
     order: 50,
     ...ROUTE_LABELS['pricing-strategies'],
+  },
+  {
+    routeName: 'special-product-categories',
+    titleKey: 'tabs.specialProductCategories',
+    icon: 'shape-outline',
+    // 与后端 FullAppMenu 一致：移动端特殊商品分类入口认 PosTerminal.SpecialProducts.Manage（新建 / 改名 / 排序 / 同步都需要它）。
+    permissionCodes: [SPECIAL_PRODUCTS_MANAGE],
+    order: 50,
+    ...ROUTE_LABELS['special-product-categories'],
   },
   {
     routeName: 'product-insights',

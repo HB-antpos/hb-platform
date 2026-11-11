@@ -517,6 +517,7 @@
     <Compile Include="EnglishOnlyEmailTemplatesTests.cs" />
     <Compile Include="SmsTests.cs" />
     <Compile Include="PlanogramTests.cs" />
+    <Compile Include="StoreSpecialProductCategoryTests.cs" />
     <Compile Include="PlanogramPlanTests.cs" />
     <Compile Include="PlanogramPublishTests.cs" />
     <Compile Include="PlanogramBatchTests.cs" />

@@ -110,6 +110,7 @@ import {
 } from "./sqlite-return-execution-ledger";
 import { SqliteReturnFulfilmentPlanStore } from "./sqlite-return-fulfilment-plan-store";
 import { SqliteSettingsSafetyRepository } from "@hb/pos-db/core/db/sqlite-settings-safety-repository";
+import { SqliteSpecialProductCategoriesRepository } from "@hb/pos-db/core/db/sqlite-special-product-categories-repository";
 import { SqliteSpecialProductsRepository } from "@hb/pos-db/core/db/sqlite-special-products-repository";
 import { SqliteVoucherBalanceMaterialStore } from "./sqlite-voucher-balance-material";
 import { SqliteVoucherPreparationStore } from "./sqlite-voucher-preparation-store";
@@ -314,6 +315,14 @@ export class PosDatabase implements DatabasePort {
   /** 特殊商品全量替换、标记和设备本地顺序统一由同一事务仓储维护。 */
   public specialProducts(): SqliteSpecialProductsRepository {
     return new SqliteSpecialProductsRepository(this.connection);
+  }
+
+  /** 分店级特殊商品分类的本机快照与「当前选中分类」（按分店）；快照整体覆盖，离线可用。 */
+  public specialProductCategories(): SqliteSpecialProductCategoriesRepository {
+    return new SqliteSpecialProductCategoriesRepository(
+      this.connection,
+      this.nowIso,
+    );
   }
 
   /** 分期缓存只提供按门店替换与读取；敏感展示字段始终经二次加密。 */
