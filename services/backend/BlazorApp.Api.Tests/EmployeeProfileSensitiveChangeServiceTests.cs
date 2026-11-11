@@ -2341,6 +2341,138 @@ public sealed class EmployeeProfileSensitiveChangeServiceTests : IDisposable
         Assert.Equal(requestA, Assert.Single(adminProcessed.Data!.Items!).RequestId);
     }
 
+    /// <summary>
+    /// 种 3 个员工、提交时间依次为 3 天前 / 1 天前 / 2 天前（RequestId 按插入顺序递增），
+    /// 供排序与显示名用例共用；用户名、姓名各不相同。
+    /// </summary>
+    private async Task SeedThreePendingForSortAsync()
+    {
+        var now = DateTime.UtcNow;
+        var specs = new (string Guid, string Username, string? FullName, string? Given, string? Family, string? Nick, int DaysAgo)[]
+        {
+            ("sort-a", "alice.w", "Alice Wong", null, null, "Ali", 3),
+            ("sort-b", "bob_login", null, "Bob", "Nguyen", null, 1),
+            ("sort-c", "carol", "Carol", null, null, null, 2),
+        };
+        foreach (var spec in specs)
+        {
+            await _db.Insertable(new User
+            {
+                UserGUID = spec.Guid,
+                Username = spec.Username,
+                FullName = spec.FullName,
+                GivenName = spec.Given,
+                FamilyName = spec.Family,
+                Nickname = spec.Nick,
+                Email = $"{spec.Guid}@example.com",
+                PasswordHash = "hashed",
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(CreatePendingRequest(spec.Guid, $"acct-{spec.Guid}", now.AddDays(-spec.DaysAgo)))
+                .ExecuteCommandAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReviewList_默认最新提交在前_Sort为oldest时最早提交在前()
+    {
+        await SeedThreePendingForSortAsync();
+        var admin = CreateService("global-admin", "global_admin", roles: ["SuperAdmin"], scopeIsAdmin: true);
+
+        var newestFirst = await admin.GetReviewListAsync(new() { Status = "Pending" });
+        var oldestFirst = await admin.GetReviewListAsync(new() { Status = "Pending", Sort = "oldest" });
+        var oldestFirstUpper = await admin.GetReviewListAsync(new() { Status = "Pending", Sort = " OLDEST " });
+        var unknownSort = await admin.GetReviewListAsync(new() { Status = "Pending", Sort = "bogus" });
+
+        // 提交时间：a=3 天前（最早）、c=2 天前、b=1 天前（最新）。
+        Assert.Equal(new[] { "sort-b", "sort-c", "sort-a" }, newestFirst.Data!.Items!.Select(item => item.UserGuid));
+        Assert.Equal(new[] { "sort-a", "sort-c", "sort-b" }, oldestFirst.Data!.Items!.Select(item => item.UserGuid));
+        Assert.Equal(new[] { "sort-a", "sort-c", "sort-b" }, oldestFirstUpper.Data!.Items!.Select(item => item.UserGuid));
+        // 不认识的 Sort 值回到默认顺序，不报错。
+        Assert.Equal(new[] { "sort-b", "sort-c", "sort-a" }, unknownSort.Data!.Items!.Select(item => item.UserGuid));
+    }
+
+    [Fact]
+    public async Task ReviewList_oldest分页稳定_同一时刻提交按RequestId决胜且翻页不重复()
+    {
+        var now = DateTime.UtcNow;
+        var sameMoment = now.AddDays(-1);
+        for (var index = 0; index < 5; index++)
+        {
+            var guid = $"tie-{index}";
+            await _db.Insertable(new User
+            {
+                UserGUID = guid,
+                Username = guid,
+                Email = $"{guid}@example.com",
+                PasswordHash = "hashed",
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(CreatePendingRequest(guid, $"acct-{index}", sameMoment)).ExecuteCommandAsync();
+        }
+        var admin = CreateService("global-admin", "global_admin", roles: ["SuperAdmin"], scopeIsAdmin: true);
+
+        var page1 = await admin.GetReviewListAsync(new() { Status = "Pending", Sort = "oldest", Page = 1, PageSize = 2 });
+        var page2 = await admin.GetReviewListAsync(new() { Status = "Pending", Sort = "oldest", Page = 2, PageSize = 2 });
+        var page3 = await admin.GetReviewListAsync(new() { Status = "Pending", Sort = "oldest", Page = 3, PageSize = 2 });
+
+        var ids = page1.Data!.Items!.Concat(page2.Data!.Items!).Concat(page3.Data!.Items!).Select(item => item.RequestId).ToList();
+        Assert.Equal(5, ids.Count);
+        Assert.Equal(ids.OrderBy(id => id).ToList(), ids); // 同一时刻 → RequestId 升序，翻页不重复不遗漏
+        Assert.Equal(ids.Distinct().Count(), ids.Count);
+    }
+
+    [Fact]
+    public async Task ReviewList_返回员工显示名_姓名优先_与用户名相同或为空时不重复返回()
+    {
+        await SeedThreePendingForSortAsync();
+        var admin = CreateService("global-admin", "global_admin", roles: ["SuperAdmin"], scopeIsAdmin: true);
+
+        var list = await admin.GetReviewListAsync(new() { Status = "Pending" });
+
+        var byGuid = list.Data!.Items!.ToDictionary(item => item.UserGuid);
+        Assert.Equal("Alice Wong", byGuid["sort-a"].DisplayName);   // FullName 优先于昵称
+        Assert.Equal("Bob Nguyen", byGuid["sort-b"].DisplayName);   // 没有 FullName → 名 + 姓
+        Assert.Null(byGuid["sort-c"].DisplayName);                  // FullName "Carol" 与用户名 carol 只差大小写 → 不重复返回，界面回退用户名
+        Assert.Equal("carol", byGuid["sort-c"].Username);
+    }
+
+    [Theory]
+    [InlineData("u1", "Full Name", null, null, null, "Full Name")]
+    [InlineData("u1", null, "Given", "Family", "Nick", "Given Family")]
+    [InlineData("u1", null, "Given", null, null, "Given")]
+    [InlineData("u1", null, null, "Family", null, "Family")]
+    [InlineData("u1", "  ", null, null, "Nick", "Nick")]
+    [InlineData("u1", null, null, null, null, null)]
+    [InlineData("Same", "same", null, null, "Nick", null)]
+    [InlineData(null, "No Username", null, null, null, "No Username")]
+    public void ResolveDisplayName_按优先级取姓名且不与用户名重复(
+        string? username, string? fullName, string? given, string? family, string? nickname, string? expected)
+    {
+        Assert.Equal(
+            expected,
+            EmployeeProfileSensitiveChangeService.ResolveDisplayName(username, fullName, given, family, nickname)
+        );
+    }
+
+    [Fact]
+    public async Task ReviewList_序列化只多出DisplayName_仍不含任何敏感值()
+    {
+        await SeedThreePendingForSortAsync();
+        var admin = CreateService("global-admin", "global_admin", roles: ["SuperAdmin"], scopeIsAdmin: true);
+
+        var list = await admin.GetReviewListAsync(new() { Status = "Pending" });
+        var json = JsonSerializer.Serialize(list.Data!.Items);
+
+        Assert.Contains("DisplayName", json);
+        Assert.DoesNotContain("acct-sort-a", json); // 申请里的银行账号不进列表
+        Assert.DoesNotContain("BankAccountNumber", json);
+    }
+
     private async Task SeedAsync()
     {
         var now = DateTime.UtcNow;

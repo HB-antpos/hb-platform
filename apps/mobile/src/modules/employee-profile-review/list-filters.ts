@@ -15,6 +15,16 @@ export function getEmployeeProfileReviewStatusFilter(
   return segment === "processed" ? "Processed" : "Pending";
 }
 
+/**
+ * 待审核分段「等得最久的在前」（后端 Sort=oldest）；已处理分段沿用后端默认「最近处理 / 提交的在前」。
+ * 旧后端不认识 sort 参数会忽略它，只是顺序仍为最新在前，不会报错。
+ */
+export function getEmployeeProfileReviewSort(
+  segment: EmployeeProfileReviewSegment
+): "oldest" | undefined {
+  return segment === "pending" ? "oldest" : undefined;
+}
+
 export function normalizeEmployeeProfileReviewSearch(value: string | null | undefined) {
   return value?.trim().slice(0, 100) ?? "";
 }

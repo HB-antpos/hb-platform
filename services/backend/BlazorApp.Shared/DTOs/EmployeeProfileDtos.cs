@@ -282,6 +282,11 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>按员工精确过滤；仍叠加审核范围，超范围员工返回空列表。</summary>
         [StringLength(50)]
         public string? UserGuid { get; set; }
+        /// <summary>
+        /// 排序方式：oldest = 提交最早的在前（手机审核页「等得最久的在前」）；留空或其他值 = 最新提交在前（网页后台等既有调用方不受影响）。
+        /// </summary>
+        [StringLength(20)]
+        public string? Sort { get; set; }
     }
 
     public sealed class EmployeeProfileSensitiveWithdrawDto
@@ -307,6 +312,8 @@ namespace BlazorApp.Shared.DTOs
         public int RequestId { get; set; }
         public string UserGuid { get; set; } = string.Empty;
         public string? Username { get; set; }
+        /// <summary>员工姓名（FullName，其次 名+姓，再次昵称），仅用于列表识别；没有姓名时为空，调用方回退显示 Username。</summary>
+        public string? DisplayName { get; set; }
         public string Status { get; set; } = string.Empty;
         public int BaseSensitiveRevision { get; set; }
         public DateTime SubmittedAt { get; set; }

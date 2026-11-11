@@ -342,9 +342,24 @@ public sealed class EmployeeProfileSensitiveChangeService
             );
         }
         var total = await source.CountAsync();
+        // 排序：默认最新提交在前（网页后台等既有调用方不变）；Sort=oldest 时最早提交在前（手机「等得最久的在前」）。
+        // RequestId 作为同一时刻提交的稳定决胜键，保证分页不重复、不漏项。
+        var oldestFirst = string.Equals(query.Sort?.Trim(), "oldest", StringComparison.OrdinalIgnoreCase);
         var rows = await source
-            .OrderBy((request, user, profile) => request.SubmittedAt, SqlSugar.OrderByType.Desc)
-            .Select((request, user, profile) => new { Request = request, user.Username, Profile = profile })
+            .OrderByIF(oldestFirst, (request, user, profile) => request.SubmittedAt, SqlSugar.OrderByType.Asc)
+            .OrderByIF(!oldestFirst, (request, user, profile) => request.SubmittedAt, SqlSugar.OrderByType.Desc)
+            .OrderByIF(oldestFirst, (request, user, profile) => request.RequestId, SqlSugar.OrderByType.Asc)
+            .OrderByIF(!oldestFirst, (request, user, profile) => request.RequestId, SqlSugar.OrderByType.Desc)
+            .Select((request, user, profile) => new
+            {
+                Request = request,
+                user.Username,
+                user.FullName,
+                user.GivenName,
+                user.FamilyName,
+                user.Nickname,
+                Profile = profile,
+            })
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
@@ -357,7 +372,13 @@ public sealed class EmployeeProfileSensitiveChangeService
             Items = rows.Select(row =>
             {
                 storeLabels.TryGetValue(row.Request.UserGUID, out var labels);
-                return MapSummary(row.Request, row.Username, row.Profile, labels);
+                return MapSummary(
+                    row.Request,
+                    row.Username,
+                    row.Profile,
+                    labels,
+                    ResolveDisplayName(row.Username, row.FullName, row.GivenName, row.FamilyName, row.Nickname)
+                );
             }).ToList(),
             Total = total,
             Page = page,
@@ -1427,16 +1448,49 @@ public sealed class EmployeeProfileSensitiveChangeService
         return dto;
     }
 
+    /// <summary>
+    /// 列表上的员工显示名：FullName 优先（全站显示口径），其次 名+姓，再次昵称；
+    /// 与用户名相同（忽略大小写）或都为空时返回 null，由调用方回退显示用户名，避免重复展示。
+    /// 只读非敏感的姓名字段，不涉及任何证件、银行或养老金信息。
+    /// </summary>
+    internal static string? ResolveDisplayName(
+        string? username,
+        string? fullName,
+        string? givenName,
+        string? familyName,
+        string? nickname
+    )
+    {
+        var candidates = new[]
+        {
+            fullName,
+            string.Join(' ', new[] { givenName, familyName }.Where(part => !string.IsNullOrWhiteSpace(part)).Select(part => part!.Trim())),
+            nickname,
+        };
+        foreach (var candidate in candidates)
+        {
+            var value = candidate?.Trim();
+            if (string.IsNullOrEmpty(value))
+            {
+                continue;
+            }
+            return string.Equals(value, username?.Trim(), StringComparison.OrdinalIgnoreCase) ? null : value;
+        }
+        return null;
+    }
+
     private static EmployeeProfileSensitiveChangeSummaryDto MapSummary(
         EmployeeProfileSensitiveChangeRequest request,
         string? username,
         EmployeeProfile? profile,
-        StoreLabels? storeLabels = null
+        StoreLabels? storeLabels = null,
+        string? displayName = null
     ) => new()
     {
         RequestId = request.RequestId,
         UserGuid = request.UserGUID,
         Username = username,
+        DisplayName = displayName,
         StoreCodes = storeLabels?.Codes ?? [],
         StoreNames = storeLabels?.Names ?? [],
         Status = FormatStatus(request.Status),
