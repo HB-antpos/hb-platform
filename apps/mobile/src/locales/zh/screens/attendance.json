@@ -35,6 +35,11 @@
       "myRequests": "申请",
       "approvals": "审核",
       "approvalsWithCount": "审核 {{count}}"
+    },
+    "personal": {
+      "today": "今天",
+      "mySchedule": "我的排班",
+      "myRequests": "我的申请"
     }
   },
   "today": {
@@ -134,7 +139,19 @@
     "hero": {
       "shift": "班次 {{start}} – {{end}}",
       "noShift": "今天没有排班",
-      "worked": "已工作 {{duration}}"
+      "worked": "已工作 {{duration}}",
+      "startsIn": "{{duration}}后上班",
+      "startedAgo": "已过上班时间 {{duration}}",
+      "scanHint": "对准收银台屏幕上的考勤码",
+      "workedSuffix": "已工作",
+      "remaining": "还剩 {{duration}}",
+      "shiftEnded": "班次已结束",
+      "clockedInAt": "{{time}} 上班",
+      "paidTotal": "计薪 {{hours}} 小时",
+      "inOut": "{{in}} 上班 → {{out}} 下班",
+      "mealDeducted": "已扣用餐 {{duration}}",
+      "timelineTitle": "今天的打卡",
+      "viaDevice": "扫收银台考勤码 · {{device}}"
     },
     "summary": {
       "worked": "工时",
@@ -818,7 +835,8 @@
       "device": "设备故障",
       "shiftChanged": "班次调整",
       "other": "其他"
-    }
+    },
+    "tileTitle": "漏打卡？"
   },
   "datePicker": {
     "selectDate": "选择日期",
@@ -1136,5 +1154,16 @@
     "openApprovals": "去审核 ›",
     "weekHours": "本周工时",
     "openHours": "工时统计 ›"
+  },
+  "personal": {
+    "previousWeek": "上一周",
+    "nextWeek": "下一周",
+    "dayRest": "休",
+    "dayLeave": "假",
+    "leaveTile": "请假",
+    "leaveTileHint": "年假 / 病假",
+    "nextShift": "下一个班 {{start}}–{{end}}",
+    "nextShiftDraft": "草稿 · 店长发布后才算数",
+    "nextShiftPublished": "已发布"
   }
 }

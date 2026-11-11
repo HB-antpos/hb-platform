@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import {
   Button,
   Card,
@@ -66,6 +66,8 @@ export function PunchAdjustmentCard({
   isBusy,
   onPreview,
   onSubmit,
+  compact = false,
+  style,
 }: {
   today?: AttendanceToday;
   selectedDate: string;
@@ -76,6 +78,9 @@ export function PunchAdjustmentCard({
   isBusy: boolean;
   onPreview: (payload: AttendancePunchAdjustmentPayload) => Promise<AttendanceAdjustmentPreview>;
   onSubmit: (payload: AttendancePunchAdjustmentPayload) => Promise<void>;
+  /** 打卡页底部「申请补卡 / 请假」两个并排小入口用：只显示一行标题 + 一行说明。 */
+  compact?: boolean;
+  style?: StyleProp<ViewStyle>;
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
   const [punchType, setPunchType] = useState<AttendancePunchType>("ClockIn");
@@ -246,7 +251,7 @@ export function PunchAdjustmentCard({
 
   if (!canOpenForm) {
     return (
-      <Card mode="outlined" style={styles.card}>
+      <Card mode="outlined" style={[styles.card, style]}>
         <Card.Content style={styles.entry}>
           <Icon source="clock-edit-outline" size={20} color={HB_COLORS.textSecondary} />
           <Text variant="bodySmall" style={[styles.muted, styles.flexText]}>
@@ -260,16 +265,16 @@ export function PunchAdjustmentCard({
   return (
     <>
       {/* 整行可点，避免标题与按钮重复同一文案 */}
-      <Card mode="outlined" style={styles.card} onPress={() => setSheetVisible(true)} accessibilityRole="button">
+      <Card mode="outlined" style={[styles.card, style]} onPress={() => setSheetVisible(true)} accessibilityRole="button">
         <Card.Content style={styles.entry}>
           <Icon source="clock-edit-outline" size={20} color={HB_COLORS.action} />
           <View style={styles.flexText}>
-            <Text variant="titleSmall">{t("adjustment.open")}</Text>
-            <Text variant="bodySmall" style={styles.muted}>
-              {isManagerStore ? t("adjustment.entryHintManager") : t("adjustment.entryHint")}
+            <Text variant="titleSmall">{compact ? t("adjustment.tileTitle") : t("adjustment.open")}</Text>
+            <Text variant="bodySmall" style={styles.muted} numberOfLines={compact ? 1 : undefined}>
+              {compact ? t("adjustment.open") : isManagerStore ? t("adjustment.entryHintManager") : t("adjustment.entryHint")}
             </Text>
           </View>
-          <Icon source="chevron-right" size={20} color={HB_COLORS.textSecondary} />
+          {compact ? null : <Icon source="chevron-right" size={20} color={HB_COLORS.textSecondary} />}
         </Card.Content>
       </Card>
 
