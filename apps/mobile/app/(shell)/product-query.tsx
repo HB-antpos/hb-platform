@@ -1067,6 +1067,11 @@ function ProductQueryContent() {
       productTypeSaving ||
       nameSaving ||
       createProductBusy ||
+      // 创建商品流程（表单弹层 / 相机扫码 / 供应商选择）打开期间必须屏蔽页面级 HID 扫码：
+      // 隐藏扫码输入框每 3 秒会抢一次焦点，弹层里正在输入的条码/货号/名称会被抢走并当成扫码查询。
+      createProductVisible ||
+      createBarcodeScannerVisible ||
+      createSupplierPickerVisible ||
       hqSyncRetrying ||
       promotionSheetOpen,
     [
@@ -1075,6 +1080,9 @@ function ProductQueryContent() {
       loading,
       lookupVisible,
       createProductBusy,
+      createProductVisible,
+      createBarcodeScannerVisible,
+      createSupplierPickerVisible,
       hqSyncRetrying,
       nameSaving,
       promotionSheetOpen,
