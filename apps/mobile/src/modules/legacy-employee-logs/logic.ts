@@ -10,6 +10,12 @@ import type {
   LogSource,
 } from "./types";
 
+/**
+ * 手机端是否还能查看老收银日志。2026-11-12 起关闭：「员工操作日志」只看新收银，不再显示老收银 / 新收银切换。
+ * 只关手机端入口；老收银权限码、后端接口与 Web 页面不变，需要恢复时改回 true 即可。
+ */
+export const LEGACY_LOG_SOURCE_ENABLED = false;
+
 export const LEGACY_LOG_PAGE_SIZE = 50;
 export const LEGACY_RANGE_PRESETS: LegacyRangePreset[] = ["today", "yesterday", "last7", "last31"];
 

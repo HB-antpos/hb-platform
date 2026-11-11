@@ -29,6 +29,7 @@ import { FACE_MATCH_PERMISSIONS } from "@/modules/face-match/constants";
 import { getUnreadCount } from "@/modules/notifications/api";
 import { fetchLogBadgeSummary } from "@/modules/legacy-employee-logs/api";
 import { legacyLogBadgeQueryKey, resolveLogBadgeLevel, shouldFetchLogBadge } from "@/modules/legacy-employee-logs/badge";
+import { LEGACY_LOG_SOURCE_ENABLED } from "@/modules/legacy-employee-logs/logic";
 import { subscribeLegacyLogReviewed } from "@/modules/legacy-employee-logs/review-events";
 import { usePushRegistration } from "@/modules/push/use-push-registration";
 import { shouldHidePrimaryTabBar } from "@/modules/navigation/primary-navigation";
@@ -94,8 +95,9 @@ export default function ShellLayout() {
   const hasFaceUnwelcomeReview = useAuthStore((state) =>
     state.access.hasPermission(FACE_MATCH_PERMISSIONS.unwelcomeReview)
   );
-  // 员工操作日志圆点：老收银 / 新收银任一来源有查看权限才请求，且只请求有权限的来源。
-  const canViewLegacyLogs = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  // 员工操作日志圆点：只请求有权限且手机端仍开放的来源（老收银来源已关闭，不再计入圆点）。
+  const legacyLogPermission = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  const canViewLegacyLogs = LEGACY_LOG_SOURCE_ENABLED && legacyLogPermission;
   const canViewPosAudits = useAuthStore((state) => state.access.canViewPosOperationAudits);
   const iosReviewOfflineGuardActive = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   const versionManagementAllowed = canAccessVersionManagement({ isAdmin, isAuthenticated, sessionKind });

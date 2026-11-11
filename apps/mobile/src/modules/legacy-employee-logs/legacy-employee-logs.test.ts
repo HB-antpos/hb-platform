@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   LEGACY_DANGER_OPERATIONS,
+  LEGACY_LOG_SOURCE_ENABLED,
   LEGACY_RULE_CODES,
   POS_DANGER_GROUPS,
   POS_RULE_CODES,
@@ -137,6 +138,21 @@ assert.equal(resolveLogSource({ canLegacy: true, canPos: true, remembered: "pos"
 assert.equal(resolveLogSource({ canLegacy: true, canPos: true, requested: "legacy", remembered: "pos" }), "legacy", "路由参数优先");
 assert.equal(resolveLogSource({ canLegacy: false, canPos: true, requested: "legacy" }), "pos", "无权限的来源不能通过参数进入");
 assert.equal(resolveLogSource({ canLegacy: false, canPos: false }), null, "两个都没权限");
+
+// —— 手机端已关闭老收银来源：只看新收银，不显示切换，圆点与守卫都不再认老收银权限 ——
+assert.equal(LEGACY_LOG_SOURCE_ENABLED, false, "手机端员工操作日志不再提供老收银");
+assert.equal(resolveLogSource({ canLegacy: LEGACY_LOG_SOURCE_ENABLED, canPos: true, remembered: "legacy" }), "pos", "上次记住老收银也落到新收银");
+assert.equal(resolveLogSource({ canLegacy: LEGACY_LOG_SOURCE_ENABLED, canPos: false }), null, "只有老收银权限时不再进入");
+{
+  const here = dirname(fileURLToPath(import.meta.url));
+  const screen = readFileSync(resolve(here, "LegacyEmployeeLogsScreen.tsx"), "utf8");
+  assert.match(screen, /const canLegacy = LEGACY_LOG_SOURCE_ENABLED && legacyPermission;/, "来源解析与切换控件按开关收口");
+  assert.match(screen, /const canView = \(LEGACY_LOG_SOURCE_ENABLED && canViewLegacy\) \|\| canViewPos;/, "入口守卫按开关收口");
+  const detail = readFileSync(resolve(here, "LegacyEmployeeLogDetailScreen.tsx"), "utf8");
+  assert.match(detail, /source === "legacy" && !LEGACY_LOG_SOURCE_ENABLED/, "旧深链不再打开老收银详情");
+  const shell = readFileSync(resolve(here, "../../../app/(shell)/_layout.tsx"), "utf8");
+  assert.match(shell, /const canViewLegacyLogs = LEGACY_LOG_SOURCE_ENABLED && legacyLogPermission;/, "工作台圆点不再请求老收银");
+}
 
 const posRange = resolvePosRange("today", now);
 assert.equal(posRange.fromUtc, new Date(2026, 8, 30).toISOString(), "新收银区间按设备本地零点换算 UTC");

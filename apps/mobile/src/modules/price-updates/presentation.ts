@@ -49,6 +49,11 @@ function resolveSourceFamilyKey(code: string): string {
   return "sources.other";
 }
 
+/** 卡片上的分店名：优先分店名称，缺失时回退分店代码（后端列表接口两者都会带）。 */
+export function resolveTaskStoreLabel(task: { storeName: string | null; storeCode: string }): string {
+  return task.storeName?.trim() || task.storeCode;
+}
+
 export function resolveInitiatorName(name: string | null | undefined, t: PriceUpdateTranslate): string {
   const trimmed = name?.trim() ?? "";
   if (!trimmed || trimmed.toLowerCase() === "system") {

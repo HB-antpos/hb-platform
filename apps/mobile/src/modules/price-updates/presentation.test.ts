@@ -14,9 +14,15 @@ import {
   resolveInitiatorName,
   resolveInitiatorSourceLabel,
   resolveLabelPrintPrice,
+  resolveTaskStoreLabel,
   summarizeSelection,
 } from "./presentation";
 import { createTask, echoTranslate as t } from "./test-helpers";
+
+// 卡片分店名：有名称用名称（去掉首尾空白），没有就回退分店代码
+assert.equal(resolveTaskStoreLabel({ storeName: " Rockdale ", storeCode: "1014" }), "Rockdale");
+assert.equal(resolveTaskStoreLabel({ storeName: null, storeCode: "1014" }), "1014");
+assert.equal(resolveTaskStoreLabel({ storeName: "  ", storeCode: "1014" }), "1014");
 
 // 来源映射
 assert.equal(resolveInitiatorSourceLabel("WarehouseProducts", null, t), "sources.warehouseProducts");
