@@ -38,6 +38,11 @@ import {
 
 const MANAGED_REASON_KEYS = ["missed", "device", "shiftChanged", "other"] as const;
 
+/** 打开时直接选中：改某张已有打卡，或补录某个类型的缺卡（从打卡明细 / 列表快捷操作进来）。 */
+export type ManagedPunchEditInitialAction =
+  | { kind: "edit"; punchGuid: string }
+  | { kind: "add"; punchType: AttendancePunchType };
+
 function punchLocalTime(punch: AttendancePunch) {
   const value = punch.punchTimeUtc
     ? toAttendanceDeviceLocalTime(punch.punchTimeUtc)
@@ -64,9 +69,11 @@ export function ManagedPunchEditSheet({
   onPreview,
   onSubmit,
   onDismiss,
+  initialAction,
 }: {
   visible: boolean;
   session?: AttendanceScheduleSession;
+  initialAction?: ManagedPunchEditInitialAction;
   today: string;
   canAdjust: boolean;
   isBusy: boolean;
@@ -95,9 +102,19 @@ export function ManagedPunchEditSheet({
   useEffect(() => {
     if (!visible || !session) return;
     const defaultType = resolveDefaultMissingPunchType(session);
-    setOriginalPunchGuid(undefined);
-    setPunchType(defaultType);
-    setRequestedPunchTimeLocal(resolveDefaultMissingPunchTime(session, defaultType));
+    const initialPunch = initialAction?.kind === "edit"
+      ? listSessionPunches(session).find((punch) => punch.punchGuid === initialAction.punchGuid)
+      : undefined;
+    if (initialPunch) {
+      setOriginalPunchGuid(initialPunch.punchGuid || undefined);
+      setPunchType(initialPunch.punchType === "ClockOut" ? "ClockOut" : "ClockIn");
+      setRequestedPunchTimeLocal(punchLocalTime(initialPunch) || resolveDefaultMissingPunchTime(session, defaultType));
+    } else {
+      const type = initialAction?.kind === "add" ? initialAction.punchType : defaultType;
+      setOriginalPunchGuid(undefined);
+      setPunchType(type);
+      setRequestedPunchTimeLocal(resolveDefaultMissingPunchTime(session, type));
+    }
     setReasonKey(undefined);
     setReasonNote("");
     setPreview(undefined);

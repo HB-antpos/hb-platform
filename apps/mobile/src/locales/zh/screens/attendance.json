@@ -942,7 +942,64 @@
     "readOnly": "你没有补卡修改权限，只能查看",
     "save": "保存修改",
     "saved": "打卡已修改",
-    "loadFailed": "打卡记录加载失败"
+    "loadFailed": "打卡记录加载失败",
+    "groups": {
+      "attention": "需处理",
+      "inProgress": "工作中",
+      "notStarted": "未开始",
+      "done": "已下班",
+      "onLeave": "请假"
+    },
+    "filterGroup": "{{label}} {{count}}",
+    "tapHint": "点人看明细、补录或修改",
+    "pendingBanner": "这天有 {{count}} 项待审，工时还没算进去",
+    "openApprovals": "去审核 ›",
+    "windowNote": "本周和上周（周二前）的打卡可以直接补录、修改，保存后立即生效并留痕",
+    "previousWeek": "上一周",
+    "nextWeek": "下一周",
+    "dayHasException": "有异常",
+    "meta": {
+      "schedule": "排班 {{start}}–{{end}}",
+      "clockIn": "{{time}} 上班",
+      "clockOut": "{{time}} 下班",
+      "segments": "{{count}} 段",
+      "shiftPassed": "班次已过 {{duration}}",
+      "noPunchAllDay": "全天没有打卡",
+      "autoClockOut": "系统 00:00 自动下班，不计薪",
+      "noClockOut": "没有下班卡"
+    },
+    "lateBy": "迟到 {{minutes}} 分钟",
+    "earlyBy": "早退 {{minutes}} 分钟",
+    "mealDeducted": "已扣用餐 {{minutes}}m",
+    "working": "工作中",
+    "actions": {
+      "fillClockOut": "补录下班时间",
+      "fillPunches": "补录上下班",
+      "viewDetail": "查看明细",
+      "pending": "{{count}} 项待审 ›"
+    },
+    "detail": {
+      "worked": "已工作",
+      "segments": "班段",
+      "status": "状态",
+      "segmentTitle": "第 {{number}} 段",
+      "ongoing": "进行中",
+      "clockIn": "上班",
+      "clockOut": "下班",
+      "notClockedOut": "还没下班",
+      "missing": "缺卡",
+      "edit": "修改",
+      "fill": "补录",
+      "viaQr": "扫收银台考勤码",
+      "device": "设备 {{code}}",
+      "location": "定位 ±{{meters}}m",
+      "pendingFix": "补卡待审：{{text}}",
+      "openApprovals": "审核 ›",
+      "editPunches": "修改打卡",
+      "addSegment": "新增一段打卡",
+      "noSegments": "这一班还没有打卡",
+      "close": "关闭"
+    }
   },
   "myAttendance": {
     "today": "今天",
@@ -1003,5 +1060,16 @@
     "scheduleSavedWithWarnings": "排班已保存；保留 {{count}} 条未成年用工提醒",
     "reminderLink": "未成年用工提醒待办",
     "cellWarning": "未成年用工提醒"
+  },
+  "managementHome": {
+    "today": "今天 · {{date}}",
+    "pullToRefresh": "下拉刷新",
+    "onDuty": "在岗",
+    "attention": "需处理",
+    "viewList": "去处理 ›",
+    "pending": "待审",
+    "openApprovals": "去审核 ›",
+    "weekHours": "本周工时",
+    "openHours": "工时统计 ›"
   }
 }

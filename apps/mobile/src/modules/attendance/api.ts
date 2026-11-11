@@ -802,6 +802,19 @@ export async function getAttendanceEmployees(storeCode: string): Promise<StoreUs
   }));
 }
 
+/** 店长查看一段日期（如一周）的打卡记录，只保留生效排班；用于周日期条的异常红点。 */
+export async function getManagedAttendanceRecordsRange(params: {
+  storeCode: string;
+  fromDate: string;
+  toDate: string;
+}): Promise<AttendanceScheduleSession[]> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/records`, {
+    params: { storeCode: params.storeCode, fromDate: params.fromDate, toDate: params.toDate, page: 1, pageSize: 200 },
+  });
+  return normalizeAttendanceToday({ schedules: getArray(response.data) }).scheduleSessions
+    .filter((session) => session.status.toLowerCase() === "active");
+}
+
 /** 店长查看某天管理分店的打卡记录（含班段打卡），只保留生效排班。 */
 export async function getManagedAttendanceRecords(params: {
   storeCode: string;

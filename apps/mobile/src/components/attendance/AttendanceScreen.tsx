@@ -23,6 +23,11 @@ import { AvailabilitySheet } from "@/components/attendance/AvailabilitySheet";
 import { HolidayManagementCard } from "@/components/attendance/HolidayManagementCard";
 import { LeaveManagementCard } from "@/components/attendance/LeaveManagementCard";
 import { ManagedPunchRecordsCard } from "@/components/attendance/ManagedPunchRecordsCard";
+import {
+  AttendanceTodaySnapshot,
+  ManagementTabBar,
+  ManagementTitleBar,
+} from "@/components/attendance/management/ManagementHeader";
 import { ManagerApprovalList } from "@/components/attendance/ManagerApprovalList";
 import { MonthDatePickerField } from "@/components/attendance/MonthDatePicker";
 import { PunchAdjustmentCard } from "@/components/attendance/PunchAdjustmentCard";
@@ -984,6 +989,13 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         isHolidayManagementTab && selectedStoreCode
           ? holidaysQuery.refetch()
           : Promise.resolve(),
+        // 管理页的今日概况与打卡记录（含周红点）、本周工时一起刷新。
+        isManagementTab && canViewManagedPunches
+          ? queryClient.invalidateQueries({ queryKey: ["attendance", "managed", "records"] })
+          : Promise.resolve(),
+        isManagementTab && canViewManagedPunches
+          ? queryClient.invalidateQueries({ queryKey: ["attendance", "payroll", "hours"] })
+          : Promise.resolve(),
       ]);
     } catch (error) {
       showMessage(
@@ -993,14 +1005,17 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   }, [
     approvalsQuery,
     availabilityQuery,
+    canViewManagedPunches,
     holidaysQuery,
     isAvailabilityWeekTab,
+    isManagementTab,
     isHolidayManagementTab,
     isLeaveManagementTab,
     isPunchRecordsTab,
     isScheduleManagementTab,
     managedAvailabilityQuery,
     managerSchedulesQuery,
+    queryClient,
     selectedStoreCode,
     showMessage,
     storeUsersQuery,
@@ -1579,6 +1594,15 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           />
         }
       >
+        {/* 管理模式：标题与门店胶囊一行，刷新靠下拉；个人考勤沿用原页头。 */}
+        {isManagementMode ? (
+          <ManagementTitleBar
+            title={screenTitle}
+            storeLabel={selectedStoreName || selectedStoreCode || "—"}
+            canPickStore={!isManagementUnavailable && sectionStores.length > 1}
+            onPickStore={() => setStorePickerVisible(true)}
+          />
+        ) : (
         <View style={styles.header}>
           <View style={styles.headerText}>
             <Text variant="headlineSmall" style={styles.screenTitle}>{screenTitle}</Text>
@@ -1596,8 +1620,9 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
             {t("common:actions.refresh")}
           </Button>
         </View>
+        )}
 
-        {!isManagementUnavailable && sectionStores.length > 1 ? (
+        {!isManagementMode && !isManagementUnavailable && sectionStores.length > 1 ? (
           <Button
             mode="outlined"
             icon="storefront-outline"
@@ -1800,35 +1825,28 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         {/* 页签栏不随单个页签的加载错误消失，否则其他页签（如打卡记录）也无法进入 */}
         {isManagementTab && managerStores.length > 0 ? (
           <>
-            <SegmentedButtons
+            {/* 今日概况：需要「查看管理分店打卡」权限（与打卡记录、工时统计同一权限）。 */}
+            {canViewManagedPunches && selectedStoreCode ? (
+              <AttendanceTodaySnapshot
+                storeCode={selectedStoreCode}
+                pendingCount={pendingApprovals.length}
+                onOpenPunches={() => setActiveManagementTab("punches")}
+                onOpenApprovals={() => setActiveManagementTab("leave")}
+                onOpenHours={() =>
+                  router.push({ pathname: "/(shell)/attendance-hours", params: { storeCode: selectedStoreCode } })
+                }
+              />
+            ) : null}
+            <ManagementTabBar<AttendanceManagementTab>
               value={activeManagementTab}
-              onValueChange={(value) =>
-                setActiveManagementTab(value as AttendanceManagementTab)
-              }
-              buttons={[
+              onChange={setActiveManagementTab}
+              tabs={[
                 // 打卡记录依赖 Punch.ViewManagedStore；无权限时不出现该页签。
-                ...(canViewManagedPunches
-                  ? [{ value: "punches", label: t("tabs.short.punches"), labelStyle: styles.managementTabLabel }]
-                  : []),
-                {
-                  value: "schedule",
-                  label: t("tabs.short.schedule"),
-                  labelStyle: styles.managementTabLabel,
-                },
-                {
-                  value: "leave",
-                  label: pendingApprovals.length
-                    ? t("tabs.short.approvalsWithCount", { count: pendingApprovals.length })
-                    : t("tabs.short.approvals"),
-                  labelStyle: styles.managementTabLabel,
-                },
-                {
-                  value: "holidays",
-                  label: t("tabs.short.holidays"),
-                  labelStyle: styles.managementTabLabel,
-                },
+                ...(canViewManagedPunches ? [{ key: "punches" as const, label: t("tabs.short.punches") }] : []),
+                { key: "schedule", label: t("tabs.short.schedule") },
+                { key: "leave", label: t("tabs.short.approvals"), badge: pendingApprovals.length },
+                { key: "holidays", label: t("tabs.short.holidays") },
               ]}
-              style={styles.sectionTabs}
             />
           </>
         ) : null}
@@ -1880,6 +1898,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 storeCode={selectedStoreCode}
                 canAdjust={access.canAdjustAttendancePunch}
                 onMessage={showMessage}
+                pendingApprovals={pendingApprovals}
+                onOpenApprovals={() => setActiveManagementTab("leave")}
               />
             ) : null}
             {isScheduleManagementTab ? (
@@ -2141,10 +2161,6 @@ const styles = StyleSheet.create({
   },
   punchDateField: {
     flex: 1,
-  },
-  // 管理端四个页签在 375pt 宽屏上平分，字号收小以免英文标签被截断。
-  managementTabLabel: {
-    fontSize: 13,
   },
   registerLeaveButton: {
     alignSelf: "stretch",
