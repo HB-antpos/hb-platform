@@ -1101,7 +1101,21 @@
       "submit_one": "提交 {{count}} 天",
       "submitUnavailable_one": "提交 {{count}} 天不能上班",
       "submitUnavailable_other": "提交 {{count}} 天不能上班",
-      "submit_other": "提交 {{count}} 天"
+      "submit_other": "提交 {{count}} 天",
+      "anyTime": "任何时间",
+      "customHint": "自己选",
+      "summaryLine": "将提交：{{days}} · {{type}} · {{time}}",
+      "day": "日子",
+      "pickDays": "选日子（可多选）",
+      "timeRange": "时间段",
+      "presets": {
+        "allDay": "全天",
+        "morning": "上午",
+        "afternoon": "下午",
+        "evening": "晚上",
+        "daytime": "白天",
+        "custom": "自定义"
+      }
     },
     "requests": {
       "adjustmentTitle": "补卡 · {{punchType}} {{time}}",
@@ -1120,7 +1134,46 @@
         "cancelled": "已撤回"
       },
       "days_one": "{{count}} 天",
-      "days_other": "{{count}} 天"
+      "days_other": "{{count}} 天",
+      "correctionHint": "忘打卡、打错时间",
+      "leaveHint": "病假、年假、其他",
+      "filterAll": "全部",
+      "hoursAmount": "{{hours}} 小时",
+      "submittedAt": "{{time}} 提交",
+      "waited": {
+        "minutes_one": "已等 {{count}} 分钟",
+        "minutes_other": "已等 {{count}} 分钟",
+        "hours_one": "已等 {{count}} 小时",
+        "hours_other": "已等 {{count}} 小时",
+        "days_one": "已等 {{count}} 天",
+        "days_other": "已等 {{count}} 天"
+      },
+      "attachments_one": "附 {{count}} 张医嘱",
+      "attachments_other": "附 {{count}} 张医嘱",
+      "steps": {
+        "submitted": "已提交",
+        "review": "店长审核中",
+        "effective": "生效"
+      },
+      "detail": {
+        "title": "申请详情",
+        "date": "日期",
+        "amount": "时长",
+        "store": "门店",
+        "reason": "原因",
+        "attachments": "医嘱",
+        "progress": "进度",
+        "waiting": "等店长审核",
+        "withdrawHint": "撤回后可以改了重新提交",
+        "afterApproval": "通过后生效",
+        "withdraw": "撤回申请"
+      },
+      "leavePicker": {
+        "title": "请哪种假？",
+        "hint": "规则由公司设置，选好后进入对应填写页。",
+        "paid": "带薪",
+        "other": "其他"
+      }
     },
     "leaveSheet": {
       "previousDay": "{{label}}前一天",
@@ -1131,7 +1184,48 @@
       "submit_one": "提交 {{count}} 天",
       "submit_other": "提交 {{count}} 天"
     },
-    "weekHoursSplit": "工作日 {{weekday}} · 周末 {{weekend}} 小时"
+    "weekHoursSplit": "工作日 {{weekday}} · 周末 {{weekend}} 小时",
+    "weekTag": {
+      "current": "本周",
+      "next": "下周",
+      "previous": "上周"
+    },
+    "weekdayShort": {
+      "0": "一",
+      "1": "二",
+      "2": "三",
+      "3": "四",
+      "4": "五",
+      "5": "六",
+      "6": "日"
+    },
+    "summary": {
+      "shifts_one": "{{count}} 个班",
+      "shifts_other": "{{count}} 个班",
+      "hoursUnit": "小时",
+      "done_one": "已上 {{count}} 班 · {{hours}} 小时",
+      "done_other": "已上 {{count}} 班 · {{hours}} 小时"
+    },
+    "outcome": {
+      "completed": "已完成 {{hours}}h",
+      "missingClockOut": "缺下班卡",
+      "absent": "未打卡",
+      "working": "工作中 · 已工作 {{time}}",
+      "onBreak": "休息中 · 已工作 {{time}}"
+    },
+    "goPunch": "去打卡",
+    "paidHours": "计薪 {{hours}}h",
+    "fill": {
+      "title": "{{week}}排班还没出",
+      "hint": "先告诉店长哪天能上班、哪天不能，店长排班时会看到。",
+      "progress": "已填 {{filled}} / {{total}} 天",
+      "due": "排班前填好",
+      "remaining_one": "填写剩下 {{count}} 天",
+      "remaining_other": "填写剩下 {{count}} 天",
+      "unfilled": "还没填",
+      "tapToFill": "点这里填写",
+      "edit": "改"
+    }
   },
   "mealCheck": {
     "title": "下班前确认用餐",
