@@ -185,3 +185,85 @@ export function employmentTypeCode(type?: string): EmploymentTypeCode | undefine
   if (normalized === "casual" || normalized === "temporary") return "C";
   return undefined;
 }
+
+// ───────────────────────── 排班矩阵改版：表头人数、状态标签、日视图人手 ─────────────────────────
+
+const isWorkingShift = (item: AttendanceSchedule) => isNotCancelled(item.status) && !item.leaveType;
+
+/** 每天排了几个人（不同员工数，不含请假、已取消）；表头写「3 人」，0 人标红。 */
+export function countScheduledPeopleByDay(weekDates: string[], schedules: AttendanceSchedule[]) {
+  const people = new Map<string, Set<string>>();
+  schedules.filter(isWorkingShift).forEach((item) => {
+    const date = item.workDate.slice(0, 10);
+    people.set(date, (people.get(date) ?? new Set()).add(item.userGuid));
+  });
+  return weekDates.map((date) => people.get(date)?.size ?? 0);
+}
+
+/** 草稿班次数（发布按钮写「发布本周 · N 个草稿」）。 */
+export function countDraftShifts(schedules: AttendanceSchedule[]) {
+  return schedules.filter((item) => isWorkingShift(item) && item.status.toLowerCase() === "draft").length;
+}
+
+/** 打开周表时横向滚到今天：左边留出前一天；今天不在本周时回到最左。 */
+export function todayScrollOffset(weekDates: string[], today: string, cellWidth: number) {
+  const index = weekDates.indexOf(today);
+  return index <= 0 ? 0 : (index - 1) * cellWidth;
+}
+
+function clockMinutes(value: string) {
+  const normalized = normalizeClockTime(value);
+  if (!normalized) return undefined;
+  const [hour, minute] = normalized.split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+/** 班次起止分钟（跨午夜的结束算到次日）。 */
+export function shiftMinutesRange(item: Pick<AttendanceSchedule, "startTime" | "endTime">) {
+  const start = clockMinutes(item.startTime);
+  let end = clockMinutes(item.endTime);
+  if (start === undefined || end === undefined || start === end) return undefined;
+  if (end < start) end += 1440;
+  return { start, end };
+}
+
+export interface DayStaffing {
+  /** 柱状图范围（整点，分钟）。 */
+  range: { start: number; end: number };
+  /** 每个整点小时在岗人数。 */
+  hours: { hour: number; count: number }[];
+  /** 只有 0～1 人的连续时段（日视图标红并写成一句话）。 */
+  gaps: { start: number; end: number; count: number }[];
+}
+
+/**
+ * 日视图人手：某小时内有班次覆盖（开始早于该小时结束、结束晚于该小时开始）就算 1 人。
+ * 范围取当天最早上班到最晚下班；当天没排班时给 08–20 的空图。
+ */
+export function buildDayStaffing(daySchedules: AttendanceSchedule[]): DayStaffing {
+  const shifts = daySchedules
+    .filter(isWorkingShift)
+    .map((item) => ({ userGuid: item.userGuid, range: shiftMinutesRange(item) }))
+    .filter((item): item is { userGuid: string; range: { start: number; end: number } } => Boolean(item.range));
+  if (!shifts.length) {
+    const hours = Array.from({ length: 12 }, (_, index) => ({ hour: 8 + index, count: 0 }));
+    return { range: { start: 480, end: 1200 }, hours, gaps: [] };
+  }
+  const start = Math.floor(Math.min(...shifts.map((item) => item.range.start)) / 60) * 60;
+  const end = Math.ceil(Math.max(...shifts.map((item) => item.range.end)) / 60) * 60;
+  const hours: DayStaffing["hours"] = [];
+  for (let minute = start; minute < end; minute += 60) {
+    const people = new Set(
+      shifts.filter((item) => item.range.start < minute + 60 && item.range.end > minute).map((item) => item.userGuid),
+    );
+    hours.push({ hour: minute / 60, count: people.size });
+  }
+  const gaps: DayStaffing["gaps"] = [];
+  hours.forEach(({ hour, count }) => {
+    if (count > 1) return;
+    const last = gaps[gaps.length - 1];
+    if (last && last.end === hour * 60 && last.count === count) last.end += 60;
+    else gaps.push({ start: hour * 60, end: hour * 60 + 60, count });
+  });
+  return { range: { start, end }, hours, gaps };
+}

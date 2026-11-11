@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import {
+  buildDayStaffing,
+  countDraftShifts,
+  countScheduledPeopleByDay,
+  shiftMinutesRange,
+  todayScrollOffset,
   availabilityKey,
   classifyScheduleGridCell,
   countUncoveredDays,
@@ -211,3 +216,28 @@ async function batchTests() {
 }
 
 void batchTests();
+
+// ───────── 排班矩阵改版 ─────────
+{
+  const s = (userGuid: string, workDate: string, startTime: string, endTime: string, extra: Record<string, unknown> = {}) =>
+    ({ scheduleGuid: `${userGuid}-${workDate}-${startTime}`, storeCode: "ROB", userGuid, workDate, startTime, endTime, status: "Active", ...extra }) as never;
+  const week = ["2026-11-09", "2026-11-10", "2026-11-11"];
+  // 每天人数：同一人两班只算一次；请假、已取消不算。
+  assert.deepEqual(countScheduledPeopleByDay(week, [
+    s("a", "2026-11-09", "09:00", "12:00"), s("a", "2026-11-09", "13:00", "17:00"), s("b", "2026-11-09", "10:00", "18:00"),
+    s("c", "2026-11-10", "09:00", "17:00", { leaveType: "PaidAnnual" }), s("d", "2026-11-10", "09:00", "17:00", { status: "Cancelled" }),
+  ]), [2, 0, 0]);
+  assert.equal(countDraftShifts([s("a", "2026-11-09", "09:00", "17:00", { status: "Draft" }), s("b", "2026-11-09", "09:00", "17:00")]), 1);
+  // 滚到今天：左边留前一天。
+  assert.equal(todayScrollOffset(week, "2026-11-11", 76), 76);
+  assert.equal(todayScrollOffset(week, "2026-11-09", 76), 0);
+  assert.equal(todayScrollOffset(week, "2026-12-01", 76), 0);
+  // 跨午夜。
+  assert.deepEqual(shiftMinutesRange({ startTime: "22:00", endTime: "06:00" }), { start: 1320, end: 1800 });
+  // 日视图人手：09–17、10–18、12–20 → 20 点后没人在 range 外；19 点只有 1 人。
+  const staffing = buildDayStaffing([s("a", "2026-11-11", "09:00", "17:00"), s("b", "2026-11-11", "10:00", "18:00"), s("c", "2026-11-11", "12:00", "20:00")]);
+  assert.deepEqual(staffing.range, { start: 540, end: 1200 });
+  assert.deepEqual(staffing.hours.map((item) => item.count), [1, 2, 2, 3, 3, 3, 3, 3, 2, 1, 1]);
+  assert.deepEqual(staffing.gaps, [{ start: 540, end: 600, count: 1 }, { start: 1080, end: 1200, count: 1 }]);
+  assert.deepEqual(buildDayStaffing([]).range, { start: 480, end: 1200 });
+}
