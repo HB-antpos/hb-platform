@@ -23,8 +23,15 @@ public sealed record ZellerGatewayOptions
     /// <summary>检查配对（不弹界面）的最长等待。实测 0.4–2.2 秒。</summary>
     public TimeSpan InitialiseTimeout { get; init; } = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// 作废 Terminal 之后，等这么久再在空闲时重新预热。放弃一笔调用后，客户端常常马上要用刷卡机核实结果，
+    /// 收银员也可能马上重试：让它们先走，它们会自己新建 Terminal，那时就不用预热了，避免白白建了又丢。
+    /// </summary>
+    public TimeSpan RewarmDelay { get; init; } = TimeSpan.FromSeconds(2);
+
     internal void Validate()
     {
+        Require(RewarmDelay, nameof(RewarmDelay));
         Require(TransactionTimeout, nameof(TransactionTimeout));
         Require(AfterProcessingTimeout, nameof(AfterProcessingTimeout));
         Require(CancelGrace, nameof(CancelGrace));

@@ -81,6 +81,27 @@ public sealed class ZellerCardRecoveryProviderTests
     }
 
     [Fact]
+    public async Task Auto_recovery_requests_a_terminal_warm_up_without_waiting_for_it()
+    {
+        // 程序启动、收银员登录时顺手预热 Zeller 连接，把「新建 Terminal 之后第一次调用」的代价挪出第一笔扣款。
+        await using var fixture = await RecoveryFixture.CreateAsync();
+        var warmUp = new CountingWarmUp();
+        var provider = new ZellerCardRecoveryProvider(
+            fixture.Recovery,
+            fixture.Client,
+            fixture.Attempts,
+            new CashCheckoutService(),
+            fixture.Orders,
+            new StaticSettingsProvider(CardTerminalSettings.FromEnvironment() with { Processor = CardProcessorKind.Zeller }),
+            timeProvider: fixture.Time,
+            warmUp: warmUp);
+
+        await provider.AutoRecoverDeterministicAsync(fixture.Session);
+
+        Assert.Equal(1, warmUp.Requests);
+    }
+
+    [Fact]
     public async Task Auto_recovery_leaves_a_just_approved_attempt_to_the_payment_page()
     {
         await using var fixture = await RecoveryFixture.CreateAsync();
@@ -468,6 +489,15 @@ public sealed class ZellerCardRecoveryProviderTests
                 cardTerminalSettingsProvider: new StaticSettingsProvider(_settings),
                 zellerCardTerminalClient: client,
                 zellerPaymentAttemptRepository: Attempts);
+    }
+
+    private sealed class CountingWarmUp : IZellerTerminalWarmUp
+    {
+        private int _requests;
+
+        public int Requests => Volatile.Read(ref _requests);
+
+        public void RequestWarmUp() => Interlocked.Increment(ref _requests);
     }
 
     private sealed class StaticSettingsProvider(CardTerminalSettings settings) : ICardTerminalSettingsProvider

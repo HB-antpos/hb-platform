@@ -666,7 +666,204 @@ public sealed class ZellerTerminalGatewayTests
         Assert.Empty(harness.Sdk.Current.Queries.ToArray());
     }
 
+    // ── 预热（2026-11-11：新建 Terminal 之后的第一次调用最慢，挪到空闲时间；预热必须让位于真实调用）──
+
+    [Fact]
+    public async Task Warm_up_creates_the_terminal_and_runs_initialise_so_the_next_purchase_is_not_cold()
+    {
+        using var harness = new Harness();
+
+        var warm = harness.Gateway.WarmUpAsync();
+        await WaitUntilAsync(() => harness.Sdk.Terminals.Count == 1 && harness.Sdk.Current.Initialises.Count == 1);
+        harness.Sdk.Current.Initialises[0].Complete(new ZellerPairingResult(true));
+        Assert.True(await warm);
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+        await purchase;
+
+        Assert.Equal(1, harness.Gateway.TerminalsCreated);
+        var timings = harness.LogLines.Where(line => line.StartsWith("timing ", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, timings.Length);
+        Assert.StartsWith("timing warmup result=Completed cold=yes", timings[0], StringComparison.Ordinal);
+        Assert.StartsWith("timing purchase result=Completed cold=no", timings[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Warm_up_is_skipped_when_a_terminal_already_exists()
+    {
+        using var harness = new Harness();
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+        await purchase;
+
+        // 加超时：如果回归成「已有 Terminal 也照样预热」，假 SDK 的 initialise 永远不返回，测试会挂死而不是失败。
+        var warmed = await harness.Gateway.WarmUpAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(warmed);
+        Assert.Equal(0, harness.Sdk.Current.Initialises.Count);
+        Assert.Equal(1, harness.Gateway.TerminalsCreated);
+        Assert.Contains("warmup skipped reason=terminal-exists", harness.LogLines);
+    }
+
+    [Fact]
+    public async Task A_real_call_arriving_during_warm_up_preempts_it_instead_of_waiting_for_it()
+    {
+        // 预热的 initialise 一直不返回（比如断网）：真实扣款不能陪着等，必须立刻让预热放弃。
+        using var harness = new Harness();
+        var warm = harness.Gateway.WarmUpAsync();
+        await WaitUntilAsync(() => harness.Sdk.Terminals.Count == 1 && harness.Sdk.Current.Initialises.Count == 1);
+        var warmUpTerminal = harness.Sdk.Current;
+
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        var operation = await harness.NextPurchaseAsync();
+        operation.Complete(ZellerCallResult.FromTransaction(Approved));
+        var result = await purchase.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(await warm.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(ZellerCallOutcome.Transaction, result.Outcome);
+        Assert.True(warmUpTerminal.Disposed);
+        Assert.Equal(2, harness.Gateway.TerminalsCreated);
+        Assert.Equal(1, harness.Sdk.MaxConcurrentCalls);
+        Assert.Contains("warmup preempted by a real call", harness.LogLines);
+        // 预热自己被放弃导致的作废不再预热，否则会形成「预热 → 作废 → 预热」的循环。
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, harness.Gateway.TerminalsCreated);
+        Assert.Equal(0, harness.Sdk.Current.Initialises.Count);
+    }
+
+    [Fact]
+    public async Task Terminal_is_rewarmed_after_a_real_call_was_abandoned_so_the_retry_is_not_cold()
+    {
+        // 收银员取消后 SDK 3 秒不应答被放弃：核实被取消中止，下一次新建 Terminal 要等下一笔扣款，那一笔就是冷启动。
+        using var harness = new Harness();
+        using var cancellation = new CancellationTokenSource();
+        var purchase = harness.Gateway.PurchaseAsync(Request, cancellationToken: cancellation.Token);
+        var operation = await harness.NextPurchaseAsync();
+        cancellation.Cancel();
+        await WaitUntilAsync(() => operation.CancelCount == 1);
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(ZellerCallOutcome.Abandoned, (await purchase.WaitAsync(TimeSpan.FromSeconds(5))).Outcome);
+
+        // 作废之后先等 RewarmDelay（2 秒）再预热，给紧跟着的核实、重试让路。
+        await AdvanceUntilAsync(harness, () => harness.Sdk.Terminals.Count == 2 && harness.Sdk.Current.Initialises.Count == 1);
+        harness.Sdk.Current.Initialises[0].Complete(new ZellerPairingResult(true));
+        var retry = harness.Gateway.PurchaseAsync(Request);
+        (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+        await retry;
+
+        Assert.Equal(2, harness.Gateway.TerminalsCreated);
+        var last = harness.LogLines.Last(line => line.StartsWith("timing purchase ", StringComparison.Ordinal));
+        Assert.Contains("cold=no", last, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Rewarm_is_skipped_when_a_real_call_creates_the_terminal_first()
+    {
+        // 放弃之后客户端马上按 reference 核实：它自己新建 Terminal，延迟预热到点时发现已有 Terminal，不会白建白丢。
+        using var harness = new Harness();
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        await harness.NextPurchaseAsync();
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(150), TimeSpan.FromSeconds(5));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(3));
+        Assert.Equal(ZellerCallOutcome.Abandoned, (await purchase.WaitAsync(TimeSpan.FromSeconds(5))).Outcome);
+
+        var query = harness.Gateway.GetTransactionsAsync(Reference);
+        await WaitUntilAsync(() => harness.Sdk.Terminals.Count == 2 && harness.Sdk.Current.Queries.Count == 1);
+        harness.Sdk.Current.Queries[0].Complete(ZellerQueryResult.Found(Approved));
+        await query;
+        await AdvanceUntilAsync(harness, () => harness.LogLines.Contains("warmup skipped reason=terminal-exists"));
+
+        Assert.Equal(2, harness.Gateway.TerminalsCreated);
+        Assert.Equal(0, harness.Sdk.Current.Initialises.Count);
+    }
+
+    [Fact]
+    public async Task A_warm_up_that_has_just_finished_is_never_discarded_by_a_real_call_arriving_at_the_same_moment()
+    {
+        // 预热的 initialise 刚返回、网关还没放开串行门时扣款恰好到达：已经完成的预热不能被当成「被打断」而作废 Terminal，
+        // 否则扣款又从冷启动开始。两个信号同时就绪时 WhenAny 返回哪个不确定，所以多跑几轮才能稳定地撞上这个窗口。
+        for (var round = 0; round < 100; round++)
+        {
+            using var harness = new Harness();
+            var warm = harness.Gateway.WarmUpAsync();
+            await WaitUntilAsync(() => harness.Sdk.Terminals.Count == 1 && harness.Sdk.Current.Initialises.Count == 1);
+
+            harness.Sdk.Current.Initialises[0].Complete(new ZellerPairingResult(true));
+            var purchase = harness.Gateway.PurchaseAsync(Request);
+            (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+            await purchase;
+
+            Assert.True(await warm, $"round {round}: the finished warm-up was reported as interrupted");
+            Assert.Equal(1, harness.Gateway.TerminalsCreated);
+        }
+    }
+
+    [Fact]
+    public async Task Warm_up_that_leaves_a_broken_sdk_state_recycles_the_terminal_but_is_not_retried_in_a_loop()
+    {
+        // 预热 → 作废 → 再预热 → 再作废……会不停地新建、销毁 WebView2；只有真实调用导致的作废才安排重新预热。
+        using var harness = new Harness();
+        var warm = harness.Gateway.WarmUpAsync();
+        await WaitUntilAsync(() => harness.Sdk.Terminals.Count == 1 && harness.Sdk.Current.Initialises.Count == 1);
+
+        harness.Sdk.Current.Initialises[0].Complete(new ZellerPairingResult(false, ZellerErrorType.OperationBusy, "busy"));
+        Assert.True(await warm);
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(harness.Sdk.Terminals[0].Disposed);
+        Assert.Equal(1, harness.Gateway.TerminalsCreated);
+    }
+
+    [Fact]
+    public async Task Warm_up_does_nothing_after_the_gateway_is_disposed()
+    {
+        var harness = new Harness();
+        harness.Dispose();
+
+        Assert.False(await harness.Gateway.WarmUpAsync());
+        harness.Gateway.RequestWarmUp();
+        await Task.Delay(50);
+
+        Assert.Empty(harness.Sdk.Terminals);
+    }
+
+    [Fact]
+    public async Task Requested_warm_up_runs_in_the_background_and_a_failure_never_escapes()
+    {
+        using var harness = new Harness();
+        harness.Sdk.CreateFailure = new InvalidOperationException("WebView2 runtime is missing");
+
+        harness.Gateway.RequestWarmUp();
+        await WaitUntilAsync(() => harness.LogLines.Any(line => line.StartsWith("timing warmup ", StringComparison.Ordinal)));
+
+        Assert.Contains(harness.LogLines, line => line.Contains("the call could not be started", StringComparison.Ordinal));
+        await WaitUntilAsync(() => !harness.Gateway.IsBusy);
+
+        // 预热失败不影响之后的真实调用：装好运行时之后照常新建 Terminal。
+        harness.Sdk.CreateFailure = null;
+        var purchase = harness.Gateway.PurchaseAsync(Request);
+        (await harness.NextPurchaseAsync()).Complete(ZellerCallResult.FromTransaction(Approved));
+        Assert.Equal(ZellerCallOutcome.Transaction, (await purchase).Outcome);
+    }
+
     // ── 辅助 ──
+
+    /// <summary>分步推进假时钟，直到条件成立（每步给后台任务一点时间登记新的计时器）。</summary>
+    private static async Task AdvanceUntilAsync(Harness harness, Func<bool> condition)
+    {
+        for (var step = 0; step < 100; step++)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            harness.Time.Advance(TimeSpan.FromSeconds(1));
+            await Task.Delay(10);
+        }
+
+        Assert.Fail("Condition was not met after advancing the fake clock by 100 seconds.");
+    }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
     {

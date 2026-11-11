@@ -38,6 +38,7 @@ public sealed class ZellerCardRecoveryProvider
     private readonly FinancialSupervisorAuditReplayService? _supervisorAuditReplay;
     private readonly ISharedHeldOrderPaymentSourceResolver? _heldOrderPaymentSourceResolver;
     private readonly TimeProvider _time;
+    private readonly IZellerTerminalWarmUp? _warmUp;
 
     public ZellerCardRecoveryProvider(
         ZellerPaymentRecoveryService recovery,
@@ -49,8 +50,10 @@ public sealed class ZellerCardRecoveryProvider
         ILocalizationService? localization = null,
         FinancialSupervisorAuditReplayService? supervisorAuditReplay = null,
         ISharedHeldOrderRepository? sharedHeldOrderRepository = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IZellerTerminalWarmUp? warmUp = null)
     {
+        _warmUp = warmUp;
         _recovery = recovery ?? throw new ArgumentNullException(nameof(recovery));
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _attempts = attempts ?? throw new ArgumentNullException(nameof(attempts));
@@ -163,6 +166,11 @@ public sealed class ZellerCardRecoveryProvider
         PosSessionState session,
         CancellationToken cancellationToken = default)
     {
+        // 中文注释：程序启动、收银员登录时顺手预热 Zeller 的 SDK 连接：把「新建 Terminal 之后第一次调用」的代价
+        // 从第一笔扣款挪到这里。只在收银机选了 Zeller 时才会走到这里（协调器按处理器分发）；
+        // 立即返回，不拖慢自动恢复；已经有 Terminal、或下面的恢复自己要用刷卡机时，预热会自动让路或跳过。
+        _warmUp?.RequestWarmUp();
+
         var summary = await _recovery.AutoRecoverAsync(session.StoreCode, session.DeviceCode, cancellationToken);
         var idleBefore = _time.GetUtcNow() - AutoCompletionIdle;
         var recoveredOrders = 0;

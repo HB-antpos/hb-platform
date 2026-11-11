@@ -16,8 +16,11 @@ namespace Hbpos.Client.Wpf.Services.Zeller;
 /// 4. 放弃、抛异常、或者 SDK 返回了 OperationBusy / OperationResponseInvalid（说明它的内部状态已经乱了）之后，
 ///    在放开串行门之前先作废并重建 Terminal。重建只要几毫秒，不需要重新配对，也不需要先初始化。
 /// 所以上层看到 Abandoned 时，Terminal 已经是新的了，可以马上按 reference 查询。
+/// 5. 预热（<see cref="IZellerTerminalWarmUp"/>）让位于真实调用：预热从不排队等门，真实调用一到达就放弃进行中的预热。
+///    新建 Terminal 之后的第一次调用最慢（WebView2 和云端会话要建立），预热把这笔代价挪到空闲时间；
+///    作废之后会延迟一小会儿再预热，让紧跟着的核实查询或重试先走。
 /// </remarks>
-public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
+public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IZellerTerminalWarmUp, IDisposable
 {
     private readonly IZellerSdkTerminalFactory _factory;
     private readonly IZellerUiDispatcher _dispatcher;
@@ -32,6 +35,12 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
 
     // 中文注释：当前占着串行门的操作名，只用来在耗时日志里说明「后来的调用被谁挡住了」，不参与任何判断。
     private string? _activeOperation;
+
+    // 中文注释：预热让位给真实调用所需的状态，都由 _stateLock 保护。
+    // _foregroundWaiters：已经到达、还没拿到串行门的真实调用数；_warmUpAbandon：正在进行的预热的放弃信号。
+    private int _foregroundWaiters;
+    private TaskCompletionSource? _warmUpAbandon;
+    private int _disposed;
 
     public ZellerTerminalGateway(
         IZellerSdkTerminalFactory factory,
@@ -139,23 +148,81 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         };
     }
 
+    /// <summary>
+    /// 预热：在没有可用 Terminal 时，用「检查配对」（不弹界面，实测 0.4–2.2 秒）把新 Terminal 的第一次调用提前做掉。
+    /// 返回预热是否完整跑完。已经有 Terminal、门被占着、有真实调用在排队、或被真实调用打断时返回 false。
+    /// </summary>
+    public async Task<bool> WarmUpAsync(CancellationToken cancellationToken = default)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return false;
+        }
+
+        if (_terminal is not null)
+        {
+            // 中文注释：已有 Terminal 就认为是热的；预热只管「新建之后的第一次调用」，不做保活。
+            Log("warmup skipped reason=terminal-exists");
+            return false;
+        }
+
+        var run = await RunAsync(
+            "warmup",
+            terminal => terminal.Initialise(),
+            new CallLimits(_options.InitialiseTimeout, null),
+            progress: null,
+            new CallEvidence(),
+            result => !result.IsPaired && IsBrokenSdkState(result.ErrorType),
+            cancellationToken,
+            RunMode.WarmUp).ConfigureAwait(false);
+        return run.Kind == RunKind.Completed;
+    }
+
+    public void RequestWarmUp()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await WarmUpAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // 预热只是优化，任何失败都不能影响收款。
+                Log($"warmup failed: {ex.GetType().Name}: {ex.Message}");
+            }
+        });
+    }
+
     public async Task ResetAsync(CancellationToken cancellationToken = default)
     {
         // 中文注释：先让进行中的调用以 Abandoned 结束，再等它放开串行门，然后作废 Terminal。
         SignalAbandon();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        var recycled = false;
         try
         {
-            await RecycleAsync("reset requested").ConfigureAwait(false);
+            recycled = await RecycleAsync("reset requested").ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+
+        if (recycled)
+        {
+            ScheduleRewarm();
+        }
     }
 
     public void Dispose()
     {
+        Interlocked.Exchange(ref _disposed, 1);
         SignalAbandon();
         var terminal = Interlocked.Exchange(ref _terminal, null);
         if (terminal is null)
@@ -182,15 +249,37 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         IProgress<ZellerTerminalEvent>? progress,
         CallEvidence evidence,
         Func<T, bool> leavesBrokenSdkState,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        RunMode mode = RunMode.Foreground)
     {
+        var warmUp = mode == RunMode.WarmUp;
+
         // 中文注释：耗时计时从调用方发起的这一刻开始。串行门正被别的调用占着时，先记下占着它的是谁
         // （例如取消后 60 秒的迟到复查正在查询），好在日志里解释「为什么这次等了这么久」；读到的值只用于诊断。
         var timings = new CallTimings(_time);
         var blockedBy = _gate.CurrentCount == 0 ? Volatile.Read(ref _activeOperation) : null;
+        if (!warmUp)
+        {
+            // 中文注释：真实调用一到达就通知正在进行的预热让路。预热不涉及钱，放弃它没有任何副作用；
+            // 到达时登记、拿到串行门后才注销，这样「预热刚好在这之间才开始」的情况也能看到有人在等。
+            EnterForeground();
+        }
+
         try
         {
-            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (warmUp)
+            {
+                // 预热从不排队：门被占着、或已经有真实调用在等，这次预热就算了。
+                if (HasForegroundWaiters() || !await _gate.WaitAsync(TimeSpan.Zero, cancellationToken).ConfigureAwait(false))
+                {
+                    Log("warmup skipped reason=busy");
+                    return GatewayRun<T>.NotStarted();
+                }
+            }
+            else
+            {
+                await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -199,10 +288,18 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
             LogTiming(operationName, nameof(RunKind.NotStarted), timings, blockedBy, TimeSpan.Zero);
             return GatewayRun<T>.NotStarted();
         }
+        finally
+        {
+            if (!warmUp)
+            {
+                LeaveForeground();
+            }
+        }
 
         timings.MarkGateAcquired();
         Volatile.Write(ref _activeOperation, operationName);
         var abandon = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var scheduleRewarm = false;
         try
         {
             if (cancellationToken.IsCancellationRequested)
@@ -214,6 +311,22 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
             lock (_stateLock)
             {
                 _abandon = abandon;
+                if (warmUp)
+                {
+                    _warmUpAbandon = abandon;
+                    if (_foregroundWaiters > 0)
+                    {
+                        // 拿到门之前真实调用就到了：预热让路。
+                        abandon.TrySetResult();
+                    }
+                }
+            }
+
+            if (warmUp && abandon.Task.IsCompleted)
+            {
+                // 预热还没开始就被让路了：不创建 Terminal，什么都不留下。
+                Log("warmup skipped reason=preempted-before-start");
+                return GatewayRun<T>.NotStarted();
             }
 
             var run = await ExecuteAsync(start, limits, progress, evidence, abandon, timings, cancellationToken).ConfigureAwait(false);
@@ -230,8 +343,12 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
             if (reason is not null)
             {
                 var recycleStartedAt = _time.GetTimestamp();
-                await RecycleAsync(reason).ConfigureAwait(false);
+                var recycled = await RecycleAsync(reason).ConfigureAwait(false);
                 recycleElapsed = _time.GetElapsedTime(recycleStartedAt);
+
+                // 中文注释：真实调用导致的作废，下一笔又会是冷启动，所以放门之后安排一次延迟预热。
+                // 预热自己被放弃或出错导致的作废不再预热，避免预热 → 作废 → 预热的循环。
+                scheduleRewarm = recycled && !warmUp;
             }
 
             LogTiming(operationName, run.Kind.ToString(), timings, blockedBy, recycleElapsed);
@@ -245,10 +362,19 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
                 {
                     _abandon = null;
                 }
+
+                if (ReferenceEquals(_warmUpAbandon, abandon))
+                {
+                    _warmUpAbandon = null;
+                }
             }
 
             Volatile.Write(ref _activeOperation, null);
             _gate.Release();
+            if (scheduleRewarm)
+            {
+                ScheduleRewarm();
+            }
         }
     }
 
@@ -349,7 +475,10 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         var first = await Task.WhenAny(waits).ConfigureAwait(false);
         timers.Cancel();
 
-        if (ReferenceEquals(first, completion))
+        // 中文注释：「调用返回」和「放弃 / 取消」同一时刻就绪时，WhenAny 返回哪个是不确定的。
+        // 只要 SDK 调用其实已经返回，就一律采用它的结果：扣款结果不能因为恰好同时到达的放弃信号而丢掉；
+        // 预热刚做完就被真实调用「让路」也会白白作废一个刚预热好的 Terminal。
+        if (ReferenceEquals(first, completion) || completion.IsCompleted)
         {
             return await CollectAsync(completion).ConfigureAwait(false);
         }
@@ -405,13 +534,13 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     }
 
     /// <summary>作废当前的 Terminal，下一次调用时重新创建。必须在持有串行门时调用。</summary>
-    private async Task RecycleAsync(string reason)
+    private async Task<bool> RecycleAsync(string reason)
     {
         var old = _terminal;
         _terminal = null;
         if (old is null)
         {
-            return;
+            return false;
         }
 
         Log($"recycling the Zeller terminal: {reason}");
@@ -423,6 +552,68 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
         {
             Log($"disposing the old terminal failed: {ex.GetType().Name}: {ex.Message}");
         }
+
+        return true;
+    }
+
+    // ───────────── 预热让位 ─────────────
+
+    /// <summary>真实调用到达：登记「有人在等」，并让正在进行的预热立刻以 Abandoned 结束。</summary>
+    private void EnterForeground()
+    {
+        TaskCompletionSource? warmUpAbandon;
+        lock (_stateLock)
+        {
+            _foregroundWaiters++;
+            warmUpAbandon = _warmUpAbandon;
+        }
+
+        if (warmUpAbandon is not null)
+        {
+            Log("warmup preempted by a real call");
+            warmUpAbandon.TrySetResult();
+        }
+    }
+
+    private void LeaveForeground()
+    {
+        lock (_stateLock)
+        {
+            _foregroundWaiters--;
+        }
+    }
+
+    private bool HasForegroundWaiters()
+    {
+        lock (_stateLock)
+        {
+            return _foregroundWaiters > 0;
+        }
+    }
+
+    /// <summary>
+    /// 作废 Terminal 之后安排一次延迟预热。先等 <see cref="ZellerGatewayOptions.RewarmDelay"/>：
+    /// 紧跟着的核实查询、重试扣款会自己新建 Terminal，那时预热发现已有 Terminal 就跳过，不会白建白丢。
+    /// </summary>
+    private void ScheduleRewarm()
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(_options.RewarmDelay, _time).ConfigureAwait(false);
+                await WarmUpAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Log($"warmup failed: {ex.GetType().Name}: {ex.Message}");
+            }
+        });
     }
 
     private async Task SafeCancelAsync<T>(IZellerSdkOperation<T> operation, string why)
@@ -526,6 +717,13 @@ public sealed class ZellerTerminalGateway : IZellerTerminalGateway, IDisposable
     // ───────────── 内部类型 ─────────────
 
     private readonly record struct CallLimits(TimeSpan? Total, TimeSpan? AfterProcessing);
+
+    /// <summary>真实调用（会排队等门，可以打断预热）还是预热（从不排队，随时让路）。</summary>
+    private enum RunMode
+    {
+        Foreground,
+        WarmUp
+    }
 
     private enum RunKind
     {

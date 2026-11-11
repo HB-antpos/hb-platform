@@ -960,6 +960,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<IZellerUiDispatcher>(),
             log: Log));
         services.AddSingleton<IZellerTerminalGateway>(sp => sp.GetRequiredService<ZellerTerminalGateway>());
+        // 预热和网关共用同一个单例：预热要看得到串行门，才能给真实调用让路。
+        services.AddSingleton<IZellerTerminalWarmUp>(sp => sp.GetRequiredService<ZellerTerminalGateway>());
         services.AddSingleton(sp => new ZellerCardTerminalClient(
             sp.GetRequiredService<IZellerTerminalGateway>(),
             sp.GetRequiredService<ILocalZellerPaymentAttemptRepository>(),
@@ -988,6 +990,7 @@ public static class ServiceRegistration
             sp.GetRequiredService<ICardTerminalSettingsProvider>(),
             sp.GetService<ILocalizationService>(),
             sp.GetService<FinancialSupervisorAuditReplayService>(),
-            sp.GetService<ISharedHeldOrderRepository>()));
+            sp.GetService<ISharedHeldOrderRepository>(),
+            warmUp: sp.GetService<IZellerTerminalWarmUp>()));
     }
 }
