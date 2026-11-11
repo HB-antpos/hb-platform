@@ -25,6 +25,7 @@ import {
   filtersFromRouteParams,
   filtersToRouteParams,
   groupLegacyLogsByHour,
+  LEGACY_LOG_SOURCE_ENABLED,
   posOperationKey,
   resolveLogSource,
   ruleCodesFor,
@@ -40,11 +41,13 @@ import type { LegacyLogFilters, LegacyLogItem, LegacyLogPage, LegacyRiskLens, Lo
 
 const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value) ?? undefined;
 
-/** 入口守卫：审核模式与无权限直接给出说明，不发请求。老收银或新收银任一查看权限即可进入。 */
+/** 入口守卫：审核模式与无权限直接给出说明，不发请求。手机端已关老收银来源时，只认新收银查看权限。 */
 export function useLegacyLogsGuard() {
   const { t } = useAppTranslation("legacyEmployeeLogs");
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
-  const canView = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs || state.access.canViewPosOperationAudits);
+  const canViewLegacy = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  const canViewPos = useAuthStore((state) => state.access.canViewPosOperationAudits);
+  const canView = (LEGACY_LOG_SOURCE_ENABLED && canViewLegacy) || canViewPos;
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const review = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   if (review || sessionKind === "iosReview") return t("messages.reviewUnavailable");
@@ -80,7 +83,9 @@ export function useLegacyRouteParams(): LegacyRouteParams {
  * 记忆还没读出来时 ready=false，页面先不渲染，避免先查一遍默认来源再切换。
  */
 export function useLogSource(requested: string | undefined) {
-  const canLegacy = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  const legacyPermission = useAuthStore((state) => state.access.canViewLegacyEmployeeLogs);
+  // 关键逻辑：老收银来源关闭时按「无权限」处理，地址参数或上次记住的 legacy 都会落到新收银，切换控件也不再显示。
+  const canLegacy = LEGACY_LOG_SOURCE_ENABLED && legacyPermission;
   const canPos = useAuthStore((state) => state.access.canViewPosOperationAudits);
   const [remembered, setRemembered] = useState(() => peekRememberedLogSource());
   const [ready, setReady] = useState(() => Boolean(requested) || peekRememberedLogSource() !== null);
