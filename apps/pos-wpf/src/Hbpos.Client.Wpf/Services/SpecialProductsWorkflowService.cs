@@ -114,14 +114,72 @@ public interface ISpecialProductsWorkflowService
     {
         throw new NotSupportedException("Special product price update is not supported by this workflow.");
     }
+
+    // ---- 分店级特殊商品分类（默认实现 = 没有分类 / 不支持，既有测试替身无需实现）----
+
+    /// <summary>读本机的分类快照（离线可用）；没有分类时 Categories 为空。</summary>
+    Task<SpecialProductCategorySnapshot> LoadCategorySnapshotAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(SpecialProductCategorySnapshot.Empty(storeCode));
+    }
+
+    /// <summary>联网拉取分类快照并整体覆盖本机；返回 null = 此实现不支持。失败抛异常，调用方应吞掉并保留现有显示。</summary>
+    Task<SpecialProductCategorySnapshot?> RefreshCategorySnapshotAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<SpecialProductCategorySnapshot?>(null);
+    }
+
+    /// <summary>把商品移到某分类（categoryId 为 null = 未分类），成功后返回服务器最新快照（本机已覆盖）。</summary>
+    Task<SpecialProductCategorySnapshot> AssignProductToCategoryAsync(
+        string storeCode,
+        string productCode,
+        string? categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product categories are not supported by this workflow.");
+    }
+
+    /// <summary>重排某分类内的商品顺序（走服务器），成功后返回服务器最新快照（本机已覆盖）。</summary>
+    Task<SpecialProductCategorySnapshot> ReorderCategoryProductsAsync(
+        string storeCode,
+        string categoryId,
+        IReadOnlyList<string> productCodes,
+        CancellationToken cancellationToken = default)
+    {
+        throw new NotSupportedException("Special product categories are not supported by this workflow.");
+    }
+
+    /// <summary>本机记住的「当前分类」（按分店）：null / 空 = 全部，"uncategorized" = 未分类，其余是分类 Id。</summary>
+    Task<string?> LoadSelectedCategoryIdAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult<string?>(null);
+    }
+
+    Task SaveSelectedCategoryIdAsync(
+        string storeCode,
+        string? categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class SpecialProductsWorkflowService(
     LocalSellableItemIndex priceIndex,
     PosCartService cart,
     ILocalCatalogRepository catalogRepository,
-    ISpecialProductService specialProductService) : ISpecialProductsWorkflowService
+    ISpecialProductService specialProductService,
+    ILocalAppSettingsRepository? settingsRepository = null) : ISpecialProductsWorkflowService
 {
+    // 当前分类按分店记在本机设置里（AppSettings 表）；没注入设置仓储时不记忆，每次回到「全部」。
+    private const string SelectedCategorySettingKeyPrefix = "SpecialProducts:SelectedCategory:";
+
     private readonly SemaphoreSlim _loadLock = new(1, 1);
     private Task<SpecialProductsLoadResult>? _preloadTask;
     private string? _preloadStoreCode;
@@ -450,6 +508,84 @@ public sealed class SpecialProductsWorkflowService(
             normalizedStoreCode,
             reordered,
             normalizedProductCode);
+    }
+
+    public Task<SpecialProductCategorySnapshot> LoadCategorySnapshotAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return catalogRepository.LoadSpecialProductCategorySnapshotAsync(NormalizeStoreCode(storeCode), cancellationToken);
+    }
+
+    public async Task<SpecialProductCategorySnapshot?> RefreshCategorySnapshotAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return await specialProductService.RefreshCategoriesAsync(NormalizeStoreCode(storeCode), cancellationToken);
+    }
+
+    public Task<SpecialProductCategorySnapshot> AssignProductToCategoryAsync(
+        string storeCode,
+        string productCode,
+        string? categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        return specialProductService.AssignProductToCategoryAsync(
+            NormalizeStoreCode(storeCode),
+            NormalizeProductCode(productCode),
+            string.IsNullOrWhiteSpace(categoryId) ? null : categoryId.Trim(),
+            cancellationToken);
+    }
+
+    public Task<SpecialProductCategorySnapshot> ReorderCategoryProductsAsync(
+        string storeCode,
+        string categoryId,
+        IReadOnlyList<string> productCodes,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(categoryId);
+        ArgumentNullException.ThrowIfNull(productCodes);
+        return specialProductService.ReorderCategoryProductsAsync(
+            NormalizeStoreCode(storeCode),
+            categoryId.Trim(),
+            productCodes.Select(NormalizeProductCode).ToArray(),
+            cancellationToken);
+    }
+
+    public async Task<string?> LoadSelectedCategoryIdAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        if (settingsRepository is null)
+        {
+            return null;
+        }
+
+        var value = await settingsRepository.GetValueAsync(
+            SelectedCategorySettingKeyPrefix + NormalizeStoreCode(storeCode),
+            cancellationToken);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    public async Task SaveSelectedCategoryIdAsync(
+        string storeCode,
+        string? categoryId,
+        CancellationToken cancellationToken = default)
+    {
+        if (settingsRepository is null)
+        {
+            return;
+        }
+
+        var key = SelectedCategorySettingKeyPrefix + NormalizeStoreCode(storeCode);
+        if (string.IsNullOrWhiteSpace(categoryId))
+        {
+            // 「全部」是默认值，直接删记录，不留空串。
+            await settingsRepository.DeleteValueAsync(key, cancellationToken);
+            return;
+        }
+
+        await settingsRepository.SetValueAsync(key, categoryId.Trim(), cancellationToken);
     }
 
     private async Task<SpecialProductsLoadResult> LoadSpecialProductsAsync(

@@ -1810,6 +1810,30 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         );
         """,
         """
+        -- 分店级特殊商品分类快照（服务端权威，整体覆盖式落库）：分类表。
+        -- 新表只靠 CREATE IF NOT EXISTS 建出，不需要回填，所以不动 LocalDatabaseSchemaVersion。
+        CREATE TABLE IF NOT EXISTS LocalSpecialProductCategory (
+            StoreCode TEXT NOT NULL,
+            CategoryId TEXT NOT NULL,
+            Name TEXT NOT NULL,
+            Color TEXT NULL,
+            SortOrder INTEGER NOT NULL,
+            UpdatedAt TEXT NOT NULL,
+            PRIMARY KEY (StoreCode, CategoryId)
+        );
+        """,
+        """
+        -- 分类快照：商品归属表（一个商品在一家店只属于一个分类；SortOrder 是分类内的服务器顺序）。
+        CREATE TABLE IF NOT EXISTS LocalSpecialProductCategoryItem (
+            StoreCode TEXT NOT NULL,
+            ProductCode TEXT NOT NULL,
+            CategoryId TEXT NOT NULL,
+            SortOrder INTEGER NOT NULL,
+            UpdatedAt TEXT NOT NULL,
+            PRIMARY KEY (StoreCode, ProductCode)
+        );
+        """,
+        """
         -- 本地商品目录对应的服务端目录版本（sync-plan 协议的增量基准）。与目录数据在同一事务里写入，
         -- 没有记录表示本地数据不对应任何已知版本，下次同步走全量。
         CREATE TABLE IF NOT EXISTS LocalCatalogSyncState (
@@ -1945,6 +1969,10 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
         """
         CREATE INDEX IF NOT EXISTS IX_LocalSellableItemIndex_Store_Special_Product
         ON LocalSellableItemIndex (StoreCode, IsSpecialProduct, ProductCode);
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS IX_LocalSpecialProductCategoryItem_Store_Category_Sort
+        ON LocalSpecialProductCategoryItem (StoreCode, CategoryId, SortOrder);
         """,
         """
         CREATE INDEX IF NOT EXISTS IX_LocalPromotionProducts_Store_Product

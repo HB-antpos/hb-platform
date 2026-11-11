@@ -7706,6 +7706,51 @@ const M59 = (() => {
   ].join("\n");
 })();
 
+/**
+ * M60 分店级特殊商品分类的本机快照（只读展示 + 离线可用）：
+ * - local_special_product_categories：分类（名称 / 颜色 / 顺序由手机 App 维护，收银端整体覆盖）；
+ * - local_special_product_category_items：商品归属与分类内的服务器顺序，一个商品在一家店只属于一个分类。
+ * 两张表都带 store_code 做主键前缀，换店 / 多店数据互不影响；快照可随时从 POS API 重新下载，
+ * 因此不建外键、不存业务凭据，覆盖式替换在仓储里用一个事务完成。
+ * 同一份 DDL（IF NOT EXISTS）也用于 M60 之后的缺表自愈，保证两处结构逐字一致。
+ */
+const specialProductCategoriesDdl = `
+CREATE TABLE IF NOT EXISTS local_special_product_categories (
+  store_code TEXT NOT NULL,
+  category_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  color TEXT NULL,
+  sort_order INTEGER NOT NULL CHECK (
+    typeof(sort_order) = 'integer' AND sort_order >= 0
+  ),
+  PRIMARY KEY (store_code, category_id),
+  CHECK (TRIM(store_code) <> '' AND LENGTH(store_code) <= 128),
+  CHECK (TRIM(category_id) <> '' AND LENGTH(category_id) <= 128),
+  CHECK (TRIM(name) <> '' AND LENGTH(name) <= 128),
+  CHECK (color IS NULL OR LENGTH(color) <= 16)
+);
+CREATE INDEX IF NOT EXISTS ix_local_special_product_categories_store_sort
+  ON local_special_product_categories (store_code, sort_order, category_id);
+
+CREATE TABLE IF NOT EXISTS local_special_product_category_items (
+  store_code TEXT NOT NULL,
+  product_code TEXT NOT NULL,
+  category_id TEXT NOT NULL,
+  sort_order INTEGER NOT NULL CHECK (
+    typeof(sort_order) = 'integer' AND sort_order >= 0
+  ),
+  PRIMARY KEY (store_code, product_code),
+  CHECK (TRIM(store_code) <> '' AND LENGTH(store_code) <= 128),
+  CHECK (TRIM(product_code) <> '' AND LENGTH(product_code) <= 128),
+  CHECK (TRIM(category_id) <> '' AND LENGTH(category_id) <= 128)
+);
+CREATE INDEX IF NOT EXISTS ix_local_special_product_category_items_category
+  ON local_special_product_category_items (
+    store_code, category_id, sort_order, product_code
+  );
+`;
+const M60 = specialProductCategoriesDdl;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7766,6 +7811,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 57, name: "M57_installment_attempts_zeller_manual", sql: M57 },
   { version: 58, name: "M58_terminal_blocking_zeller", sql: M58 },
   { version: 59, name: "M59_recovery_reconciliation_zeller", sql: M59 },
+  { version: 60, name: "M60_special_product_categories", sql: M60 },
 ];
 
 export async function applyMigrations(
@@ -7797,6 +7843,10 @@ export async function applyMigrations(
     if (appliedVersions.has(17)) {
       await ensureCatalogSchemaForM17(transaction);
       await ensureLocalSpecialProductsSchema(transaction);
+    }
+    if (appliedVersions.has(60)) {
+      // M60 已记录但分类表缺失 / 不完整时幂等自愈（快照可从 POS API 重新下载）。
+      await ensureSpecialProductCategoriesSchema(transaction);
     }
 
     for (const migration of migrations) {
@@ -8301,6 +8351,61 @@ async function ensureLocalSpecialProductsSchema(
     throw new Error(
       `LOCAL_SPECIAL_PRODUCTS_SCHEMA_INVALID:MISSING_COLUMNS=${missing.join(",")}`,
     );
+  }
+}
+
+const specialProductCategoriesColumns = {
+  local_special_product_categories: [
+    "store_code",
+    "category_id",
+    "name",
+    "color",
+    "sort_order",
+  ],
+  local_special_product_category_items: [
+    "store_code",
+    "product_code",
+    "category_id",
+    "sort_order",
+  ],
+} as const;
+
+/**
+ * 分类快照表自愈：M60 已应用后若表缺失，按 M60 同一份 DDL 幂等重建（本机快照可重新下载，
+ * 不丢失业务价值）；表在但列不完整时抛出明确错误码，便于区分"表缺失"与"结构异常"。
+ */
+async function ensureSpecialProductCategoriesSchema(
+  transaction: SqliteConnectionPort,
+): Promise<void> {
+  const tables = Object.keys(specialProductCategoriesColumns);
+  const existing = await transaction.getAll<{ name: unknown }>(
+    `SELECT name FROM sqlite_master
+     WHERE type = 'table' AND name IN (${tables.map(() => "?").join(", ")})`,
+    tables,
+  );
+  if (existing.length < tables.length) {
+    // IF NOT EXISTS：只补建缺失的表与索引，已有的表不动。
+    await transaction.exec(specialProductCategoriesDdl);
+  }
+  for (const [table, expected] of Object.entries(
+    specialProductCategoriesColumns,
+  )) {
+    const columns = await transaction.getAll<{ name: unknown }>(
+      `PRAGMA table_info('${table}')`,
+    );
+    const present = new Set(
+      columns
+        .map((column) =>
+          typeof column.name === "string" ? column.name.toLowerCase() : "",
+        )
+        .filter(Boolean),
+    );
+    const missing = expected.filter((name) => !present.has(name));
+    if (missing.length > 0) {
+      throw new Error(
+        `LOCAL_SPECIAL_PRODUCT_CATEGORIES_SCHEMA_INVALID:${table}:MISSING_COLUMNS=${missing.join(",")}`,
+      );
+    }
   }
 }
 

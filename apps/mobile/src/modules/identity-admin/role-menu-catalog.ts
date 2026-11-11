@@ -86,6 +86,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["traffic-stats", "Foot traffic", "客流统计", ["FaceMatch.Traffic.View"]],
   // 与后端 FullAppMenu 的 pricing-strategies 一致：只认 PricingStrategy.View（Edit 只决定页面里能不能改，不决定入口）。
   ["pricing-strategies", "Pricing rules", "自动价格策略", ["PricingStrategy.View"]],
+  // 与后端 FullAppMenu 的 special-product-categories 一致：入口按「管理特殊商品」授权（页面内的读接口另按 View 校验）。
+  ["special-product-categories", "Special product categories", "特殊商品分类", ["Permissions.PosTerminal.SpecialProducts.Manage"]],
   ["container-new-products", "HB new arrivals", "HB新品", ["Container.MobileNewProductsView"]],
   ["installment-orders", "Lay-by orders", "分期订单", ["InstallmentOrders.View"]],
   ["store-vouchers", "Store vouchers", "门店代金券", ["StoreVouchers.View"]],

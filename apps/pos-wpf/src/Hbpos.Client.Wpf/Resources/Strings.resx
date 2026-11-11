@@ -629,6 +629,19 @@
   <data name="specialProducts.chip.inCart" xml:space="preserve"><value>In cart {0}</value></data>
   <data name="specialProducts.filter.placeholder" xml:space="preserve"><value>Filter by name / item no.</value></data>
   <data name="specialProducts.hint.browse" xml:space="preserve"><value>Scroll to browse · tap a card to add</value></data>
+  <data name="specialProducts.category.all" xml:space="preserve"><value>All</value></data>
+  <data name="specialProducts.category.uncategorized" xml:space="preserve"><value>Uncategorized</value></data>
+  <data name="specialProducts.category.empty" xml:space="preserve"><value>No special products in this category.</value></data>
+  <data name="specialProducts.chip.category" xml:space="preserve"><value>{0} {1}</value></data>
+  <data name="specialProducts.moveToCategory" xml:space="preserve"><value>Move to category</value></data>
+  <data name="specialProducts.edit.selectedInCategory" xml:space="preserve"><value>Selected: {0} · {1} · No. {2}</value></data>
+  <data name="specialProducts.status.categoryMoved" xml:space="preserve"><value>Moved {0} to “{1}”.</value></data>
+  <data name="specialProducts.status.categoryMoveFailed" xml:space="preserve"><value>Could not move the product to the category: {0}</value></data>
+  <data name="specialProducts.status.categoryOnlineRequired" xml:space="preserve"><value>Go online to move products between categories or reorder inside a category.</value></data>
+  <data name="specialProducts.status.categoryOrderSaved" xml:space="preserve"><value>Category order saved to the server (same on every terminal).</value></data>
+  <data name="specialProducts.status.categoryOrderFailed" xml:space="preserve"><value>Could not save the category order: {0}</value></data>
+  <data name="specialProducts.status.categoryOrderConflict" xml:space="preserve"><value>This category was just changed on another terminal or phone. It has been refreshed; please reorder again.</value></data>
+  <data name="specialProducts.status.categoryAssignConflict" xml:space="preserve"><value>This product was just categorized on another terminal or phone. The categories have been refreshed; please try again.</value></data>
   <data name="specialProducts.showMore" xml:space="preserve"><value>Show more ({0} left)</value></data>
   <data name="specialProducts.filter.empty" xml:space="preserve"><value>No special products match.</value></data>
   <data name="specialProducts.cart.title" xml:space="preserve"><value>Current cart</value></data>

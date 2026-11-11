@@ -173,6 +173,7 @@ import {
   SharedHeldOrderPublicationWorker,
   type SharedHeldOrderPublicationRunResult,
 } from "../../features/shared-held-orders/shared-held-order-publication-worker";
+import { HbposSpecialProductCategoriesApi } from "@hb/pos-api-client/features/special-products/hbpos-special-product-categories-api";
 import { HbposSpecialProductsApi } from "@hb/pos-api-client/features/special-products/hbpos-special-products-api";
 import { SPECIAL_PRODUCTS_ADD_TO_CART_PERMISSION } from "@hb/pos-domain/features/special-products/special-products-authorization";
 import { SpecialProductsPresenter } from "../../features/special-products/special-products-presenter";
@@ -970,6 +971,11 @@ export function createProductionPosRuntimeServices(
   const specialProductsRepository = input.database.specialProducts();
   const dailyCloseRepository = input.database.dailyCloses();
   const specialProductsRemote = new HbposSpecialProductsApi(input.transport);
+  // 分店级特殊商品分类：独立的端口与本机仓储（不改动上面两个既有端口，手持端共用）。
+  const specialProductCategoriesRepository =
+    input.database.specialProductCategories();
+  const specialProductCategoriesRemote =
+    new HbposSpecialProductCategoriesApi(input.transport);
   const settingsRepository = input.database.settings();
   let dailyCloseReceiptSettings: ReceiptPrinterSettings | null = null;
   const offlineReturnCapacity = input.database.offlineReturnCapacity();
@@ -1324,6 +1330,77 @@ export function createProductionPosRuntimeServices(
             const result = await specialProductsRemote.mark(request);
             requireActiveSession();
             return result;
+          },
+        },
+        // 与上面同口径：每个方法都先校验当前收银员门店，返回前再确认会话仍有效。
+        categories: {
+          repository: {
+            readSnapshot: async (storeCode) => {
+              assertStore(storeCode);
+              const result =
+                await specialProductCategoriesRepository.readSnapshot(
+                  storeCode,
+                );
+              requireActiveSession();
+              return result;
+            },
+            replaceSnapshot: async (snapshot) => {
+              assertStore(snapshot.storeCode);
+              await specialProductCategoriesRepository.replaceSnapshot(
+                snapshot,
+              );
+              requireActiveSession();
+            },
+            listCategoryProducts: async (storeCode, categoryId) => {
+              assertStore(storeCode);
+              const result =
+                await specialProductCategoriesRepository.listCategoryProducts(
+                  storeCode,
+                  categoryId,
+                );
+              requireActiveSession();
+              return result;
+            },
+            readSelectedCategory: async (storeCode) => {
+              assertStore(storeCode);
+              const result =
+                await specialProductCategoriesRepository.readSelectedCategory(
+                  storeCode,
+                );
+              requireActiveSession();
+              return result;
+            },
+            saveSelectedCategory: async (storeCode, selection) => {
+              assertStore(storeCode);
+              await specialProductCategoriesRepository.saveSelectedCategory(
+                storeCode,
+                selection,
+              );
+              requireActiveSession();
+            },
+          },
+          remote: {
+            getCategories: async (request) => {
+              assertStore(request.storeCode);
+              const result =
+                await specialProductCategoriesRemote.getCategories(request);
+              requireActiveSession();
+              return result;
+            },
+            assign: async (request) => {
+              assertStore(request.storeCode);
+              const result =
+                await specialProductCategoriesRemote.assign(request);
+              requireActiveSession();
+              return result;
+            },
+            setOrder: async (request) => {
+              assertStore(request.storeCode);
+              const result =
+                await specialProductCategoriesRemote.setOrder(request);
+              requireActiveSession();
+              return result;
+            },
           },
         },
         addToCart: {

@@ -769,6 +769,131 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/catalog/special-products/categories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    storeCode?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                        "application/json": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                        "text/json": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/special-products/categories/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CatalogSpecialProductCategoryAssignRequest"];
+                    "text/json": components["schemas"]["CatalogSpecialProductCategoryAssignRequest"];
+                    "application/*+json": components["schemas"]["CatalogSpecialProductCategoryAssignRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                        "application/json": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                        "text/json": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/catalog/special-products/categories/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CatalogSpecialProductCategoryOrderRequest"];
+                    "text/json": components["schemas"]["CatalogSpecialProductCategoryOrderRequest"];
+                    "application/*+json": components["schemas"]["CatalogSpecialProductCategoryOrderRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                        "application/json": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                        "text/json": components["schemas"]["CatalogSpecialProductCategoriesResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/files/sync-plan": {
         parameters: {
             query?: never;
@@ -6130,6 +6255,30 @@ export interface components {
             errorCode?: string | null;
             message?: string | null;
         };
+        CatalogSpecialProductCategoriesResponse: {
+            storeCode?: string | null;
+            /** Format: date-time */
+            generatedAt?: string;
+            revision?: string | null;
+            categories?: components["schemas"]["SpecialProductCategoryDto"][] | null;
+            assignments?: components["schemas"]["SpecialProductCategoryAssignmentDto"][] | null;
+        };
+        CatalogSpecialProductCategoriesResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["CatalogSpecialProductCategoriesResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        CatalogSpecialProductCategoryAssignRequest: {
+            storeCode?: string | null;
+            productCode?: string | null;
+            categoryId?: string | null;
+        };
+        CatalogSpecialProductCategoryOrderRequest: {
+            storeCode?: string | null;
+            categoryId?: string | null;
+            productCodes?: string[] | null;
+        };
         CatalogSpecialProductMarkRequest: {
             storeCode?: string | null;
             productCode?: string | null;
@@ -8244,6 +8393,19 @@ export interface components {
             discountState?: components["schemas"]["SharedLineDiscountStateV1"];
             /** Format: int32 */
             catalogDiscountBasisPoints: number;
+        };
+        SpecialProductCategoryAssignmentDto: {
+            productCode?: string | null;
+            categoryId?: string | null;
+            /** Format: int32 */
+            sortOrder?: number;
+        };
+        SpecialProductCategoryDto: {
+            categoryId?: string | null;
+            name?: string | null;
+            color?: string | null;
+            /** Format: int32 */
+            sortOrder?: number;
         };
         SquareCheckoutActionRequest: {
             environment?: string | null;

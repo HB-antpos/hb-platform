@@ -1799,6 +1799,45 @@
   <data name="specialProducts.hint.browse" xml:space="preserve">
     <value>上下滑动浏览 · 点卡片直接加购</value>
   </data>
+  <data name="specialProducts.category.all" xml:space="preserve">
+    <value>全部</value>
+  </data>
+  <data name="specialProducts.category.uncategorized" xml:space="preserve">
+    <value>未分类</value>
+  </data>
+  <data name="specialProducts.category.empty" xml:space="preserve">
+    <value>该分类下暂无特殊商品。</value>
+  </data>
+  <data name="specialProducts.chip.category" xml:space="preserve">
+    <value>{0} {1}</value>
+  </data>
+  <data name="specialProducts.moveToCategory" xml:space="preserve">
+    <value>移到分类</value>
+  </data>
+  <data name="specialProducts.edit.selectedInCategory" xml:space="preserve">
+    <value>已选：{0} · {1} · 第 {2} 位</value>
+  </data>
+  <data name="specialProducts.status.categoryMoved" xml:space="preserve">
+    <value>已把 {0} 移到“{1}”。</value>
+  </data>
+  <data name="specialProducts.status.categoryMoveFailed" xml:space="preserve">
+    <value>移到分类失败：{0}</value>
+  </data>
+  <data name="specialProducts.status.categoryOnlineRequired" xml:space="preserve">
+    <value>移到分类或调整分类内顺序需要联网。</value>
+  </data>
+  <data name="specialProducts.status.categoryOrderSaved" xml:space="preserve">
+    <value>分类内顺序已保存到服务器，全店收银机一致。</value>
+  </data>
+  <data name="specialProducts.status.categoryOrderFailed" xml:space="preserve">
+    <value>保存分类内顺序失败：{0}</value>
+  </data>
+  <data name="specialProducts.status.categoryOrderConflict" xml:space="preserve">
+    <value>该分类刚被其他收银机或手机改动，已刷新，请重新调整。</value>
+  </data>
+  <data name="specialProducts.status.categoryAssignConflict" xml:space="preserve">
+    <value>该商品刚在别的收银机或手机上被归类，已刷新，请重新操作。</value>
+  </data>
   <data name="specialProducts.showMore" xml:space="preserve">
     <value>显示更多（还有 {0} 个）</value>
   </data>

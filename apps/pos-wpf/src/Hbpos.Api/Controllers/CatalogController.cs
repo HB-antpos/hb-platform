@@ -547,6 +547,132 @@ public sealed class CatalogController(ICatalogService catalogService) : Controll
             : BadRequest(failed);
     }
 
+    /// <summary>
+    /// 分店级特殊商品分类快照（全部分类 + 当前仍是特殊商品的归属）。实时读库，不走目录缓存。
+    /// 没建任何分类的分店返回空列表，客户端据此不显示分类栏。
+    /// </summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.SpecialProductsView)]
+    [HttpGet("special-products/categories")]
+    public async Task<ActionResult<ApiResult<CatalogSpecialProductCategoriesResponse>>> GetSpecialProductCategories(
+        [FromQuery] string storeCode,
+        [FromServices] ISpecialProductCategoryService categoryService,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(storeCode))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("STORE_CODE_REQUIRED", "storeCode is required"));
+        }
+
+        if (!this.IsDeviceScopeAllowed(storeCode))
+        {
+            return DeviceAuthorizationExtensions.DeviceScopeForbidden<CatalogSpecialProductCategoriesResponse>("Device is not authorized for this store.");
+        }
+
+        var response = await categoryService.GetSnapshotAsync(storeCode, cancellationToken);
+        return response is null
+            ? NotFound(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("STORE_NOT_FOUND", "store was not found or inactive"))
+            : Ok(ApiResult<CatalogSpecialProductCategoriesResponse>.Ok(response));
+    }
+
+    /// <summary>把一个特殊商品移到某分类（追加到末尾）或移出分类（CategoryId 为空）；返回最新全量快照。</summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.SpecialProductsManage)]
+    [HttpPost("special-products/categories/assign")]
+    public async Task<ActionResult<ApiResult<CatalogSpecialProductCategoriesResponse>>> AssignSpecialProductCategory(
+        [FromBody] CatalogSpecialProductCategoryAssignRequest? request,
+        [FromServices] ISpecialProductCategoryService categoryService,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("ASSIGN_REQUEST_REQUIRED", "request body is required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.StoreCode))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("STORE_CODE_REQUIRED", "storeCode is required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ProductCode))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("PRODUCT_CODE_REQUIRED", "productCode is required"));
+        }
+
+        if (!this.IsDeviceScopeAllowed(request.StoreCode))
+        {
+            return DeviceAuthorizationExtensions.DeviceScopeForbidden<CatalogSpecialProductCategoriesResponse>("Device is not authorized for this store.");
+        }
+
+        var updatedBy = User.FindFirstValue(DeviceAuthConstants.DeviceCodeClaim)
+            ?? User.Identity?.Name
+            ?? "pos-device";
+        Log($"special product category assign request store={request.StoreCode} product={request.ProductCode} category={request.CategoryId ?? "<none>"} actor={updatedBy}");
+        var result = await categoryService.AssignAsync(request, updatedBy, cancellationToken);
+        return ToCategoryActionResult(result);
+    }
+
+    /// <summary>重排某分类内的商品顺序；商品列表必须恰好是该分类当前全部特殊商品的排列，否则 409。</summary>
+    [Authorize(Policy = CashierAuthorizationPolicies.SpecialProductsManage)]
+    [HttpPost("special-products/categories/order")]
+    public async Task<ActionResult<ApiResult<CatalogSpecialProductCategoriesResponse>>> OrderSpecialProductCategory(
+        [FromBody] CatalogSpecialProductCategoryOrderRequest? request,
+        [FromServices] ISpecialProductCategoryService categoryService,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("ORDER_REQUEST_REQUIRED", "request body is required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.StoreCode))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("STORE_CODE_REQUIRED", "storeCode is required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.CategoryId))
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("CATEGORY_ID_REQUIRED", "categoryId is required"));
+        }
+
+        if (request.ProductCodes is null)
+        {
+            return BadRequest(ApiResult<CatalogSpecialProductCategoriesResponse>.Fail("PRODUCT_CODES_REQUIRED", "productCodes is required"));
+        }
+
+        if (!this.IsDeviceScopeAllowed(request.StoreCode))
+        {
+            return DeviceAuthorizationExtensions.DeviceScopeForbidden<CatalogSpecialProductCategoriesResponse>("Device is not authorized for this store.");
+        }
+
+        var updatedBy = User.FindFirstValue(DeviceAuthConstants.DeviceCodeClaim)
+            ?? User.Identity?.Name
+            ?? "pos-device";
+        Log($"special product category order request store={request.StoreCode} category={request.CategoryId} items={request.ProductCodes.Count} actor={updatedBy}");
+        var result = await categoryService.ReorderAsync(request, updatedBy, cancellationToken);
+        return ToCategoryActionResult(result);
+    }
+
+    /// <summary>分类写操作的错误码到 HTTP 状态的映射：不存在 404、顺序冲突 409、其余业务拒绝 400。</summary>
+    private ActionResult<ApiResult<CatalogSpecialProductCategoriesResponse>> ToCategoryActionResult(
+        SpecialProductCategoryServiceResult result)
+    {
+        if (result.Success && result.Response is not null)
+        {
+            return Ok(ApiResult<CatalogSpecialProductCategoriesResponse>.Ok(result.Response));
+        }
+
+        var failed = ApiResult<CatalogSpecialProductCategoriesResponse>.Fail(
+            result.ErrorCode ?? "SPECIAL_PRODUCT_CATEGORY_FAILED",
+            result.Message ?? "failed to update special product category");
+        return result.ErrorCode switch
+        {
+            SpecialProductCategoryErrorCodes.StoreNotFound or SpecialProductCategoryErrorCodes.CategoryNotFound
+                => NotFound(failed),
+            SpecialProductCategoryErrorCodes.OrderConflict or SpecialProductCategoryErrorCodes.AssignConflict
+                => Conflict(failed),
+            _ => BadRequest(failed)
+        };
+    }
+
     private static void Log(string message)
     {
         Console.WriteLine($"[HBPOS][Api][Catalog] {DateTimeOffset.Now:O} {message}");

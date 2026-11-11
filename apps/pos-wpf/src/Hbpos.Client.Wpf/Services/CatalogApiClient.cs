@@ -54,6 +54,29 @@ public interface ICatalogApiClient
         return Task.FromException<CatalogSpecialProductPriceResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
     }
 
+    // 中文注释：分店级特殊商品分类（读快照 / 移到分类 / 分类内排序）。
+    // 老服务端没有这些接口，默认实现按"服务端不支持"处理，既有测试替身无需实现。
+    Task<CatalogSpecialProductCategoriesResponse> GetSpecialProductCategoriesAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogSpecialProductCategoriesResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
+    Task<CatalogSpecialProductCategoriesResponse> AssignSpecialProductCategoryAsync(
+        CatalogSpecialProductCategoryAssignRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogSpecialProductCategoriesResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
+    Task<CatalogSpecialProductCategoriesResponse> OrderSpecialProductCategoryAsync(
+        CatalogSpecialProductCategoryOrderRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        return Task.FromException<CatalogSpecialProductCategoriesResponse>(CatalogApiClient.CreateProtocolNotSupportedException());
+    }
+
     // 中文注释：以下三个是与 iPad 同一套按版本同步的协议；默认实现按"服务端不支持"处理，
     // 同步服务据此回退旧的逐页核对流程，既有测试替身无需实现。
     Task<CatalogSyncPlanResponse> GetCatalogSyncPlanAsync(
@@ -405,6 +428,88 @@ public sealed class CatalogApiClient : ICatalogApiClient
         {
             stopwatch.Stop();
             LogFailed("POST", requestUri, $"store={request.StoreCode} product={request.ProductCode} price={request.RetailPrice} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<CatalogSpecialProductCategoriesResponse> GetSpecialProductCategoriesAsync(
+        string storeCode,
+        CancellationToken cancellationToken = default)
+    {
+        var requestUri = BuildUri(
+            "api/v1/catalog/special-products/categories",
+            ("storeCode", storeCode));
+
+        var stopwatch = Stopwatch.StartNew();
+        Log($"GET {requestUri} start base={_httpClient.BaseAddress}");
+        try
+        {
+            using var response = await _httpClient.GetAsync(requestUri, cancellationToken);
+            var result = await ReadApiResultAsync<CatalogSpecialProductCategoriesResponse>(response, cancellationToken);
+            stopwatch.Stop();
+            Log($"GET {requestUri} completed status={(int)response.StatusCode} categories={result.Categories?.Count ?? 0} assignments={result.Assignments?.Count ?? 0} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            LogFailed("GET", requestUri, $"elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<CatalogSpecialProductCategoriesResponse> AssignSpecialProductCategoryAsync(
+        CatalogSpecialProductCategoryAssignRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        const string requestUri = "api/v1/catalog/special-products/categories/assign";
+        var stopwatch = Stopwatch.StartNew();
+        Log($"POST {requestUri} start base={_httpClient.BaseAddress} store={request.StoreCode} product={request.ProductCode} category={request.CategoryId ?? "<none>"}");
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                requestUri,
+                request,
+                JsonOptions,
+                cancellationToken);
+
+            var result = await ReadApiResultAsync<CatalogSpecialProductCategoriesResponse>(response, cancellationToken);
+            stopwatch.Stop();
+            Log($"POST {requestUri} completed status={(int)response.StatusCode} categories={result.Categories?.Count ?? 0} assignments={result.Assignments?.Count ?? 0} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            LogFailed("POST", requestUri, $"store={request.StoreCode} product={request.ProductCode} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
+            throw;
+        }
+    }
+
+    public async Task<CatalogSpecialProductCategoriesResponse> OrderSpecialProductCategoryAsync(
+        CatalogSpecialProductCategoryOrderRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        const string requestUri = "api/v1/catalog/special-products/categories/order";
+        var stopwatch = Stopwatch.StartNew();
+        Log($"POST {requestUri} start base={_httpClient.BaseAddress} store={request.StoreCode} category={request.CategoryId} products={request.ProductCodes.Count}");
+        try
+        {
+            using var response = await _httpClient.PostAsJsonAsync(
+                requestUri,
+                request,
+                JsonOptions,
+                cancellationToken);
+
+            var result = await ReadApiResultAsync<CatalogSpecialProductCategoriesResponse>(response, cancellationToken);
+            stopwatch.Stop();
+            Log($"POST {requestUri} completed status={(int)response.StatusCode} categories={result.Categories?.Count ?? 0} assignments={result.Assignments?.Count ?? 0} elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            LogFailed("POST", requestUri, $"store={request.StoreCode} category={request.CategoryId} elapsedMs={stopwatch.ElapsedMilliseconds} error={ex.Message}", stopwatch.ElapsedMilliseconds, ex, cancellationToken);
             throw;
         }
     }

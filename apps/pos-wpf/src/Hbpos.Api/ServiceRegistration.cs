@@ -152,6 +152,7 @@ public static class ServiceRegistration
         services.AddScoped<ICatalogIndexRefreshWorker>(sp => sp.GetRequiredService<CatalogService>());
         services.AddScoped<ICatalogTargetIndexSource>(sp => sp.GetRequiredService<CatalogService>());
         services.AddScoped<ICatalogFileSyncService, CatalogFileSyncService>();
+        services.AddScoped<ISpecialProductCategoryService, SpecialProductCategoryService>();
         services.AddScoped<IPromotionRuleService, PromotionRuleService>();
         services.AddScoped<IAdvertisementPlaybackService, AdvertisementPlaybackService>();
         services.AddScoped<IStoreSchemaSqlExecutor, SqlSugarStoreSchemaSqlExecutor>();

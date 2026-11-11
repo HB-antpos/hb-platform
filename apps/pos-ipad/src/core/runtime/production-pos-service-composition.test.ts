@@ -86,6 +86,10 @@ import type {
   LocalOrder,
 } from "@hb/pos-domain/core/contracts/order";
 import type {
+  SpecialProductCategoriesRepositoryPort,
+  SpecialProductCategorySnapshot,
+} from "@hb/pos-domain/core/contracts/special-product-categories";
+import type {
   ActiveCatalogMetadata,
   ActiveCatalogPromotions,
   LocalCatalogMatch,
@@ -4264,6 +4268,87 @@ test("特殊商品只从可信收银员作用域加载，并将服务端价格�
   specialProducts.destroy();
 });
 
+test("特殊商品分类：组合根把分类拉取与落库绑定到当前收银员门店，并按服务端快照派生分类视图", async () => {
+  const replaced: SpecialProductCategorySnapshot[] = [];
+  const requests: string[] = [];
+  const item = (productCode: string): SpecialProductItem => ({
+    storeCode: "S001",
+    productCode,
+    referenceCode: null,
+    itemNumber: `ITEM-${productCode}`,
+    displayName: `Special ${productCode}`,
+    barcode: null,
+    lookupCode: productCode,
+    retailPriceCents: 100,
+    priceSource: 0,
+    quantityFactor: 1,
+    productImage: null,
+    discountRate: null,
+    sortOrder: 0,
+  });
+  const services = createTestComposition(
+    databaseFor([], {
+      specialProductItems: [item("P1"), item("P2")],
+      specialProductCategories: {
+        async replaceSnapshot(snapshot) {
+          replaced.push(snapshot);
+        },
+      },
+    }),
+    {
+      cashierPermissions: [
+        "Permissions.PosTerminal.SpecialProducts.View",
+        "Permissions.PosTerminal.SpecialProducts.Manage",
+      ],
+      transport: {
+        async request<T>(request: HbposTransportRequest) {
+          requests.push(`${request.method} ${request.url} ${JSON.stringify(request.params ?? request.data)}`);
+          return {
+            status: 200,
+            data: {
+              success: true,
+              data: {
+                storeCode: "S001",
+                generatedAt: "2026-11-11T00:00:00.000Z",
+                revision: "1",
+                categories: [
+                  { categoryId: "C1", name: "Balloons", color: null, sortOrder: 0 },
+                ],
+                assignments: [
+                  { productCode: "P1", categoryId: "C1", sortOrder: 0 },
+                ],
+              },
+            } as T,
+          };
+        },
+      } as HbposTransport,
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+
+  const presenter = services.specialProducts.createPresenter();
+  await presenter.load();
+  presenter.setOnline(true);
+  for (let turn = 0; turn < 10; turn += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  // 登录时还有促销后台刷新等请求，这里只关心特殊商品分类。
+  assert.deepEqual(
+    requests.filter((entry) => entry.includes("/special-products/")),
+    ['GET /api/v1/catalog/special-products/categories {"storeCode":"S001"}'],
+  );
+  assert.equal(replaced.length, 1);
+  assert.equal(replaced[0]?.storeCode, "S001");
+  assert.deepEqual(presenter.getState().categoryCounts, {
+    all: 2,
+    byCategory: { C1: 1 },
+    uncategorized: 1,
+  });
+  presenter.destroy();
+});
+
 test("生产更新门禁阻止空车开始普通或特殊商品交易，但不截断已有购物车", async () => {
   let canStartNewTransaction = false;
   const specialItem: SpecialProductItem = {
@@ -6643,6 +6728,7 @@ function databaseFor(
     heldOrderRecords?: Partial<HeldOrderRecordRepositoryPort>;
     syncHistoryOrders?: readonly LocalSyncHistoryOrder[];
     specialProductItems?: readonly SpecialProductItem[];
+    specialProductCategories?: Partial<SpecialProductCategoriesRepositoryPort>;
     dailyClose?: DailyCloseRepositoryPort;
     dailyCloseUploads?: DailyCloseUploadRepositoryPort;
     onSyncHistoryRestore?(): void;
@@ -6976,6 +7062,21 @@ function databaseFor(
       async replaceDownloaded() {},
       async applyMark() {},
       async saveOrder() {},
+    }),
+    // 分店级特殊商品分类：组合根创建 presenter 时会取用本机快照仓储，空实现即可。
+    specialProductCategories: () => ({
+      async readSnapshot() {
+        return { assignments: [], categories: [] };
+      },
+      async replaceSnapshot() {},
+      async listCategoryProducts() {
+        return [];
+      },
+      async readSelectedCategory() {
+        return null;
+      },
+      async saveSelectedCategory() {},
+      ...(options.specialProductCategories ?? {}),
     }),
     dailyCloses: () =>
       options.dailyClose ?? new MemoryDailyCloseRepository(),

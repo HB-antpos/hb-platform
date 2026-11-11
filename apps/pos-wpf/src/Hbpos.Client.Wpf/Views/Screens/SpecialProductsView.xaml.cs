@@ -35,6 +35,7 @@ public partial class SpecialProductsView : UserControl
         {
             _subscribedViewModel = viewModel;
             viewModel.FocusProductRequested += OnFocusProductRequested;
+            viewModel.ScrollToTopRequested += OnScrollToTopRequested;
         }
     }
 
@@ -43,8 +44,15 @@ public partial class SpecialProductsView : UserControl
         if (_subscribedViewModel is not null)
         {
             _subscribedViewModel.FocusProductRequested -= OnFocusProductRequested;
+            _subscribedViewModel.ScrollToTopRequested -= OnScrollToTopRequested;
             _subscribedViewModel = null;
         }
+    }
+
+    /// <summary>切换分类后商品网格滚回顶部，避免停在上一个分类的滚动位置上。</summary>
+    private void OnScrollToTopRequested(object? sender, EventArgs e)
+    {
+        SpecialProductScroller.ScrollToTop();
     }
 
     /// <summary>
