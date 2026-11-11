@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.Services.Zeller;
 using Microsoft.Extensions.Time.Testing;
@@ -66,6 +67,24 @@ public sealed class ZellerCardTerminalClientTests
         Assert.Equal(sentReference, saved.Reference);
         Assert.Equal(100, saved.AmountCents);
         Assert.Equal("{\"draft\":1}", saved.OrderDraftJson);
+    }
+
+    [Fact]
+    public async Task Local_save_timings_are_logged_in_order_before_the_terminal_is_called()
+    {
+        // 「点击到刷卡机显示金额」拆段排查：本机两次写库（建记录、标记已发出）的耗时必须进日志，才能排除或锁定「本机慢」。
+        await using var harness = new Harness();
+        harness.Gateway.OnPurchase = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(Approved(request.Reference)));
+
+        await harness.Client.PurchaseAsync(Context);
+
+        var log = harness.Log.ToArray();
+        var created = Array.FindIndex(log, line => Regex.IsMatch(line, @"^attempt [0-9a-f-]{36} created, .*, createMs=\d+$"));
+        var submitted = Array.FindIndex(log, line => Regex.IsMatch(line, @"^attempt [0-9a-f-]{36}: marked submitted, saveMs=\d+$"));
+        var ended = Array.FindIndex(log, line => line.Contains("call ended as", StringComparison.Ordinal));
+        Assert.True(created >= 0, "missing the created line with createMs");
+        Assert.True(submitted > created, "the submitted line must come after the created line");
+        Assert.True(ended > submitted, "the call-ended line must come after the submitted line");
     }
 
     [Fact]
@@ -510,6 +529,18 @@ public sealed class ZellerCardTerminalClientTests
         Rrn: "629266629008",
         Scheme: "OTHER",
         ReceiptText: "REFUND RECEIPT");
+
+    [Fact]
+    public async Task Refund_created_log_carries_the_local_save_timing()
+    {
+        await using var harness = new Harness();
+        harness.Gateway.OnRefund = (request, _, _) => Task.FromResult(ZellerCallResult.FromTransaction(RefundApproved(request.Reference)));
+
+        await harness.Client.RefundAsync(Refund);
+
+        Assert.Contains(harness.Log.ToArray(), line =>
+            Regex.IsMatch(line, @"^refund attempt [0-9a-f-]{36} created, .*, original [0-9a-f-]{36}, createMs=\d+$"));
+    }
 
     [Fact]
     public async Task Approved_refund_targets_the_original_transaction_uuid_and_returns_a_refund_reference()
