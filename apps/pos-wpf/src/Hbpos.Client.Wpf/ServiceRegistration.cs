@@ -502,7 +502,8 @@ public static class ServiceRegistration
             sp.GetRequiredService<ILocalAppSettingsRepository>(),
             sp.GetRequiredService<IDeviceAuthorizationProtector>(),
             sp.GetRequiredService<ILocalizationService>(),
-            endpointState: sp.GetRequiredService<ApiRuntimeEndpointState>()));
+            endpointState: sp.GetRequiredService<ApiRuntimeEndpointState>(),
+            authorizationState: sp.GetRequiredService<DeviceAuthorizationState>()));
         services.AddSingleton<ICardPaymentResultPolicy, LinklyCardPaymentResultPolicy>();
         services.AddSingleton<ICardPaymentResultPolicy, SquareCardPaymentResultPolicy>();
         // 兜底策略认得所有结果，必须排在各提供方之后。

@@ -32,6 +32,8 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
     private readonly ILocalizationService _localization;
     private readonly TimeProvider _timeProvider;
     private readonly ApiRuntimeEndpointState? _endpointState;
+    // 为 null 时（单元测试或未接入设备授权的场景）不做「等授权」判断，保持原有行为。
+    private readonly DeviceAuthorizationState? _authorizationState;
     private readonly TimeSpan _tickInterval;
     private readonly TimeSpan _refreshInterval;
     private readonly bool _adaptiveRefresh;
@@ -75,7 +77,8 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         bool startTimer = true,
         ApiRuntimeEndpointState? endpointState = null,
         TimeSpan? tickInterval = null,
-        TimeSpan? refreshInterval = null)
+        TimeSpan? refreshInterval = null,
+        DeviceAuthorizationState? authorizationState = null)
     {
         _apiClient = apiClient;
         _connectivity = connectivity;
@@ -86,6 +89,7 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         _localization = localization;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _endpointState = endpointState;
+        _authorizationState = authorizationState;
         _tickInterval = ValidateInterval(tickInterval ?? DefaultTickInterval, nameof(tickInterval));
         _refreshInterval = ValidateInterval(refreshInterval ?? DefaultRefreshInterval, nameof(refreshInterval));
         // 只有使用默认刷新间隔时才按状态自适应（健康 5 分钟 / 异常 15 秒重试）；
@@ -93,6 +97,12 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         _adaptiveRefresh = refreshInterval is null;
         _endpointVersion = endpointState?.Version ?? 0;
         _localization.CultureChanged += OnCultureChanged;
+        if (_authorizationState is not null)
+        {
+            // 启动时设备授权晚于本面板就绪：授权一到立即刷新，不必等下一轮 15 秒重试。
+            _authorizationState.Authorized += OnDeviceAuthorized;
+        }
+
         ApplyLocalizedState();
         if (startTimer)
         {
@@ -185,6 +195,14 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
             finally
             {
                 _stateGate.Release();
+            }
+
+            if (_authorizationState is not null && _authorizationState.Current is null)
+            {
+                // 关键逻辑：启动阶段设备授权要等服务端校验完才写入内存。此时登记密钥必然被 401 拒绝，
+                // 不能算「启用失败」：先按离线处理（有本地身份就继续离线出码），授权写入后由 Authorized 事件触发重试。
+                await MarkOfflineAndTickAsync(cancellationToken);
+                return;
             }
 
             if (!await _connectivity.CheckOnlineAsync(cancellationToken))
@@ -286,6 +304,11 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         if (_disposed) return;
         _disposed = true;
         _localization.CultureChanged -= OnCultureChanged;
+        if (_authorizationState is not null)
+        {
+            _authorizationState.Authorized -= OnDeviceAuthorized;
+        }
+
         var cancellationTask = _stop.CancelAsync();
         var loops = new[] { _tickLoopTask, _refreshLoopTask }.OfType<Task>().ToArray();
         _ = Task.WhenAll(loops.Append(cancellationTask)).ContinueWith(
@@ -371,6 +394,28 @@ public sealed class AttendanceQrPanelViewModel : ObservableObject, IDisposable
         try { await RefreshAsync(cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception ex) { await MarkSetupFailedAsync(ex, cancellationToken, "refresh"); }
+    }
+
+    private void OnDeviceAuthorized(object? sender, EventArgs e)
+    {
+        if (_disposed) return;
+        CancellationToken stopToken;
+        try
+        {
+            stopToken = _stop.Token;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        // 在线程池上刷新，不阻塞写入授权的启动线程（可能是 UI 线程）；与刷新循环共用 _refreshGate 串行执行。
+        _ = Task.Run(async () =>
+        {
+            try { await RefreshSafeAsync(stopToken); }
+            catch (OperationCanceledException) { }
+            catch (ObjectDisposedException) { }
+        });
     }
 
     private async Task TickSafeAsync(CancellationToken cancellationToken)
