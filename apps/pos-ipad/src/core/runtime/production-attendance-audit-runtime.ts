@@ -92,6 +92,15 @@ export function createProductionAttendanceAuditRuntime(
       });
       return new AttendanceAuditPresenter({ audit, qr });
     },
+    createDeviceQrController(): AttendanceQrDisplaySource {
+      // 中文注释：登录页没有收银员会话，考勤码只认「这台已授权的设备」：
+      // 后端登记接口走设备授权（DeviceAuth），签名密钥与缓存也都是设备级的。
+      // 端口只锁定门店 / 设备编号，不带任何收银员 lease，也不提供审计读取。
+      return createLeaseBoundQrController(
+        input,
+        new LeaseBoundAttendancePorts({ input, lease: null, terminal }),
+      );
+    },
     createQrController(): AttendanceQrDisplaySource {
       // 中文注释：收银页的考勤码与考勤页同一套 lease 守卫——登出、换人或换设备后
       // 定时器不再签发，端口调用直接抛错，不会用旧收银员身份继续出码。
@@ -132,7 +141,8 @@ class LeaseBoundAttendancePorts {
   public constructor(
     private readonly context: Readonly<{
       input: ProductionAttendanceAuditRuntimeDependencies;
-      lease: TrustedCashierLease;
+      /** null 表示设备级（登录页）：不校验收银员 lease，也不允许读审计。 */
+      lease: TrustedCashierLease | null;
       terminal: TerminalScope;
     }>,
   ) {
@@ -180,7 +190,7 @@ class LeaseBoundAttendancePorts {
         this.context.input.scheduler.every(intervalMs, () => {
           // 中文注释：旧 lease 的定时器不执行任何动作，避免登出后继续刷新 QR。
           try {
-            requireScopedLease(this.context.lease, this.context.terminal);
+            this.assertActive();
           } catch {
             return;
           }
@@ -215,17 +225,17 @@ class LeaseBoundAttendancePorts {
     keyHandle: string,
     use: (keyMaterialBase64Url: string) => Promise<T>,
   ): Promise<T> {
-    requireScopedLease(this.context.lease, this.context.terminal);
+    this.assertActive();
     const value = await this.context.input.qrCrypto.withRegistrationKey(
       keyHandle,
       async (keyMaterialBase64Url) => {
-        requireScopedLease(this.context.lease, this.context.terminal);
+        this.assertActive();
         const result = await use(keyMaterialBase64Url);
-        requireScopedLease(this.context.lease, this.context.terminal);
+        this.assertActive();
         return result;
       },
     );
-    requireScopedLease(this.context.lease, this.context.terminal);
+    this.assertActive();
     return value;
   }
 
@@ -243,6 +253,12 @@ class LeaseBoundAttendancePorts {
       | Parameters<OperationAuditReadPort["list"]>[0]
       | Parameters<OperationAuditReadPort["get"]>[0],
   ): Promise<readonly OperationAuditRawRecord[] | OperationAuditRawRecord | null> {
+    // 设备级端口（登录页）没有收银员，审计读取一律拒绝。
+    if (this.context.lease === null) {
+      throw new AttendanceAuditRuntimeError(
+        "ATTENDANCE_AUDIT_SESSION_UNAVAILABLE",
+      );
+    }
     assertAuditRequestScope(request, this.context.terminal);
     const source = request.source;
     if (source === "remote") {
@@ -266,10 +282,16 @@ class LeaseBoundAttendancePorts {
   }
 
   private async call<T>(operation: () => Promise<T>): Promise<T> {
-    requireScopedLease(this.context.lease, this.context.terminal);
+    this.assertActive();
     const result = await operation();
-    requireScopedLease(this.context.lease, this.context.terminal);
+    this.assertActive();
     return result;
+  }
+
+  /** 有 lease 时按收银员会话守卫；设备级端口没有会话，只靠门店 / 设备编号限定。 */
+  private assertActive(): void {
+    if (this.context.lease === null) return;
+    requireScopedLease(this.context.lease, this.context.terminal);
   }
 }
 

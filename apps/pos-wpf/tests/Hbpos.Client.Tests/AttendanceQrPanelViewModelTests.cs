@@ -183,6 +183,35 @@ public sealed class AttendanceQrPanelViewModelTests
     }
 
     [Fact]
+    public async Task Online_verified_flag_follows_the_status_text_and_notifies_the_login_card()
+    {
+        var fixture = new Fixture(online: true);
+        using var viewModel = fixture.CreateViewModel();
+        var notifications = new List<bool>();
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(AttendanceQrPanelViewModel.IsOnlineVerified))
+            {
+                notifications.Add(viewModel.IsOnlineVerified);
+            }
+        };
+
+        await viewModel.RefreshAsync();
+        Assert.True(viewModel.IsOnlineVerified);
+        Assert.Equal("Online verified", viewModel.VerificationStatusText);
+
+        // 断网后离线签名：登录框里的标签要从绿色换成黄色，所以 IsOnlineVerified 必须随状态文字一起变并通知界面。
+        fixture.Connectivity.IsOnline = false;
+        fixture.Time.Advance(TimeSpan.FromSeconds(10));
+        await viewModel.RefreshAsync();
+
+        Assert.False(viewModel.IsOnlineVerified);
+        Assert.Equal("Offline signed", viewModel.VerificationStatusText);
+        Assert.Contains(true, notifications);
+        Assert.Equal(false, notifications[^1]);
+    }
+
+    [Fact]
     public async Task First_offline_start_without_trusted_time_never_displays_a_qr()
     {
         var fixture = new Fixture(online: false);

@@ -9,9 +9,23 @@ let mockScreenProps: any;
 const mockRouterReplace = jest.fn();
 const mockToggleAppLanguage = jest.fn<() => Promise<"en" | "zh">>();
 
-jest.mock("expo-router", () => ({
-  router: { replace: (...args: unknown[]) => mockRouterReplace(...args) },
-}));
+// 聚焦效果由测试手动触发：模拟「登录页聚焦 / 失焦」。
+const mockFocusEffects = new Set<() => unknown>();
+
+jest.mock("expo-router", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  return {
+    router: { replace: (...args: unknown[]) => mockRouterReplace(...args) },
+    useFocusEffect: (effect: () => unknown) => {
+      React.useEffect(() => {
+        mockFocusEffects.add(effect);
+        return () => {
+          mockFocusEffects.delete(effect);
+        };
+      }, [effect]);
+    },
+  };
+});
 
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -36,6 +50,15 @@ jest.mock("@/features/cashier-login", () => {
       mockScreenProps = props;
       return React.createElement(Text, { testID: "cashier-login" }, "login");
     },
+    // 与真实实现一致：就绪（含离线就绪）且设备未锁定。
+    isCashierLoginRuntimeReady: (runtime: {
+      state: { phase: string; device: string };
+      services: unknown;
+    }) =>
+      (runtime.state.phase === "ready" ||
+        runtime.state.phase === "ready-offline") &&
+      runtime.state.device !== "locked" &&
+      runtime.services !== null,
   };
 });
 
@@ -210,4 +233,109 @@ test("登录路由卸载时清理待恢复的 HID 定时器", async () => {
     clearTimeoutSpy.mockRestore();
     jest.useRealTimers();
   }
+});
+
+function attendanceSource() {
+  return {
+    destroy: jest.fn(),
+    getState: jest.fn(),
+    start: jest.fn(),
+    subscribe: jest.fn(() => () => undefined),
+  };
+}
+
+async function focusLoginRoute(): Promise<unknown[]> {
+  const cleanups: unknown[] = [];
+  await act(async () => {
+    for (const effect of mockFocusEffects) cleanups.push(effect());
+    await Promise.resolve();
+  });
+  return cleanups;
+}
+
+test("登录页聚焦时创建设备级考勤码并启动，失焦时销毁并撤下", async () => {
+  const source = attendanceSource();
+  const createDeviceQrController = jest.fn(() => source);
+  mockRuntime = {
+    state: { phase: "ready", device: "authorized-online" },
+    services: {
+      attendanceAudit: { createPresenter: jest.fn(), createDeviceQrController },
+    },
+  };
+  mockScreenProps = null;
+  mockFocusEffects.clear();
+  const screen = await render(<LoginRoute />);
+  // 还没聚焦：不创建。
+  expect(createDeviceQrController).not.toHaveBeenCalled();
+  expect(mockScreenProps.attendanceQr).toBeNull();
+
+  const cleanups = await focusLoginRoute();
+  expect(createDeviceQrController).toHaveBeenCalledTimes(1);
+  expect(createDeviceQrController).toHaveBeenCalledWith();
+  expect(source.start).toHaveBeenCalledTimes(1);
+  expect(mockScreenProps.attendanceQr).toBe(source);
+
+  // 登录进入收银页 / 去网络检测页（失焦）：销毁，由收银页的考勤码接力。
+  await act(async () => {
+    for (const cleanup of cleanups) {
+      if (typeof cleanup === "function") cleanup();
+    }
+    await Promise.resolve();
+  });
+  expect(source.destroy).toHaveBeenCalledTimes(1);
+  expect(mockScreenProps.attendanceQr).toBeNull();
+  await screen.unmount();
+});
+
+test.each([
+  { name: "设备被服务端锁定", state: { phase: "ready", device: "locked" } },
+  { name: "终端还没就绪", state: { phase: "starting", device: "unknown" } },
+])("$name 时登录页不创建考勤码", async ({ state }) => {
+  const createDeviceQrController = jest.fn(() => attendanceSource());
+  mockRuntime = {
+    state,
+    services: {
+      attendanceAudit: { createPresenter: jest.fn(), createDeviceQrController },
+    },
+  };
+  mockScreenProps = null;
+  mockFocusEffects.clear();
+  const screen = await render(<LoginRoute />);
+
+  await focusLoginRoute();
+  expect(createDeviceQrController).not.toHaveBeenCalled();
+  expect(mockScreenProps.attendanceQr).toBeNull();
+  await screen.unmount();
+});
+
+test("没有考勤服务或创建失败时登录页照常显示、不带考勤码", async () => {
+  mockRuntime = {
+    state: { phase: "ready", device: "authorized-online" },
+    services: {
+      attendanceAudit: {
+        createPresenter: jest.fn(),
+        createDeviceQrController: jest.fn(() => {
+          throw new Error("boom");
+        }),
+      },
+    },
+  };
+  mockScreenProps = null;
+  mockFocusEffects.clear();
+  const screen = await render(<LoginRoute />);
+  await focusLoginRoute();
+  expect(mockScreenProps.attendanceQr).toBeNull();
+  expect(screen.getByTestId("cashier-login")).toBeTruthy();
+  await screen.unmount();
+
+  // 组合根没提供考勤服务（status: unavailable）时同样不创建。
+  mockRuntime = {
+    state: { phase: "ready", device: "authorized-online" },
+    services: { attendanceAudit: { status: "unavailable" } },
+  };
+  mockScreenProps = null;
+  const second = await render(<LoginRoute />);
+  await focusLoginRoute();
+  expect(mockScreenProps.attendanceQr).toBeNull();
+  await second.unmount();
 });

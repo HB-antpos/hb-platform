@@ -3593,6 +3593,8 @@
   <data name="attendance.qr.closeHelp" xml:space="preserve"><value>关闭考勤二维码扫码弹窗</value></data>
   <data name="attendance.qr.device" xml:space="preserve"><value>POS 设备</value></data>
   <data name="attendance.qr.seconds" xml:space="preserve"><value>秒</value></data>
+  <data name="attendance.qr.untilNextCode" xml:space="preserve"><value>秒后换码</value></data>
+  <data name="shell.cashierLogin.attendanceTitle" xml:space="preserve"><value>员工打卡</value></data>
   <data name="cardRecovery.refund.section.title" xml:space="preserve"><value>主管退款核对</value></data>
   <data name="cardRecovery.refund.section.instructions" xml:space="preserve"><value>请先核对银行或终端记录，再选择一个结果。主管决定保存前，该退款会继续锁定。</value></data>
   <data name="cardRecovery.refund.field.processor" xml:space="preserve"><value>支付处理器</value></data>

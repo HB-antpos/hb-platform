@@ -10,6 +10,7 @@ import {
 import { CashierLoginScreen } from "./cashier-login-screen";
 
 import { HbposApiError } from "@/core/api/hbpos-api";
+import type { AttendanceQrState } from "@/features/attendance-audit/attendance-qr-controller";
 import type { PosCashierSummary } from "@/core/runtime/production-pos-service-composition";
 import { posColors } from "@/ui/theme";
 
@@ -700,4 +701,143 @@ test("登录页网络检测入口在终端未就绪时也可点，不传回调�
     />,
   );
   expect(screen.queryByTestId("cashier-login-network-check")).toBeNull();
+});
+
+/** 考勤码假数据源：测试里直接推送控制器状态。 */
+function attendanceSource(overrides: Partial<AttendanceQrState> = {}) {
+  let state: AttendanceQrState = {
+    deviceText: "IPAD-02",
+    kind: "ready",
+    online: true,
+    qrImageUri: "data:image/png;base64,QQ==",
+    requiresOnlineResync: false,
+    secondsRemaining: 12,
+    statusCode: "online-verified",
+    storeText: "Hot Bargain Springfield (1042)",
+    ...overrides,
+  };
+  const listeners = new Set<() => void>();
+  return {
+    destroy: jest.fn(),
+    getState: () => state,
+    publish(patch: Partial<AttendanceQrState>) {
+      state = { ...state, ...patch };
+      for (const listener of listeners) listener();
+    },
+    start: jest.fn(),
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+test("登录页左栏显示员工打卡码：品牌区收成一行，码正中有倒计时，右侧登录表单照常", async () => {
+  const source = attendanceSource();
+  const screen = await render(
+    <CashierLoginScreen
+      attendanceQr={source}
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={runtime(async () => cashier())}
+    />,
+  );
+
+  expect(screen.getByTestId("login-attendance-qr-card")).toBeTruthy();
+  const image = screen.getByTestId("login-attendance-qr-image");
+  expect(image.props.source).toEqual({ uri: "data:image/png;base64,QQ==" });
+  expect(
+    screen.getByTestId("login-attendance-qr-image-countdown").props
+      .accessibilityLabel,
+  ).toBe("剩余 12 秒");
+  expect(screen.getByText("员工打卡")).toBeTruthy();
+  expect(screen.getByText("在线验证")).toBeTruthy();
+  expect(screen.getByText("POS 设备 IPAD-02")).toBeTruthy();
+  // 品牌标题仍在，原来那段长说明让位给打卡区。
+  expect(screen.getByText("准备开始下一笔收银")).toBeTruthy();
+  expect(
+    screen.queryByText(/此终端只允许已获本门店授权的员工进入收银/),
+  ).toBeNull();
+  // 右侧收银员登录表单不受影响。
+  expect(screen.getByTestId("cashier-login-barcode")).toBeTruthy();
+  expect(screen.getByTestId("cashier-login-submit")).toBeTruthy();
+
+  await act(async () => {
+    source.publish({ secondsRemaining: 7, online: false, statusCode: "offline-signed" });
+  });
+  expect(
+    screen.getByTestId("login-attendance-qr-image-countdown").props
+      .accessibilityLabel,
+  ).toBe("剩余 7 秒");
+  expect(screen.getByText("离线签名")).toBeTruthy();
+});
+
+test("登录页考勤码没有码图时按状态显示说明，不挡登录", async () => {
+  const source = attendanceSource({
+    kind: "unavailable",
+    online: false,
+    qrImageUri: null,
+    secondsRemaining: 0,
+    statusCode: "enable-online",
+  });
+  const screen = await render(
+    <CashierLoginScreen
+      attendanceQr={source}
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={runtime(async () => cashier())}
+    />,
+  );
+
+  expect(screen.getByTestId("login-attendance-qr-placeholder")).toBeTruthy();
+  expect(screen.getByText("请先联网启用")).toBeTruthy();
+  expect(screen.queryByTestId("login-attendance-qr-image")).toBeNull();
+  expect(screen.queryByTestId("attendance-qr-status")).toBeNull();
+
+  await act(async () => {
+    source.publish({
+      kind: "clock-invalid",
+      requiresOnlineResync: true,
+      statusCode: "clock-rollback",
+    });
+  });
+  expect(screen.getByText("时钟变化，需要校时")).toBeTruthy();
+  expect(screen.getByTestId("cashier-login-submit")).toBeTruthy();
+});
+
+test("没有考勤码或终端未就绪时，登录页左栏保持原来的品牌介绍", async () => {
+  const withoutQr = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={runtime(async () => cashier())}
+    />,
+  );
+  expect(withoutQr.queryByTestId("login-attendance-qr-card")).toBeNull();
+  expect(
+    withoutQr.getByText(/此终端只允许已获本门店授权的员工进入收银/),
+  ).toBeTruthy();
+  await withoutQr.unmount();
+
+  // 终端未就绪（设备还没授权 / 被锁定）：传了考勤码也不显示。
+  const notReady = {
+    ...runtime(async () => cashier()),
+    services: null,
+  } as unknown as CashierLoginRuntime;
+  const blocked = await render(
+    <CashierLoginScreen
+      attendanceQr={attendanceSource()}
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={notReady}
+    />,
+  );
+  expect(blocked.queryByTestId("login-attendance-qr-card")).toBeNull();
+  expect(
+    blocked.getByText(/此终端只允许已获本门店授权的员工进入收银/),
+  ).toBeTruthy();
 });

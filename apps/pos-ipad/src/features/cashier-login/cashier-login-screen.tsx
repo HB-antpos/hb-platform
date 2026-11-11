@@ -17,6 +17,11 @@ import {
 import { useCashierLoginStore } from "./cashier-login-store";
 
 import { HbposApiError } from "@/core/api/hbpos-api";
+import type { AttendanceQrDisplaySource } from "@/features/attendance-audit/attendance-audit-runtime";
+import {
+  AttendanceQrLoginCard,
+  useAttendanceQrState,
+} from "@/features/attendance-audit/attendance-qr-sales-panels";
 import { PosButton } from "@/ui/controls/pos-button";
 import {
   PosKeyboardAwareScrollView,
@@ -137,6 +142,7 @@ const DEFAULT_VERSION_INFO: CashierLoginVersionInfo = Object.freeze({
 });
 
 export function CashierLoginScreen({
+  attendanceQr = null,
   controller,
   language = "zh",
   onManualInputFocusChange,
@@ -146,6 +152,11 @@ export function CashierLoginScreen({
   runtime,
   versionInfo = DEFAULT_VERSION_INFO,
 }: Readonly<{
+  /**
+   * 员工打卡二维码（路由在登录页聚焦时创建、失焦时销毁）。不传或为 null 时左栏保持原来的品牌介绍；
+   * 设备还没授权 / 终端未就绪时也不显示，避免在没有设备身份时展示考勤区。
+   */
+  attendanceQr?: AttendanceQrDisplaySource | null;
   controller?: CashierLoginController;
   language?: string;
   onManualInputFocusChange?(focused: boolean): void;
@@ -181,7 +192,8 @@ export function CashierLoginScreen({
   const [submitting, setSubmitting] = useState(false);
   const locale = language.toLowerCase().startsWith("zh") ? "zh" : "en";
   const text = copy[locale];
-  const blocked = !isReady(runtime);
+  const blocked = !isCashierLoginRuntimeReady(runtime);
+  const attendanceQrState = useAttendanceQrState(blocked ? null : attendanceQr);
 
   const clearKeyboardRefreshTimer = useCallback((): void => {
     if (keyboardRefreshTimerRef.current === null) return;
@@ -298,16 +310,44 @@ export function CashierLoginScreen({
       <View style={styles.page} testID="cashier-login-page">
         {/* 左侧深色品牌区：Logo、眉标、标题、说明；安全提示和版本信息压在底部。 */}
         <View style={styles.brandPanel}>
-          <Image
-            accessibilityIgnoresInvertColors
-            accessible={false}
-            resizeMode="contain"
-            source={require("../../../assets/icon.png")}
-            style={styles.brandMark}
-          />
-          <Text style={styles.eyebrow}>{text.eyebrow}</Text>
-          <Text style={styles.title}>{text.title}</Text>
-          <Text style={styles.subtitle}>{text.subtitle}</Text>
+          {attendanceQrState ? (
+            // 有考勤码：品牌区收成一行放在顶上，腾出位置给「员工打卡」大码；
+            // 右侧收银员登录表单不受影响。
+            <>
+              <View style={styles.brandHeaderCompact}>
+                <Image
+                  accessibilityIgnoresInvertColors
+                  accessible={false}
+                  resizeMode="contain"
+                  source={require("../../../assets/icon.png")}
+                  style={styles.brandMarkCompact}
+                />
+                <View style={styles.brandHeaderCopy}>
+                  <Text style={styles.eyebrowCompact}>{text.eyebrow}</Text>
+                  <Text numberOfLines={1} style={styles.titleCompact}>
+                    {text.title}
+                  </Text>
+                </View>
+              </View>
+              <AttendanceQrLoginCard
+                language={locale}
+                state={attendanceQrState}
+              />
+            </>
+          ) : (
+            <>
+              <Image
+                accessibilityIgnoresInvertColors
+                accessible={false}
+                resizeMode="contain"
+                source={require("../../../assets/icon.png")}
+                style={styles.brandMark}
+              />
+              <Text style={styles.eyebrow}>{text.eyebrow}</Text>
+              <Text style={styles.title}>{text.title}</Text>
+              <Text style={styles.subtitle}>{text.subtitle}</Text>
+            </>
+          )}
           <View style={styles.brandSpacer} />
           <View style={styles.securityNote}>
             <MaterialCommunityIcons
@@ -489,7 +529,10 @@ export function CashierLoginScreen({
   );
 }
 
-function isReady(runtime: CashierLoginRuntime): boolean {
+/** 设备已授权且终端就绪（含离线就绪）、未被服务端锁定：登录页才显示考勤码，路由才创建它。 */
+export function isCashierLoginRuntimeReady(
+  runtime: CashierLoginRuntime,
+): boolean {
   return (
     (runtime.state.phase === "ready" ||
       runtime.state.phase === "ready-offline") &&
@@ -580,6 +623,33 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "600",
     lineHeight: 23,
     opacity: 0.82,
+  },
+  brandHeaderCompact: {
+    alignItems: "center",
+    borderBottomColor: "rgba(255,255,255,0.12)",
+    borderBottomWidth: 1,
+    flexDirection: "row",
+    gap: 12,
+    paddingBottom: 14,
+  },
+  brandHeaderCopy: { flex: 1, minWidth: 0 },
+  brandMarkCompact: {
+    borderRadius: 12,
+    height: 46,
+    width: 46,
+  },
+  eyebrowCompact: {
+    color: colors.onInverse,
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 2,
+    opacity: 0.7,
+  },
+  titleCompact: {
+    color: colors.onInverse,
+    fontSize: 18,
+    fontWeight: "900",
+    marginTop: 2,
   },
   brandSpacer: { flex: 1, minHeight: 8 },
   securityNote: {

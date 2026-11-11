@@ -1044,6 +1044,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         !IsTransactionHistoryScreenActive &&
         !IsSettingsScreenActive;
 
+    /// <summary>
+    /// 登录框左栏「员工打卡」卡片用：与收银页侧栏共用同一个考勤面板实例。
+    /// 面板在程序启动时就已开始出码 / 登记，不依赖收银员会话，所以登录前也能显示。
+    /// </summary>
+    public AttendanceQrPanelViewModel? AttendanceQrPanel => _attendanceQrPanel;
+
+    public bool HasAttendanceQrPanel => _attendanceQrPanel is not null;
+
     public bool IsCashierLoginOverlayOpen =>
         CurrentScreen is not null &&
         !ReferenceEquals(CurrentScreen, DeviceRegistration) &&

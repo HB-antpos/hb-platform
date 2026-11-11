@@ -1269,7 +1269,8 @@
         </Grid>
 
         <!-- 收银员登录全局遮盖：未登录时盖住主窗口，扫码内容仍走现有登录命令。
-             布局：左栏放门店 / 设备 / 连接状态 / 扫码提示 / 服务器地址 / 退出；右栏只管登录。1024×768 下不需要滚动。 -->
+             布局：左栏放门店 / 设备 / 连接状态 / 员工打卡二维码 / 服务器地址 / 退出；右栏只管登录。
+             左栏上半部分（含二维码）放在可滚动区里：窗口较矮（如 1366×768 带任务栏）放不下时只滚动这一块，服务器地址与退出始终固定在底部。 -->
         <Grid Grid.RowSpan="3"
               AutomationProperties.AutomationId="CashierLoginOverlay"
               Visibility="{Binding IsCashierLoginOverlayOpen, Converter={StaticResource BoolToVis}}"
@@ -1277,8 +1278,8 @@
               Panel.ZIndex="97"
               IsVisibleChanged="CashierLoginOverlayIsVisibleChanged"
               IsEnabledChanged="CashierLoginOverlayIsEnabledChanged">
-            <Border MaxWidth="800"
-                    MaxHeight="620"
+            <Border MaxWidth="960"
+                    MaxHeight="680"
                     Margin="24"
                     Background="{DynamicResource PosSurfaceBrush}"
                     CornerRadius="16"
@@ -1374,7 +1375,7 @@
                     </Grid.Resources>
 
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="272" />
+                        <ColumnDefinition Width="320" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
@@ -1384,8 +1385,69 @@
                             Background="{DynamicResource PosSurfaceAltBrush}"
                             BorderBrush="{DynamicResource PosDividerBrush}"
                             BorderThickness="0,0,1,0">
-                        <DockPanel LastChildFill="False">
-                            <StackPanel DockPanel.Dock="Top">
+                        <!-- 上半部分放进可滚动区；下半部分（服务器地址 / 退出 / 版本）先声明并停靠底部，始终可见。 -->
+                        <DockPanel LastChildFill="True">
+                            <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                <!-- 关键逻辑：未登录时原地复用服务器设置面板，不绕过现有校验与连接测试。 -->
+                                <ToggleButton x:Name="CashierLoginServerToggle"
+                                              Unchecked="CashierLoginServerToggleUnchecked"
+                                              AutomationProperties.AutomationId="CashierLoginServerAddressToggle"
+                                              Style="{StaticResource CashierLoginRailToggleStyle}"
+                                              Margin="0,0,0,10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <materialDesign:PackIcon Kind="ServerNetwork"
+                                                                 Width="18"
+                                                                 Height="18"
+                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                 VerticalAlignment="Center"
+                                                                 Margin="0,0,8,0" />
+                                        <TextBlock Grid.Column="1"
+                                                   Text="{loc:Loc shell.cashierLogin.serverAddress}"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource PosTextBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <materialDesign:PackIcon Grid.Column="2"
+                                                                 Kind="ChevronRight"
+                                                                 Width="18"
+                                                                 Height="18"
+                                                                 Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                 VerticalAlignment="Center" />
+                                    </Grid>
+                                </ToggleButton>
+
+                                <Button AutomationProperties.AutomationId="CashierLoginExitButton"
+                                        Command="{Binding ExitApplicationCommand}"
+                                        Style="{StaticResource CashierLoginExitButtonStyle}"
+                                        Height="42">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="Power"
+                                                                 Width="18"
+                                                                 Height="18"
+                                                                 Foreground="{DynamicResource PosDangerTextBrush}"
+                                                                 Margin="0,0,8,0" />
+                                        <TextBlock Text="{loc:Loc shell.cashierLogin.exit}"
+                                                   Foreground="{DynamicResource PosDangerTextBrush}"
+                                                   FontWeight="Bold" />
+                                    </StackPanel>
+                                </Button>
+
+                                <TextBlock FontSize="11"
+                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                           HorizontalAlignment="Center"
+                                           Margin="0,10,0,0">
+                                    <Run Text="v" />
+                                    <Run Text="{Binding AppUpdate.CurrentVersion, Mode=OneWay}" />
+                                </TextBlock>
+                            </StackPanel>
+                            <ScrollViewer Style="{StaticResource PosVerticalTouchScrollViewerStyle}"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel>
                                 <StackPanel Orientation="Horizontal" Margin="0,0,0,20">
                                     <Border Width="38"
                                             Height="38"
@@ -1474,86 +1536,152 @@
                                     </Grid>
                                 </Border>
 
-                                <Border Margin="0,14,0,0"
-                                        Padding="14"
+                                <!-- 员工打卡：员工到店时登录框常常挂着，不用登录收银就能扫。
+                                     面板与收银页侧栏是同一个实例，程序启动时就在出码 / 登记，不依赖收银员会话；
+                                     码沿用现有渲染器（整数像素 / 模块，不插值），倒计时放在码下方，码上不压东西（L 级纠错）。 -->
+                                <Border AutomationProperties.AutomationId="CashierLoginAttendanceQrCard"
+                                        Margin="0,12,0,0"
+                                        Padding="12"
                                         Background="{DynamicResource PosSurfaceBrush}"
                                         BorderBrush="{DynamicResource PosDividerBrush}"
                                         BorderThickness="1"
-                                        CornerRadius="12">
-                                    <StackPanel Orientation="Horizontal">
-                                        <materialDesign:PackIcon Kind="BarcodeScan"
-                                                                 Width="30"
-                                                                 Height="30"
-                                                                 Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                                 VerticalAlignment="Center" />
-                                        <TextBlock Text="{loc:Loc shell.cashierLogin.scanHint}"
-                                                   FontSize="12"
-                                                   Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                   TextWrapping="Wrap"
-                                                   MaxWidth="150"
-                                                   VerticalAlignment="Center"
-                                                   Margin="12,0,0,0" />
+                                        CornerRadius="12"
+                                        Visibility="{Binding HasAttendanceQrPanel, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Orientation="Horizontal">
+                                                <materialDesign:PackIcon Kind="AccountClockOutline"
+                                                                         Width="22"
+                                                                         Height="22"
+                                                                         Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                         VerticalAlignment="Center"
+                                                                         Margin="0,0,8,0" />
+                                                <TextBlock Text="{loc:Loc shell.cashierLogin.attendanceTitle}"
+                                                           FontSize="15"
+                                                           FontWeight="Black"
+                                                           Foreground="{DynamicResource PosTextBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <TextBlock Grid.Column="1"
+                                                       Text="{loc:Loc attendance.qr.scanHint}"
+                                                       FontSize="11"
+                                                       Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                       HorizontalAlignment="Right"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Margin="8,0,0,0" />
+                                        </Grid>
+
+                                        <!-- 码图固定白底（二维码必须深色码 + 浅色底，不随主题变）。没有码时显示面板的提示文字。 -->
+                                        <Border Width="228"
+                                                Height="228"
+                                                Margin="0,8,0,0"
+                                                HorizontalAlignment="Center"
+                                                Background="White"
+                                                CornerRadius="6">
+                                            <Grid>
+                                                <Image AutomationProperties.AutomationId="CashierLoginAttendanceQrImage"
+                                                       AutomationProperties.Name="{loc:Loc attendance.qr.title}"
+                                                       Width="228"
+                                                       Height="228"
+                                                       Source="{Binding AttendanceQrPanel.QrImage}"
+                                                       Stretch="None"
+                                                       RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                                       SnapsToDevicePixels="True" />
+                                                <TextBlock Text="{Binding AttendanceQrPanel.MessageText}"
+                                                           Margin="20"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           TextAlignment="Center"
+                                                           TextWrapping="Wrap"
+                                                           Foreground="#FF56655D"
+                                                           AutomationProperties.LiveSetting="Polite">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Collapsed" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding AttendanceQrPanel.QrImage}" Value="{x:Null}">
+                                                                    <Setter Property="Visibility" Value="Visible" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Grid>
+                                        </Border>
+
+                                        <!-- 在线验证（绿）/ 离线签名（黄）+ 距离换码的秒数。 -->
+                                        <Grid Margin="0,8,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border AutomationProperties.AutomationId="CashierLoginAttendanceQrStatus"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Center"
+                                                    Padding="10,3"
+                                                    CornerRadius="12">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="{DynamicResource PosSuccessSoftBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding AttendanceQrPanel.IsOnlineVerified}" Value="False">
+                                                                <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding AttendanceQrPanel.QrImage}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Text="{Binding AttendanceQrPanel.VerificationStatusText}"
+                                                           FontSize="12"
+                                                           FontWeight="Black">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{DynamicResource PosSuccessTextBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding AttendanceQrPanel.IsOnlineVerified}" Value="False">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                            <StackPanel Grid.Column="1"
+                                                        Orientation="Horizontal"
+                                                        VerticalAlignment="Center">
+                                                <StackPanel.Style>
+                                                    <Style TargetType="StackPanel">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding AttendanceQrPanel.QrImage}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </StackPanel.Style>
+                                                <TextBlock Text="{Binding AttendanceQrPanel.SecondsRemaining}"
+                                                           FontSize="22"
+                                                           FontWeight="Black"
+                                                           Foreground="{DynamicResource PosTextBrush}"
+                                                           VerticalAlignment="Center"
+                                                           Margin="0,0,4,0" />
+                                                <TextBlock Text="{loc:Loc attendance.qr.untilNextCode}"
+                                                           FontSize="12"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                           VerticalAlignment="Center" />
+                                            </StackPanel>
+                                        </Grid>
                                     </StackPanel>
                                 </Border>
-                            </StackPanel>
-
-                            <StackPanel DockPanel.Dock="Bottom">
-                                <!-- 关键逻辑：未登录时原地复用服务器设置面板，不绕过现有校验与连接测试。 -->
-                                <ToggleButton x:Name="CashierLoginServerToggle"
-                                              Unchecked="CashierLoginServerToggleUnchecked"
-                                              AutomationProperties.AutomationId="CashierLoginServerAddressToggle"
-                                              Style="{StaticResource CashierLoginRailToggleStyle}"
-                                              Margin="0,0,0,10">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <materialDesign:PackIcon Kind="ServerNetwork"
-                                                                 Width="18"
-                                                                 Height="18"
-                                                                 Foreground="{DynamicResource PosPrimaryTextBrush}"
-                                                                 VerticalAlignment="Center"
-                                                                 Margin="0,0,8,0" />
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{loc:Loc shell.cashierLogin.serverAddress}"
-                                                   FontSize="13"
-                                                   Foreground="{DynamicResource PosTextBrush}"
-                                                   VerticalAlignment="Center" />
-                                        <materialDesign:PackIcon Grid.Column="2"
-                                                                 Kind="ChevronRight"
-                                                                 Width="18"
-                                                                 Height="18"
-                                                                 Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                                                 VerticalAlignment="Center" />
-                                    </Grid>
-                                </ToggleButton>
-
-                                <Button AutomationProperties.AutomationId="CashierLoginExitButton"
-                                        Command="{Binding ExitApplicationCommand}"
-                                        Style="{StaticResource CashierLoginExitButtonStyle}"
-                                        Height="42">
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                        <materialDesign:PackIcon Kind="Power"
-                                                                 Width="18"
-                                                                 Height="18"
-                                                                 Foreground="{DynamicResource PosDangerTextBrush}"
-                                                                 Margin="0,0,8,0" />
-                                        <TextBlock Text="{loc:Loc shell.cashierLogin.exit}"
-                                                   Foreground="{DynamicResource PosDangerTextBrush}"
-                                                   FontWeight="Bold" />
-                                    </StackPanel>
-                                </Button>
-
-                                <TextBlock FontSize="11"
-                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
-                                           HorizontalAlignment="Center"
-                                           Margin="0,10,0,0">
-                                    <Run Text="v" />
-                                    <Run Text="{Binding AppUpdate.CurrentVersion, Mode=OneWay}" />
-                                </TextBlock>
-                            </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
                         </DockPanel>
                     </Border>
 
