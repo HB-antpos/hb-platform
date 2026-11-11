@@ -40,9 +40,26 @@ function parseDay(value: string) {
   return Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86_400_000;
 }
 
+/** 排班结束时间相对工作日 00:00 的分钟（跨午夜的结束算到次日）。 */
+function scheduleEndMinutes(session: AttendanceScheduleSession) {
+  const toMinutes = (value?: string) => {
+    const match = value ? /(\d{1,2}):(\d{2})/.exec(value) : null;
+    return match ? Number(match[1]) * 60 + Number(match[2]) : undefined;
+  };
+  const start = toMinutes(session.startTime);
+  const end = toMinutes(session.endTime);
+  if (start === undefined || end === undefined) return undefined;
+  return end <= start ? end + 1440 : end;
+}
+
+/**
+ * nowMinutes：今天已过的分钟数（门店本地）。传了就能把「今天班次已经结束却一张卡都没打」判成未打卡，
+ * 不传时今天没打卡一律算「未开始」（旧行为）。
+ */
 export function classifyManagedRecord(
   session: AttendanceScheduleSession,
   today: string,
+  nowMinutes?: number,
 ): ManagedRecordIssue {
   if (session.hasMissingClockOut) return "missingClockOut";
   // 已批准请假且没有任何打卡：不算缺卡。
@@ -52,7 +69,12 @@ export function classifyManagedRecord(
   const workDay = parseDay(session.workDate);
   const todayDay = parseDay(today);
   const isPastDay = workDay !== undefined && todayDay !== undefined && workDay < todayDay;
-  if (!hasAnyPunch) return isPastDay ? "noPunch" : "notStarted";
+  if (!hasAnyPunch) {
+    if (isPastDay) return "noPunch";
+    const end = scheduleEndMinutes(session);
+    const isToday = workDay !== undefined && workDay === todayDay;
+    return isToday && nowMinutes !== undefined && end !== undefined && nowMinutes >= end ? "noPunch" : "notStarted";
+  }
   if (punches.some((punch) => punch?.status === "Late")) return "late";
   if (punches.some((punch) => punch?.status === "EarlyLeave")) return "earlyLeave";
   if (session.hasOpenSegment) return isPastDay ? "missingClockOut" : "inProgress";
@@ -140,4 +162,78 @@ export function buildAdjustmentReason(preset: string | undefined, note: string) 
   const trimmedPreset = preset?.trim() ?? "";
   if (trimmedPreset && trimmedNote) return `${trimmedPreset}：${trimmedNote}`;
   return trimmedPreset || trimmedNote;
+}
+
+// ───────────────────────── 打卡记录列表的分组与周日期 ─────────────────────────
+
+export type ManagedRecordGroupKey = "attention" | "inProgress" | "notStarted" | "done" | "onLeave";
+
+const GROUP_ORDER: ManagedRecordGroupKey[] = ["attention", "inProgress", "notStarted", "done", "onLeave"];
+
+/** 名单分组：需处理（异常）→ 工作中 → 未开始 → 已下班 → 请假。 */
+export function managedRecordGroupOf(issue: ManagedRecordIssue): ManagedRecordGroupKey {
+  if (isManagedRecordException(issue)) return "attention";
+  if (issue === "inProgress") return "inProgress";
+  if (issue === "notStarted") return "notStarted";
+  if (issue === "onLeave") return "onLeave";
+  return "done";
+}
+
+/** 按分组归并（组内沿用 sortManagedRecords 的顺序），只返回有人的组。 */
+export function groupManagedRecords<T extends { session: AttendanceScheduleSession; issue: ManagedRecordIssue }>(rows: T[]) {
+  const sorted = sortManagedRecords(rows);
+  return GROUP_ORDER
+    .map((key) => ({ key, rows: sorted.filter((row) => managedRecordGroupOf(row.issue) === key) }))
+    .filter((group) => group.rows.length > 0);
+}
+
+/** 某天所在周的周一（YYYY-MM-DD）。 */
+export function mondayOfDate(value: string) {
+  const day = parseDay(value);
+  if (day === undefined) return value;
+  const weekdayFromMonday = (((day + 3) % 7) + 7) % 7;
+  return new Date((day - weekdayFromMonday) * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** 从周一起连续 7 天。 */
+export function weekDatesFrom(monday: string) {
+  const start = parseDay(monday);
+  if (start === undefined) return [];
+  return Array.from({ length: 7 }, (_, index) => new Date((start + index) * 86_400_000).toISOString().slice(0, 10));
+}
+
+export function shiftDateString(value: string, days: number) {
+  const day = parseDay(value);
+  return day === undefined ? value : new Date((day + days) * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** 周日期条的红点：这一天有没有异常（漏下班 / 未打卡 / 迟到 / 早退）。 */
+export function datesWithExceptions(sessions: AttendanceScheduleSession[], today: string, nowMinutes?: number) {
+  const result = new Set<string>();
+  for (const session of sessions) {
+    if (isManagedRecordException(classifyManagedRecord(session, today, nowMinutes))) {
+      result.add(session.workDate.slice(0, 10));
+    }
+  }
+  return result;
+}
+
+/**
+ * 列表共用的时间轴范围（分钟）：覆盖所有人的排班与打卡，整点对齐，至少 8 小时；
+ * 刻度每 3 小时一个。points 由调用方给（排班起止、各段打卡）。
+ */
+export function buildManagedDayAxis(points: number[]) {
+  const valid = points.filter((point) => Number.isFinite(point));
+  const min = valid.length ? Math.min(...valid) : 9 * 60;
+  const max = valid.length ? Math.max(...valid) : 17 * 60;
+  let start = Math.max(0, Math.floor(min / 60) * 60);
+  let end = Math.ceil(max / 60) * 60;
+  if (end - start < 8 * 60) {
+    const pad = 8 * 60 - (end - start);
+    start = Math.max(0, start - Math.floor(pad / 120) * 60);
+    end = start + Math.max(8 * 60, end - start);
+  }
+  const ticks: number[] = [];
+  for (let tick = start; tick <= end; tick += 180) ticks.push(tick);
+  return { start, end, ticks };
 }

@@ -8,6 +8,7 @@ const sheet = readFileSync(join(directory, "ManagedPunchEditSheet.tsx"), "utf8")
 const card = readFileSync(join(directory, "ManagedPunchRecordsCard.tsx"), "utf8");
 const screen = readFileSync(join(directory, "AttendanceScreen.tsx"), "utf8");
 const adjustmentCard = readFileSync(join(directory, "PunchAdjustmentCard.tsx"), "utf8");
+const records = readFileSync(join(directory, "../../modules/attendance/attendance-managed-records.ts"), "utf8");
 
 assert.match(sheet, /runLatestAttendanceAdjustmentRequest/,
   "店长修改的 preview 与 submit 必须经过请求隔离器");
@@ -23,13 +24,15 @@ assert.match(sheet, /const isEditable = canAdjust && isWithinWindow/,
   "无权限或超出工资周窗口时只能查看");
 assert.match(sheet, /managedRecords\.auditNotice/,
   "店长直接生效前必须提示会留痕");
-assert.match(card, /classifyManagedRecord\(session, today\)/,
-  "列表必须按统一规则识别异常");
-assert.match(card, /sortManagedRecords\(/,
-  "列表必须异常优先排序");
+assert.match(card, /classifyManagedRecord\(session, today, /,
+  "列表必须按统一规则识别异常（今天带上当前时间）");
+assert.match(card, /groupManagedRecords\(/,
+  "列表必须按需处理优先分组");
+assert.match(records, /export function groupManagedRecords[\s\S]*?sortManagedRecords\(rows\)/,
+  "分组内仍须异常优先排序");
 assert.match(card, /queryKey: \["attendance", "approvals"\]/,
   "修改后必须刷新待审事项");
-assert.match(screen, /canViewManagedPunches\s*\?\s*\[\{ value: "punches"/,
+assert.match(screen, /canViewManagedPunches\s*\?\s*\[\{ key: "punches"/,
   "无 Punch.ViewManagedStore 权限时不得出现打卡记录页签");
 assert.match(screen, /canAdjust=\{access\.canAdjustAttendancePunch\}/,
   "修改入口由补卡修改权限控制");
