@@ -12,7 +12,8 @@ let mockSalesScreenProps: any;
 let mockRouteCaptureProps: any;
 let mockUpdateGate: any;
 let mockUpdatePolicy: any;
-let mockSalesRouteFocusEffect: (() => void) | null;
+// 路由里有多个 useFocusEffect（结账冻结释放、考勤码），这里全部记下，聚焦时逐个执行。
+const mockSalesRouteFocusEffects = new Set<() => unknown>();
 let mockAuthorizationState: Readonly<{ kind: string }>;
 let mockAuthorizationListener: (() => void) | null;
 let mockPresenterState: any;
@@ -94,11 +95,9 @@ jest.mock("expo-router", () => {
       React.createElement(Text, { testID: "redirect" }, href),
     useFocusEffect: (effect: () => void) => {
       React.useEffect(() => {
-        mockSalesRouteFocusEffect = effect;
+        mockSalesRouteFocusEffects.add(effect);
         return () => {
-          if (mockSalesRouteFocusEffect === effect) {
-            mockSalesRouteFocusEffect = null;
-          }
+          mockSalesRouteFocusEffects.delete(effect);
         };
       }, [effect]);
     },
@@ -225,7 +224,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSalesScreenProps = null;
   mockRouteCaptureProps = null;
-  mockSalesRouteFocusEffect = null;
+  mockSalesRouteFocusEffects.clear();
   mockAuthorizationListener = null;
   mockPresenterListener = null;
   mockAuthorizationState = { kind: "idle" };
@@ -685,10 +684,10 @@ test("从统一支付页返回收银时释放已核验 checkout，使商品录�
     },
   });
   expect(mockReleasePreparedCheckout).not.toHaveBeenCalled();
-  expect(mockSalesRouteFocusEffect).not.toBeNull();
+  expect(mockSalesRouteFocusEffects.size).toBeGreaterThan(0);
 
   await act(async () => {
-    mockSalesRouteFocusEffect?.();
+    for (const effect of mockSalesRouteFocusEffects) effect();
     await Promise.resolve();
   });
 
@@ -1251,3 +1250,66 @@ function assertUtilityResult(
 ): void {
   expect(result).toEqual({ kind: expectedKind });
 }
+
+test("考勤码只在收银页聚焦时运行：聚焦创建并启动，失焦销毁并从页面撤下", async () => {
+  const source = {
+    destroy: jest.fn(),
+    getState: jest.fn(),
+    start: jest.fn(),
+    subscribe: jest.fn(() => () => undefined),
+  };
+  const createQrController = jest.fn(() => source);
+  mockRuntime.services.attendanceAudit = {
+    createPresenter: jest.fn(),
+    createQrController,
+  };
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  });
+  // 还没聚焦：不创建考勤码。
+  expect(createQrController).not.toHaveBeenCalled();
+  expect(mockSalesScreenProps.attendanceQr).toBeNull();
+
+  const cleanups: unknown[] = [];
+  await act(async () => {
+    for (const effect of mockSalesRouteFocusEffects) cleanups.push(effect());
+    await Promise.resolve();
+  });
+  expect(createQrController).toHaveBeenCalledTimes(1);
+  expect(createQrController).toHaveBeenCalledWith();
+  expect(source.start).toHaveBeenCalledTimes(1);
+  expect(mockSalesScreenProps.attendanceQr).toBe(source);
+
+  // 失焦（进考勤页 / 付款页 / 锁屏）：销毁控制器，页面不再持有。
+  await act(async () => {
+    for (const cleanup of cleanups) {
+      if (typeof cleanup === "function") cleanup();
+    }
+    await Promise.resolve();
+  });
+  expect(source.destroy).toHaveBeenCalledTimes(1);
+  expect(mockSalesScreenProps.attendanceQr).toBeNull();
+  await screen.unmount();
+});
+
+test("考勤服务创建失败（例如没有可用的收银员 lease）时不显示考勤码，收银照常", async () => {
+  mockRuntime.services.attendanceAudit = {
+    createPresenter: jest.fn(),
+    createQrController: jest.fn(() => {
+      throw new Error("CURRENT_CASHIER_REQUIRED");
+    }),
+  };
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  });
+
+  await act(async () => {
+    for (const effect of mockSalesRouteFocusEffects) effect();
+    await Promise.resolve();
+  });
+  expect(mockSalesScreenProps.attendanceQr).toBeNull();
+  expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  await screen.unmount();
+});

@@ -1,5 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
-import { useCallback, useContext, useState } from "react";
+import { useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal, ScrollView, Text, View } from "react-native";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
@@ -53,6 +53,11 @@ export type PosNavModel = Readonly<{
   onLock?(): void;
   lockDisabled?: boolean;
   lockTestID?: string;
+  /**
+   * 固定在「更多 / 锁屏」上方的页面专属格子（收银页的「考勤」二维码入口）。
+   * 不参与固定 / 高亮逻辑，也不进「全部功能」面板；不传时侧栏与原来完全一致。
+   */
+  accessory?: ReactNode;
 }>;
 
 export type PosAppRailProps = Readonly<{
@@ -124,6 +129,7 @@ export function PosAppRail({
           />
         ))}
       </ScrollView>
+      {model.accessory ?? null}
       <View style={styles.railDivider} />
       <RailTile
         active={moreActive}

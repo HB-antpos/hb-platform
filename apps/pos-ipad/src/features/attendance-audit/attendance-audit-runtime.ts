@@ -1,4 +1,16 @@
 import type { AttendanceAuditPresenter } from "./attendance-audit-presenter";
+import type { AttendanceQrState } from "./attendance-qr-controller";
+
+/**
+ * 只用于「显示」考勤二维码的最小接口（收银页空车大码、侧栏考勤小格和放大弹窗）。
+ * 和考勤页的 presenter 一样由组合根创建，绑定当前收银员 lease；页面只能 start / destroy。
+ */
+export interface AttendanceQrDisplaySource {
+  getState(): AttendanceQrState;
+  subscribe(listener: () => void): () => void;
+  start(): void;
+  destroy(): void;
+}
 
 /**
  * 组合根注入可信设备上下文、Keychain/crypto、加密缓存、可信时间和审计读 Port。
@@ -6,6 +18,11 @@ import type { AttendanceAuditPresenter } from "./attendance-audit-presenter";
  */
 export interface AttendanceAuditRuntimeFactory {
   createPresenter(): AttendanceAuditPresenter;
+  /**
+   * 收银页用的考勤二维码（不含审计区）。可选：没有提供时收银页不显示考勤码。
+   * 同一时刻只能有一个控制器在跑（共用本机签名身份与缓存），由页面在聚焦时创建、失焦时销毁。
+   */
+  createQrController?(): AttendanceQrDisplaySource;
 }
 
 export function resolveAttendanceAuditRuntimeFactory(

@@ -27,7 +27,10 @@ const DEVICE_CODE = "IPAD-1";
 test("公开服务只提供零参数 presenter 工厂，初始 online 来自组合根连通性", () => {
   const harness = createHarness({ online: false });
 
-  assert.deepEqual(Object.keys(harness.runtime), ["createPresenter"]);
+  assert.deepEqual(Object.keys(harness.runtime), [
+    "createPresenter",
+    "createQrController",
+  ]);
   assert.equal(harness.presenter.getState().audit.online, false);
 });
 
@@ -94,6 +97,45 @@ test("destroy 只清理 QR scheduler，不删除 Keychain A256 密钥", async ()
 
   assert.equal(harness.scheduler.cancellations, 2);
   assert.equal(harness.crypto.destroyCalls, 0);
+});
+
+test("收银页考勤码：离线时用缓存身份签发，destroy 只停定时器不删密钥", async () => {
+  const harness = createHarness({ online: false });
+  const qr = harness.runtime.createQrController!();
+  qr.start();
+  await flush();
+
+  assert.equal(qr.getState().kind, "ready");
+  assert.equal(qr.getState().statusCode, "offline-signed");
+  assert.equal(qr.getState().qrImageUri, "data:image/png;base64,QQ==");
+  const cancellationsBefore = harness.scheduler.cancellations;
+  qr.destroy();
+  assert.equal(harness.scheduler.cancellations - cancellationsBefore, 2);
+  assert.equal(harness.crypto.destroyCalls, 0);
+});
+
+test("收银页考勤码：收银员登出后不再访问设备、缓存或远端登记", async () => {
+  const harness = createHarness({ online: true });
+  const qr = harness.runtime.createQrController!();
+  const deviceCallsBefore = harness.device.calls;
+  const cacheLoadsBefore = harness.cache.loadCalls;
+  harness.currentCashier.clear();
+  qr.start();
+  await flush();
+
+  assert.equal(harness.device.calls, deviceCallsBefore);
+  assert.equal(harness.cache.loadCalls, cacheLoadsBefore);
+  assert.equal(harness.security.registerCalls, 0);
+  assert.equal(qr.getState().qrImageUri, null);
+  qr.destroy();
+});
+
+test("收银页考勤码：没有已登录收银员时拒绝创建", () => {
+  const harness = createHarness({ online: true });
+  harness.currentCashier.clear();
+
+  // 中文注释：与 createPresenter 相同，没有收银员时 lease 创建即失败，路由据此不显示考勤码。
+  assert.throws(() => harness.runtime.createQrController!());
 });
 
 class MemoryCache implements AttendanceQrCachePort {

@@ -42,7 +42,9 @@ final class HBAttendanceQrCodec {
   private func renderQrDataUri(_ token: String) throws -> String {
     let filter = CIFilter.qrCodeGenerator()
     filter.message = Data(token.utf8)
-    filter.correctionLevel = "M"
+    // Q 级纠错（约 25%）：收银页的码正中压了一个倒计时圆标，遮住约 4% 面积，
+    // M 级（约 15%）余量偏紧；码会从 57 × 57 模块变成 65 × 65，显示尺寸足够。
+    filter.correctionLevel = "Q"
     guard let output = filter.outputImage else {
       throw HBAttendanceSecurityException(
         .qrRenderFailed,

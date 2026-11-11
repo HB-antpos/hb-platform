@@ -56,6 +56,13 @@ import {
 import type { CartLine, CartSnapshot } from "@/core/contracts";
 import type { NewTransactionGate } from "@/core/contracts/app-updates";
 import type { CameraScanMode } from "@/core/contracts/scanner";
+import type { AttendanceQrDisplaySource } from "@/features/attendance-audit/attendance-audit-runtime";
+import {
+  AttendanceQrEmptyCartCard,
+  AttendanceQrModal,
+  AttendanceQrRailTile,
+  useAttendanceQrState,
+} from "@/features/attendance-audit/attendance-qr-sales-panels";
 import { MAX_MANUAL_UNIT_PRICE_DISPLAY } from "@/features/sales/domain";
 import {
   CameraScannerInline,
@@ -127,6 +134,11 @@ export type SalesCartProductDetails = Readonly<{
 
 export type SalesScreenProps = Readonly<{
   presenter: SalesPresenter;
+  /**
+   * 员工打卡二维码（路由在收银页聚焦时创建、失焦时销毁）。不传或为 null 时不显示：
+   * 空购物车显示原来的「扫描商品」提示，左侧栏也没有「考勤」格子。
+   */
+  attendanceQr?: AttendanceQrDisplaySource | null;
   cameraScanner?: SalesCameraScannerControl;
   locale?: SalesLocale;
   newTransactionGate?: NewTransactionGate;
@@ -189,6 +201,7 @@ type NumericValueDisplayProps = Readonly<{
 
 export function SalesScreen({
   appVersionLabel,
+  attendanceQr = null,
   presenter,
   cameraScanner,
   locale: localeOverride,
@@ -245,6 +258,13 @@ export function SalesScreen({
   const [orderDiscountVisible, setOrderDiscountVisible] = useState(false);
   const [orderEdit, setOrderEdit] = useState<OrderEditState | null>(null);
   const [clearCartVisible, setClearCartVisible] = useState(false);
+  const attendanceQrState = useAttendanceQrState(attendanceQr);
+  const [attendanceQrModalVisible, setAttendanceQrModalVisible] =
+    useState(false);
+  useEffect(() => {
+    // 离开收银页（考勤码随之销毁）或锁屏后弹窗自动关闭，回来时不会自己弹出。
+    if (!attendanceQr) setAttendanceQrModalVisible(false);
+  }, [attendanceQr]);
   const [searchDrawerVisible, setSearchDrawerVisible] = useState(false);
   const [searchDrawerQuery, setSearchDrawerQuery] = useState("");
   const [searchResultsQuery, setSearchResultsQuery] = useState<string | null>(
@@ -1124,6 +1144,19 @@ export function SalesScreen({
       ? { onPinnedChange: onPinnedDestinationsChange }
       : {}),
     ...(onSwitchLanguage ? { onSwitchLanguage } : {}),
+    // 「考勤」格子固定在「更多 / 锁屏」上方；缩略码只是入口，点开放大再扫。
+    ...(attendanceQrState
+      ? {
+          accessory: (
+            <AttendanceQrRailTile
+              active={attendanceQrModalVisible}
+              language={locale}
+              onPress={() => setAttendanceQrModalVisible(true)}
+              state={attendanceQrState}
+            />
+          ),
+        }
+      : {}),
   };
   const cartEditingDisabled =
     cartEmpty || !state.capabilities.cartEditing || transactionActionsDisabled;
@@ -1242,7 +1275,24 @@ export function SalesScreen({
               />
             </View>
           </View>
-          {cartEmpty ? (
+          {cartEmpty && attendanceQrState ? (
+            // 空购物车直接显示大码：上班、下班、交接时员工不用收银员点任何按钮就能扫。
+            <View style={styles.emptyCartWithQr} testID="sales-cart-empty">
+              <View style={styles.emptyCartCompactHint}>
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={posColors.mutedInk}
+                  name="barcode-scan"
+                  size={22}
+                />
+                <Text style={styles.emptyCartHint}>{t("cart.emptyHint")}</Text>
+              </View>
+              <AttendanceQrEmptyCartCard
+                language={locale}
+                state={attendanceQrState}
+              />
+            </View>
+          ) : cartEmpty ? (
             <View style={styles.emptyCart} testID="sales-cart-empty">
               <MaterialCommunityIcons
                 accessible={false}
@@ -2416,6 +2466,12 @@ export function SalesScreen({
           </View>
         </View>
       </Modal>
+      <AttendanceQrModal
+        language={locale}
+        onClose={() => setAttendanceQrModalVisible(false)}
+        state={attendanceQrState}
+        visible={attendanceQrModalVisible}
+      />
     </PosScreenFrame>
   );
 }
@@ -3778,6 +3834,17 @@ const styles = createPosStyles((colors) => ({
     gap: 8,
     justifyContent: "center",
     padding: 24,
+  },
+  emptyCartCompactHint: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    paddingTop: 18,
+  },
+  emptyCartWithQr: {
+    backgroundColor: colors.surfaceAlt,
+    flex: 1,
   },
   emptyCartHint: {
     color: colors.mutedInk,
