@@ -983,7 +983,64 @@
     "readOnly": "You can't adjust punches, so this view is read-only",
     "save": "Save changes",
     "saved": "Punch updated",
-    "loadFailed": "Couldn't load punch records"
+    "loadFailed": "Couldn't load punch records",
+    "groups": {
+      "attention": "Needs action",
+      "inProgress": "Working",
+      "notStarted": "Not started",
+      "done": "Finished",
+      "onLeave": "On leave"
+    },
+    "filterGroup": "{{label}} {{count}}",
+    "tapHint": "Tap a person to view, fill in or fix",
+    "pendingBanner": "{{count}} pending item(s) this day — hours not counted yet",
+    "openApprovals": "Approvals ›",
+    "windowNote": "Punches from this week (and last week until Tuesday) can be filled in or fixed here; changes apply immediately and are logged",
+    "previousWeek": "Previous week",
+    "nextWeek": "Next week",
+    "dayHasException": "has issues",
+    "meta": {
+      "schedule": "Rostered {{start}}–{{end}}",
+      "clockIn": "In {{time}}",
+      "clockOut": "Out {{time}}",
+      "segments": "{{count}} segments",
+      "shiftPassed": "Shift ended {{duration}} ago",
+      "noPunchAllDay": "No punches all day",
+      "autoClockOut": "Auto clocked out at 00:00, unpaid",
+      "noClockOut": "No clock-out"
+    },
+    "lateBy": "Late {{minutes}} min",
+    "earlyBy": "Left {{minutes}} min early",
+    "mealDeducted": "Meal {{minutes}}m deducted",
+    "working": "Working",
+    "actions": {
+      "fillClockOut": "Add clock-out",
+      "fillPunches": "Add punches",
+      "viewDetail": "Details",
+      "pending": "{{count}} pending ›"
+    },
+    "detail": {
+      "worked": "Worked",
+      "segments": "Segments",
+      "status": "Status",
+      "segmentTitle": "Segment {{number}}",
+      "ongoing": "In progress",
+      "clockIn": "In",
+      "clockOut": "Out",
+      "notClockedOut": "Not clocked out yet",
+      "missing": "Missing",
+      "edit": "Edit",
+      "fill": "Add",
+      "viaQr": "Scanned till QR code",
+      "device": "Device {{code}}",
+      "location": "Location ±{{meters}}m",
+      "pendingFix": "Punch fix pending: {{text}}",
+      "openApprovals": "Review ›",
+      "editPunches": "Edit punches",
+      "addSegment": "Add a segment",
+      "noSegments": "No punches for this shift yet",
+      "close": "Close"
+    }
   },
   "myAttendance": {
     "today": "Today",
@@ -1044,5 +1101,16 @@
     "scheduleSavedWithWarnings": "Shift saved with {{count}} minor employment warning(s)",
     "reminderLink": "Minor employment reminders",
     "cellWarning": "Minor employment warning"
+  },
+  "managementHome": {
+    "today": "Today · {{date}}",
+    "pullToRefresh": "Pull to refresh",
+    "onDuty": "On duty",
+    "attention": "Needs action",
+    "viewList": "Review ›",
+    "pending": "Pending",
+    "openApprovals": "Approvals ›",
+    "weekHours": "Hours this week",
+    "openHours": "Hours ›"
   }
 }

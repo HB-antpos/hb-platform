@@ -10,6 +10,12 @@ import {
   resolveLocalPunchDayOffset,
   shiftLocalPunchTime,
   sortManagedRecords,
+  buildManagedDayAxis,
+  datesWithExceptions,
+  groupManagedRecords,
+  mondayOfDate,
+  shiftDateString,
+  weekDatesFrom,
 } from "./attendance-managed-records";
 import { normalizeAttendanceToday } from "./attendance-today-normalization";
 import type { AttendanceScheduleSession } from "./types";
@@ -83,5 +89,46 @@ assert.equal(shiftLocalPunchTime("bad", 5, "2026-05-18"), "bad");
 assert.equal(buildAdjustmentReason("忘记打卡", "  "), "忘记打卡");
 assert.equal(buildAdjustmentReason("其他", "手机没信号"), "其他：手机没信号");
 assert.equal(buildAdjustmentReason(undefined, " 说明 "), "说明");
+
+
+// 今天班次已结束却没打卡：传了当前时间就判「未打卡」，还没到结束时间仍是「未开始」。
+assert.equal(classifyManagedRecord(session({ segments: [] }), "2026-05-18", 17 * 60 + 5), "noPunch");
+assert.equal(classifyManagedRecord(session({ segments: [] }), "2026-05-18", 12 * 60), "notStarted");
+// 跨午夜班次（22:00–06:00）当天 23:00 还没结束。
+assert.equal(classifyManagedRecord(session({ startTime: "22:00:00", endTime: "06:00:00", segments: [] }), "2026-05-18", 23 * 60), "notStarted");
+
+// 分组：需处理 → 工作中 → 未开始 → 已下班 → 请假，空组不返回。
+{
+  const rows = [
+    { session: session({ scheduleGuid: "n" }), issue: "normal" as const },
+    { session: session({ scheduleGuid: "l" }), issue: "late" as const },
+    { session: session({ scheduleGuid: "v" }), issue: "onLeave" as const },
+    { session: session({ scheduleGuid: "p" }), issue: "inProgress" as const },
+    { session: session({ scheduleGuid: "m" }), issue: "missingClockOut" as const },
+  ];
+  const groups = groupManagedRecords(rows);
+  assert.deepEqual(groups.map((group) => group.key), ["attention", "inProgress", "done", "onLeave"]);
+  assert.deepEqual(groups[0].rows.map((row) => row.session.scheduleGuid), ["m", "l"]);
+}
+
+// 周日期：周三所在周的周一，及连续 7 天。
+assert.equal(mondayOfDate("2026-11-11"), "2026-11-09");
+assert.equal(mondayOfDate("2026-11-15"), "2026-11-09");
+assert.equal(mondayOfDate("2026-11-09"), "2026-11-09");
+assert.deepEqual(weekDatesFrom("2026-11-09"), ["2026-11-09", "2026-11-10", "2026-11-11", "2026-11-12", "2026-11-13", "2026-11-14", "2026-11-15"]);
+assert.equal(shiftDateString("2026-11-09", -7), "2026-11-02");
+
+// 红点：只标有异常的日子。
+assert.deepEqual(
+  [...datesWithExceptions([
+    session({ workDate: "2026-05-18", segments: [{ clockIn: clockIn("Late"), clockOut: clockOut() }] }),
+    session({ workDate: "2026-05-19", segments: [{ clockIn: clockIn(), clockOut: clockOut() }] }),
+  ], "2026-05-20")],
+  ["2026-05-18"],
+);
+
+// 时间轴：整点对齐，至少 8 小时，3 小时一个刻度。
+assert.deepEqual(buildManagedDayAxis([8 * 60 + 52, 20 * 60]), { start: 480, end: 1200, ticks: [480, 660, 840, 1020, 1200] });
+assert.deepEqual(buildManagedDayAxis([10 * 60, 14 * 60]).end - buildManagedDayAxis([10 * 60, 14 * 60]).start, 480);
 
 console.log("attendance-managed-records.test.ts: ok");
