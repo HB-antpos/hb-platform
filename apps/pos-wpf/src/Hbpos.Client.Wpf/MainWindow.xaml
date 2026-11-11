@@ -1576,12 +1576,13 @@
                                                        Margin="8,0,0,0" />
                                         </Grid>
 
-                                        <!-- 码图固定白底（二维码必须深色码 + 浅色底，不随主题变）。没有码时显示面板的提示文字。 -->
+                                        <!-- 码图本身是 PNG（深色码 + 自带白色静区），不随主题变；外框用主题表面色，和收银页放大弹窗一致。
+                                             没有码时显示面板的提示文字。 -->
                                         <Border Width="228"
                                                 Height="228"
                                                 Margin="0,8,0,0"
                                                 HorizontalAlignment="Center"
-                                                Background="White"
+                                                Background="{DynamicResource PosSurfaceBrush}"
                                                 CornerRadius="6">
                                             <Grid>
                                                 <Image AutomationProperties.AutomationId="CashierLoginAttendanceQrImage"
@@ -1598,7 +1599,7 @@
                                                            VerticalAlignment="Center"
                                                            TextAlignment="Center"
                                                            TextWrapping="Wrap"
-                                                           Foreground="#FF56655D"
+                                                           Foreground="{DynamicResource PosMutedForegroundBrush}"
                                                            AutomationProperties.LiveSetting="Polite">
                                                     <TextBlock.Style>
                                                         <Style TargetType="TextBlock">
