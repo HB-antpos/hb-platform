@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, IconButton, Text } from "react-native-paper";
 import type zhRoleCopy from "@/locales/zh/identityRoles.json";
@@ -9,6 +10,14 @@ import { fillCopy, type PeopleRolesCopy } from "./people-roles-copy";
 import type { IdentityRoleUser, IdentityUser } from "./types";
 import { AdminEmpty, AdminError, SearchField } from "./ui";
 import { quoteName } from "@/shared/i18n/punctuation";
+import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { UserPickerFilterBar, UserPickerPage, useUserPickerPageTitle, type PickerOption } from "./user-picker-filter-bar";
+import {
+  USER_PICKER_SEARCH_DELAY_MS,
+  hasActiveUserPickerFilters,
+  type UserPickerFilters,
+  type UserPickerPageKind,
+} from "./user-picker-logic";
 
 type RoleCopy = typeof zhRoleCopy;
 
@@ -151,6 +160,15 @@ export function RoleAddMembersSheet({
   onLoadMore,
   selected,
   onToggle,
+  filters,
+  onFiltersChange,
+  storeOptions,
+  roleOptions,
+  myStoreGuids,
+  showStoreFilter,
+  showRoleFilter,
+  filterOptionsFailed,
+  onRetryFilterOptions,
   onCancel,
   onSubmit,
   submitting,
@@ -170,12 +188,52 @@ export function RoleAddMembersSheet({
   onLoadMore: () => void;
   selected: readonly string[];
   onToggle: (userGuid: string) => void;
+  /** 分店 / 角色 / 排序筛选（状态在页面里，因为它们是查询参数）。 */
+  filters: UserPickerFilters;
+  onFiltersChange: (next: UserPickerFilters) => void;
+  storeOptions: readonly PickerOption[];
+  roleOptions: readonly PickerOption[];
+  myStoreGuids: readonly string[];
+  showStoreFilter: boolean;
+  showRoleFilter: boolean;
+  filterOptionsFailed: boolean;
+  onRetryFilterOptions: () => void;
   onCancel: () => void;
   onSubmit: () => void;
   submitting: boolean;
   /** 添加失败的原因：原生 Snackbar 在弹层打开时会被盖住，必须就地显示 */
   notice?: string;
 }) {
+  const { t } = useAppTranslation("people");
+  // 二级选择页（分店 / 角色 / 排序）在同一个弹层里原地切换，不叠第二个弹层。
+  const [page, setPage] = useState<UserPickerPageKind>("main");
+  const pageTitle = useUserPickerPageTitle(page === "main" ? "store" : page);
+  const filtered = hasActiveUserPickerFilters(filters) || search.trim() !== "";
+  if (page !== "main") {
+    return (
+      <AdminBottomSheet
+        title={pageTitle}
+        closeLabel={legacy.cancel}
+        onDismiss={onCancel}
+        dismissable={!submitting}
+        onBack={() => setPage("main")}
+        backLabel={t("picker.back")}
+        fullHeight
+      >
+        <UserPickerPage
+          kind={page}
+          filters={filters}
+          storeOptions={storeOptions}
+          roleOptions={roleOptions}
+          myStoreGuids={myStoreGuids}
+          onChange={(next) => {
+            onFiltersChange({ ...filters, ...next });
+            setPage("main");
+          }}
+        />
+      </AdminBottomSheet>
+    );
+  }
   return (
     <AdminBottomSheet
       title={legacy.addMembers}
@@ -183,7 +241,27 @@ export function RoleAddMembersSheet({
       closeLabel={legacy.cancel}
       onDismiss={onCancel}
       dismissable={!submitting}
-      header={<SearchField value={search} onChange={onSearch} placeholder={legacy.availableSearch} />}
+      fullHeight
+      header={(
+        <>
+          <SearchField value={search} onChange={onSearch} placeholder={legacy.availableSearch} emitDelayMs={USER_PICKER_SEARCH_DELAY_MS} />
+          <UserPickerFilterBar
+            filters={filters}
+            storeOptions={storeOptions}
+            roleOptions={roleOptions}
+            showStore={showStoreFilter}
+            showRole={showRoleFilter}
+            disabled={false}
+            onOpen={setPage}
+            onClear={(kind) => onFiltersChange({ ...filters, ...(kind === "store" ? { storeGuid: "" } : { roleGuid: "" }) })}
+          />
+          {filterOptionsFailed ? (
+            <Pressable accessibilityRole="button" onPress={onRetryFilterOptions}>
+              <Text style={styles.optionsFailed}>{t("sheet.optionsFailed")}</Text>
+            </Pressable>
+          ) : null}
+        </>
+      )}
       notice={notice ? <NoticeBox tone="red" icon="alert-circle-outline">{notice}</NoticeBox> : undefined}
       footer={(
         <>
@@ -199,7 +277,21 @@ export function RoleAddMembersSheet({
       ) : error ? (
         <AdminError error={error} onRetry={onRetry} />
       ) : users.length === 0 && !hasMore ? (
-        <AdminEmpty text={legacy.noAvailableUsers} />
+        <>
+          <AdminEmpty text={legacy.noAvailableUsers} />
+          {filtered ? (
+            <Button
+              mode="outlined"
+              compact
+              onPress={() => {
+                onFiltersChange({ ...filters, storeGuid: "", roleGuid: "" });
+                onSearch("");
+              }}
+            >
+              {t("picker.clearFilters")}
+            </Button>
+          ) : null}
+        </>
       ) : (
         <>
           <View style={styles.sheetCard}>
@@ -261,4 +353,5 @@ const styles = StyleSheet.create({
   sheetName: { color: C.textPrimary, fontSize: 14.5, fontWeight: "700" },
   sheetNickname: { color: "#667085", fontSize: 12.5, fontWeight: "600" },
   sheetMeta: { color: C.textSecondary, fontSize: 12.5 },
+  optionsFailed: { color: C.danger, fontSize: 12.5 },
 });

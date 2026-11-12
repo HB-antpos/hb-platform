@@ -69,6 +69,8 @@ import {
 import { getRoleMenuDefinitions } from "./role-menu-catalog";
 import { AdminError } from "./ui";
 import { useIdentitySession } from "./user-hooks";
+import { useUserPickerFilterOptions } from "./use-user-picker-filter-options";
+import { DEFAULT_USER_PICKER_FILTERS, buildUserPickerFilterKey, buildUserPickerQuery, type UserPickerFilters } from "./user-picker-logic";
 
 type DetailTab = "profile" | "permissions" | "members" | "menus";
 
@@ -120,7 +122,9 @@ function RoleDetailScreenContent({ roleGuid }: { roleGuid: string }) {
   const [permissionSearch, setPermissionSearch] = useState("");
   const [onlySelectedPermissions, setOnlySelectedPermissions] = useState(false);
   const [memberSearch, setMemberSearch] = useState("");
+  // 搜索词由搜索框自己防抖（停手 300ms 才通知上层），这里直接就是「可以拿去查」的值。
   const [addSearch, setAddSearch] = useState("");
+  const [addFilters, setAddFilters] = useState<UserPickerFilters>(DEFAULT_USER_PICKER_FILTERS);
   const [addOpen, setAddOpen] = useState(false);
   const [addNotice, setAddNotice] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
@@ -175,16 +179,22 @@ function RoleDetailScreenContent({ roleGuid }: { roleGuid: string }) {
     queryFn: ({ signal }) => fetchAllRoleUsers(roleGuid, actorKey, signal),
   });
   const availableUsersQuery = useInfiniteQuery({
-    queryKey: ["identity-admin", actorKey, "roleAvailableUsers", roleGuid, addSearch.trim()],
+    queryKey: ["identity-admin", actorKey, "roleAvailableUsers", roleGuid, ...buildUserPickerFilterKey(addSearch, addFilters)],
     enabled: canOpen && !isCreate && addOpen && capabilities.canManageUsers && membersEditable && !writeForbidden && allMemberIdsQuery.isSuccess,
     retry: false,
     initialPageParam: 1,
     queryFn: async ({ pageParam, signal }) => {
-      const page = await fetchIdentityUsers({ page: pageParam, pageSize: 100, search: addSearch.trim() || undefined }, actorKey, signal);
+      const page = await fetchIdentityUsers(buildUserPickerQuery(addSearch, addFilters, pageParam, 100), actorKey, signal);
       const assigned = new Set((allMemberIdsQuery.data ?? []).map((member) => member.userGUID));
       return { ...page, items: page.items.filter((user) => !assigned.has(user.userGUID)) };
     },
     getNextPageParam: (lastPage) => lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined,
+  });
+
+  // 分店 / 角色选项（与人员管理列表同口径、同缓存）：添加成员弹层打开时才取。
+  const addFilterOptions = useUserPickerFilterOptions({
+    enabled: addOpen && capabilities.canManageUsers && membersEditable && !writeForbidden,
+    language: appLanguage,
   });
 
   const profileDirty = draft.roleName.trim() !== baseline.roleName.trim()
@@ -714,7 +724,7 @@ function RoleDetailScreenContent({ roleGuid }: { roleGuid: string }) {
               onRetry={() => void membersQuery.refetch()}
               canManage={membersManageable}
               derived={roleKind.isDerived}
-              onAdd={() => { setAddSearch(""); setSelectedUsers([]); setAddNotice(""); setAddOpen(true); }}
+              onAdd={() => { setAddSearch(""); setAddFilters(DEFAULT_USER_PICKER_FILTERS); setSelectedUsers([]); setAddNotice(""); setAddOpen(true); }}
               onRemove={(member) => {
                 const name = resolvePersonName({ fullName: member.fullName, givenName: member.givenName, familyName: member.familyName, nickname: member.nickname, username: member.username }).primary;
                 Alert.alert(copy.removeTitle, fillCopy(copy.removeMessage, { name }), [
@@ -758,6 +768,15 @@ function RoleDetailScreenContent({ roleGuid }: { roleGuid: string }) {
             onLoadMore={() => void availableUsersQuery.fetchNextPage()}
             selected={selectedUsers}
             onToggle={(userGuid) => setSelectedUsers((current) => current.includes(userGuid) ? current.filter((guid) => guid !== userGuid) : [...current, userGuid])}
+            filters={addFilters}
+            onFiltersChange={setAddFilters}
+            storeOptions={addFilterOptions.storeOptions}
+            roleOptions={addFilterOptions.roleOptions}
+            myStoreGuids={addFilterOptions.myStoreGuids}
+            showStoreFilter={addFilterOptions.showStore}
+            showRoleFilter={addFilterOptions.showRole}
+            filterOptionsFailed={addFilterOptions.loadFailed}
+            onRetryFilterOptions={addFilterOptions.retry}
             onCancel={() => setAddOpen(false)}
             onSubmit={() => { setAddNotice(""); addMembersMutation.mutate(); }}
             submitting={addMembersMutation.isPending}

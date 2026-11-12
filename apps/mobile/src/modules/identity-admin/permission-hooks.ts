@@ -39,7 +39,8 @@ export const permissionQueryKeys = {
   permissionRoles: (actorKey: string, code: string) => ["identity-admin", actorKey, "permissionRoles", code.toLocaleLowerCase()] as const,
   allRoles: (actorKey: string) => ["identity-admin", actorKey, "permissionAllRoles"] as const,
   permissionUsers: (actorKey: string, code: string) => ["identity-admin", actorKey, "permissionUsers", code.toLocaleLowerCase()] as const,
-  permissionUserCandidates: (actorKey: string, search: string) => ["identity-admin", actorKey, "permissionUserCandidates", search] as const,
+  // filterKey = 搜索词 / 分店 / 角色 / 排序（buildUserPickerFilterKey），任何一个变化都从第一页重新取。
+  permissionUserCandidates: (actorKey: string, filterKey: readonly string[]) => ["identity-admin", actorKey, "permissionUserCandidates", ...filterKey] as const,
 };
 
 /**

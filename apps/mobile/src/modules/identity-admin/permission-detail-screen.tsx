@@ -39,13 +39,38 @@ import {
 } from "./permission-logic";
 import { interpolatePermissionCopy as interpolate, permissionQueryKeys, usePermissionCopy, usePermissionItems, usePermissionSession } from "./permission-hooks";
 import { AdminEmpty, AdminError } from "./ui";
-import { identityDate, useIdentitySearch } from "./user-hooks";
+import { identityDate } from "./user-hooks";
+import {
+  DEFAULT_USER_PICKER_FILTERS,
+  buildUserPickerFilterKey,
+  buildUserPickerQuery,
+  countSelectedOutsideResults,
+  hasActiveUserPickerFilters,
+  type UserPickerFilters,
+} from "./user-picker-logic";
+import { useUserPickerFilterOptions } from "./use-user-picker-filter-options";
 import { labelColon } from "@/shared/i18n/punctuation";
 
-type PermissionUserLite = Pick<IdentityRoleUser, "userGUID" | "username" | "email" | "fullName" | "isActive">;
+type PermissionUserLite = Pick<IdentityRoleUser, "userGUID" | "username" | "email" | "fullName" | "isActive"> & {
+  /** 用户列表接口随行返回的角色名 / 分店名；「已分配用户」接口没有这两项。 */
+  roleNames?: string[];
+  storeNames?: string[];
+};
 
 function toPermissionUserLite(user: PermissionUserLite): PermissionUserLite {
-  return { userGUID: user.userGUID, username: user.username, email: user.email, isActive: user.isActive, ...(user.fullName ? { fullName: user.fullName } : {}) };
+  return {
+    userGUID: user.userGUID,
+    username: user.username,
+    email: user.email,
+    isActive: user.isActive,
+    ...(user.fullName ? { fullName: user.fullName } : {}),
+    ...(user.roleNames?.length ? { roleNames: user.roleNames } : {}),
+    ...(user.storeNames?.length ? { storeNames: user.storeNames } : {}),
+  };
+}
+
+function sameNames(a?: readonly string[], b?: readonly string[]) {
+  return (a ?? []).join("|") === (b ?? []).join("|");
 }
 
 function matchesPermissionUser(user: PermissionUserLite, keyword: string) {
@@ -92,8 +117,10 @@ function PermissionDetailContent({ code }: { code: string }) {
   const [assignNotice, setAssignNotice] = useState("");
   const [userAssignNotice, setUserAssignNotice] = useState("");
   const [userAssignOpen, setUserAssignOpen] = useState(false);
+  // 搜索词由搜索框自己防抖（停手 300ms 才通知上层），所以这里直接就是「可以拿去查」的值。
   const [userSearch, setUserSearch] = useState("");
-  const debouncedUserSearch = useIdentitySearch(userSearch);
+  const debouncedUserSearch = userSearch.trim();
+  const [userFilters, setUserFilters] = useState<UserPickerFilters>(DEFAULT_USER_PICKER_FILTERS);
   const [onlySelectedUsers, setOnlySelectedUsers] = useState(false);
   // 复用 GUID 集合草稿：baseline 为服务端直接授权用户，保存时只提交增量。
   const [userAssignment, setUserAssignment] = useState<RoleAssignmentDraft | null>(null);
@@ -124,12 +151,17 @@ function PermissionDetailContent({ code }: { code: string }) {
     queryFn: ({ signal }) => fetchIdentityPermissionUsers(code, actorKey, signal),
   });
   const userCandidatesQuery = useInfiniteQuery({
-    queryKey: permissionQueryKeys.permissionUserCandidates(actorKey, debouncedUserSearch),
+    queryKey: permissionQueryKeys.permissionUserCandidates(actorKey, buildUserPickerFilterKey(debouncedUserSearch, userFilters)),
     enabled: userAssignOpen && capabilities.canManage && !writeForbidden,
     retry: false,
     initialPageParam: 1,
-    queryFn: ({ pageParam, signal }) => fetchIdentityUsers({ page: pageParam, pageSize: 50, search: debouncedUserSearch || undefined }, actorKey, signal),
+    queryFn: ({ pageParam, signal }) => fetchIdentityUsers(buildUserPickerQuery(debouncedUserSearch, userFilters, pageParam), actorKey, signal),
     getNextPageParam: (lastPage) => lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined,
+  });
+
+  const pickerOptions = useUserPickerFilterOptions({
+    enabled: userAssignOpen && capabilities.canManage && !writeForbidden,
+    language: appLanguage,
   });
 
   const isLockedRole = useCallback(
@@ -164,8 +196,14 @@ function PermissionDetailContent({ code }: { code: string }) {
       const next = new Map(current);
       for (const user of incoming) {
         const previous = next.get(user.userGUID);
-        if (!previous || previous.username !== user.username || previous.fullName !== user.fullName || previous.email !== user.email || previous.isActive !== user.isActive) {
-          next.set(user.userGUID, toPermissionUserLite(user));
+        const lite = toPermissionUserLite(user);
+        if (previous?.roleNames && !lite.roleNames) lite.roleNames = previous.roleNames;
+        if (previous?.storeNames && !lite.storeNames) lite.storeNames = previous.storeNames;
+        if (
+          !previous || previous.username !== lite.username || previous.fullName !== lite.fullName || previous.email !== lite.email
+          || previous.isActive !== lite.isActive || !sameNames(previous.roleNames, lite.roleNames) || !sameNames(previous.storeNames, lite.storeNames)
+        ) {
+          next.set(user.userGUID, lite);
           changed = true;
         }
       }
@@ -353,6 +391,20 @@ function PermissionDetailContent({ code }: { code: string }) {
     [allRolesQuery.data, assignment?.selected, isLockedRole],
   );
 
+  // 勾选回调保持引用稳定，行组件（memo）才不会因为页面重绘而全部重绘。
+  const handleToggleUser = useCallback(
+    (userGuid: string) => setUserAssignment((current) => current ? toggleRoleAssignment(current, userGuid) : current),
+    [],
+  );
+  const candidateTotal = userCandidatesQuery.data?.pages[0]?.total;
+  // 筛选 / 搜索时，已勾选但不在当前结果里的人数；结果没加载完时不提示（它们可能只是在没加载的页里）。
+  const hiddenSelectedCount = useMemo(() => {
+    if (!userAssignOpen || onlySelectedUsers) return 0;
+    if (!hasActiveUserPickerFilters(userFilters) && debouncedUserSearch === "") return 0;
+    const allLoaded = !userCandidatesQuery.isPending && !userCandidatesQuery.hasNextPage;
+    return countSelectedOutsideResults(userAssignment?.selected ?? [], sheetUsers.map((user) => user.userGUID), allLoaded);
+  }, [debouncedUserSearch, onlySelectedUsers, sheetUsers, userAssignOpen, userAssignment?.selected, userCandidatesQuery.hasNextPage, userCandidatesQuery.isPending, userFilters]);
+
   const handleBack = useCallback(() => backToHubTab(router, "permissions"), [router]);
   const confirmDelete = () => {
     if (!item) return;
@@ -410,7 +462,7 @@ function PermissionDetailContent({ code }: { code: string }) {
         mode="contained"
         style={styles.footerButton}
         disabled={!canWrite || !canViewUsers || assignedUsersQuery.isPending || Boolean(assignedUsersQuery.error)}
-        onPress={() => { setUserSearch(""); setOnlySelectedUsers(false); setUserAssignNotice(""); setUserAssignOpen(true); }}
+        onPress={() => { setUserSearch(""); setUserFilters(DEFAULT_USER_PICKER_FILTERS); setOnlySelectedUsers(false); setUserAssignNotice(""); setUserAssignOpen(true); }}
       >
         {copy.assignUsers}
       </Button>
@@ -562,7 +614,18 @@ function PermissionDetailContent({ code }: { code: string }) {
             onSearch={setUserSearch}
             onlySelected={onlySelectedUsers}
             onToggleOnlySelected={() => setOnlySelectedUsers((value) => !value)}
-            onToggle={(userGuid) => setUserAssignment((current) => current ? toggleRoleAssignment(current, userGuid) : current)}
+            onToggle={handleToggleUser}
+            filters={userFilters}
+            onFiltersChange={setUserFilters}
+            storeOptions={pickerOptions.storeOptions}
+            roleOptions={pickerOptions.roleOptions}
+            myStoreGuids={pickerOptions.myStoreGuids}
+            showStoreFilter={pickerOptions.showStore}
+            showRoleFilter={pickerOptions.showRole}
+            filterOptionsFailed={pickerOptions.loadFailed}
+            onRetryFilterOptions={pickerOptions.retry}
+            total={onlySelectedUsers ? undefined : candidateTotal}
+            hiddenSelectedCount={hiddenSelectedCount}
             loading={!onlySelectedUsers && userCandidatesQuery.isPending}
             error={!onlySelectedUsers ? userCandidatesQuery.error : null}
             onRetry={() => void userCandidatesQuery.refetch()}

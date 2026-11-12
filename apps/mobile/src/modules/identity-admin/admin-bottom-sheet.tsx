@@ -40,6 +40,15 @@ export interface AdminBottomSheetProps {
   footer?: ReactNode;
   /** 默认用 ScrollView 包住内容；内容自带 FlatList 时传 false，避免虚拟列表嵌进 ScrollView */
   scroll?: boolean;
+  /** 标题左侧的返回按钮（二级选择页用）；必须同时给 backLabel。 */
+  onBack?: () => void;
+  backLabel?: string;
+  /**
+   * 固定高度：弹层始终撑到最大高度，不随内容条数变高变矮。
+   * 底部弹层靠底对齐，内容一变矮，顶部的搜索框就会跟着往下掉；输入过程中结果条数一直在变，
+   * 输入框位移会干扰输入法组词，所以选人弹层用固定高度，二级页切换时也不会跳动。
+   */
+  fullHeight?: boolean;
   children: ReactNode;
 }
 
@@ -62,6 +71,9 @@ export function AdminBottomSheet({
   notice,
   footer,
   scroll = true,
+  onBack,
+  backLabel,
+  fullHeight = false,
   children,
 }: AdminBottomSheetProps) {
   const insets = useSafeAreaInsets();
@@ -81,11 +93,22 @@ export function AdminBottomSheet({
         style={[styles.wrapper, { marginBottom: keyboardHeight }]}
         contentContainerStyle={[
           styles.sheet,
-          { maxHeight, paddingBottom: keyboardHeight > 0 ? HB_SPACING.sm : Math.max(insets.bottom, HB_SPACING.sm) },
+          fullHeight ? { height: maxHeight } : { maxHeight },
+          { paddingBottom: keyboardHeight > 0 ? HB_SPACING.sm : Math.max(insets.bottom, HB_SPACING.sm) },
         ]}
       >
         <View style={styles.handle} />
-        <View style={styles.titleRow}>
+        <View style={[styles.titleRow, onBack && styles.titleRowWithBack]}>
+          {onBack ? (
+            <IconButton
+              icon="chevron-left"
+              accessibilityLabel={backLabel}
+              onPress={onBack}
+              disabled={!dismissable}
+              iconColor={HB_COLORS.textSecondary}
+              style={styles.back}
+            />
+          ) : null}
           <View style={styles.heading}>
             <Text accessibilityRole="header" style={styles.title} numberOfLines={2}>{title}</Text>
             {subtitle || subtitleCode ? (
@@ -109,7 +132,7 @@ export function AdminBottomSheet({
         {notice ? <View style={styles.notice}>{notice}</View> : null}
         {scroll ? (
           <ScrollView
-            style={styles.scroll}
+            style={fullHeight ? styles.scrollFill : styles.scroll}
             contentContainerStyle={styles.content}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
@@ -139,6 +162,7 @@ const styles = StyleSheet.create({
   },
   handle: { alignSelf: "center", backgroundColor: HB_COLORS.outline, borderRadius: 2, height: 4, marginTop: 8, width: 40 },
   titleRow: { alignItems: "center", flexDirection: "row", gap: HB_SPACING.xs, minHeight: 60, paddingLeft: HB_SPACING.md, paddingRight: HB_SPACING.xxs },
+  titleRowWithBack: { paddingLeft: HB_SPACING.xxs },
   heading: { flex: 1, gap: 2, minWidth: 0 },
   title: { color: HB_COLORS.textPrimary, fontSize: 18, fontWeight: "700", lineHeight: 26 },
   subtitle: { color: HB_COLORS.textSecondary, fontSize: 12.5, lineHeight: 18 },
@@ -146,7 +170,9 @@ const styles = StyleSheet.create({
   close: { margin: 0 },
   fixedHeader: { gap: HB_SPACING.xs, paddingBottom: HB_SPACING.xs, paddingHorizontal: HB_SPACING.md },
   notice: { paddingBottom: HB_SPACING.xs, paddingHorizontal: HB_SPACING.md },
+  back: { margin: 0, marginRight: -HB_SPACING.xxs },
   scroll: { flexGrow: 0, flexShrink: 1 },
+  scrollFill: { flex: 1, minHeight: 0 },
   content: { gap: HB_SPACING.sm, paddingBottom: HB_SPACING.sm, paddingHorizontal: HB_SPACING.md },
   custom: { flexShrink: 1, minHeight: 0 },
   footer: {

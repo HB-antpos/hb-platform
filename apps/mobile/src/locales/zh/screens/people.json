@@ -123,6 +123,30 @@
     "clearStore": "清除分店",
     "roleHint": "仅显示等级低于你的角色"
   },
+  "picker": {
+    "clearRole": "清除角色",
+    "rolePageTitle": "选择角色",
+    "sortPageTitle": "排序方式",
+    "allRoles": "全部角色",
+    "back": "返回",
+    "total": "共 {{count}} 人",
+    "selectedCount": "已选 {{count}}",
+    "hiddenSelected": "另有 {{count}} 名已选用户不在当前结果中",
+    "viewSelected": "查看",
+    "emptyConditions": "当前条件：{{conditions}}",
+    "emptyHint": "放宽条件再试，或清除全部筛选",
+    "clearFilters": "清除筛选",
+    "conditionStore": "分店 {{name}}",
+    "conditionRole": "角色 {{name}}",
+    "conditionKeyword": "关键字 {{keyword}}",
+    "moreStores": "等 {{count}} 家",
+    "moreRoles": "+{{count}}",
+    "sortHint": {
+      "lastLoginAt": "最近登录的排在前面（默认）",
+      "username": "按账号字母升序",
+      "fullName": "按姓名字母升序"
+    }
+  },
   "rolesList": {
     "noAccess": "当前会话无权访问角色列表",
     "empty": "暂无角色",
