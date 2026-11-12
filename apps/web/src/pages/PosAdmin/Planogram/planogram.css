@@ -413,6 +413,15 @@
   min-width: 270px;
 }
 
+/*
+ * 仓库分类是 maxTagCount="responsive" 的多选框，必须固定宽度：只写 min-width 时宽度随已选标签变化，
+ * rc-overflow 反复重算「显示几个标签」，选了「一级分类（含子类）」这类连续汉字标签后会在标签与「+ N ...」之间持续闪烁
+ * （Edge 实测 3 秒 180 次不收敛）。320px 能完整放下「节日装饰用品（含子类）」，更长的路径收成「+ N ...」。
+ */
+.planogram-filter-select.is-warehouse {
+  width: 320px;
+}
+
 .planogram-filter-label {
   color: #8c8c8c;
   white-space: nowrap;
@@ -902,7 +911,8 @@
   .planogram-search,
   .planogram-search.is-wide,
   .planogram-plan-shelf-filter,
-  .planogram-filter-select {
+  .planogram-filter-select,
+  .planogram-filter-select.is-warehouse {
     width: 100%;
   }
 

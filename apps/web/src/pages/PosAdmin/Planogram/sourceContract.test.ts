@@ -413,6 +413,10 @@ assert(batchModalSource.includes('skipReasonKey(item.reason)') && batchModalSour
 assert(batchModalSource.includes("edit.error.kind === 'conflict'") && batchEditHookSource.includes("view.kind === 'conflict'") && batchEditHookSource.includes('IDLE_BATCH_PREVIEW'), '并发冲突：黄色提示，预览作废，引导重新预览')
 
 assert(filterControlsSource.includes('filter.ensureLoaded()') && filterControlsSource.includes('aria-pressed={on}') && filterControlsSource.includes('maxTagCount="responsive"'), '分类控件首次打开才加载；等级是 aria-pressed 的按钮；仓库分类多选')
+// maxTagCount="responsive" 依赖固定宽度：只写 min-width 时选了「一级分类（含子类）」这类连续汉字标签会持续闪烁（Edge 实测 3 秒 180 次不收敛）。
+assert(filterControlsSource.includes("variant === 'bar' ? ' is-warehouse' : ''"), '筛选条里的仓库分类多选带 is-warehouse（弹层变体由外层给宽度）')
+assert(/\.planogram-filter-select\.is-warehouse\s*\{\s*width:\s*\d+px;/.test(css), '仓库分类多选必须固定宽度，不能只靠 min-width 让宽度随标签变化')
+assert(css.slice(css.indexOf('@media (max-width: 767px)')).includes('.planogram-filter-select.is-warehouse'), '窄屏下仓库分类多选仍要撑满一行，不能被固定宽度盖掉')
 assert(gradeDisplaySource.includes("from '../../../types/productGrade'") && gradeDisplaySource.includes('PRODUCT_GRADE_CONFIG'), '等级颜色复用 PRODUCT_GRADE_CONFIG')
 assert(!/#[0-9a-fA-F]{6}/.test(gradeTagSource + filterControlsSource), '等级颜色不在组件里另写死')
 
