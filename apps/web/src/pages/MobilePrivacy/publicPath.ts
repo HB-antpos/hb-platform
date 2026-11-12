@@ -2,6 +2,7 @@ const PUBLIC_APP_PATHS = new Set([
   '/login',
   '/privacy/browser-extension',
   '/privacy/mobile',
+  '/privacy/pos',
   '/minor-employment/sign',
   '/support/hb-supplier-order',
   '/support/faq',
