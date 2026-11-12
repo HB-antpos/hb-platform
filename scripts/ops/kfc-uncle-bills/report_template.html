@@ -206,9 +206,9 @@
   table.data tbody tr:hover > td { background: var(--accent-soft); }
   .sticky1, .sticky2, .sticky3 { position: sticky; background: var(--surface); z-index: 1; }
   thead .sticky1, thead .sticky2, thead .sticky3 { z-index: 3; background: var(--surface-2); }
-  .sticky1 { left: 0; width: 48px; min-width: 48px; }
-  .sticky2 { left: 48px; width: 96px; min-width: 96px; }
-  .sticky3 { left: 144px; }
+  .sticky1 { left: 0; width: 80px; min-width: 80px; }
+  .sticky2 { left: 80px; width: 96px; min-width: 96px; }
+  .sticky3 { left: 176px; }
 
   /* ---------- 分页条 ---------- */
   .pager {
@@ -293,7 +293,7 @@
     display: block; border-radius: 6px; cursor: zoom-in;
   }
   .thumb {
-    width: 34px; height: 34px; border-radius: 6px; object-fit: cover;
+    width: 64px; height: 64px; border-radius: 8px; object-fit: cover;
     background: var(--surface-2); border: 1px solid var(--border); display: block;
   }
   .thumb-btn:hover .thumb { border-color: var(--accent); }
@@ -413,6 +413,10 @@
     .lang-toggle { margin-left: 0; }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
     table.data th, table.data td { padding: 6px 8px; }
+    .thumb { width: 48px; height: 48px; }
+    .sticky1 { width: 64px; min-width: 64px; }
+    .sticky2 { left: 64px; }
+    .sticky3 { left: 160px; }
     .toolbar .hint { margin-left: 0; width: 100%; }
     .pager .pg-pages { order: 3; width: 100%; justify-content: center; margin-left: 0; }
     .pager .pg-pages button { min-width: 36px; height: 36px; }
@@ -782,7 +786,7 @@
 
   var PLACEHOLDER_IMG =
     "data:image/svg+xml;utf8," + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34">' +
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 34 34" width="64" height="64">' +
       '<rect width="34" height="34" rx="6" fill="#DDD9CE"/>' +
       '<path d="M7 26l6-8 4 4 5-7 6 11z" fill="#B8B3A6"/>' +
       '<circle cx="12" cy="12" r="2.6" fill="#B8B3A6"/></svg>'
@@ -881,7 +885,7 @@
     if (!r.img) return '<img class="thumb" src="' + PLACEHOLDER_IMG + '" alt="">';
     return '<button type="button" class="thumb-btn" aria-label="' + esc(L().zoomAlt + " " + (r.name || "")) + '"' +
       ' data-img="' + esc(r.img) + '" data-item="' + esc(r.item_number || "") + '" data-name="' + esc(r.name || "") + '">' +
-      '<img class="thumb" loading="lazy" decoding="async" width="34" height="34" src="' + esc(thumbUrl(r.img)) + '" alt=""></button>';
+      '<img class="thumb" loading="lazy" decoding="async" width="64" height="64" src="' + esc(thumbUrl(r.img)) + '" alt=""></button>';
   }
   function confBadge(c) {
     if (!c) return "";
