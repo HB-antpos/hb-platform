@@ -181,5 +181,72 @@
     "notAllowed": "You don't have access to leave requests, or you're not signed in.",
     "notEligible": "Casual staff can't request paid leave. Go back to request other leave (unpaid).",
     "unknownType": "Unknown leave type. Please go back and choose again."
+  },
+  "picker": {
+    "title": "Request leave",
+    "today": "today {{date}}",
+    "employment": {
+      "FullTime": "Full-time",
+      "PartTime": "Part-time",
+      "Casual": "Casual"
+    },
+    "paid": "Paid",
+    "unpaid": "Unpaid",
+    "or": " or ",
+    "more": "+{{count}} more",
+    "sick": {
+      "title": "I was sick",
+      "claim": "Claim {{dates}}",
+      "none": "No rostered days to claim in the last {{days}}",
+      "tagRostered": "Rostered days only",
+      "tagWithin": "Within {{days}}",
+      "tagCertificate": "Medical certificate"
+    },
+    "annual": {
+      "title": "Annual leave · time off",
+      "when": "Start from {{date}} · up to {{max}}",
+      "tagHours": "{{hours}} h per workday",
+      "tagExcluded": "Weekends & public holidays not counted"
+    },
+    "cashOut": {
+      "title": "Annual leave · cash out",
+      "when": "Keep working, extra pay · from {{date}}",
+      "tagMax": "Up to {{max}}"
+    },
+    "other": {
+      "title": "Other time off",
+      "when": "Any day · doesn't use your leave",
+      "tag": "Sick or personal"
+    },
+    "footer": "Dates follow your store's leave rules · Your manager approves every request"
+  },
+  "timeOff": {
+    "entryTitle": "Time off",
+    "entryHint": "Unpaid leave",
+    "titleCasual": "Time off",
+    "titleOther": "Other time off",
+    "unpaid": "UNPAID",
+    "casualSubtitle": "Casual staff don't get paid leave",
+    "otherSubtitle": "Doesn't use your paid leave",
+    "why": "Why",
+    "sick": "Sick",
+    "sickHint": "Not feeling well",
+    "personal": "Personal",
+    "personalHint": "Family, errands…",
+    "personalHintCasual": "Holiday, family…",
+    "days": "Days",
+    "rostered": "Rostered",
+    "tapHint": "Tap a day, then tap the last day",
+    "previousWeeks": "Previous two weeks",
+    "nextWeeks": "Next two weeks",
+    "summary": "{{range}} · {{days}}.",
+    "affects_one": "Affects {{count}} rostered day: {{dates}}. Your manager will need to cover it.",
+    "affects_other": "Affects {{count}} rostered days: {{dates}}.",
+    "noRoster": "No rostered shifts on these days.",
+    "note": "Note for your manager (optional)",
+    "submit_one": "Submit {{count}} day",
+    "submit_other": "Submit {{count}} days",
+    "fineCasual": "Your manager will approve it and arrange cover.",
+    "fineOther": "Want to be paid? Use annual leave instead."
   }
 }

@@ -18,13 +18,14 @@ import {
 import { requestProgressStep, waitedSince } from "@/modules/attendance/attendance-my-week-view";
 import { resolveAttendancePunchDisplayTime, toAttendanceDeviceLocalTime } from "@/modules/attendance/attendance-device-time";
 import { getMyLeaveOptions, LEAVE_OPTIONS_QUERY_KEY } from "@/modules/attendance/leave-api";
+import { shouldOpenTimeOffDirectly } from "@/modules/attendance/leave-picker";
 import { formatHours, localDateString } from "@/modules/attendance/leave-rules";
 import { isPaidLeaveType } from "@/modules/attendance/leave-types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { ATTENDANCE_STATUS_TONES, type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
 import { useApprovalDateLabels } from "./approvals/use-approval-labels";
-import { LeaveTypeCard, PaidLeaveCards } from "./leave/LeaveHomeScreen";
+import { LeavePickerOptions, useLeavePickerSubtitle } from "./leave/LeavePickerOptions";
 import { OtherLeaveSheet } from "./leave/OtherLeaveSheet";
 import { LEAVE_TONES, type LeaveTone } from "./leave/leave-ui";
 import { paidLeaveHref } from "./leave/leave-route-guard";
@@ -151,7 +152,8 @@ function RequestSteps({ status }: { status: string }) {
 /**
  * 员工「我的申请」：补卡 / 请假两个大入口 + 全部 / 进行中 / 已处理筛选。
  * 进行中的卡片带三步进度和「已等多久」；已处理的收成紧凑卡并直接显示审核人与店长备注；点卡片看详情。
- * 「请假」先弹「请哪种假」，带薪三类进入原有填写页，其他请假打开原有表单弹层。
+ * 「请假」：全职 / 兼职先弹「请哪种假」（带薪三类进填写页，其他请假打开无薪表单）；
+ * 临时工没有带薪假，直接打开无薪表单（入口也改叫「请假 · 无薪」）。
  */
 export function MyRequestsPanel({
   storeCode,
@@ -191,7 +193,8 @@ export function MyRequestsPanel({
   const optionsQuery = useQuery({
     queryKey: [...LEAVE_OPTIONS_QUERY_KEY, storeCode ?? ""],
     queryFn: () => getMyLeaveOptions(storeCode),
-    enabled: canApplyLeave && pickerVisible,
+    // 关键逻辑：进页面就读，点「请假」时才能知道是不是临时工、要不要跳过「请哪种假」。
+    enabled: canApplyLeave,
   });
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["attendance", "my", "leave-requests"] });
   const cancelLeaveMutation = useMutation({
@@ -212,6 +215,9 @@ export function MyRequestsPanel({
   const isLoading = adjustmentsQuery.isLoading || leavesQuery.isLoading;
   const detailItem = items.find((item) => item.key === detailKey);
   const options = optionsQuery.data;
+  const casual = shouldOpenTimeOffDirectly(options);
+  const pickerSubtitle = useLeavePickerSubtitle(options);
+  const openLeave = () => (casual ? setOtherVisible(true) : setPickerVisible(true));
 
   const withdraw = (item: MyRequestItem) => {
     if (item.leave) cancelLeaveMutation.mutate(item.leave.leaveGuid);
@@ -315,13 +321,21 @@ export function MyRequestsPanel({
           </View>
         </Pressable>
         {canApplyLeave ? (
-          <Pressable accessibilityRole="button" onPress={() => setPickerVisible(true)} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
-            <View style={[styles.actionIcon, { backgroundColor: LEAVE_TONES.annual.background }]}>
-              <Icon source="umbrella-outline" size={20} color={LEAVE_TONES.annual.foreground} />
+          <Pressable accessibilityRole="button" onPress={openLeave} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
+            <View style={[styles.actionIcon, { backgroundColor: LEAVE_TONES[casual ? "other" : "annual"].background }]}>
+              <Icon
+                source={casual ? "calendar-remove-outline" : "umbrella-outline"}
+                size={20}
+                color={LEAVE_TONES[casual ? "other" : "annual"].foreground}
+              />
             </View>
             <View style={styles.flex}>
-              <Text style={styles.actionTitle}>{t("myAttendance.requests.applyLeave")}</Text>
-              <Text style={styles.actionHint} numberOfLines={1}>{t("myAttendance.requests.leaveHint")}</Text>
+              <Text style={styles.actionTitle} numberOfLines={1}>
+                {casual ? t("attendanceLeave:timeOff.entryTitle") : t("myAttendance.requests.applyLeave")}
+              </Text>
+              <Text style={styles.actionHint} numberOfLines={1}>
+                {casual ? t("attendanceLeave:timeOff.entryHint") : t("myAttendance.requests.leaveHint")}
+              </Text>
             </View>
           </Pressable>
         ) : null}
@@ -372,48 +386,33 @@ export function MyRequestsPanel({
         onDismiss={() => setDetailKey(null)}
       />
 
-      {/* 请哪种假：带薪三类（临时工没有）+ 其他请假；规则数字来自后端参数，与「申请假期」页一致。 */}
+      {/* 请哪种假（全职 / 兼职）：每项写清现在能请哪天；临时工不经过这里。 */}
       <BusinessSheet
         visible={pickerVisible}
-        title={t("myAttendance.requests.leavePicker.title")}
-        subtitle={t("myAttendance.requests.leavePicker.hint")}
+        title={t("attendanceLeave:picker.title")}
+        subtitle={pickerSubtitle}
         onDismiss={() => setPickerVisible(false)}
       >
-        <View style={styles.pickerContent}>
-          {optionsQuery.isLoading ? <ActivityIndicator /> : null}
-          {options?.paidLeaveEligible ? (
-            <>
-              <Text style={styles.groupTitle}>{t("myAttendance.requests.leavePicker.paid")}</Text>
-              <PaidLeaveCards
-                rules={options.rules}
-                onOpen={(type) => {
-                  setPickerVisible(false);
-                  router.push(paidLeaveHref(type, storeCode));
-                }}
-              />
-            </>
-          ) : options ? (
-            <Text variant="bodySmall" style={styles.muted}>{t("attendanceLeave:home.casualHint")}</Text>
-          ) : optionsQuery.isError ? (
-            <Text variant="bodySmall" style={styles.warningText}>{t("attendanceLeave:home.optionsFailed")}</Text>
-          ) : null}
-          <Text style={styles.groupTitle}>{t("myAttendance.requests.leavePicker.other")}</Text>
-          <LeaveTypeCard
-            tone="other"
-            icon="calendar-remove-outline"
-            title={t("attendanceLeave:home.other.title")}
-            lines={[t("attendanceLeave:home.other.line1")]}
-            onPress={() => {
-              setPickerVisible(false);
-              setOtherVisible(true);
-            }}
-          />
-        </View>
+        <LeavePickerOptions
+          options={options}
+          isLoading={optionsQuery.isLoading}
+          isError={optionsQuery.isError}
+          onRetry={() => void optionsQuery.refetch()}
+          onOpenPaid={(type) => {
+            setPickerVisible(false);
+            router.push(paidLeaveHref(type, storeCode));
+          }}
+          onOpenOther={() => {
+            setPickerVisible(false);
+            setOtherVisible(true);
+          }}
+        />
       </BusinessSheet>
       <OtherLeaveSheet
         visible={otherVisible}
         storeCode={storeCode ?? options?.storeCode}
         today={options?.today ?? (today || localDateString())}
+        options={options}
         onDismiss={() => setOtherVisible(false)}
         onMessage={onMessage}
       />
@@ -564,7 +563,6 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   muted: { color: HB_COLORS.textSecondary },
   faint: { color: "#98A2B3" },
-  warningText: { color: HB_COLORS.warning },
   pressed: { opacity: 0.75 },
   empty: { paddingVertical: HB_SPACING.md, textAlign: "center" },
   actions: { flexDirection: "row", gap: HB_SPACING.xs },
@@ -633,7 +631,6 @@ const styles = StyleSheet.create({
   stepLabels: { flexDirection: "row", justifyContent: "space-between" },
   stepLabel: { color: HB_COLORS.textSecondary, fontSize: 11 },
   stepLabelCurrent: { color: HB_COLORS.warning, fontWeight: "700" },
-  pickerContent: { gap: HB_SPACING.xs },
   detailContent: { gap: HB_SPACING.sm },
   detailCard: {
     backgroundColor: HB_COLORS.white,

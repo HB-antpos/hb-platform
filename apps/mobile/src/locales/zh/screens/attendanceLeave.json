@@ -181,5 +181,72 @@
     "notAllowed": "你没有申请假期的权限，或还没有登录。",
     "notEligible": "临时工不能申请带薪假，可以回到上一页申请其他请假（无薪）。",
     "unknownType": "不认识的假期类型，请返回重新选择。"
+  },
+  "picker": {
+    "title": "请哪种假？",
+    "today": "今天 {{date}}",
+    "employment": {
+      "FullTime": "全职",
+      "PartTime": "兼职",
+      "Casual": "临时工"
+    },
+    "paid": "带薪",
+    "unpaid": "无薪",
+    "or": " 或 ",
+    "more": "等 {{count}} 天",
+    "sick": {
+      "title": "生病没上班",
+      "claim": "可补 {{dates}}",
+      "none": "近 {{days}}内没有可申请的排班日",
+      "tagRostered": "只算有排班的日子",
+      "tagWithin": "{{days}}内提交",
+      "tagCertificate": "需要医嘱"
+    },
+    "annual": {
+      "title": "带薪年假 · 休息",
+      "when": "最早 {{date}} 开始 · 一次最多 {{max}}",
+      "tagHours": "每个工作日 {{hours}} h",
+      "tagExcluded": "周末、公假不算"
+    },
+    "cashOut": {
+      "title": "带薪年假 · 发放",
+      "when": "照常上班另发工资 · 最早 {{date}}",
+      "tagMax": "最多 {{max}}"
+    },
+    "other": {
+      "title": "其他请假",
+      "when": "任何日子 · 不占用带薪假",
+      "tag": "生病或有事"
+    },
+    "footer": "日期按门店的请假规则计算 · 每个申请都由店长审核"
+  },
+  "timeOff": {
+    "entryTitle": "请假",
+    "entryHint": "无薪",
+    "titleCasual": "请假",
+    "titleOther": "其他请假",
+    "unpaid": "无薪",
+    "casualSubtitle": "临时工没有带薪假",
+    "otherSubtitle": "不占用带薪假",
+    "why": "原因",
+    "sick": "生病",
+    "sickHint": "身体不舒服",
+    "personal": "有事",
+    "personalHint": "家事、办事…",
+    "personalHintCasual": "出游、家事…",
+    "days": "日期",
+    "rostered": "有排班",
+    "tapHint": "点一下选起始日，再点选结束日",
+    "previousWeeks": "前两周",
+    "nextWeeks": "后两周",
+    "summary": "{{range}} · {{days}}。",
+    "affects_one": "影响 {{count}} 个排班日：{{dates}}，店长需要安排人顶班。",
+    "affects_other": "影响 {{count}} 个排班日：{{dates}}。",
+    "noRoster": "这几天没有排班。",
+    "note": "给店长的备注（选填）",
+    "submit_one": "提交 {{count}} 天",
+    "submit_other": "提交 {{count}} 天",
+    "fineCasual": "店长审核后会安排顶班。",
+    "fineOther": "想带薪请改用年假。"
   }
 }
