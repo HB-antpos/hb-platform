@@ -28,6 +28,10 @@ services:
       # HQ / HBSales 旧库已断开；回滚时在 .env 里设为 true。
       - LegacyDatabases__HqEnabled=${LEGACY_HQ_ENABLED:-false}
       - LegacyDatabases__HBSalesEnabled=${LEGACY_HBSALES_ENABLED:-false}
+      # 仓库经理分店口径收口（StoreScopePolicy）：默认关 = 仓库经理仍不限分店。
+      # 打开前须：Web 与各端 App 已含按 hasAllStoreScope 判断的前端（否则旧 App 订货只列出分配的分店）、仓库经理的分店分配已补齐。
+      # 本 compose 没有 env_file：不在这里映射，服务器 .env 里写了也传不进容器。开 / 关只需改 .env 并重建容器，不需要发版。
+      - Access__WarehouseManagerStoreScoped=${ACCESS_WAREHOUSE_MANAGER_STORE_SCOPED:-false}
       # 生产连接字符串只从服务器 .env 注入，避免把敏感值写入 compose。
       - ConnectionStrings__DefaultConnection=${CONNECTION_STRING_DEFAULT}
       - ConnectionStrings__StoreHzgHQConnection=${CONNECTION_STRING_STORE_HQ}
