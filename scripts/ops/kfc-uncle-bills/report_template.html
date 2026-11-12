@@ -427,6 +427,7 @@
     <span class="subtitle" id="page-subtitle"></span>
     <span class="trend-badge" id="trend-badge"></span>
     <div class="top-tools">
+      <div class="seg" id="theme-seg" role="group" aria-label="节日主题"></div>
       <label class="view-picker" for="view-select" hidden><span id="view-label">查看范围</span><select id="view-select"></select></label>
       <div class="lang-toggle" role="group" aria-label="Language">
         <button type="button" id="lang-zh" data-lang="zh">中文</button>
@@ -480,6 +481,41 @@
     var saved = window.localStorage.getItem("ub-restock-lang");
     if (saved === "zh" || saved === "en") LANG = saved;
   } catch (e) { /* 隐私模式等场景忽略 */ }
+
+  // ============================================================
+  // 节日主题筛选：万圣节 / 圣诞节 / 其他
+  // 数据里没有商品分类字段，按英文商品名关键词归类（仅供参考）。
+  // 先判万圣节：「Spooky Tinsel」这类名字同时含圣诞常见词 tinsel，应归万圣节。
+  // ============================================================
+  var THEME = "all";
+  try {
+    var savedTheme = window.localStorage.getItem("ub-restock-theme");
+    if (["all", "halloween", "christmas", "other"].indexOf(savedTheme) >= 0) THEME = savedTheme;
+  } catch (e) { /* 隐私模式等场景忽略 */ }
+  var THEME_LABELS = {
+    zh: { label: "节日主题", all: "全部", halloween: "万圣节", christmas: "圣诞节", other: "其他" },
+    en: { label: "Holiday theme", all: "All", halloween: "Halloween", christmas: "Christmas", other: "Other" }
+  };
+  var HALLOWEEN_RE = new RegExp([
+    "halloween", "spook", "horror", "fright", "scary", "creep", "blood", "bleed", "skull", "skelet",
+    "spider", "cobweb", "pumpkin", "lantern", "trick or treat", "witch", "wizard", "vampire", "zombie",
+    "ghost", "ghoul", "demon", "devil", "cauldron", "coffin", "tomb", "grave", "monster", "mummy",
+    "wicked", "dagger", "retractable knife", "eye ?balls?", "face paint", "\\bboo\\b", "\\bbats?\\b",
+    "g\\.i\\.d", "glow in (the )?dark", "severed", "scream", "\\bbony\\b", "clown", "trident", "sickle", "cat eye", "black cat"
+  ].join("|"), "i");
+  var CHRISTMAS_RE = new RegExp([
+    "christmas", "xmas", "santa", "reindeer", "rudolph", "snowman", "snowflake", "snow ", "bauble",
+    "tinsel", "ornament", "\\belf\\b", "\\belves\\b", "candy cane", "stocking", "wreath", "holly",
+    "noel", "jingle", "gingerbread", "nativity", "advent", "mistletoe", "festive", "wrap paper", "gift wrap",
+    "gift tag", "gift bag", "bow ", "poinsettia", "tree ", "nutbell", "berry", "\\bpine\\b", "angel", "\\bbells?\\b"
+  ].join("|"), "i");
+  function themeOf(name) {
+    var n = String(name || "");
+    if (HALLOWEEN_RE.test(n)) return "halloween";
+    if (CHRISTMAS_RE.test(n)) return "christmas";
+    return "other";
+  }
+  function themeMatch(row) { return THEME === "all" || themeOf(row && row.name) === THEME; }
 
   // 脚本产出的枚举值是中文，这里按语言映射显示文字。
   var VALUE_MAP = {
@@ -950,6 +986,7 @@
       var q = state.query.trim().toLowerCase();
       var list = rows.filter(function (r) {
         if (state.filter && !state.filter(r)) return false;
+        if (!themeMatch(r)) return false;
         if (!q) return true;
         return (r.item_number && String(r.item_number).toLowerCase().indexOf(q) >= 0) ||
           (r.name && String(r.name).toLowerCase().indexOf(q) >= 0);
@@ -1133,7 +1170,16 @@
   // ============================================================
   // 各面板
   // ============================================================
+  function renderThemeSeg() {
+    var T = THEME_LABELS[LANG], seg = document.getElementById("theme-seg");
+    seg.setAttribute("aria-label", T.label);
+    seg.innerHTML = ["all", "halloween", "christmas", "other"].map(function (k) {
+      return '<button type="button" data-theme="' + k + '" aria-pressed="' + String(k === THEME) + '">' + esc(T[k]) + "</button>";
+    }).join("");
+  }
+
   function renderHeader() {
+    renderThemeSeg();
     document.documentElement.setAttribute("lang", LANG === "zh" ? "zh-CN" : "en");
     document.getElementById("page-title").textContent = L().h1;
     var headMeta = META || { supplier_name: BOOT.supplier_name, supplier_code: BOOT.supplier_code, as_of: BOOT.as_of, data_cutoff: BOOT.data_cutoff };
@@ -1292,12 +1338,13 @@
         x.t.setFilter(urgentOnly ? function (r) { return r.urgent; } : null);
         var n = x.t.setQuery(q);
         // 筛选后没有行的门店整段隐藏，避免满屏空表
-        x.sec.hidden = (sel && sel !== x.code) || (n === 0 && (q || urgentOnly));
+        x.sec.hidden = (sel && sel !== x.code) || (n === 0 && (q || urgentOnly || THEME !== "all"));
       });
     }
     document.getElementById("sg-search").addEventListener("input", apply);
     document.getElementById("sg-store").addEventListener("change", apply);
     document.getElementById("sg-urgent").addEventListener("change", apply);
+    if (THEME !== "all") apply();
   }
 
   function renderNoPurchase() {
@@ -1679,6 +1726,17 @@
     renderTabs();
     renderFooter();
   }
+
+  // ============================================================
+  // 节日主题切换
+  // ============================================================
+  document.getElementById("theme-seg").addEventListener("click", function (ev) {
+    var btn = ev.target.closest("button[data-theme]");
+    if (!btn || btn.getAttribute("data-theme") === THEME) return;
+    THEME = btn.getAttribute("data-theme");
+    try { window.localStorage.setItem("ub-restock-theme", THEME); } catch (e) { /* 忽略 */ }
+    renderAll();
+  });
 
   // ============================================================
   // 语言切换
