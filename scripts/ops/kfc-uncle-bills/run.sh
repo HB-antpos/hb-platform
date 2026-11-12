@@ -25,4 +25,10 @@ else
   echo "SYNC_WARN=git fetch 失败，沿用本机脚本" >&2
 fi
 
-exec python3 "${DIR}/analyze_kfc.py" "$@"
+# Python 解释器：优先用 KFC_PYTHON，其次专用 venv（装有 pymssql / requests / pillow），最后退回系统 python3。
+# brew 的 python3 升级后会丢失依赖且禁止 pip 直接装（PEP 668），所以用固定版本的 venv：
+#   /opt/homebrew/opt/python@3.11/bin/python3.11 -m venv ~/.venvs/kfc-uncle-bills
+#   ~/.venvs/kfc-uncle-bills/bin/pip install pymssql requests pillow
+PYBIN="${KFC_PYTHON:-${HOME}/.venvs/kfc-uncle-bills/bin/python}"
+[ -x "${PYBIN}" ] || PYBIN="python3"
+exec "${PYBIN}" "${DIR}/analyze_kfc.py" "$@"
