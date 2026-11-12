@@ -1,10 +1,10 @@
 {
-  "policyVersion": "2026-11-12",
+  "policyVersion": "2026-11-13",
   "language": "en",
   "title": "HB POS Privacy Policy",
   "subtitle": "Hot Bargain store checkout app for authorised iPads",
   "effectiveDateLabel": "Effective date",
-  "effectiveDate": "12 November 2026",
+  "effectiveDate": "13 November 2026",
   "summary": "This policy explains how HOT BARGAIN INTERNATIONAL PTY LTD (we, us or our) handles personal information when store staff use the HB POS iPad app and when customers' details are recorded in a sale, return or lay-by order. Please read it before using the app.",
   "organization": {
     "label": "Responsible entity",
@@ -33,10 +33,10 @@
         "Staff and account details: cashier name, cashier and user identifiers, and the employee cashier barcode credential used to sign in.",
         "Device and store information: install and hardware identifiers, device code, store code, device registration status and app version.",
         "Sale and return records: products, quantities, prices, discounts and promotions, orders, refunds, vouchers, payment method and time, and held orders.",
-        "Payment information: card type, card BIN, masked card number, authorisation code, transaction reference, terminal and merchant identifiers, and refund references produced by supported payment providers.",
+        "Payment information: card type, card BIN, masked card number, authorisation code, transaction reference, terminal and merchant identifiers, and refund references produced by supported payment providers. The app does not store full card numbers, card security codes or PINs.",
         "Lay-by (instalment) customer details: customer name, phone number and notes recorded by staff.",
         "Attendance sign-in: a short-lived signed QR code shown on the device so staff can clock in with the Hot Bargain employee app.",
-        "Diagnostics: app version, error type, trace identifier, error messages and stack traces, and the related store, device and user, to keep the service reliable."
+        "Diagnostics: app version, error type, trace identifier, error messages and stack traces, and the related store, device and cashier (identifier and name), sent to our own servers to keep the service reliable."
       ]
     },
     {
@@ -79,7 +79,7 @@
       "id": "overseas",
       "title": "6. Overseas processing",
       "paragraphs": [
-        "Personal information may be processed in Singapore by service providers supporting the app. Before this occurs, we take reasonable steps to ensure that the information receives protection consistent with this policy and applicable privacy law."
+        "Personal information handled by the app may be stored and processed in Singapore by our cloud hosting provider and other service providers supporting the app. Some traffic may be routed through content-delivery or relay infrastructure in other locations, including Australia, and payment providers process payment data in their own environments under their own policies. Before information is processed outside Australia, we take reasonable steps to ensure that it receives protection consistent with this policy and applicable privacy law."
       ],
       "items": []
     },

@@ -72,7 +72,7 @@ for (const language of LANGUAGES) {
   // 1. 两种语言都能经加载器取到，且结构完整。
   assert.equal(policy, language === 'en' ? policyEn : policyZh, `${name} 加载器必须返回对应语言的 JSON`)
   assert.equal(policy.language, language)
-  assert.equal(policy.policyVersion, '2026-11-12')
+  assert.equal(policy.policyVersion, '2026-11-13')
   assertKeys(policy, POLICY_KEYS, name)
   assertKeys(policy.organization, ORGANIZATION_KEYS, `${name}.organization`)
   assertKeys(policy.footer, FOOTER_KEYS, `${name}.footer`)
@@ -145,6 +145,15 @@ assert.match(enText, /do not sell or rent personal information/)
 assert.match(zhText, /不出售或出租个人信息/)
 assert.match(enText, /Singapore/)
 assert.match(zhText, /新加坡/)
+// 境外处理不得只写新加坡：入口还经过内容分发 / 中继节点，支付服务商按自身环境处理（2026-11-12 核对结论）。
+assert.match(enText, /content-delivery or relay infrastructure/)
+assert.match(zhText, /内容分发或中继设施/)
+// 本应用不保存完整卡号：iPad 代码与生产银行交易表近 30 天最多 10 位数字，均为掩码。
+assert.match(enText, /does not store full card numbers, card security codes or PINs/)
+assert.match(zhText, /不保存完整卡号、卡安全码或 PIN/)
+// 诊断只发到我们自己的服务器（生产 EAS 未配置 Sentry DSN）；若以后启用第三方诊断，必须先改政策再发版。
+assert.match(enText, /sent to our own servers/)
+assert.match(zhText, /发送至我们自己的服务器/)
 assert.match(enText, /OAIC/)
 assert.match(zhText, /OAIC/)
 
