@@ -118,6 +118,7 @@ export function LeaveHomeContent({ storeCode, onBack, onOpenPaidLeave }: LeaveHo
         visible={otherVisible}
         storeCode={effectiveStoreCode}
         today={today}
+        options={options}
         onDismiss={() => setOtherVisible(false)}
         onMessage={setMessage}
       />
