@@ -123,6 +123,30 @@
     "clearStore": "Clear store",
     "roleHint": "Only roles below your level"
   },
+  "picker": {
+    "clearRole": "Clear role",
+    "rolePageTitle": "Choose role",
+    "sortPageTitle": "Sort by",
+    "allRoles": "All roles",
+    "back": "Back",
+    "total": "{{count}} found",
+    "selectedCount": "{{count}} selected",
+    "hiddenSelected": "Selected but not in these results: {{count}}",
+    "viewSelected": "View",
+    "emptyConditions": "Current filters: {{conditions}}",
+    "emptyHint": "Loosen the filters, or clear them all",
+    "clearFilters": "Clear filters",
+    "conditionStore": "Store {{name}}",
+    "conditionRole": "Role {{name}}",
+    "conditionKeyword": "Keyword {{keyword}}",
+    "moreStores": "+{{count}} more",
+    "moreRoles": "+{{count}}",
+    "sortHint": {
+      "lastLoginAt": "Most recent login first (default)",
+      "username": "Username A to Z",
+      "fullName": "Name A to Z"
+    }
+  },
   "rolesList": {
     "noAccess": "You don't have access to the role list",
     "empty": "No roles yet",

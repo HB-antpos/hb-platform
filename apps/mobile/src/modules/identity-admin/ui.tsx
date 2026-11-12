@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Button, Icon, IconButton, Text, TextInput, TouchableRipple } from "react-native-paper";
 import { HB_COLORS as C } from "@/shared/theme/tokens";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { useBufferedSearchText } from "./use-buffered-search-text";
 
 export function AdminScreen({ title, children, action, footer, onBack }: {
   title: string; children: ReactNode; action?: ReactNode; footer?: ReactNode; onBack?: () => void;
@@ -45,11 +46,20 @@ export function StatusTag({ active }: { active: boolean }) {
   </View>;
 }
 
-export function SearchField({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
-  return <TextInput mode="outlined" value={value} onChangeText={onChange} placeholder={placeholder}
+/**
+ * 搜索框。文字由输入框自己持有（见 useBufferedSearchText），上层 onChange 默认每个按键都收到；
+ * 传 emitDelayMs 则停手后才通知上层（选人弹层用它，避免每个按键都重绘整个页面）。
+ * 右侧「清除」图标位置始终占着、只是空输入时看不见：输入框的布局不再随「有没有字」变化。
+ */
+export function SearchField({ value, onChange, placeholder, emitDelayMs = 0 }: {
+  value: string; onChange: (value: string) => void; placeholder: string; emitDelayMs?: number;
+}) {
+  const { text, handleChange, clear } = useBufferedSearchText(value, onChange, emitDelayMs);
+  return <TextInput mode="outlined" value={text} onChangeText={handleChange} placeholder={placeholder}
     accessibilityLabel={placeholder} left={<TextInput.Icon icon="magnify" />} autoCapitalize="none"
     autoCorrect={false} dense style={styles.search} outlineStyle={{ borderRadius: 8, borderColor: C.outlineMuted }}
-    returnKeyType="search" right={value ? <TextInput.Icon icon="close" onPress={() => onChange("")} /> : undefined} />;
+    returnKeyType="search"
+    right={<TextInput.Icon icon="close" onPress={text ? clear : undefined} style={text ? undefined : styles.clearHidden} />} />;
 }
 
 export function AdminError({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
@@ -113,6 +123,7 @@ export const styles = StyleSheet.create({
   tabLabel: { textAlign: "center", fontSize: 14, color: C.textSecondary },
   status: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 5 },
   search: { backgroundColor: C.white, fontSize: 14, minHeight: 44 },
+  clearHidden: { opacity: 0 },
   error: { padding: 16, margin: 16, gap: 8, backgroundColor: "#FEF3F2", borderRadius: 8 },
   empty: { padding: 32, alignItems: "center", gap: 12 },
 });
