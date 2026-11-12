@@ -23,9 +23,9 @@
       },
       "meal": {
         "column": "用餐与计薪",
-        "deduction": "用餐扣 {{minutes}} 分",
-        "pendingAddBack": "待审加回 {{minutes}} 分",
-        "approvedAddBack": "已加回 {{minutes}} 分",
+        "deduction": "用餐扣 {{duration}}",
+        "pendingAddBack": "待审加回 {{duration}}",
+        "approvedAddBack": "已加回 {{duration}}",
         "paid": "计薪 {{value}}",
         "claimSummary": "没休息 {{count}} 次，申请加回 {{minutes}} 分钟",
         "claimCounts": "排班用餐 {{expected}} 次，记录到 {{recorded}} 次",

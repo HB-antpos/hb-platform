@@ -451,18 +451,18 @@ export default function ScheduleAttendancePage() {
   const formatBusinessDisplayText = useCallback((displayText: string) => (
     insertAttendanceWeekday(displayText, getBusinessWeekdayLabel(displayText))
   ), [getBusinessWeekdayLabel])
-  const formatRecordMinutes = useCallback((minutes?: number) => (
-    typeof minutes === 'number'
-      ? t('posAdmin.scheduleAttendance.recordLabels.minutes', { minutes })
-      : '--'
-  ), [t])
-  // 迟到 / 早退 / 早到 / 晚退：不足 60 分钟显示分钟，满 60 分钟起显示「X 小时 Y 分」（整小时不带分钟）。
+  // 考勤记录里所有时长（迟到 / 早退 / 早到 / 晚退、班段、工时、间隔、计薪、加班、用餐）统一口径：
+  // 不足 60 分钟显示分钟，满 60 分钟起显示「X 小时 Y 分」（整小时不带分钟），如 412 分 → 6 小时 52 分。
   const formatExceptionDuration = useCallback((totalMinutes: number) => {
     const { hours, minutes } = splitExceptionDuration(totalMinutes)
     if (hours === 0) return t('posAdmin.scheduleAttendance.recordLabels.duration.minutes', { minutes })
     if (minutes === 0) return t('posAdmin.scheduleAttendance.recordLabels.duration.hours', { hours })
     return t('posAdmin.scheduleAttendance.recordLabels.duration.hoursMinutes', { hours, minutes })
   }, [t])
+  // 后端没返回（旧版本 / 预览缺字段）时显示 --，有值时按上面的小时口径显示。
+  const formatRecordMinutes = useCallback((minutes?: number) => (
+    typeof minutes === 'number' ? formatExceptionDuration(minutes) : '--'
+  ), [formatExceptionDuration])
   const renderBusinessDisplay = useCallback((displayText: string) => {
     const weekdayLabel = getBusinessWeekdayLabel(displayText)
     return (
@@ -2057,12 +2057,12 @@ export default function ScheduleAttendancePage() {
         if (!meal) return '--'
         return (
           <Space size={[4, 3]} wrap>
-            <Tag>{t('posAdmin.scheduleAttendance.meal.deduction', { minutes: meal.deductionMinutes })}</Tag>
+            <Tag>{t('posAdmin.scheduleAttendance.meal.deduction', { duration: formatExceptionDuration(meal.deductionMinutes) })}</Tag>
             {meal.pendingAddBackMinutes > 0 ? (
-              <Tag color="gold">{t('posAdmin.scheduleAttendance.meal.pendingAddBack', { minutes: meal.pendingAddBackMinutes })}</Tag>
+              <Tag color="gold">{t('posAdmin.scheduleAttendance.meal.pendingAddBack', { duration: formatExceptionDuration(meal.pendingAddBackMinutes) })}</Tag>
             ) : null}
             {meal.approvedAddBackMinutes > 0 ? (
-              <Tag color="green">{t('posAdmin.scheduleAttendance.meal.approvedAddBack', { minutes: meal.approvedAddBackMinutes })}</Tag>
+              <Tag color="green">{t('posAdmin.scheduleAttendance.meal.approvedAddBack', { duration: formatExceptionDuration(meal.approvedAddBackMinutes) })}</Tag>
             ) : null}
             {meal.paidMinutes !== undefined ? (
               <Typography.Text strong>{t('posAdmin.scheduleAttendance.meal.paid', { value: formatRecordMinutes(meal.paidMinutes) })}</Typography.Text>
@@ -2100,10 +2100,10 @@ export default function ScheduleAttendancePage() {
             <Tag>{t('posAdmin.scheduleAttendance.recordLabels.earlyArrival', { duration: formatExceptionDuration(summary.earlyOvertimeMinutes) })}</Tag>
             <Tag>{t('posAdmin.scheduleAttendance.recordLabels.lateDeparture', { duration: formatExceptionDuration(summary.lateOvertimeMinutes) })}</Tag>
             <Tag color={summary.candidateOvertimeMinutes ? 'gold' : 'default'}>
-              {t('posAdmin.scheduleAttendance.recordLabels.candidateOvertime', { minutes: summary.candidateOvertimeMinutes })}
+              {t('posAdmin.scheduleAttendance.recordLabels.candidateOvertime', { duration: formatExceptionDuration(summary.candidateOvertimeMinutes) })}
             </Tag>
             <Tag color={summary.approvedOvertimeMinutes ? 'green' : 'default'}>
-              {t('posAdmin.scheduleAttendance.recordLabels.approvedOvertime', { minutes: summary.approvedOvertimeMinutes })}
+              {t('posAdmin.scheduleAttendance.recordLabels.approvedOvertime', { duration: formatExceptionDuration(summary.approvedOvertimeMinutes) })}
             </Tag>
           </Space>
         )
