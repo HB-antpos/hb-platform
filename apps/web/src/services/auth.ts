@@ -20,6 +20,12 @@ type CurrentUserApiDto = Omit<CurrentUser, 'stores'> & {
   Stores?: CurrentUserStoreApiDto[]
   exactPermissions?: string[]
   ExactPermissions?: string[]
+  HasAllStoreScope?: boolean
+  HasWarehouseWideScope?: boolean
+}
+
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === 'boolean' ? value : undefined
 }
 
 export async function login(payload: LoginRequest) {
@@ -56,11 +62,20 @@ export async function getCurrentUser(): Promise<CurrentUser> {
 
 export function normalizeCurrentUser(user: CurrentUserApiDto): CurrentUser {
   const stores = user.stores ?? user.Stores
-  const { Stores: _stores, ExactPermissions: _exactPermissions, ...rest } = user
+  const {
+    Stores: _stores,
+    ExactPermissions: _exactPermissions,
+    HasAllStoreScope: _hasAllStoreScope,
+    HasWarehouseWideScope: _hasWarehouseWideScope,
+    ...rest
+  } = user
 
   return {
     ...rest,
     exactPermissions: user.exactPermissions ?? user.ExactPermissions,
+    // 只认真正的布尔值；旧后端没有这两个字段时保持缺省，由 buildAccess 按角色回退。
+    hasAllStoreScope: optionalBoolean(user.hasAllStoreScope ?? user.HasAllStoreScope),
+    hasWarehouseWideScope: optionalBoolean(user.hasWarehouseWideScope ?? user.HasWarehouseWideScope),
     stores: stores?.map((store) => ({
       storeGUID: store.storeGUID ?? store.StoreGUID ?? '',
       storeName: store.storeName ?? store.StoreName ?? '',

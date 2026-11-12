@@ -26,8 +26,7 @@ export default function PersonDetailScreen() {
   const identity = useIdentitySession();
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const { stores, isDeviceMode, selectedStoreCode } = useStores();
-  const isAdmin = useAuthStore((state) => state.access.isAdmin);
-  const isWarehouseManager = useAuthStore((state) => state.access.isWarehouseManager);
+  const hasAllStoreScope = useAuthStore((state) => state.access.hasAllStoreScope);
   const isStoreLevelManager = useAuthStore((state) => state.access.isStoreLevelManager);
 
   const env = useMemo<DetailEnvironment>(() => {
@@ -40,11 +39,11 @@ export default function PersonDetailScreen() {
         stores,
         isDeviceMode,
         deviceBoundStore: deviceBoundStoreCode ? stores.find((store) => store.storeCode === deviceBoundStoreCode) ?? null : null,
-        // 仓库管理在服务端不限分店，但后端返回给它的分店 isPrimary 恒为 false，按 isPrimary 过滤会得到 0 个。
-        isAdmin: isAdmin || isWarehouseManager,
+        // 不限分店以后端口径为准（hasAllStoreScope）：仓库经理收口后按 isPrimary（管理）过滤，旧后端回退为管理员或仓库经理。
+        isAdmin: hasAllStoreScope,
       }),
     };
-  }, [isAdmin, isDeviceMode, isWarehouseManager, selectedStoreCode, stores]);
+  }, [hasAllStoreScope, isDeviceMode, selectedStoreCode, stores]);
 
   const variant = resolveDetailVariant({
     identityAllowed: identity.allowed,

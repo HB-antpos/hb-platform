@@ -1,4 +1,5 @@
 import type { ApiResponse, PagedResult } from '../types/api'
+import type { UserStoreDto } from '../types/user'
 import type {
   AddUserToStoreDto,
   BatchUpdateStoresRequest,
@@ -62,6 +63,23 @@ export async function getActiveStores(): Promise<StoreOption[]> {
       value: store.storeCode,
     })),
   )
+}
+
+/**
+ * 订货商城用：全部启用分店转成用户分店形状（仓库经理收口后仍替任意分店订货）。
+ * isManageable 一律 false——这只是订货可选范围，不代表门店管理权。
+ */
+export async function getActiveStoresAsUserStores(): Promise<UserStoreDto[]> {
+  const response = await request.get<ApiResponse<StoreDto[]> | StoreDto[]>('/api/stores/active')
+  const stores = Array.isArray(response) ? response : Array.isArray(response.data) ? response.data : []
+  return stores.map((store) => ({
+    storeGUID: store.storeGUID,
+    storeName: store.storeName,
+    storeCode: store.storeCode,
+    isActive: store.isActive,
+    isManageable: false,
+    assignedAt: '',
+  }))
 }
 
 export interface BrandedStoreOption extends StoreOption {

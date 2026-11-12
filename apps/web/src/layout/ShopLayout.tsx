@@ -211,7 +211,8 @@ export default function ShopLayout() {
     setIsHoverSupported(supportsHover())
   }, [])
 
-  useShopUserStores(currentUser?.userGUID)
+  // 仓库本职不限分店、门店口径却已收口（仓库经理）：订货商城拉全部启用分店。
+  useShopUserStores(currentUser?.userGUID, { loadAllStores: access.hasWarehouseWideScope && !access.hasAllStoreScope })
 
   useEffect(() => {
     let cancelled = false

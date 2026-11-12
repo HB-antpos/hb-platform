@@ -250,6 +250,9 @@ function createEmptyAccess(): AccessControl {
     isStoreStaff: false,
     isStoreManager: false,
     isStoreLevelManager: false,
+    hasAllStoreScope: false,
+    hasWarehouseWideScope: false,
+    isWarehouseAccessDelegate: false,
     onlyOrder: false,
     canReadOrder: false,
     canCreateOrder: false,
@@ -365,22 +368,37 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const isWarehouseStaffOnly =
     (hasRole("WarehouseStaff") || hasRole("仓库员工")) && !isAdmin && !isWarehouseManager;
   const isStoreStaff = hasRole("StoreStaff") || hasRole("店铺员工");
-  const isStoreLevelManager = isStoreManager && !isAdmin && !isWarehouseManager;
+  // 关键逻辑：分店口径以后端给出的为准（开关切换后 Web / 手机一起生效）；旧后端没给时按角色回退到旧口径。
+  const hasAllStoreScope =
+    typeof currentUser.hasAllStoreScope === "boolean"
+      ? currentUser.hasAllStoreScope
+      : isAdmin || isWarehouseManager;
+  const hasWarehouseWideScope =
+    typeof currentUser.hasWarehouseWideScope === "boolean"
+      ? currentUser.hasWarehouseWideScope
+      : isAdmin || isWarehouseManager;
+  // 门店级管理者：按分配分店收口的店长；后端口径收口后，仓库经理也算（不再走全局分支）。
+  const isStoreLevelManager = !hasAllStoreScope && (isStoreManager || isWarehouseManager);
+  const isWarehouseAccessDelegate = !isAdmin && isWarehouseManager && hasAllStoreScope;
   const onlyOrder = onlyRole("Order") || hasRole("订货员");
 
   const assignedStoreCodes = () => {
-    if (isAdmin || isWarehouseManager) {
+    if (hasAllStoreScope) {
       return null;
     }
     if (currentUser.stores?.length) {
       return currentUser.stores.map((item) => item.storeCode).filter(Boolean);
     }
-    return null;
+    // 收口后的仓库经理没有分配分店时是「一家都没有」，不能回落成 null（不限分店）。
+    return isWarehouseManager ? [] : null;
   };
 
   const managedStoreCodes = () => {
-    if (isAdmin || isWarehouseManager) {
+    if (hasAllStoreScope) {
       return null;
+    }
+    if (isWarehouseManager && !currentUser.stores?.length) {
+      return [];
     }
     if (currentUser.stores?.length) {
       // isPrimary=true 表示可管理分店；false 是已分配但只读范围。
@@ -499,6 +517,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isStoreStaff,
     isStoreManager,
     isStoreLevelManager,
+    hasAllStoreScope,
+    hasWarehouseWideScope,
+    isWarehouseAccessDelegate,
     onlyOrder,
     canReadOrder,
     canCreateOrder,

@@ -22,6 +22,13 @@ export interface CurrentUser {
   roleNames: string[]
   storeNames: string[]
   stores?: UserStoreDto[]
+  /**
+   * 门店管理类功能是否不限分店（后端 /api/Auth/current 给出；旧后端缺省时按角色回退：管理员或仓库经理）。
+   * 后端开关 Access:WarehouseManagerStoreScoped 打开后仓库经理为 false，按分配的分店收口。
+   */
+  hasAllStoreScope?: boolean
+  /** 仓库本职业务（订货 / 发货、本地采购等）是否不限分店：管理员与仓库经理为 true。 */
+  hasWarehouseWideScope?: boolean
 }
 
 export interface AccessControl {
@@ -34,6 +41,10 @@ export interface AccessControl {
   isStoreStaff: boolean
   isStoreManager: boolean
   isStoreLevelManager: boolean
+  /** 门店管理类功能是否不限分店（见 CurrentUser.hasAllStoreScope）。 */
+  hasAllStoreScope: boolean
+  /** 仓库本职业务是否不限分店（见 CurrentUser.hasWarehouseWideScope）。 */
+  hasWarehouseWideScope: boolean
   onlyOrder: boolean
   canReadOrder: boolean
   canWriteOrder: boolean
@@ -185,6 +196,8 @@ export interface AccessControl {
   hasAllRoles: (roles: string[]) => boolean
   managedStoreCodes: () => string[] | null
   visibleStoreCodes: () => string[] | null
+  /** 仓库本职（本地采购、订货等）可选分店：仓库经理恒为 null（不限）；其他人同 managedStoreCodes。 */
+  warehouseStoreCodes: () => string[] | null
 }
 
 export interface NavigationMenuDto {

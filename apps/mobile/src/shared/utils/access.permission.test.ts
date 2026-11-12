@@ -591,3 +591,38 @@ assertEqual(
   false,
   "signed-out sessions cannot view China supplier names"
 );
+
+// —— 仓库经理分店口径：以后端 hasAllStoreScope 为准；旧后端缺省时按角色回退到「不限分店」——
+const warehouseStores = [
+  { storeGUID: "g-1", storeCode: "1001", storeName: "Managed", isPrimary: true },
+  { storeGUID: "g-2", storeCode: "1002", storeName: "Viewed", isPrimary: false },
+];
+const legacyWarehouse = buildAccess(createUser([], ["WarehouseManager"], warehouseStores));
+assertEqual(legacyWarehouse.hasAllStoreScope, true, "old backend: warehouse manager falls back to all stores");
+assertEqual(legacyWarehouse.managedStoreCodes(), null, "old backend: warehouse manager managed scope unrestricted");
+assertEqual(legacyWarehouse.isStoreLevelManager, false, "old backend: warehouse manager is not store level");
+assertEqual(legacyWarehouse.isWarehouseAccessDelegate, true, "old backend: warehouse manager stays account-access delegate");
+
+const scopedWarehouse = buildAccess({
+  ...createUser([], ["WarehouseManager"], warehouseStores),
+  hasAllStoreScope: false,
+  hasWarehouseWideScope: true,
+});
+assertEqual(scopedWarehouse.hasAllStoreScope, false, "scoped backend: warehouse manager no longer unrestricted");
+assertEqual(scopedWarehouse.hasWarehouseWideScope, true, "scoped backend: warehouse business stays all stores");
+assertEqual(scopedWarehouse.managedStoreCodes()?.join(","), "1001", "scoped backend: manage only isPrimary stores");
+assertEqual(scopedWarehouse.assignedStoreCodes()?.join(","), "1001,1002", "scoped backend: view all assigned stores");
+assertEqual(scopedWarehouse.isStoreLevelManager, true, "scoped backend: warehouse manager follows store-manager rules");
+assertEqual(scopedWarehouse.isWarehouseAccessDelegate, false, "scoped backend: no unrestricted account-access delegation");
+
+const scopedWarehouseNoStores = buildAccess({
+  ...createUser([], ["仓库经理"], []),
+  hasAllStoreScope: false,
+  hasWarehouseWideScope: true,
+});
+assertEqual(scopedWarehouseNoStores.managedStoreCodes()?.length, 0, "scoped warehouse manager without stores manages none (not null)");
+assertEqual(scopedWarehouseNoStores.assignedStoreCodes()?.length, 0, "scoped warehouse manager without stores views none (not null)");
+
+const scopedAdmin = buildAccess({ ...createUser([], ["Admin"], []), hasAllStoreScope: true, hasWarehouseWideScope: true });
+assertEqual(scopedAdmin.managedStoreCodes(), null, "admin stays unrestricted");
+assertEqual(scopedAdmin.isWarehouseAccessDelegate, false, "admin is not a warehouse delegate");
