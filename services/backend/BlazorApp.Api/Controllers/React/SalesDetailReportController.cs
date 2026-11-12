@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services;
 using System.Security.Claims;
 using BlazorApp.Api.Filters;
 using BlazorApp.Api.Interfaces;
@@ -347,7 +348,7 @@ public sealed class SalesDetailReportController : ControllerBase
         var normalizedRequested = Normalize(requested);
         if (requested != null && normalizedRequested.Count == 0)
             return (false, new List<string>());
-        if (User.IsInRole("Admin") || User.IsInRole("WarehouseManager"))
+        if (User.IsInRole("Admin") || (!StoreScopePolicy.WarehouseManagerStoreScoped && User.IsInRole("WarehouseManager")))
             return (true, requested == null ? null : normalizedRequested);
         var userGuid = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrWhiteSpace(userGuid))

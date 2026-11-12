@@ -343,6 +343,9 @@ namespace BlazorApp.Api.Controllers
                     ExactPermissions = snapshot.ExactPermissionCodes?.ToList() ?? new List<string>(),
                     StoreNames = userStores.Select(s => s.StoreName).ToList(),
                     Stores = userStores,
+                    // 分店口径由后端统一给出，前端不再按角色名自己判断（开关切换后 Web / 手机端一起生效）。
+                    HasAllStoreScope = StoreScopePolicy.HasAllStoreScope(snapshot.RoleNames),
+                    HasWarehouseWideScope = StoreScopePolicy.HasWarehouseWideScope(snapshot.RoleNames),
                     MustChangePassword = await UserPasswordChangeRequirements.IsRequiredAsync(
                         _dbContext.Db,
                         user.UserGUID

@@ -526,7 +526,8 @@ public sealed class EmployeeProfileManagedService
         {
             return new ManagedAccess(true, scope.UserGuid, Array.Empty<string>());
         }
-        if (!HasAnyRole(principal, EmployeeProfileSensitiveChangeService.StoreManagerRoleAliases)
+        // 开关打开后仓库经理与店长同口径（只管自己「管理」的分店），见 StoreScopePolicy。
+        if (!StoreScopePolicy.IsStoreScopedManager(principal)
             || scope.StoreGuids.Count == 0)
         {
             return null;

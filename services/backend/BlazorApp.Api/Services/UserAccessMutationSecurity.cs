@@ -108,12 +108,15 @@ namespace BlazorApp.Api.Services
             // 仓库管理是「不限分店、但不是超管」的受限委派者：和范围服务里的口径一致（看全部分店），
             // 但提权相关的动作（授 Admin / 仓库管理角色、改管理员账号）都由下面各校验单独拦住。
             // 同时有店长角色时以仓库管理为准（范围更大），店长身份仍由主分店关系派生保留。
-            if (actorRoleNames.Any(IsWarehouseManagerRoleName))
+            // 关键逻辑：StoreScopePolicy 开关打开后不再走这条，仓库经理与店长同口径——只能维护自己「管理」分店里的员工，
+            // 「管理」关系只有管理员能授（没有管理分店的仓库经理在下面被判为无权）。
+            var isWarehouseManager = actorRoleNames.Any(IsWarehouseManagerRoleName);
+            if (isWarehouseManager && !StoreScopePolicy.WarehouseManagerStoreScoped)
             {
                 return UserAccessMutationActor.WarehouseManager(userGuid);
             }
 
-            if (!actorRoleNames.Any(Permissions.IsStoreManagerRole))
+            if (!actorRoleNames.Any(Permissions.IsStoreManagerRole) && !isWarehouseManager)
             {
                 return UserAccessMutationActor.DeniedFor(userGuid);
             }

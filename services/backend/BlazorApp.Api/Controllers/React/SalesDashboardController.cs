@@ -78,7 +78,7 @@ namespace BlazorApp.Api.Controllers.React
             if (user == null)
                 return false;
             // Admin 和 WarehouseManager 都可以访问所有分店数据
-            return HasRole("Admin") || HasRole("WarehouseManager");
+            return HasRole("Admin") || (!StoreScopePolicy.WarehouseManagerStoreScoped && HasRole("WarehouseManager"));
         }
 
         /// <summary>
@@ -176,7 +176,7 @@ namespace BlazorApp.Api.Controllers.React
             var roleNames = snapshotResult.Data.RoleNames ?? new List<string>();
             var hasFullStoreRole = roleNames.Any(role =>
                 Permissions.SuperAdminRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase)
-                || Permissions.WarehouseManagerRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase)
+                || (!StoreScopePolicy.WarehouseManagerStoreScoped && Permissions.WarehouseManagerRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase))
             );
 
             if (hasFullStoreRole)

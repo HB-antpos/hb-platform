@@ -86,7 +86,8 @@ public sealed class StoreUserCashierBarcodeService
         }
 
         var isAdmin = HasAnyRole(principal, Permissions.SuperAdminRoleNames);
-        var isStoreManager = HasAnyRole(principal, Permissions.StoreManagerRoleNames);
+        // 开关打开后仓库经理与店长同口径（按自己「管理」的分店），见 StoreScopePolicy。
+        var isStoreManager = StoreScopePolicy.IsStoreScopedManager(principal);
         // scope.IsAdmin 还包含仓库角色；指定员工条码只允许真实管理员或普通店长账号操作。
         if ((!isAdmin && !isStoreManager) || (isAdmin && !scope.IsAdmin))
         {

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services;
 using System.Security.Claims;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
@@ -32,7 +33,7 @@ public sealed class MobileReportStoreOptionsController(
         var roles = snapshot.Data.RoleNames ?? new List<string>();
         var allStores = roles.Any(role =>
             Permissions.SuperAdminRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase)
-            || Permissions.WarehouseManagerRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase));
+            || (!StoreScopePolicy.WarehouseManagerStoreScoped && Permissions.WarehouseManagerRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase)));
         List<string>? storeCodes = null;
         if (!allStores)
         {

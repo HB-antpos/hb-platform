@@ -1000,7 +1000,7 @@ namespace BlazorApp.Api.Services.React
             }
 
             return _storeScopeService != null
-                && await _storeScopeService.CanAccessStoreCodeAsync(storeCode);
+                && await _storeScopeService.CanAccessStoreCodeForWarehouseAsync(storeCode);
         }
 
         private async Task<bool> HasExclusiveConflictAsync(

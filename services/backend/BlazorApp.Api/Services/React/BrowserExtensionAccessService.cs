@@ -59,7 +59,7 @@ public sealed class BrowserExtensionAccessService : IBrowserExtensionAccessServi
         }
 
         var normalizedStoreCode = storeCode.Trim();
-        if (await _storeScopeService.CanAccessStoreCodeAsync(normalizedStoreCode))
+        if (await _storeScopeService.CanAccessStoreCodeForWarehouseAsync(normalizedStoreCode))
         {
             return true;
         }
@@ -92,7 +92,12 @@ public sealed class BrowserExtensionAccessService : IBrowserExtensionAccessServi
             return Array.Empty<string>();
         }
 
-        var stores = await _userService.GetUserStoresAsync(userGuid);
+        // 订货插件属仓库本职：开关打开后仓库经理的门店口径会收口，这里改取仓库口径（全部分店）。
+        var useWarehouseScope =
+            StoreScopePolicy.HasWarehouseWideScope(user) && !StoreScopePolicy.HasAllStoreScope(user);
+        var stores = useWarehouseScope
+            ? await _userService.GetWarehouseUserStoresAsync(userGuid)
+            : await _userService.GetUserStoresAsync(userGuid);
         return stores.Success
             ? BrowserExtensionStoreSelection.NormalizeRelatedStoreCodes(stores.Data)
             : Array.Empty<string>();

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services;
 using System.Security.Claims;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Features.PosReceipts;
@@ -103,7 +104,7 @@ public sealed class PosmSalesOrderReceiptController : ControllerBase
         var isAdmin = User.Claims.Any(c =>
             c.Type == ClaimTypes.Role
             && (c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase)
-                || c.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase)));
+                || (!StoreScopePolicy.WarehouseManagerStoreScoped && c.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase))));
         if (isAdmin)
         {
             return null;

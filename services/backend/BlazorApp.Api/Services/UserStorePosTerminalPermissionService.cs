@@ -319,7 +319,9 @@ public sealed class UserStorePosTerminalPermissionService(
         var targetRoles = await GetActiveRoleNamesAsync(userGuid);
         // 仓库管理优先于店长身份（同时有两个角色时以仓库管理为准，与 UserAccessMutationSecurity 一致）。
         // 它能维护店长账号的 POS 权限，所以受保护目标只算管理员和仓库管理账号；店长操作者仍按完整高权限口径保护。
-        var protectedTarget = isWarehouseManager
+        // 开关打开后仓库经理与店长同口径：受保护目标按店长的完整高权限口径（不能再改店长账号）。
+        var warehouseDelegate = isWarehouseManager && !StoreScopePolicy.WarehouseManagerStoreScoped;
+        var protectedTarget = warehouseDelegate
             ? targetRoles.Any(role =>
                 Permissions.IsSuperAdminRole(role)
                 || CurrentUserManageableStoreScopeService.WarehouseManagerRoleAliases.Contains(
@@ -331,7 +333,7 @@ public sealed class UserStorePosTerminalPermissionService(
         if (protectedTarget)
         {
             return AccessResult.Denied(
-                isWarehouseManager ? "不能修改管理员和仓库管理账号" : "店长不能修改高权限账号",
+                warehouseDelegate ? "不能修改管理员和仓库管理账号" : "店长不能修改高权限账号",
                 "POS_PERMISSION_FORBIDDEN"
             );
         }
@@ -341,10 +343,10 @@ public sealed class UserStorePosTerminalPermissionService(
                 role,
                 StringComparer.OrdinalIgnoreCase
             ));
-        if (!targetRoles.Any(Permissions.IsEmployeeRole) && !(isWarehouseManager && targetIsStoreManager))
+        if (!targetRoles.Any(Permissions.IsEmployeeRole) && !(warehouseDelegate && targetIsStoreManager))
         {
             return AccessResult.Denied(
-                isWarehouseManager
+                warehouseDelegate
                     ? "仓库管理只能维护员工和店长的 POS 收银权限"
                     : "店长只能维护员工的 POS 收银权限",
                 "EMPLOYEE_TARGET_REQUIRED"

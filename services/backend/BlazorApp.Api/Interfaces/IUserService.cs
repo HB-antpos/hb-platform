@@ -147,6 +147,12 @@ namespace BlazorApp.Api.Interfaces
         Task<ApiResponse<List<UserStoreDto>>> GetUserStoresAsync(string userGuid);
 
         /// <summary>
+        /// 仓库本职业务（订货前台、浏览器订货插件）取用户分店：仓库经理始终返回全部分店，不受 StoreScopePolicy 开关影响。
+        /// 默认实现沿用 GetUserStoresAsync，既有测试替身无需改动。
+        /// </summary>
+        Task<ApiResponse<List<UserStoreDto>>> GetWarehouseUserStoresAsync(string userGuid) => GetUserStoresAsync(userGuid);
+
+        /// <summary>
         /// 从用户移除角色
         /// </summary>
         /// <param name="userGuid">用户GUID</param>

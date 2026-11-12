@@ -3942,9 +3942,8 @@ namespace BlazorApp.Api.Services.React
             }
 
             var user = _httpContextAccessor.HttpContext?.User;
-            if (!CurrentUserManageableStoreScopeService.HasAnyRole(
-                    user,
-                    CurrentUserManageableStoreScopeService.StoreManagerRoleAliases))
+            // 开关打开后仓库经理与店长同口径（按自己「管理」的分店），见 StoreScopePolicy。
+            if (!StoreScopePolicy.IsStoreScopedManager(user))
             {
                 return false;
             }

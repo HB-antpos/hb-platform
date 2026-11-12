@@ -2803,7 +2803,13 @@ namespace BlazorApp.Api.Services
         /// <summary>
         /// 获取用户的分店列表
         /// </summary>
-        public async Task<ApiResponse<List<UserStoreDto>>> GetUserStoresAsync(string userGuid)
+        public Task<ApiResponse<List<UserStoreDto>>> GetUserStoresAsync(string userGuid) =>
+            GetUserStoresCoreAsync(userGuid, warehouseWide: false);
+
+        public Task<ApiResponse<List<UserStoreDto>>> GetWarehouseUserStoresAsync(string userGuid) =>
+            GetUserStoresCoreAsync(userGuid, warehouseWide: true);
+
+        private async Task<ApiResponse<List<UserStoreDto>>> GetUserStoresCoreAsync(string userGuid, bool warehouseWide)
         {
             try
             {
@@ -2820,13 +2826,11 @@ namespace BlazorApp.Api.Services
                     .Select((ur, r) => r.RoleName)
                     .ToListAsync();
 
-                var isAdminOrWarehouse = userRoles.Any(roleName =>
-                    Permissions.IsSuperAdminRole(roleName)
-                    || Permissions.WarehouseManagerRoleNames.Contains(
-                        roleName,
-                        StringComparer.OrdinalIgnoreCase
-                    )
-                );
+                // 关键逻辑：管理员恒返回全部分店；仓库经理在仓库口径或开关关闭（旧口径）时返回全部分店，
+                // 开关打开后的门店口径返回他真实的 UserStore 分店与真实的「管理」标记（IsPrimary）。
+                var isAdminOrWarehouse = warehouseWide
+                    ? StoreScopePolicy.HasWarehouseWideScope(userRoles)
+                    : StoreScopePolicy.HasAllStoreScope(userRoles);
 
                 List<UserStoreDto> stores;
 
