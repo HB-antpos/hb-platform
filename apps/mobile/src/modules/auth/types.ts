@@ -59,6 +59,13 @@ export interface CurrentUser {
   stores: UserStoreDto[];
   /** 店长新建或重置密码后须先改成自己的密码；旧后端不返回时视为 false。 */
   mustChangePassword?: boolean;
+  /**
+   * 门店管理类功能是否不限分店（后端 /auth/current 给出；旧后端缺省时按角色回退：管理员或仓库经理）。
+   * 后端开关 Access:WarehouseManagerStoreScoped 打开后仓库经理为 false，按分配的分店收口。
+   */
+  hasAllStoreScope?: boolean;
+  /** 仓库本职业务（订货 / 发货等）是否不限分店：管理员与仓库经理为 true（旧后端缺省时按角色回退）。 */
+  hasWarehouseWideScope?: boolean;
 }
 
 export interface AccessControl {
@@ -71,6 +78,15 @@ export interface AccessControl {
   isStoreStaff: boolean;
   isStoreManager: boolean;
   isStoreLevelManager: boolean;
+  /** 门店管理类功能是否不限分店（见 CurrentUser.hasAllStoreScope）。 */
+  hasAllStoreScope: boolean;
+  /** 仓库本职业务是否不限分店（见 CurrentUser.hasWarehouseWideScope）。 */
+  hasWarehouseWideScope: boolean;
+  /**
+   * 账号授权里的「仓库委派者」（不限分店、可授管理关系、可改店长）：仓库经理且门店口径不限分店。
+   * 后端口径收口后为 false，仓库经理按店长规则（只管自己「管理」分店的员工）。
+   */
+  isWarehouseAccessDelegate: boolean;
   onlyOrder: boolean;
   canReadOrder: boolean;
   canCreateOrder: boolean;

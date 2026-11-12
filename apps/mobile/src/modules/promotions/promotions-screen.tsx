@@ -62,9 +62,10 @@ export function PromotionsScreen() {
         stores,
         isDeviceMode,
         deviceBoundStore,
-        isAdmin: access.isAdmin || access.isWarehouseManager,
+        // 促销暂按仓库口径（后端同样走仓库口径，仓库经理不限分店）。
+        isAdmin: access.hasWarehouseWideScope,
       }),
-    [access.isAdmin, access.isWarehouseManager, deviceBoundStore, isDeviceMode, stores],
+    [access.hasWarehouseWideScope, deviceBoundStore, isDeviceMode, stores],
   );
   // 全局所选分店不在可管理范围时，退回第一家可管理分店（不改全局选择）。
   const store: Store | null =

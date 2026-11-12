@@ -96,8 +96,8 @@ export function useAccessEditor({
   // 只有账号会话才把操作者绑进请求；iOS 审核会话带这个绑定会被拦截器拒绝。
   const boundActorKey = sessionKind === "account" ? actorUserGuid : "";
 
-  // 管理员与仓库管理都是「不限分店」的操作者；仓库管理在登录态里的分店 isPrimary 恒为 false，不能按它算范围。
-  const hasAllStoreScope = access.isAdmin || access.isWarehouseManager;
+  // 账号授权的操作者分店范围以后端口径为准：管理员不限；仓库经理收口后与店长一样只看自己「管理」的分店。
+  const hasAllStoreScope = access.hasAllStoreScope;
   const managedStoreCodes = useMemo(
     () =>
       hasAllStoreScope
@@ -134,7 +134,7 @@ export function useAccessEditor({
         isDeviceMode,
         isAdmin: access.isAdmin,
         isStoreManager: access.isStoreManager,
-        isWarehouseManager: access.isWarehouseManager,
+        isWarehouseManager: access.isWarehouseAccessDelegate,
         canManageStores,
         canManageRoles,
         canManagePos,
@@ -147,7 +147,7 @@ export function useAccessEditor({
     [
       access.isAdmin,
       access.isStoreManager,
-      access.isWarehouseManager,
+      access.isWarehouseAccessDelegate,
       canManagePos,
       canManageRoles,
       canManageStores,
@@ -181,7 +181,7 @@ export function useAccessEditor({
         isDeviceMode,
         isAdmin: access.isAdmin,
         isStoreManager: access.isStoreManager,
-        isWarehouseManager: access.isWarehouseManager,
+        isWarehouseManager: access.isWarehouseAccessDelegate,
         canManageStores,
         canManageRoles,
         canManagePos,
@@ -194,7 +194,7 @@ export function useAccessEditor({
     [
       access.isAdmin,
       access.isStoreManager,
-      access.isWarehouseManager,
+      access.isWarehouseAccessDelegate,
       canManagePos,
       canManageRoles,
       canManageStores,
@@ -418,9 +418,9 @@ export function useAccessEditor({
       limitUserAccessRolesForActor(
         mergeAccessRoleOptions(roleCatalogQuery.data, rolesQuery.data),
         access.isAdmin,
-        access.isWarehouseManager,
+        access.isWarehouseAccessDelegate,
       ),
-    [access.isAdmin, access.isWarehouseManager, roleCatalogQuery.data, rolesQuery.data],
+    [access.isAdmin, access.isWarehouseAccessDelegate, roleCatalogQuery.data, rolesQuery.data],
   );
   const hasManagedStoreAssignment = storeAssignments.some((item) => item.isPrimary);
 
@@ -736,7 +736,7 @@ export function useAccessEditor({
     isDeviceMode,
     isAuthenticated,
     isAdmin: access.isAdmin,
-    isWarehouseManager: access.isWarehouseManager,
+    isWarehouseManager: access.isWarehouseAccessDelegate,
     actorUserGuid,
     managedStoreCodes,
     eligibility,

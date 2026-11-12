@@ -1,4 +1,4 @@
-import { shouldLoadAllStoresForWarehouseCart } from "./warehouse-cart-access";
+import { mergeAssignedStoreFlags, shouldLoadAllStoresForWarehouseCart } from "./warehouse-cart-access";
 
 function assertEqual(actual: unknown, expected: unknown, label: string) {
   if (actual !== expected) {
@@ -6,8 +6,11 @@ function assertEqual(actual: unknown, expected: unknown, label: string) {
   }
 }
 
+const base = { hasWarehouseWideScope: false, hasAllStoreScope: false };
+
 assertEqual(
   shouldLoadAllStoresForWarehouseCart({
+    ...base,
     isWarehouseStaffOnly: true,
     canCreateOrder: true,
   }),
@@ -17,6 +20,7 @@ assertEqual(
 
 assertEqual(
   shouldLoadAllStoresForWarehouseCart({
+    ...base,
     isWarehouseStaffOnly: true,
     canCreateOrder: false,
   }),
@@ -28,7 +32,51 @@ assertEqual(
   shouldLoadAllStoresForWarehouseCart({
     isWarehouseStaffOnly: false,
     canCreateOrder: true,
+    hasWarehouseWideScope: true,
+    hasAllStoreScope: true,
   }),
   false,
-  "admins and managers keep normal store loading even when they can create orders"
+  "admins and unrestricted warehouse managers keep normal store loading (user endpoint already returns all stores)"
 );
+
+assertEqual(
+  shouldLoadAllStoresForWarehouseCart({
+    isWarehouseStaffOnly: false,
+    canCreateOrder: true,
+    hasWarehouseWideScope: true,
+    hasAllStoreScope: false,
+  }),
+  true,
+  "store-scoped warehouse manager still orders for every store"
+);
+
+assertEqual(
+  shouldLoadAllStoresForWarehouseCart({
+    isWarehouseStaffOnly: false,
+    canCreateOrder: false,
+    hasWarehouseWideScope: true,
+    hasAllStoreScope: false,
+  }),
+  false,
+  "store-scoped warehouse manager without Orders.Create keeps assigned stores"
+);
+
+assertEqual(
+  shouldLoadAllStoresForWarehouseCart({ ...base, isWarehouseStaffOnly: false, canCreateOrder: true }),
+  false,
+  "store managers keep normal store loading"
+);
+
+const merged = mergeAssignedStoreFlags(
+  [
+    { storeCode: "1001", storeName: "A" },
+    { storeCode: "1002", storeName: "B" },
+    { storeCode: "1003", storeName: "C", isPrimary: true },
+  ],
+  [
+    { storeCode: "1001", isPrimary: true },
+    { storeCode: "1002", isPrimary: false },
+  ],
+);
+assertEqual(merged.map((store) => `${store.storeCode}:${store.isPrimary}`).join(","), "1001:true,1002:false,1003:false",
+  "only stores the account really manages keep the manage flag");
