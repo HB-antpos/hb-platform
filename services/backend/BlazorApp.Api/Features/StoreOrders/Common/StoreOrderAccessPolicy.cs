@@ -434,7 +434,7 @@ internal sealed class StoreOrderAccessPolicy(
             return StoreOrderAccessDecision.Allowed;
         }
 
-        return await storeScopeService.CanAccessStoreCodeAsync(storeCode)
+        return await storeScopeService.CanAccessStoreCodeForWarehouseAsync(storeCode)
             ? StoreOrderAccessDecision.Allowed
             : StoreOrderAccessDecision.Forbidden;
     }
@@ -478,7 +478,7 @@ internal sealed class StoreOrderAccessPolicy(
 
         var stopwatch = Stopwatch.StartNew();
         var isAllowed =
-            await storeScopeService.CanAccessStoreCodeAsync(storeCode)
+            await storeScopeService.CanAccessStoreCodeForWarehouseAsync(storeCode)
             || await CanAccessAssignedStoreCodeAsync(storeCode);
         stopwatch.Stop();
 
@@ -505,7 +505,7 @@ internal sealed class StoreOrderAccessPolicy(
             return StoreOrderAccessDecision.Allowed;
         }
 
-        return await storeScopeService.CanAccessOrderAsync(orderGuid)
+        return await storeScopeService.CanAccessOrderForWarehouseAsync(orderGuid)
             ? StoreOrderAccessDecision.Allowed
             : StoreOrderAccessDecision.Forbidden;
     }
@@ -540,7 +540,7 @@ internal sealed class StoreOrderAccessPolicy(
 
     public async Task<IReadOnlyList<string>> GetAccessibleStoreCodesAsync()
     {
-        return await storeScopeService.GetAccessibleStoreCodesAsync();
+        return await storeScopeService.GetWarehouseAccessibleStoreCodesAsync();
     }
 
     public Task<StoreOrderStoreSelectionDecision> ResolveMissingOrdersSyncScopeAsync(
@@ -620,7 +620,7 @@ internal sealed class StoreOrderAccessPolicy(
             return StoreOrderStoreSelectionDecision.Preserve;
         }
 
-        var scope = await storeScopeService.GetScopeAsync();
+        var scope = await storeScopeService.GetWarehouseScopeAsync();
         if (!scope.IsAllowed || (scope.IsAdmin && !allowAdminScopeWithoutSelection))
         {
             return StoreOrderStoreSelectionDecision.Forbidden;

@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services;
 using System.Security.Claims;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
@@ -108,7 +109,7 @@ public sealed class SalesDetailCategoryOptionsController : ControllerBase
         var roles = permission.Data.RoleNames ?? new List<string>();
         var allStores = roles.Any(role =>
             Permissions.SuperAdminRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase)
-            || Permissions.WarehouseManagerRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase));
+            || (!StoreScopePolicy.WarehouseManagerStoreScoped && Permissions.WarehouseManagerRoleNames.Contains(role, StringComparer.OrdinalIgnoreCase)));
         List<string>? storeCodes = null;
         if (!allStores)
         {

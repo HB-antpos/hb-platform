@@ -231,7 +231,7 @@ public sealed class ContainerNewProductsReactService(
 
     private async Task<bool> CanAccessStoreCodeAsync(string storeCode)
     {
-        var scope = await storeScope.GetScopeAsync();
+        var scope = await storeScope.GetWarehouseScopeAsync();
         if (scope.IsAdmin || scope.CanAccessStoreCode(storeCode))
         {
             return true;

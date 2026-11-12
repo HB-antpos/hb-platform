@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services;
 using System.Security.Claims;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Api.Interfaces.React;
@@ -228,6 +229,6 @@ public sealed class HolidaySalesReportController : ControllerBase
         return User.Claims.Any(claim =>
             claim.Type == ClaimTypes.Role
             && (claim.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase)
-                || claim.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase)));
+                || (!StoreScopePolicy.WarehouseManagerStoreScoped && claim.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase))));
     }
 }

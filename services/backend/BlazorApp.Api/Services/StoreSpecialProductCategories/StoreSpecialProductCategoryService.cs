@@ -175,7 +175,7 @@ public sealed partial class StoreSpecialProductCategoryService : IStoreSpecialPr
             throw Validation($"缺少{fieldLabel}代码");
         }
 
-        var scope = await _scopeService.GetScopeAsync();
+        var scope = await _scopeService.GetWarehouseScopeAsync();
         if (!scope.IsAllowed || !scope.CanAccessStoreCode(code))
         {
             throw new CategoryException(

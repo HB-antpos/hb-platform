@@ -41,7 +41,7 @@ namespace BlazorApp.Api.Controllers.React
             return user.Claims.Any(c =>
                 c.Type == ClaimTypes.Role
                 && (c.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase)
-                    || c.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase))
+                    || (!StoreScopePolicy.WarehouseManagerStoreScoped && c.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase)))
             );
         }
 

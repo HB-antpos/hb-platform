@@ -1537,7 +1537,8 @@ public sealed class EmployeeProfileSensitiveChangeService
         {
             return new ReviewAccess(true, scope.UserGuid, []);
         }
-        if (!HasAnyRole(user, StoreManagerRoleAliases) || scope.StoreGuids.Count == 0)
+        // 开关打开后仓库经理与店长同口径（只审自己「管理」的分店），见 StoreScopePolicy。
+        if (!StoreScopePolicy.IsStoreScopedManager(user) || scope.StoreGuids.Count == 0)
         {
             return null;
         }

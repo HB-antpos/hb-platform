@@ -217,7 +217,7 @@ public sealed class RevenueReportSnapshotController : ControllerBase
         return User.Claims.Any(claim =>
             claim.Type == ClaimTypes.Role
             && (claim.Value.Equals("Admin", StringComparison.OrdinalIgnoreCase)
-                || claim.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase)));
+                || (!StoreScopePolicy.WarehouseManagerStoreScoped && claim.Value.Equals("WarehouseManager", StringComparison.OrdinalIgnoreCase))));
     }
 
     private static List<string> NormalizeCodes(IEnumerable<string>? codes)

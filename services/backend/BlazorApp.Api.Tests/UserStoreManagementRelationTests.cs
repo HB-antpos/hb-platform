@@ -3856,6 +3856,45 @@ namespace BlazorApp.Api.Tests
         }
 
         [Theory]
+        [InlineData("WarehouseManager")]
+        [InlineData("仓库经理")]
+        [InlineData("WarehouseAdmin")]
+        public async Task GetUserStoresAsync_WarehouseManagerStoreScoped_ReturnsRealAssignmentsButWarehouseReadStaysAll(
+            string roleName
+        )
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            await SeedAliasedStoreManagerAsync("warehouse-target", $"role-{roleName}", roleName, true);
+            using var _ = StoreScopePolicy.OverrideForTest(true);
+            var service = CreateUserService();
+
+            var scoped = await service.GetUserStoresAsync("warehouse-target");
+            var warehouse = await service.GetWarehouseUserStoresAsync("warehouse-target");
+
+            // 中文注释：开关打开后门店口径返回真实分配与真实「管理」标记；仓库口径（订货插件等）仍是全部分店。
+            Assert.True(scoped.Success);
+            var only = Assert.Single(scoped.Data!);
+            Assert.Equal("store-1", only.StoreGUID);
+            Assert.True(only.IsPrimary);
+            Assert.True(warehouse.Success);
+            Assert.Equal(2, warehouse.Data!.Count);
+        }
+
+        [Fact]
+        public async Task GetUserStoresAsync_WarehouseManagerStoreScoped_AdminStillReadsAllStores()
+        {
+            await SeedUsersRolesAndStoresForScopeTestsAsync();
+            await SeedAliasedStoreManagerAsync("admin-target", "role-admin-target", "Admin", false);
+            using var _ = StoreScopePolicy.OverrideForTest(true);
+
+            var result = await CreateUserService().GetUserStoresAsync("admin-target");
+
+            Assert.True(result.Success);
+            Assert.Equal(2, result.Data!.Count);
+            Assert.All(result.Data!, store => Assert.False(store.IsPrimary));
+        }
+
+        [Theory]
         [InlineData(Permissions.Users.ManageStores)]
         [InlineData(Permissions.Users.ManagePosTerminalPermissions)]
         public async Task GetUserStores_WhenStoreManagerHasPermission_ReturnsManagedStoreIntersection(
@@ -4220,7 +4259,7 @@ namespace BlazorApp.Api.Tests
                 StringComparison.Ordinal
             );
             var methodEnd = source.IndexOf(
-                "public async Task<ApiResponse<List<UserStoreDto>>> GetUserStoresAsync",
+                "public Task<ApiResponse<List<UserStoreDto>>> GetUserStoresAsync",
                 methodStart,
                 StringComparison.Ordinal
             );

@@ -518,7 +518,8 @@ internal sealed class DailyCloseQueryService : IDailyCloseQueryService
             return StoreAccess.Admin;
         }
 
-        if (!HasAnyRole(user, StoreManagerRoleAliases))
+        // 店长按关联分店查看；开关打开后仓库经理同口径（StoreScopePolicy），开关关闭时与原来一样只认店长。
+        if (!StoreScopePolicy.IsStoreScopedManager(user))
         {
             return StoreAccess.Denied;
         }

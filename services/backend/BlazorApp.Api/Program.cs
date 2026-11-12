@@ -650,6 +650,10 @@ builder.Services.AddScoped<
     BlazorApp.Api.Interfaces.ICurrentUserManageableStoreScopeService,
     BlazorApp.Api.Services.CurrentUserManageableStoreScopeService
 >();
+// 仓库经理在门店管理类功能里是否按分配的分店收口（默认 false = 旧口径不限分店），见 StoreScopePolicy。
+BlazorApp.Api.Services.StoreScopePolicy.Configure(
+    builder.Configuration.GetValue<bool>(BlazorApp.Api.Services.StoreScopePolicy.ConfigurationKey, false)
+);
 
 // 📁 数据库上下文服务 - 使用作用域模式（Scoped）
 // 说明：将原先的 Singleton 改为 Scoped，避免多个请求并发复用同一底层连接

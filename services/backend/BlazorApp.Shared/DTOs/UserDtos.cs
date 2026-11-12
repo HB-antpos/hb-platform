@@ -150,6 +150,16 @@ namespace BlazorApp.Shared.DTOs
         /// 账号须先修改密码才能继续使用（店长新建或重置密码后）；客户端据此进入强制改密页。
         /// </summary>
         public bool MustChangePassword { get; set; }
+
+        /// <summary>
+        /// 门店管理 / 门店数据是否不限分店（只在当前用户接口填写，其他接口为 null）。
+        /// 管理员恒为 true；仓库经理按后端开关 Access:WarehouseManagerStoreScoped（关闭时 true，打开后 false 并按分配分店收口）。
+        /// 前端据此决定门店管理类页面的可选分店，为 null（旧后端）时回退到按角色判断。
+        /// </summary>
+        public bool? HasAllStoreScope { get; set; }
+
+        /// <summary>仓库本职业务（订货 / 发货、拣货、仓库商品等）是否不限分店：管理员与仓库经理为 true（只在当前用户接口填写）。</summary>
+        public bool? HasWarehouseWideScope { get; set; }
     }
 
     /// <summary>

@@ -632,7 +632,7 @@ namespace BlazorApp.Api.Services.React
 
         private async Task<StoreAccessResult> ResolveManagedStoreAccessAsync(string? requestedStoreCode)
         {
-            var scope = await _scopeService.GetScopeAsync();
+            var scope = await _scopeService.GetWarehouseScopeAsync();
             if (!scope.IsAllowed)
             {
                 return StoreAccessResult.Forbidden(scope.Message);

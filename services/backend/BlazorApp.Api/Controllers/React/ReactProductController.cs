@@ -100,7 +100,7 @@ namespace BlazorApp.Api.Controllers.React
         {
             try
             {
-                var scope = await _storeScopeService.GetScopeAsync();
+                var scope = await _storeScopeService.GetWarehouseScopeAsync();
                 IReadOnlyCollection<string>? accessibleStoreCodes = scope.IsAllowed
                     ? scope.IsAdmin ? null : scope.StoreCodes
                     : Array.Empty<string>();
@@ -139,7 +139,7 @@ namespace BlazorApp.Api.Controllers.React
                     return BadRequest(new { success = false, message = "请求数据不能为空" });
                 }
 
-                var scope = await _storeScopeService.GetScopeAsync();
+                var scope = await _storeScopeService.GetWarehouseScopeAsync();
                 IReadOnlyCollection<string>? accessibleStoreCodes = scope.IsAllowed
                     ? scope.IsAdmin ? null : scope.StoreCodes
                     : Array.Empty<string>();
@@ -1136,7 +1136,7 @@ namespace BlazorApp.Api.Controllers.React
             SyncProductsToStoresRequest request
         )
         {
-            var scope = await _storeScopeService.GetScopeAsync();
+            var scope = await _storeScopeService.GetWarehouseScopeAsync();
             if (!scope.IsAllowed)
             {
                 return Forbid();

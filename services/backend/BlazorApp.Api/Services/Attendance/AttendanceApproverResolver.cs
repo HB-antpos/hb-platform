@@ -89,8 +89,11 @@ internal sealed class AttendanceApproverResolver(
     /// <summary>不限门店的候选：启用的超级管理员 / 仓库经理角色成员（角色与账号均启用且未删除）。</summary>
     internal static ISugarQueryable<string> BuildUnrestrictedCandidateQuery(ISqlSugarClient db)
     {
-        var roleNamesLower = ToLowerDistinct(
-            Permissions.SuperAdminRoleNames.Concat(Permissions.WarehouseManagerRoleNames));
+        // 开关打开后仓库经理不再是「不限门店」的审批人，改按下面店长候选的主分店关系计算。
+        var unrestrictedRoles = StoreScopePolicy.WarehouseManagerStoreScoped
+            ? Permissions.SuperAdminRoleNames
+            : Permissions.SuperAdminRoleNames.Concat(Permissions.WarehouseManagerRoleNames);
+        var roleNamesLower = ToLowerDistinct(unrestrictedRoles);
         return db.Queryable<UserRole>()
             .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
             .InnerJoin<User>((userRole, role, user) => userRole.UserGUID == user.UserGUID)
@@ -108,7 +111,11 @@ internal sealed class AttendanceApproverResolver(
     /// <summary>店长候选：店长角色成员，且在该门店有主分店关联（UserStore.IsPrimary），非主分店不算。</summary>
     internal static ISugarQueryable<string> BuildStoreManagerCandidateQuery(ISqlSugarClient db, string storeCode)
     {
-        var roleNamesLower = ToLowerDistinct(Permissions.StoreManagerRoleNames);
+        // 开关打开后仓库经理与店长同口径：在该门店有主分店（管理）关联才算审批人。
+        var managerRoles = StoreScopePolicy.WarehouseManagerStoreScoped
+            ? Permissions.StoreManagerRoleNames.Concat(Permissions.WarehouseManagerRoleNames)
+            : Permissions.StoreManagerRoleNames;
+        var roleNamesLower = ToLowerDistinct(managerRoles);
         return db.Queryable<UserRole>()
             .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
             .InnerJoin<User>((userRole, role, user) => userRole.UserGUID == user.UserGUID)
