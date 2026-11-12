@@ -3153,8 +3153,8 @@
         "earlyLeave": "Early leave: {{duration}}",
         "earlyArrival": "Early arrival: {{duration}}",
         "lateDeparture": "Late departure: {{duration}}",
-        "candidateOvertime": "Candidate overtime: {{minutes}} min",
-        "approvedOvertime": "Approved overtime: {{minutes}} min",
+        "candidateOvertime": "Candidate overtime: {{duration}}",
+        "approvedOvertime": "Approved overtime: {{duration}}",
         "duration": {
           "minutes": "{{minutes}} min",
           "hours": "{{hours}} h",

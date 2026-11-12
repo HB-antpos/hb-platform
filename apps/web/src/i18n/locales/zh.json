@@ -3153,8 +3153,8 @@
         "earlyLeave": "早退 {{duration}}",
         "earlyArrival": "早到 {{duration}}",
         "lateDeparture": "晚退 {{duration}}",
-        "candidateOvertime": "候选 {{minutes}} 分",
-        "approvedOvertime": "批准 {{minutes}} 分",
+        "candidateOvertime": "候选 {{duration}}",
+        "approvedOvertime": "批准 {{duration}}",
         "duration": {
           "minutes": "{{minutes}} 分",
           "hours": "{{hours}} 小时",

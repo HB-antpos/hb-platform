@@ -23,9 +23,9 @@
       },
       "meal": {
         "column": "Meal & paid",
-        "deduction": "Meal −{{minutes}} min",
-        "pendingAddBack": "Pending add-back {{minutes}} min",
-        "approvedAddBack": "Added back {{minutes}} min",
+        "deduction": "Meal −{{duration}}",
+        "pendingAddBack": "Pending add-back {{duration}}",
+        "approvedAddBack": "Added back {{duration}}",
         "paid": "Paid {{value}}",
         "claimSummary": "No break ×{{count}}, requests {{minutes}} min added back",
         "claimCounts": "Roster meal breaks {{expected}}, recorded {{recorded}}",
