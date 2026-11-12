@@ -681,6 +681,23 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
     for key, entries in purchases_ps.items():
         purchase_qty_180[key] = sum(q for d, q in entries if d >= E - timedelta(days=179))
 
+    # 库存估算基数：近 180 天内「所有批次」到货量之和，销量从第一批到货日起算。
+    # 之前只取最近一天的到货量，会漏掉更早批次还没卖完的货（例如 9 月到 240 件、10 月又到 60 件，
+    # 旧口径只算 60 件，把大量在手库存误判成缺货）。近 180 天内没有任何到货时，退回只看最近一批。
+    stock_basis = {}  # (store,product) -> {first_date, total_qty, batches}
+    window_start = E - timedelta(days=179)
+    for key, entries in purchases_ps.items():
+        in_window = [(d, q) for d, q in entries if d >= window_start]
+        if in_window:
+            stock_basis[key] = {
+                "first_date": min(d for d, _ in in_window),
+                "total_qty": sum(q for _, q in in_window),
+                "batches": len({d for d, _ in in_window}),
+            }
+        else:
+            lp0 = last_purchase[key]
+            stock_basis[key] = {"first_date": lp0["date"], "total_qty": lp0["qty"], "batches": 1}
+
     # ---------- HQ 参考库存（可选，可失败）----------
     hq_available = False
     hq_note = "未启用"
@@ -813,11 +830,11 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
 
     def remaining_of(store, product):
         key = (store, product)
-        lp = last_purchase.get(key)
-        if lp is None:
+        basis = stock_basis.get(key)
+        if basis is None:
             return None
-        sold_since = cur_idx.sum_store_product(store, product, lp["date"], E)
-        return lp["qty"] - sold_since
+        sold_since = cur_idx.sum_store_product(store, product, basis["first_date"], E)
+        return basis["total_qty"] - sold_since
 
     ps_rows = {}
     for store, product in universe_ps:
@@ -834,8 +851,10 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
             store, product, E - timedelta(days=179), E
         )
         lp = last_purchase.get((store, product))
+        basis = stock_basis.get((store, product))
+        # 「到货后销量」与余量同一起点：从窗口内第一批到货日起算，才能与累计到货量对得上
         sold_since_purchase = (
-            cur_idx.sum_store_product(store, product, lp["date"], E) if lp else None
+            cur_idx.sum_store_product(store, product, basis["first_date"], E) if basis else None
         )
         ps_rows[(store, product)] = {
             "forecast7": f7,
@@ -848,6 +867,8 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
             "est180": est180,
             "last_purchase_date": lp["date"].isoformat() if lp else None,
             "last_purchase_qty": lp["qty"] if lp else None,
+            "purchase_total_qty": basis["total_qty"] if basis else None,
+            "purchase_batches": basis["batches"] if basis else None,
             "sold_since_purchase": sold_since_purchase,
             "basis": basis14,
             "is_shortage": conf != "低" and f14 >= cfg.min_forecast_for_shortage and gap > 0,
@@ -1091,6 +1112,8 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
                         "image_url": info["image_url"],
                         "last_purchase_date": row["last_purchase_date"],
                         "last_purchase_qty": row["last_purchase_qty"],
+                        "purchase_total_qty": row["purchase_total_qty"],
+                        "purchase_batches": row["purchase_batches"],
                         "sales_since_purchase": (
                             math.ceil(row["sold_since_purchase"]) if row["sold_since_purchase"] is not None else None
                         ),

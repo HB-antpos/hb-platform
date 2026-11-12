@@ -557,7 +557,7 @@
       kpiHq: "HQ 账面库存", hqYes: "可用", hqNo: "不可用",
       missing: function (d, list) { return "数据截止日（" + d + "）里以下门店没有销量记录，可能是当天确实无销售，也可能是数据未同步：" + list + "。"; },
       warnTitle: "运行警告：",
-      caveat: "口径提醒：「到货后余量」按最近一次进货单起算，含在途、不含上一批剩货，不是货架库存；「未知店目标量」来自没有可用进货单据的门店，只是建议保持量，不能当作确定要订的数量。系统没有调拨功能，「调拨来源」仅为建议，以现场核对为准。点商品图片可放大，点商品行可展开分店销量。",
+      caveat: "口径提醒：「到货后余量」累计近 180 天内所有批次的进货量，再减去自第一批到货日起的销量，含在途，不是货架库存；「未知店目标量」来自没有可用进货单据的门店，只是建议保持量，不能当作确定要订的数量。系统没有调拨功能，「调拨来源」仅为建议，以现场核对为准。点商品图片可放大，点商品行可展开分店销量。",
       tabs: { bestsellers: "畅销榜", sell_through: "进销累计", high_value: "高价大件", forecast: "7/14 天预测", store_gaps: "分店缺口与调拨", no_purchase: "无进货记录", notes: "附注" },
       search: "搜索货号或名称…", count: function (n) { return "共 " + n + " 项"; },
       hintBest: "近 28 天销量 Top 30% 并集金额 Top 30%",
@@ -579,6 +579,7 @@
       detailTitle: function (name, n) { return name + " · " + n + " 家门店有销量或需求"; },
       noStores: "近 28 天没有门店销量记录",
       pcs: function (n) { return "（" + n + "件）"; },
+      batches: function (b, q) { return "共 " + b + " 批累计 " + q + " 件"; },
       shortChip: function (s, n) { return s + " 缺" + n; },
       firstRun: "首次",
       allStores: function (n) { return "全部门店（" + n + "）"; },
@@ -625,7 +626,7 @@
           formulaTitle: "公式与口径",
           formula: [
             "<strong>预测</strong>：有去年基线时按「去年同期同店销量 × 同比系数」与「近 28 天日均 × 季节比」加权融合，权重随去年同期样本量升到 1；新品或去年未在售，退化为近期外推 × 季节比。<strong>建议保持库存</strong> = 预测 14 天 × " + p.safety_factor + "。",
-            "<strong>到货后余量</strong> = 最近一次进货单当日进货量之和 − 到货后至今销量（不含更早批次的剩货）。<strong>缺口</strong> = 目标库存 − max(余量, 0)。判定「缺货」需同时满足：有可信余量数据、预测 14 天 ≥ " + p.min_forecast_for_shortage + "、缺口 > 0。",
+            "<strong>到货后余量</strong> = 近 180 天内所有批次进货量之和 − 自第一批到货日起至今的销量（多次到货都计入；近 180 天没有到货的，只看最近一批）。<strong>缺口</strong> = 目标库存 − max(余量, 0)。判定「缺货」需同时满足：有可信余量数据、预测 14 天 ≥ " + p.min_forecast_for_shortage + "、缺口 > 0。",
             "<strong>调拨来源</strong>：来源店需「高」可信度且（余量 − 预测 28 天）> 0，按盈余从高到低最多取 3 家，同一批余量在多个目标店之间贪心分配，不会重复推荐。" + p.warehouse_store + " 仓库店只作来源，不计入需求。",
             "<strong>分店销量</strong>：只统计需求侧门店（不含仓库与测试店），占比按这些门店合计计算。",
             "<strong>进销累计</strong>：起始日（默认最近一个 8 月 1 日）以来的进货量与累计已售，售出率 = 累计已售 ÷ 进货量。起始日之前的库存不计入，所以售出率可能超过 100%。进货均价 = 进货单金额 ÷ 进货量，销售均价 = 销售额 ÷ 已售，两者的含税口径可能不同。"
@@ -679,7 +680,7 @@
       kpiHq: "HQ book stock", hqYes: "Available", hqNo: "Unavailable",
       missing: function (d, list) { return "These stores have no sales rows on the cutoff date (" + d + "). They may simply have had no sales, or the data has not synced yet: " + list + "."; },
       warnTitle: "Run warnings:",
-      caveat: "How to read this: “stock since delivery” counts from the latest invoice, includes stock in transit and ignores older leftover stock, so it is not shelf stock. “Unknown-store target” comes from stores with no usable invoices and is a suggested level, not a confirmed order. The system has no transfer feature, so transfer sources are suggestions to check on site. Tap a product image to enlarge it, and tap a product row to see sales by store.",
+      caveat: "How to read this: “stock since delivery” adds up every delivery in the last 180 days and subtracts sales since the first of them; it includes stock in transit, so it is not shelf stock. “Unknown-store target” comes from stores with no usable invoices and is a suggested level, not a confirmed order. The system has no transfer feature, so transfer sources are suggestions to check on site. Tap a product image to enlarge it, and tap a product row to see sales by store.",
       tabs: { bestsellers: "Best sellers", sell_through: "Sell-through", high_value: "High-value items", forecast: "7/14-day forecast", store_gaps: "Store gaps & transfers", no_purchase: "No invoice record", notes: "Notes" },
       search: "Search item no. or name…", count: function (n) { return n + " items"; },
       hintBest: "Top 30% by 28-day units, merged with top 30% by sales value",
@@ -701,6 +702,7 @@
       detailTitle: function (name, n) { return name + " · " + n + (n === 1 ? " store" : " stores") + " with sales or demand"; },
       noStores: "No store sales in the last 28 days",
       pcs: function (n) { return " (" + n + " pcs)"; },
+      batches: function (b, q) { return b + " deliveries, " + q + " pcs in total"; },
       shortChip: function (s, n) { return s + " short " + n; },
       firstRun: "First run",
       allStores: function (n) { return "All stores (" + n + ")"; },
@@ -747,7 +749,7 @@
           formulaTitle: "Formulas",
           formula: [
             "<strong>Forecast</strong>: when last year has history, it blends “same store, same period last year × year-on-year factor” with “28-day daily rate × seasonal ratio”. The weight moves fully to last year as its sample grows. New items or items not sold last year use the recent rate × seasonal ratio only. <strong>Target stock</strong> = 14-day forecast × " + p.safety_factor + ".",
-            "<strong>Stock since delivery</strong> = units on the latest invoice date − units sold since then (older leftover stock is not counted). <strong>Gap</strong> = target − max(stock, 0). A store is <em>short</em> when it has usable stock data, a 14-day forecast ≥ " + p.min_forecast_for_shortage + ", and a gap > 0.",
+            "<strong>Stock since delivery</strong> = units delivered across all batches in the last 180 days − units sold since the first of those deliveries (with no delivery in 180 days, only the latest batch is used). <strong>Gap</strong> = target − max(stock, 0). A store is <em>short</em> when it has usable stock data, a 14-day forecast ≥ " + p.min_forecast_for_shortage + ", and a gap > 0.",
             "<strong>Transfer sources</strong>: a source needs High confidence and (stock − 28-day forecast) > 0. Up to 3 sources are picked by surplus, and one surplus is shared out greedily so it is never offered twice. Store " + p.warehouse_store + " (warehouse) is a source only and is not counted as demand.",
             "<strong>Sales by store</strong>: retail stores only (warehouse and test store excluded). Share is against the total of those stores.",
             "<strong>Sell-through</strong>: units purchased and sold since the start date (by default the most recent 1 August). Sell-through = sold ÷ purchased. Stock from before the start date is not counted, so it can exceed 100%. Avg cost = invoice amount ÷ units purchased; avg sell price = sales ÷ units sold. The two may differ in GST treatment."
@@ -1307,7 +1309,7 @@
     }).join("");
 
     var columns = productColumns([
-      { key: "last_purchase_date", label: c.lastIn, render: function (r) { return esc(r.last_purchase_date || "—") + (r.last_purchase_qty !== null && r.last_purchase_qty !== undefined ? esc(l.pcs(fmtNum(r.last_purchase_qty))) : ""); } },
+      { key: "last_purchase_date", label: c.lastIn, render: function (r) { return esc(r.last_purchase_date || "—") + (r.last_purchase_qty !== null && r.last_purchase_qty !== undefined ? esc(l.pcs(fmtNum(r.last_purchase_qty))) : "") + (r.purchase_batches > 1 ? '<div class="muted">' + esc(l.batches(r.purchase_batches, fmtNum(r.purchase_total_qty))) + "</div>" : ""); } },
       { key: "sales_since_purchase", label: c.soldSince, numeric: true, render: function (r) { return fmtNum(r.sales_since_purchase); } },
       { key: "remaining", label: c.remaining, numeric: true, render: function (r) { return fmtNum(r.remaining); } },
       { key: "est180", label: c.est180, numeric: true, render: function (r) { return fmtNum(r.est180); } },
