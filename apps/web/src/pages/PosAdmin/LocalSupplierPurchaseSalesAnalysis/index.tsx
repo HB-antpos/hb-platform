@@ -278,7 +278,8 @@ export default function LocalSupplierPurchaseSalesAnalysisPage({ embedded = fals
   const currentUser = useAuthStore((state) => state.currentUser)
   const access = useAuthStore((state) => state.access)
 
-  const scopedStoreCodes = useMemo(() => access.managedStoreCodes(), [access])
+  // 本地采购属仓库本职：仓库经理不受门店口径收口影响。
+  const scopedStoreCodes = useMemo(() => access.warehouseStoreCodes(), [access])
   const singleScopedStoreCode = useMemo(
     () => (Array.isArray(scopedStoreCodes) && scopedStoreCodes.length === 1 ? scopedStoreCodes[0] : undefined),
     [scopedStoreCodes],

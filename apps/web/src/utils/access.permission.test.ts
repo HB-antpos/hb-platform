@@ -1990,4 +1990,27 @@ assertEqual(
   '只有查看名称权限时不得进入国内供应商管理',
 )
 
+// —— 仓库经理分店口径：以后端 hasAllStoreScope 为准；旧后端缺省时按角色回退到「不限分店」——
+{
+  const stores = [
+    { storeGUID: 'g-1', storeCode: '1001', storeName: 'Managed', isManageable: true, assignedAt: '' },
+    { storeGUID: 'g-2', storeCode: '1002', storeName: 'Viewed', isManageable: false, assignedAt: '' },
+  ]
+  const legacy = buildAccess(createCurrentUser({ roleNames: ['WarehouseManager'], stores }))
+  assertEqual(legacy.managedStoreCodes(), null, '旧后端：仓库经理门店口径仍不限')
+  assertEqual(legacy.isStoreLevelManager, false, '旧后端：仓库经理不是门店级')
+
+  const scoped = buildAccess(
+    createCurrentUser({ roleNames: ['仓库管理员'], stores, hasAllStoreScope: false, hasWarehouseWideScope: true }),
+  )
+  assertEqual(scoped.isWarehouseManager, true, '仓库经理别名与后端一致')
+  assertEqual(scoped.managedStoreCodes()?.join(','), '1001', '收口后只管「管理」分店')
+  assertEqual(scoped.visibleStoreCodes()?.join(','), '1001,1002', '收口后可看全部分配分店')
+  assertEqual(scoped.warehouseStoreCodes(), null, '仓库本职（本地采购）仍不限分店')
+  assertEqual(scoped.isStoreLevelManager, true, '收口后按店长规则')
+
+  const storeManager = buildAccess(createCurrentUser({ roleNames: ['StoreManager'], stores }))
+  assertEqual(storeManager.warehouseStoreCodes()?.join(','), '1001', '店长的仓库口径同管理分店')
+}
+
 console.log('access.permission.test: ok')

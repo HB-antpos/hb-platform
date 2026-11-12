@@ -1,6 +1,7 @@
 import { message } from 'antd'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { getActiveStoresAsUserStores } from '../services/storeService'
 import { getUserStores } from '../services/userService'
 import { useShopStore } from '../store/shop'
 
@@ -10,7 +11,9 @@ import { useShopStore } from '../store/shop'
  * effect 不能依赖 selectedStore 对象：setUserStores 每次都会换成新数组里同 storeCode 的新对象，
  * 引用一变 effect 就重跑、再次拉取，选中分店后会按网络往返节奏无限请求分店列表。
  */
-export function useShopUserStores(userGuid: string | undefined) {
+export function useShopUserStores(userGuid: string | undefined, options: { loadAllStores?: boolean } = {}) {
+  // 仓库经理在后端口径收口后，用户分店只剩分配的分店；订货是仓库本职，改拉全部启用分店。
+  const loadAllStores = options.loadAllStores === true
   const { t } = useTranslation()
   const setUserStores = useShopStore((state) => state.setUserStores)
   const setSelectedStore = useShopStore((state) => state.setSelectedStore)
@@ -26,7 +29,8 @@ export function useShopUserStores(userGuid: string | undefined) {
       }
 
       try {
-        const stores = (await getUserStores(userGuid)).slice().sort((left, right) =>
+        const source = loadAllStores ? await getActiveStoresAsUserStores() : await getUserStores(userGuid)
+        const stores = source.slice().sort((left, right) =>
           (left.storeName || left.storeCode || '').localeCompare(right.storeName || right.storeCode || '', undefined, {
             sensitivity: 'base',
           }),
@@ -52,5 +56,5 @@ export function useShopUserStores(userGuid: string | undefined) {
     return () => {
       cancelled = true
     }
-  }, [userGuid, resetShop, setSelectedStore, setUserStores, t])
+  }, [userGuid, loadAllStores, resetShop, setSelectedStore, setUserStores, t])
 }

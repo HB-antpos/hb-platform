@@ -603,7 +603,8 @@ export default function InvoiceEditPage() {
   const canEditInvoice = access.canEditLocalPurchase
   const canEditDetailRows = isAdmin
   const canSelectRows = isAdmin || canWriteLocalPurchaseToHq || canRunGlobalLocalPurchaseBatchActions
-  const managedStoreCodes = access.managedStoreCodes()
+  // 本地采购属仓库本职：仓库经理不受门店口径收口影响。
+  const managedStoreCodes = access.warehouseStoreCodes()
   const managedStoreCodeKey = managedStoreCodes?.join(',') ?? 'all'
   // 记录当前发票已完成首次加载，保活 Tab 恢复时保留订单头和明细表。
   const loadedInvoiceGuidRef = useRef<string | null>(null)

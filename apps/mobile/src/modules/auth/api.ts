@@ -119,7 +119,14 @@ export function normalizeCurrentUser(payload: unknown): CurrentUser {
         : [],
     stores: normalizeUserStores(data.stores ?? data.Stores),
     mustChangePassword: data.mustChangePassword === true || data.MustChangePassword === true,
+    hasAllStoreScope: optionalBoolean(data.hasAllStoreScope ?? data.HasAllStoreScope),
+    hasWarehouseWideScope: optionalBoolean(data.hasWarehouseWideScope ?? data.HasWarehouseWideScope),
   };
+}
+
+/** 只认真正的布尔值；旧后端没有这个字段（undefined / null）时保持缺省，由 access 按角色回退。 */
+function optionalBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
 }
 
 export async function loginApi(payload: LoginRequest): Promise<TokenResponse> {

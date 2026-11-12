@@ -42,6 +42,8 @@ function createEmptyAccess(): AccessControl {
     isStoreStaff: false,
     isStoreManager: false,
     isStoreLevelManager: false,
+    hasAllStoreScope: false,
+    hasWarehouseWideScope: false,
     onlyOrder: false,
     canReadOrder: false,
     canWriteOrder: false,
@@ -166,6 +168,7 @@ function createEmptyAccess(): AccessControl {
     hasAllRoles: alwaysFalse,
     managedStoreCodes: () => null,
     visibleStoreCodes: () => null,
+    warehouseStoreCodes: () => null,
   }
 }
 
@@ -182,7 +185,20 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     hasRole('管理员') ||
     hasRole('SuperAdmin') ||
     hasRole('超级管理员')
-  const isWarehouseManager = hasRole('WarehouseManager') || hasRole('仓库经理')
+  // 与后端 Permissions.WarehouseManagerRoleNames、移动端一致的仓库经理别名。
+  const isWarehouseManager =
+    hasRole('WarehouseManager') ||
+    hasRole('仓库经理') ||
+    hasRole('Warehouse') ||
+    hasRole('仓库管理员') ||
+    hasRole('WarehouseAdmin')
+  // 关键逻辑：分店口径以后端给出的为准（开关切换后 Web / 手机一起生效）；旧后端没给时按角色回退到旧口径。
+  const hasAllStoreScope =
+    typeof currentUser.hasAllStoreScope === 'boolean' ? currentUser.hasAllStoreScope : isAdmin || isWarehouseManager
+  const hasWarehouseWideScope =
+    typeof currentUser.hasWarehouseWideScope === 'boolean'
+      ? currentUser.hasWarehouseWideScope
+      : isAdmin || isWarehouseManager
   const currentPermissionSet = new Set((currentUser.permissions ?? []).map((item) => item.toLowerCase()))
   const currentExactPermissionSet = new Set(
     (currentUser.exactPermissions ?? []).map((item) => item.toLowerCase()),
@@ -218,7 +234,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     !isWarehouseManager &&
     (hasRole('WarehouseStaff') || hasRole('仓库员工'))
   const isStoreStaff = hasRole('StoreStaff') || hasRole('店铺员工')
-  const isStoreLevelManager = isStoreManager && !isAdmin && !isWarehouseManager
+  // 门店级管理者：按分配分店收口的店长；后端口径收口后仓库经理也算（不再走全局分支）。
+  const isStoreLevelManager = !hasAllStoreScope && (isStoreManager || isWarehouseManager)
   // 仅当全部角色都是订货角色别名时才限制到订货前台，避免影响兼任其他岗位的用户。
   const orderRoleNames = currentUser.roleNames ?? []
   const onlyOrder =
@@ -226,7 +243,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     orderRoleNames.every((roleName) => ['order', '订货员'].includes(roleName.toLowerCase()))
 
   const managedStoreCodes = () => {
-    if (isAdmin || isWarehouseManager) {
+    if (hasAllStoreScope) {
       return null
     }
     if (currentUser.stores?.length) {
@@ -239,7 +256,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   }
 
   const visibleStoreCodes = () => {
-    if (isAdmin || isWarehouseManager) {
+    if (hasAllStoreScope) {
       return null
     }
     if (currentUser.stores?.length) {
@@ -249,6 +266,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     }
     return []
   }
+
+  // 仓库本职（本地采购、订货等）的可选分店：仓库经理不受门店口径收口影响，仍不限分店；其他人同 managedStoreCodes。
+  const warehouseStoreCodes = () => (hasWarehouseWideScope ? null : managedStoreCodes())
 
   // --- 旧权限（保留兼容）---
   const canReadUser = isAdmin || hasPermission(P.Users.View)
@@ -503,6 +523,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isStoreStaff,
     isStoreManager,
     isStoreLevelManager,
+    hasAllStoreScope,
+    hasWarehouseWideScope,
     onlyOrder,
     canReadOrder,
     canWriteOrder,
@@ -627,5 +649,6 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     hasAllRoles,
     managedStoreCodes,
     visibleStoreCodes,
+    warehouseStoreCodes,
   }
 }

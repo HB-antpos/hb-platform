@@ -430,7 +430,8 @@ export default function LocalSupplierInvoicesPage() {
   const isAdmin = access.isAdmin
   // 有编辑权限的人进入明细工作台处理；只读用户（如店长）进入同一页面的只读视图。
   const canEditInvoices = access.canEditLocalPurchase
-  const managedStoreCodes = access.managedStoreCodes()
+  // 本地采购属仓库本职：仓库经理不受门店口径收口影响。
+  const managedStoreCodes = access.warehouseStoreCodes()
   const managedStoreCodeKey = managedStoreCodes?.join(',') ?? 'all'
 
   const [loading, setLoading] = useState(false)

@@ -224,8 +224,8 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
   const showRoleSection = canReadRoleOptions;
   const canCreate =
     (access.isAdmin && access.hasPermission("Users.Create"))
-    // 仓库管理：可以为任意分店新增员工（服务端按范围服务判定，对它不限分店）。
-    || (access.isWarehouseManager
+    // 仓库管理（不限分店的委派者）：可以为任意分店新增员工；后端口径收口后按店长规则，不走这里。
+    || (access.isWarehouseAccessDelegate
       && (access.hasPermission("Users.Create") || access.hasPermission("Users.CreateStoreStaff")));
 
   if (!allowed) {
@@ -339,7 +339,7 @@ export function AdminUserList({ chrome, active }: { chrome: PeopleHubChrome; act
 
       {canCreate ? <FloatingAction label={t("people:admin.create")} icon="plus" onPress={openCreate} /> : null}
 
-      {!access.isAdmin && access.isWarehouseManager ? (
+      {access.isWarehouseAccessDelegate ? (
         <StoreSwitchSheet
           visible={createStorePickerVisible}
           stores={createStores}
