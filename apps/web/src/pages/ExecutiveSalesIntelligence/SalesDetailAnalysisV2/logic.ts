@@ -11,6 +11,19 @@ export function exceedsSalesDetailSelectionLimit(values: readonly string[], limi
   return values.length > limit
 }
 
+/** 记住供应商下拉选项来自哪个页签（澳洲 / 国内），避免切页签时把另一个页签的选项带过来。 */
+export interface RememberedSupplierOptions<T> { kind: SupplierKind; options: T[] }
+/**
+ * 选择供应商会改变整页查询键，useReportQuery 在重新加载期间不返回数据（loaded 为 undefined）。
+ * 此时若直接用空数组：多选下拉被清空成「没有供应商」，已选标签退化成裸编码，数据回来后又弹回名称，表现为闪烁。
+ * 因此加载期间沿用同一页签上一次加载成功的选项；加载完成后一律以最新数据为准。
+ */
+export function resolveSupplierOptions<T>(kind: SupplierKind, loaded: T[] | undefined,
+  remembered: RememberedSupplierOptions<T> | undefined): RememberedSupplierOptions<T> {
+  if (loaded) return { kind, options: loaded }
+  return remembered?.kind === kind ? remembered : { kind, options: [] }
+}
+
 export interface DetailSelection { supplier?: string; supplierCodes: string[]; supplierCategoryGuids: string[]; warehouseCategoryGuids: string[]; branch?: string; product?: string; keyword: string; page: number; pageSize: number }
 export const emptySelection: DetailSelection = { supplierCodes: [], supplierCategoryGuids: [], warehouseCategoryGuids: [], keyword: '', page: 1, pageSize: 20 }
 

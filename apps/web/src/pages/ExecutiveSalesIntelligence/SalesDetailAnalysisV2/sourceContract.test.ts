@@ -92,4 +92,10 @@ assert.ok((page.match(/<ReportControls compact /g) ?? []).length === 2, '三个�
 assert.ok(page.includes('summaryCollapsed={summaryCollapsed} onSummaryCollapsedChange={toggleSummary}') && page.includes('styles.summaryCollapsed'), '三个页签共用汇总条收起偏好')
 assert.ok(css.includes('.panel.expanded { position:fixed; inset:0;') && categoryCss.includes('.split[data-enlarged] > .panel { position:fixed; inset:0;'), '面板放大同时放大宽度和高度（铺满视口）')
 assert.ok(css.includes('.page:has(.expanded),.page:has([data-enlarged]) { z-index:900; }'), '放大时整页抬到外壳顶栏之上，否则被 z-index:10 的顶栏压住')
+// 供应商多选框闪烁：选供应商会让整页重新加载，加载期间 suppliers.data 为空；responsive 标签又依赖固定宽度。
+assert.ok(page.includes('resolveSupplierOptions(kind, loadedSupplierOptions, supplierOptionCache.current)'), '供应商下拉选项在重新加载期间必须沿用上一次结果，否则下拉被清空、标签退化成编码')
+assert.ok(!page.includes('const supplierOptions = (suppliers.data?.rows ?? [])'), '不得在加载期间把供应商选项直接置空')
+const responsiveSupplierSelects = page.match(/<Select[^>]*?maxTagCount="responsive"[\s\S]*?style=\{\{[^}]*\}\}/g) ?? []
+assert.equal(responsiveSupplierSelects.length, 2, '销售明细有两个 responsive 供应商多选框（普通页签与分类页签）')
+for (const select of responsiveSupplierSelects) assert.ok(/style=\{\{ width: \d+ \}\}$/.test(select), 'maxTagCount="responsive" 的多选框必须固定宽度，不能用 minWidth/maxWidth 让宽度随标签变化')
 console.log('销售明细三栏、IME、取消、权限key与响应式契约：通过')

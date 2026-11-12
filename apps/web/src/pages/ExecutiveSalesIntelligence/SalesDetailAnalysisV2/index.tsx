@@ -11,7 +11,7 @@ import { toProductImagePreviewUrl, toProductThumbnailUrl } from '../../../utils/
 import { MetricPair, ReportControls, useReportText } from '../ReportWorkbench/ReportControls'
 import { growth, normalizeKeyword, reportPeriod } from '../ReportWorkbench/logic'
 import { useReportQuery, type ReportQueryState } from '../ReportWorkbench/useReportQuery'
-import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage, type CompareView, type DetailTotals, type DetailViewPreference } from './logic'
+import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, RAIL_DEFAULT_WIDTH, resolveSupplierOptions, selectDimension, sumProductPage, type CompareView, type DetailTotals, type DetailViewPreference, type RememberedSupplierOptions } from './logic'
 import ProductBranchDrawer from './ProductBranchDrawer'
 import { fetchSalesDetailReport, type ReportSection, type SalesDetailPage, type SalesDetailQuery, type SalesDetailReport, type SalesDetailRow, type SupplierKind } from './reportService'
 import { buildSalesDetailSupplierCategoryTree, fetchSalesDetailCategoryOptions, type SalesDetailCategoryGroup, type SalesDetailCategoryTreeNode } from './categoryOptionsService'
@@ -127,6 +127,8 @@ export default function SalesDetailAnalysisV2() {
   const workspace = useRef<HTMLDivElement>(null)
   const drag = useRef<{ startX: number; railWidth: number; width: number }>()
   const selectedNames = useRef<Record<string, string>>({})
+  // 供应商下拉选项在 bundle 重新加载期间沿用上一次的结果，见 resolveSupplierOptions。
+  const supplierOptionCache = useRef<RememberedSupplierOptions<{ value: string; label: string }>>()
   const searchClear = useRef(false)
   const appliedSearch = useRef(location.search)
   // 「澳洲供应商分类」页签：所选供应商、分店与刷新各自独立，日期与其他页签共用。
@@ -338,8 +340,13 @@ export default function SalesDetailAnalysisV2() {
   })
   const supplierRows = sortedRows('suppliers', (suppliers.data?.rows ?? []).filter(row => `${row.name} ${row.code}`.toLowerCase().includes(supplierSearch.trim().toLowerCase())))
   // 国内供应商页签：无「查看国内供应商名称」权限时名称为空，只显示代码（不拼成「代码 · 代码」）；澳洲页签保持原样。
-  const supplierOptions = (suppliers.data?.rows ?? []).map(row => ({ value: row.code,
+  const loadedSupplierOptions = suppliers.data?.rows.map(row => ({ value: row.code,
     label: kind === 'china' ? formatDomesticSupplierNameFirst(row.code, row.name) : `${row.name || row.code} · ${row.code}` }))
+  // 选供应商会触发整页重新加载（加载期间 suppliers.data 为空）；下拉选项与已选标签文字必须保持稳定，否则选完就闪烁。
+  // 这里对同一份输入重复写入 ref 是幂等的，不依赖渲染次数。
+  const resolvedSupplierOptions = resolveSupplierOptions(kind, loadedSupplierOptions, supplierOptionCache.current)
+  supplierOptionCache.current = resolvedSupplierOptions
+  const supplierOptions = resolvedSupplierOptions.options
   const supplierCategoryTree = buildSalesDetailSupplierCategoryTree(categoryGroups ?? [], code =>
     supplierOptions.find(option => option.value === code)?.label || code || text('供应商分类', 'Supplier categories'))
   // 复用分类父子关系，仓库树直接从分类根节点展示，不添加供应商分组。
@@ -554,7 +561,7 @@ export default function SalesDetailAnalysisV2() {
       </div> : categoryTab ? <div className={styles.headerControls}>
         <Select ref={auSupplierSelect} mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
           aria-label={text('选择澳洲供应商', 'Select Australian suppliers')} placeholder={text('澳洲供应商（可多选）', 'AU suppliers')}
-          style={{ minWidth: 180, maxWidth: 360 }} value={auSuppliers} loading={!auOptions && !auOptionsError}
+          style={{ width: 240 }} value={auSuppliers} loading={!auOptions && !auOptionsError}
           notFoundContent={auOptionsError || text('没有供应商', 'No suppliers')} popupClassName={styles.categoryTreePopup}
           options={(auOptions?.suppliers ?? []).map(option => ({ value: option.supplierCode, label: `${option.supplierName} · ${option.supplierCode}`,
             categoryCount: option.categoryCount, assigned: option.assignedProductCount, warehouse: option.categorySource === 'warehouse' }))}
@@ -577,9 +584,10 @@ export default function SalesDetailAnalysisV2() {
           <Button size="small" type="text" icon={<UpOutlined />} aria-label={text('收起筛选', 'Collapse filters')} onClick={() => toggleAuFilters(true)} />
         </Tooltip>
       </div> : <div className={styles.headerControls}>
+        {/* maxTagCount="responsive" 依赖固定宽度：宽度随标签内容变化会让 ResizeObserver 反复重算「显示几个标签」，选完后在标签与「+ N ...」之间闪烁（Edge/Chrome 明显） */}
         <Select mode="multiple" allowClear showSearch optionFilterProp="label" maxTagCount="responsive" size="small"
           aria-label={text('选择供应商', 'Select suppliers')} placeholder={text('供应商', 'Suppliers')}
-          style={{ minWidth: 150, maxWidth: 300 }} value={selection.supplierCodes} options={supplierOptions}
+          style={{ width: 240 }} value={selection.supplierCodes} options={supplierOptions}
           onChange={values => {
             if (exceedsSalesDetailSelectionLimit(values, MAX_SUPPLIER_SELECTIONS)) {
               message.warning(text(`最多选择 ${MAX_SUPPLIER_SELECTIONS} 个供应商`, `Select up to ${MAX_SUPPLIER_SELECTIONS} suppliers.`))

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productBranchDrawerQuery, RAIL_DEFAULT_WIDTH, selectDimension, sumProductPage } from './logic'
+import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productBranchDrawerQuery, RAIL_DEFAULT_WIDTH, resolveSupplierOptions, selectDimension, sumProductPage } from './logic'
 import { normalizeSalesDetailRow, sectionQuery, type SalesDetailQuery } from './reportService'
 
 const selected = { ...emptySelection, branch: 'OR', supplier: 'HB215', supplierCodes: ['HB215'], supplierCategoryGuids: ['CAT1'], product: 'P1', page: 3 }
@@ -73,3 +73,14 @@ assert.deepEqual(initialCategoryState('?kind=category&supplier=240&supplier=%202
   { active: true, supplierCodes: ['240', '200'], branch: 'OR' }, '分类页签从 URL 恢复去重后的供应商与分店')
 assert.deepEqual(initialCategoryState('?kind=australia&supplier=240'), { active: false, supplierCodes: [], branch: undefined },
   '其他页签的供应商参数不带进分类页签')
+
+// 供应商下拉选项：选供应商触发整页重新加载时（loaded 为 undefined）沿用同页签上一次的选项，避免下拉被清空、标签退化成编码而闪烁
+const australiaOptions = [{ value: '205', label: 'Bloomsdae Greedings · 205' }]
+const chinaOptions = [{ value: 'HB215', label: '玛索' }]
+const remembered = resolveSupplierOptions('australia', australiaOptions, undefined)
+assert.deepEqual(remembered, { kind: 'australia', options: australiaOptions }, '加载完成后以最新数据为准')
+assert.equal(resolveSupplierOptions('australia', undefined, remembered), remembered, '重新加载期间沿用上一次的选项')
+assert.deepEqual(resolveSupplierOptions('australia', undefined, undefined), { kind: 'australia', options: [] }, '首次加载没有历史选项时为空')
+assert.deepEqual(resolveSupplierOptions('china', undefined, remembered), { kind: 'china', options: [] }, '切换页签的加载期间不得沿用另一个页签的选项')
+assert.deepEqual(resolveSupplierOptions('china', chinaOptions, remembered), { kind: 'china', options: chinaOptions })
+assert.deepEqual(resolveSupplierOptions('australia', [], remembered), { kind: 'australia', options: [] }, '加载完成且确实没有供应商时不能继续显示旧选项')

@@ -61,7 +61,7 @@ export function WarehouseCategorySelect({ filter, variant = 'bar', className, st
       multiple
       showSearch
       allowClear
-      className={`planogram-filter-select ${className ?? ''}`}
+      className={`planogram-filter-select${variant === 'bar' ? ' is-warehouse' : ''} ${className ?? ''}`}
       style={style}
       size={variant === 'popover' ? 'small' : undefined}
       prefix={variant === 'bar' ? <span className="planogram-filter-label">{label}</span> : undefined}
