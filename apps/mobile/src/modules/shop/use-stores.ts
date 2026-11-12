@@ -12,7 +12,7 @@ import {
 } from "@/modules/shop/types";
 import { normalizeShopStores, sortShopStores } from "@/modules/shop/store-normalization";
 import { getAssignedStoresForSession, resolveScopedStoreSelection } from "@/modules/shop/store-scope";
-import { shouldLoadAllStoresForWarehouseCart } from "@/modules/shop/warehouse-cart-access";
+import { mergeAssignedStoreFlags, shouldLoadAllStoresForWarehouseCart } from "@/modules/shop/warehouse-cart-access";
 import {
   buildStoreSelectionScopeKey,
   isStoreSelectionReadyForScope,
@@ -60,7 +60,8 @@ export function useStores() {
       const embeddedStores = sortShopStores(normalizeShopStores(user?.stores));
 
       if (useAllStoresForWarehouseCart) {
-        const stores = sortShopStores(await getAllStores());
+        // 全部分店不带「管理」标记，合并登录态里的真实分店关系，避免门店管理页把全部分店当成可管理。
+        const stores = sortShopStores(mergeAssignedStoreFlags(await getAllStores(), embeddedStores));
         console.info("[useStores] loaded all stores for warehouse cart", {
           count: stores.length,
           endpoint: "/stores/all-by-name",
