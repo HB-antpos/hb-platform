@@ -26,6 +26,8 @@ const AppDownloadPage = lazy(() => import('./pages/AppDownload'))
 const BrowserExtensionPrivacyPage = lazy(() => import('./pages/BrowserExtensionPrivacy'))
 const HbSupplierOrderSupportPage = lazy(() => import('./pages/HbSupplierOrderSupport'))
 const MobilePrivacyPage = lazy(() => import('./pages/MobilePrivacy'))
+// HB POS（iPad 收银）隐私政策公开页：独立代码块，不进首屏。
+const PosPrivacyPage = lazy(() => import('./pages/PosPrivacy'))
 const MinorEmploymentParentSignaturePage = lazy(() => import('./pages/MinorEmployment/ParentSignature'))
 // 客人扫码打开的在线小票：独立代码块，不进首屏。
 const PublicReceiptPage = lazy(() => import('./pages/PublicReceipt'))
@@ -97,6 +99,10 @@ function AppBootstrap() {
       <Route
         path="/privacy/mobile"
         element={<RouteLoadBoundary resetKey="mobile-privacy"><MobilePrivacyPage /></RouteLoadBoundary>}
+      />
+      <Route
+        path="/privacy/pos"
+        element={<RouteLoadBoundary resetKey="pos-privacy"><PosPrivacyPage /></RouteLoadBoundary>}
       />
       <Route
         path="/minor-employment/sign"

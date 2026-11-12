@@ -1,0 +1,130 @@
+{
+  "policyVersion": "2026-11-12",
+  "language": "en",
+  "title": "HB POS Privacy Policy",
+  "subtitle": "Hot Bargain store checkout app for authorised iPads",
+  "effectiveDateLabel": "Effective date",
+  "effectiveDate": "12 November 2026",
+  "summary": "This policy explains how HOT BARGAIN INTERNATIONAL PTY LTD (we, us or our) handles personal information when store staff use the HB POS iPad app and when customers' details are recorded in a sale, return or lay-by order. Please read it before using the app.",
+  "organization": {
+    "label": "Responsible entity",
+    "name": "HOT BARGAIN INTERNATIONAL PTY LTD",
+    "contactLabel": "Privacy contact",
+    "email": "inquiries@hotbargain.com.au"
+  },
+  "sections": [
+    {
+      "id": "account",
+      "title": "1. Accounts and scope",
+      "paragraphs": [
+        "HB POS is an internal point-of-sale tool for Hot Bargain stores. It does not offer public registration and is not intended for consumer use. Each iPad must be registered and approved by an authorised administrator before it can be used. Staff sign in with an employee cashier barcode that is provisioned, managed or disabled by the employer or an authorised administrator.",
+        "To access, correct or request deletion of personal information connected to your account or to a transaction, contact your manager or organisational administrator first, or contact us using the email in this policy. Some employment, tax, audit, payment or other statutory records may need to be retained for legally required periods."
+      ],
+      "items": []
+    },
+    {
+      "id": "collection",
+      "title": "2. Information we handle",
+      "paragraphs": [
+        "The information handled depends on the features used. It may include:",
+        "We collect information when staff enter or scan it in the app, from our organisational systems, from supported payment providers, and automatically through app operation and diagnostics."
+      ],
+      "items": [
+        "Staff and account details: cashier name, cashier and user identifiers, and the employee cashier barcode credential used to sign in.",
+        "Device and store information: install and hardware identifiers, device code, store code, device registration status and app version.",
+        "Sale and return records: products, quantities, prices, discounts and promotions, orders, refunds, vouchers, payment method and time, and held orders.",
+        "Payment information: card type, card BIN, masked card number, authorisation code, transaction reference, terminal and merchant identifiers, and refund references produced by supported payment providers.",
+        "Lay-by (instalment) customer details: customer name, phone number and notes recorded by staff.",
+        "Attendance sign-in: a short-lived signed QR code shown on the device so staff can clock in with the Hot Bargain employee app.",
+        "Diagnostics: app version, error type, trace identifier, error messages and stack traces, and the related store, device and user, to keep the service reliable."
+      ]
+    },
+    {
+      "id": "purposes",
+      "title": "3. Why we handle information",
+      "paragraphs": [
+        "We handle information only as needed to operate and manage the Hot Bargain business:"
+      ],
+      "items": [
+        "Authenticate staff and registered store devices, and enforce role, store and terminal access.",
+        "Process sales, returns, vouchers and lay-by orders, issue receipts and keep an auditable ledger.",
+        "Recover interrupted or uncertain card payments and prevent duplicate charges or fraud.",
+        "Keep an encrypted local record so cash sales can continue and synchronise later when the connection is lost.",
+        "Diagnose faults, maintain security and reliability, and meet legal and audit obligations."
+      ]
+    },
+    {
+      "id": "permissions",
+      "title": "4. Device permissions",
+      "paragraphs": [
+        "The app requests system permissions only when a related feature needs them. You can withdraw them in iOS Settings, but the related feature may stop working.",
+        "The app does not request microphone access."
+      ],
+      "items": [
+        "Camera: scan product barcodes as a fallback to a hardware scanner. We do not use the camera to record or store images or video.",
+        "Bluetooth: discover, connect to and use supported store receipt printers.",
+        "Local network: reach supported store payment terminals on the store network."
+      ]
+    },
+    {
+      "id": "sharing",
+      "title": "5. Sharing information",
+      "paragraphs": [
+        "We make necessary information available to the employer, authorised administrators and relevant business personnel according to their duties and permissions. Service providers that support payment processing, hosting, storage, app updates and diagnostics may process information only on our instructions and for agreed purposes. We require them to protect personal information with safeguards at least equivalent to those described in this policy.",
+        "We may also disclose necessary information when required by law, to protect people or systems, to resolve disputes, or to maintain lawful rights."
+      ],
+      "items": []
+    },
+    {
+      "id": "overseas",
+      "title": "6. Overseas processing",
+      "paragraphs": [
+        "Personal information may be processed in Singapore by service providers supporting the app. Before this occurs, we take reasonable steps to ensure that the information receives protection consistent with this policy and applicable privacy law."
+      ],
+      "items": []
+    },
+    {
+      "id": "tracking",
+      "title": "7. Tracking and sale",
+      "paragraphs": [
+        "We do not sell or rent personal information. We do not use this app to track you across other companies' apps or websites, and we do not deliver third-party targeted advertising. Advertising content shown on the customer-facing display is Hot Bargain's own business content."
+      ],
+      "items": []
+    },
+    {
+      "id": "retention",
+      "title": "8. Retention and security",
+      "paragraphs": [
+        "We retain information according to business, employment, tax, audit, payment, security and statutory record requirements. Information that is no longer needed is deleted or de-identified where practicable. The period varies by record category and applicable law.",
+        "We use device encryption for the local ledger, secure storage for credentials, transmission safeguards, access controls and audit logging appropriate to the sensitivity of the information. No storage or transmission method can guarantee absolute security."
+      ],
+      "items": []
+    },
+    {
+      "id": "rights",
+      "title": "9. Your choices and requests",
+      "paragraphs": [
+        "You may ask your manager or organisational administrator to access, correct, export, restrict use of, or delete personal information, or contact us through the privacy email. We will verify identity and authority and explain the action taken, any legal or operational reason a request cannot be fulfilled, and any applicable complaint channel. Customers whose lay-by details were recorded may contact the store or us at the email below.",
+        "When employment ends or access is no longer needed, the employer or authorised administrator disables the account and handles related information under the organisation's record-retention process."
+      ],
+      "items": []
+    },
+    {
+      "id": "changes",
+      "title": "10. Changes, complaints and contact",
+      "paragraphs": [
+        "We may update this policy when features, processing activities or legal requirements change. The latest version will be published on the public web page. Contact us at inquiries@hotbargain.com.au with questions about this policy or our handling of personal information.",
+        "To make a privacy complaint, email us with the details. We will acknowledge and investigate the complaint and normally provide a written response within 30 days. If you are not satisfied with our response, you may complain to the Office of the Australian Information Commissioner (OAIC)."
+      ],
+      "items": []
+    }
+  ],
+  "footer": {
+    "backLabel": "Back",
+    "publicCopy": "View the public version in your browser",
+    "publicUrl": "https://hotbargain.vip/privacy/pos",
+    "emailLabel": "Email privacy enquiries",
+    "openFailedTitle": "Could not open link",
+    "openFailedMessage": "Please try again later or email inquiries@hotbargain.com.au."
+  }
+}
