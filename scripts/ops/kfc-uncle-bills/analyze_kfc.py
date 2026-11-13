@@ -10,7 +10,7 @@ KFC（Uncle Bills，本地供应商 257）销量 · 库存 · 调拨分析脚本
 
 用法：
     python3 analyze_kfc.py [--as-of YYYY-MM-DD] [--out-dir DIR] [--supplier-code 257]
-                            [--hq on|off] [--since YYYY-MM-DD] [--upload-server]
+                            [--since YYYY-MM-DD] [--upload-server]
                             [--backtest 2025-10-06,2025-11-03,2025-12-01]
 """
 
@@ -23,6 +23,7 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import time
@@ -69,9 +70,7 @@ class Config:
     exclude_stores: set = field(default_factory=lambda: {"1042"})
     warehouse_store: str = "1006"
     appsettings_path: Path = DEFAULT_APPSETTINGS_PATH
-    hq_retry_count: int = 3
     sell_through_since: date | None = None  # 进销累计页签起点；默认取最近一个 8 月 1 日
-    hq_retry_delay_seconds: int = 300
     sql_slow_threshold_seconds: float = 15.0
 
 
@@ -203,8 +202,48 @@ def fetch_stores(cur, timings):
         cur,
         timings,
         "stores",
-        "SELECT StoreCode, StoreName, BrandName FROM Store WHERE IsActive = 1 AND IsDeleted = 0",
+        "SELECT StoreCode, StoreName, BrandName, Address, TimeZoneId FROM Store WHERE IsActive = 1 AND IsDeleted = 0",
     )
+
+
+# 门店所在州：Store 表没有州字段，与考勤公众假日同步（PublicHolidaySyncHelper）同一做法，
+# 先取地址里最后一个 4 位澳洲邮编换算州；地址没写邮编时退回门店时区；都不行记为 None（页面显示「未知」）。
+# 前后不能紧贴字母或数字，避免把「Shop2023B」这类铺位号当成邮编
+_POSTCODE_RE = re.compile(r"(?<![0-9A-Za-z])(\d{4})(?![0-9A-Za-z])")
+_TZ_STATE = {
+    "Australia/Brisbane": "QLD", "Australia/Lindeman": "QLD",
+    "Australia/Sydney": "NSW", "Australia/Melbourne": "VIC", "Australia/Hobart": "TAS",
+    "Australia/Adelaide": "SA", "Australia/Perth": "WA", "Australia/Darwin": "NT",
+}
+
+
+def state_from_postcode(postcode: str | None) -> str | None:
+    if not postcode:
+        return None
+    n = int(postcode)
+    # 澳洲邮政编码分段（ACT 段夹在 NSW 段中间，要先判断）
+    if 2600 <= n <= 2618 or 2900 <= n <= 2920 or 200 <= n <= 299:
+        return "ACT"
+    if 1000 <= n <= 2999:
+        return "NSW"
+    if 3000 <= n <= 3999 or 8000 <= n <= 8999:
+        return "VIC"
+    if 4000 <= n <= 4999 or 9000 <= n <= 9999:
+        return "QLD"
+    if 5000 <= n <= 5999:
+        return "SA"
+    if 6000 <= n <= 6999:
+        return "WA"
+    if 7000 <= n <= 7999:
+        return "TAS"
+    if 800 <= n <= 999:
+        return "NT"
+    return None
+
+
+def resolve_store_state(address: str | None, time_zone_id: str | None) -> str | None:
+    codes = _POSTCODE_RE.findall(address or "")
+    return state_from_postcode(codes[-1] if codes else None) or _TZ_STATE.get((time_zone_id or "").strip())
 
 
 def fetch_products(cur, timings, supplier_code):
@@ -299,38 +338,6 @@ def fetch_purchases(cur, timings, supplier_code, start_date):
         """,
         (supplier_code, start_date),
     )
-
-
-def fetch_hq_stock(appsettings_path, timings, supplier_code, retries, delay_seconds):
-    """
-    HQ 库（HOT_HQ_CLOUD）每天 0-8 点关闭，且对 257 供应商 96% 的 H库存 为 NULL。
-    仅作参考列，失败不影响主流程；失败会重试，重试间隔较长（5 分钟）是刻意的，
-    给 HQ 刚开门的窗口期一点缓冲。
-    """
-    last_err = None
-    for attempt in range(1, retries + 1):
-        try:
-            conn, cur = connect(appsettings_path, "StoreHzgHQConnection", timeout=20)
-            rows = timed_query(
-                cur,
-                timings,
-                "hq_stock",
-                """
-                SELECT H分店代码 AS store_code, H商品编码 AS product_code,
-                       CAST(H库存 AS int) AS stock, H是否缺货状态 AS oos_flag,
-                       FGC_LastModifyDate AS last_modify
-                FROM DIC_商品零售价表
-                WHERE H供应商编码 = %s AND H库存 IS NOT NULL
-                """,
-                (supplier_code,),
-            )
-            conn.close()
-            return rows, None
-        except Exception as exc:  # noqa: BLE001 - 只读旁路，失败要降级而不是中断主流程
-            last_err = str(exc)[:300]
-            if attempt < retries:
-                time.sleep(delay_seconds)
-    return [], last_err
 
 
 def fetch_actual_sales_window(cur, timings, supplier_code, start_date, end_date):
@@ -530,7 +537,7 @@ def build_sell_through(since, E, cur_idx, purchases_ps, purchase_amt_ps, product
     }
 
 
-def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict:
+def run_analysis(cfg: Config, as_of: date, warn_out: list) -> dict:
     """核心流程：给定运行日 as_of，跑完整套查询与公式，返回 report.json 的字典结构。"""
     timings: dict = {}
     warnings = warn_out
@@ -550,6 +557,7 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
     stores = fetch_stores(cur, timings)
     store_name = {r["StoreCode"]: r["StoreName"] for r in stores}
     store_brand = {r["StoreCode"]: r["BrandName"] for r in stores}
+    store_state = {r["StoreCode"]: resolve_store_state(r["Address"], r["TimeZoneId"]) for r in stores}
     active_store_codes = {r["StoreCode"] for r in stores}
 
     products = fetch_products(cur, timings, cfg.supplier_code)
@@ -697,29 +705,6 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
         else:
             lp0 = last_purchase[key]
             stock_basis[key] = {"first_date": lp0["date"], "total_qty": lp0["qty"], "batches": 1}
-
-    # ---------- HQ 参考库存（可选，可失败）----------
-    hq_available = False
-    hq_note = "未启用"
-    hq_note_en = "Not enabled"
-    hq_stock = {}
-    if hq_mode != "off":
-        hq_rows, hq_err = fetch_hq_stock(
-            cfg.appsettings_path, timings, cfg.supplier_code, cfg.hq_retry_count, cfg.hq_retry_delay_seconds
-        )
-        if hq_err:
-            hq_note = f"HQ 库存不可用：{hq_err}"
-            hq_note_en = f"HQ stock unavailable: {hq_err}"
-            add_warning(hq_note, hq_note_en)
-        else:
-            hq_available = True
-            hq_note = f"{len(hq_rows)} 行（96% 通常为空，仅供参考）"
-            hq_note_en = f"{len(hq_rows)} rows (usually ~96% empty, reference only)"
-            for r in hq_rows:
-                hq_stock[(r["store_code"], r["product_code"])] = r["stock"]
-    else:
-        hq_note = "本次运行已跳过（--hq off）"
-        hq_note_en = "Skipped in this run (--hq off)"
 
     # ---------- 全链（chain-level）指标：同比、季节比、走势 ----------
     universe_products = set(cur_idx.by_product) | set(ly_idx.by_product)
@@ -873,7 +858,6 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
             "basis": basis14,
             "is_shortage": conf != "低" and f14 >= cfg.min_forecast_for_shortage and gap > 0,
             "is_urgent": False,  # 下面补
-            "hq_stock": hq_stock.get((store, product)),
         }
         row = ps_rows[(store, product)]
         row["is_urgent"] = row["is_shortage"] and f7 > max(remaining or 0, 0)
@@ -881,6 +865,12 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
     # ---------- 调拨来源：按商品分组，贪心分配 ----------
     demand_stores = active_store_codes - cfg.exclude_stores - {cfg.warehouse_store}
     supply_stores = active_store_codes - cfg.exclude_stores
+    unknown_state = sorted(s for s in supply_stores if not store_state.get(s))
+    if unknown_state:
+        add_warning(
+            f"以下门店地址里没有邮编、时区也无法判断州，按「未知」显示：{', '.join(unknown_state)}",
+            f"State could not be derived from address or time zone for: {', '.join(unknown_state)} (shown as Unknown)",
+        )
 
     by_product_ps = defaultdict(list)
     for (store, product), row in ps_rows.items():
@@ -1119,7 +1109,6 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
                         ),
                         "remaining": math.ceil(row["remaining"]) if row["remaining"] is not None else None,
                         "est180": math.ceil(row["est180"]) if row["est180"] is not None else None,
-                        "hq_stock": row["hq_stock"],
                         "forecast7": math.ceil(row["forecast7"]),
                         "forecast14": math.ceil(row["forecast14"]),
                         "target14": math.ceil(row["target14"]),
@@ -1140,11 +1129,35 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
             if shortage_rows:
                 shortage_rows.sort(key=lambda r: (-r["gap"], r["product_code"]))
                 store_gaps.append({"store_code": store, "store_name": store_name.get(store, store),
-                                   "brand_name": store_brand.get(store), "rows": shortage_rows})
+                                   "brand_name": store_brand.get(store), "state": store_state.get(store),
+                                   "rows": shortage_rows})
             if no_purchase_rows:
                 no_purchase_rows.sort(key=lambda r: (-r["target14"], r["product_code"]))
                 no_purchase.append({"store_code": store, "store_name": store_name.get(store, store),
-                                    "brand_name": store_brand.get(store), "rows": no_purchase_rows})
+                                    "brand_name": store_brand.get(store), "state": store_state.get(store),
+                                    "rows": no_purchase_rows})
+
+        # 有货门店：缺口表里出现的每个商品，列出哪些门店「到货后余量」> 0（含视图外门店，供调拨参考）。
+        # 按商品只存一份，缺口行用商品编码引用，避免同一份门店清单在多家缺货店的行里重复。
+        # surplus = 余量 − 未来 28 天预测，> 0 才算有富余可调；余量是进货减销量的估算，含在途，不是货架实数。
+        stock_holders = {}
+        for product in sorted({r["product_code"] for sg in store_gaps for r in sg["rows"]}):
+            holders = []
+            for s, row in by_product_ps.get(product, []):
+                if s not in supply_stores or row["remaining"] is None or row["remaining"] < 1:
+                    continue
+                holders.append({
+                    "store_code": s,
+                    "store_name": store_name.get(s, s),
+                    "state": store_state.get(s),
+                    "remaining": math.floor(row["remaining"]),
+                    "surplus": math.floor(row["remaining"] - row["forecast28"]),
+                    "confidence": row["confidence"],
+                    "warehouse": s == cfg.warehouse_store,
+                })
+            if holders:
+                holders.sort(key=lambda h: (h["state"] or "~", -h["remaining"], h["store_code"]))
+                stock_holders[product] = holders
 
         recent28_q = sum(v[W_Q28] for v in metrics.values())
         if chain_view:
@@ -1170,6 +1183,7 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
             "high_value": high_value,
             "forecast": forecast_board,
             "store_gaps": store_gaps,
+            "stock_holders": stock_holders,
             "no_purchase": no_purchase,
             "sell_through": build_sell_through(
                 since, E, cur_idx, purchases_ps, purchase_amt_ps, product_info, store_name,
@@ -1182,7 +1196,8 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
     for s in report_stores:
         views[f"store-{s}"] = build_view(
             {s}, {s},
-            {"kind": "store", "store_code": s, "store_name": store_name.get(s, s), "brand_name": store_brand.get(s)},
+            {"kind": "store", "store_code": s, "store_name": store_name.get(s, s), "brand_name": store_brand.get(s),
+             "state": store_state.get(s)},
         )
 
     slow_sql = {k: v for k, v in timings.items() if v >= cfg.sql_slow_threshold_seconds}
@@ -1204,9 +1219,6 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
         "ly_anchor_kind": ly_anchor_kind,
         "season_ratio": round(season_ratio, 3),
         "trend_phase": trend_phase,
-        "hq_available": hq_available,
-        "hq_note": hq_note,
-        "hq_note_en": hq_note_en,
         "unmatched_purchase_lines": unmatched_lines,
         "purchase_match_stats": match_stats,
         "sql_timings": timings,
@@ -1230,7 +1242,8 @@ def run_analysis(cfg: Config, as_of: date, hq_mode: str, warn_out: list) -> dict
         "meta": {**shared_meta, **views["all"]["meta_overrides"]},
         "shared_meta": shared_meta,
         "stores": [
-            {"store_code": s, "store_name": store_name.get(s, s), "brand_name": store_brand.get(s)}
+            {"store_code": s, "store_name": store_name.get(s, s), "brand_name": store_brand.get(s),
+             "state": store_state.get(s)}
             for s in report_stores
         ],
         "views": views,
@@ -1542,7 +1555,7 @@ def write_outputs(result: dict, out_dir: Path, template_path: Path, as_of: date,
     for name, view in result["views"].items():
         payload = {
             "meta": {**view_meta_base, **view["meta_overrides"], "scope": view["scope"]},
-            **{k: view[k] for k in ("bestsellers", "high_value", "forecast", "store_gaps", "no_purchase", "sell_through")},
+            **{k: view[k] for k in ("bestsellers", "high_value", "forecast", "store_gaps", "stock_holders", "no_purchase", "sell_through")},
         }
         rel = f"data/{name}.json"
         (site_dir / rel).write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str), encoding="utf-8")
@@ -1590,7 +1603,7 @@ def run_backtest(cfg: Config, dates: list, out_dir: Path):
     results = []
     for d in dates:
         warnings = []
-        analysis = run_analysis(cfg, d, hq_mode="off", warn_out=warnings)
+        analysis = run_analysis(cfg, d, warn_out=warnings)
         forecast_by_product = {r["product_code"]: r["forecast14"] for r in analysis["views"]["all"]["forecast"]}
         conn, cur = connect(cfg.appsettings_path, "DefaultConnection")
         timings = {}
@@ -1639,7 +1652,6 @@ def main():
         "--out-dir", default=str(Path.home() / "Documents/HB-Reports/kfc-uncle-bills")
     )
     parser.add_argument("--supplier-code", default="257")
-    parser.add_argument("--hq", choices=["on", "off"], default="on")
     parser.add_argument("--since", help="进销累计页签起点 YYYY-MM-DD，默认最近一个 8 月 1 日")
     parser.add_argument("--backtest", help="逗号分隔的历史日期列表，跑回测而不生成正式报告")
     parser.add_argument(
@@ -1680,7 +1692,7 @@ def main():
     t0 = time.time()
     warnings = []
     try:
-        result = run_analysis(cfg, as_of, args.hq, warnings)
+        result = run_analysis(cfg, as_of, warnings)
     except Exception as exc:  # noqa: BLE001 - 顶层兜底，打印清晰错误供定时任务汇报
         print(f"分析失败：{exc}", file=sys.stderr)
         raise
