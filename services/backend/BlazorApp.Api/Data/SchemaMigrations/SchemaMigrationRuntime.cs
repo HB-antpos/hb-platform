@@ -296,9 +296,9 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStoreSpecialProductCategoryAsync(CancellationToken cancellationToken);
 
-    Task ApplyWarehousePackingAsync(CancellationToken cancellationToken);
+    Task ApplyScanPackingAsync(CancellationToken cancellationToken);
 
-    Task VerifyWarehousePackingAsync(CancellationToken cancellationToken);
+    Task VerifyScanPackingAsync(CancellationToken cancellationToken);
 
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
@@ -1897,23 +1897,23 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         );
     }
 
-    public async Task ApplyWarehousePackingAsync(CancellationToken cancellationToken)
+    public async Task ApplyScanPackingAsync(CancellationToken cancellationToken)
     {
         await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
             _mainDatabase.ConnectionString,
-            WarehousePackingSchema.ApplySql,
+            PackingSchema.ApplySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
-        // 六张表的列 / 主键 / 索引签名通过后协调器才登记账本。
-        await VerifyWarehousePackingAsync(cancellationToken);
+        // 七张表的列 / 主键 / 索引签名通过后协调器才登记账本。
+        await VerifyScanPackingAsync(cancellationToken);
     }
 
-    public async Task VerifyWarehousePackingAsync(CancellationToken cancellationToken)
+    public async Task VerifyScanPackingAsync(CancellationToken cancellationToken)
     {
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
-            WarehousePackingSchema.VerifySql,
+            PackingSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

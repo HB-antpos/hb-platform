@@ -217,8 +217,9 @@ namespace BlazorApp.Shared.Constants
             "Warehouse.ManageProducts",
             // 撤销价格变更任务：Web「价格变更任务」页与移动端「价格和标签」共用。
             "Warehouse.CancelPriceUpdateTasks",
-            // 扫码打包：移动端「扫码打包」与 Web「仓库管理 → 扫码打包」共用。
+            // 扫码打包：移动端「扫码打包」与 Web「扫码打包」共用（分店用 StorePacking.Use，总仓用 Warehouse.Packing）。
             "Warehouse.Packing",
+            "StorePacking.Use",
         };
 
         private static readonly IReadOnlyDictionary<string, PermissionSurface> Registered = BuildRegistry();
