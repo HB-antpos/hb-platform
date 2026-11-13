@@ -8,17 +8,23 @@ import type {
   PackCartonList,
   PackDestinationRequest,
   PackEvent,
+  PackIncoming,
   PackLocateResult,
-  PackOrderOption,
+  PackLocation,
+  PackLocationSaveRequest,
+  PackOwner,
   PackPalletDetail,
   PackPalletFilter,
   PackPalletHeaderRequest,
   PackPalletList,
+  PackReceiveLookup,
+  PackReceivePalletRequest,
   PackResolveResult,
-} from '../types/warehousePacking'
+  PackScope,
+} from '../types/packing'
 import request, { RequestError, unwrapApiData } from '../utils/request'
 
-const API_BASE = '/api/react/v1/warehouse-packing'
+const API_BASE = '/api/react/v1/packing'
 
 const segment = (value: string) => encodeURIComponent(value)
 const cartonUrl = (cartonGuid: string, suffix = '') => `${API_BASE}/cartons/${segment(cartonGuid)}${suffix}`
@@ -29,7 +35,7 @@ export interface PackingErrorInfo<TData = unknown> {
   status: number
   errorCode?: string
   message: string
-  /** 后端随错误带回的数据：一码多品的候选商品、被拦下的箱等。 */
+  /** 后端随错误带回的数据：一码多品的候选商品、被拦下的箱、实到箱数等。 */
   data?: TData
 }
 
@@ -47,16 +53,42 @@ export function readPackingError<TData = unknown>(error: unknown): PackingErrorI
   return { status: 0, message: error instanceof Error ? error.message : String(error) }
 }
 
+// ---- 所属地点 ----
+
+/** 当前账号能操作的地点（分店 / 总仓）以及是不是店长 / 管理员。 */
+export async function getPackScope() {
+  return unwrapApiData(await request.get<ApiResponse<PackScope>>(`${API_BASE}/scope`))
+}
+
+/**
+ * 选「其他分店 / 总仓」时的候选地点：启用的分店（不含发出地点自己）加总仓（发出地点是总仓时不含总仓）。
+ * 店员没有「查看分店」权限，用这个接口而不是通用分店列表。
+ */
+export async function listPackDestinations(ownerCode?: string) {
+  const response = await request.get<ApiResponse<PackOwner[]>>(`${API_BASE}/destinations`, { params: { ownerCode } })
+  return unwrapApiData(response) ?? []
+}
+
 // ---- 箱 ----
 
-export async function listPackCartons(params: { filter?: PackCartonFilter; keyword?: string; mine?: boolean }) {
+export async function listPackCartons(params: {
+  ownerCode?: string
+  filter?: PackCartonFilter
+  keyword?: string
+  mine?: boolean
+}) {
   const response = await request.get<ApiResponse<PackCartonList>>(`${API_BASE}/cartons`, {
-    params: { filter: params.filter, keyword: params.keyword?.trim(), mine: params.mine ? true : undefined },
+    params: {
+      ownerCode: params.ownerCode,
+      filter: params.filter,
+      keyword: params.keyword?.trim(),
+      mine: params.mine ? true : undefined,
+    },
   })
   return unwrapApiData(response)
 }
 
-export async function createPackCarton(payload: PackDestinationRequest & { orderGuid?: string | null }) {
+export async function createPackCarton(payload: PackDestinationRequest & { ownerCode?: string | null }) {
   return unwrapApiData(await request.post<ApiResponse<PackCartonDetail>>(`${API_BASE}/cartons`, payload))
 }
 
@@ -97,20 +129,39 @@ export async function voidPackCarton(cartonGuid: string) {
   return unwrapApiData(await request.post<ApiResponse<PackCartonDetail>>(cartonUrl(cartonGuid, '/void')))
 }
 
+/** 设置箱的存放位置（位置名称或位置条码）；传空清除。 */
+export async function setPackCartonLocation(cartonGuid: string, locationCode: string | null) {
+  return unwrapApiData(
+    await request.put<ApiResponse<PackCartonDetail>>(cartonUrl(cartonGuid, '/location'), { locationCode: locationCode || null }),
+  )
+}
+
+/** 发出散箱：去向必须是其他分店或总仓，发出后由对方扫码签收。 */
+export async function dispatchPackCarton(cartonGuid: string) {
+  return unwrapApiData(await request.post<ApiResponse<PackCartonDetail>>(cartonUrl(cartonGuid, '/dispatch')))
+}
+
+/** 签收一只箱（散箱，或托盘上「只签收这一箱」）。 */
+export async function receivePackCarton(cartonGuid: string, locationCode?: string | null) {
+  return unwrapApiData(
+    await request.post<ApiResponse<PackCartonDetail>>(cartonUrl(cartonGuid, '/receive'), { locationCode: locationCode || null }),
+  )
+}
+
 export async function listPackCartonEvents(cartonGuid: string) {
   return unwrapApiData(await request.get<ApiResponse<PackEvent[]>>(cartonUrl(cartonGuid, '/events'))) ?? []
 }
 
 // ---- 托盘 ----
 
-export async function listPackPallets(params: { filter?: PackPalletFilter; keyword?: string }) {
+export async function listPackPallets(params: { ownerCode?: string; filter?: PackPalletFilter; keyword?: string }) {
   const response = await request.get<ApiResponse<PackPalletList>>(`${API_BASE}/pallets`, {
-    params: { filter: params.filter, keyword: params.keyword?.trim() },
+    params: { ownerCode: params.ownerCode, filter: params.filter, keyword: params.keyword?.trim() },
   })
   return unwrapApiData(response)
 }
 
-export async function createPackPallet(payload: PackDestinationRequest) {
+export async function createPackPallet(payload: PackDestinationRequest & { ownerCode?: string | null }) {
   return unwrapApiData(await request.post<ApiResponse<PackPalletDetail>>(`${API_BASE}/pallets`, payload))
 }
 
@@ -118,7 +169,7 @@ export async function getPackPallet(palletGuid: string) {
   return unwrapApiData(await request.get<ApiResponse<PackPalletDetail>>(palletUrl(palletGuid)))
 }
 
-/** 把箱放上托盘；code 为箱号或箱 GUID。去向不一致时仓库经理可带 allowDestinationMismatch 放行。 */
+/** 把箱放上托盘；code 为箱号或箱 GUID。去向不一致时店长可带 allowDestinationMismatch 放行。 */
 export async function addCartonToPackPallet(palletGuid: string, code: string, allowDestinationMismatch = false) {
   return unwrapApiData(
     await request.post<ApiResponse<PackPalletDetail>>(palletUrl(palletGuid, '/cartons'), { code, allowDestinationMismatch }),
@@ -149,8 +200,41 @@ export async function voidPackPallet(palletGuid: string) {
   return unwrapApiData(await request.post<ApiResponse<PackPalletDetail>>(palletUrl(palletGuid, '/void')))
 }
 
+export async function setPackPalletLocation(palletGuid: string, locationCode: string | null) {
+  return unwrapApiData(
+    await request.put<ApiResponse<PackPalletDetail>>(palletUrl(palletGuid, '/location'), { locationCode: locationCode || null }),
+  )
+}
+
+/** 发出整个托盘：托盘上的箱一起变成在路上，由对方扫码签收。 */
+export async function dispatchPackPallet(palletGuid: string) {
+  return unwrapApiData(await request.post<ApiResponse<PackPalletDetail>>(palletUrl(palletGuid, '/dispatch')))
+}
+
+/**
+ * 签收托盘：整托签收必须带实到箱数（和系统记录不一致返回 409 COUNT_MISMATCH）；
+ * 带 cartonGuids 表示只签收这几只箱（逐箱核对，不要求箱数）。
+ */
+export async function receivePackPallet(palletGuid: string, payload: PackReceivePalletRequest) {
+  return unwrapApiData(await request.post<ApiResponse<PackPalletDetail>>(palletUrl(palletGuid, '/receive'), payload))
+}
+
 export async function listPackPalletEvents(palletGuid: string) {
   return unwrapApiData(await request.get<ApiResponse<PackEvent[]>>(palletUrl(palletGuid, '/events'))) ?? []
+}
+
+// ---- 签收 ----
+
+/** 待签收（发给本地点、还没签完）和最近签收。 */
+export async function listPackIncoming(ownerCode?: string) {
+  return unwrapApiData(await request.get<ApiResponse<PackIncoming>>(`${API_BASE}/incoming`, { params: { ownerCode } }))
+}
+
+/** 扫托盘标签或箱标签找到要签收的东西；扫在路上的托盘上的箱，同样返回整个托盘。 */
+export async function lookupPackReceive(code: string) {
+  return unwrapApiData(
+    await request.get<ApiResponse<PackReceiveLookup>>(`${API_BASE}/receive/lookup`, { params: { code: code.trim() } }),
+  )
 }
 
 // ---- 扫码识别、位置查询、主数据 ----
@@ -169,9 +253,12 @@ export async function resolvePackCode(code: string): Promise<PackResolveResult |
   }
 }
 
-export async function locatePackProduct(code: string) {
+/** 商品位置查询；allStores 只有店长 / 管理员可用（否则 403）。 */
+export async function locatePackProduct(params: { ownerCode?: string; code: string; allStores?: boolean }) {
   return unwrapApiData(
-    await request.get<ApiResponse<PackLocateResult>>(`${API_BASE}/locate`, { params: { code: code.trim() } }),
+    await request.get<ApiResponse<PackLocateResult>>(`${API_BASE}/locate`, {
+      params: { ownerCode: params.ownerCode, code: params.code.trim(), allStores: params.allStores ? true : undefined },
+    }),
   )
 }
 
@@ -182,7 +269,7 @@ export async function listPackCarriers(includeInactive = false) {
   return unwrapApiData(response) ?? []
 }
 
-/** 新增（不传 carrierGuid）或修改运输公司；停用即 isActive=false 保存。 */
+/** 新增（不传 carrierGuid，任何人可现场新增）或修改运输公司（只有管理员）；停用即 isActive=false 保存。 */
 export async function savePackCarrier(carrierGuid: string | null, payload: PackCarrierSaveRequest) {
   const response = carrierGuid
     ? await request.put<ApiResponse<PackCarrier>>(`${API_BASE}/carriers/${segment(carrierGuid)}`, payload)
@@ -190,10 +277,18 @@ export async function savePackCarrier(carrierGuid: string | null, payload: PackC
   return unwrapApiData(response)
 }
 
-/** 装箱时可关联的订货单：已提交和配货中的。 */
-export async function searchPackOrders(keyword?: string) {
-  const response = await request.get<ApiResponse<PackOrderOption[]>>(`${API_BASE}/orders`, {
-    params: { keyword: keyword?.trim() },
+/** 存放位置：分店返回本店自己维护的位置，总仓返回现有货位。 */
+export async function listPackLocations(ownerCode?: string, includeInactive = false) {
+  const response = await request.get<ApiResponse<PackLocation[]>>(`${API_BASE}/locations`, {
+    params: { ownerCode, includeInactive: includeInactive ? true : undefined },
   })
   return unwrapApiData(response) ?? []
+}
+
+/** 新增（不传 locationGuid）或修改存放位置（只有店长）；停用即 isActive=false 保存。 */
+export async function savePackLocation(locationGuid: string | null, payload: PackLocationSaveRequest) {
+  const response = locationGuid
+    ? await request.put<ApiResponse<PackLocation>>(`${API_BASE}/locations/${segment(locationGuid)}`, payload)
+    : await request.post<ApiResponse<PackLocation>>(`${API_BASE}/locations`, payload)
+  return unwrapApiData(response)
 }

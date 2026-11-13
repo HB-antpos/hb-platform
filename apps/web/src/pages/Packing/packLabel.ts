@@ -1,14 +1,14 @@
 import { Ecc, QrCode } from '@rc-component/qrcode/es/libs/qrcodegen'
 import { generatePath } from '@rc-component/qrcode/es/utils'
 
-import type { PackCartonSummary, PackPalletDetail, PackPalletSummary } from '../../../types/warehousePacking'
-import { PACK_DESTINATION_TYPE } from '../../../types/warehousePacking'
-import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../../utils/barcode'
+import type { PackCartonSummary, PackDestination, PackLocation, PackPalletDetail, PackPalletSummary } from '../../types/packing'
+import { PACK_DESTINATION_TYPE } from '../../types/packing'
+import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../utils/barcode'
 
 import { parsePackUtc } from './packingLogic'
 
-// 箱 / 托盘标签：英文版 70×26 mm（与移动端同一设计，设计稿 l4.html）。
-// 标签本体只出现英文和数字、只用纯黑纯白，热敏打印不会糊。
+// 箱 / 托盘 / 存放位置标签：英文版 70×26 mm（与移动端同一设计，设计稿 l4.html）。
+// 箱和托盘标签本体只出现英文和数字、只用纯黑纯白，热敏打印不会糊。
 // 版式按设计稿的 570×208 打印点排版，打印时整体缩放到 70 mm 宽。
 
 export const PACK_LABEL_WIDTH_PX = 570
@@ -23,13 +23,13 @@ export interface PackLabelFields {
   /** 左侧黑条大字：BOX / PLT。 */
   kindText: 'BOX' | 'PLT'
   kindCaption: 'CARTON' | 'PALLET'
-  /** 发出地（大写）。 */
+  /** 发出地（大写）：取后端的 originName（分店名 / 总仓名）。 */
   origin: string
-  /** 托盘经运输公司时的承运商（大写）；有值时打印 · VIA <承运商>。 */
+  /** 有运输公司时的承运商（大写）；有值时打印 · VIA <承运商>。 */
   via: string | null
-  /** 托盘直送分店：打印 · DIRECT。 */
+  /** 要发出但没有运输公司（自己送 / 对方来取）：打印 · DIRECT。 */
   direct: boolean
-  /** 去向：分店名大写；未指定为 UNASSIGNED。 */
+  /** 去向：其他分店 / 总仓取名称大写；本地存放 STORAGE；未指定 UNASSIGNED。 */
   to: string
   /** 完整编号：二维码和 Code128 的内容。 */
   code: string
@@ -59,7 +59,7 @@ export function toLabelText(value: string | null | undefined): string {
     .toUpperCase()
 }
 
-/** 标签时间：`13 NOV 14:32`，按浏览器本地时区（打包工位就在仓库）。 */
+/** 标签时间：`13 NOV 14:32`，按浏览器本地时区（打包工位就在店里 / 仓库）。 */
 export function formatLabelTime(value: string | null | undefined, now: Date = new Date()): string {
   const date = parsePackUtc(value) ?? now
   const pad = (part: number) => String(part).padStart(2, '0')
@@ -70,12 +70,34 @@ function splitCode(code: string) {
   return { codePrefix: code.slice(0, CODE_PREFIX_LENGTH), codeTail: code.slice(CODE_PREFIX_LENGTH) }
 }
 
-/** 去向大字：分店名（无英文名时用分店编码）；没有收货分店一律 UNASSIGNED。 */
-function resolveTo(destination: PackCartonSummary['destination']): string {
-  if (destination.destinationType === PACK_DESTINATION_TYPE.Unassigned) {
-    return 'UNASSIGNED'
+/** FROM：分店名 / 总仓名大写；名称里没有英文（纯中文）时退回地点编码。 */
+function resolveOrigin(originName: string | null | undefined, originCode: string | null | undefined): string {
+  return toLabelText(originName) || toLabelText(originCode)
+}
+
+/** TO 大字：其他分店 / 总仓取名称（无英文名时用地点编码）；本地存放 STORAGE；未指定 UNASSIGNED。 */
+function resolveTo(destination: PackDestination): string {
+  if (destination.destinationType === PACK_DESTINATION_TYPE.Local) {
+    return 'STORAGE'
   }
-  return toLabelText(destination.storeName) || toLabelText(destination.storeCode) || 'UNASSIGNED'
+  if (destination.destinationType === PACK_DESTINATION_TYPE.Store || destination.destinationType === PACK_DESTINATION_TYPE.Warehouse) {
+    return toLabelText(destination.name) || toLabelText(destination.code) || 'UNASSIGNED'
+  }
+  return 'UNASSIGNED'
+}
+
+/** FROM 行后缀：有运输公司打 VIA；要发出且没有运输公司打 DIRECT；本地存放 / 未指定都不打。 */
+function resolveRoute(destination: PackDestination): { via: string | null; direct: boolean } {
+  const shippable =
+    destination.destinationType === PACK_DESTINATION_TYPE.Store || destination.destinationType === PACK_DESTINATION_TYPE.Warehouse
+  if (!shippable) {
+    return { via: null, direct: false }
+  }
+  if (destination.carrierGuid || destination.carrierName) {
+    // 运输公司名称没有英文时用 CARRIER 兜底，避免把有承运商的货打成 DIRECT。
+    return { via: toLabelText(destination.carrierName) || 'CARRIER', direct: false }
+  }
+  return { via: null, direct: true }
 }
 
 function buildStamp(sealedAtUtc: string | null | undefined, operatorName: string | null | undefined, now: Date) {
@@ -89,9 +111,8 @@ export function buildCartonLabelFields(carton: PackCartonSummary, now: Date = ne
     kind: 'carton',
     kindText: 'BOX',
     kindCaption: 'CARTON',
-    origin: toLabelText(carton.originName),
-    via: null,
-    direct: false,
+    origin: resolveOrigin(carton.originName, carton.originCode),
+    ...resolveRoute(carton.destination),
     to: resolveTo(carton.destination),
     code: carton.cartonNo,
     ...splitCode(carton.cartonNo),
@@ -104,15 +125,12 @@ export function buildCartonLabelFields(carton: PackCartonSummary, now: Date = ne
 
 /**
  * 托盘 DTO → 标签字段（固定 2 张，带 1/2、2/2）。
- * 经运输公司：FROM 行加 VIA，右下打运单号（CN）；直送分店：FROM 行加 DIRECT，
- * 托盘上的箱都关联同一张订货单时右下打该订货单号。
+ * 右下第一行：有运单号打 `CN …`；没有时托盘上的箱都关联同一张订货单则打订货单号（总仓场景）。
  */
 export function buildPalletLabelFields(
   pallet: PackPalletSummary & Partial<Pick<PackPalletDetail, 'cartons'>>,
   now: Date = new Date(),
 ): PackLabelFields[] {
-  const { destination } = pallet
-  const viaCarrier = destination.destinationType === PACK_DESTINATION_TYPE.Carrier
   const consignmentNo = toLabelText(pallet.consignmentNo)
   const orderNos = new Set((pallet.cartons ?? []).map((carton) => toLabelText(carton.orderNo)).filter(Boolean))
   const singleOrderNo = orderNos.size === 1 ? [...orderNos][0] : ''
@@ -122,10 +140,9 @@ export function buildPalletLabelFields(
     kind: 'pallet',
     kindText: 'PLT',
     kindCaption: 'PALLET',
-    origin: toLabelText(pallet.originName),
-    via: viaCarrier ? toLabelText(destination.carrierName) || null : null,
-    direct: destination.destinationType === PACK_DESTINATION_TYPE.Store,
-    to: resolveTo(destination),
+    origin: resolveOrigin(pallet.originName, pallet.originCode),
+    ...resolveRoute(pallet.destination),
+    to: resolveTo(pallet.destination),
     code: pallet.palletNo,
     ...splitCode(pallet.palletNo),
     stat: `${pallet.cartonCount} CTN · ${pallet.pieceCount} PCS`,
@@ -139,11 +156,15 @@ export function buildPalletLabelFields(
   }))
 }
 
-/** 估算大写文字的相对宽度：M / W 偏宽，I / 1 / 空格偏窄，其余按 1 个字宽。 */
+/** 估算大写文字的相对宽度：M / W 偏宽，I / 1 / 空格偏窄，中日韩字符约两个字宽，其余按 1 个字宽。 */
 function estimateLabelTextWidth(text: string): number {
   let width = 0
   for (const char of text) {
-    width += char === 'M' || char === 'W' ? 1.4 : char === 'I' || char === '1' || char === ' ' ? 0.55 : 1
+    if (char.charCodeAt(0) > 0x2e7f) {
+      width += 1.9
+    } else {
+      width += char === 'M' || char === 'W' ? 1.4 : char === 'I' || char === '1' || char === ' ' ? 0.55 : 1
+    }
   }
   return width
 }
@@ -156,6 +177,37 @@ export function resolveToFontSize(to: string): number {
   if (width <= 14.5) return 27
   return 21
 }
+
+// ---- 存放位置标签 ----
+
+/** 存放位置标签字段：位置名称大字 + 条码（内容是位置条码）。位置名称是店里自己起的，允许中文，原样打印。 */
+export interface LocationLabelFields {
+  /** 所属分店 / 总仓的名称（大写，没有英文时用编码）。 */
+  owner: string
+  /** 位置名称（原样，英文转大写）。 */
+  name: string
+  /** 位置条码：二维码和 Code128 的内容，也印在名称下方便人工核对。 */
+  barcode: string
+}
+
+export function buildLocationLabelFields(
+  location: Pick<PackLocation, 'name' | 'barcode' | 'ownerCode'>,
+  ownerName: string | null | undefined,
+): LocationLabelFields {
+  return {
+    owner: toLabelText(ownerName) || toLabelText(location.ownerCode),
+    name: location.name.trim().toUpperCase(),
+    barcode: location.barcode,
+  }
+}
+
+/** 位置名称大字：按估算宽度反推字号（可用宽度约 330 打印点，大写粗体平均约 0.72 em），限制在 24～64。 */
+export function resolveLocationNameFontSize(name: string): number {
+  const width = Math.max(estimateLabelTextWidth(name), 1)
+  return Math.max(24, Math.min(64, Math.floor(330 / (width * 0.72))))
+}
+
+// ---- 渲染 ----
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -182,7 +234,7 @@ export function buildLabelQrSvg(code: string): string {
   )
 }
 
-/** 单张标签的 HTML（570×208 打印点）。所有文字先转义。 */
+/** 单张箱 / 托盘标签的 HTML（570×208 打印点）。所有文字先转义。 */
 export function buildPackLabelHtml(fields: PackLabelFields): string {
   const fromSuffix = fields.via
     ? ` · VIA <b>${escapeHtml(fields.via)}</b>`
@@ -205,10 +257,25 @@ export function buildPackLabelHtml(fields: PackLabelFields): string {
   )
 }
 
+/** 单张存放位置标签的 HTML：左侧黑条 LOC，位置名称大字，条码内容是位置条码。 */
+export function buildLocationLabelHtml(fields: LocationLabelFields): string {
+  return (
+    '<div class="pkl pkl-location">' +
+    '<div class="pkl-kind"><b>LOC</b><i>LOCATION</i></div>' +
+    '<div class="pkl-main"><div class="pkl-top"><div class="pkl-txt">' +
+    `<div class="pkl-from">${fields.owner ? `<b>${escapeHtml(fields.owner)}</b>` : ''}</div>` +
+    `<div class="pkl-locname" style="font-size:${resolveLocationNameFontSize(fields.name)}px">${escapeHtml(fields.name)}</div>` +
+    `<div class="pkl-loccode">${escapeHtml(fields.barcode)}</div>` +
+    `</div>${buildLabelQrSvg(fields.barcode)}</div>` +
+    `<div class="pkl-bot">${buildLabelBarcodeSvg(fields.barcode)}</div>` +
+    '</div></div>'
+  )
+}
+
 /** 标签本体样式：预览和打印共用（类名统一 pkl- 前缀）。 */
 export const PACK_LABEL_CSS = `
 .pkl,.pkl *{box-sizing:border-box;margin:0;padding:0}
-.pkl{width:${PACK_LABEL_WIDTH_PX}px;height:${PACK_LABEL_HEIGHT_PX}px;background:#fff;color:#000;overflow:hidden;display:flex;font-family:"Helvetica Neue",Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.pkl{width:${PACK_LABEL_WIDTH_PX}px;height:${PACK_LABEL_HEIGHT_PX}px;background:#fff;color:#000;overflow:hidden;display:flex;font-family:"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .pkl-pallet{border:6px solid #000}
 .pkl-kind{width:70px;background:#000;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none}
 .pkl-kind b{font-size:27px;font-weight:900;letter-spacing:1px;line-height:1}
@@ -225,6 +292,8 @@ export const PACK_LABEL_CSS = `
 .pkl-code span{font-size:19px}
 .pkl-code b{font-size:40px;font-weight:800}
 .pkl-code .pkl-stat{font-family:"Helvetica Neue",Arial,sans-serif;font-size:15px;font-weight:800;margin-left:6px}
+.pkl-locname{font-weight:900;line-height:70px;letter-spacing:.3px}
+.pkl-loccode{font-family:Menlo,Consolas,"Courier New",monospace;font-size:19px;font-weight:800;line-height:26px}
 .pkl-qr{width:112px;height:112px;flex:none;align-self:flex-start;margin-top:4px;display:block}
 .pkl-bot{display:flex;align-items:flex-end;gap:10px;height:48px;flex:none}
 .pkl-bc{width:232px;height:44px;flex:none;display:block}
@@ -233,8 +302,8 @@ export const PACK_LABEL_CSS = `
 `
 
 /** 打印文档：一张标签一页，纸张 70×26 mm、无页边距；标签按 570 点 → 70 mm 等比缩放。 */
-export function buildPackLabelDocument(labels: PackLabelFields[]): string {
-  const pages = labels.map((fields) => `<div class="pkl-page"><div class="pkl-fit">${buildPackLabelHtml(fields)}</div></div>`)
+export function buildPackLabelPagesDocument(labelHtmlList: string[]): string {
+  const pages = labelHtmlList.map((html) => `<div class="pkl-page"><div class="pkl-fit">${html}</div></div>`)
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Labels</title><style>' +
     '@page{size:70mm 26mm;margin:0}' +
@@ -247,6 +316,16 @@ export function buildPackLabelDocument(labels: PackLabelFields[]): string {
   )
 }
 
+/** 箱 / 托盘标签的打印文档。 */
+export function buildPackLabelDocument(labels: PackLabelFields[]): string {
+  return buildPackLabelPagesDocument(labels.map(buildPackLabelHtml))
+}
+
+/** 存放位置标签的打印文档。 */
+export function buildLocationLabelDocument(labels: LocationLabelFields[]): string {
+  return buildPackLabelPagesDocument(labels.map(buildLocationLabelHtml))
+}
+
 function waitForAnimationFrame() {
   return new Promise<void>((resolve) => {
     window.requestAnimationFrame(() => resolve())
@@ -254,13 +333,10 @@ function waitForAnimationFrame() {
 }
 
 /**
- * 用隐藏 iframe 打印标签（沿用仓库里 iframe 打印的时序：等两帧布局完成再 focus + print）。
+ * 用隐藏 iframe 打印（沿用仓库里 iframe 打印的时序：等两帧布局完成再 focus + print）。
  * 不 import StoreOrders/printUtils：它与发票 / 拣货单共用 print.css 分块，多一个引用方会破坏包体门禁。
  */
-export function printPackLabels(labels: PackLabelFields[]) {
-  if (!labels.length) {
-    return
-  }
+function printDocument(documentHtml: string) {
   const frame = document.createElement('iframe')
   let cleaned = false
   const cleanup = () => {
@@ -287,6 +363,20 @@ export function printPackLabels(labels: PackLabelFields[]) {
         window.setTimeout(cleanup, 60_000)
       })
   }
-  frame.srcdoc = buildPackLabelDocument(labels)
+  frame.srcdoc = documentHtml
   document.body.appendChild(frame)
+}
+
+/** 打印箱 / 托盘标签。 */
+export function printPackLabels(labels: PackLabelFields[]) {
+  if (labels.length) {
+    printDocument(buildPackLabelDocument(labels))
+  }
+}
+
+/** 打印存放位置标签。 */
+export function printLocationLabels(labels: LocationLabelFields[]) {
+  if (labels.length) {
+    printDocument(buildLocationLabelDocument(labels))
+  }
 }

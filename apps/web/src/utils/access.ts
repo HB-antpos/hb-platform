@@ -89,7 +89,7 @@ function createEmptyAccess(): AccessControl {
     canOrderSupplierPreorders: false,
     canManageWarehouseCategories: false,
     canManageWarehouseLocations: false,
-    canUseWarehousePacking: false,
+    canUsePacking: false,
     canViewContainers: false,
     canCreateContainer: false,
     canEditContainer: false,
@@ -342,9 +342,10 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || hasPermission(P.Warehouse.ManageCategories) || hasPermission(P.Warehouse.Manage)
   const canManageWarehouseLocations =
     isAdmin || hasPermission(P.Warehouse.ManageLocations) || hasPermission(P.Warehouse.Manage)
-  // 扫码打包与后端别名同一口径：管理仓库 / 管理仓库订货的账号无需重新授权。
-  const canUseWarehousePacking =
+  // 扫码打包：分店用 StorePacking.Use；总仓用 Warehouse.Packing，管理仓库 / 管理仓库订货与后端别名同一口径，无需重新授权。
+  const canUsePacking =
     isAdmin ||
+    hasPermission(P.StorePacking.Use) ||
     hasPermission(P.Warehouse.Packing) ||
     hasPermission(P.Warehouse.Manage) ||
     hasPermission(P.Warehouse.ManageOrders)
@@ -577,7 +578,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canOrderSupplierPreorders,
     canManageWarehouseCategories,
     canManageWarehouseLocations,
-    canUseWarehousePacking,
+    canUsePacking,
     canViewContainers,
     canCreateContainer,
     canEditContainer,

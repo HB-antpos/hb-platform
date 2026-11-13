@@ -1,16 +1,18 @@
-import { BarcodeOutlined, DeleteOutlined, InboxOutlined, PictureOutlined, PrinterOutlined } from '@ant-design/icons'
-import { Button, Input, InputNumber, Modal, Select, Switch, Tag, Typography, message } from 'antd'
+import { BarcodeOutlined, DeleteOutlined, InboxOutlined, PictureOutlined, PrinterOutlined, SendOutlined } from '@ant-design/icons'
+import { Button, Input, InputNumber, Modal, Popconfirm, Select, Switch, Tag, Typography, message } from 'antd'
 import type { InputRef } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { MeasuredTable } from '../../../components/MeasuredTable'
-import { useBarcodeScanner } from '../../../hooks/useBarcodeScanner'
+import { MeasuredTable } from '../../components/MeasuredTable'
+import { useBarcodeScanner } from '../../hooks/useBarcodeScanner'
 import {
   addCartonToPackPallet,
   createPackCarton,
   createPackPallet,
+  dispatchPackCarton,
+  dispatchPackPallet,
   getPackCarton,
   getPackPallet,
   listPackPallets,
@@ -19,33 +21,29 @@ import {
   scanIntoPackCarton,
   sealPackCarton,
   sealPackPallet,
-  searchPackOrders,
   setPackCartonItemQuantity,
   updatePackCartonHeader,
-} from '../../../services/warehousePackingService'
+} from '../../services/packingService'
 import type {
   PackCartonDetail,
   PackCartonItem,
   PackCartonSummary,
-  PackOrderOption,
   PackPalletDetail,
   PackPalletSummary,
   PackProductCandidate,
   PackResolveResult,
-} from '../../../types/warehousePacking'
-import {
-  PACK_CARTON_STATUS,
-  PACK_DESTINATION_TYPE,
-  PACK_ERROR_CODE,
-  PACK_PALLET_STATUS,
-} from '../../../types/warehousePacking'
-import { isScanFeedbackUnlocked, playScanFeedback, unlockScanFeedback } from '../../../utils/scanFeedback'
-import type { ScanFeedbackTone } from '../../../utils/scanFeedback'
+} from '../../types/packing'
+import { PACK_CARTON_STATUS, PACK_ERROR_CODE, PACK_PALLET_STATUS } from '../../types/packing'
+import { isScanFeedbackUnlocked, playScanFeedback, unlockScanFeedback } from '../../utils/scanFeedback'
+import type { ScanFeedbackTone } from '../../utils/scanFeedback'
 
 import { DestinationModal } from './DestinationSelect'
 import type { PackCountMode, PackDestinationValue } from './packingLogic'
 import {
   UNASSIGNED_DESTINATION,
+  canDispatchCarton,
+  canDispatchPallet,
+  cartonStateKind,
   destinationToRequest,
   destinationToValue,
   findCartonItemByCode,
@@ -55,15 +53,14 @@ import {
   resolveScanStep,
   resolveStationHotkey,
 } from './packingLogic'
-import { CartonStatusTag, DestinationText, showPackingError, usePackingPage } from './packingShared'
+import { DestinationText, StateTag, showPackingError, usePackingPage } from './packingShared'
 import { buildCartonLabelFields, buildPalletLabelFields, printPackLabels } from './packLabel'
 import QuantityStepper from './QuantityStepper'
 
 // 打包台的当前箱 / 当前托盘 / 计数方式记在本机：刷新页面或换班后接着装（同一只箱也可以在手机端接着装）。
-const STORAGE_CARTON = 'hb.warehousePacking.station.cartonGuid'
-const STORAGE_PALLET = 'hb.warehousePacking.station.palletGuid'
-const STORAGE_PALLET_ENABLED = 'hb.warehousePacking.station.palletEnabled'
-const STORAGE_COUNT_MODE = 'hb.warehousePacking.station.countMode'
+// 当前箱和托盘属于某个地点，所以键里带地点编码；计数方式与地点无关。
+const storageKey = (ownerCode: string, name: string) => `hb.packing.station.${ownerCode}.${name}`
+const STORAGE_COUNT_MODE = 'hb.packing.station.countMode'
 
 function readStorage(key: string): string | null {
   try {
@@ -87,7 +84,6 @@ function writeStorage(key: string, value: string | null) {
 
 interface NextCartonHeader {
   destination: PackDestinationValue
-  orderGuid: string | null
 }
 
 interface ScanStatus {
@@ -109,7 +105,10 @@ interface StationTabProps {
 
 export default function StationTab({ active }: StationTabProps) {
   const { t } = useTranslation()
-  const { notifyChanged, openCarton, openPallet, dataVersion } = usePackingPage()
+  const { ownerCode, notifyChanged, openCarton, openPallet, dataVersion } = usePackingPage()
+  const STORAGE_CARTON = storageKey(ownerCode, 'cartonGuid')
+  const STORAGE_PALLET = storageKey(ownerCode, 'palletGuid')
+  const STORAGE_PALLET_ENABLED = storageKey(ownerCode, 'palletEnabled')
 
   const [carton, setCarton] = useState<PackCartonDetail | null>(null)
   const [highlightCode, setHighlightCode] = useState<string | null>(null)
@@ -122,23 +121,22 @@ export default function StationTab({ active }: StationTabProps) {
   const [pallet, setPallet] = useState<PackPalletDetail | null>(null)
   const [palletOptions, setPalletOptions] = useState<PackPalletSummary[]>([])
   const [lastSealed, setLastSealed] = useState<PackCartonSummary | null>(null)
+  const [lastSealedPallet, setLastSealedPallet] = useState<PackPalletDetail | null>(null)
   const [scanText, setScanText] = useState('')
   const [scanFocused, setScanFocused] = useState(false)
   const [scanStatus, setScanStatus] = useState<ScanStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [candidatePrompt, setCandidatePrompt] = useState<CandidatePrompt | null>(null)
   const [destinationTarget, setDestinationTarget] = useState<DestinationTarget | null>(null)
-  const [orderOptions, setOrderOptions] = useState<PackOrderOption[]>([])
 
   const scanInputRef = useRef<InputRef>(null)
   const cartonRef = useRef<PackCartonDetail | null>(null)
   const palletRef = useRef<PackPalletDetail | null>(null)
   const palletEnabledRef = useRef(palletEnabled)
   const countModeRef = useRef(countMode)
-  const nextHeaderRef = useRef<NextCartonHeader>({ destination: UNASSIGNED_DESTINATION, orderGuid: null })
+  const nextHeaderRef = useRef<NextCartonHeader>({ destination: UNASSIGNED_DESTINATION })
   const queueRef = useRef<Promise<void>>(Promise.resolve())
   const pendingRef = useRef(0)
-  const orderSearchSeqRef = useRef(0)
   const modalOpen = candidatePrompt !== null || destinationTarget !== null
   const modalOpenRef = useRef(modalOpen)
   modalOpenRef.current = modalOpen
@@ -149,13 +147,15 @@ export default function StationTab({ active }: StationTabProps) {
     cartonRef.current = next
     setCarton(next)
     writeStorage(STORAGE_CARTON, next?.cartonGuid ?? null)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerCode])
 
   const applyPallet = useCallback((next: PackPalletDetail | null) => {
     palletRef.current = next
     setPallet(next)
     writeStorage(STORAGE_PALLET, next?.palletGuid ?? null)
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerCode])
 
   /** 扫码框常驻焦点：操作完成后把焦点还给扫码框；用户正在别的输入框里打字或有弹窗时不抢。 */
   const refocusScan = useCallback(() => {
@@ -227,7 +227,8 @@ export default function StationTab({ active }: StationTabProps) {
     return () => {
       cancelled = true
     }
-  }, [applyCarton, applyPallet])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyCarton, applyPallet, ownerCode])
 
   // 抽屉或其他标签里改过数据（重新开箱、移出托盘等）后，刷新打包台手上的箱和托盘。
   const seenVersionRef = useRef(dataVersion)
@@ -260,20 +261,27 @@ export default function StationTab({ active }: StationTabProps) {
 
   const createCarton = useCallback(
     async (header: NextCartonHeader) => {
-      const created = await createPackCarton({ ...destinationToRequest(header.destination), orderGuid: header.orderGuid })
+      const created = await createPackCarton({ ...destinationToRequest(header.destination), ownerCode })
       applyCarton(created)
       setWeight(null)
       setHighlightCode(null)
       return created
     },
-    [applyCarton],
+    [applyCarton, ownerCode],
   )
 
   /** 把箱放上托盘；去向不一致时询问是否放行（只有仓库经理能放行，后端会再核一次）。 */
   const addToPallet = useCallback(
     async (palletGuid: string, cartonNo: string, allowMismatch = false): Promise<void> => {
       try {
-        applyPallet(await addCartonToPackPallet(palletGuid, cartonNo, allowMismatch))
+        const updated = await addCartonToPackPallet(palletGuid, cartonNo, allowMismatch)
+        applyPallet(updated)
+        // 上了托盘的箱不能再单独发出：上一箱的快捷按钮要跟着变。
+        setLastSealed((previous) =>
+          previous && previous.cartonNo === cartonNo
+            ? { ...previous, palletGuid: updated.palletGuid, palletNo: updated.palletNo }
+            : previous,
+        )
         notifyChanged()
       } catch (error) {
         const info = readPackingError(error)
@@ -281,15 +289,15 @@ export default function StationTab({ active }: StationTabProps) {
           playScanFeedback('blocked')
           Modal.confirm({
             title: info.message,
-            content: t('warehouseUi.packing.station.mismatchConfirm', { cartonNo }),
-            okText: t('warehouseUi.packing.station.mismatchAllow'),
+            content: t('packingUi.station.mismatchConfirm', { cartonNo }),
+            okText: t('packingUi.station.mismatchAllow'),
             cancelText: t('common.cancel'),
             onOk: () => enqueue(() => addToPallet(palletGuid, cartonNo, true)),
           })
           return
         }
         playScanFeedback('blocked')
-        void message.warning(t('warehouseUi.packing.station.notOnPallet', { cartonNo, reason: info.message }))
+        void message.warning(t('packingUi.station.notOnPallet', { cartonNo, reason: info.message }))
       }
     },
     [applyPallet, enqueue, notifyChanged, t],
@@ -299,7 +307,7 @@ export default function StationTab({ active }: StationTabProps) {
     async (input: { code?: string; productCode?: string }) => {
       let current = cartonRef.current
       if (!current || current.status !== PACK_CARTON_STATUS.Packing) {
-        // 没有当前箱时扫商品即自动开新箱，沿用上一箱的去向和订货单。
+        // 没有当前箱时扫商品即自动开新箱，沿用上一箱的去向。
         current = await createCarton(nextHeaderRef.current)
       }
       const mode = countModeRef.current
@@ -322,8 +330,8 @@ export default function StationTab({ active }: StationTabProps) {
         feedback(
           'success',
           step.fellBack
-            ? { tone: 'warning', text: t('warehouseUi.packing.station.countFallback') }
-            : { tone: 'success', text: t('warehouseUi.packing.station.scanAdded', { count: step.quantity }) },
+            ? { tone: 'warning', text: t('packingUi.station.countFallback') }
+            : { tone: 'success', text: t('packingUi.station.scanAdded', { count: step.quantity }) },
         )
       } catch (error) {
         const info = readPackingError<PackCartonDetail>(error)
@@ -357,7 +365,7 @@ export default function StationTab({ active }: StationTabProps) {
           applyCarton(detail)
           setWeight(detail.weightKg ?? null)
           setHighlightCode(null)
-          feedback('success', { tone: 'success', text: t('warehouseUi.packing.station.switchedCarton', { no: detail.cartonNo }) })
+          feedback('success', { tone: 'success', text: t('packingUi.station.switchedCarton', { no: detail.cartonNo }) })
           return
         }
         const currentPallet = palletRef.current
@@ -372,13 +380,13 @@ export default function StationTab({ active }: StationTabProps) {
       if (detail.status === PACK_PALLET_STATUS.Building) {
         applyPallet(detail)
         setPalletEnabled(true)
-        writeStorage(STORAGE_PALLET_ENABLED, '1')
-        feedback('success', { tone: 'success', text: t('warehouseUi.packing.station.switchedPallet', { no: detail.palletNo }) })
+        writeStorage(storageKey(ownerCode, 'palletEnabled'), '1')
+        feedback('success', { tone: 'success', text: t('packingUi.station.switchedPallet', { no: detail.palletNo }) })
         return
       }
       openPallet(detail.palletGuid)
     },
-    [addToPallet, applyCarton, applyPallet, feedback, openCarton, openPallet, t],
+    [addToPallet, applyCarton, applyPallet, feedback, openCarton, openPallet, ownerCode, t],
   )
 
   const handleScan = useCallback(
@@ -409,15 +417,15 @@ export default function StationTab({ active }: StationTabProps) {
     enqueue(async () => {
       const current = cartonRef.current
       if (current && current.items.length === 0) {
-        void message.info(t('warehouseUi.packing.station.cartonStillEmpty'))
+        void message.info(t('packingUi.station.cartonStillEmpty'))
         return
       }
-      // 新箱沿用当前箱的去向和订货单；原来那只箱保持「装箱中」，可在「箱」标签里继续或作废。
+      // 新箱沿用当前箱的去向；原来那只箱保持「装箱中」，可在「箱」标签里继续或作废。
       const header: NextCartonHeader = current
-        ? { destination: destinationToValue(current.destination), orderGuid: current.orderGuid ?? null }
+        ? { destination: destinationToValue(current.destination) }
         : nextHeaderRef.current
       const created = await createCarton(header)
-      setScanStatus({ tone: 'success', text: t('warehouseUi.packing.station.cartonCreated', { no: created.cartonNo }) })
+      setScanStatus({ tone: 'success', text: t('packingUi.station.cartonCreated', { no: created.cartonNo }) })
       notifyChanged()
     })
   }, [createCarton, enqueue, notifyChanged, t])
@@ -426,26 +434,26 @@ export default function StationTab({ active }: StationTabProps) {
     enqueue(async () => {
       const current = cartonRef.current
       if (!current) {
-        void message.warning(t('warehouseUi.packing.station.noCarton'))
+        void message.warning(t('packingUi.station.noCarton'))
         return
       }
       if (current.items.length === 0) {
-        void message.warning(t('warehouseUi.packing.station.cartonEmpty'))
+        void message.warning(t('packingUi.station.cartonEmpty'))
         return
       }
       const weightKg = parseWeightInput(weight)
       if (weightKg === undefined) {
-        void message.warning(t('warehouseUi.packing.station.weightInvalid'))
+        void message.warning(t('packingUi.station.weightInvalid'))
         return
       }
       const sealed = await sealPackCarton(current.cartonGuid, weightKg)
       printPackLabels([buildCartonLabelFields(sealed)])
-      nextHeaderRef.current = { destination: destinationToValue(sealed.destination), orderGuid: sealed.orderGuid ?? null }
+      nextHeaderRef.current = { destination: destinationToValue(sealed.destination) }
       setLastSealed(sealed)
       applyCarton(null)
       setWeight(null)
       setHighlightCode(null)
-      setScanStatus({ tone: 'success', text: t('warehouseUi.packing.station.cartonSealed', { no: sealed.cartonNo }) })
+      setScanStatus({ tone: 'success', text: t('packingUi.station.cartonSealed', { no: sealed.cartonNo }) })
       const currentPallet = palletRef.current
       if (palletEnabledRef.current && currentPallet) {
         await addToPallet(currentPallet.palletGuid, sealed.cartonNo)
@@ -458,17 +466,18 @@ export default function StationTab({ active }: StationTabProps) {
     enqueue(async () => {
       const current = palletRef.current
       if (!palletEnabledRef.current || !current) {
-        void message.warning(t('warehouseUi.packing.station.noPallet'))
+        void message.warning(t('packingUi.station.noPallet'))
         return
       }
       if (current.cartonCount === 0) {
-        void message.warning(t('warehouseUi.packing.station.palletEmpty'))
+        void message.warning(t('packingUi.station.palletEmpty'))
         return
       }
       const sealed = await sealPackPallet(current.palletGuid)
       printPackLabels(buildPalletLabelFields(sealed))
+      setLastSealedPallet(sealed)
       applyPallet(null)
-      setScanStatus({ tone: 'success', text: t('warehouseUi.packing.station.palletSealed', { no: sealed.palletNo }) })
+      setScanStatus({ tone: 'success', text: t('packingUi.station.palletSealed', { no: sealed.palletNo }) })
       notifyChanged()
     })
   }, [applyPallet, enqueue, notifyChanged, t])
@@ -488,17 +497,17 @@ export default function StationTab({ active }: StationTabProps) {
     [applyCarton, enqueue],
   )
 
-  /** 保存当前箱的箱头（去向 / 订货单）；重量和备注原样带回，避免被清空。 */
+  /** 保存当前箱的箱头（去向）；订货单、重量和备注原样带回，避免被清空（手机端可能已经填过）。 */
   const saveCartonHeader = useCallback(
-    async (destination: PackDestinationValue, orderGuid: string | null) => {
+    async (destination: PackDestinationValue) => {
       const current = cartonRef.current
       if (!current) {
-        nextHeaderRef.current = { destination, orderGuid }
+        nextHeaderRef.current = { destination }
         return
       }
       const detail = await updatePackCartonHeader(current.cartonGuid, {
         ...destinationToRequest(destination),
-        orderGuid,
+        orderGuid: current.orderGuid ?? null,
         weightKg: current.weightKg ?? null,
         remark: current.remark ?? null,
       })
@@ -508,35 +517,30 @@ export default function StationTab({ active }: StationTabProps) {
     [applyCarton, notifyChanged],
   )
 
-  const handleOrderChange = useCallback(
-    (orderGuid: string | undefined) => {
-      enqueue(async () => {
-        const current = cartonRef.current
-        if (!current) {
-          return
-        }
-        let destination = destinationToValue(current.destination)
-        const order = orderOptions.find((option) => option.orderGuid === orderGuid)
-        // 还没指定去向时，关联订货单即默认发往该订货单的分店。
-        if (destination.destinationType === PACK_DESTINATION_TYPE.Unassigned && order?.storeCode) {
-          destination = { destinationType: PACK_DESTINATION_TYPE.Store, storeCode: order.storeCode }
-        }
-        await saveCartonHeader(destination, orderGuid ?? null)
-      })
-    },
-    [enqueue, orderOptions, saveCartonHeader],
-  )
+  /** 发出刚封好的箱 / 托盘：发出后对方扫码签收，这边不能再改。 */
+  const dispatchLastCarton = useCallback(() => {
+    enqueue(async () => {
+      if (!lastSealed) {
+        return
+      }
+      const dispatched = await dispatchPackCarton(lastSealed.cartonGuid)
+      setLastSealed(dispatched)
+      setScanStatus({ tone: 'success', text: t('packingUi.station.dispatched', { no: dispatched.cartonNo }) })
+      notifyChanged()
+    })
+  }, [enqueue, lastSealed, notifyChanged, t])
 
-  const searchOrders = useCallback((keyword?: string) => {
-    const sequence = ++orderSearchSeqRef.current
-    searchPackOrders(keyword)
-      .then((options) => {
-        if (sequence === orderSearchSeqRef.current) {
-          setOrderOptions(options)
-        }
-      })
-      .catch(showPackingError)
-  }, [])
+  const dispatchLastPallet = useCallback(() => {
+    enqueue(async () => {
+      if (!lastSealedPallet) {
+        return
+      }
+      const dispatched = await dispatchPackPallet(lastSealedPallet.palletGuid)
+      setLastSealedPallet(dispatched)
+      setScanStatus({ tone: 'success', text: t('packingUi.station.dispatched', { no: dispatched.palletNo }) })
+      notifyChanged()
+    })
+  }, [enqueue, lastSealedPallet, notifyChanged, t])
 
   // ---- 托盘 ----
 
@@ -547,10 +551,10 @@ export default function StationTab({ active }: StationTabProps) {
   }
 
   const loadPalletOptions = useCallback(() => {
-    listPackPallets({ filter: 'building' })
+    listPackPallets({ ownerCode, filter: 'building' })
       .then((list) => setPalletOptions(list.items))
       .catch(showPackingError)
-  }, [])
+  }, [ownerCode])
 
   const selectPallet = (palletGuid: string) => {
     enqueue(async () => {
@@ -561,10 +565,11 @@ export default function StationTab({ active }: StationTabProps) {
   const submitDestination = async (value: PackDestinationValue) => {
     try {
       if (destinationTarget === 'newPallet') {
-        applyPallet(await createPackPallet(destinationToRequest(value)))
+        applyPallet(await createPackPallet({ ...destinationToRequest(value), ownerCode }))
+        setLastSealedPallet(null)
         notifyChanged()
       } else {
-        await saveCartonHeader(value, cartonRef.current?.orderGuid ?? null)
+        await saveCartonHeader(value)
       }
       setDestinationTarget(null)
     } catch (error) {
@@ -636,7 +641,7 @@ export default function StationTab({ active }: StationTabProps) {
         render: (_value, _record, index) => items.length - index,
       },
       {
-        title: t('warehouseUi.packing.columns.product'),
+        title: t('packingUi.columns.product'),
         dataIndex: 'productName',
         ellipsis: true,
         render: (_value, record) => (
@@ -644,34 +649,39 @@ export default function StationTab({ active }: StationTabProps) {
             {record.productName || record.productCode}
             {hasOrder && !resolveOrderProgress(record).onOrder ? (
               <Tag color="orange" className="wh-packing-inline-tag">
-                {t('warehouseUi.packing.station.offOrder')}
+                {t('packingUi.station.offOrder')}
               </Tag>
             ) : null}
           </span>
         ),
       },
       {
-        title: t('warehouseUi.packing.columns.itemNumber'),
+        title: t('packingUi.columns.itemNumber'),
         dataIndex: 'itemNumber',
         width: 130,
         render: (value: string | null) => <span className="wh-packing-mono">{value || '—'}</span>,
       },
+      // 关联订货单（手机端 / 总仓可能填过）时才显示配货对照；分店一期不用订货单。
+      ...(hasOrder
+        ? ([
+            {
+              title: t('packingUi.columns.orderQuantity'),
+              dataIndex: 'orderQuantity',
+              width: 80,
+              align: 'right',
+              render: (value: number | null | undefined) =>
+                value === null || value === undefined ? <Typography.Text type="secondary">—</Typography.Text> : value,
+            },
+            {
+              title: t('packingUi.columns.packedElsewhere'),
+              dataIndex: 'packedInOtherCartons',
+              width: 110,
+              align: 'right',
+            },
+          ] as ColumnsType<PackCartonItem>)
+        : []),
       {
-        title: t('warehouseUi.packing.columns.orderQuantity'),
-        dataIndex: 'orderQuantity',
-        width: 80,
-        align: 'right',
-        render: (value: number | null | undefined) =>
-          value === null || value === undefined ? <Typography.Text type="secondary">—</Typography.Text> : value,
-      },
-      {
-        title: t('warehouseUi.packing.columns.packedElsewhere'),
-        dataIndex: 'packedInOtherCartons',
-        width: 110,
-        align: 'right',
-      },
-      {
-        title: t('warehouseUi.packing.columns.cartonQuantity'),
+        title: t('packingUi.columns.cartonQuantity'),
         key: 'quantity',
         width: 150,
         render: (_value, record) => (
@@ -699,24 +709,9 @@ export default function StationTab({ active }: StationTabProps) {
     [handleSetQuantity, hasOrder, items.length, t],
   )
 
-  // 没有当前箱时显示下一箱将沿用的订货单（上一箱的）。
-  const headerOrder = carton ?? lastSealed
-  // 当前订货单不一定在搜索结果里：补一个选项保证下拉能显示单号。
-  const orderSelectOptions = useMemo(() => {
-    const options = orderOptions.map((option) => ({
-      value: option.orderGuid,
-      label: [option.orderNo || option.orderGuid, option.storeName].filter(Boolean).join(' · '),
-    }))
-    const orderGuid = headerOrder?.orderGuid
-    if (orderGuid && !options.some((option) => option.value === orderGuid)) {
-      options.unshift({ value: orderGuid, label: headerOrder?.orderNo || orderGuid })
-    }
-    return options
-  }, [headerOrder, orderOptions])
-
   const palletSelectOptions = palletOptions.map((option) => ({
     value: option.palletGuid,
-    label: `${option.palletNo} · ${t('warehouseUi.packing.summary.cartons', { count: option.cartonCount })}`,
+    label: `${option.palletNo} · ${t('packingUi.summary.cartons', { count: option.cartonCount })}`,
   }))
 
   // 改当前箱去向、新建托盘都以当前箱的去向为初值（没有当前箱时取上一箱的）。
@@ -736,7 +731,7 @@ export default function StationTab({ active }: StationTabProps) {
             allowClear
             autoComplete="off"
             prefix={<BarcodeOutlined />}
-            placeholder={t('warehouseUi.packing.station.scanPlaceholder')}
+            placeholder={t('packingUi.station.scanPlaceholder')}
             value={scanText}
             onChange={(event) => setScanText(event.target.value)}
             onPressEnter={submitScanInput}
@@ -745,10 +740,10 @@ export default function StationTab({ active }: StationTabProps) {
             suffix={
               scanFocused ? (
                 <Tag color="green" className="wh-packing-scan-ready">
-                  {t('warehouseUi.packing.station.scannerReady')}
+                  {t('packingUi.station.scannerReady')}
                 </Tag>
               ) : (
-                <Tag className="wh-packing-scan-ready">{t('warehouseUi.packing.station.scannerPaused')}</Tag>
+                <Tag className="wh-packing-scan-ready">{t('packingUi.station.scannerPaused')}</Tag>
               )
             }
           />
@@ -762,9 +757,9 @@ export default function StationTab({ active }: StationTabProps) {
               refocusScan()
             }}
             options={[
-              { value: 'one', label: t('warehouseUi.packing.station.countOne') },
-              { value: 'middle', label: t('warehouseUi.packing.station.countMiddle') },
-              { value: 'packing', label: t('warehouseUi.packing.station.countPacking') },
+              { value: 'one', label: t('packingUi.station.countOne') },
+              { value: 'middle', label: t('packingUi.station.countMiddle') },
+              { value: 'packing', label: t('packingUi.station.countPacking') },
             ]}
           />
         </div>
@@ -784,16 +779,16 @@ export default function StationTab({ active }: StationTabProps) {
               <div className="wh-packing-last-name">
                 {lastItem.productName || lastItem.productCode}
                 <Tag color="green" className="wh-packing-inline-tag">
-                  {t('warehouseUi.packing.station.justScanned')}
+                  {t('packingUi.station.justScanned')}
                 </Tag>
               </div>
               <div className="wh-packing-mono wh-packing-muted">
                 {[lastItem.itemNumber, lastItem.barcode].filter(Boolean).join(' · ')}
                 {lastItem.middlePackageQuantity
-                  ? `　${t('warehouseUi.packing.station.middlePack', { count: lastItem.middlePackageQuantity })}`
+                  ? `　${t('packingUi.station.middlePack', { count: lastItem.middlePackageQuantity })}`
                   : ''}
                 {lastItem.packingQuantity
-                  ? ` · ${t('warehouseUi.packing.station.packingSize', { count: lastItem.packingQuantity })}`
+                  ? ` · ${t('packingUi.station.packingSize', { count: lastItem.packingQuantity })}`
                   : ''}
               </div>
             </div>
@@ -801,11 +796,11 @@ export default function StationTab({ active }: StationTabProps) {
               {lastProgress?.onOrder ? (
                 <div className={lastProgress.over ? 'wh-packing-over' : 'wh-packing-muted'}>
                   {lastProgress.over
-                    ? t('warehouseUi.packing.station.orderOver', {
+                    ? t('packingUi.station.orderOver', {
                         order: lastItem.orderQuantity,
                         over: -lastProgress.remaining,
                       })
-                    : t('warehouseUi.packing.station.orderRemaining', {
+                    : t('packingUi.station.orderRemaining', {
                         order: lastItem.orderQuantity,
                         remaining: lastProgress.remaining,
                       })}
@@ -813,7 +808,7 @@ export default function StationTab({ active }: StationTabProps) {
               ) : null}
               <div className="wh-packing-last-count">
                 {lastItem.quantity}
-                <small>{t('warehouseUi.packing.unit.piece')}</small>
+                <small>{t('packingUi.unit.piece')}</small>
               </div>
             </div>
           </div>
@@ -831,8 +826,8 @@ export default function StationTab({ active }: StationTabProps) {
             rowClassName={(record) => (record.productCode === highlightCode ? 'wh-packing-row-highlight' : '')}
             locale={{
               emptyText: carton
-                ? t('warehouseUi.packing.station.emptyCarton')
-                : t('warehouseUi.packing.station.emptyNoCarton'),
+                ? t('packingUi.station.emptyCarton')
+                : t('packingUi.station.emptyNoCarton'),
             }}
           />
         </div>
@@ -843,56 +838,36 @@ export default function StationTab({ active }: StationTabProps) {
         <div className="wh-packing-panel wh-packing-side-card">
           <div className="wh-packing-side-head">
             <span className="wh-packing-side-title">
-              {t('warehouseUi.packing.station.currentCarton')}
+              {t('packingUi.station.currentCarton')}
               {carton ? <span className="wh-packing-mono">{carton.cartonNo}</span> : null}
             </span>
             {carton ? (
-              <CartonStatusTag status={carton.status} t={t} />
+              <StateTag kind={cartonStateKind(carton, ownerCode)} t={t} />
             ) : (
-              <Tag>{t('warehouseUi.packing.station.noCartonTag')}</Tag>
+              <Tag>{t('packingUi.station.noCartonTag')}</Tag>
             )}
           </div>
           <div className="wh-packing-kv">
-            <span>{t('warehouseUi.packing.columns.destination')}</span>
+            <span>{t('packingUi.columns.destination')}</span>
             <span className="wh-packing-kv-value">
               {/* 没有当前箱时显示下一箱将沿用的去向（上一箱的）。 */}
               <DestinationText destination={carton?.destination ?? lastSealed?.destination} t={t} />
               <Button type="link" size="small" disabled={!carton} onClick={() => setDestinationTarget('carton')}>
-                {t('warehouseUi.packing.action.change')}
+                {t('packingUi.action.change')}
               </Button>
             </span>
           </div>
           <div className="wh-packing-kv">
-            <span>{t('warehouseUi.packing.columns.order')}</span>
-            <Select
-              className="wh-packing-order-select"
-              showSearch
-              allowClear
-              filterOption={false}
-              disabled={!carton}
-              placeholder={t('warehouseUi.packing.station.orderPlaceholder')}
-              value={headerOrder?.orderGuid ?? undefined}
-              options={orderSelectOptions}
-              onDropdownVisibleChange={(open) => {
-                if (open) {
-                  searchOrders()
-                }
-              }}
-              onSearch={searchOrders}
-              onChange={handleOrderChange}
-            />
-          </div>
-          <div className="wh-packing-kv">
-            <span>{t('warehouseUi.packing.columns.total')}</span>
+            <span>{t('packingUi.columns.total')}</span>
             <b className="wh-packing-total">
-              {t('warehouseUi.packing.summary.skuPieces', {
+              {t('packingUi.summary.skuPieces', {
                 sku: carton?.skuCount ?? 0,
                 pieces: carton?.pieceCount ?? 0,
               })}
             </b>
           </div>
           <div className="wh-packing-kv">
-            <span>{t('warehouseUi.packing.station.weightOptional')}</span>
+            <span>{t('packingUi.station.weightOptional')}</span>
             <InputNumber
               className="wh-packing-weight"
               min={0}
@@ -909,7 +884,7 @@ export default function StationTab({ active }: StationTabProps) {
           </div>
           <div className="wh-packing-side-actions">
             <Button size="large" disabled={busy} onClick={handleNewCarton}>
-              {t('warehouseUi.packing.station.newCarton')}
+              {t('packingUi.station.newCarton')}
               <kbd>F2</kbd>
             </Button>
             <Button
@@ -919,16 +894,31 @@ export default function StationTab({ active }: StationTabProps) {
               disabled={busy || !carton || items.length === 0}
               onClick={handleSealCarton}
             >
-              {t('warehouseUi.packing.station.sealAndPrint')}
+              {t('packingUi.station.sealAndPrint')}
               <kbd>F9</kbd>
             </Button>
           </div>
           {lastSealed ? (
             <div className="wh-packing-last-sealed">
-              <span>{t('warehouseUi.packing.station.lastSealed', { no: lastSealed.cartonNo })}</span>
+              <span>{t('packingUi.station.lastSealed', { no: lastSealed.cartonNo })}</span>
+              {lastSealed.status === PACK_CARTON_STATUS.InTransit ? (
+                <Tag color="purple">{t('packingUi.status.transit')}</Tag>
+              ) : null}
               <Button type="link" size="small" onClick={() => printPackLabels([buildCartonLabelFields(lastSealed)])}>
-                {t('warehouseUi.packing.action.reprint')}
+                {t('packingUi.action.reprint')}
               </Button>
+              {canDispatchCarton(lastSealed, ownerCode) ? (
+                <Popconfirm
+                  title={t('packingUi.confirm.dispatchCarton', { name: lastSealed.destination.name ?? '' })}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                  onConfirm={dispatchLastCarton}
+                >
+                  <Button type="link" size="small" icon={<SendOutlined />} disabled={busy}>
+                    {t('packingUi.action.dispatch')}
+                  </Button>
+                </Popconfirm>
+              ) : null}
               <Button type="link" size="small" onClick={() => openCarton(lastSealed.cartonGuid)}>
                 {t('common.detail')}
               </Button>
@@ -939,19 +929,19 @@ export default function StationTab({ active }: StationTabProps) {
         <div className="wh-packing-panel wh-packing-side-card wh-packing-side-pallet">
           <div className="wh-packing-side-head">
             <span className="wh-packing-side-title">
-              {t('warehouseUi.packing.station.currentPallet')}
+              {t('packingUi.station.currentPallet')}
               {palletEnabled && pallet ? <span className="wh-packing-mono">{pallet.palletNo}</span> : null}
             </span>
             <Switch
               size="small"
               checked={palletEnabled}
               onChange={togglePallet}
-              aria-label={t('warehouseUi.packing.station.currentPallet')}
+              aria-label={t('packingUi.station.currentPallet')}
             />
           </div>
           {!palletEnabled ? (
             <Typography.Paragraph type="secondary" className="wh-packing-side-hint">
-              {t('warehouseUi.packing.station.palletOff')}
+              {t('packingUi.station.palletOff')}
             </Typography.Paragraph>
           ) : (
             <>
@@ -960,7 +950,7 @@ export default function StationTab({ active }: StationTabProps) {
                   className="wh-packing-pallet-select"
                   showSearch
                   optionFilterProp="label"
-                  placeholder={t('warehouseUi.packing.station.choosePallet')}
+                  placeholder={t('packingUi.station.choosePallet')}
                   value={pallet?.palletGuid}
                   options={
                     pallet && !palletSelectOptions.some((option) => option.value === pallet.palletGuid)
@@ -974,14 +964,14 @@ export default function StationTab({ active }: StationTabProps) {
                   }}
                   onChange={selectPallet}
                 />
-                <Button onClick={() => setDestinationTarget('newPallet')}>{t('warehouseUi.packing.action.newPallet')}</Button>
+                <Button onClick={() => setDestinationTarget('newPallet')}>{t('packingUi.action.newPallet')}</Button>
               </div>
               {pallet ? (
                 <>
                   <div className="wh-packing-side-hint">
-                    {t('warehouseUi.packing.columns.destination')} <DestinationText destination={pallet.destination} t={t} />
+                    {t('packingUi.columns.destination')} <DestinationText destination={pallet.destination} t={t} />
                     {' · '}
-                    {t('warehouseUi.packing.station.palletAuto')}
+                    {t('packingUi.station.palletAuto')}
                     <Button type="link" size="small" onClick={() => openPallet(pallet.palletGuid)}>
                       {t('common.detail')}
                     </Button>
@@ -993,7 +983,7 @@ export default function StationTab({ active }: StationTabProps) {
                         <span className="wh-packing-mono">{item.cartonNo}</span>
                         <span className="wh-packing-mini-spacer" />
                         <span className="wh-packing-muted">
-                          {t('warehouseUi.packing.summary.skuPieces', { sku: item.skuCount, pieces: item.pieceCount })}
+                          {t('packingUi.summary.skuPieces', { sku: item.skuCount, pieces: item.pieceCount })}
                         </span>
                       </div>
                     ))}
@@ -1002,14 +992,14 @@ export default function StationTab({ active }: StationTabProps) {
                         <InboxOutlined />
                         <span className="wh-packing-mono">{carton.cartonNo}</span>
                         <span className="wh-packing-mini-spacer" />
-                        {t('warehouseUi.packing.station.joinsAfterSeal')}
+                        {t('packingUi.station.joinsAfterSeal')}
                       </div>
                     ) : null}
                   </div>
                   <div className="wh-packing-kv wh-packing-kv-top">
-                    <span>{t('warehouseUi.packing.station.palletTotal')}</span>
+                    <span>{t('packingUi.station.palletTotal')}</span>
                     <b>
-                      {t('warehouseUi.packing.summary.palletTotal', {
+                      {t('packingUi.summary.palletTotal', {
                         cartons: pallet.cartonCount,
                         sku: pallet.skuCount,
                         pieces: pallet.pieceCount,
@@ -1019,7 +1009,7 @@ export default function StationTab({ active }: StationTabProps) {
                 </>
               ) : (
                 <Typography.Paragraph type="secondary" className="wh-packing-side-hint">
-                  {t('warehouseUi.packing.station.palletNone')}
+                  {t('packingUi.station.palletNone')}
                 </Typography.Paragraph>
               )}
               <Button
@@ -1029,17 +1019,43 @@ export default function StationTab({ active }: StationTabProps) {
                 disabled={busy || !pallet || pallet.cartonCount === 0}
                 onClick={handleSealPallet}
               >
-                {t('warehouseUi.packing.station.sealPalletAndPrint')}
+                {t('packingUi.station.sealPalletAndPrint')}
                 <kbd>F10</kbd>
               </Button>
             </>
           )}
+          {lastSealedPallet ? (
+            <div className="wh-packing-last-sealed">
+              <span>{t('packingUi.station.lastSealedPallet', { no: lastSealedPallet.palletNo })}</span>
+              {lastSealedPallet.status === PACK_PALLET_STATUS.InTransit ? (
+                <Tag color="purple">{t('packingUi.status.transit')}</Tag>
+              ) : null}
+              <Button type="link" size="small" onClick={() => printPackLabels(buildPalletLabelFields(lastSealedPallet))}>
+                {t('packingUi.action.reprint')}
+              </Button>
+              {canDispatchPallet(lastSealedPallet, ownerCode) ? (
+                <Popconfirm
+                  title={t('packingUi.confirm.dispatchPallet', { name: lastSealedPallet.destination.name ?? '' })}
+                  okText={t('common.confirm')}
+                  cancelText={t('common.cancel')}
+                  onConfirm={dispatchLastPallet}
+                >
+                  <Button type="link" size="small" icon={<SendOutlined />} disabled={busy}>
+                    {t('packingUi.action.dispatch')}
+                  </Button>
+                </Popconfirm>
+              ) : null}
+              <Button type="link" size="small" onClick={() => openPallet(lastSealedPallet.palletGuid)}>
+                {t('common.detail')}
+              </Button>
+            </div>
+          ) : null}
         </div>
       </div>
 
       <Modal
         open={candidatePrompt !== null}
-        title={t('warehouseUi.packing.station.candidateTitle')}
+        title={t('packingUi.station.candidateTitle')}
         footer={null}
         width={560}
         onCancel={() => {
@@ -1049,7 +1065,7 @@ export default function StationTab({ active }: StationTabProps) {
         destroyOnClose
       >
         <Typography.Paragraph type="secondary">
-          {t('warehouseUi.packing.station.candidateHint', { code: candidatePrompt?.code ?? '' })}
+          {t('packingUi.station.candidateHint', { code: candidatePrompt?.code ?? '' })}
         </Typography.Paragraph>
         <div className="wh-packing-candidates">
           {(candidatePrompt?.candidates ?? []).map((candidate) => (
@@ -1080,8 +1096,8 @@ export default function StationTab({ active }: StationTabProps) {
         open={destinationTarget !== null}
         title={
           destinationTarget === 'newPallet'
-            ? t('warehouseUi.packing.action.newPallet')
-            : t('warehouseUi.packing.action.changeDestination')
+            ? t('packingUi.action.newPallet')
+            : t('packingUi.action.changeDestination')
         }
         initialValue={destinationInitial}
         onCancel={() => setDestinationTarget(null)}

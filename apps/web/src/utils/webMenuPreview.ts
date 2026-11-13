@@ -69,7 +69,7 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageWarehouseProducts: [P.Warehouse.ManageProducts, P.Warehouse.Manage],
   canManageWarehouseCategories: [P.Warehouse.ManageCategories, P.Warehouse.Manage],
   canManageWarehouseLocations: [P.Warehouse.ManageLocations, P.Warehouse.Manage],
-  canUseWarehousePacking: [P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+  canUsePacking: [P.StorePacking.Use, P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
   canViewReports: [P.Reports.View],
   canViewSalesIntelligence: [],
   canViewSalesData: [P.SalesDashboard.SalesDataView],
@@ -206,7 +206,6 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/warehouse/products', title: 'menu.warehouseProducts', accessKey: 'canManageWarehouseProducts' },
       { path: '/warehouse/categories', title: 'menu.categories', accessKey: 'canManageWarehouseCategories' },
       { path: '/warehouse/locations', title: 'menu.warehouseLocations', accessKey: 'canManageWarehouseLocations' },
-      { path: '/warehouse/packing', title: 'menu.warehousePacking', accessKey: 'canUseWarehousePacking' },
       { path: '/warehouse/product-grade-management', title: 'menu.productGradeManagement', accessKey: 'canManageWarehouseProducts' },
     ],
   },
@@ -283,16 +282,20 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },
       { path: '/pos-admin/local-supplier-invoices', title: 'menu.localSupplierInvoices', accessKey: 'canManageLocalPurchase' },
+      { path: '/packing', title: 'menu.packing', accessKey: 'canUsePacking' },
     ],
   },
 ]
 
 /** 自带后台入口规则（见 webPortalAccess 的 ADMIN_ENTRY_RULES）的独立页面：从菜单授予时不连带授予工作台。 */
-const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms'])
+const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms', '/packing'])
 
 const warehouseStaffVisibleMenuPaths = new Set([
   '/warehouse',
   '/warehouse/store-orders',
+  // 扫码打包：仓库员工在总仓装箱用，入口在「收银管理」组下；组里其他页面仍不对仓库员工开放。
+  '/pos-admin',
+  '/packing',
 ])
 
 function isWarehouseStaffNavigationLimited(access: AccessControl) {

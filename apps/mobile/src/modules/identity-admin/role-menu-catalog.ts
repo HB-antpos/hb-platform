@@ -26,8 +26,6 @@ const WEB_MENU: MenuSource[] = ([
   ["/warehouse/products", "Warehouse products", "仓库商品", ["Warehouse.ManageProducts"]],
   ["/warehouse/categories", "Categories", "分类管理", ["Warehouse.ManageCategories"]],
   ["/warehouse/locations", "Locations", "库位管理", ["Warehouse.ManageLocations"]],
-  // 扫码打包：与拣货同一口径，管理仓库 / 管理仓库订货按后端别名自动具备。
-  ["/warehouse/packing", "Scan packing", "扫码打包", ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
   ["/warehouse/product-grade-management", "Product grades", "商品等级", ["Warehouse.ManageProducts"]],
   ["/domestic-purchase/china-suppliers", "China suppliers", "国内供应商", ["DomesticPurchase.ManageSuppliers"]],
   ["/domestic-purchase/domestic-products", "Domestic products", "国内商品", ["Products.View"]],
@@ -67,6 +65,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/myob", "MYOB integration", "MYOB 对接", ["Myob.Connection.Manage", "Myob.Employee.Bind", "Myob.Payslip.ViewManagedStore", "Myob.Payslip.ViewAllStores", "Attendance.Payroll.Edit"]],
   ["/pos-admin/sales-orders", "Sales orders", "销售订单", ["Orders.View"]],
   ["/pos-admin/local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.View"]],
+  // 扫码打包（分店 + 总仓共用，在 Web「收银管理」组下）：分店 StorePacking.Use，总仓 Warehouse.Packing；管理仓库 / 管理仓库订货按后端别名自动具备。
+  ["/packing", "Scan packing", "扫码打包", ["StorePacking.Use", "Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
 ] as MenuRow[]).map(toSource("web"));
 
 const MOBILE_MENU: MenuSource[] = ([

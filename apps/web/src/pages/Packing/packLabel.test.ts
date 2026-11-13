@@ -1,14 +1,18 @@
-import type { PackCartonSummary, PackPalletDetail } from '../../../types/warehousePacking'
+import type { PackCartonSummary, PackPalletDetail } from '../../types/packing'
 
 import {
   PACK_LABEL_PRINT_SCALE,
   buildCartonLabelFields,
   buildLabelBarcodeSvg,
   buildLabelQrSvg,
+  buildLocationLabelDocument,
+  buildLocationLabelFields,
+  buildLocationLabelHtml,
   buildPackLabelDocument,
   buildPackLabelHtml,
   buildPalletLabelFields,
   formatLabelTime,
+  resolveLocationNameFontSize,
   resolveToFontSize,
   toLabelText,
 } from './packLabel'
@@ -34,12 +38,13 @@ function carton(overrides: Partial<PackCartonSummary> = {}): PackCartonSummary {
     cartonGuid: 'carton-1',
     cartonNo: 'BX2611130042',
     status: 2,
-    originName: 'HB Warehouse',
-    destination: { destinationType: 1, storeCode: '1008', storeName: 'Sunnybank' },
+    ownerCode: '1008',
+    ownerName: 'Sunnybank',
+    originCode: '1008',
+    originName: 'Sunnybank',
+    destination: { destinationType: 2, code: '1011', name: 'Inala' },
     skuCount: 5,
     pieceCount: 86,
-    orderGuid: 'order-1',
-    orderNo: '2026-0412',
     createdByName: 'Tom',
     createdAtUtc: SEALED_AT,
     sealedByName: 'Lily',
@@ -54,16 +59,14 @@ function pallet(overrides: Partial<PackPalletDetail> = {}): PackPalletDetail {
     palletGuid: 'pallet-1',
     palletNo: 'PL261113007',
     status: 2,
+    ownerCode: 'WAREHOUSE',
+    ownerName: 'HB Warehouse',
+    originCode: 'WAREHOUSE',
     originName: 'HB Warehouse',
-    destination: {
-      destinationType: 2,
-      storeCode: '1020',
-      storeName: 'Cairns',
-      carrierGuid: 'carrier-1',
-      carrierName: 'Border Express',
-    },
+    destination: { destinationType: 2, code: '1020', name: 'Cairns', carrierGuid: 'carrier-1', carrierName: 'Border Express' },
     consignmentNo: 'BEX 4471 0932 18',
     cartonCount: 5,
+    inTransitCartonCount: 0,
     skuCount: 20,
     pieceCount: 366,
     createdByName: 'Tom',
@@ -85,39 +88,69 @@ assertEqual(toLabelText(null), '', '空值')
 assertEqual(formatLabelTime(SEALED_AT), '13 NOV 14:32', '标签时间格式')
 assertEqual(formatLabelTime(null, NOW), '13 NOV 14:32', '没有封箱时间用当前时间')
 
-// ---- 箱标签字段 ----
+// ---- 箱标签：FROM 取 originName，TO 取去向名称 ----
 const cartonFields = buildCartonLabelFields(carton(), NOW)
 assertEqual(cartonFields.kindText, 'BOX', '左侧黑条 BOX')
 assertEqual(cartonFields.kindCaption, 'CARTON', '黑条小字 CARTON')
-assertEqual(cartonFields.origin, 'HB WAREHOUSE', '发出地大写')
-assertEqual(cartonFields.via, null, '箱标签不打 VIA')
-assertEqual(cartonFields.direct, false, '箱标签不打 DIRECT')
-assertEqual(cartonFields.to, 'SUNNYBANK', '去向为分店名大写')
+assertEqual(cartonFields.origin, 'SUNNYBANK', 'FROM 取后端 originName（分店名）')
+assertEqual(cartonFields.via, null, '没有运输公司不打 VIA')
+assertEqual(cartonFields.direct, true, '要发出且没有运输公司打 DIRECT')
+assertEqual(cartonFields.to, 'INALA', '其他分店取名称大写')
 assertEqual(cartonFields.code, 'BX2611130042', '完整编号')
 assertEqual(cartonFields.codePrefix, 'BX261113', '编号前 8 位')
 assertEqual(cartonFields.codeTail, '0042', '流水尾号')
 assertEqual(cartonFields.stat, '5 SKU · 86 PCS', '箱数量')
-assertEqual(cartonFields.reference, 'ORDER 2026-0412', '右下订货单号')
+assertEqual(cartonFields.reference, null, '分店一期没有订货单：右下不打订货单号')
 assertEqual(cartonFields.stamp, '13 NOV 14:32 LILY', '时间 + 封箱人')
 assertEqual(cartonFields.copy, null, '箱标签不带张数')
 
+assertEqual(buildCartonLabelFields(carton({ orderNo: '2026-0412' }), NOW).reference, 'ORDER 2026-0412', '总仓关联订货单时打订货单号')
+assertEqual(
+  buildCartonLabelFields(carton({ originName: 'HB Warehouse', originCode: 'WAREHOUSE' }), NOW).origin,
+  'HB WAREHOUSE',
+  '总仓 FROM 取总仓名',
+)
+assertEqual(buildCartonLabelFields(carton({ originName: '阳光岸分店', originCode: '1008' }), NOW).origin, '1008', '分店名没有英文时 FROM 用地点编码')
+
+const toWarehouse = buildCartonLabelFields(
+  carton({ destination: { destinationType: 3, code: 'WAREHOUSE', name: 'HB Warehouse' } }),
+  NOW,
+)
+assertEqual(toWarehouse.to, 'HB WAREHOUSE', '发往总仓取总仓名')
+assertEqual(toWarehouse.direct, true, '发往总仓自己送 DIRECT')
+
+const viaCarrier = buildCartonLabelFields(
+  carton({ destination: { destinationType: 2, code: '1011', name: 'Inala', carrierGuid: 'c-1', carrierName: 'Followmont' } }),
+  NOW,
+)
+assertEqual(viaCarrier.via, 'FOLLOWMONT', '有运输公司打 VIA')
+assertEqual(viaCarrier.direct, false, '有运输公司不打 DIRECT')
+assertEqual(
+  buildCartonLabelFields(
+    carton({ destination: { destinationType: 2, code: '1011', name: 'Inala', carrierGuid: 'c-1', carrierName: '顺丰' } }),
+    NOW,
+  ).via,
+  'CARRIER',
+  '运输公司名称没有英文时用 CARRIER 兜底，不打成 DIRECT',
+)
+
+const local = buildCartonLabelFields(carton({ destination: { destinationType: 1 } }), NOW)
+assertEqual(local.to, 'STORAGE', '本地存放打 STORAGE')
+assertEqual(local.via, null, '本地存放不打 VIA')
+assertEqual(local.direct, false, '本地存放不打 DIRECT')
+
 const unassigned = buildCartonLabelFields(
-  carton({ destination: { destinationType: 0 }, orderGuid: null, orderNo: null, sealedAtUtc: null, sealedByName: null }),
+  carton({ destination: { destinationType: 0 }, sealedAtUtc: null, sealedByName: null }),
   NOW,
 )
 assertEqual(unassigned.to, 'UNASSIGNED', '未指定去向打 UNASSIGNED')
-assertEqual(unassigned.reference, null, '没关联订货单时不打订货单号')
+assertEqual(unassigned.direct, false, '未指定不打 DIRECT')
 assertEqual(unassigned.stamp, '13 NOV 14:32 TOM', '未封箱时用当前时间和建箱人')
 
 assertEqual(
-  buildCartonLabelFields(carton({ destination: { destinationType: 1, storeCode: '1008', storeName: '阳光岸分店' } }), NOW).to,
-  '1008',
+  buildCartonLabelFields(carton({ destination: { destinationType: 2, code: '1011', name: '伊纳拉分店' } }), NOW).to,
+  '1011',
   '分店名没有英文时用分店编码',
-)
-assertEqual(
-  buildCartonLabelFields(carton({ destination: { destinationType: 2, carrierGuid: 'c', carrierName: 'Toll' } }), NOW).to,
-  'UNASSIGNED',
-  '经运输公司但没填最终分店时为 UNASSIGNED',
 )
 assertEqual(buildCartonLabelFields(carton({ sealedByName: '莉莉' }), NOW).stamp, '13 NOV 14:32', '操作人没有英文名时只打时间')
 
@@ -128,32 +161,33 @@ assertEqual(palletLabels.map((label) => label.copy).join(','), '1/2,2/2', '张�
 const palletFields = palletLabels[0]
 assertEqual(palletFields.kindText, 'PLT', '左侧黑条 PLT')
 assertEqual(palletFields.kindCaption, 'PALLET', '黑条小字 PALLET')
-assertEqual(palletFields.via, 'BORDER EXPRESS', '经运输公司打 VIA')
-assertEqual(palletFields.direct, false, '经运输公司不打 DIRECT')
-assertEqual(palletFields.to, 'CAIRNS', '去向为最终收货分店')
+assertEqual(palletFields.origin, 'HB WAREHOUSE', 'FROM 取托盘 originName')
+assertEqual(palletFields.via, 'BORDER EXPRESS', '有运输公司打 VIA')
+assertEqual(palletFields.direct, false, '有运输公司不打 DIRECT')
+assertEqual(palletFields.to, 'CAIRNS', '去向取收货分店名')
 assertEqual(palletFields.codePrefix, 'PL261113', '托盘编号前 8 位')
 assertEqual(palletFields.codeTail, '007', '托盘流水尾号')
 assertEqual(palletFields.stat, '5 CTN · 366 PCS', '托盘数量')
-assertEqual(palletFields.reference, 'CN BEX 4471 0932 18', '右下运单号')
+assertEqual(palletFields.reference, 'CN BEX 4471 0932 18', '右下运单号取 consignmentNo')
 assertEqual(palletFields.stamp, '13 NOV 14:32 LILY', '时间 + 封托人')
 
 const direct = buildPalletLabelFields(
   pallet({
-    destination: { destinationType: 1, storeCode: '1011', storeName: 'Inala' },
+    destination: { destinationType: 2, code: '1011', name: 'Inala' },
     consignmentNo: null,
     cartons: [carton({ orderNo: '2026-0398' }), carton({ cartonGuid: 'carton-2', orderNo: '2026-0398' })],
   }),
   NOW,
 )[1]
-assertEqual(direct.direct, true, '直送分店打 DIRECT')
-assertEqual(direct.via, null, '直送没有承运商')
-assertEqual(direct.reference, 'ORDER 2026-0398', '直送且各箱同一订货单时右下打订货单号')
+assertEqual(direct.direct, true, '自己送打 DIRECT')
+assertEqual(direct.via, null, '没有运输公司不打 VIA')
+assertEqual(direct.reference, 'ORDER 2026-0398', '没有运单号且各箱同一订货单时右下打订货单号')
 assertEqual(direct.copy, '2/2', '第二张')
 
 assertEqual(
   buildPalletLabelFields(
     pallet({
-      destination: { destinationType: 1, storeCode: '1011', storeName: 'Inala' },
+      destination: { destinationType: 2, code: '1011', name: 'Inala' },
       consignmentNo: null,
       cartons: [carton({ orderNo: '2026-0398' }), carton({ cartonGuid: 'carton-2', orderNo: '2026-0401' })],
     }),
@@ -167,6 +201,7 @@ assertEqual(
   'UNASSIGNED',
   '托盘未指定去向',
 )
+assertEqual(buildPalletLabelFields(pallet({ destination: { destinationType: 1 }, consignmentNo: null }), NOW)[0].to, 'STORAGE', '托盘本地存放')
 
 // ---- 字号分档：长名字缩号，不换行不截断 ----
 assertEqual(resolveToFontSize('INALA'), 40, '短名用最大字')
@@ -189,25 +224,29 @@ assertEqual(buildLabelQrSvg('BX2611130042') === buildLabelQrSvg('BX2611130043'),
 const cartonHtml = buildPackLabelHtml(cartonFields)
 assertIncludes(cartonHtml, 'class="pkl pkl-carton"', '箱标签样式类')
 assertIncludes(cartonHtml, '<b>BOX</b><i>CARTON</i>', '黑条文字')
-assertIncludes(cartonHtml, 'FROM <b>HB WAREHOUSE</b></div>', '箱标签 FROM 行没有后缀')
-assertIncludes(cartonHtml, '<em>TO</em>SUNNYBANK', 'TO 行')
+assertIncludes(cartonHtml, 'FROM <b>SUNNYBANK</b> · DIRECT</div>', '箱标签 FROM 行取分店名并打 DIRECT')
+assertIncludes(cartonHtml, '<em>TO</em>INALA', 'TO 行')
 assertIncludes(cartonHtml, '<span>BX261113</span><b>0042</b>', '编号前缀小字 + 尾号大字')
 assertIncludes(cartonHtml, '5 SKU · 86 PCS', '数量')
-assertIncludes(cartonHtml, 'ORDER 2026-0412<br>13 NOV 14:32 LILY', '右下两行')
+assertIncludes(cartonHtml, '13 NOV 14:32 LILY', '右下时间和操作人')
 assertEqual(cartonHtml.includes('pkl-copy'), false, '箱标签没有张数')
 
 const palletHtml = buildPackLabelHtml(palletFields)
 assertIncludes(palletHtml, 'class="pkl pkl-pallet"', '托盘标签样式类（整圈粗黑框）')
 assertIncludes(palletHtml, 'FROM <b>HB WAREHOUSE</b> · VIA <b>BORDER EXPRESS</b>', '托盘 FROM 行带 VIA')
 assertIncludes(palletHtml, '<b class="pkl-copy">1/2</b>', '托盘张数')
-assertIncludes(buildPackLabelHtml(direct), 'FROM <b>HB WAREHOUSE</b> · DIRECT', '直送托盘 FROM 行带 DIRECT')
+assertIncludes(
+  buildPackLabelHtml(buildCartonLabelFields(carton({ destination: { destinationType: 1 } }), NOW)),
+  'FROM <b>SUNNYBANK</b></div>',
+  '本地存放的 FROM 行没有后缀',
+)
 assertIncludes(
   buildPackLabelHtml({ ...cartonFields, to: 'A&B <X>' }),
   '<em>TO</em>A&amp;B &lt;X&gt;',
   '文字必须转义',
 )
 
-// 标签本体只出现英文和数字：去掉 SVG 路径后不应有非 ASCII 字符（· 分隔符除外）
+// 箱和托盘标签本体只出现英文和数字：去掉 SVG 路径后不应有非 ASCII 字符（· 分隔符除外）
 for (const html of [cartonHtml, palletHtml]) {
   const text = html.replace(/<svg[\s\S]*?<\/svg>/g, '').replace(/<[^>]+>/g, ' ').replace(/·/g, '')
   assertEqual(/^[\x20-\x7e]*$/.test(text), true, '标签文字应全部是英文和数字')
@@ -225,5 +264,28 @@ assertEqual(PACK_LABEL_PRINT_SCALE * 208 <= (26 / 25.4) * 96, true, '缩放后�
 const colors = new Set((documentHtml.match(/#[0-9a-fA-F]{3,6}\b/g) ?? []).map((color) => color.toLowerCase()))
 assertEqual([...colors].sort().join(','), '#000,#fff', '只允许纯黑纯白')
 assertEqual(/rgba?\(|gray|grey/i.test(documentHtml), false, '不应出现灰色或半透明')
+
+// ---- 存放位置标签：位置名称大字 + 条码（内容是位置条码）----
+const locationFields = buildLocationLabelFields({ name: ' Back room A ', barcode: 'LC000001', ownerCode: '1008' }, 'Sunnybank')
+assertEqual(locationFields.owner, 'SUNNYBANK', '所属分店名大写')
+assertEqual(locationFields.name, 'BACK ROOM A', '位置名称去空白并转大写')
+assertEqual(locationFields.barcode, 'LC000001', '条码内容是位置条码')
+assertEqual(buildLocationLabelFields({ name: '后仓 A 架', barcode: 'LC000002', ownerCode: '1008' }, '阳光岸').owner, '1008', '分店名没有英文时用编码')
+assertEqual(buildLocationLabelFields({ name: '后仓 a 架', barcode: 'LC000002', ownerCode: '1008' }, 'X').name, '后仓 A 架', '中文位置名称原样保留')
+const locationHtml = buildLocationLabelHtml(locationFields)
+assertIncludes(locationHtml, 'class="pkl pkl-location"', '位置标签样式类')
+assertIncludes(locationHtml, '<b>LOC</b><i>LOCATION</i>', '黑条文字')
+assertIncludes(locationHtml, 'BACK ROOM A</div>', '位置名称大字')
+assertIncludes(locationHtml, '<div class="pkl-loccode">LC000001</div>', '条码文字便于人工核对')
+assertIncludes(locationHtml, 'class="pkl-bc"', '底部 Code128 条码')
+assertIncludes(locationHtml, 'class="pkl-qr"', '右上二维码')
+assertIncludes(buildLocationLabelHtml({ ...locationFields, name: 'A&B' }), 'A&amp;B</div>', '位置名称必须转义')
+assertEqual(resolveLocationNameFontSize('A') > resolveLocationNameFontSize('BACK ROOM SHELF A12'), true, '名称越长字号越小')
+assertEqual(resolveLocationNameFontSize('A'), 64, '短名最大 64')
+assertEqual(resolveLocationNameFontSize('X'.repeat(60)), 24, '很长的名称最小 24')
+assertEqual(resolveLocationNameFontSize('后仓货架上层') < resolveLocationNameFontSize('ABCDEF'), true, '中文按两个字宽估算')
+const locationDocument = buildLocationLabelDocument([locationFields, locationFields])
+assertIncludes(locationDocument, '@page{size:70mm 26mm;margin:0}', '位置标签同样是 70×26 mm')
+assertEqual(locationDocument.split('<div class="pkl-page">').length - 1, 2, '一个位置一页')
 
 console.log('packLabel.test: ok')

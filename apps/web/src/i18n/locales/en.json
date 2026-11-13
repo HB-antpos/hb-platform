@@ -118,7 +118,7 @@
     "warehouseProducts": "Warehouse Products",
     "categories": "Categories",
     "warehouseLocations": "Locations",
-    "warehousePacking": "Scan Packing",
+    "packing": "Scan Packing",
     "productGradeManagement": "Product Grades",
     "posAdmin": "POS Admin",
     "suppliers": "Suppliers",

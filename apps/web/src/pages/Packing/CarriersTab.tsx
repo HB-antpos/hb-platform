@@ -4,9 +4,9 @@ import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { MeasuredTable } from '../../../components/MeasuredTable'
-import { listPackCarriers, savePackCarrier } from '../../../services/warehousePackingService'
-import type { PackCarrier, PackCarrierSaveRequest } from '../../../types/warehousePacking'
+import { MeasuredTable } from '../../components/MeasuredTable'
+import { listPackCarriers, savePackCarrier } from '../../services/packingService'
+import type { PackCarrier, PackCarrierSaveRequest } from '../../types/packing'
 
 import { showPackingError, usePackingPage } from './packingShared'
 
@@ -19,7 +19,7 @@ interface CarrierEditing {
 /** 运输公司主数据：列表、新增、编辑、停用 / 启用（修改和停用后端只允许仓库经理，403 时照实提示）。 */
 export default function CarriersTab({ active }: { active: boolean }) {
   const { t } = useTranslation()
-  const { reloadCarriers } = usePackingPage()
+  const { isAdmin, reloadCarriers } = usePackingPage()
   const [form] = Form.useForm<PackCarrierSaveRequest>()
   const [carriers, setCarriers] = useState<PackCarrier[]>([])
   const [loading, setLoading] = useState(false)
@@ -45,7 +45,7 @@ export default function CarriersTab({ active }: { active: boolean }) {
       setSaving(true)
       try {
         await savePackCarrier(carrierGuid, payload)
-        void message.success(t('warehouseUi.packing.message.carrierSaved'))
+        void message.success(t('packingUi.message.carrierSaved'))
         setEditing(null)
         load()
         // 去向选择里的运输公司列表同步刷新。
@@ -86,9 +86,9 @@ export default function CarriersTab({ active }: { active: boolean }) {
 
   const columns = useMemo<ColumnsType<PackCarrier>>(
     () => [
-      { title: t('warehouseUi.packing.carriers.name'), dataIndex: 'name', width: 260, ellipsis: true },
+      { title: t('packingUi.carriers.name'), dataIndex: 'name', width: 260, ellipsis: true },
       {
-        title: t('warehouseUi.packing.columns.remark'),
+        title: t('packingUi.columns.remark'),
         dataIndex: 'remark',
         ellipsis: true,
         render: (value: string | null | undefined) => value || '—',
@@ -98,20 +98,21 @@ export default function CarriersTab({ active }: { active: boolean }) {
         dataIndex: 'isActive',
         width: 100,
         render: (value: boolean) =>
-          value ? <Tag color="green">{t('common.enabled')}</Tag> : <Tag>{t('warehouseUi.packing.carriers.inactive')}</Tag>,
+          value ? <Tag color="green">{t('common.enabled')}</Tag> : <Tag>{t('packingUi.carriers.inactive')}</Tag>,
       },
       {
-        title: t('warehouseUi.packing.columns.actions'),
+        title: t('packingUi.columns.actions'),
         key: 'actions',
         width: 150,
-        render: (_value, record) => (
+        render: (_value, record) =>
+          isAdmin ? (
           <>
             <Button type="link" size="small" onClick={() => openEditor(record)}>
               {t('common.edit')}
             </Button>
             {record.isActive ? (
               <Popconfirm
-                title={t('warehouseUi.packing.confirm.deactivateCarrier', { name: record.name })}
+                title={t('packingUi.confirm.deactivateCarrier', { name: record.name })}
                 okText={t('common.confirm')}
                 cancelText={t('common.cancel')}
                 onConfirm={() =>
@@ -119,7 +120,7 @@ export default function CarriersTab({ active }: { active: boolean }) {
                 }
               >
                 <Button type="link" size="small" danger disabled={saving}>
-                  {t('warehouseUi.packing.carriers.deactivate')}
+                  {t('packingUi.carriers.deactivate')}
                 </Button>
               </Popconfirm>
             ) : (
@@ -129,40 +130,41 @@ export default function CarriersTab({ active }: { active: boolean }) {
                 disabled={saving}
                 onClick={() => void save(record.carrierGuid, { name: record.name, remark: record.remark ?? null, isActive: true })}
               >
-                {t('warehouseUi.packing.carriers.activate')}
+                {t('packingUi.carriers.activate')}
               </Button>
             )}
           </>
-        ),
+          ) : null,
       },
     ],
     // openEditor 只用到稳定的 form 实例。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [save, saving, t],
+    [isAdmin, save, saving, t],
   )
 
   return (
     <div className="wh-packing-panel wh-packing-list">
       <div className="wh-packing-filters">
-        <Typography.Text type="secondary">{t('warehouseUi.packing.carriers.hint')}</Typography.Text>
+        <Typography.Text type="secondary">{t('packingUi.carriers.hint')}</Typography.Text>
         <span className="wh-packing-filters-spacer" />
         <Button icon={<ReloadOutlined />} onClick={load} aria-label={t('common.refresh')} />
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor()}>
-          {t('warehouseUi.packing.carriers.add')}
+          {t('packingUi.carriers.add')}
         </Button>
       </div>
       <MeasuredTable<PackCarrier>
-        metricId="warehouse.packing.carriers"
+        metricId="packing.carriers"
         size="middle"
         rowKey="carrierGuid"
         loading={loading}
-        columns={columns}
+        // 编辑 / 停用只有管理员可用：非管理员不显示操作列。
+        columns={isAdmin ? columns : columns.filter((column) => column.key !== 'actions')}
         dataSource={carriers}
         pagination={false}
       />
       <Modal
         open={editing !== null}
-        title={editing?.carrierGuid ? t('warehouseUi.packing.carriers.edit') : t('warehouseUi.packing.carriers.add')}
+        title={editing?.carrierGuid ? t('packingUi.carriers.edit') : t('packingUi.carriers.add')}
         width={440}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
@@ -174,12 +176,12 @@ export default function CarriersTab({ active }: { active: boolean }) {
         <Form form={form} layout="vertical" initialValues={{ isActive: true }}>
           <Form.Item
             name="name"
-            label={t('warehouseUi.packing.carriers.name')}
-            rules={[{ required: true, whitespace: true, message: t('warehouseUi.packing.carriers.nameRequired') }]}
+            label={t('packingUi.carriers.name')}
+            rules={[{ required: true, whitespace: true, message: t('packingUi.carriers.nameRequired') }]}
           >
             <Input maxLength={100} autoComplete="off" />
           </Form.Item>
-          <Form.Item name="remark" label={t('warehouseUi.packing.columns.remark')}>
+          <Form.Item name="remark" label={t('packingUi.columns.remark')}>
             <Input maxLength={200} autoComplete="off" />
           </Form.Item>
           <Form.Item name="isActive" label={t('common.enabled')} valuePropName="checked">

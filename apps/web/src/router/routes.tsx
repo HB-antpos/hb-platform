@@ -103,6 +103,7 @@ const PosAdminStoreCashPage = lazy(() => import('../pages/PosAdmin/StoreCash'))
 // 节日贺卡分店填报统计（后台只读，页面文案与 exceljs 都随页面懒加载）。
 const SeasonalCardStatsPage = lazy(() => import('../pages/PosAdmin/SeasonalCardStats'))
 const LocalSupplierInvoicesPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices'))
+const PackingPage = lazy(() => import('../pages/Packing'))
 const LocalSupplierInvoiceSalesAnalysisPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoiceSalesAnalysis'))
 const InvoiceEditPage = lazy(() => import('../pages/PosAdmin/LocalSupplierInvoices/InvoiceEdit'))
 
@@ -144,7 +145,6 @@ const ContainerDetailPage = lazy(() => import('../pages/Warehouse/ContainerDetai
 const ContainerAllocationSalesPage = lazy(() => import('../pages/Warehouse/ContainerAllocationSales'))
 const ContainersPage = lazy(() => import('../pages/Warehouse/Containers'))
 const WarehouseLocationsPage = lazy(() => import('../pages/Warehouse/Locations'))
-const WarehousePackingPage = lazy(() => import('../pages/Warehouse/Packing'))
 const WarehouseProductsPage = lazy(() => import('../pages/Warehouse/Products'))
 const RetailPriceChangesPage = lazy(() => import('../pages/Warehouse/RetailPriceChanges'))
 const PriceUpdateTasksPage = lazy(() => import('../pages/Warehouse/PriceUpdateTasks'))
@@ -686,17 +686,6 @@ export const appRoutes: AppRouteItem[] = [
         element: <WarehouseLocationsPage />,
       },
       {
-        // 扫码打包：打包台 / 箱 / 托盘 / 商品位置 / 运输公司，一个页面五个标签。
-        path: '/warehouse/packing',
-        meta: {
-          title: 'menu.warehousePacking',
-          icon: 'InboxOutlined',
-          keepAlive: true,
-          accessKey: 'canUseWarehousePacking',
-        },
-        element: <WarehousePackingPage />,
-      },
-      {
         path: '/warehouse/product-grade-management',
         meta: {
           title: 'menu.productGradeManagement',
@@ -1021,6 +1010,18 @@ export const appRoutes: AppRouteItem[] = [
         element: <LocalSupplierInvoicesPage />,
       },
       {
+        // 扫码打包（分店 + 总仓共用）：打包台 / 箱 / 托盘 / 到货签收 / 商品位置 / 存放位置 / 运输公司，一个页面七个标签。
+        // 放在分店侧的「收银管理」组里；分店用 StorePacking.Use，总仓用 Warehouse.Packing（管理仓库 / 管理仓库订货按别名具备）。
+        path: '/packing',
+        meta: {
+          title: 'menu.packing',
+          icon: 'InboxOutlined',
+          keepAlive: true,
+          accessKey: 'canUsePacking',
+        },
+        element: <PackingPage />,
+      },
+      {
         // 旧地址兼容：页面已挪到销售看板，书签与历史链接重定向到新路径。
         path: '/pos-admin/local-supplier-purchase-sales-analysis',
         meta: {
@@ -1191,13 +1192,10 @@ function isWarehouseStaffNavigationLimited(access: AccessControl) {
 }
 
 function buildWarehouseStaffMenus(access: AccessControl): MenuProps['items'] {
-  if (!access.canManageWarehouseOrders) {
-    return []
-  }
-
-  // 仓库员工侧边栏只保留分店订货列表；首柜价差异属于仓库管理员报表，不跟随只读订货入口开放。
-  return [
-    {
+  const menus: NonNullable<MenuProps['items']> = []
+  if (access.canManageWarehouseOrders) {
+    // 仓库员工侧边栏只保留分店订货列表；首柜价差异属于仓库管理员报表，不跟随只读订货入口开放。
+    menus.push({
       key: '/warehouse',
       icon: iconMap.DatabaseOutlined,
       label: i18n.t('menu.warehouse'),
@@ -1208,8 +1206,18 @@ function buildWarehouseStaffMenus(access: AccessControl): MenuProps['items'] {
           label: i18n.t('menu.storeOrders'),
         },
       ],
-    },
-  ]
+    })
+  }
+  if (access.canUsePacking) {
+    // 扫码打包：仓库员工在总仓装箱要用；入口在「收银管理」组下，组里其他页面仍不对仓库员工开放。
+    menus.push({
+      key: '/pos-admin',
+      icon: iconMap.WalletOutlined,
+      label: i18n.t('menu.posAdmin'),
+      children: [{ key: '/packing', icon: iconMap.InboxOutlined, label: i18n.t('menu.packing') }],
+    })
+  }
+  return menus
 }
 
 export function buildMenus(access: AccessControl, navigationMenu?: NavigationMenuDto[]) {
