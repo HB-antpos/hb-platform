@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productBranchDrawerQuery, RAIL_DEFAULT_WIDTH, resolveSupplierOptions, selectDimension, sumProductPage } from './logic'
+import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productBranchDrawerQuery, productSortParams, RAIL_DEFAULT_WIDTH, resolveSupplierOptions, selectDimension, sortProductRows, sumProductPage, toggleProductSort, DEFAULT_PRODUCT_SORT } from './logic'
 import { normalizeSalesDetailRow, sectionQuery, type SalesDetailQuery } from './reportService'
 
 const selected = { ...emptySelection, branch: 'OR', supplier: 'HB215', supplierCodes: ['HB215'], supplierCategoryGuids: ['CAT1'], product: 'P1', page: 3 }
@@ -84,3 +84,23 @@ assert.deepEqual(resolveSupplierOptions('australia', undefined, undefined), { ki
 assert.deepEqual(resolveSupplierOptions('china', undefined, remembered), { kind: 'china', options: [] }, '切换页签的加载期间不得沿用另一个页签的选项')
 assert.deepEqual(resolveSupplierOptions('china', chinaOptions, remembered), { kind: 'china', options: chinaOptions })
 assert.deepEqual(resolveSupplierOptions('australia', [], remembered), { kind: 'australia', options: [] }, '加载完成且确实没有供应商时不能继续显示旧选项')
+
+// —— 商品明细排序：营业额 / 数量 / 均价，服务端全量排序，前端同口径重排当前页 ——
+assert.deepEqual(productSortParams(DEFAULT_PRODUCT_SORT), {}, '默认数量降序不带参数，请求与查询键与改版前相同')
+assert.deepEqual(productSortParams({ key: 'revenue', ascending: false }), { productSortField: 'Revenue', productSortOrder: 'desc' })
+assert.deepEqual(productSortParams({ key: 'averageUnitPrice', ascending: true }), { productSortField: 'AverageUnitPrice', productSortOrder: 'asc' })
+assert.deepEqual(productSortParams({ key: 'quantity', ascending: true }), { productSortField: 'Quantity', productSortOrder: 'asc' }, '数量升序不是默认，必须传参')
+assert.deepEqual(toggleProductSort(DEFAULT_PRODUCT_SORT, 'revenue'), { key: 'revenue', ascending: false }, '换列从降序开始')
+assert.deepEqual(toggleProductSort({ key: 'revenue', ascending: false }, 'revenue'), { key: 'revenue', ascending: true }, '同一列再点切换升序')
+assert.equal(sectionQuery('suppliers', { ...query, productSortField: 'Revenue', productSortOrder: 'asc' }).productSortField, undefined, '商品排序只属于商品栏')
+assert.equal(sectionQuery('products', { ...query, productSortField: 'Revenue', productSortOrder: 'asc' }).productSortOrder, 'asc')
+assert.equal(productBranchDrawerQuery({ ...query, productSortField: 'Revenue' }, 'P9').productSortField, undefined, '抽屉不随商品排序重新请求')
+const sortRow = (code: string, quantity: number, revenue: number) => normalizeSalesDetailRow({ code, quantity, revenue })
+const sortable = [sortRow('A', 10, 50), sortRow('B', 2, 40), sortRow('C', 5, 100), sortRow('D', 0, 0)]
+const codes = (key: 'revenue' | 'quantity' | 'averageUnitPrice', ascending: boolean) => sortProductRows(sortable, { key, ascending }).map(row => row.code)
+assert.deepEqual(codes('quantity', false), ['A', 'C', 'B', 'D'])
+assert.deepEqual(codes('revenue', false), ['C', 'A', 'B', 'D'])
+assert.deepEqual(codes('revenue', true), ['D', 'B', 'A', 'C'])
+assert.deepEqual(codes('averageUnitPrice', false), ['C', 'B', 'A', 'D'], '均价相同时营业额高的在前，与服务端一致')
+assert.deepEqual(codes('averageUnitPrice', true), ['A', 'C', 'B', 'D'], '没有均价（数量 ≤ 0）的商品升序也排最后')
+assert.deepEqual(sortable.map(row => row.code), ['A', 'B', 'C', 'D'], '重排不得修改原数组')

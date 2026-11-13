@@ -127,6 +127,20 @@ public sealed class SalesDetailMonthlyProjectionTests
         Assert.Contains("FROM #sdmBranchFacts f WHERE [AustralianSupplierCode] IS NOT NULL;", sql);
         Assert.Contains("FROM #sdmProductFacts WHERE [SupplierCode] IS NOT NULL\nGROUP BY [ProductCode]", sql);
         Assert.Contains("OFFSET 20 ROWS FETCH NEXT 20 ROWS ONLY", sql);
+        // 不传排序时商品栏仍是改版前的数量降序原文。
+        Assert.Contains("ORDER BY [Quantity] DESC, [CompareQuantity] DESC, [ProductCode] ASC OFFSET 20 ROWS", sql);
+        Assert.Contains("ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC OPTION (HASH GROUP);", sql);
+        // 均价排序：内层用聚合表达式（GROUP BY 查询里不能拿别名参与运算），外层用派生表列，没有均价的排最后。
+        var byPrice = SalesDashboardReactService.BuildSalesDetailReportSqlMonthly(
+            "POSM", range, SalesDetailKind.China, null, null, 2, 20, Enum.GetValues<SalesDetailSection>().ToHashSet(),
+            productOrder: new SalesDashboardReactService.SalesDetailProductOrder(SalesDetailProductSortField.AverageUnitPrice, Ascending: true));
+        Assert.Contains("ORDER BY CASE WHEN SUM(CASE WHEN [Period]=0 THEN [Quantity] ELSE 0 END)>0 THEN 0 ELSE 1 END ASC, CASE WHEN SUM(CASE WHEN [Period]=0 THEN [Quantity] ELSE 0 END)>0 THEN SUM(CASE WHEN [Period]=0 THEN [Revenue] ELSE 0 END)*1.0/SUM(CASE WHEN [Period]=0 THEN [Quantity] ELSE 0 END) END ASC, [Revenue] DESC, [ProductCode] ASC OFFSET 20 ROWS", byPrice);
+        Assert.Contains("ORDER BY CASE WHEN a.[Quantity]>0 THEN 0 ELSE 1 END ASC, CASE WHEN a.[Quantity]>0 THEN a.[Revenue]*1.0/a.[Quantity] END ASC, a.[Revenue] DESC, a.[ProductCode] ASC OPTION (HASH GROUP);", byPrice);
+        var byRevenue = SalesDashboardReactService.BuildSalesDetailReportSqlMonthly(
+            "POSM", range, SalesDetailKind.China, null, null, 1, 20, Enum.GetValues<SalesDetailSection>().ToHashSet(),
+            productOrder: new SalesDashboardReactService.SalesDetailProductOrder(SalesDetailProductSortField.Revenue));
+        Assert.Contains("ORDER BY [Revenue] DESC, [CompareRevenue] DESC, [ProductCode] ASC OFFSET 0 ROWS", byRevenue);
+        Assert.Contains("ORDER BY a.[Revenue] DESC, a.[CompareRevenue] DESC, a.[ProductCode] ASC OPTION (HASH GROUP);", byRevenue);
         Assert.Contains("SELECT [StatisticType],[Date],[Status],[LastAggregatedAtUtc],[CompletedAtUtc],[SourceProductVersion] FROM [SalesStatisticRefreshState]", sql);
         Assert.EndsWith("DROP TABLE #sdmBranchFacts;", sql);
 
