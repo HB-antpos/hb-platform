@@ -250,9 +250,11 @@ public sealed class SalesReportStoreScopeTests
                 It.IsAny<CancellationToken>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<List<string>?>(),
-                It.IsAny<List<string>?>()))
-            .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken, List<string>?, List<string>?, List<string>?>(
-                (_, _, branches, _, _, _, _, _, _, _, _, _, _, _) => capturedBranches = branches)
+                It.IsAny<List<string>?>(),
+                It.IsAny<SalesDetailProductSortField>(),
+                It.IsAny<bool>()))
+            .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken, List<string>?, List<string>?, List<string>?, SalesDetailProductSortField, bool>(
+                (_, _, branches, _, _, _, _, _, _, _, _, _, _, _, _, _) => capturedBranches = branches)
             .ReturnsAsync(new ProductReportResponseDto<SalesDetailReportDto> { Data = new() });
         var userService = new Mock<IUserService>(MockBehavior.Strict);
 
@@ -464,9 +466,11 @@ public sealed class SalesReportStoreScopeTests
                     It.IsAny<CancellationToken>(),
                     It.IsAny<List<string>?>(),
                     It.IsAny<List<string>?>(),
-                    It.IsAny<List<string>?>()))
-                .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken, List<string>?, List<string>?, List<string>?>(
-                    (_, _, branches, _, _, _, _, _, _, _, _, _, _, _) => capture(branches, null))
+                    It.IsAny<List<string>?>(),
+                    It.IsAny<SalesDetailProductSortField>(),
+                    It.IsAny<bool>()))
+                .Callback<DateRangeDto, SalesDetailKind, List<string>?, string?, string?, string?, string?, int, int, IReadOnlyCollection<SalesDetailSection>?, CancellationToken, List<string>?, List<string>?, List<string>?, SalesDetailProductSortField, bool>(
+                    (_, _, branches, _, _, _, _, _, _, _, _, _, _, _, _, _) => capture(branches, null))
                 .ReturnsAsync(new ProductReportResponseDto<SalesDetailReportDto> { Data = new() });
             return;
         }

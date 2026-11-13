@@ -233,7 +233,9 @@ public sealed class ClientAbortSqlCancellationControllerTests
                 It.IsAny<CancellationToken>(),
                 It.IsAny<List<string>?>(),
                 It.IsAny<List<string>?>(),
-                It.IsAny<List<string>?>()
+                It.IsAny<List<string>?>(),
+                It.IsAny<SalesDetailProductSortField>(),
+                It.IsAny<bool>()
             ))
             .Returns(() =>
             {

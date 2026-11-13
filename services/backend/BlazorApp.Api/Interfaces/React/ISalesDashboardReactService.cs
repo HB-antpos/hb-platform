@@ -182,7 +182,9 @@ namespace BlazorApp.Api.Interfaces.React
             string? selectedProductCode = null, string? search = null, int pageIndex = 1, int pageSize = 20,
             IReadOnlyCollection<SalesDetailSection>? sections = null, CancellationToken cancellationToken = default,
             List<string>? selectedSupplierCodes = null, List<string>? supplierCategoryGuids = null,
-            List<string>? warehouseCategoryGuids = null);
+            List<string>? warehouseCategoryGuids = null,
+            SalesDetailProductSortField productSortField = SalesDetailProductSortField.Quantity,
+            bool productSortAscending = false);
 
         /// <summary>
         /// 销售明细商品抽屉的销售曲线（日）：窗口（销售开始日前 60 天 ~ 销售结束日）内该商品在授权分店或所选单店的每日销量。

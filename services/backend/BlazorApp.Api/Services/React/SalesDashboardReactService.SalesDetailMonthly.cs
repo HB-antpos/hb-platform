@@ -178,7 +178,8 @@ GROUP BY [Period], [BranchCode], [RawSupplierCode], [ChinaSupplierCode], [Austra
         string posmDatabase, DateRangeDto range, SalesDetailKind kind, string? selectedSupplier, string? selectedProduct,
         int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted,
         IReadOnlyCollection<string>? selectedSuppliers = null, IReadOnlyCollection<string>? branches = null, string? selectedBranch = null,
-        long scopeComplementThresholdRows = SalesDetailScopeComplementThresholdRows)
+        long scopeComplementThresholdRows = SalesDetailScopeComplementThresholdRows,
+        SalesDetailProductOrder productOrder = default)
     {
         var hasCompare = HasCompare(range);
         var database = QuoteIdentifier(posmDatabase);
@@ -329,7 +330,7 @@ SELECT a.[ProductCode] [Code], COALESCE(NULLIF(LTRIM(RTRIM(p.[ProductName])), ''
        a.[Revenue], a.[CompareRevenue], a.[Quantity], a.[CompareQuantity], a.[OrderCount], a.[CompareOrderCount],
        a.[GrossProfit], a.[CompareGrossProfit], a.[StatisticRowCount], a.[CostedRowCount], a.[GrossProfitRowCount],
        a.[CompareStatisticRowCount], a.[CompareCostedRowCount], a.[CompareGrossProfitRowCount], a.[CurrentProductCount], a.[CompareProductCount]
-FROM ({productAggregate} ORDER BY [Quantity] DESC, [CompareQuantity] DESC, [ProductCode] ASC OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY) a
+FROM ({productAggregate} {SalesDetailProductOrderBy(productOrder, revenueExpression: SalesDetailCurrentRevenueSum, quantityExpression: SalesDetailCurrentQuantitySum)} OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY) a
 OUTER APPLY (SELECT TOP (1) p0.[ProductName], p0.[EnglishName], p0.[ItemNumber], p0.[ProductImage], p0.[Barcode]
              FROM [Product] p0 WHERE p0.[ProductCode]=a.[ProductCode] ORDER BY p0.[UUID]) p
 OUTER APPLY (SELECT TOP (1) s0.[ProductName] [StatisticProductName]
@@ -338,7 +339,7 @@ OUTER APPLY (SELECT TOP (1) s0.[ProductName] [StatisticProductName]
                AND s0.[ProductCode]=a.[ProductCode]
                AND ((s0.[Date]>=@sdrCurrentStart AND s0.[Date]<@sdrCurrentEnd) OR (@sdrHasCompare=1 AND s0.[Date]>=@sdrCompareStart AND s0.[Date]<@sdrCompareEnd)){statScope}
              ORDER BY s0.[Date] DESC) stat
-ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC OPTION (HASH GROUP);
+{SalesDetailProductOrderBy(productOrder, "a.")} OPTION (HASH GROUP);
 """;
         var productCount = $"SELECT COUNT(*) FROM (SELECT [ProductCode] FROM {productSource} WHERE [SupplierCode] IS NOT NULL{supplierFilter} GROUP BY [ProductCode]) x;";
         // 分母不按商品过滤：无分店范围时沿用原来源；有分店范围时用全部商品的分店粒度事实按门店过滤。

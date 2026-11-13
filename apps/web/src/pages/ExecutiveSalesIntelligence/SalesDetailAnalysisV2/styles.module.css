@@ -148,7 +148,6 @@
 .productTable .groupStart { border-left:1px solid #e6ecf3; }
 .productTable .previousCell { background:#fafbfd; }
 .productTable .previousCell strong { color:#5f728a; font-weight:500; }
-.sortedHead { color:var(--navy); font-weight:650; cursor:help; }
 .productName { display:flex; align-items:center; gap:2px; min-width:0; }
 .productName .nameButton { flex:1 1 auto; gap:8px; }
 /* 序号与缩略图移出名称按钮后，用右边距保持原来 8px 的间隔 */

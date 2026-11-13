@@ -1155,6 +1155,17 @@ namespace BlazorApp.Shared.DTOs
     }
 
     /// <summary>
+    /// Sales Detail 商品栏的服务端排序字段（全量排序后再分页）。默认数量，与改版前一致。
+    /// 均价 = 本期营业额 ÷ 本期数量，数量 ≤ 0 的商品没有均价，无论升降序都排在最后。
+    /// </summary>
+    public enum SalesDetailProductSortField
+    {
+        Quantity,
+        Revenue,
+        AverageUnitPrice,
+    }
+
+    /// <summary>
     /// 三栏统一行 DTO。金额为 AUD，比例为 0..1。
     /// </summary>
     public sealed class SalesDetailRowDto
