@@ -316,6 +316,15 @@
   .chip.transfer { background: var(--accent-soft); color: var(--accent); }
   .chip.priority { background: var(--good-bg); color: var(--good); }
   .chip.short { background: var(--warn-bg); color: var(--warn); }
+  .chip.state { background: var(--surface-2); color: var(--ink-soft); }
+  .chip.state.same { background: var(--good-bg); color: var(--good); }
+  .state-tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-soft); }
+  .holder-group + .holder-group { margin-top: 10px; }
+  /* 各州一张小表，固定列宽让不同州的表上下对齐 */
+  .holder-group table.mini { table-layout: fixed; width: 100%; max-width: 600px; }
+  .holder-group table.mini th { white-space: normal; vertical-align: bottom; }
+  .holder-group table.mini th:first-child { width: 44%; }
+  .holder-group h5 { font-size: 12px; margin: 0 0 4px; display: flex; gap: 6px; align-items: baseline; }
   .more { font-size: 11px; color: var(--accent); font-weight: 600; }
   .muted { color: var(--ink-soft); }
 
@@ -554,7 +563,6 @@
       kpiShort: "缺货门店", kpiShortSub: function (n) { return n + " 个商品有缺口"; },
       kpiShortStore: "本店缺货商品", kpiShortStoreSub: "预测 14 天 × 1.2 > 到货后余量",
       kpiUrgent: "紧急调拨项", kpiUrgentSub: "预测 7 天 > 到货后余量",
-      kpiHq: "HQ 账面库存", hqYes: "可用", hqNo: "不可用",
       missing: function (d, list) { return "数据截止日（" + d + "）里以下门店没有销量记录，可能是当天确实无销售，也可能是数据未同步：" + list + "。"; },
       warnTitle: "运行警告：",
       caveat: "口径提醒：「到货后余量」累计近 180 天内所有批次的进货量，再减去自第一批到货日起的销量，含在途，不是货架库存；「未知店目标量」来自没有可用进货单据的门店，只是建议保持量，不能当作确定要订的数量。系统没有调拨功能，「调拨来源」仅为建议，以现场核对为准。点商品图片可放大，点商品行可展开分店销量。",
@@ -570,8 +578,9 @@
         item: "货号", name: "名称", qty28: "28天销量", amt28: "28天金额", avg: "均价", ly7: "去年同期7天",
         ly14: "去年同期14天", f7: "预测7天", f14: "预测14天", target: "建议保持库存", remTrusted: "可信余量",
         gapTrusted: "可信缺口", gapUnknown: "未知店目标量", stores: "分店销量", topShort: "主要缺货店",
-        lastIn: "最近到货", soldSince: "到货后销量", remaining: "到货后余量", est180: "180天估算", hq: "HQ账面",
+        lastIn: "最近到货", soldSince: "到货后销量", remaining: "到货后余量", est180: "180天估算",
         targetStock: "目标库存", gap: "缺口", urgent: "紧急", conf: "可信度", transfer: "调拨来源", delta: "较上次",
+        holders: "有货门店（按州）", surplus: "28天后富余", state: "州",
         store: "分店", qty7: "近7天", share: "占比"
       },
       storesCell: function (n) { return n + " 店"; },
@@ -583,6 +592,11 @@
       shortChip: function (s, n) { return s + " 缺" + n; },
       firstRun: "首次",
       allStores: function (n) { return "全部门店（" + n + "）"; },
+      allStates: "全部州", stateUnknown: "未知", sameState: "同州", warehouseTag: "仓库",
+      holderSum: function (st, n, q) { return st + " · " + n + " 店 · " + q + " 件"; },
+      holdersTitle: function (name, n) { return name + " · " + n + " 家门店有到货后余量"; },
+      holdersNote: "余量是进货减销量的估算，含在途，不是货架实数；「28天后富余」= 余量 − 预测 28 天，> 0 才建议调出。",
+      noHolders: "没有其它门店有到货后余量",
       urgentOnly: "只看紧急",
       gapItems: function (n) { return n + " 个缺口商品"; },
       noGaps: "本次运行没有门店触发缺货阈值。",
@@ -628,6 +642,7 @@
             "<strong>预测</strong>：有去年基线时按「去年同期同店销量 × 同比系数」与「近 28 天日均 × 季节比」加权融合，权重随去年同期样本量升到 1；新品或去年未在售，退化为近期外推 × 季节比。<strong>建议保持库存</strong> = 预测 14 天 × " + p.safety_factor + "。",
             "<strong>到货后余量</strong> = 近 180 天内所有批次进货量之和 − 自第一批到货日起至今的销量（多次到货都计入；近 180 天没有到货的，只看最近一批）。<strong>缺口</strong> = 目标库存 − max(余量, 0)。判定「缺货」需同时满足：有可信余量数据、预测 14 天 ≥ " + p.min_forecast_for_shortage + "、缺口 > 0。",
             "<strong>调拨来源</strong>：来源店需「高」可信度且（余量 − 预测 28 天）> 0，按盈余从高到低最多取 3 家，同一批余量在多个目标店之间贪心分配，不会重复推荐。" + p.warehouse_store + " 仓库店只作来源，不计入需求。",
+            "<strong>有货门店</strong>：列出该商品「到货后余量」≥ 1 的其它门店（含仓库，不含测试店），按州分组，缺货店所在州排在最前。州由门店地址里的邮编推导，地址没写邮编时按门店时区判断。有余量不等于可以调出，「28天后富余」> 0 才说明对方够卖 28 天还有剩。",
             "<strong>分店销量</strong>：只统计需求侧门店（不含仓库与测试店），占比按这些门店合计计算。",
             "<strong>进销累计</strong>：起始日（默认最近一个 8 月 1 日）以来的进货量与累计已售，售出率 = 累计已售 ÷ 进货量。起始日之前的库存不计入，所以售出率可能超过 100%。进货均价 = 进货单金额 ÷ 进货量，销售均价 = 销售额 ÷ 已售，两者的含税口径可能不同。"
           ],
@@ -647,7 +662,6 @@
           limits: [
             "系统没有分店真实库存表，「到货后余量」「180天估算」都是进销差值估算，不是货架库存。",
             "进货单没有真实入库确认（InboundDate 基本为空），「到货」按下单日期近似。",
-            "HQ 账面库存对本供应商约 96% 为空，且与本地估算常对不上，仅作参考，不参与计算。",
             "约 " + m.unmatched_purchase_lines + " 行进货明细缺商品编码且无法回查，对应商品的到货记录会不完整。",
             "系统没有店间调拨功能，「调拨来源」纯粹是本报告的建议，需人工核实库存与运输成本。"
           ],
@@ -677,7 +691,6 @@
       kpiShort: "Stores short", kpiShortSub: function (n) { return n + " products with a gap"; },
       kpiShortStore: "Products short here", kpiShortStoreSub: "14-day forecast × 1.2 > stock since delivery",
       kpiUrgent: "Urgent transfers", kpiUrgentSub: "7-day forecast > stock since delivery",
-      kpiHq: "HQ book stock", hqYes: "Available", hqNo: "Unavailable",
       missing: function (d, list) { return "These stores have no sales rows on the cutoff date (" + d + "). They may simply have had no sales, or the data has not synced yet: " + list + "."; },
       warnTitle: "Run warnings:",
       caveat: "How to read this: “stock since delivery” adds up every delivery in the last 180 days and subtracts sales since the first of them; it includes stock in transit, so it is not shelf stock. “Unknown-store target” comes from stores with no usable invoices and is a suggested level, not a confirmed order. The system has no transfer feature, so transfer sources are suggestions to check on site. Tap a product image to enlarge it, and tap a product row to see sales by store.",
@@ -693,8 +706,9 @@
         item: "Item no.", name: "Name", qty28: "Units 28d", amt28: "Sales 28d", avg: "Avg price", ly7: "LY 7d",
         ly14: "LY 14d", f7: "Fcst 7d", f14: "Fcst 14d", target: "Target stock", remTrusted: "Known stock",
         gapTrusted: "Known gap", gapUnknown: "Unknown-store target", stores: "Sales by store", topShort: "Stores short",
-        lastIn: "Last delivery", soldSince: "Sold since", remaining: "Stock since delivery", est180: "180d estimate", hq: "HQ book",
+        lastIn: "Last delivery", soldSince: "Sold since", remaining: "Stock since delivery", est180: "180d estimate",
         targetStock: "Target", gap: "Gap", urgent: "Urgent", conf: "Confidence", transfer: "Transfer from", delta: "vs last run",
+        holders: "Stores with stock (by state)", surplus: "Spare after 28d", state: "State",
         store: "Store", qty7: "Units 7d", share: "Share"
       },
       storesCell: function (n) { return n + (n === 1 ? " store" : " stores"); },
@@ -706,6 +720,11 @@
       shortChip: function (s, n) { return s + " short " + n; },
       firstRun: "First run",
       allStores: function (n) { return "All stores (" + n + ")"; },
+      allStates: "All states", stateUnknown: "Unknown", sameState: "Same state", warehouseTag: "Warehouse",
+      holderSum: function (st, n, q) { return st + " · " + n + (n === 1 ? " store · " : " stores · ") + q + " units"; },
+      holdersTitle: function (name, n) { return name + " · " + n + (n === 1 ? " store has" : " stores have") + " stock since delivery"; },
+      holdersNote: "Stock is purchases minus sales, includes stock in transit and is not a shelf count. “Spare after 28d” = stock − 28-day forecast; only > 0 is worth transferring out.",
+      noHolders: "No other store has stock since delivery",
       urgentOnly: "Urgent only",
       gapItems: function (n) { return n + (n === 1 ? " product short" : " products short"); },
       noGaps: "No store crossed the shortage threshold in this run.",
@@ -751,6 +770,7 @@
             "<strong>Forecast</strong>: when last year has history, it blends “same store, same period last year × year-on-year factor” with “28-day daily rate × seasonal ratio”. The weight moves fully to last year as its sample grows. New items or items not sold last year use the recent rate × seasonal ratio only. <strong>Target stock</strong> = 14-day forecast × " + p.safety_factor + ".",
             "<strong>Stock since delivery</strong> = units delivered across all batches in the last 180 days − units sold since the first of those deliveries (with no delivery in 180 days, only the latest batch is used). <strong>Gap</strong> = target − max(stock, 0). A store is <em>short</em> when it has usable stock data, a 14-day forecast ≥ " + p.min_forecast_for_shortage + ", and a gap > 0.",
             "<strong>Transfer sources</strong>: a source needs High confidence and (stock − 28-day forecast) > 0. Up to 3 sources are picked by surplus, and one surplus is shared out greedily so it is never offered twice. Store " + p.warehouse_store + " (warehouse) is a source only and is not counted as demand.",
+            "<strong>Stores with stock</strong>: other stores (warehouse included, test store excluded) whose stock since delivery is at least 1, grouped by state with the short store's own state first. The state comes from the postcode in the store address, or the store time zone when the address has no postcode. Having stock does not mean it can be spared; only “spare after 28d” > 0 means that store still has stock left after 28 days of its own sales.",
             "<strong>Sales by store</strong>: retail stores only (warehouse and test store excluded). Share is against the total of those stores.",
             "<strong>Sell-through</strong>: units purchased and sold since the start date (by default the most recent 1 August). Sell-through = sold ÷ purchased. Stock from before the start date is not counted, so it can exceed 100%. Avg cost = invoice amount ÷ units purchased; avg sell price = sales ÷ units sold. The two may differ in GST treatment."
           ],
@@ -770,7 +790,6 @@
           limits: [
             "There is no store stock table. “Stock since delivery” and the 180-day estimate are both sales-vs-purchase estimates, not shelf stock.",
             "Invoices have no real receiving confirmation (InboundDate is almost always empty), so delivery is approximated by the order date.",
-            "About 96% of HQ book stock is empty for this supplier and often disagrees with the local estimate. It is shown for reference only.",
             "About " + m.unmatched_purchase_lines + " invoice lines have no product code and cannot be matched, so deliveries for those products are incomplete.",
             "There is no store-to-store transfer feature. Transfer sources are suggestions only; confirm stock and freight cost first."
           ],
@@ -898,6 +917,56 @@
     if (!f) return "";
     return '<span class="badge flag' + (f === "疑似停售" ? " stale" : "") + '">' + esc(v("flag", f)) + "</span>";
   }
+  // ---------- 有货门店（按州分组）----------
+  // 数据按商品存一份（DATA.stock_holders），行上挂了所属缺货店 _store / _state，
+  // 这里排除缺货店自己，按州分组；缺货店所在州排最前，其余州按字母，未知州最后。
+  function stateLabel(st) { return st || L().stateUnknown; }
+  function holderGroups(r) {
+    var list = ((DATA.stock_holders || {})[r.product_code] || []).filter(function (h) { return h.store_code !== r._store; });
+    var map = {}, order = [];
+    list.forEach(function (h) {
+      var k = h.state || "";
+      if (!map[k]) { map[k] = []; order.push(k); }
+      map[k].push(h);
+    });
+    order.sort(function (a, b) {
+      var ra = a === (r._state || "") && a ? 0 : (a ? 1 : 2), rb = b === (r._state || "") && b ? 0 : (b ? 1 : 2);
+      return ra - rb || (a < b ? -1 : a > b ? 1 : 0);
+    });
+    return order.map(function (k) {
+      var hs = map[k];
+      return { state: k, same: !!k && k === r._state, holders: hs, qty: hs.reduce(function (t, h) { return t + h.remaining; }, 0) };
+    });
+  }
+  function holdersCell(r) {
+    var l = L(), groups = holderGroups(r);
+    if (!groups.length) return '<span class="muted">—</span>';
+    return groups.map(function (g) {
+      return '<span class="chip state' + (g.same ? " same" : "") + '"' + (g.same ? ' title="' + esc(l.sameState) + '"' : "") + ">" +
+        esc(l.holderSum(stateLabel(g.state), g.holders.length, fmtNum(g.qty))) + "</span>";
+    }).join("") + ' <span class="more"><span class="caret">▶</span></span>';
+  }
+  function holdersDetail(r) {
+    var l = L(), c = l.col, groups = holderGroups(r);
+    if (!groups.length) return '<div class="detail-box"><h4>' + esc(l.noHolders) + "</h4></div>";
+    var n = groups.reduce(function (t, g) { return t + g.holders.length; }, 0);
+    var body = groups.map(function (g) {
+      var rows = g.holders.map(function (h) {
+        return "<tr><td>" + esc(h.store_name) + ' <span class="itemnum">' + esc(h.store_code) + "</span>" +
+          (h.warehouse ? ' <span class="chip priority">' + esc(l.warehouseTag) + "</span>" : "") + "</td>" +
+          '<td class="num">' + fmtNum(h.remaining) + "</td>" +
+          '<td class="num">' + (h.surplus > 0 ? fmtNum(h.surplus) : '<span class="muted">—</span>') + "</td>" +
+          "<td>" + confBadge(h.confidence) + "</td></tr>";
+      }).join("");
+      return '<div class="holder-group"><h5><span class="state-tag">' + esc(stateLabel(g.state)) + "</span>" +
+        (g.same ? '<span class="muted">' + esc(l.sameState) + "</span>" : "") + "</h5>" +
+        '<div style="overflow-x:auto"><table class="mini"><thead><tr><th>' + esc(c.store) + '</th><th class="num">' + esc(c.remaining) +
+        '</th><th class="num">' + esc(c.surplus) + "</th><th>" + esc(c.conf) + "</th></tr></thead><tbody>" + rows + "</tbody></table></div></div>";
+    }).join("");
+    return '<div class="detail-box"><h4>' + esc(l.holdersTitle(r.name, n)) + '</h4><p class="muted" style="margin:0 0 8px;font-size:11.5px">' +
+      esc(l.holdersNote) + "</p>" + body + "</div>";
+  }
+
   function transferCell(list) {
     if (!list || !list.length) return '<span class="muted">—</span>';
     return list.map(function (t) {
@@ -1204,7 +1273,6 @@
 
   function renderKPI() {
     var l = L();
-    var hqNote = LANG === "en" ? (META.hq_note_en || META.hq_note) : META.hq_note;
     var items = [
       { label: isStoreView() ? l.kpiSalesStore : l.kpiSales, value: fmtNum(META.recent28_qty), sub: fmtMoney(META.recent28_amt) },
       { label: isStoreView() ? l.kpiYoyStore : l.kpiYoy, value: fmtPct(META.yoy_supplier), sub: l.kpiYoySub(fmtNum(META.ly14_qty_supplier)) },
@@ -1212,8 +1280,7 @@
       isStoreView()
         ? { label: l.kpiShortStore, value: fmtNum(META.shortage_product_count), sub: l.kpiShortStoreSub, cls: META.shortage_product_count > 0 ? "warn" : "good" }
         : { label: l.kpiShort, value: fmtNum(META.shortage_store_count), sub: l.kpiShortSub(fmtNum(META.shortage_product_count)), cls: META.shortage_store_count > 0 ? "warn" : "good" },
-      { label: l.kpiUrgent, value: fmtNum(META.urgent_count), sub: l.kpiUrgentSub, cls: META.urgent_count > 0 ? "crit" : "good" },
-      { label: l.kpiHq, value: META.hq_available ? l.hqYes : l.hqNo, sub: hqNote, cls: META.hq_available ? "good" : "warn" }
+      { label: l.kpiUrgent, value: fmtNum(META.urgent_count), sub: l.kpiUrgentSub, cls: META.urgent_count > 0 ? "crit" : "good" }
     ];
     document.getElementById("kpi-grid").innerHTML = items.map(function (it) {
       return '<div class="kpi' + (it.cls ? " " + it.cls : "") + '"><div class="kpi-label">' + esc(it.label) +
@@ -1291,12 +1358,26 @@
     var l = L(), c = l.col;
     var panel = document.getElementById("panel-store_gaps");
     if (!DATA.store_gaps.length) { panel.innerHTML = '<div class="empty">' + esc(l.noGaps) + "</div>"; return; }
-    var opts = DATA.store_gaps.map(function (sg) {
-      return '<option value="' + esc(sg.store_code) + '">' + esc(sg.store_name) + " (" + esc(sg.store_code) + ")</option>";
+    // 每行挂上所属缺货店与州，供「有货门店」列排除本店、标出同州
+    DATA.store_gaps.forEach(function (sg) {
+      sg.rows.forEach(function (r) { r._store = sg.store_code; r._state = sg.state || ""; });
+    });
+    var states = [];
+    DATA.store_gaps.forEach(function (sg) { var k = sg.state || ""; if (states.indexOf(k) < 0) states.push(k); });
+    states.sort(function (a, b) { return a === "" ? 1 : b === "" ? -1 : (a < b ? -1 : a > b ? 1 : 0); });
+    var opts = states.map(function (st) {
+      return '<optgroup label="' + esc(stateLabel(st)) + '">' + DATA.store_gaps.filter(function (sg) { return (sg.state || "") === st; }).map(function (sg) {
+        return '<option value="' + esc(sg.store_code) + '">' + esc(sg.store_name) + " (" + esc(sg.store_code) + ")</option>";
+      }).join("") + "</optgroup>";
     }).join("");
+    var stateOpts = states.length > 1
+      ? '<select id="sg-state" aria-label="' + esc(c.state) + '"><option value="">' + esc(l.allStates) + "</option>" +
+        states.map(function (st) { return '<option value="' + esc(st || "_") + '">' + esc(stateLabel(st)) + "</option>"; }).join("") + "</select>"
+      : "";
     panel.innerHTML =
       '<div class="toolbar">' +
       '<input type="search" id="sg-search" placeholder="' + esc(l.search) + '" aria-label="' + esc(l.search) + '">' +
+      stateOpts +
       '<select id="sg-store" aria-label="' + esc(c.store) + '"><option value="">' + esc(l.allStores(DATA.store_gaps.length)) + "</option>" + opts + "</select>" +
       '<label class="chk" for="sg-urgent"><input type="checkbox" id="sg-urgent"> ' + esc(l.urgentOnly) + "</label>" +
       '</div><div id="sg-sections"></div>';
@@ -1304,7 +1385,7 @@
     var sections = document.getElementById("sg-sections");
     sections.innerHTML = DATA.store_gaps.map(function (sg) {
       return '<div class="store-section" data-store="' + esc(sg.store_code) + '"><h3>' + esc(sg.store_name) +
-        ' <span class="itemnum">' + esc(sg.store_code) + '</span><span class="store-meta">' + esc(sg.brand_name || "") +
+        ' <span class="itemnum">' + esc(sg.store_code) + '</span><span class="state-tag">' + esc(stateLabel(sg.state)) + '</span><span class="store-meta">' + esc(sg.brand_name || "") +
         " · " + esc(l.gapItems(sg.rows.length)) + '</span></h3><div class="tblwrap"><table class="data"><thead></thead><tbody></tbody></table></div></div>';
     }).join("");
 
@@ -1313,7 +1394,6 @@
       { key: "sales_since_purchase", label: c.soldSince, numeric: true, render: function (r) { return fmtNum(r.sales_since_purchase); } },
       { key: "remaining", label: c.remaining, numeric: true, render: function (r) { return fmtNum(r.remaining); } },
       { key: "est180", label: c.est180, numeric: true, render: function (r) { return fmtNum(r.est180); } },
-      { key: "hq_stock", label: c.hq, numeric: true, render: function (r) { return fmtNum(r.hq_stock); } },
       { key: "forecast7", label: c.f7, numeric: true, render: function (r) { return fmtNum(r.forecast7); } },
       { key: "forecast14", label: c.f14, numeric: true, render: function (r) { return fmtNum(r.forecast14); } },
       { key: "target14", label: c.targetStock, numeric: true, render: function (r) { return fmtNum(r.target14); } },
@@ -1321,6 +1401,7 @@
       { key: null, label: c.urgent, render: function (r) { return r.urgent ? '<span class="badge urgent">' + esc(c.urgent) + "</span>" : ""; } },
       { key: null, label: c.conf, render: function (r) { return confBadge(r.confidence); } },
       { key: null, label: c.transfer, render: function (r) { return transferCell(r.transfer_from); } },
+      { key: null, label: c.holders, render: holdersCell },
       {
         key: "change_vs_prev", label: c.delta, numeric: true, render: function (r) {
           if (r.change_vs_prev === null || r.change_vs_prev === undefined) return '<span class="muted">' + esc(l.firstRun) + "</span>";
@@ -1331,24 +1412,27 @@
 
     var tables = DATA.store_gaps.map(function (sg) {
       var sec = sections.querySelector('.store-section[data-store="' + sg.store_code + '"]');
-      var t = buildTable(sec.querySelector("table"), columns, sg.rows, { defaultSortKey: "gap" });
+      var t = buildTable(sec.querySelector("table"), columns, sg.rows, { defaultSortKey: "gap", expand: holdersDetail });
       t.render();
-      return { sec: sec, code: sg.store_code, t: t };
+      return { sec: sec, code: sg.store_code, state: sg.state || "_", t: t };
     });
 
     function apply() {
       var sel = document.getElementById("sg-store").value;
+      var stEl = document.getElementById("sg-state");
+      var stSel = stEl ? stEl.value : "";
       var q = document.getElementById("sg-search").value;
       var urgentOnly = document.getElementById("sg-urgent").checked;
       tables.forEach(function (x) {
         x.t.setFilter(urgentOnly ? function (r) { return r.urgent; } : null);
         var n = x.t.setQuery(q);
         // 筛选后没有行的门店整段隐藏，避免满屏空表
-        x.sec.hidden = (sel && sel !== x.code) || (n === 0 && (q || urgentOnly || THEME !== "all"));
+        x.sec.hidden = (sel && sel !== x.code) || (stSel && stSel !== x.state) || (n === 0 && (q || urgentOnly || THEME !== "all"));
       });
     }
     document.getElementById("sg-search").addEventListener("input", apply);
     document.getElementById("sg-store").addEventListener("change", apply);
+    if (document.getElementById("sg-state")) document.getElementById("sg-state").addEventListener("change", apply);
     document.getElementById("sg-urgent").addEventListener("change", apply);
     if (THEME !== "all") apply();
   }
