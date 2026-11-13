@@ -205,6 +205,14 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
       access.hasPermission(P.FaceMatch.Unwelcome.Review),
   },
   {
+    // 扫码打包：只有 Warehouse.Packing 的打包账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    // 管理仓库 / 管理仓库订货按后端别名自动具备打包权限，这里一并放行。
+    defaultPath: '/warehouse/packing',
+    targetPrefixes: ['/warehouse/packing'],
+    canAccess: (access) =>
+      access.hasPermission(P.Warehouse.Packing) || access.canManageWarehouse || access.canManageWarehouseOrders,
+  },
+  {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。
     defaultPath: '/system/performance-baseline',
     targetPrefixes: ['/system/performance-baseline', '/system/monitoring'],

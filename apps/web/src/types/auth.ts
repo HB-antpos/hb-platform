@@ -97,6 +97,8 @@ export interface AccessControl {
   canOrderSupplierPreorders: boolean
   canManageWarehouseCategories: boolean
   canManageWarehouseLocations: boolean
+  /** 仓库扫码打包；管理仓库 / 管理仓库订货权限按后端别名自动具备。 */
+  canUseWarehousePacking: boolean
   canViewContainers: boolean
   canCreateContainer: boolean
   canEditContainer: boolean

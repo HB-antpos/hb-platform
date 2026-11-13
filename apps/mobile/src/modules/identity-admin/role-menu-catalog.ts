@@ -26,6 +26,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/warehouse/products", "Warehouse products", "仓库商品", ["Warehouse.ManageProducts"]],
   ["/warehouse/categories", "Categories", "分类管理", ["Warehouse.ManageCategories"]],
   ["/warehouse/locations", "Locations", "库位管理", ["Warehouse.ManageLocations"]],
+  // 扫码打包：与拣货同一口径，管理仓库 / 管理仓库订货按后端别名自动具备。
+  ["/warehouse/packing", "Scan packing", "扫码打包", ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
   ["/warehouse/product-grade-management", "Product grades", "商品等级", ["Warehouse.ManageProducts"]],
   ["/domestic-purchase/china-suppliers", "China suppliers", "国内供应商", ["DomesticPurchase.ManageSuppliers"]],
   ["/domestic-purchase/domestic-products", "Domestic products", "国内商品", ["Products.View"]],

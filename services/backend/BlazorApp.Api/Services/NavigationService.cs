@@ -106,6 +106,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/warehouse/products",     TitleKey = "menu.warehouseProducts", Icon = "AppstoreOutlined",   Permission = Permissions.Warehouse.ManageProducts },
                     new() { Path = "/warehouse/categories",   TitleKey = "menu.categories",        Icon = "TagsOutlined",       Permission = Permissions.Warehouse.ManageCategories },
                     new() { Path = "/warehouse/locations",    TitleKey = "menu.warehouseLocations", Icon = "EnvironmentOutlined", Permission = Permissions.Warehouse.ManageLocations },
+                    // 扫码打包：Warehouse.Packing；管理仓库 / 管理仓库订货的账号按别名自动具备。
+                    new() { Path = "/warehouse/packing",      TitleKey = "menu.warehousePacking",   Icon = "InboxOutlined",       Permission = Permissions.Warehouse.Packing },
                     new() { Path = "/warehouse/product-grade-management", TitleKey = "menu.productGradeManagement", Icon = "TrophyOutlined", Permission = Permissions.Warehouse.ManageProducts },
                 },
             },
@@ -890,6 +892,8 @@ namespace BlazorApp.Api.Services
                 Permissions.Dashboard.View,
                 Permissions.Warehouse.ManageOrders,
                 Permissions.Warehouse.Manage,
+                // 扫码打包：只有该权限的打包账号也要能拿到后台菜单。
+                Permissions.Warehouse.Packing,
                 Permissions.Container.View,
                 Permissions.LocalPurchase.View,
                 Permissions.SalesDashboard.SalesDataView,

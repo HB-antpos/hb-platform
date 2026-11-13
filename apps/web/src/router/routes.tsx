@@ -144,6 +144,7 @@ const ContainerDetailPage = lazy(() => import('../pages/Warehouse/ContainerDetai
 const ContainerAllocationSalesPage = lazy(() => import('../pages/Warehouse/ContainerAllocationSales'))
 const ContainersPage = lazy(() => import('../pages/Warehouse/Containers'))
 const WarehouseLocationsPage = lazy(() => import('../pages/Warehouse/Locations'))
+const WarehousePackingPage = lazy(() => import('../pages/Warehouse/Packing'))
 const WarehouseProductsPage = lazy(() => import('../pages/Warehouse/Products'))
 const RetailPriceChangesPage = lazy(() => import('../pages/Warehouse/RetailPriceChanges'))
 const PriceUpdateTasksPage = lazy(() => import('../pages/Warehouse/PriceUpdateTasks'))
@@ -683,6 +684,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canManageWarehouseLocations',
         },
         element: <WarehouseLocationsPage />,
+      },
+      {
+        // 扫码打包：打包台 / 箱 / 托盘 / 商品位置 / 运输公司，一个页面五个标签。
+        path: '/warehouse/packing',
+        meta: {
+          title: 'menu.warehousePacking',
+          icon: 'InboxOutlined',
+          keepAlive: true,
+          accessKey: 'canUseWarehousePacking',
+        },
+        element: <WarehousePackingPage />,
       },
       {
         path: '/warehouse/product-grade-management',

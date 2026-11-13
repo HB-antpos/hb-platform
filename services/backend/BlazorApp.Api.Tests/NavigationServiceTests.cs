@@ -1189,6 +1189,34 @@ public class NavigationServiceTests
     }
 
     [Fact]
+    public void BuildMenu_ShowsWarehousePackingForPackingOrWarehouseManagePermissions()
+    {
+        static bool HasPacking(List<NavigationMenuDto> menu) =>
+            menu.Any(node => node.Path == "/warehouse"
+                && node.Children != null
+                && node.Children.Any(child => child.Path == "/warehouse/packing"));
+
+        var packingUser = CreateUser(new Claim("permission", Permissions.Warehouse.Packing));
+        var manageUser = CreateUser(new Claim("permission", Permissions.Warehouse.Manage));
+        var ordersUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageOrders));
+        var productsOnlyUser = CreateUser(
+            new Claim("permission", Permissions.Dashboard.View),
+            new Claim("permission", Permissions.Warehouse.ManageProducts)
+        );
+
+        // Web「扫码打包」按打包权限或其别名（管理仓库、管理仓库订货）放行；只有打包权限的账号也要拿得到后台菜单。
+        var packingMenu = _service.BuildMenu(packingUser);
+        Assert.True(HasPacking(packingMenu));
+        Assert.Equal(
+            new[] { "/warehouse/packing" },
+            packingMenu.Single(node => node.Path == "/warehouse").Children!.Select(child => child.Path).ToArray()
+        );
+        Assert.True(HasPacking(_service.BuildMenu(manageUser)));
+        Assert.True(HasPacking(_service.BuildMenu(ordersUser)));
+        Assert.False(HasPacking(_service.BuildMenu(productsOnlyUser)));
+    }
+
+    [Fact]
     public void BuildDeviceAppMenu_ShowsWarehousePickingOnlyForWarehouseDevices()
     {
         // 纯设备会话没有个人账号，拣货人靠扫员工码确认；只有仓库类型设备放出入口。
