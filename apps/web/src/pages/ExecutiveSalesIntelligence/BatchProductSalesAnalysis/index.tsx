@@ -59,8 +59,10 @@ function businessToday() {
   const value = (type: string) => parts.find((part) => part.type === type)?.value ?? ''
   return `${value('year')}-${value('month')}-${value('day')}`
 }
+// 默认区间截止到昨天（共 30 天）：当天销量尚未统计完，默认含今天会出现「其余日期未统计」提示。
+// 只改默认值，用户仍可手动选到今天。
 function defaultRange(today: string): [Dayjs, Dayjs] {
-  const end = dayjs(today)
+  const end = dayjs(today).subtract(1, 'day')
   return [end.subtract(29, 'day'), end]
 }
 function number(value: number | null | undefined) {
