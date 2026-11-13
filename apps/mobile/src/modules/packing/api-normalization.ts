@@ -8,6 +8,7 @@ import type {
   PackIncoming,
   PackLocateResult,
   PackLocation,
+  PackOwner,
   PackPalletDetail,
   PackPalletList,
   PackProductCandidate,
@@ -149,9 +150,16 @@ const resolveSchema = z.object({
   palletGuid: nullableText,
 });
 
+// 账号能操作的地点，以及「可发往的地点」候选，结构相同：{ code, name, isWarehouse }。
+const ownerSchema = z.object({
+  code: text.min(1),
+  name: emptyText,
+  isWarehouse: z.boolean().nullish().transform((value) => value ?? false),
+});
+
 const scopeSchema = z.object({
   owners: z
-    .array(z.object({ code: text.min(1), name: emptyText, isWarehouse: z.boolean().nullish().transform((value) => value ?? false) }))
+    .array(ownerSchema)
     .nullish()
     .transform((value) => value ?? []),
   isManager: z.boolean().nullish().transform((value) => value ?? false),
@@ -257,6 +265,7 @@ export const normalizeResolve = (payload: unknown): PackResolveResult => parse(r
 export const normalizeCarrier = (payload: unknown): PackCarrier => parse(carrierSchema, payload);
 export const normalizeCarriers = (payload: unknown): PackCarrier[] => parse(z.array(carrierSchema), payload);
 export const normalizeScope = (payload: unknown): PackScope => parse(scopeSchema, payload);
+export const normalizeDestinations = (payload: unknown): PackOwner[] => parse(z.array(ownerSchema), payload);
 export const normalizeLocations = (payload: unknown): PackLocation[] => parse(z.array(locationSchema), payload);
 export const normalizeLocation = (payload: unknown): PackLocation => parse(locationSchema, payload);
 export const normalizeIncoming = (payload: unknown): PackIncoming => parse(incomingSchema, payload);

@@ -178,6 +178,21 @@ export function isShippableDestination(destination: PackDestination) {
   return isShippableType(destination.destinationType);
 }
 
+/** 「可发往的地点」候选拆成总仓项（接口带 isWarehouse 才有）和分店列表，界面据此决定要不要显示「总仓」。 */
+export function splitDestinations(options: readonly PackOwner[]): { warehouse: PackOwner | null; stores: PackOwner[] } {
+  return {
+    warehouse: options.find((option) => option.isWarehouse) ?? null,
+    stores: options.filter((option) => !option.isWarehouse),
+  };
+}
+
+/** 分店候选按名称或编码搜索；空关键字返回全部。 */
+export function filterDestinationStores(stores: readonly PackOwner[], keyword: string): PackOwner[] {
+  const needle = keyword.trim().toLowerCase();
+  if (!needle) return [...stores];
+  return stores.filter((store) => store.name.toLowerCase().includes(needle) || store.code.toLowerCase().includes(needle));
+}
+
 /** 去向里的收货地点显示名：有名字用名字，否则用编码。 */
 export function destinationLabel(destination: PackDestination): string | null {
   return destination.name?.trim() || destination.code?.trim() || null;

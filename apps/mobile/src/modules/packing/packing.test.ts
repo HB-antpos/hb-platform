@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   normalizeCartonDetail,
   normalizeCartonList,
+  normalizeDestinations,
   normalizeIncoming,
   normalizeLocate,
   normalizeLocations,
@@ -24,6 +25,7 @@ import {
   destinationFormOf,
   destinationRequestOf,
   emptyDestinationForm,
+  filterDestinationStores,
   findCartonItemByCode,
   findPalletCartonByCode,
   formatLabelTime,
@@ -47,6 +49,7 @@ import {
   resolveScanQuantity,
   savedOwnerCode,
   sharedOrderNo,
+  splitDestinations,
   splitPackNumber,
   sumCartonWeight,
   toDestinationRequest,
@@ -262,6 +265,29 @@ assert.equal(resolveActiveOwner([], "S01"), null, "没有任何地点返回 null
 assert.equal(savedOwnerCode({ "user-a": "S02" }, "USER-A"), "S02", "按账号分开记");
 assert.equal(savedOwnerCode({ "user-a": "S02" }, "user-b"), null, "不同账号的选择不串");
 assert.equal(savedOwnerCode({}, null), null);
+
+// ---- 可发往的地点（GET packing/destinations，店员也能调）----
+const destinations = normalizeDestinations({
+  success: true,
+  data: [
+    { code: "WAREHOUSE", name: "HB Warehouse", isWarehouse: true },
+    { code: "S02", name: "Inala" },
+    { code: "S05", name: "Cairns" },
+  ],
+});
+assert.equal(destinations.length, 3);
+assert.equal(destinations[1].isWarehouse, false, "省略的 isWarehouse 按 false");
+const split = splitDestinations(destinations);
+assert.equal(split.warehouse?.code, "WAREHOUSE", "总仓项由接口返回的 isWarehouse 决定");
+assert.deepEqual(split.stores.map((store) => store.code), ["S02", "S05"], "分店列表不含总仓项");
+assert.equal(splitDestinations([{ code: "S02", name: "Inala", isWarehouse: false }]).warehouse, null, "总仓作为所属地点时接口不返回总仓项，不显示「总仓」");
+assert.deepEqual(splitDestinations([]), { warehouse: null, stores: [] }, "接口返回为空：没有总仓、没有分店");
+assert.deepEqual(normalizeDestinations([]), []);
+assert.deepEqual(filterDestinationStores(split.stores, "  ").map((store) => store.code), ["S02", "S05"], "空关键字返回全部");
+assert.deepEqual(filterDestinationStores(split.stores, "cairns").map((store) => store.code), ["S05"], "按名称搜索不区分大小写");
+assert.deepEqual(filterDestinationStores(split.stores, "s02").map((store) => store.code), ["S02"], "也可按编码搜索");
+assert.deepEqual(filterDestinationStores(split.stores, "zzz"), []);
+assert.throws(() => normalizeDestinations([{ name: "缺编码" }]), /Invalid warehouse packing response/, "缺编码的候选拒绝");
 
 // ---- 编号 ----
 assert.equal(looksLikePackCode(" bx2611130042 "), "carton");

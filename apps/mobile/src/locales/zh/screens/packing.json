@@ -136,6 +136,7 @@
     "receivingStore": "收货分店",
     "searchStore": "搜索分店名称",
     "noStores": "没有可选的其他分店",
+    "loadFailedRetry": "加载分店失败，点此重试",
     "noStoreMatch": "没有匹配的分店",
     "howToSend": "怎么送",
     "selfDeliver": "自己送 / 对方来取",

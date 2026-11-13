@@ -4,13 +4,10 @@ import { ActivityIndicator, Button, Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
-import { getAllStores } from "@/modules/shop/api";
-import { useCartStore } from "@/store/cart-store";
-import { sortStoresByName } from "@/shared/utils/name-sort";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
-import { createCarrier, fetchCarriers } from "../api";
+import { createCarrier, fetchCarriers, fetchDestinations } from "../api";
 import { packingErrorMessage } from "../packing-errors";
-import { destinationFormError, sameCode } from "../packing-logic";
+import { destinationFormError, filterDestinationStores, sameCode, splitDestinations } from "../packing-logic";
 import { DESTINATION_TYPE, WAREHOUSE_OWNER_CODE, type DestinationFormValue, type PackCarrier } from "../types";
 import { PACK_COLORS, SectionTitle, Segmented, packStyles } from "./pack-ui";
 
@@ -36,7 +33,8 @@ const TAB_TYPE: Record<DestinationTab, number> = {
 /**
  * 选择去向（箱和托盘共用）：本店存放 / 其他分店 / 总仓，可先不选。
  * 去其他分店或总仓时再选「怎么送」：自己送 / 对方来取，或交运输公司（可现场新增）。
- * 总仓作为所属地点时没有「总仓」一项，「本店存放」叫「仓内存放」。
+ * 其他分店、总仓的候选都来自 `GET packing/destinations`（店员也能调）：返回里有总仓项才显示「总仓」一项，
+ * 总仓作为所属地点时接口不返回总仓，「本店存放」叫「仓内存放」。
  */
 export function DestinationSheet({
   visible,
@@ -52,7 +50,7 @@ export function DestinationSheet({
 }: {
   visible: boolean;
   kind: "carton" | "pallet";
-  /** 当前箱 / 托盘所属的地点编码：收货分店里要排除它，总仓所属时隐藏「总仓」。 */
+  /** 当前箱 / 托盘所属的地点编码：用来取候选地点（接口已排除它自己），总仓所属时「本店存放」叫「仓内存放」。 */
   ownerCode: string;
   title: string;
   confirmLabel: string;
@@ -64,7 +62,6 @@ export function DestinationSheet({
 }) {
   const { t, language } = useAppTranslation(["packing", "common"]);
   const queryClient = useQueryClient();
-  const userStores = useCartStore((state) => state.userStores);
   const ownerIsWarehouse = sameCode(ownerCode, WAREHOUSE_OWNER_CODE);
   const [value, setValue] = useState<DestinationFormValue>(initial);
   const [viaCarrier, setViaCarrier] = useState(Boolean(initial.carrierGuid));
@@ -90,26 +87,20 @@ export function DestinationSheet({
   const tab = tabOf(value.destinationType);
   const shipping = tab === "store" || tab === "warehouse";
 
-  const storesQuery = useQuery({
-    queryKey: ["packing", "stores"],
-    queryFn: getAllStores,
-    enabled: visible && tab === "store",
+  const destinationsQuery = useQuery({
+    queryKey: ["packing", "destinations", ownerCode],
+    queryFn: ({ signal }) => fetchDestinations(ownerCode, signal),
+    enabled: visible && Boolean(ownerCode),
     staleTime: 5 * 60_000,
-    retry: false,
   });
-  // 取不到全部分店（账号没有分店列表权限）时退回本账号可见的分店。
-  const stores = useMemo(() => {
-    const source = storesQuery.data?.length ? storesQuery.data : userStores;
-    const keyword = storeKeyword.trim().toLowerCase();
-    return sortStoresByName(
-      source.filter(
-        (store) =>
-          store.isActive !== false &&
-          !sameCode(store.storeCode, ownerCode) &&
-          (!keyword || store.storeName.toLowerCase().includes(keyword) || store.storeCode.toLowerCase().includes(keyword)),
-      ),
-    );
-  }, [ownerCode, storeKeyword, storesQuery.data, userStores]);
+  const { warehouse: warehouseOption, stores: allStores } = useMemo(
+    () => splitDestinations(destinationsQuery.data ?? []),
+    [destinationsQuery.data],
+  );
+  const stores = useMemo(() => filterDestinationStores(allStores, storeKeyword), [allStores, storeKeyword]);
+  // 候选还在加载时，已选的总仓不能凭空消失。
+  const showWarehouse =
+    Boolean(warehouseOption) || (destinationsQuery.isLoading && value.destinationType === DESTINATION_TYPE.warehouse);
 
   const carriersQuery = useQuery({
     queryKey: ["packing", "carriers"],
@@ -155,7 +146,7 @@ export function DestinationSheet({
   const tabOptions = [
     { key: "local" as const, label: ownerIsWarehouse ? t("destination.typeLocalWarehouse") : t("destination.typeLocal") },
     { key: "store" as const, label: t("destination.typeStore") },
-    ...(ownerIsWarehouse ? [] : [{ key: "warehouse" as const, label: t("destination.typeWarehouse") }]),
+    ...(showWarehouse ? [{ key: "warehouse" as const, label: t("destination.typeWarehouse") }] : []),
   ];
 
   return (
@@ -186,7 +177,7 @@ export function DestinationSheet({
             // 切换去向类型时清掉不再适用的选择，避免提交时带着上一类的分店 / 公司。
             patch({
               destinationType: TAB_TYPE[next],
-              ...(next === "store" ? {} : { code: null, name: null }),
+              ...(next === "store" ? {} : { code: null, name: next === "warehouse" ? warehouseOption?.name ?? null : null }),
             });
           }}
           options={tabOptions}
@@ -210,16 +201,21 @@ export function DestinationSheet({
               style={packStyles.textInput}
             />
             <View style={packStyles.cardList}>
-              {storesQuery.isLoading ? <ActivityIndicator style={styles.inlineLoading} /> : null}
+              {destinationsQuery.isLoading ? <ActivityIndicator style={styles.inlineLoading} /> : null}
+              {destinationsQuery.isError ? (
+                <Pressable accessibilityRole="button" onPress={() => void destinationsQuery.refetch()} style={styles.clearRow}>
+                  <Text style={styles.link}>{t("destination.loadFailedRetry")}</Text>
+                </Pressable>
+              ) : null}
               <ScrollView style={styles.storeList} nestedScrollEnabled keyboardShouldPersistTaps="handled">
                 {stores.map((store, index) => {
-                  const selected = sameCode(store.storeCode, value.code);
+                  const selected = sameCode(store.code, value.code);
                   return (
                     <Pressable
-                      key={store.storeCode}
+                      key={store.code}
                       accessibilityRole="radio"
                       accessibilityState={{ checked: selected }}
-                      onPress={() => patch({ code: store.storeCode, name: store.storeName })}
+                      onPress={() => patch({ code: store.code, name: store.name })}
                       style={[styles.radioRow, index > 0 ? styles.divider : null]}
                     >
                       <MaterialCommunityIcons
@@ -228,13 +224,13 @@ export function DestinationSheet({
                         color={selected ? PACK_COLORS.action : PACK_COLORS.outline}
                       />
                       <Text numberOfLines={1} style={styles.radioText}>
-                        {store.storeName}
+                        {store.name}
                       </Text>
                     </Pressable>
                   );
                 })}
               </ScrollView>
-              {!storesQuery.isLoading && stores.length === 0 ? (
+              {destinationsQuery.isSuccess && stores.length === 0 ? (
                 <Text style={[packStyles.muted, styles.emptyHint]}>
                   {storeKeyword.trim() ? t("destination.noStoreMatch") : t("destination.noStores")}
                 </Text>

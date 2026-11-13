@@ -4,6 +4,7 @@ import {
   normalizeCarriers,
   normalizeCartonDetail,
   normalizeCartonList,
+  normalizeDestinations,
   normalizeIncoming,
   normalizeLocate,
   normalizeLocation,
@@ -26,6 +27,15 @@ const pallet = (palletGuid: string, suffix = "") => `${BASE}/pallets/${encodeURI
 export async function fetchPackScope(signal?: AbortSignal) {
   const response = await apiClient.get(`${BASE}/scope`, { signal });
   return normalizeScope(response.data);
+}
+
+/**
+ * 选「其他分店 / 总仓」时的候选地点：启用的分店（不含发出地点自己）加总仓（发出地点是总仓时没有总仓项）。
+ * 店员没有查看分店权限，不能用通用的分店列表接口，一律用这个。
+ */
+export async function fetchDestinations(ownerCode: string, signal?: AbortSignal) {
+  const response = await apiClient.get(`${BASE}/destinations`, { params: { ownerCode }, signal });
+  return normalizeDestinations(response.data);
 }
 
 // ---- 箱 ----

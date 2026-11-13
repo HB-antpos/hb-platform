@@ -136,6 +136,7 @@
     "receivingStore": "Receiving store",
     "searchStore": "Search store name",
     "noStores": "No other stores to choose from",
+    "loadFailedRetry": "Could not load stores. Tap to retry",
     "noStoreMatch": "No matching store",
     "howToSend": "How to send",
     "selfDeliver": "Deliver ourselves / they collect",
