@@ -296,6 +296,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStoreSpecialProductCategoryAsync(CancellationToken cancellationToken);
 
+    Task ApplyWarehousePackingAsync(CancellationToken cancellationToken);
+
+    Task VerifyWarehousePackingAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1888,6 +1892,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StoreSpecialProductCategorySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyWarehousePackingAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehousePackingSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 六张表的列 / 主键 / 索引签名通过后协调器才登记账本。
+        await VerifyWarehousePackingAsync(cancellationToken);
+    }
+
+    public async Task VerifyWarehousePackingAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehousePackingSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

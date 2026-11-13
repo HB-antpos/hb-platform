@@ -1113,6 +1113,11 @@ builder.Services.AddScoped<
     BlazorApp.Api.Features.WarehousePicking.IWarehousePickingAssignmentService,
     BlazorApp.Api.Features.WarehousePicking.WarehousePickingAssignmentService
 >();
+// 仓库扫码打包：装箱、封箱、组托盘、指定去向与商品位置查询（移动端和 Web 共用）。
+builder.Services.AddScoped<
+    BlazorApp.Api.Features.WarehousePacking.IWarehousePackingService,
+    BlazorApp.Api.Features.WarehousePacking.WarehousePackingService
+>();
 // 通知平台：统一发布入口 + 站内消息收件箱 + SignalR 实时通道（单实例，分组在内存中）。
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<

@@ -4324,6 +4324,57 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 仓库扫码打包六张表_新表_可重复执行_箱号唯一_权限码只入库一次_识别列漂移和缺失索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 表还没建：54480。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql));
+        Assert.Equal(54480, missing.Number);
+
+        // 新建、可重复执行；重复执行不丢数据。
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.WarehousePackCarton
+                (CartonGUID, CartonNo, Status, OriginName, DestinationType, CreatedAtUtc, CreatedByUserGuid, CreatedByName, UpdatedAtUtc)
+            VALUES (N'c-1', N'BX2611130001', 1, N'HB WAREHOUSE', 0, SYSUTCDATETIME(), N'u-1', N'Lily', SYSUTCDATETIME());
+            INSERT dbo.WarehousePackCartonItem (CartonGUID, ProductCode, Quantity, UpdatedAtUtc, UpdatedByName)
+            VALUES (N'c-1', N'P-1', 24, SYSUTCDATETIME(), N'Lily');
+            """);
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.WarehousePackCarton WHERE CartonNo = N'BX2611130001'"));
+        Assert.Equal(24, await ScalarIntAsync(main, "SELECT Quantity FROM dbo.WarehousePackCartonItem WHERE CartonGUID = N'c-1' AND ProductCode = N'P-1'"));
+
+        // 箱号是标签上的条码内容：重号必须被唯一索引挡住。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.WarehousePackCarton
+                (CartonGUID, CartonNo, Status, OriginName, DestinationType, CreatedAtUtc, CreatedByUserGuid, CreatedByName, UpdatedAtUtc)
+            VALUES (N'c-2', N'BX2611130001', 1, N'HB WAREHOUSE', 0, SYSUTCDATETIME(), N'u-1', N'Lily', SYSUTCDATETIME());
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 列类型漂移 → 54481；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WarehousePackPallet ALTER COLUMN ConsignmentNo nvarchar(50) NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql));
+        Assert.Equal(54481, drift.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WarehousePackPallet ALTER COLUMN ConsignmentNo nvarchar(100) NULL;");
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql);
+
+        // 缺唯一索引 → 54482；重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX UX_WarehousePackPallet_PalletNo ON dbo.WarehousePackPallet;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql));
+        Assert.Equal(54482, noIndex.Number);
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehousePackingSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 分店特殊商品分类两张表_新表_同店名称唯一_归属主键_可重复执行_识别漂移和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

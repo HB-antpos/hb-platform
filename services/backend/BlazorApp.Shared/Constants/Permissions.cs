@@ -372,6 +372,8 @@ namespace BlazorApp.Shared.Constants
             public const string ManageLocations = "Warehouse.ManageLocations";
             public const string ManageOrders = "Warehouse.ManageOrders";
             public const string Picking = "Warehouse.Picking";
+            /// <summary>扫码打包：装箱、封箱打标、组托盘、指定去向与商品位置查询。</summary>
+            public const string Packing = "Warehouse.Packing";
             /// <summary>
             /// 打印配货单时自动「开始配货」（订单 已提交 → 配货中）。与订单编辑权限分开授权：
             /// 纯仓库员工不能编辑订单，但可以被单独授予这一个动作。刻意不设别名，
@@ -542,6 +544,8 @@ namespace BlazorApp.Shared.Constants
                 [Warehouse.CancelPriceUpdateTasks] = [Warehouse.ManageProducts, Warehouse.Manage],
                 // 现有仓库员工与订货管理者无需重新授权即可拣货；单独授予 Picking 不会反向获得管理权限。
                 [Warehouse.Picking] = [Warehouse.Manage, Warehouse.ManageOrders],
+                // 打包与拣货同一口径：现有仓库管理者无需重新授权；单独授予 Packing 不会反向获得管理权限。
+                [Warehouse.Packing] = [Warehouse.Manage, Warehouse.ManageOrders],
                 // 管理下载权限天然包含查看下载，保证菜单可见性和列表 GET 授权一致。
                 [System.ViewAppDownloads] = [System.ManageAppDownloads],
                 // 能编辑管理分店排班的人天然可以查看排班，避免「能改不能看」导致排班页 403。

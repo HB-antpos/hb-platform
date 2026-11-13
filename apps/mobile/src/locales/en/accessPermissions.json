@@ -914,6 +914,10 @@
       "name": "Pick store orders",
       "description": "In the app (Order picking), scan to pick, fill in missing inner qty and submit picked quantities. Included with Manage warehouse or Manage warehouse orders."
     },
+    "Warehouse.Packing": {
+      "name": "Pack cartons and pallets",
+      "description": "In the app and on the web (Packing), scan items into cartons, seal and print carton labels, build pallets, set destinations and look up where an item is. Included with Manage warehouse or Manage warehouse orders."
+    },
     "Warehouse.StartPicking": {
       "name": "Start picking on print",
       "description": "Web page /warehouse/store-order/picking/:id - printing or downloading the picking sheet moves the order from Submitted to Picking. Granted separately from order editing; not included with Manage warehouse."
