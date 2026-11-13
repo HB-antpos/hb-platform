@@ -1,0 +1,169 @@
+{
+  "title": "收银端设置",
+  "tabs": {
+    "global": "全局",
+    "stores": "门店",
+    "devices": "设备"
+  },
+  "states": {
+    "loading": "加载中…",
+    "loadFailed": "加载失败，请稍后重试。",
+    "notAllowed": "当前账号没有查看收银端设置的权限。",
+    "readOnly": "当前账号只有查看权限，不能修改收银端设置。",
+    "noStores": "没有可查看的门店。",
+    "noDevices": "这家门店还没有登记收银设备。",
+    "noResults": "没有符合条件的门店。",
+    "pickStoreFirst": "先选择门店，再查看它的收银设备。"
+  },
+  "choice": {
+    "global": { "inherit": "未设置", "on": "开", "off": "关" },
+    "store": { "inherit": "跟随全局", "on": "开", "off": "关" },
+    "device": { "inherit": "跟随门店", "on": "开", "off": "关" }
+  },
+  "effective": {
+    "label": "应生效",
+    "reported": "设备回报",
+    "unreported": "未回报",
+    "pendingSync": "待同步",
+    "combined": "{{value}} · {{source}}",
+    "value": { "on": "开", "off": "关", "local": "沿用本机" },
+    "source": {
+      "global": "全局",
+      "store": "本店",
+      "device": "本设备",
+      "default": "默认",
+      "none": ""
+    }
+  },
+  "badge": {
+    "new": "新",
+    "changed": "已修改"
+  },
+  "clients": {
+    "wpf": "WPF",
+    "ipad": "iPad",
+    "handheld": "手持",
+    "other": "其他"
+  },
+  "deviceStatus": {
+    "applied": "已应用最新",
+    "pending": "待同步",
+    "never": "尚未同步",
+    "neverHint": "旧版本不支持，或还没联过网"
+  },
+  "global": {
+    "intro": "「未设置」表示不下发，收银机继续用本机已有的值；选「开」或「关」会覆盖所有门店收银机本机的设置。保存后收银机约 {{minutes}} 分钟内同步。硬件参数仍在收银机本机设置。",
+    "updatedBy": "最近修改 {{time}} · {{name}}",
+    "updatedAt": "最近修改 {{time}}"
+  },
+  "stores": {
+    "searchPlaceholder": "搜索门店名称或代码",
+    "filterAll": "全部 {{count}}",
+    "filterOverrides": "有覆盖 {{count}}",
+    "filterUnsynced": "未同步 {{count}}",
+    "followGlobal": "跟随全局",
+    "applied": "已应用 {{applied}}/{{total}}",
+    "pending": "{{applied}}/{{total}} 已应用",
+    "noDevices": "无设备",
+    "overrideTag": "{{name}}：{{value}}",
+    "deviceOverrides": "{{count}} 台设备有单独设置"
+  },
+  "storeDetail": {
+    "title": "{{store}} · 门店覆盖",
+    "intro": "每项选「跟随全局」时使用全局的值；选「开」或「关」只对本店生效。",
+    "devicesTitle": "本店设备",
+    "devicesEmpty": "本店还没有登记收银设备。"
+  },
+  "devices": {
+    "currentStore": "当前门店",
+    "pickStore": "选择门店",
+    "switchStore": "切换",
+    "hasOverride": "有单独设置",
+    "offlineCount": "离线修改 {{count}} 次",
+    "version": "版本 {{version}}",
+    "unknownVersion": "版本未知"
+  },
+  "deviceDetail": {
+    "title": "设备 {{device}}",
+    "intro": "每项选「跟随门店」时使用本店的值；选「开」或「关」只对这台设备生效。",
+    "appliedAt": "最近应用 {{time}}",
+    "offlineNotice": "离线时临时修改过 {{count}} 次，最近一次 {{time}}",
+    "offlineNoticeNoTime": "离线时临时修改过 {{count}} 次",
+    "notFound": "没有找到这台设备。",
+    "unsupportedNone": "这台设备端没有可下发的设置项。"
+  },
+  "actions": {
+    "save": "保存并下发",
+    "saving": "正在保存…",
+    "discard": "撤销修改"
+  },
+  "confirm": {
+    "titleGlobal": "确认下发全局设置？",
+    "titleStore": "确认下发到 {{target}}？",
+    "titleDevice": "确认下发到设备 {{target}}？",
+    "subtitleGlobal": "以下改动约 {{minutes}} 分钟内同步到所有门店收银机",
+    "subtitleStore": "以下改动约 {{minutes}} 分钟内同步到本店收银机",
+    "subtitleDevice": "以下改动约 {{minutes}} 分钟内同步到这台设备",
+    "change": "{{from}} → {{to}}",
+    "inheritWith": "{{label}}（{{value}}）",
+    "impact": "影响设备",
+    "impactCount": "{{count}} 台",
+    "impactAll": "所有门店的收银机",
+    "impactNone": "没有适用的设备",
+    "notSyncedWarning": "{{devices}} 版本过旧不支持或还没联过网，升级或联网后才会生效。",
+    "cancel": "取消",
+    "confirm": "确认下发",
+    "saveFailed": "保存失败，请稍后重试。"
+  },
+  "saved": {
+    "global": "全局设置已保存，收银机约 {{minutes}} 分钟内同步。",
+    "store": "门店设置已保存，收银机约 {{minutes}} 分钟内同步。",
+    "device": "设备设置已保存，这台设备约 {{minutes}} 分钟内同步。"
+  },
+  "leave": {
+    "discardTitle": "放弃未保存的修改？",
+    "discardMessage": "你修改了收银端设置但还没有保存并下发，离开后这些修改会丢失。",
+    "keepEditing": "继续编辑",
+    "discard": "放弃修改",
+    "busyTitle": "正在保存",
+    "busyMessage": "正在保存收银端设置，请等保存完成再离开。"
+  },
+  "settings": {
+    "cashMovement_enabled": {
+      "name": "现金存入 / 取出",
+      "hint": "收银机记录交店长、补零钱、小额支出"
+    },
+    "cashDrawer_noSaleRescan": {
+      "name": "只开钱箱需再扫员工工码",
+      "hint": "不结账、只打开钱箱时，要求再扫一次员工工码"
+    },
+    "returns_rescan": {
+      "name": "退货需再扫员工工码",
+      "hint": "办理退货前要求再扫一次员工工码"
+    },
+    "receipt_bankReceipt": {
+      "name": "客人小票附银行收据",
+      "hint": "刷卡付款后在客人小票上附银行收据"
+    },
+    "payment_manualCard": {
+      "name": "手动刷卡",
+      "hint": "允许收银员手动录入刷卡金额"
+    },
+    "payment_voucher": {
+      "name": "代金券 / 购物券",
+      "hint": "付款页允许用代金券或购物券"
+    },
+    "payment_orderList": {
+      "name": "付款页显示订单列表",
+      "hint": "付款页右侧显示本单商品列表"
+    },
+    "maintenance_autoRestart": {
+      "name": "日结后凌晨自动重启",
+      "hint": "日结完成后在凌晨自动重启收银机"
+    },
+    "zeller_unmatchedRefund": {
+      "name": "Zeller 无关联退款",
+      "hint": "允许处理没有原交易可关联的 Zeller 退款"
+    }
+  }
+}

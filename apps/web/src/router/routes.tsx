@@ -5,6 +5,7 @@ import {
   BarChartOutlined,
   BuildOutlined,
   CalendarOutlined,
+  ControlOutlined,
   DashboardOutlined,
   DatabaseOutlined,
   DollarOutlined,
@@ -54,6 +55,7 @@ import { getNavGroupAccessKeys } from './navGroupLogic'
 import { shouldIncludeLocalMenuRoute } from './menuVisibility'
 
 const DashboardPage = lazy(() => import('../pages/Dashboard'))
+const PosSettingsPage = lazy(() => import('../pages/System/PosSettings'))
 const DomesticChinaSuppliersPage = lazy(() => import('../pages/DomesticPurchase/ChinaSuppliers'))
 const DomesticProductsPage = lazy(() => import('../pages/DomesticPurchase/DomesticProducts'))
 const ProductPrefixCodeManagementPage = lazy(() => import('../pages/DomesticPurchase/ProductPrefixCodeManagement'))
@@ -197,6 +199,7 @@ const iconMap = {
   ShoppingCartOutlined: <ShoppingCartOutlined />,
   TagsOutlined: <TagsOutlined />,
   MoneyCollectOutlined: <MoneyCollectOutlined />,
+  ControlOutlined: <ControlOutlined />,
   KeyOutlined: <KeyOutlined />,
   PictureOutlined: <PictureOutlined />,
   QrcodeOutlined: <QrcodeOutlined />,
@@ -402,6 +405,17 @@ export const appRoutes: AppRouteItem[] = [
           accessKey: 'canReadStore',
         },
         element: <SystemStoresPage />,
+      },
+      {
+        // 收银端设置下发：View / Manage 任一可进入；保存按钮在页面内另按 canManagePosSettings 控制。
+        path: '/system/pos-settings',
+        meta: {
+          title: 'menu.posSettings',
+          icon: 'ControlOutlined',
+          keepAlive: true,
+          accessKey: 'canViewPosSettings',
+        },
+        element: <PosSettingsPage />,
       },
       ...navGroupRoutes(DEVICES_NAV_GROUP),
       ...navGroupRoutes(ACCOUNTS_NAV_GROUP),

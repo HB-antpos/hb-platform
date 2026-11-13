@@ -1471,6 +1471,8 @@ builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashAttachment
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IPosCashMovementSource>(sp =>
     new BlazorApp.Api.Services.StoreCash.PosmCashMovementSource(sp.GetRequiredService<POSMSqlSugarContext>().Db));
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashService, BlazorApp.Api.Services.StoreCash.StoreCashService>();
+// 收银端设置下发（管理侧）：全局 / 门店 / 设备三层已设置值、修改记录、设备应用情况。
+builder.Services.AddScoped<BlazorApp.Api.Services.PosSettings.IPosSettingsService, BlazorApp.Api.Services.PosSettings.PosSettingsService>();
 // 收银端小额支出 → 后台现金支出（类别 Purchase），每 2 分钟增量同步。
 builder.Services.AddHostedService<BlazorApp.Api.Services.StoreCash.PosPaidOutExpenseSyncBackgroundService>();
 builder.Services.AddScoped<ISalesDashboardCacheWarmer, SalesDashboardCacheWarmer>();

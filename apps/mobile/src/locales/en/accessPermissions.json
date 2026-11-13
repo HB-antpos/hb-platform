@@ -330,6 +330,14 @@
       "name": "Manage planograms",
       "description": "Maintain shelf and hook models, clear product display specs, and publish or archive display plans on the web admin."
     },
+    "PosSettings.View": {
+      "name": "View POS settings",
+      "description": "On the web admin (System > POS settings) and in the app (POS Settings), view global, store and device POS settings and whether each device has applied them."
+    },
+    "PosSettings.Manage": {
+      "name": "Manage POS settings",
+      "description": "On the web admin (System > POS settings) and in the app (POS Settings), change global, store and device POS settings and push them to POS terminals. Only admins can change the global level."
+    },
     "SalesOrders.View": {
       "name": "View POS orders",
       "description": "In the app, view POS orders, lines and invoices by store, date and order type."

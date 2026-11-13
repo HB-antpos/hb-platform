@@ -139,6 +139,8 @@ namespace BlazorApp.Shared.Constants
         /// <summary>后台与移动端共用同一个权限码。</summary>
         private static readonly string[] WebAndMobileCodes =
         {
+            "PosSettings.Manage",
+            "PosSettings.View",
             "Advertisements.View",
             "Attendance.Admin.View",
             "Attendance.Approval.ReviewManagedStore",

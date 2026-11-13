@@ -92,6 +92,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["installment-orders", "Lay-by orders", "分期订单", ["InstallmentOrders.View"]],
   ["store-vouchers", "Store vouchers", "门店代金券", ["StoreVouchers.View"]],
   ["store-cash", "Cash", "现金", ["Cash.Overview.View"]],
+  // 与后端 FullAppMenu 的 pos-settings 一致：入口只认 PosSettings.View（Manage 只决定页面里能不能改）。
+  ["pos-settings", "POS Settings", "收银端设置", ["PosSettings.View"]],
   ["attendance-personal", "My attendance", "我的考勤", ["Attendance.Schedule.ViewSelf"]],
   ["attendance-management", "Attendance management", "考勤管理", [
     "Attendance.Schedule.ViewStore", "Attendance.Schedule.EditManagedStore", "Attendance.Availability.ViewManagedStore",

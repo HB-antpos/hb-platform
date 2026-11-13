@@ -633,6 +633,23 @@ assert.deepEqual(
   "人脸比对合并入口必须归入人员与管理，紧跟资料审核，只依赖后端显式菜单"
 );
 assert.deepEqual(
+  buildWorkbenchSections(["device-management", "pos-settings"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+    icons: section.items.map((item) => item.icon),
+  })),
+  [
+    {
+      key: "people-management",
+      itemRouteNames: ["device-management", "pos-settings"],
+      icons: ["cellphone-cog", "tune-variant"],
+    },
+  ],
+  "收银端设置必须归入人员与管理并紧跟设备管理，图标为 tune-variant"
+);
+assert.equal(zhWorkbench.routes.posSettings, "收银端设置", "中文工作台必须显示收银端设置");
+assert.equal(enWorkbench.routes.posSettings, "POS Settings", "英文工作台必须显示 POS Settings");
+assert.deepEqual(
   buildWorkbenchSections(["face-unwelcome", "face-capture-results", "face-match-settings"]),
   [],
   "旧三个人脸比对入口不再出现在工作台（新版只显示 face-hub）"

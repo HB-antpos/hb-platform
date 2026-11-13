@@ -91,7 +91,7 @@ assert.equal(implicitPreview[2].visible, false);
 const fullMenus = getRoleMenuDefinitions("en");
 // Web 菜单目录按页签登记：52 = 原 50 项 + 节日销售报告（#1155）+ 商品陈列图（/pos-admin/planograms，Planogram.View，商品与价格合并页的第 5 个页签）。
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 52);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 45);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 46);
 // 「人脸比对」合并入口：与后端 FullAppMenu 的 any-of 一致，六个码任一即可见；旧三项目录项保留（旧版 App 兼容）
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "face-hub")?.permissionCodes,
@@ -127,6 +127,11 @@ assert.deepEqual(
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "store-cash")?.permissionCodes,
   ["Cash.Overview.View"]
+);
+// 收银端设置入口只认 PosSettings.View（Manage 只决定页面里能不能改），与后端 FullAppMenu 的 pos-settings 同口径。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "pos-settings")?.permissionCodes,
+  ["PosSettings.View"]
 );
 // Web「现金管理」与移动端「现金」共用 Cash.Overview.View，与后端 FullMenu 的 /pos-admin/store-cash 同口径。
 assert.deepEqual(

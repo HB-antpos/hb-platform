@@ -99,6 +99,8 @@ function createEmptyAccess(): AccessControl {
     canCreateStoreProducts: false,
     canManageStoreOps: false,
     canViewStoreCash: false,
+    canViewPosSettings: false,
+    canManagePosSettings: false,
     canManageLocalPurchase: false,
     canEditLocalPurchase: false,
     canPushLocalPurchaseToHq: false,
@@ -358,6 +360,10 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   // 父菜单 /pos-admin 不设访问键，由可见子页决定，所以本页权限即可点亮父菜单。
   const canViewStoreCash = hasPermission(P.Cash.OverviewView)
 
+  // 收银端设置：View / Manage 任一可进入页面；只有 Manage 才能编辑（全局层再由后端限制为管理员）。
+  const canManagePosSettings = isAdmin || hasPermission(P.PosSettings.Manage)
+  const canViewPosSettings = canManagePosSettings || hasPermission(P.PosSettings.View)
+
   // 本地进货
   const canManageLocalPurchase = isAdmin || hasPermission(P.LocalPurchase.View)
   const canEditLocalPurchase = isAdmin || hasPermission(P.LocalPurchase.Edit)
@@ -580,6 +586,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canCreateStoreProducts,
     canManageStoreOps,
     canViewStoreCash,
+    canViewPosSettings,
+    canManagePosSettings,
     canManageLocalPurchase,
     canEditLocalPurchase,
     canPushLocalPurchaseToHq,

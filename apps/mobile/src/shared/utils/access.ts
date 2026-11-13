@@ -125,6 +125,11 @@ export const PERMISSIONS = {
     View: "Promotions.View",
     Edit: "Promotions.Edit",
   },
+  // 收银端设置下发：View 可看全局 / 门店 / 设备三层设置与设备应用情况；Manage 才能修改并下发（全局层另限管理员，服务端把关）。
+  PosSettings: {
+    View: "PosSettings.View",
+    Manage: "PosSettings.Manage",
+  },
   StoreProducts: {
     View: "StoreProducts.View",
     Create: "StoreProducts.Create",

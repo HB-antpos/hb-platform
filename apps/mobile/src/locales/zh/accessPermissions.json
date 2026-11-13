@@ -330,6 +330,14 @@
       "name": "管理商品陈列图",
       "description": "Web 页面 /pos-admin/planograms - 维护货架与挂钩型号、清除商品陈列参数、发布与归档陈列方案"
     },
+    "PosSettings.View": {
+      "name": "查看收银端设置",
+      "description": "Web 页面 /system/pos-settings 与员工 App「收银端设置」- 查看全局、门店、设备的收银端设置与设备应用情况"
+    },
+    "PosSettings.Manage": {
+      "name": "管理收银端设置",
+      "description": "Web 页面 /system/pos-settings 与员工 App「收银端设置」- 修改全局、门店、设备的收银端设置并下发到收银机"
+    },
     "SalesOrders.View": {
       "name": "查看 POS 订单",
       "description": "移动端「POS 订单」- 按分店、日期与订单类型查看 POS 订单、明细及发票"

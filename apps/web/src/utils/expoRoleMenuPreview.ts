@@ -170,6 +170,7 @@ const TAB_PATHS: Record<string, string> = {
   'traffic-stats': '/(shell)/traffic-stats',
   'store-vouchers': '/(shell)/store-vouchers',
   'store-cash': '/(shell)/store-cash',
+  'pos-settings': '/(shell)/pos-settings',
   'seasonal-cards': '/(shell)/seasonal-cards',
   'attendance-personal': '/(shell)/attendance-personal',
   'attendance-management': '/(shell)/attendance-management',
@@ -221,6 +222,7 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   'installment-orders': { zhTitle: '分期订单', enTitle: 'Lay-bys' },
   'store-vouchers': { zhTitle: '门店代金券', enTitle: 'Vouchers' },
   'store-cash': { zhTitle: '现金', enTitle: 'Cash' },
+  'pos-settings': { zhTitle: '收银端设置', enTitle: 'POS Settings' },
   'seasonal-cards': { zhTitle: '节日贺卡', enTitle: 'Seasonal Cards' },
   'attendance-personal': { zhTitle: '考勤', enTitle: 'Attendance' },
   'attendance-management': { zhTitle: '考勤管理', enTitle: 'Attendance Management' },
@@ -446,6 +448,15 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     permissionCodes: [P.Cash.OverviewView],
     order: 53,
     ...ROUTE_LABELS['store-cash'],
+  },
+  {
+    routeName: 'pos-settings',
+    titleKey: 'tabs.posSettings',
+    icon: 'tune-variant',
+    // 与后端 FullAppMenu 一致：入口只认 PosSettings.View（Manage 只决定页面里能不能改）。
+    permissionCodes: [P.PosSettings.View],
+    order: 54,
+    ...ROUTE_LABELS['pos-settings'],
   },
   {
     routeName: 'attendance-personal',

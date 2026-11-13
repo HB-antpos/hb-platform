@@ -1,0 +1,196 @@
+{
+  "posSettings": {
+    "title": "POS Settings",
+    "subtitle": "Business switches pushed from head office to POS terminals. Hardware settings (printer, card terminal, scanner) stay on each terminal.",
+    "historyButton": "Change history",
+    "tabs": {
+      "global": "Global & stores",
+      "devices": "Devices"
+    },
+    "actions": {
+      "retry": "Retry",
+      "edit": "Edit",
+      "view": "View",
+      "save": "Save and push",
+      "cancel": "Cancel",
+      "reset": "Discard changes"
+    },
+    "tri": {
+      "inheritGlobal": "Not set",
+      "inheritStore": "Follow global",
+      "inheritDevice": "Follow store",
+      "on": "On",
+      "off": "Off"
+    },
+    "value": {
+      "on": "On",
+      "off": "Off",
+      "native": "Use local"
+    },
+    "source": {
+      "global": "from global",
+      "store": "from store",
+      "device": "from device",
+      "default": "default",
+      "none": "local setting"
+    },
+    "clientKind": {
+      "wpf": "WPF",
+      "ipad": "iPad",
+      "handheld": "Handheld",
+      "other": "Other"
+    },
+    "newBadge": "New",
+    "settings": {
+      "cashMovement": {
+        "name": "Cash in / out",
+        "desc": "Deposit, withdraw and today's log in the side-bar cash drawer panel"
+      },
+      "noSaleRescan": {
+        "name": "Re-scan staff code for No Sale",
+        "desc": "Ask for a staff code on No Sale even when the user has permission"
+      },
+      "returnsRescan": {
+        "name": "Re-scan staff code for returns",
+        "desc": "Scan the staff code again when Return is tapped"
+      },
+      "bankReceipt": {
+        "name": "Attach bank receipt to customer receipt",
+        "desc": "Print the bank transaction slip after the card receipt"
+      },
+      "manualCard": {
+        "name": "Manual card entry",
+        "desc": "Show Manual card on the payment page (no card terminal)"
+      },
+      "voucher": {
+        "name": "Vouchers / gift cards",
+        "desc": "Accept vouchers on the payment page"
+      },
+      "orderList": {
+        "name": "Order list on payment page",
+        "desc": "Show the item list on the left of the payment page"
+      },
+      "autoRestart": {
+        "name": "Auto restart after daily close",
+        "desc": "Prompt after daily close and restart the terminal early in the morning"
+      },
+      "zellerUnmatchedRefund": {
+        "name": "Zeller unmatched refund",
+        "desc": "Allow refunds that are not linked to the original transaction"
+      }
+    },
+    "readOnlyNote": "You have view-only access and cannot change settings.",
+    "global": {
+      "title": "Global defaults",
+      "subtitle": "The starting point for every store and device. Not set = nothing is pushed and the terminal keeps its local value.",
+      "colSetting": "Setting",
+      "colValue": "Global default",
+      "hintDefault": "When not set this is treated as {{value}}",
+      "hintNative": "When not set the terminal keeps its local setting",
+      "adminOnly": "Only administrators can save changes to the global defaults."
+    },
+    "stores": {
+      "title": "Store overrides",
+      "subtitle": "Only items that differ from global are listed; stores without overrides follow global",
+      "searchPlaceholder": "Search stores",
+      "colStore": "Store",
+      "colOverrides": "Overrides",
+      "colDeviceOverrides": "Device overrides",
+      "colApplied": "Devices applied",
+      "followGlobal": "Follow global",
+      "deviceCount": "{{count}}",
+      "footer": "{{total}} stores, {{overridden}} with overrides · devices pick changes up on their next sync (about 1 minute)",
+      "empty": "No visible stores",
+      "noMatch": "No matching stores",
+      "tableLabel": "Store overrides"
+    },
+    "storeDrawer": {
+      "title": "Store overrides · {{name}} ({{code}})",
+      "info": "Store overrides take priority over global; a single device can still be overridden on the Devices tab.",
+      "colSetting": "Setting",
+      "colOwn": "This store",
+      "colEffective": "Final value",
+      "devicesTitle": "Devices in this store",
+      "noDevices": "No devices are registered in this store",
+      "colDevice": "Device",
+      "colType": "Type",
+      "colStatus": "Status",
+      "colAppliedAt": "Applied at",
+      "updatedBy": "Last changed: {{time}} · {{name}}"
+    },
+    "devices": {
+      "storeLabel": "Store",
+      "storePlaceholder": "Select a store",
+      "title": "Devices",
+      "subtitle": "Click a row to edit that device's overrides; reported values come from the terminal after it applies settings",
+      "colCode": "Device",
+      "colClient": "Client",
+      "colVersion": "Version",
+      "colStatus": "Status",
+      "colOverride": "Device override",
+      "colOffline": "Offline local changes",
+      "colAppliedAt": "Applied at",
+      "overridden": "Overridden",
+      "offlineTimes": "{{count}}",
+      "offlineLast": "last {{time}}",
+      "empty": "No devices are registered in this store",
+      "noStores": "No visible stores, so devices cannot be listed",
+      "tableLabel": "Devices"
+    },
+    "deviceStatus": {
+      "applied": "Up to date",
+      "pending": "Pending sync",
+      "never": "Not synced yet",
+      "neverHint": "The app version is too old, or it has not been online yet",
+      "pendingHint": "There are new changes the device has not reported as applied"
+    },
+    "deviceDrawer": {
+      "title": "Device settings · {{code}}",
+      "meta": "{{store}} · {{client}} {{version}}",
+      "bannerApplied": "Latest settings applied ({{time}})",
+      "bannerPending": "New changes have not been applied to this device yet",
+      "bannerNever": "This device has never reported its settings: the app is too old, or it has not been online yet",
+      "offline": "Changed locally while offline {{count}} time(s) · last {{time}}",
+      "colSetting": "Setting",
+      "colOwn": "This device",
+      "colEffective": "Should apply",
+      "colReported": "Device reports",
+      "pendingTag": "Pending sync",
+      "notReported": "Not reported",
+      "footnote": "Device reports is the actual value the terminal sent back after applying. When it differs from Should apply it is marked Pending sync.",
+      "noSettings": "This device type has no settings to push"
+    },
+    "confirm": {
+      "titleGlobal": "Confirm global defaults",
+      "titleStore": "Confirm store overrides · {{name}}",
+      "titleDevice": "Confirm device overrides · {{code}}",
+      "description": "{{count}} change(s). Devices pick them up on their next sync:",
+      "okText": "Confirm and push",
+      "arrow": "→"
+    },
+    "saved": "Saved. Devices will apply the change on their next sync.",
+    "history": {
+      "title": "Change history",
+      "hint": "Latest 50 changes",
+      "empty": "No changes recorded yet",
+      "colTime": "Time",
+      "colScope": "Scope",
+      "colSetting": "Setting",
+      "colChange": "Change",
+      "colBy": "By",
+      "scopeGlobal": "Global",
+      "scopeStore": "Store {{name}}",
+      "scopeDevice": "Device {{code}}",
+      "unset": "Not set",
+      "cleared": "Cleared"
+    },
+    "errors": {
+      "network": "Network error. Check the connection and try again.",
+      "forbidden": "You do not have permission to do this.",
+      "notFound": "The record was not found.",
+      "server": "The server ran into a problem. Please try again later.",
+      "unknown": "The operation failed. Please try again later."
+    },
+    "emptyCatalog": "There are no settings to push yet"
+  }
+}
