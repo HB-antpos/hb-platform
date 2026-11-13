@@ -366,6 +366,37 @@ internal sealed partial class PackingService
         });
     }
 
+    // ---- 可发往的地点 ----
+
+    /// <summary>
+    /// 选「其他分店 / 总仓」时的候选：所有启用的分店（排除发出地点自己）加总仓。
+    /// 店员没有「查看分店」权限，调不动通用的分店列表接口，所以单独给一个只读接口；只返回编码和名称。
+    /// </summary>
+    public async Task<PackingResult<List<PackingOwnerDto>>> ListDestinationsAsync(PackingOperator op, string? ownerCode)
+    {
+        var owner = RequireOwner(op, ownerCode);
+        if (owner.Error != null)
+        {
+            return PackingResult<List<PackingOwnerDto>>.Fail(owner.StatusCode, owner.ErrorCode!, owner.Error);
+        }
+
+        var me = owner.Code!;
+        var stores = await _db.Queryable<Store>()
+            .Where(store => !store.IsDeleted && store.IsActive && store.StoreCode != me)
+            .OrderBy(store => store.StoreName)
+            .Select(store => new { store.StoreCode, store.StoreName })
+            .ToListAsync();
+        var destinations = stores
+            .Select(store => new PackingOwnerDto { Code = store.StoreCode, Name = store.StoreName, IsWarehouse = false })
+            .ToList();
+        if (!PackOwners.IsWarehouse(me))
+        {
+            destinations.Insert(0, new PackingOwnerDto { Code = PackOwners.Warehouse, Name = PackingConfig.WarehouseName(configuration), IsWarehouse = true });
+        }
+
+        return PackingResult<List<PackingOwnerDto>>.Ok(destinations);
+    }
+
     // ---- 订货单选择（总仓二期用）----
 
     public async Task<PackingResult<List<PackingOrderOptionDto>>> SearchOrdersAsync(PackingOperator op, string? keyword)

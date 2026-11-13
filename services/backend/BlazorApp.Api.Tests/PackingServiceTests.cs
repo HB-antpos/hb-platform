@@ -1021,6 +1021,26 @@ public sealed class PackingServiceTests : IDisposable
         Assert.Equal(404, strangerGet.StatusCode);
     }
 
+    [Fact]
+    public async Task 可发往的地点_店员也能取_排除本店_分店带总仓_总仓不带总仓()
+    {
+        var service = CreateService();
+
+        var fromStore = await service.ListDestinationsAsync(Lily, null);
+        var fromWarehouse = await service.ListDestinationsAsync(Wendy, null);
+        var notAllowed = await service.ListDestinationsAsync(Lily, "1020");
+        var adminMissing = await service.ListDestinationsAsync(Admin, null);
+
+        Assert.Equal(new[] { PackOwners.Warehouse, "1020", "1030" }, fromStore.Data!.Select(item => item.Code).OrderBy(code => code == PackOwners.Warehouse ? 0 : 1).ThenBy(code => code, StringComparer.Ordinal));
+        Assert.True(fromStore.Data.Single(item => item.Code == PackOwners.Warehouse).IsWarehouse);
+        Assert.Equal("HB TEST WAREHOUSE", fromStore.Data.Single(item => item.IsWarehouse).Name);
+        Assert.DoesNotContain(fromStore.Data, item => item.Code == "1013");
+        Assert.Equal(new[] { "1013", "1020", "1030" }, fromWarehouse.Data!.Select(item => item.Code).OrderBy(code => code, StringComparer.Ordinal));
+        Assert.DoesNotContain(fromWarehouse.Data, item => item.IsWarehouse);
+        Assert.Equal(PackingErrorCodes.OwnerNotAllowed, notAllowed.ErrorCode);
+        Assert.Equal(PackingErrorCodes.OwnerRequired, adminMissing.ErrorCode);
+    }
+
     // ---- 测试辅助 ----
 
     private static PackingCreateCartonRequestDto Dest(int type, string? code, string? carrierGuid = null) => new()
