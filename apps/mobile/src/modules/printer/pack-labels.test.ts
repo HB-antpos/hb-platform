@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { buildPackCartonLabelCommand, buildPackPalletLabelCommand } from "./cpcl-labels";
+import {
+  buildPackCartonLabelCommand,
+  buildPackCartonLabelSpec,
+  buildPackPalletLabelCommand,
+  buildPackPalletLabelSpec,
+} from "./cpcl-labels";
 
 /** 把指令拆成行；TEXT 行解析出字体、坐标、当前 SETMAG 倍率与内容，便于断言不越界。 */
 function parse(command: string) {
@@ -35,18 +40,21 @@ function bottom(textRow: { font: number; y: number; scaleY: number }) {
   return textRow.y + (textRow.font === 0 ? 9 : 24) * textRow.scaleY;
 }
 
+// 去向类型与后端 PackDestinationTypes 一致：0 未指定、1 本地存放、2 其他分店、3 总仓。
 const carton = {
   cartonNo: "BX2611130042",
-  originName: "HB Warehouse",
-  destinationName: "Sunnybank",
+  originName: "Sunnybank",
+  destinationType: 2,
+  destinationName: "Inala",
+  carrierName: null,
   skuCount: 5,
   pieceCount: 86,
-  orderNo: "2026-0412",
+  orderNo: null,
   printedAt: "13 NOV 14:32",
   operatorName: "Lily",
 };
 
-// ---- 箱标签 · 标准 570×208 ----
+// ---- 箱标签 · 标准 570×208：分店发给另一家分店，自己送 ----
 const cartonCommand = buildPackCartonLabelCommand(carton);
 const cartonParsed = parse(cartonCommand);
 assert.ok(cartonCommand.startsWith("! 0 200 200 208 1\r\nPAGE-WIDTH 570\r\n"), "箱标签页高 208、页宽 570");
@@ -56,9 +64,13 @@ assert.ok(cartonParsed.texts.some((row) => row.value === "BOX"), "左侧类型�
 assert.ok(cartonParsed.texts.some((row) => row.value === "CARTON"), "类型条下方写 CARTON");
 assert.ok(cartonParsed.rows.includes("INVERSE-LINE 0 0 70 0 208"), "左侧整条反白成黑条");
 assert.ok(!cartonParsed.rows.some((row) => row.startsWith("BOX ")), "箱标签没有外框");
-assert.ok(cartonParsed.texts.some((row) => row.value === "FROM HB WAREHOUSE"), "第一行发出地大写");
+assert.ok(
+  cartonParsed.texts.some((row) => row.value === "FROM SUNNYBANK - DIRECT"),
+  "FROM 取后端返回的发出地（分店名），要发出且没有运输公司打 DIRECT"
+);
+assert.ok(!cartonCommand.includes("HB WAREHOUSE"), "不再写死总仓名");
 assert.ok(cartonParsed.texts.some((row) => row.value === "TO"), "第二行有 TO");
-const cartonDestination = cartonParsed.texts.find((row) => row.value === "SUNNYBANK");
+const cartonDestination = cartonParsed.texts.find((row) => row.value === "INALA");
 assert.ok(cartonDestination, "去向分店名大写");
 assert.deepEqual([cartonDestination.scaleX, cartonDestination.scaleY], [2, 2], "去向用最大字");
 const cartonPrefix = cartonParsed.texts.find((row) => row.value === "BX261113");
@@ -68,8 +80,8 @@ assert.deepEqual([cartonPrefix.scaleX, cartonTail.scaleX], [1, 2], "前 8 位小
 assert.ok(cartonParsed.texts.some((row) => row.value === "5 SKU - 86 PCS"), "数量为 N SKU - M PCS");
 assert.ok(cartonParsed.rows.includes("BARCODE 128 2 1 46 80 144 BX2611130042"), "底部 Code128 内容是完整箱号");
 assert.ok(cartonCommand.includes("BARCODE QR 457 6 M 2 U 5\r\nMA,BX2611130042\r\nENDQR"), "右上二维码内容是完整箱号");
-assert.ok(cartonParsed.texts.some((row) => row.value === "ORDER 2026-0412"), "右下第一行订货单号");
-assert.ok(cartonParsed.texts.some((row) => row.value === "13 NOV 14:32 LILY"), "右下第二行时间与操作人");
+assert.ok(!cartonParsed.texts.some((row) => row.value.startsWith("ORDER")), "没有订货单时不打订货单号");
+assert.ok(cartonParsed.texts.some((row) => row.value === "13 NOV 14:32 LILY"), "右下时间与操作人");
 assert.ok(
   cartonParsed.rows.every((row) => /^[\x20-\x7e]*$/.test(row)),
   "英文数据的标签指令全部是 ASCII"
@@ -101,13 +113,35 @@ function assertWithinBounds(command: string, width: number, label: string) {
 }
 assertWithinBounds(cartonCommand, 570, "箱标签");
 
-// ---- 箱标签 · 未指定去向、无订货单 ----
-const unassigned = parse(
-  buildPackCartonLabelCommand({ ...carton, destinationName: null, orderNo: null, operatorName: "Tom" })
+// ---- 去向文案：TO 与 FROM 行的 VIA / DIRECT 规则 ----
+// 本地存放：TO 打 STORAGE，FROM 不加 VIA / DIRECT
+const storage = parse(
+  buildPackCartonLabelCommand({ ...carton, destinationType: 1, destinationName: null, carrierName: "Ignored Carrier" })
 );
+assert.ok(storage.texts.some((row) => row.value === "STORAGE"), "本地存放 TO 打 STORAGE");
+assert.ok(storage.texts.some((row) => row.value === "FROM SUNNYBANK"), "本地存放 FROM 不打 VIA / DIRECT，也不打运输公司");
+// 未指定：UNASSIGNED
+const unassigned = parse(buildPackCartonLabelCommand({ ...carton, destinationType: 0, destinationName: null, operatorName: "Tom" }));
 assert.ok(unassigned.texts.some((row) => row.value === "UNASSIGNED"), "未指定去向打 UNASSIGNED");
-assert.ok(!unassigned.texts.some((row) => row.value.startsWith("ORDER")), "没有订货单时不打订货单号");
+assert.ok(unassigned.texts.some((row) => row.value === "FROM SUNNYBANK"), "未指定 FROM 不打 VIA / DIRECT");
 assert.ok(unassigned.texts.some((row) => row.value === "13 NOV 14:32 TOM"));
+// 要发出但缺收货方名称：不打空 TO，退回 UNASSIGNED
+assert.ok(
+  parse(buildPackCartonLabelCommand({ ...carton, destinationName: null })).texts.some((row) => row.value === "UNASSIGNED"),
+  "缺收货方名称时 TO 打 UNASSIGNED"
+);
+// 总仓 + 运输公司：VIA
+const viaCarrier = parse(
+  buildPackCartonLabelCommand({ ...carton, destinationType: 3, destinationName: "Warehouse", carrierName: "Border Express" })
+);
+assert.ok(viaCarrier.texts.some((row) => row.value === "FROM SUNNYBANK - VIA BORDER EXPRESS"), "有运输公司打 VIA");
+assert.ok(viaCarrier.texts.some((row) => row.value === "WAREHOUSE"), "总仓作为收货方打总仓名");
+// 总仓发出的箱：FROM 取总仓名；订货单号打在右下
+const fromWarehouse = parse(
+  buildPackCartonLabelCommand({ ...carton, originName: "HB Warehouse", orderNo: "2026-0412" })
+);
+assert.ok(fromWarehouse.texts.some((row) => row.value === "FROM HB WAREHOUSE - DIRECT"));
+assert.ok(fromWarehouse.texts.some((row) => row.value === "ORDER 2026-0412"), "有订货单时右下打订货单号");
 
 // ---- 箱标签 · 超长字段截断而不是溢出 ----
 const longCommand = buildPackCartonLabelCommand({
@@ -128,14 +162,12 @@ assert.ok(longDestination.value.length < "SUNNYBANK HILLS SHOPPING TOWN LEVEL TW
 const longFrom = longParsed.texts.find((row) => row.value.startsWith("FROM "));
 assert.ok(longFrom && longFrom.value.length < 70, "超长发出地截断");
 assert.ok(longParsed.rows.includes("BARCODE 128 2 1 46 80 144 BX2611130042"), "截断不影响条码内容");
-assert.ok(
-  !longParsed.rows.some((row) => /[\r\n]/.test(row)) && longParsed.rows.filter((row) => row === "PRINT").length === 1,
-  "截断不产生多余行"
-);
+assert.equal(longParsed.rows.filter((row) => row === "PRINT").length, 1, "截断不产生多余行");
 
 // 稍长的分店名：缩一号后完整保留，不截断。
-const mediumDestination = parse(buildPackCartonLabelCommand({ ...carton, destinationName: "Sunnybank Hills" })).texts
-  .find((row) => row.value === "SUNNYBANK HILLS");
+const mediumDestination = parse(buildPackCartonLabelCommand({ ...carton, destinationName: "Sunnybank Hills" })).texts.find(
+  (row) => row.value === "SUNNYBANK HILLS"
+);
 assert.ok(mediumDestination, "15 个字符的分店名完整保留");
 assert.equal(mediumDestination.scaleX, 1, "15 个字符的分店名缩一号");
 
@@ -148,15 +180,17 @@ assert.ok(smallCarton.rows.includes("INVERSE-LINE 0 0 58 0 208"), "小标签类�
 assert.ok(smallCarton.rows.includes("BARCODE 128 1 1 46 68 144 BX2611130042"), "小标签条码退到 1 点窄条，给右下文字留位置");
 assert.ok(smallCartonCommand.includes("MA,BX2611130042\r\nENDQR"));
 
-// ---- 托盘标签 · 经运输公司 ----
+// ---- 托盘标签 · 总仓发往分店，经运输公司 ----
 const pallet = {
   palletNo: "PL261113007",
   originName: "HB Warehouse",
+  destinationType: 2,
   destinationName: "Cairns",
   carrierName: "Border Express",
   cartonCount: 5,
   pieceCount: 366,
   consignmentNo: "BEX 4471 0932 18",
+  orderNo: null,
   printedAt: "13 NOV 15:06",
   operatorName: "Lily",
   sheetIndex: 1,
@@ -177,32 +211,38 @@ assert.ok(palletParsed.texts.some((row) => row.value === "FROM HB WAREHOUSE - VI
 assert.ok(palletParsed.texts.some((row) => row.value === "CAIRNS"));
 assert.ok(palletParsed.texts.some((row) => row.value === "PL261113") && palletParsed.texts.some((row) => row.value === "007"));
 assert.ok(palletParsed.texts.some((row) => row.value === "5 CTN - 366 PCS"), "数量为 N CTN - M PCS");
-assert.ok(palletParsed.texts.some((row) => row.value === "CN BEX 4471 0932 18"), "右下第一行运单号");
+assert.ok(palletParsed.texts.some((row) => row.value === "CN BEX 4471 0932 18"), "右下第一行运单号（consignmentNo）");
 assert.ok(palletParsed.texts.some((row) => row.value === "1/2" && row.font === 7), "托盘带 1/2 张数");
 assert.ok(palletParsed.texts.some((row) => row.value.startsWith("13 NOV 15:06")), "右下时间完整");
 assert.ok(palletParsed.rows.some((row) => /^BARCODE 128 2 1 46 80 144 PL261113007$/.test(row)), "Code128 内容是完整托盘号");
 assert.ok(palletCommand.includes("MA,PL261113007\r\nENDQR"), "二维码内容是完整托盘号");
 assertWithinBounds(palletCommand, 570 - 6, "托盘标签");
 
-// ---- 托盘标签 · 直送分店 ----
+// ---- 托盘标签 · 自己送（没有运输公司）：DIRECT，右下改打订货单号 ----
 const direct = parse(
   buildPackPalletLabelCommand({
     ...pallet,
+    originName: "Sunnybank",
     carrierName: null,
-    direct: true,
     destinationName: "Inala",
     consignmentNo: null,
     orderNo: "2026-0398",
     sheetIndex: 2,
   })
 );
-assert.ok(direct.texts.some((row) => row.value === "FROM HB WAREHOUSE - DIRECT"), "直送加 DIRECT");
-assert.ok(direct.texts.some((row) => row.value === "ORDER 2026-0398"), "直送没有运单号时右下打订货单号");
+assert.ok(direct.texts.some((row) => row.value === "FROM SUNNYBANK - DIRECT"), "自己送 / 对方来取打 DIRECT");
+assert.ok(direct.texts.some((row) => row.value === "ORDER 2026-0398"), "没有运单号时右下打订货单号");
 assert.ok(direct.texts.some((row) => row.value === "2/2"));
 
-// 未指定去向的托盘：既不是 VIA 也不是 DIRECT。
+// 本地存放的托盘：TO 打 STORAGE，FROM 不打 VIA / DIRECT
+const palletStorage = parse(
+  buildPackPalletLabelCommand({ ...pallet, destinationType: 1, destinationName: null, carrierName: null, consignmentNo: null })
+);
+assert.ok(palletStorage.texts.some((row) => row.value === "FROM HB WAREHOUSE"));
+assert.ok(palletStorage.texts.some((row) => row.value === "STORAGE"));
+// 未指定去向的托盘
 const palletUnassigned = parse(
-  buildPackPalletLabelCommand({ ...pallet, carrierName: null, destinationName: null, consignmentNo: null })
+  buildPackPalletLabelCommand({ ...pallet, destinationType: 0, destinationName: null, carrierName: null, consignmentNo: null })
 );
 assert.ok(palletUnassigned.texts.some((row) => row.value === "FROM HB WAREHOUSE"));
 assert.ok(palletUnassigned.texts.some((row) => row.value === "UNASSIGNED"));
@@ -231,5 +271,15 @@ assert.throws(() => buildPackCartonLabelCommand({ ...carton, cartonNo: " " }), /
 // 换行等控制字符不能进入指令，避免伪造 CPCL 行。
 const injected = buildPackCartonLabelCommand({ ...carton, destinationName: "A\r\nPRINT\r\nB" });
 assert.equal(parse(injected).rows.filter((row) => row === "PRINT").length, 1, "字段里的换行被压成空格");
+
+// ---- 版面内容（打印与弹层预览同源）----
+const cartonSpec = buildPackCartonLabelSpec(carton);
+assert.equal(cartonSpec.fromLine, "FROM SUNNYBANK - DIRECT");
+assert.equal(cartonSpec.destinationName, "INALA");
+assert.equal(cartonSpec.sheetText, "");
+const palletSpec = buildPackPalletLabelSpec(pallet);
+assert.equal(palletSpec.referenceLine, "CN BEX 4471 0932 18");
+assert.equal(palletSpec.sheetText, "1/2");
+assert.equal(palletSpec.framed, true);
 
 console.log("pack-labels.test.ts passed");

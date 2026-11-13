@@ -113,10 +113,10 @@ assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "warehouse-picking")?.permissionCodes,
   ["Warehouse.Picking", "Warehouse.Manage", "Warehouse.ManageOrders"]
 );
-// 扫码打包同理：打包专用权限或两个仓库管理权限任一即可见。
+// 扫码打包分店、总仓共用：分店打包权限、总仓打包权限或两个仓库管理权限任一即可见。
 assert.deepEqual(
-  fullMenus.find((item) => item.platform === "mobile" && item.key === "warehouse-packing")?.permissionCodes,
-  ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "packing")?.permissionCodes,
+  ["StorePacking.Use", "Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]
 );
 // 季节商品查询会展示其他分店库存，只认独立权限，不复用商品查询的 StoreProducts.View。
 assert.deepEqual(

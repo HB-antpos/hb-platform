@@ -559,7 +559,7 @@ export function buildWarehouseLocationLabelCommand(payload: WarehouseLocationLab
 
 // ---- 打包箱标签 / 托盘标签（70×26 mm 英文版，纯 CPCL 文本，走 print(rawCommand)，不依赖原生改动） ----
 
-interface PackLabelSpec {
+export interface PackLabelSpec {
   kind: "BOX" | "PLT";
   kindCaption: "CARTON" | "PALLET";
   number: string;
@@ -702,49 +702,78 @@ function buildPackLabelCommand(spec: PackLabelSpec, printType?: string | null) {
   return command(lines);
 }
 
-/** 箱标签：左侧 BOX 黑条，FROM / TO / 编号 + N SKU - M PCS，右上二维码、底部 Code128（内容都是完整箱号）。 */
-export function buildPackCartonLabelCommand(payload: PackCartonLabelPrintPayload, printType?: string | null) {
-  const orderNo = packUpper(payload.orderNo, 30);
-  return buildPackLabelCommand(
-    {
-      kind: "BOX",
-      kindCaption: "CARTON",
-      number: payload.cartonNo,
-      fromLine: `FROM ${packUpper(payload.originName) || "--"}`,
-      destinationName: packUpper(payload.destinationName) || "UNASSIGNED",
-      statLine: `${packCount(payload.skuCount)} SKU - ${packCount(payload.pieceCount)} PCS`,
-      referenceLine: orderNo ? `ORDER ${orderNo}` : "",
-      printedAt: packUpper(payload.printedAt, 20),
-      operatorName: packUpper(payload.operatorName, 20),
-      sheetText: "",
-      framed: false,
-    },
-    printType
-  );
+// 打包标签上的去向类型，与后端 PackDestinationTypes 一致：0 未指定、1 本地存放、2 其他分店、3 总仓。
+const PACK_DESTINATION_LOCAL = 1;
+const PACK_DESTINATION_SHIPPABLE = [2, 3];
+
+/** TO 一行：要发出的取收货方名称；本地存放打 STORAGE；未指定（或缺名称）打 UNASSIGNED。 */
+function packToText(destinationType: number, destinationName: string | null | undefined) {
+  if (destinationType === PACK_DESTINATION_LOCAL) return "STORAGE";
+  if (PACK_DESTINATION_SHIPPABLE.includes(destinationType)) return packUpper(destinationName) || "UNASSIGNED";
+  return "UNASSIGNED";
 }
 
-/** 托盘标签：PLT 黑条加整圈粗黑框；经运输公司打 VIA 与运单号（CN），直送打 DIRECT；带 1/2 张数。 */
-export function buildPackPalletLabelCommand(payload: PackPalletLabelPrintPayload, printType?: string | null) {
-  const carrier = packUpper(payload.carrierName);
+/**
+ * FROM 一行：FROM <发出地>；有运输公司时加 " - VIA <公司>"；要发出（其他分店 / 总仓）且没有运输公司时加 " - DIRECT"；
+ * 本地存放和未指定不加。
+ */
+function packFromText(
+  destinationType: number,
+  originName: string | null | undefined,
+  carrierName: string | null | undefined
+) {
+  const origin = packUpper(originName) || "--";
+  const carrier = packUpper(carrierName);
+  const shippable = PACK_DESTINATION_SHIPPABLE.includes(destinationType);
+  if (!shippable) return `FROM ${origin}`;
+  return carrier ? `FROM ${origin} - VIA ${carrier}` : `FROM ${origin} - DIRECT`;
+}
+
+/** 箱标签的版面内容（打印与弹层预览共用，保证所见即所得）。 */
+export function buildPackCartonLabelSpec(payload: PackCartonLabelPrintPayload): PackLabelSpec {
+  const orderNo = packUpper(payload.orderNo, 30);
+  return {
+    kind: "BOX",
+    kindCaption: "CARTON",
+    number: payload.cartonNo,
+    fromLine: packFromText(payload.destinationType, payload.originName, payload.carrierName),
+    destinationName: packToText(payload.destinationType, payload.destinationName),
+    statLine: `${packCount(payload.skuCount)} SKU - ${packCount(payload.pieceCount)} PCS`,
+    referenceLine: orderNo ? `ORDER ${orderNo}` : "",
+    printedAt: packUpper(payload.printedAt, 20),
+    operatorName: packUpper(payload.operatorName, 20),
+    sheetText: "",
+    framed: false,
+  };
+}
+
+/** 托盘标签的版面内容：右下优先运单号（CN），没有再打订货单号；带 1/2 张数。 */
+export function buildPackPalletLabelSpec(payload: PackPalletLabelPrintPayload): PackLabelSpec {
   const consignmentNo = packUpper(payload.consignmentNo, 40);
   const orderNo = packUpper(payload.orderNo, 30);
   const sheetTotal = Math.trunc(Number(payload.sheetTotal));
   const sheetIndex = Math.trunc(Number(payload.sheetIndex));
-  const via = carrier ? ` - VIA ${carrier}` : payload.direct ? " - DIRECT" : "";
-  return buildPackLabelCommand(
-    {
-      kind: "PLT",
-      kindCaption: "PALLET",
-      number: payload.palletNo,
-      fromLine: `FROM ${packUpper(payload.originName) || "--"}${via}`,
-      destinationName: packUpper(payload.destinationName) || "UNASSIGNED",
-      statLine: `${packCount(payload.cartonCount)} CTN - ${packCount(payload.pieceCount)} PCS`,
-      referenceLine: consignmentNo ? `CN ${consignmentNo}` : orderNo ? `ORDER ${orderNo}` : "",
-      printedAt: packUpper(payload.printedAt, 20),
-      operatorName: packUpper(payload.operatorName, 20),
-      sheetText: sheetTotal >= 1 && sheetIndex >= 1 && sheetIndex <= sheetTotal ? `${sheetIndex}/${sheetTotal}` : "",
-      framed: true,
-    },
-    printType
-  );
+  return {
+    kind: "PLT",
+    kindCaption: "PALLET",
+    number: payload.palletNo,
+    fromLine: packFromText(payload.destinationType, payload.originName, payload.carrierName),
+    destinationName: packToText(payload.destinationType, payload.destinationName),
+    statLine: `${packCount(payload.cartonCount)} CTN - ${packCount(payload.pieceCount)} PCS`,
+    referenceLine: consignmentNo ? `CN ${consignmentNo}` : orderNo ? `ORDER ${orderNo}` : "",
+    printedAt: packUpper(payload.printedAt, 20),
+    operatorName: packUpper(payload.operatorName, 20),
+    sheetText: sheetTotal >= 1 && sheetIndex >= 1 && sheetIndex <= sheetTotal ? `${sheetIndex}/${sheetTotal}` : "",
+    framed: true,
+  };
+}
+
+/** 箱标签：左侧 BOX 黑条，FROM / TO / 编号 + N SKU - M PCS，右上二维码、底部 Code128（内容都是完整箱号）。 */
+export function buildPackCartonLabelCommand(payload: PackCartonLabelPrintPayload, printType?: string | null) {
+  return buildPackLabelCommand(buildPackCartonLabelSpec(payload), printType);
+}
+
+/** 托盘标签：PLT 黑条加整圈粗黑框；FROM 行按去向带 VIA / DIRECT，右下运单号（CN）；带 1/2 张数。 */
+export function buildPackPalletLabelCommand(payload: PackPalletLabelPrintPayload, printType?: string | null) {
+  return buildPackLabelCommand(buildPackPalletLabelSpec(payload), printType);
 }

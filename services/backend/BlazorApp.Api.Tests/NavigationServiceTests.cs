@@ -1119,7 +1119,7 @@ public class NavigationServiceTests
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
         Assert.Equal(49, menu.Count);
-        Assert.Contains(menu, item => item.RouteName == "warehouse-packing");
+        Assert.Contains(menu, item => item.RouteName == "packing");
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "payslips");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");
@@ -1198,28 +1198,31 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsWarehousePackingForPackingOrWarehouseManagePermissions()
+    public void BuildAppMenu_ShowsPackingForStorePackingWarehousePackingOrWarehouseManagePermissions()
     {
+        var storeUser = CreateUser(new Claim("permission", Permissions.StorePacking.Use));
         var packingUser = CreateUser(new Claim("permission", Permissions.Warehouse.Packing));
         var manageUser = CreateUser(new Claim("permission", Permissions.Warehouse.Manage));
         var ordersUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageOrders));
         var pickingOnlyUser = CreateUser(new Claim("permission", Permissions.Warehouse.Picking));
 
-        // 打包入口按打包权限或其别名（管理仓库、管理仓库订货）放行；只有拣货权限的账号看不到。
-        Assert.Single(_service.BuildAppMenu(packingUser), item => item.RouteName == "warehouse-packing");
-        Assert.Single(_service.BuildAppMenu(manageUser), item => item.RouteName == "warehouse-packing");
-        Assert.Single(_service.BuildAppMenu(ordersUser), item => item.RouteName == "warehouse-packing");
-        Assert.DoesNotContain(_service.BuildAppMenu(pickingOnlyUser), item => item.RouteName == "warehouse-packing");
+        // 打包入口分店、总仓共用：分店打包权限、总仓打包权限或其别名（管理仓库、管理仓库订货）任一即可见；只有拣货权限的账号看不到。
+        Assert.Single(_service.BuildAppMenu(storeUser), item => item.RouteName == "packing");
+        Assert.Single(_service.BuildAppMenu(packingUser), item => item.RouteName == "packing");
+        Assert.Single(_service.BuildAppMenu(manageUser), item => item.RouteName == "packing");
+        Assert.Single(_service.BuildAppMenu(ordersUser), item => item.RouteName == "packing");
+        Assert.DoesNotContain(_service.BuildAppMenu(pickingOnlyUser), item => item.RouteName == "packing");
         // 反过来，只有打包权限也不会连带看到拣货入口。
+        Assert.DoesNotContain(_service.BuildAppMenu(storeUser), item => item.RouteName == "warehouse-picking");
         Assert.DoesNotContain(_service.BuildAppMenu(packingUser), item => item.RouteName == "warehouse-picking");
     }
 
     [Fact]
-    public void BuildDeviceAppMenu_HidesWarehousePackingEvenForWarehouseDevices()
+    public void BuildDeviceAppMenu_HidesPackingEvenForWarehouseDevices()
     {
         // 打包接口只接受登录账号（要记操作人），纯设备会话没有个人账号，仓库设备也不放出入口。
-        Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "warehouse-packing");
-        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "warehouse-packing");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "packing");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "packing");
     }
 
     [Fact]

@@ -195,6 +195,15 @@ assert.equal(
   true,
   "订单拣货从工作台进入，不能新增一级导航"
 );
+assert.equal(
+  compactPrimaryItems("packing", [...fullMenu, "packing"])[0]?.active,
+  true,
+  "扫码打包从工作台进入，不能新增一级导航"
+);
+assert.equal(shouldHidePrimaryTabBar("/packing"), true, "扫码打包是全屏作业，不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/packing/receive"), true, "签收页同样不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/packing/carton/abc123"), true, "箱页同样不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/packingx"), false, "只按完整路径段匹配，避免误伤相似路由");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-picking"), true, "拣货入口是 PDA 全屏作业，不显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/finish"), true, "拣货子页同样不显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse"), false, "仓库页等其它页面仍显示全局底栏");
@@ -571,6 +580,17 @@ assert.deepEqual(
     },
   ],
   "订单拣货归入仓库与采购并紧跟仓库入口，只依赖后端显式菜单"
+);
+assert.deepEqual(
+  buildWorkbenchSections(["orders", "packing", "warehouse", "warehouse-picking"]).map((section) => ({
+    key: section.key,
+    itemRouteNames: section.items.map((item) => item.routeName),
+  })),
+  [
+    { key: "product-purchasing", itemRouteNames: ["orders", "packing"] },
+    { key: "warehouse-purchase", itemRouteNames: ["warehouse", "warehouse-picking"] },
+  ],
+  "扫码打包放在分店区（商品进货）紧跟订货单，不放在仓库与采购里"
 );
 assert.deepEqual(
   buildWorkbenchSections(["warehouse", "containers", "warehouse-picking"]).map((section) => ({

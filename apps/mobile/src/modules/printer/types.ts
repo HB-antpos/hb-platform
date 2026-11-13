@@ -93,12 +93,19 @@ export interface EmployeeCashierBarcodeLabelPrintPayload {
   symbology?: PersonalCodeSymbology;
 }
 
-/** 打包箱标签（70×26 mm 英文版）；时间由调用方按本机时间格式化成 "13 NOV 14:32"。 */
+/**
+ * 打包箱标签（70×26 mm 英文版）；时间由调用方按本机时间格式化成 "13 NOV 14:32"。
+ * destinationType 与后端一致：0 未指定、1 本地存放、2 其他分店、3 总仓。
+ */
 export interface PackCartonLabelPrintPayload {
   cartonNo: string;
+  /** 标签上的 FROM：取后端返回的发出地（分店名 / 总仓名）。 */
   originName: string;
-  /** 收货分店名；为空打印 UNASSIGNED。 */
+  destinationType: number;
+  /** 收货方名称（其他分店 / 总仓）；本地存放和未指定不用。 */
   destinationName?: string | null;
+  /** 运输公司；为空且要发出时打 DIRECT。 */
+  carrierName?: string | null;
   skuCount: number;
   pieceCount: number;
   orderNo?: string | null;
@@ -110,10 +117,9 @@ export interface PackCartonLabelPrintPayload {
 export interface PackPalletLabelPrintPayload {
   palletNo: string;
   originName: string;
+  destinationType: number;
   destinationName?: string | null;
-  /** 经运输公司时的公司名；为空且 direct 为 true 时打印 DIRECT。 */
   carrierName?: string | null;
-  direct?: boolean;
   cartonCount: number;
   pieceCount: number;
   consignmentNo?: string | null;

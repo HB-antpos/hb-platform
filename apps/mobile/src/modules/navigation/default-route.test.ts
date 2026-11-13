@@ -470,6 +470,31 @@ assertEqual(
 );
 
 assertEqual(
+  TAB_PATHS["packing"],
+  "/(shell)/packing",
+  "packing route is registered as a valid tab path"
+);
+
+// 扫码打包要记操作人、接口只接受登录账号：设备会话（含仓库设备）必须隐藏，账号会话照后端菜单显示。
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["product-query", "packing"],
+    isDeviceMode: true,
+  }).join(","),
+  "workbench,product-query,settings",
+  "设备模式收到显式扫码打包菜单时也必须隐藏该入口"
+);
+
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["orders", "packing"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,orders,packing,settings",
+  "账号会话必须保留后端下发的扫码打包入口"
+);
+
+assertEqual(
   TAB_PATHS["daily-closes"],
   "/(shell)/daily-closes",
   "daily closes route is registered as a valid tab path"

@@ -12,8 +12,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "warehouse-product-insights",
   // 订单拣货依赖真实分店订单与拣货记录，审核模式没有离线演示数据。
   "warehouse-picking",
-  // 扫码打包依赖真实的箱、托盘与订货单数据，并要连接标签打印机，审核模式没有离线演示数据。
-  "warehouse-packing",
+  // 扫码打包依赖真实的箱、托盘与分店间调货数据，并要连接标签打印机，审核模式没有离线演示数据。
+  "packing",
   // 季节商品查询依赖真实进销与其他分店库存，审核模式没有离线演示数据。
   "seasonal-product-insights",
   "sales-orders",
