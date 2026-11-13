@@ -19,6 +19,35 @@ namespace BlazorApp.Shared.DTOs
 
         /// <summary>货柜/订单等单据关键字。</summary>
         public string? DocumentKeyword { get; set; }
+
+        /// <summary>
+        /// 从 Excel 粘贴的批量货号，按粘贴顺序传入；精确匹配（去首尾空格、不区分大小写），
+        /// 与 Keyword 等其他条件取交集。
+        /// </summary>
+        public List<string>? ItemNumbers { get; set; }
+
+        /// <summary>批量货号匹配方式：itemNumber（默认，仅货号）或 any（货号/条码/商品编码任一）。</summary>
+        public string? ItemNumberMatchMode { get; set; }
+    }
+
+    /// <summary>批量货号的匹配统计，只在请求带 ItemNumbers 时返回。</summary>
+    public class WarehouseProductFlowItemNumberMatchDto
+    {
+        /// <summary>去重后的批量货号个数。</summary>
+        public int RequestedCount { get; set; }
+
+        /// <summary>在当前筛选结果中找到商品的货号个数。</summary>
+        public int MatchedCount { get; set; }
+
+        /// <summary>未找到的货号，按粘贴顺序。</summary>
+        public List<string> UnmatchedItemNumbers { get; set; } = new();
+    }
+
+    /// <summary>候选商品分页结果；带批量货号时附加匹配统计。</summary>
+    public class WarehouseProductFlowCandidatePageDto
+        : WarehouseProductFlowAnalysisPagedDto<WarehouseProductFlowCandidateDto>
+    {
+        public WarehouseProductFlowItemNumberMatchDto? ItemNumberMatch { get; set; }
     }
 
     /// <summary>

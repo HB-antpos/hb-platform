@@ -10,9 +10,7 @@ namespace BlazorApp.Api.Interfaces.React
             bool forceRefresh = false
         );
 
-        Task<
-            ApiResponse<WarehouseProductFlowAnalysisPagedDto<WarehouseProductFlowCandidateDto>>
-        > GetCandidatesAsync(WarehouseProductFlowCandidateRequest request);
+        Task<ApiResponse<WarehouseProductFlowCandidatePageDto>> GetCandidatesAsync(WarehouseProductFlowCandidateRequest request);
 
         Task<ApiResponse<WarehouseProductFlowAnalysisSummaryDto>> GetSummaryAsync(
             WarehouseProductFlowAnalysisRequest request,

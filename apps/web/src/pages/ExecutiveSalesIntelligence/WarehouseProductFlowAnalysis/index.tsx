@@ -1,9 +1,9 @@
-import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SearchOutlined, SnippetsOutlined } from '@ant-design/icons'
 import { Alert, Button, Checkbox, DatePicker, Empty, Input, Pagination, Select, Spin, Tabs, Tag, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import { ContainerNumberRevealButton, useContainerNumberDisplay } from '../../../components/ContainerNumber'
 import PageContainer from '../../../components/PageContainer'
 import {
@@ -38,8 +38,9 @@ import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import ProductImage from '../ProductFlowShared/ProductImage'
 import FlowTrendChart from '../ProductFlowShared/FlowTrendChart'
 import { createAllFilteredSelection, createIncludedSelection, isProductSelected, resolveCurrentProductCode, selectFirstCandidate, toggleProductSelection } from '../ProductFlowShared/logic'
-import { buildWarehouseProductFlowCategoryOptions, buildWarehouseProductFlowDefaultPeriods, createWarehouseProductFlowFilter, filterWarehouseProductFlowCategoryOptions, filterWarehouseProductFlowShipments, filterWarehouseProductFlowSupplierOptions, isValidWarehouseProductFlowRange, sortWarehouseProductFlowBranches, type WarehouseProductFlowPosFilter } from './logic'
+import { buildWarehouseProductFlowCategoryOptions, buildWarehouseProductFlowDefaultPeriods, createWarehouseProductFlowFilter, filterWarehouseProductFlowCategoryOptions, findItemNumberPasteLine, filterWarehouseProductFlowShipments, filterWarehouseProductFlowSupplierOptions, isValidWarehouseProductFlowRange, sortWarehouseProductFlowBranches, type WarehouseProductFlowPosFilter } from './logic'
 import styles from './index.module.css'
+import ItemNumberPasteModal, { type ItemNumberPasteResult } from './ItemNumberPasteModal'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
 const { RangePicker } = DatePicker
@@ -138,6 +139,10 @@ export default function WarehouseProductFlowAnalysisPage() {
   const [draftSuppliers, setDraftSuppliers] = useState<string[]>([])
   const [supplierSearchText, setSupplierSearchText] = useState('')
   const [draftDocument, setDraftDocument] = useState('')
+  // 已应用的批量货号（含粘贴原文与行号映射）；null 表示没有批量货号条件。
+  const [appliedItemNumbers, setAppliedItemNumbers] = useState<ItemNumberPasteResult | null>(null)
+  const [itemNumberModalOpen, setItemNumberModalOpen] = useState(false)
+  const [unmatchedExpanded, setUnmatchedExpanded] = useState(true)
   const [filter, setFilter] = useState<WarehouseProductFlowFilter>(() => createWarehouseProductFlowFilter('', [], [], ''))
   const [selection, setSelection] = useState<WarehouseProductFlowSelection>(createIncludedSelection())
   const [currentProductCode, setCurrentProductCode] = useState<string | null>(null)
@@ -208,6 +213,13 @@ export default function WarehouseProductFlowAnalysisPage() {
   const currentProduct = currentSummaryProduct ?? validSnapshot ?? candidateItems.find((item) => item.productCode === currentProductCode)
   const currentMetrics = currentSummaryProduct?.metrics ?? emptyMetrics()
   const summaryTotals = summary?.totals ?? emptyMetrics()
+  // 只有当前生效的筛选带批量货号时才显示匹配结果，避免旧响应残留。
+  const itemNumberMatch = filter.itemNumbers?.length ? candidates?.itemNumberMatch : undefined
+  const renderPasteLine = (product: WarehouseProductFlowCandidate) => {
+    if (!filter.itemNumbers?.length || !appliedItemNumbers) return null
+    const line = findItemNumberPasteLine(product, appliedItemNumbers.parsed.lineByItemNumber, appliedItemNumbers.matchMode)
+    return line ? <em className={styles.pasteLineTag}>{t('warehouseProductFlowAnalysis.itemNumbers.pasteLine', { line })}</em> : null
+  }
   const selectedLabel = selection.mode === 'allFiltered'
     ? t('warehouseProductFlowAnalysis.selection.allFiltered', { count: selection.excludedProductCodes.length })
     : t('warehouseProductFlowAnalysis.selection.selected', { count: selection.includedProductCodes.length })
@@ -242,6 +254,13 @@ export default function WarehouseProductFlowAnalysisPage() {
         setCandidates(result.data)
         if (shouldSelectFirstCandidate.current) {
           shouldSelectFirstCandidate.current = false
+          if (filter.itemNumbers?.length && result.data.items.length) {
+            // 批量货号查询默认全选匹配结果，右侧直接汇总这批商品，并把第一个设为当前商品。
+            setSelection(createAllFilteredSelection())
+            setCurrentProductCode(result.data.items[0].productCode)
+            setCurrentProductSnapshot(result.data.items[0])
+            return
+          }
           const firstSelection = selectFirstCandidate(createIncludedSelection(), result.data.items)
           setSelection(firstSelection)
           setCurrentProductCode(firstSelection.includedProductCodes[0] ?? null)
@@ -357,14 +376,34 @@ export default function WarehouseProductFlowAnalysisPage() {
     return () => branchDailyGuard.current.invalidate()
   }, [branchCode, consumeForceRefresh, currentProductCode, filter, globalRefreshVersion, periods.salesPeriod.endDate, periods.salesPeriod.startDate, productRequest, salesRefreshVersion])
 
-  const submitMasterFilter = () => {
+  // 批量货号弹窗「应用并查询」和移除条件时需要用新值立即查询，不能等 state 更新，所以显式传入。
+  const applyMasterFilter = (itemNumberPaste: ItemNumberPasteResult | null) => {
     candidateGuard.current.invalidate(); shouldSelectFirstCandidate.current = true
     setSelection(createIncludedSelection()); setCurrentProductCode(null); setCurrentProductSnapshot(null); setCandidates(null); setSummary(null); setCandidatePage(1)
-    setFilter(createWarehouseProductFlowFilter(draftKeyword, draftCategories, draftSuppliers, draftDocument))
+    setFilter(createWarehouseProductFlowFilter(draftKeyword, draftCategories, draftSuppliers, draftDocument, itemNumberPaste?.parsed.itemNumbers ?? [], itemNumberPaste?.matchMode ?? 'itemNumber'))
+  }
+
+  const submitMasterFilter = () => applyMasterFilter(appliedItemNumbers)
+
+  const applyItemNumbers = (result: ItemNumberPasteResult) => {
+    setAppliedItemNumbers(result); setItemNumberModalOpen(false); setUnmatchedExpanded(true)
+    applyMasterFilter(result)
+  }
+
+  const removeItemNumbers = () => {
+    setAppliedItemNumbers(null)
+    applyMasterFilter(null)
+  }
+
+  const copyUnmatchedItemNumbers = (itemNumbers: readonly string[]) => {
+    // 一行一个，粘回 Excel 正好是一列。
+    navigator.clipboard.writeText(itemNumbers.join('\n'))
+      .then(() => message.success(t('warehouseProductFlowAnalysis.itemNumbers.copied', { count: itemNumbers.length })))
+      .catch(() => message.error(t('warehouseProductFlowAnalysis.itemNumbers.copyFailed')))
   }
 
   const resetFilters = () => {
-    setDraftKeyword(''); setDraftCategories([]); setDraftSuppliers([]); setDraftDocument('')
+    setDraftKeyword(''); setDraftCategories([]); setDraftSuppliers([]); setDraftDocument(''); setAppliedItemNumbers(null)
     setShipmentPosFilter('all')
     setContainerRange(toRange(defaultPeriods.containerPeriod)); setOrderShipmentRange(toRange(defaultPeriods.orderShipmentPeriod)); setSalesRange(toRange(defaultPeriods.salesPeriod))
     setPeriods(defaultPeriods)
@@ -453,6 +492,7 @@ export default function WarehouseProductFlowAnalysisPage() {
     : setOrderShipmentRefreshVersion((value) => value + 1)
 
   return <PageContainer title={t('warehouseProductFlowAnalysis.title')} subtitle={t('warehouseProductFlowAnalysis.subtitle')}>
+    <ItemNumberPasteModal open={itemNumberModalOpen} initialText={appliedItemNumbers?.text ?? ''} initialMatchMode={appliedItemNumbers?.matchMode ?? 'itemNumber'} onCancel={() => setItemNumberModalOpen(false)} onApply={applyItemNumbers} />
     <div className={styles.page}>
       <section className={styles.toolbar}>
         <Button type="primary" icon={<SearchOutlined />} onClick={submitMasterFilter}>{t('warehouseProductFlowAnalysis.actions.queryProducts')}</Button><Button onClick={resetFilters}>{t('common.reset')}</Button>
@@ -469,15 +509,44 @@ export default function WarehouseProductFlowAnalysisPage() {
           <div className={styles.filters}>
             {categoryError ? <Alert type="warning" showIcon message={t('warehouseProductFlowAnalysis.errors.categoriesTitle')} description={<LocalizedErrorDescription error={categoryError} />} /> : null}
             <label>{t('warehouseProductFlowAnalysis.filters.category')}<Select mode="multiple" showSearch filterOption={false} value={draftCategories} options={visibleCategoryOptions} onSearch={setCategorySearchText} onOpenChange={(open) => { if (!open) setCategorySearchText('') }} onChange={setDraftCategories} placeholder={t('warehouseProductFlowAnalysis.filters.categoryPlaceholder')} /></label>
-            <label>{t('warehouseProductFlowAnalysis.filters.keyword')}<Input value={draftKeyword} onChange={(event) => setDraftKeyword(event.target.value)} placeholder={t('warehouseProductFlowAnalysis.filters.keywordPlaceholder')} onPressEnter={submitMasterFilter} /></label>
+            <div className={styles.filterField}>
+              <label htmlFor="warehouse-product-flow-keyword">{t('warehouseProductFlowAnalysis.filters.keyword')}</label>
+              <div className={styles.keywordRow}>
+                <Input id="warehouse-product-flow-keyword" value={draftKeyword} onChange={(event) => setDraftKeyword(event.target.value)} placeholder={t('warehouseProductFlowAnalysis.filters.keywordPlaceholder')} onPressEnter={submitMasterFilter} />
+                <Button icon={<SnippetsOutlined />} className={appliedItemNumbers ? styles.itemNumberButtonActive : undefined} onClick={() => setItemNumberModalOpen(true)}>
+                  {t('warehouseProductFlowAnalysis.itemNumbers.button')}{appliedItemNumbers ? <span className={styles.itemNumberBadge}>{appliedItemNumbers.parsed.itemNumbers.length}</span> : null}
+                </Button>
+              </div>
+              {appliedItemNumbers ? <div className={styles.itemNumberChipBar}>
+                <Tag color="blue" closable closeIcon={<span aria-label={t('warehouseProductFlowAnalysis.itemNumbers.remove')}>✕</span>} onClose={(event) => { event.preventDefault(); removeItemNumbers() }}>
+                  {t('warehouseProductFlowAnalysis.itemNumbers.chip', { count: appliedItemNumbers.parsed.itemNumbers.length, mode: t(appliedItemNumbers.matchMode === 'any' ? 'warehouseProductFlowAnalysis.itemNumbers.modeAny' : 'warehouseProductFlowAnalysis.itemNumbers.modeItemNumber') })}
+                </Tag>
+                <Button type="link" size="small" onClick={() => setItemNumberModalOpen(true)}>{t('warehouseProductFlowAnalysis.itemNumbers.edit')}</Button>
+              </div> : null}
+            </div>
             <label>{t('warehouseProductFlowAnalysis.filters.supplier')}<Select mode="multiple" showSearch filterOption={false} value={draftSuppliers} options={visibleSupplierOptions} onSearch={setSupplierSearchText} onOpenChange={(open) => { if (!open) setSupplierSearchText('') }} onChange={setDraftSuppliers} placeholder={t('warehouseProductFlowAnalysis.filters.supplierPlaceholder')} /></label>
             <label>{t('warehouseProductFlowAnalysis.filters.containerNumber')}<Input value={draftDocument} onChange={(event) => setDraftDocument(event.target.value)} placeholder={t('warehouseProductFlowAnalysis.filters.containerNumberPlaceholder')} onPressEnter={submitMasterFilter} /></label>
           </div>
+          {itemNumberMatch ? <div className={`${styles.itemNumberResult} ${itemNumberMatch.unmatchedItemNumbers.length ? styles.itemNumberResultWarn : ''}`}>
+            <div className={styles.itemNumberResultLine}>
+              <span>
+                <Trans i18nKey="warehouseProductFlowAnalysis.itemNumbers.matched" values={{ matched: itemNumberMatch.matchedCount, requested: itemNumberMatch.requestedCount }} components={{ ok: <b className={styles.itemNumberOk} /> }} />
+                {itemNumberMatch.unmatchedItemNumbers.length
+                  ? <Trans i18nKey="warehouseProductFlowAnalysis.itemNumbers.unmatched" values={{ count: itemNumberMatch.unmatchedItemNumbers.length }} components={{ warn: <b className={styles.itemNumberWarn} /> }} />
+                  : t('warehouseProductFlowAnalysis.itemNumbers.allMatched')}
+              </span>
+              {itemNumberMatch.unmatchedItemNumbers.length ? <span>
+                <Button type="link" size="small" onClick={() => copyUnmatchedItemNumbers(itemNumberMatch.unmatchedItemNumbers)}>{t('warehouseProductFlowAnalysis.itemNumbers.copyUnmatched')}</Button>
+                <Button type="link" size="small" onClick={() => setUnmatchedExpanded((value) => !value)}>{t(unmatchedExpanded ? 'warehouseProductFlowAnalysis.itemNumbers.collapse' : 'warehouseProductFlowAnalysis.itemNumbers.expand')}</Button>
+              </span> : null}
+            </div>
+            {unmatchedExpanded && itemNumberMatch.unmatchedItemNumbers.length ? <div className={styles.unmatchedList}>{itemNumberMatch.unmatchedItemNumbers.map((itemNumber) => <code key={itemNumber}>{itemNumber}</code>)}</div> : null}
+          </div> : null}
           <div className={styles.selectionBar}><span>{selectedLabel}</span><span><Button type="link" size="small" onClick={() => setSelection(createAllFilteredSelection())}>{t('warehouseProductFlowAnalysis.actions.selectAllFiltered')}</Button><Button type="link" size="small" onClick={() => { setSelection(createIncludedSelection()); setCurrentProductCode(null); setCurrentProductSnapshot(null) }}>{t('common.clearSelection')}</Button></span></div>
           <LocalPanel loading={candidateLoading} error={candidateError} retry={loadCandidates}>
             {candidateItems.length ? <div className={styles.candidateList}>{candidateItems.map((product) => <div key={product.productCode} className={`${styles.candidate} ${currentProductCode === product.productCode ? styles.currentCandidate : ''}`}>
               <Checkbox checked={isProductSelected(selection, product.productCode)} onClick={(event) => event.stopPropagation()} onChange={(event) => toggleCandidate(product, event.target.checked)} />
-              <button type="button" className={styles.candidateMain} disabled={!isProductSelected(selection, product.productCode)} onClick={() => { setCurrentProductCode(product.productCode); setCurrentProductSnapshot(product) }}><ProductImage src={product.imageUrl} alt={product.productName || product.productCode} size={48} /><span className={styles.candidateText}><strong>{t('warehouseProductFlowAnalysis.product.itemNumber')}: {product.itemNumber || '—'}</strong><span>{product.productName || product.englishName || t('warehouseProductFlowAnalysis.product.unnamed')}</span><small>{t('warehouseProductFlowAnalysis.product.code')}: {product.productCode}</small><small>{t('warehouseProductFlowAnalysis.product.barcode')}: {product.barcode || '—'}</small><small>{product.categoryName || t('warehouseProductFlowAnalysis.product.uncategorized')} · {product.supplierName || product.supplierCode || t('warehouseProductFlowAnalysis.product.supplierUnmapped')}</small></span></button>
+              <button type="button" className={styles.candidateMain} disabled={!isProductSelected(selection, product.productCode)} onClick={() => { setCurrentProductCode(product.productCode); setCurrentProductSnapshot(product) }}><ProductImage src={product.imageUrl} alt={product.productName || product.productCode} size={48} /><span className={styles.candidateText}><strong>{t('warehouseProductFlowAnalysis.product.itemNumber')}: {product.itemNumber || '—'}{renderPasteLine(product)}</strong><span>{product.productName || product.englishName || t('warehouseProductFlowAnalysis.product.unnamed')}</span><small>{t('warehouseProductFlowAnalysis.product.code')}: {product.productCode}</small><small>{t('warehouseProductFlowAnalysis.product.barcode')}: {product.barcode || '—'}</small><small>{product.categoryName || t('warehouseProductFlowAnalysis.product.uncategorized')} · {product.supplierName || product.supplierCode || t('warehouseProductFlowAnalysis.product.supplierUnmapped')}</small></span></button>
             </div>)}</div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('warehouseProductFlowAnalysis.empty.noProducts')} />}
           </LocalPanel>
           <Pagination size="small" current={candidatePage} total={candidates?.total || 0} pageSize={20} showSizeChanger={false} onChange={setCandidatePage} />
