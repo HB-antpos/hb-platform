@@ -57,6 +57,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "warehouse", labelKey: "routes.warehouse", icon: "warehouse" },
       { routeName: "containers", labelKey: "routes.containers", icon: "archive-outline" },
       { routeName: "warehouse-picking", labelKey: "routes.warehousePicking", icon: "clipboard-check-outline" },
+      { routeName: "warehouse-packing", labelKey: "routes.warehousePacking", icon: "package-variant" },
       { routeName: "warehouse-product-insights", labelKey: "routes.warehouseProductInsights", icon: "warehouse" },
       { routeName: "domestic-purchase", labelKey: "routes.domesticPurchase", icon: "shopping-outline" },
     ],

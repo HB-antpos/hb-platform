@@ -1,6 +1,8 @@
 import type {
   CashRegisterUserBarcodeLabelPrintPayload,
   EmployeeCashierBarcodeLabelPrintPayload,
+  PackCartonLabelPrintPayload,
+  PackPalletLabelPrintPayload,
   ProductLabelPrintPayload,
   WarehouseLocationLabelPrintPayload,
   WarehouseProductLabelPrintPayload,
@@ -553,4 +555,196 @@ export function buildWarehouseLocationLabelCommand(payload: WarehouseLocationLab
   addBarcode(lines, "128", 0, 151, barcodeValue, 44, 1);
   lines.push("PRINT");
   return command(lines);
+}
+
+// ---- 打包箱标签 / 托盘标签（70×26 mm 英文版，纯 CPCL 文本，走 print(rawCommand)，不依赖原生改动） ----
+
+interface PackLabelSpec {
+  kind: "BOX" | "PLT";
+  kindCaption: "CARTON" | "PALLET";
+  number: string;
+  fromLine: string;
+  destinationName: string;
+  statLine: string;
+  /** 右下第一行：订货单号或运单号；可空。 */
+  referenceLine: string;
+  printedAt: string;
+  operatorName: string;
+  /** 托盘张数，如 1/2；箱标签为空。 */
+  sheetText: string;
+  /** 托盘标签加整圈粗黑框。 */
+  framed: boolean;
+}
+
+// CPCL 固定字体：font 0 为 8×9 点，font 7 为 12×24 点，SETMAG 按倍数放大；非 ASCII 保守按双宽。
+function packTextWidth(value: string, font: 0 | 7, scaleX = 1) {
+  return Array.from(value).reduce(
+    (total, char) => total + ((char.codePointAt(0) ?? 0) > 127 ? 2 : 1) * (font === 0 ? 8 : 12) * scaleX,
+    0
+  );
+}
+
+/** 超宽时直接截断（不换行），保证不压到二维码或标签边缘。 */
+function packFit(value: string, maxWidth: number, font: 0 | 7, scaleX = 1) {
+  const chars = Array.from(value);
+  while (chars.length && packTextWidth(chars.join(""), font, scaleX) > maxWidth) chars.pop();
+  return chars.join("").trimEnd();
+}
+
+function packUpper(value: unknown, maxLength = 80) {
+  return cpclText(value, maxLength).toUpperCase();
+}
+
+function packCount(value: number) {
+  return Number.isFinite(value) ? String(Math.max(0, Math.trunc(value))) : "0";
+}
+
+function buildPackLabelCommand(spec: PackLabelSpec, printType?: string | null) {
+  const small = isSmallLabel(printType);
+  const width = small ? SMALL_WIDTH : STANDARD_WIDTH;
+  const height = WAREHOUSE_HEIGHT;
+  const number = packUpper(spec.number, 40).replace(/\s+/g, "");
+  if (!number) {
+    throw new Error("Pack label number is required.");
+  }
+  const frame = spec.framed ? 6 : 0;
+  const kindWidth = small ? 58 : 70;
+  const mainX = kindWidth + 10;
+  const rightEdge = width - frame - 8;
+
+  // 二维码：编号 ≤14 字节是 Version 1（21 模块），更长按 Version 2 / 3 缩小单元，边长始终不超过约 108 点。
+  const qrModules = number.length <= 14 ? 21 : number.length <= 26 ? 25 : 29;
+  const qrUnit = Math.max(2, Math.floor((small ? 88 : 108) / qrModules));
+  const qrX = rightEdge - qrModules * qrUnit;
+  const qrY = frame + 6;
+  const textMaxWidth = qrX - 8 - mainX;
+
+  const lines = [
+    `! 0 200 200 ${height} 1`,
+    `PAGE-WIDTH ${width}`,
+    "LEFT",
+    "SETBOLD 0",
+    // BARCODE-TEXT 会跨标签保持：显式关闭，避免继承上一张商品标签的可读数字。
+    "BARCODE-TEXT OFF",
+  ];
+  const addText = (font: 0 | 7, x: number, y: number, value: string, scaleX = 1, scaleY = 1) => {
+    if (value) lines.push(`SETMAG ${scaleX} ${scaleY}`, text(font, Math.round(x), Math.round(y), value));
+  };
+
+  // 左侧类型条：先印黑字，最后整条反白成黑底白字。
+  const kindCenter = (frame + kindWidth) / 2;
+  addText(7, kindCenter - packTextWidth(spec.kind, 7) / 2, 64, spec.kind, 1, 2);
+  addText(0, kindCenter - packTextWidth(spec.kindCaption, 0) / 2, 120, spec.kindCaption, 1, 2);
+
+  // 第一行：发出地（托盘带承运商 / DIRECT）。
+  addText(0, mainX, frame + 8, packFit(spec.fromLine, textMaxWidth, 0), 1, 2);
+
+  // 第二行：TO + 去向大字；放不下先缩一号，再截断。
+  const toY = 34;
+  addText(7, mainX, toY + 20, "TO");
+  const destinationX = mainX + 32;
+  const destinationMaxWidth = textMaxWidth - 32;
+  const destinationScaleX = packTextWidth(spec.destinationName, 7, 2) <= destinationMaxWidth ? 2 : 1;
+  addText(
+    7,
+    destinationX,
+    toY,
+    packFit(spec.destinationName, destinationMaxWidth, 7, destinationScaleX),
+    destinationScaleX,
+    2
+  );
+
+  // 第三行：编号前 8 位小字 + 流水尾号大字 + 数量。
+  const codeY = 86;
+  const prefix = number.length > 8 ? number.slice(0, 8) : "";
+  const tail = number.length > 8 ? number.slice(8) : number;
+  const tailX = mainX + (prefix ? packTextWidth(prefix, 7) + 8 : 0);
+  const tailScale = packTextWidth(tail, 7, 2) <= textMaxWidth - (tailX - mainX) ? 2 : 1;
+  addText(7, mainX, codeY + 22, prefix);
+  const fittedTail = packFit(tail, textMaxWidth - (tailX - mainX), 7, tailScale);
+  addText(7, tailX, tailScale === 2 ? codeY : codeY + 22, fittedTail, tailScale, tailScale);
+  const statX = tailX + packTextWidth(fittedTail, 7, tailScale) + 10;
+  addText(0, statX, codeY + 26, packFit(spec.statLine, qrX - 8 - statX, 0), 1, 2);
+
+  // 底部：Code128 给扫码枪；右下两行（订货单号 / 运单号，时间与操作人）右对齐。
+  const barcodeY = 144;
+  const barcodeHeight = 46;
+  // Code128-B 估宽：(字符数 + 起始 + 校验) × 11 + 终止 13 模块。
+  const barcodeModules = (number.length + 2) * 11 + 13;
+  const sheetWidth = spec.sheetText ? packTextWidth(spec.sheetText, 7) + 8 : 0;
+  const metaWidthFor = (unit: number) => rightEdge - (mainX + barcodeModules * unit + 10);
+  // 右侧至少放得下时间（加托盘张数）才用 2 点窄条，否则退到 1 点，文字优先不被条码压住。
+  const barcodeUnit = metaWidthFor(2) - sheetWidth >= packTextWidth("00 XXX 00:00", 0) ? 2 : 1;
+  const metaWidth = metaWidthFor(barcodeUnit);
+  lines.push(`BARCODE 128 ${barcodeUnit} 1 ${barcodeHeight} ${mainX} ${barcodeY} ${number}`);
+  const referenceLine = packFit(spec.referenceLine, metaWidth, 0);
+  addText(0, rightEdge - packTextWidth(referenceLine, 0), barcodeY + 4, referenceLine, 1, 2);
+  // 小标签的托盘右下只打时间，不打操作人（宽度不够）。
+  const withOperator = Boolean(spec.operatorName) && !(small && spec.framed);
+  const timeLine = packFit(
+    withOperator ? `${spec.printedAt} ${spec.operatorName}` : spec.printedAt,
+    metaWidth - sheetWidth,
+    0
+  );
+  addText(0, rightEdge - sheetWidth - packTextWidth(timeLine, 0), barcodeY + 28, timeLine, 1, 2);
+  addText(7, rightEdge - packTextWidth(spec.sheetText, 7), barcodeY + 23, spec.sheetText);
+
+  lines.push(`BARCODE QR ${qrX} ${qrY} M 2 U ${qrUnit}`, `MA,${number}`, "ENDQR");
+  if (spec.framed) {
+    // 托盘标签整圈粗黑框；类型条只反白框内部分，和黑框连成一片。
+    lines.push(`BOX 0 0 ${width - 1} ${height - 1} ${frame}`);
+  }
+  lines.push(
+    `INVERSE-LINE ${frame} ${frame} ${kindWidth} ${frame} ${height - frame * 2}`,
+    "SETMAG 0 0",
+    "PRINT"
+  );
+  return command(lines);
+}
+
+/** 箱标签：左侧 BOX 黑条，FROM / TO / 编号 + N SKU - M PCS，右上二维码、底部 Code128（内容都是完整箱号）。 */
+export function buildPackCartonLabelCommand(payload: PackCartonLabelPrintPayload, printType?: string | null) {
+  const orderNo = packUpper(payload.orderNo, 30);
+  return buildPackLabelCommand(
+    {
+      kind: "BOX",
+      kindCaption: "CARTON",
+      number: payload.cartonNo,
+      fromLine: `FROM ${packUpper(payload.originName) || "--"}`,
+      destinationName: packUpper(payload.destinationName) || "UNASSIGNED",
+      statLine: `${packCount(payload.skuCount)} SKU - ${packCount(payload.pieceCount)} PCS`,
+      referenceLine: orderNo ? `ORDER ${orderNo}` : "",
+      printedAt: packUpper(payload.printedAt, 20),
+      operatorName: packUpper(payload.operatorName, 20),
+      sheetText: "",
+      framed: false,
+    },
+    printType
+  );
+}
+
+/** 托盘标签：PLT 黑条加整圈粗黑框；经运输公司打 VIA 与运单号（CN），直送打 DIRECT；带 1/2 张数。 */
+export function buildPackPalletLabelCommand(payload: PackPalletLabelPrintPayload, printType?: string | null) {
+  const carrier = packUpper(payload.carrierName);
+  const consignmentNo = packUpper(payload.consignmentNo, 40);
+  const orderNo = packUpper(payload.orderNo, 30);
+  const sheetTotal = Math.trunc(Number(payload.sheetTotal));
+  const sheetIndex = Math.trunc(Number(payload.sheetIndex));
+  const via = carrier ? ` - VIA ${carrier}` : payload.direct ? " - DIRECT" : "";
+  return buildPackLabelCommand(
+    {
+      kind: "PLT",
+      kindCaption: "PALLET",
+      number: payload.palletNo,
+      fromLine: `FROM ${packUpper(payload.originName) || "--"}${via}`,
+      destinationName: packUpper(payload.destinationName) || "UNASSIGNED",
+      statLine: `${packCount(payload.cartonCount)} CTN - ${packCount(payload.pieceCount)} PCS`,
+      referenceLine: consignmentNo ? `CN ${consignmentNo}` : orderNo ? `ORDER ${orderNo}` : "",
+      printedAt: packUpper(payload.printedAt, 20),
+      operatorName: packUpper(payload.operatorName, 20),
+      sheetText: sheetTotal >= 1 && sheetIndex >= 1 && sheetIndex <= sheetTotal ? `${sheetIndex}/${sheetTotal}` : "",
+      framed: true,
+    },
+    printType
+  );
 }

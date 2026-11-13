@@ -81,6 +81,7 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
   if (
     routeName === "product-insights" ||
     routeName === "warehouse-picking" ||
+    routeName === "warehouse-packing" ||
     routeName === "warehouse-product-insights" ||
     routeName === "sales-orders" ||
     routeName === "legacy-employee-logs" ||
@@ -111,7 +112,8 @@ function resolveActivePrimaryKey(routeName: string | undefined): PrimaryNavigati
 
 // 全屏作业页：PDA 小屏上底部留给页面自己的操作栏（如“完成拣货”），不显示全局底栏。
 // 申请假期的两个子页底部有固定的提交按钮，与拣货一样隐藏一级导航，避免按钮被压住。
-const FULL_SCREEN_TASK_ROUTE_PREFIXES = ["/warehouse-picking", "/attendance-leave", "/attendance-leave-paid"] as const;
+// 扫码打包同样是 PDA 全屏作业（底部是「封箱并打印标签」等操作栏）。
+const FULL_SCREEN_TASK_ROUTE_PREFIXES = ["/warehouse-picking", "/warehouse-packing", "/attendance-leave", "/attendance-leave-paid"] as const;
 
 export function shouldHidePrimaryTabBar(pathname: string | null | undefined) {
   if (!pathname) return false;

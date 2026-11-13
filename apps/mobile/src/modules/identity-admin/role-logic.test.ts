@@ -91,7 +91,7 @@ assert.equal(implicitPreview[2].visible, false);
 const fullMenus = getRoleMenuDefinitions("en");
 // Web 菜单目录按页签登记：52 = 原 50 项 + 节日销售报告（#1155）+ 商品陈列图（/pos-admin/planograms，Planogram.View，商品与价格合并页的第 5 个页签）。
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 52);
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 45);
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 46);
 // 「人脸比对」合并入口：与后端 FullAppMenu 的 any-of 一致，六个码任一即可见；旧三项目录项保留（旧版 App 兼容）
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "face-hub")?.permissionCodes,
@@ -112,6 +112,11 @@ assert.deepEqual(
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "warehouse-picking")?.permissionCodes,
   ["Warehouse.Picking", "Warehouse.Manage", "Warehouse.ManageOrders"]
+);
+// 扫码打包同理：打包专用权限或两个仓库管理权限任一即可见。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "warehouse-packing")?.permissionCodes,
+  ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]
 );
 // 季节商品查询会展示其他分店库存，只认独立权限，不复用商品查询的 StoreProducts.View。
 assert.deepEqual(

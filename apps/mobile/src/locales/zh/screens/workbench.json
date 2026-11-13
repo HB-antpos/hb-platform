@@ -46,6 +46,7 @@
     "warehouse": "商品和货位管理",
     "containers": "货柜管理",
     "warehousePicking": "订单拣货",
+    "warehousePacking": "扫码打包",
     "warehouseProductInsights": "仓库商品进销",
     "seasonalProductInsights": "季节商品查询",
     "containerNewProducts": "HB新品",

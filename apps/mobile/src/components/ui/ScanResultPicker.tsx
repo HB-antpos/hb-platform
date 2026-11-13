@@ -20,6 +20,8 @@ interface ScanResultPickerProps {
   cancelLabel?: string;
   title?: string;
   tip?: string;
+  /** 非订货场景（如仓库打包选商品）没有起订量和订货价，隐藏这一行；默认显示，现有调用不受影响。 */
+  hideOrderMeta?: boolean;
 }
 
 function resolveGrade(item: StoreOrderProductItem) {
@@ -36,6 +38,7 @@ export function ScanResultPicker({
   cancelLabel,
   title,
   tip,
+  hideOrderMeta = false,
 }: ScanResultPickerProps) {
   const { t } = useAppTranslation(["common", "cart", "productQuery"]);
   const resolvedSelectLabel = selectLabel || t("common:actions.select");
@@ -76,14 +79,16 @@ export function ScanResultPicker({
                       <Text variant="bodySmall" style={styles.secondaryText}>
                         {t("common:labels.itemNumber")}: {item.itemNumber || t("common:na")}
                       </Text>
-                      <View style={styles.metaRow}>
-                        <Text variant="bodySmall" style={styles.secondaryText}>
-                          {t("common:labels.minOrder")} {item.minOrderQuantity || 1}
-                        </Text>
-                        <Text variant="bodySmall" style={styles.priceText}>
-                          ${Number(item.oemPrice ?? 0).toFixed(2)}
-                        </Text>
-                      </View>
+                      {hideOrderMeta ? null : (
+                        <View style={styles.metaRow}>
+                          <Text variant="bodySmall" style={styles.secondaryText}>
+                            {t("common:labels.minOrder")} {item.minOrderQuantity || 1}
+                          </Text>
+                          <Text variant="bodySmall" style={styles.priceText}>
+                            ${Number(item.oemPrice ?? 0).toFixed(2)}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
 
