@@ -148,7 +148,10 @@ internal static class DailyCloseSyncRequestMapper
             archive.CountedCashAmount,
             archive.CashDifference,
             report.CashRoundingAmount,
-            report.InstallmentPaymentCount);
+            report.InstallmentPaymentCount,
+            // 现金存入 / 取出合计（冲正已抵消）；没有现金进出时为 0，与旧客户端一致。
+            report.CashInAmount,
+            report.CashOutAmount);
     }
 
     /// <summary>本地面额是以元为单位的 decimal（如 100、0.05），换算成分用 decimal 乘 100 取整，避免浮点误差。</summary>

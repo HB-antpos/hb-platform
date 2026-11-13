@@ -18,6 +18,7 @@
              Background="{DynamicResource PosScreenBackgroundBrush}">
     <UserControl.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <converters:InverseBooleanConverter x:Key="InverseBooleanConverter" />
         <converters:AlternationIndexToRowNumberConverter x:Key="RowNumberConverter" />
         <converters:ProductThumbnailImageSourceConverter x:Key="ProductThumbnailImageSourceConverter" DecodePixelWidth="72" />
         <converters:StringNullOrWhiteSpaceToVisibilityConverter x:Key="StringHasValueToVis" />
@@ -2314,12 +2315,13 @@
                         </Border>
                     </Grid>
                 </Button>
-                <Button Background="{DynamicResource PosSidebarTileDrawerBrush}" Command="{Binding OpenCashDrawerCommand}" services:ButtonFeedback.Cue="CashDrawer" Style="{StaticResource PosSidebarActionButtonStyle}">
+                <!-- 「钱箱」格：有现金进出功能时打开钱箱小面板（No Sale / 存入 / 取出 / 今日记录），否则仍是直接开钱箱。 -->
+                <Button Background="{DynamicResource PosSidebarTileDrawerBrush}" Command="{Binding CashDrawerTileCommand}" services:ButtonFeedback.Cue="CashDrawer" Style="{StaticResource PosSidebarActionButtonStyle}">
                     <StackPanel>
                         <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
                             <materialDesign:PackIcon Kind="CashRegister" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
-                        <TextBlock Text="{Binding OpenCashDrawerText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
+                        <TextBlock Text="{Binding CashDrawerTileText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
                 <Button Background="{DynamicResource PosSidebarTileReceiptBrush}" Command="{Binding PrintLastReceiptCommand}" Style="{StaticResource PosSidebarActionButtonStyle}">
@@ -2616,6 +2618,371 @@
                                 AutomationProperties.AutomationId="PendingChoicePromptBack" />
                     </StackPanel>
                 </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- 收银端现金存入 / 取出：钱箱小面板、存入 / 取出弹窗、今日记录（含冲正确认）。CashMovement 为 null 时整块不显示。 -->
+        <Grid Grid.ColumnSpan="3"
+              Panel.ZIndex="90"
+              DataContext="{Binding CashMovement}"
+              Visibility="{Binding DataContext.IsCashMovementEnabled, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+            <!-- 钱箱小面板 -->
+            <Border Background="#33000000"
+                    Visibility="{Binding IsPanelOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                <Border Width="460"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Margin="0,0,200,0"
+                        Padding="20"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        BorderBrush="{DynamicResource PosBorderBrush}"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        AutomationProperties.AutomationId="CashMovementPanel">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="28" ShadowDepth="6" Opacity="0.3" />
+                    </Border.Effect>
+                    <StackPanel>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Command="{Binding ClosePanelCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Width="44" Height="44" Padding="0">
+                                <materialDesign:PackIcon Kind="Close" Width="20" Height="20" />
+                            </Button>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <materialDesign:PackIcon Kind="CashRegister" Width="26" Height="26" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                <TextBlock Text="{loc:Loc cashMovement.panel.title}" FontSize="19" FontWeight="Black" Margin="10,0,0,0" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DockPanel>
+                        <Border Margin="0,14,0,0" Padding="12,10" CornerRadius="8" Background="{DynamicResource PosSurfaceAltBrush}" BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="1">
+                            <UniformGrid Columns="3">
+                                <StackPanel>
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.todayIn}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                    <TextBlock Text="{Binding TodayCashInText, StringFormat='+{0}'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource PosSuccessBrush}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.todayOut}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                    <TextBlock Text="{Binding TodayCashOutText, StringFormat='-{0}'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource PosDangerBrush}" />
+                                </StackPanel>
+                                <StackPanel>
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.count}" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                    <TextBlock Text="{Binding TodayCountText}" FontSize="18" FontWeight="Bold" />
+                                </StackPanel>
+                            </UniformGrid>
+                        </Border>
+                        <UniformGrid Columns="2" Margin="0,12,0,0">
+                            <Button Command="{Binding StartCashInCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="76" Margin="0,0,5,5"
+                                    BorderBrush="{DynamicResource PosSuccessBrush}" BorderThickness="2" AutomationProperties.AutomationId="CashMovementStartCashIn">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="TrayArrowDown" Width="20" Height="20" Foreground="{DynamicResource PosSuccessBrush}" />
+                                        <TextBlock Text="{loc:Loc cashMovement.panel.cashIn}" FontSize="18" FontWeight="Bold" Margin="6,0,0,0" Foreground="{DynamicResource PosSuccessBrush}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.cashInHint}" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding StartCashOutCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="76" Margin="5,0,0,5"
+                                    BorderBrush="{DynamicResource PosDangerBrush}" BorderThickness="2" AutomationProperties.AutomationId="CashMovementStartCashOut">
+                                <StackPanel HorizontalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                        <materialDesign:PackIcon Kind="TrayArrowUp" Width="20" Height="20" Foreground="{DynamicResource PosDangerBrush}" />
+                                        <TextBlock Text="{loc:Loc cashMovement.panel.cashOut}" FontSize="18" FontWeight="Bold" Margin="6,0,0,0" Foreground="{DynamicResource PosDangerBrush}" />
+                                    </StackPanel>
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.cashOutHint}" FontSize="12" HorizontalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding NoSaleCommand}"
+                                    CommandParameter="{Binding DataContext.OpenCashDrawerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                    Style="{StaticResource PosSecondaryButtonStyle}" Height="52" Margin="0,5,5,0" AutomationProperties.AutomationId="CashMovementNoSale">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="LockOpenVariantOutline" Width="18" Height="18" />
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.noSale}" FontSize="15" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                            <Button Command="{Binding OpenRecordsCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Height="52" Margin="5,5,0,0" AutomationProperties.AutomationId="CashMovementOpenRecords">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="FormatListBulleted" Width="18" Height="18" />
+                                    <TextBlock Text="{loc:Loc cashMovement.panel.records}" FontSize="15" Margin="6,0,0,0" />
+                                </StackPanel>
+                            </Button>
+                        </UniformGrid>
+                        <TextBlock Text="{loc:Loc cashMovement.panel.periodHint}" Margin="0,10,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource PosSubtleForegroundBrush}" />
+                    </StackPanel>
+                </Border>
+            </Border>
+
+            <!-- 存入 / 取出弹窗 -->
+            <Border Background="#66000000"
+                    Visibility="{Binding IsDialogOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                <Border Width="900"
+                        Padding="24"
+                        Background="{DynamicResource PosSurfaceBrush}"
+                        CornerRadius="12"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        AutomationProperties.AutomationId="CashMovementDialog">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DockPanel Grid.Row="0" Margin="0,0,0,16">
+                            <Border DockPanel.Dock="Right" Background="{DynamicResource PosSurfaceMutedBrush}" CornerRadius="8" Padding="3" BorderBrush="{DynamicResource PosBorderBrush}" BorderThickness="1">
+                                <StackPanel Orientation="Horizontal">
+                                    <Button Command="{Binding SelectDirectionCommand}" CommandParameter="In" Height="42" MinWidth="110" Padding="16,0"
+                                            Style="{StaticResource PosSecondaryButtonStyle}" AutomationProperties.AutomationId="CashMovementDirectionIn">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="TrayArrowDown" Width="18" Height="18" Foreground="{DynamicResource PosSuccessBrush}" />
+                                            <TextBlock Text="{loc:Loc cashMovement.panel.cashIn}" FontSize="16" FontWeight="SemiBold" Margin="6,0,0,0"
+                                                       Foreground="{DynamicResource PosSuccessBrush}" />
+                                            <materialDesign:PackIcon Kind="CheckCircle" Width="16" Height="16" Margin="6,0,0,0" Foreground="{DynamicResource PosSuccessBrush}"
+                                                                     Visibility="{Binding IsCashIn, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Command="{Binding SelectDirectionCommand}" CommandParameter="Out" Height="42" MinWidth="110" Padding="16,0" Margin="4,0,0,0"
+                                            Style="{StaticResource PosSecondaryButtonStyle}" AutomationProperties.AutomationId="CashMovementDirectionOut">
+                                        <StackPanel Orientation="Horizontal">
+                                            <materialDesign:PackIcon Kind="TrayArrowUp" Width="18" Height="18" Foreground="{DynamicResource PosDangerBrush}" />
+                                            <TextBlock Text="{loc:Loc cashMovement.panel.cashOut}" FontSize="16" FontWeight="SemiBold" Margin="6,0,0,0"
+                                                       Foreground="{DynamicResource PosDangerBrush}" />
+                                            <materialDesign:PackIcon Kind="CheckCircle" Width="16" Height="16" Margin="6,0,0,0" Foreground="{DynamicResource PosDangerBrush}"
+                                                                     Visibility="{Binding IsCashOut, Converter={StaticResource BoolToVis}}" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{Binding DialogTitle}" FontSize="22" FontWeight="Black" VerticalAlignment="Center" />
+                        </DockPanel>
+
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="22" />
+                                <ColumnDefinition Width="320" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="{loc:Loc cashMovement.dialog.reason}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,0,0,6" />
+                                <ItemsControl ItemsSource="{Binding ReasonOptions}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <UniformGrid Columns="2" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Command="{Binding DataContext.SelectReasonCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding Code}"
+                                                    Margin="0,0,8,0" MinHeight="72" Padding="12,8"
+                                                    HorizontalContentAlignment="Stretch"
+                                                    Style="{StaticResource PosSecondaryButtonStyle}">
+                                                <DockPanel>
+                                                    <materialDesign:PackIcon DockPanel.Dock="Left" Kind="CheckCircle" Width="22" Height="22" Margin="0,0,8,0"
+                                                                             Foreground="{DynamicResource PosPrimaryTextBrush}"
+                                                                             Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" />
+                                                    <StackPanel>
+                                                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+                                                        <TextBlock Text="{Binding Hint}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBlock Text="{loc:Loc cashMovement.dialog.amount}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,14,0,6" />
+                                <Border Height="62" CornerRadius="8" BorderThickness="2" BorderBrush="{DynamicResource PosPrimaryBrush}" Background="White" Padding="14,0">
+                                    <TextBlock Text="{Binding AmountText, StringFormat='${0}', TargetNullValue='$', FallbackValue='$'}" FontSize="32" FontWeight="Bold" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource PosAccentBrush}" AutomationProperties.AutomationId="CashMovementAmount" />
+                                </Border>
+                                <ItemsControl ItemsSource="{Binding QuickAmounts}" Margin="0,8,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding StringFormat='${0}'}"
+                                                    Command="{Binding DataContext.QuickAmountCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource PosSecondaryButtonStyle}" Height="38" MinWidth="70" Margin="0,0,8,0" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <TextBox Text="{Binding NoteText, UpdateSourceTrigger=PropertyChanged}"
+                                         materialDesign:HintAssist.Hint="{Binding NotePlaceholder}"
+                                         MaxLength="200" FontSize="15" Margin="0,12,0,0" Height="46" VerticalContentAlignment="Center"
+                                         AutomationProperties.AutomationId="CashMovementNote" />
+                                <ItemsControl ItemsSource="{Binding QuickNotes}" Margin="0,6,0,0">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding}"
+                                                    Command="{Binding DataContext.QuickNoteCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource PosSecondaryButtonStyle}" Height="34" Padding="12,0" Margin="0,0,6,6" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Border Margin="0,6,0,0" Padding="12,8" CornerRadius="8" Background="{DynamicResource PosSurfaceAltBrush}"
+                                        Visibility="{Binding HasExpectedCash, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{loc:Loc cashMovement.dialog.expected}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                        <TextBlock Text="{Binding ExpectedBeforeText}" FontWeight="Bold" Margin="10,0,0,0" />
+                                        <materialDesign:PackIcon Kind="ArrowRight" Width="16" Height="16" Margin="10,0" Foreground="{DynamicResource PosSubtleForegroundBrush}" />
+                                        <TextBlock Text="{loc:Loc cashMovement.dialog.expectedAfter}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                        <TextBlock Text="{Binding ExpectedAfterText}" FontWeight="Bold" Margin="10,0,0,0" Foreground="{DynamicResource PosPrimaryTextBrush}" />
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="{Binding ErrorText}" Margin="0,8,0,0" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource PosDangerBrush}"
+                                           Visibility="{Binding ErrorText, Converter={StaticResource StringHasValueToVis}, FallbackValue=Collapsed}" />
+                            </StackPanel>
+
+                            <UniformGrid Grid.Column="2" Columns="3" VerticalAlignment="Top">
+                                <Button Content="7" Command="{Binding KeypadInputCommand}" CommandParameter="7" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="8" Command="{Binding KeypadInputCommand}" CommandParameter="8" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="9" Command="{Binding KeypadInputCommand}" CommandParameter="9" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="4" Command="{Binding KeypadInputCommand}" CommandParameter="4" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="5" Command="{Binding KeypadInputCommand}" CommandParameter="5" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="6" Command="{Binding KeypadInputCommand}" CommandParameter="6" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="1" Command="{Binding KeypadInputCommand}" CommandParameter="1" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="2" Command="{Binding KeypadInputCommand}" CommandParameter="2" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="3" Command="{Binding KeypadInputCommand}" CommandParameter="3" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="." Command="{Binding KeypadInputCommand}" CommandParameter="." Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="0" Command="{Binding KeypadInputCommand}" CommandParameter="0" Style="{StaticResource PosStitchNumberButtonStyle}" />
+                                <Button Content="{loc:Loc Backspace}" Command="{Binding KeypadInputCommand}" CommandParameter="Back" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
+                                <Button Content="{loc:Loc Clear}" Command="{Binding KeypadInputCommand}" CommandParameter="Clear" Style="{StaticResource PosStitchClearNumberButtonStyle}" />
+                            </UniformGrid>
+                        </Grid>
+
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
+                            <Button Command="{Binding CancelDialogCommand}" Style="{StaticResource PosSecondaryButtonStyle}" MinWidth="120" Height="48" Margin="0,0,12,0"
+                                    AutomationProperties.AutomationId="CashMovementCancel">
+                                <TextBlock Text="{loc:Loc Cancel}" />
+                            </Button>
+                            <Button Command="{Binding ConfirmCommand}" Style="{StaticResource PosPrimaryButtonStyle}" MinWidth="280" Height="48"
+                                    IsEnabled="{Binding IsBusy, Converter={StaticResource InverseBooleanConverter}}"
+                                    AutomationProperties.AutomationId="CashMovementConfirm">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="CheckCircle" Width="18" Height="18" Foreground="White" Margin="0,0,8,0" />
+                                    <TextBlock Text="{Binding ConfirmText}" Foreground="White" />
+                                </StackPanel>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Border>
+
+            <!-- 今日记录 -->
+            <Border Background="#66000000"
+                    Visibility="{Binding IsRecordsOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                <Grid>
+                    <Border Width="1180"
+                            MaxHeight="660"
+                            Padding="24"
+                            Background="{DynamicResource PosSurfaceBrush}"
+                            CornerRadius="12"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="CashMovementRecords">
+                        <DockPanel>
+                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,14">
+                                <Button DockPanel.Dock="Right" Command="{Binding CloseRecordsCommand}" Style="{StaticResource PosSecondaryButtonStyle}" Width="44" Height="44" Padding="0">
+                                    <materialDesign:PackIcon Kind="Close" Width="20" Height="20" />
+                                </Button>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding TodayTitle}" FontSize="22" FontWeight="Black" />
+                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                        <TextBlock Text="{loc:Loc cashMovement.panel.todayIn}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                        <TextBlock Text="{Binding TodayCashInText, StringFormat='+{0}'}" FontWeight="Bold" Margin="6,0,18,0" Foreground="{DynamicResource PosSuccessBrush}" />
+                                        <TextBlock Text="{loc:Loc cashMovement.panel.todayOut}" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                        <TextBlock Text="{Binding TodayCashOutText, StringFormat='-{0}'}" FontWeight="Bold" Margin="6,0,0,0" Foreground="{DynamicResource PosDangerBrush}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </DockPanel>
+                            <TextBlock DockPanel.Dock="Bottom" Text="{loc:Loc cashMovement.records.closeHint}" Margin="0,12,0,0" FontSize="13" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                            <TextBlock DockPanel.Dock="Bottom" Text="{Binding ErrorText}" Margin="0,8,0,0" FontWeight="SemiBold" Foreground="{DynamicResource PosDangerBrush}"
+                                       Visibility="{Binding ErrorText, Converter={StaticResource StringHasValueToVis}, FallbackValue=Collapsed}" />
+                            <Border BorderBrush="{DynamicResource PosBorderBrush}" BorderThickness="1" CornerRadius="8">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl ItemsSource="{Binding Rows}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="{DynamicResource PosDividerBrush}" BorderThickness="0,0,0,1" Padding="12,8">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="70" />
+                                                            <ColumnDefinition Width="80" />
+                                                            <ColumnDefinition Width="70" />
+                                                            <ColumnDefinition Width="170" />
+                                                            <ColumnDefinition Width="110" />
+                                                            <ColumnDefinition Width="170" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="80" />
+                                                            <ColumnDefinition Width="190" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Column="0" Text="{Binding TimeText}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding DisplayNumber}" VerticalAlignment="Center" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                        <TextBlock Grid.Column="2" Text="{Binding DirectionText}" VerticalAlignment="Center" FontWeight="Bold" />
+                                                        <TextBlock Grid.Column="3" Text="{Binding ReasonText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Grid.Column="4" Text="{Binding AmountText}" VerticalAlignment="Center" FontWeight="Bold" HorizontalAlignment="Right" Margin="0,0,14,0" />
+                                                        <TextBlock Grid.Column="5" Text="{Binding CashierText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Grid.Column="6" Text="{Binding NoteText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding NoteText}" />
+                                                        <TextBlock Grid.Column="7" Text="{Binding UploadText}" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                        <StackPanel Grid.Column="8" Orientation="Horizontal" HorizontalAlignment="Right">
+                                                            <TextBlock Text="{loc:Loc cashMovement.records.voided}" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource PosMutedForegroundBrush}"
+                                                                       Visibility="{Binding IsVoided, Converter={StaticResource BoolToVis}}" />
+                                                            <Button Command="{Binding DataContext.ReprintCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                                    Style="{StaticResource PosSecondaryButtonStyle}" Height="36" Padding="10,0" Margin="0,0,6,0">
+                                                                <TextBlock Text="{loc:Loc cashMovement.records.reprint}" />
+                                                            </Button>
+                                                            <Button Command="{Binding DataContext.StartVoidCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                                    Style="{StaticResource PosDangerButtonStyle}" Height="36" Padding="10,0"
+                                                                    Visibility="{Binding CanVoid, Converter={StaticResource BoolToVis}}">
+                                                                <TextBlock Text="{loc:Loc cashMovement.records.voidAction}" />
+                                                            </Button>
+                                                        </StackPanel>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </Border>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- 冲正确认：必须写原因 -->
+                    <Border Background="#55000000"
+                            Visibility="{Binding IsVoidConfirmOpen, Converter={StaticResource BoolToVis}, FallbackValue=Collapsed}">
+                        <Border Width="520" Padding="22" Background="{DynamicResource PosSurfaceBrush}" CornerRadius="12"
+                                HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <StackPanel>
+                                <TextBlock Text="{loc:Loc cashMovement.void.title}" FontSize="19" FontWeight="Black" />
+                                <TextBlock Text="{Binding VoidTargetText}" Margin="0,8,0,0" FontSize="15" />
+                                <TextBlock Text="{loc:Loc cashMovement.void.hint}" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                <TextBox Text="{Binding VoidNoteText, UpdateSourceTrigger=PropertyChanged}" Margin="0,12,0,0" Height="46" FontSize="15" MaxLength="200"
+                                         VerticalContentAlignment="Center" materialDesign:HintAssist.Hint="{loc:Loc cashMovement.void.reasonPlaceholder}" />
+                                <TextBlock Text="{Binding ErrorText}" Margin="0,8,0,0" FontWeight="SemiBold" Foreground="{DynamicResource PosDangerBrush}"
+                                           Visibility="{Binding ErrorText, Converter={StaticResource StringHasValueToVis}, FallbackValue=Collapsed}" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+                                    <Button Command="{Binding CancelVoidCommand}" Style="{StaticResource PosSecondaryButtonStyle}" MinWidth="110" Height="44" Margin="0,0,10,0">
+                                        <TextBlock Text="{loc:Loc Cancel}" />
+                                    </Button>
+                                    <Button Command="{Binding ConfirmVoidCommand}" Style="{StaticResource PosDangerButtonStyle}" MinWidth="140" Height="44">
+                                        <TextBlock Text="{loc:Loc cashMovement.void.confirm}" Foreground="White" />
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </Border>
+                </Grid>
             </Border>
         </Grid>
     </Grid>

@@ -12,6 +12,7 @@ public sealed class TestSalesDataResetServiceTests
         "LocalOrderLines",
         "LocalOrders",
         "LocalOrderInstallments",
+        "LocalCashMovements",
         "LocalDailyCloseCashCounts",
         "LocalDailyCloses",
         "SuspendedOrderReturnPaymentCapacities",

@@ -24,6 +24,9 @@ internal static class OperationAuditTypes
     public const string OrderRecall = "ORDER_RECALL";
     public const string OrderCancel = "ORDER_CANCEL";
     public const string CashDrawerOpen = "CASH_DRAWER_OPEN";
+    public const string CashIn = "CASH_IN";
+    public const string CashOut = "CASH_OUT";
+    public const string CashMovementVoid = "CASH_MOVEMENT_VOID";
     public const string PaymentTenderAdd = "PAYMENT_TENDER_ADD";
     public const string PaymentTenderRemove = "PAYMENT_TENDER_REMOVE";
     public const string PaymentCancel = "PAYMENT_CANCEL";

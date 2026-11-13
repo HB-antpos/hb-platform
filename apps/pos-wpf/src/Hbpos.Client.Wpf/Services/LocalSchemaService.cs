@@ -628,6 +628,21 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN InstallmentPaymentCount INTEGER NOT NULL DEFAULT 0;", cancellationToken);
         }
 
+        // 收银端现金存入 / 取出按原因码的合计：旧存档补 0（当时没有现金进出），不改写历史数据。
+        foreach (var cashMovementColumn in new[]
+                 {
+                     "CashChangeTopUpAmount",
+                     "CashOtherInAmount",
+                     "CashSafeDropAmount",
+                     "CashPaidOutAmount"
+                 })
+        {
+            if (!columns.Contains(cashMovementColumn))
+            {
+                await ExecuteAsync(connection, $"ALTER TABLE LocalDailyCloses ADD COLUMN {cashMovementColumn} TEXT NOT NULL DEFAULT '0';", cancellationToken);
+            }
+        }
+
         if (!columns.Contains("UploadStatus"))
         {
             await ExecuteAsync(connection, "ALTER TABLE LocalDailyCloses ADD COLUMN UploadStatus TEXT NOT NULL DEFAULT 'Pending';", cancellationToken);
@@ -1716,6 +1731,10 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             InstallmentVoucherReceivedAmount TEXT NOT NULL DEFAULT '0',
             InstallmentVoucherRefundAmount TEXT NOT NULL DEFAULT '0',
             InstallmentPaymentCount INTEGER NOT NULL DEFAULT 0,
+            CashChangeTopUpAmount TEXT NOT NULL DEFAULT '0',
+            CashOtherInAmount TEXT NOT NULL DEFAULT '0',
+            CashSafeDropAmount TEXT NOT NULL DEFAULT '0',
+            CashPaidOutAmount TEXT NOT NULL DEFAULT '0',
             UploadStatus TEXT NOT NULL DEFAULT 'Pending',
             UploadAttemptCount INTEGER NOT NULL DEFAULT 0,
             NextUploadAt TEXT NULL,
@@ -1724,6 +1743,42 @@ public sealed class LocalSchemaService(LocalSqliteStore store) : ILocalSchemaSer
             UploadErrorMessage TEXT NULL,
             UploadedAt TEXT NULL
         );
+        """,
+        // 收银端现金存入 / 取出：只增不改（上传状态列除外），输错由冲正记录抵消；每条原记录最多一条冲正。
+        """
+        CREATE TABLE IF NOT EXISTS LocalCashMovements (
+            MovementGuid TEXT PRIMARY KEY,
+            StoreCode TEXT NOT NULL,
+            DeviceCode TEXT NOT NULL,
+            Direction TEXT NOT NULL,
+            ReasonCode TEXT NOT NULL,
+            Amount TEXT NOT NULL,
+            Note TEXT NULL,
+            VoidsMovementGuid TEXT NULL,
+            BusinessDate TEXT NOT NULL,
+            OccurredAt TEXT NOT NULL,
+            CashierId TEXT NOT NULL,
+            CashierName TEXT NOT NULL,
+            AuthorizedById TEXT NULL,
+            AuthorizedByName TEXT NULL,
+            DisplayNumber TEXT NOT NULL,
+            UploadStatus TEXT NOT NULL DEFAULT 'Pending',
+            UploadAttemptCount INTEGER NOT NULL DEFAULT 0,
+            NextUploadAt TEXT NULL,
+            LastUploadAttemptAt TEXT NULL,
+            UploadErrorCode TEXT NULL,
+            UploadErrorMessage TEXT NULL,
+            UploadedAt TEXT NULL
+        );
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS UX_LocalCashMovements_Voids
+            ON LocalCashMovements (VoidsMovementGuid)
+            WHERE VoidsMovementGuid IS NOT NULL;
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS IX_LocalCashMovements_Device_OccurredAt
+            ON LocalCashMovements (StoreCode, DeviceCode, OccurredAt);
         """,
         """
         CREATE TABLE IF NOT EXISTS LocalDailyCloseCashCounts (

@@ -204,6 +204,18 @@ public static class DailyCloseTextFormatter
         builder.Separator();
         // 现金进位（5 分进位）单独一行：Cash 行是订单精确金额，Cash Expected = Cash 净额 + 分期现金净额 + 进位。
         builder.Text(FitTwoColumns("Cash Rounding", SignedMoney(report.CashRoundingAmount)));
+        // 收银端现金存入 / 取出（冲正已抵消）：没有时整段不打，旧格式不变。
+        var movements = report.CashMovementTotals;
+        if (movements.HasAny)
+        {
+            builder.Text(FitTwoColumns("Cash In", SignedMoney(movements.CashIn)));
+            AppendMovementDetail(builder, "  Change top-up", movements.ChangeTopUp);
+            AppendMovementDetail(builder, "  Other cash in", movements.OtherIn);
+            builder.Text(FitTwoColumns("Cash Out", SignedMoney(-movements.CashOut)));
+            AppendMovementDetail(builder, "  Safe drop", movements.SafeDrop);
+            AppendMovementDetail(builder, "  Paid out", movements.PaidOut);
+        }
+
         builder.Text(FitTwoColumns("Cash Expected", Money(report.ExpectedCashAmount)));
         builder.Text(FitTwoColumns("Cash Counted", Money(archive.CountedCashAmount)), isEmphasized: true);
         builder.Text(FitTwoColumns("Cash Difference", SignedMoney(archive.CashDifference)), isEmphasized: true);
@@ -383,6 +395,14 @@ public static class DailyCloseTextFormatter
             ReceiptPrintReason.Test => "==== DAILY CLOSE TEST ====",
             _ => "==== DAILY CLOSE ===="
         };
+    }
+
+    private static void AppendMovementDetail(DailyCloseDocumentBuilder builder, string label, decimal amount)
+    {
+        if (amount != 0m)
+        {
+            builder.Text(FitTwoColumns(label, Money(amount)));
+        }
     }
 
     private static string GetCashSlipTitle(ReceiptPrintReason reason)

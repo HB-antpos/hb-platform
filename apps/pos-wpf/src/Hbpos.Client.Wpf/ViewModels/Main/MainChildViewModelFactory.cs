@@ -56,6 +56,8 @@ internal sealed class MainChildViewModelFactory
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
     private readonly IMobileAppDownloadService? _mobileAppDownloadService;
     private readonly IHeldOrderTodayCountService? _heldOrderTodayCountService;
+    private readonly ICashMovementService? _cashMovementService;
+    private readonly ICashMovementPrintService? _cashMovementPrintService;
 
     public MainChildViewModelFactory(
         IDeviceRegistrationWorkflowService deviceRegistrationWorkflowService,
@@ -102,7 +104,9 @@ internal sealed class MainChildViewModelFactory
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
         IMobileAppDownloadService? mobileAppDownloadService = null,
-        IHeldOrderTodayCountService? heldOrderTodayCountService = null)
+        IHeldOrderTodayCountService? heldOrderTodayCountService = null,
+        ICashMovementService? cashMovementService = null,
+        ICashMovementPrintService? cashMovementPrintService = null)
     {
         _deviceRegistrationWorkflowService = deviceRegistrationWorkflowService;
         _receiptQueryService = receiptQueryService;
@@ -149,6 +153,8 @@ internal sealed class MainChildViewModelFactory
         _receiptProfileSyncService = receiptProfileSyncService;
         _mobileAppDownloadService = mobileAppDownloadService;
         _heldOrderTodayCountService = heldOrderTodayCountService;
+        _cashMovementService = cashMovementService;
+        _cashMovementPrintService = cashMovementPrintService;
     }
 
     public DeviceRegistrationViewModel CreateDeviceRegistrationViewModel(
@@ -330,6 +336,13 @@ internal sealed class MainChildViewModelFactory
             onOpenCardRecoveryCenterAsync: onOpenCardRecoveryCenterAsync,
             // 首页「取单」按钮角标：今天仍可取的挂单数量（本机 + 本店共享）。
             heldOrderTodayCountService: _heldOrderTodayCountService,
+            // 侧栏「钱箱」：现金存入 / 取出；弹窗里「今日应有现金」取今天的日结统计（与日结页同一个算法）。
+            cashMovementService: _cashMovementService,
+            cashMovementPrintService: _cashMovementPrintService,
+            loadExpectedCashAsync: _cashMovementService is null
+                ? null
+                : async cancellationToken =>
+                    (await _dailyCloseService.LoadReportAsync(session, _cashMovementService.Today, cancellationToken)).ExpectedCashAmount,
             // 设置页「无交易开钱箱需要再次扫码」：每次点开钱箱都现读小票设置仓储，改设置后立即生效。
             isNoSaleCashDrawerRescanRequiredAsync: _receiptPrinterSettingsStore is null
                 ? null
