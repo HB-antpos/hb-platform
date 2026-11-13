@@ -27,6 +27,7 @@ try {
     const url = String(input)
     captured.push({ url, init })
     if (url.endsWith('/options') || url.endsWith('/options?forceRefresh=true')) return jsonResponse({ success: true, data: { DomesticSuppliers: [{ Code: 'CN-1', Name: '优品玩具' }] } })
+    if (url.endsWith('/candidates') && String(init?.body).includes('itemNumbers')) return jsonResponse({ success: true, data: { Items: [], Total: 0, PageNumber: 1, PageSize: 20, ItemNumberMatch: { RequestedCount: 2, MatchedCount: 1, UnmatchedItemNumbers: ['X9', ''] } } })
     if (url.endsWith('/candidates')) return jsonResponse({ success: true, data: { Items: [{ ProductCode: 'HB-1', ItemNumber: '001', ProductName: '粉色玩具', Barcode: '123' }], Total: 1, PageNumber: 1, PageSize: 20 } })
     if (url.endsWith('/summary')) return jsonResponse({ success: true, data: { Totals: { InboundQuantity: 12 }, CurrentProduct: { ProductCode: 'HB-1', Metrics: { InboundQuantity: 12 } }, Items: [{ ProductCode: 'HB-1', Metrics: { InboundQuantity: 12 } }], Total: 1, PageNumber: 1, PageSize: 20 } })
     if (url.endsWith('/shipments')) return jsonResponse({ success: true, data: [
@@ -58,6 +59,7 @@ try {
     filter, pageNumber: 1, pageSize: 20, sortBy: 'itemNumber', sortDirection: 'asc', forceRefresh: true,
   }, 'candidates 必须使用独立 CandidateRequest，不能包含 periods、selection 或当前商品')
   assertEqual('metrics' in candidates.data.items[0], false, '候选商品主档不得归一化区间指标')
+  assertEqual('itemNumberMatch' in candidates.data, false, '没有批量货号时不得带匹配统计')
 
   const summary = await queryWarehouseProductFlowSummary({ filter, periods, selection, currentProductCode: 'HB-1', pageNumber: 1, pageSize: 20, sortBy: 'itemNumber', sortDirection: 'asc' })
   assertDeepEqual(JSON.parse(String(captured[3].init?.body)), {
@@ -85,6 +87,11 @@ try {
   assertEqual(shipments.data[2].posEnabled, null, '未关联分店必须保持未知 POS 状态')
   assertEqual(shipments.data[3].netSalesQuantity, null, '旧接口缺少销量时不能误显示为零')
   assertEqual(shipments.data[3].posEnabled, null, '旧接口缺少 POS 状态时不能归入未启用')
+
+  const itemNumberFilter = { ...filter, itemNumbers: ['10235', 'X9'], itemNumberMatchMode: 'any' as const }
+  const itemNumberCandidates = await queryWarehouseProductFlowCandidates({ filter: itemNumberFilter, pageNumber: 1, pageSize: 20 })
+  assertDeepEqual(JSON.parse(String(captured[captured.length - 1].init?.body)).filter, itemNumberFilter, '批量货号与匹配方式必须放在 POST 请求体的 filter 中')
+  assertDeepEqual(itemNumberCandidates.data.itemNumberMatch, { requestedCount: 2, matchedCount: 1, unmatchedItemNumbers: ['X9'] }, '批量货号匹配统计必须归一化并丢弃空值')
 
   console.log('warehouseProductFlowAnalysisService.test: ok')
 } finally {

@@ -253,6 +253,119 @@ public sealed class WarehouseProductFlowAnalysisServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Candidates_批量货号精确匹配按粘贴顺序并返回未找到()
+    {
+        await _db.Insertable(new[]
+        {
+            new WarehouseProduct { ProductCode = "P1", IsDeleted = false },
+            new WarehouseProduct { ProductCode = "P2", IsDeleted = false },
+            new WarehouseProduct { ProductCode = "P3", IsDeleted = false },
+            new WarehouseProduct { ProductCode = "P4", IsDeleted = false },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            new Product { UUID = "u1", ProductCode = "P1", ItemNumber = "10236", Barcode = "931001" },
+            new Product { UUID = "u2", ProductCode = "P2", ItemNumber = "10235", Barcode = "931002" },
+            // 关键字模糊匹配会命中，批量货号精确匹配不能命中。
+            new Product { UUID = "u3", ProductCode = "P3", ItemNumber = "102350", Barcode = "931003" },
+            new Product { UUID = "u4", ProductCode = "P4", ItemNumber = "000", Barcode = "931004" },
+        }).ExecuteCommandAsync();
+
+        var request = CreateCandidateRequest();
+        request.Filter.ItemNumbers = new List<string> { "10235", " 10236 ", "X9", "10235", "" };
+        var result = await CreateService().GetCandidatesAsync(request);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Data!.Total);
+        Assert.Equal(new[] { "P2", "P1" }, result.Data.Items.Select(item => item.ProductCode).ToArray());
+        var match = Assert.IsType<WarehouseProductFlowItemNumberMatchDto>(result.Data.ItemNumberMatch);
+        Assert.Equal(3, match.RequestedCount);
+        Assert.Equal(2, match.MatchedCount);
+        Assert.Equal(new[] { "X9" }, match.UnmatchedItemNumbers.ToArray());
+    }
+
+    [Fact]
+    public async Task Candidates_批量货号any模式匹配条码与商品编码并与其他条件取交集()
+    {
+        await _db.Insertable(new[]
+        {
+            new WarehouseProduct { ProductCode = "P1", IsDeleted = false },
+            new WarehouseProduct { ProductCode = "P2", IsDeleted = false },
+            new WarehouseProduct { ProductCode = "P3", IsDeleted = false },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            new Product { UUID = "u1", ProductCode = "P1", ItemNumber = "A1", Barcode = "931001", ProductName = "杯子" },
+            new Product { UUID = "u2", ProductCode = "P2", ItemNumber = "A2", Barcode = "931002", ProductName = "杯子" },
+            new Product { UUID = "u3", ProductCode = "P3", ItemNumber = "A3", Barcode = "931003", ProductName = "盒子" },
+        }).ExecuteCommandAsync();
+
+        var onlyItemNumber = CreateCandidateRequest();
+        onlyItemNumber.Filter.ItemNumbers = new List<string> { "P3", "931002", "A1" };
+        var itemResult = await CreateService().GetCandidatesAsync(onlyItemNumber);
+        Assert.Equal(new[] { "P1" }, itemResult.Data!.Items.Select(item => item.ProductCode).ToArray());
+
+        var any = CreateCandidateRequest(keyword: "杯子");
+        any.Filter.ItemNumbers = new List<string> { "P3", "931002", "A1" };
+        any.Filter.ItemNumberMatchMode = "any";
+        var anyResult = await CreateService().GetCandidatesAsync(any);
+
+        // P3 按商品编码命中，但被关键字「杯子」排除，算作未找到。
+        Assert.Equal(new[] { "P2", "P1" }, anyResult.Data!.Items.Select(item => item.ProductCode).ToArray());
+        Assert.Equal(new[] { "P3" }, anyResult.Data.ItemNumberMatch!.UnmatchedItemNumbers.ToArray());
+    }
+
+    [Fact]
+    public async Task Candidates_批量货号全部未找到返回空页且超过上限报参数错误()
+    {
+        await _db.Insertable(new WarehouseProduct { ProductCode = "P1", IsDeleted = false }).ExecuteCommandAsync();
+        await _db.Insertable(new Product { UUID = "u1", ProductCode = "P1", ItemNumber = "A1" }).ExecuteCommandAsync();
+
+        var request = CreateCandidateRequest();
+        request.Filter.ItemNumbers = new List<string> { "NOPE" };
+        var result = await CreateService().GetCandidatesAsync(request);
+        Assert.Equal(0, result.Data!.Total);
+        Assert.Empty(result.Data.Items);
+        Assert.Equal(new[] { "NOPE" }, result.Data.ItemNumberMatch!.UnmatchedItemNumbers.ToArray());
+
+        var tooMany = CreateCandidateRequest();
+        tooMany.Filter.ItemNumbers = Enumerable.Range(1, WarehouseProductFlowAnalysisService.MaxItemNumberFilterCount + 1)
+            .Select(index => $"I{index}")
+            .ToList();
+        await Assert.ThrowsAsync<WarehouseProductFlowAnalysisValidationException>(
+            () => CreateService().GetCandidatesAsync(tooMany)
+        );
+    }
+
+    [Fact]
+    public async Task Summary_批量货号只汇总命中商品()
+    {
+        var date = new DateTime(2026, 8, 10);
+        await _db.Insertable(new[]
+        {
+            new WarehouseProduct { ProductCode = "P1", IsDeleted = false },
+            new WarehouseProduct { ProductCode = "P2", IsDeleted = false },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            new Product { UUID = "u1", ProductCode = "P1", ItemNumber = "A1" },
+            new Product { UUID = "u2", ProductCode = "P2", ItemNumber = "A2" },
+        }).ExecuteCommandAsync();
+        await _db.Insertable(new[]
+        {
+            CreateStatistic(date, "B1", "AU1", "P1", 5, 50m),
+            CreateStatistic(date, "B1", "AU1", "P2", 7, 70m),
+        }).ExecuteCommandAsync();
+
+        var request = CreateRequest(date);
+        request.Filter.ItemNumbers = new List<string> { "a1 " };
+        var result = await CreateService().GetSummaryAsync(request, branchCodes: null);
+
+        Assert.Equal("P1", Assert.Single(result.Data!.Items).ProductCode);
+        Assert.Equal(5, result.Data.Totals.NetSalesQuantity);
+    }
+
+    [Fact]
     public async Task Candidates_宽泛关键字不因候选预读取截断()
     {
         foreach (var chunk in Enumerable.Range(1, 505).Chunk(500))

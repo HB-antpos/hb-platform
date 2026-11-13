@@ -8,6 +8,7 @@ import type {
   WarehouseProductFlowDaily,
   WarehouseProductFlowEnvelope,
   WarehouseProductFlowFilter,
+  WarehouseProductFlowItemNumberMatch,
   WarehouseProductFlowMetrics,
   WarehouseProductFlowOptions,
   WarehouseProductFlowOrderRow,
@@ -83,14 +84,27 @@ function normalizeProduct(raw: unknown): WarehouseProductFlowProduct | null {
   return { ...candidate, metrics: normalizeMetrics(pick(record, 'metrics', 'Metrics') ?? record) }
 }
 
+function normalizeItemNumberMatch(raw: unknown): WarehouseProductFlowItemNumberMatch | undefined {
+  const record = asRecord(raw)
+  if (!record) return undefined
+  const unmatched = pick(record, 'unmatchedItemNumbers', 'UnmatchedItemNumbers')
+  return {
+    requestedCount: readNumber(pick(record, 'requestedCount', 'RequestedCount')),
+    matchedCount: readNumber(pick(record, 'matchedCount', 'MatchedCount')),
+    unmatchedItemNumbers: Array.isArray(unmatched) ? unmatched.filter((value): value is string => typeof value === 'string' && !!value.trim()) : [],
+  }
+}
+
 function normalizePagedProducts(raw: unknown): WarehouseProductFlowCandidatesData {
   const record = asRecord(raw) ?? {}
   const items = pick(record, 'items', 'Items')
+  const itemNumberMatch = normalizeItemNumberMatch(pick(record, 'itemNumberMatch', 'ItemNumberMatch'))
   return {
     items: Array.isArray(items) ? items.map(normalizeCandidate).filter((item): item is WarehouseProductFlowCandidate => !!item) : [],
     total: readNumber(pick(record, 'total', 'Total')),
     pageNumber: readNumber(pick(record, 'pageNumber', 'PageNumber'), 1),
     pageSize: readNumber(pick(record, 'pageSize', 'PageSize'), 20),
+    ...(itemNumberMatch ? { itemNumberMatch } : {}),
   }
 }
 
@@ -187,6 +201,9 @@ function serializeFilter(filter: WarehouseProductFlowFilter) {
     warehouseCategoryGuids: filter.warehouseCategoryGuids,
     supplierCodes: filter.supplierCodes,
     documentKeyword: filter.documentKeyword,
+    // 批量货号可达 2000 个，放在 POST 请求体里，不进 URL。
+    itemNumbers: filter.itemNumbers?.length ? filter.itemNumbers : undefined,
+    itemNumberMatchMode: filter.itemNumbers?.length ? filter.itemNumberMatchMode ?? 'itemNumber' : undefined,
   }
 }
 
