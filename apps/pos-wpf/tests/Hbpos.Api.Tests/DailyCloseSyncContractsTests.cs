@@ -55,7 +55,9 @@ public sealed class DailyCloseSyncContractsTests
                 "OrderCount", "ReturnQuantity", "RefundAmount", "Tenders", "CashCounts",
                 "NoteSubtotal", "CoinSubtotal", "CountedCashAmount", "CashDifference",
                 "CashRoundingAmount",
-                "InstallmentPaymentCount"
+                "InstallmentPaymentCount",
+                "CashInAmount",
+                "CashOutAmount"
             ],
             properties);
     }

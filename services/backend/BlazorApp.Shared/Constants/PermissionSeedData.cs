@@ -202,6 +202,9 @@ namespace BlazorApp.Shared.Constants
                 Permissions.PosTerminal.Installments.ConfirmPickup,
                 Permissions.PosTerminal.Installments.AmendLines,
                 Permissions.PosTerminal.CashDrawer.Open,
+                Permissions.PosTerminal.CashMovement.CashIn,
+                Permissions.PosTerminal.CashMovement.CashOut,
+                Permissions.PosTerminal.CashMovement.Void,
                 Permissions.PosTerminal.Receipt.PrintLast,
             }
             .Concat(PosTerminalLineDiscountPermissionCodes)
@@ -422,6 +425,9 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.PosTerminal.Settings.DeviceRegistration, "设备注册设置", "POS 设置", "收银端设置页 - 设备注册按钮"),
                 new(Permissions.PosTerminal.Settings.AppUpdate, "应用更新设置", "POS 设置", "收银端设置页 - 应用更新按钮"),
                 new(Permissions.PosTerminal.CashDrawer.Open, "打开钱箱", "POS 钱箱", "收银端钱箱 - 打开钱箱按钮"),
+                new(Permissions.PosTerminal.CashMovement.CashIn, "现金存入", "POS 钱箱", "收银端钱箱 - 现金存入（补零钱、其他存入）"),
+                new(Permissions.PosTerminal.CashMovement.CashOut, "现金取出", "POS 钱箱", "收银端钱箱 - 现金取出（交店长 / 入保险柜、小额现金支出）"),
+                new(Permissions.PosTerminal.CashMovement.Void, "冲正现金进出", "POS 钱箱", "收银端钱箱 - 冲正本期（未日结）的现金存入 / 取出记录"),
                 new(Permissions.PosTerminal.Receipt.PrintLast, "打印上一张小票", "POS 小票", "收银端小票 - 打印上一张小票按钮"),
                 new(Permissions.PosTerminal.CustomerDisplay.Manage, "管理客显", "POS 客显", "收银端客显 - 管理客显按钮"),
                 new(Permissions.PosTerminal.System.Sync, "同步收银数据", "POS 同步", "收银端同步 - 手动同步按钮"),

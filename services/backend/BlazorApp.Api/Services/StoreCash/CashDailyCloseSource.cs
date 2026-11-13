@@ -14,11 +14,20 @@ public sealed record CashCloseArchive(
     DateTime PeriodToUtc,
     DateTime SavedAtUtc,
     decimal CountedCash,
-    decimal ExpectedCash
+    decimal ExpectedCash,
+    // 本期收银端现金存入 / 取出合计（冲正已抵消）；旧客户端、回填行为 0。
+    decimal CashIn = 0m,
+    decimal CashOut = 0m
 )
 {
     /// <summary>差异 = 实点 − 系统应有，与收银端日结口径一致。</summary>
     public decimal Variance => CountedCash - ExpectedCash;
+
+    /// <summary>
+    /// 入池金额 = 实点 + 取出 − 存入：交店长的钱还在店里要加回；小额支出加回后由自动生成的现金支出再扣一次；
+    /// 补零钱来自保险柜（已在池中）要扣回。恒等于 现金净额 + 进位 + 差异。没有现金进出时等于实点。
+    /// </summary>
+    public decimal PoolInflow => CountedCash + CashOut - CashIn;
 }
 
 /// <summary>

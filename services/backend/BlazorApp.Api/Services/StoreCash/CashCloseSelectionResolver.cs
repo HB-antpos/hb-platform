@@ -15,7 +15,8 @@ public sealed record ResolvedCloseSelection(
     DateTime? SelectedAtUtc
 )
 {
-    public decimal IncludedCash => Included.Sum(archive => archive.CountedCash);
+    /// <summary>纳入现金池的金额：各份日结的入池金额（实点 + 收银端取出 − 存入）之和。</summary>
+    public decimal IncludedCash => Included.Sum(archive => archive.PoolInflow);
 }
 
 /// <summary>

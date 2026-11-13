@@ -82,6 +82,12 @@ internal sealed class PosmDailyCloseRecord
 
     public decimal? ExpectedCashAmount { get; set; }
 
+    /// <summary>本期收银端现金存入合计；旧客户端与回填行为 NULL（按 0 处理）。</summary>
+    public decimal? CashInAmount { get; set; }
+
+    /// <summary>本期收银端现金取出合计；旧客户端与回填行为 NULL（按 0 处理）。</summary>
+    public decimal? CashOutAmount { get; set; }
+
     public decimal? CountedCashAmount { get; set; }
 
     public decimal? CashDifference { get; set; }
@@ -122,7 +128,7 @@ internal sealed class SqlSugarDailyCloseRepository(
         [CashSalesAmount], [CashRefundAmount], [CashNetAmount],
         [CardSalesAmount], [CardRefundAmount], [CardNetAmount],
         [VoucherSalesAmount], [VoucherRefundAmount], [VoucherNetAmount],
-        [RefundAmount], [ExpectedCashAmount], [CountedCashAmount], [CashDifference],
+        [RefundAmount], [ExpectedCashAmount], [CashInAmount], [CashOutAmount], [CountedCashAmount], [CashDifference],
         [NoteSubtotal], [CoinSubtotal], [CashCountsJson], [ReceivedAtUtc], [UpdatedAtUtc]
         """;
 
@@ -140,7 +146,7 @@ internal sealed class SqlSugarDailyCloseRepository(
             [CashSalesAmount], [CashRefundAmount], [CashNetAmount],
             [CardSalesAmount], [CardRefundAmount], [CardNetAmount],
             [VoucherSalesAmount], [VoucherRefundAmount], [VoucherNetAmount],
-            [RefundAmount], [ExpectedCashAmount], [CountedCashAmount], [CashDifference],
+            [RefundAmount], [ExpectedCashAmount], [CashInAmount], [CashOutAmount], [CountedCashAmount], [CashDifference],
             [NoteSubtotal], [CoinSubtotal], [CashCountsJson], [ReceivedAtUtc], [UpdatedAtUtc])
         VALUES (
             @DailyCloseGuid, @StoreCode, @DeviceCode, @ClientKind, @DetailLevel, @DataSource, @BackfillBatch,
@@ -149,7 +155,7 @@ internal sealed class SqlSugarDailyCloseRepository(
             @CashSalesAmount, @CashRefundAmount, @CashNetAmount,
             @CardSalesAmount, @CardRefundAmount, @CardNetAmount,
             @VoucherSalesAmount, @VoucherRefundAmount, @VoucherNetAmount,
-            @RefundAmount, @ExpectedCashAmount, @CountedCashAmount, @CashDifference,
+            @RefundAmount, @ExpectedCashAmount, @CashInAmount, @CashOutAmount, @CountedCashAmount, @CashDifference,
             @NoteSubtotal, @CoinSubtotal, @CashCountsJson, @ReceivedAtUtc, @UpdatedAtUtc);
         """;
 
@@ -183,6 +189,8 @@ internal sealed class SqlSugarDailyCloseRepository(
             [VoucherNetAmount] = @VoucherNetAmount,
             [RefundAmount] = @RefundAmount,
             [ExpectedCashAmount] = @ExpectedCashAmount,
+            [CashInAmount] = @CashInAmount,
+            [CashOutAmount] = @CashOutAmount,
             [CountedCashAmount] = @CountedCashAmount,
             [CashDifference] = @CashDifference,
             [NoteSubtotal] = @NoteSubtotal,
@@ -265,6 +273,8 @@ internal sealed class SqlSugarDailyCloseRepository(
             Money("@VoucherNetAmount", record.VoucherNetAmount),
             Money("@RefundAmount", record.RefundAmount),
             Money("@ExpectedCashAmount", record.ExpectedCashAmount),
+            Money("@CashInAmount", record.CashInAmount),
+            Money("@CashOutAmount", record.CashOutAmount),
             Money("@CountedCashAmount", record.CountedCashAmount),
             Money("@CashDifference", record.CashDifference),
             Money("@NoteSubtotal", record.NoteSubtotal),

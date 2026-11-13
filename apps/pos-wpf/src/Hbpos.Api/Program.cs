@@ -130,6 +130,10 @@ using (var scope = app.Services.CreateScope())
         var dailyCloseSchemaInitializer = scope.ServiceProvider.GetRequiredService<IDailyCloseSchemaInitializer>();
         await dailyCloseSchemaInitializer.InitializeAsync();
 
+        // 收银端现金存入 / 取出明细表：启动时幂等建表。
+        var cashMovementSchemaInitializer = scope.ServiceProvider.GetRequiredService<ICashMovementSchemaInitializer>();
+        await cashMovementSchemaInitializer.InitializeAsync();
+
         var installmentRepaymentClaimSchemaInitializer = scope.ServiceProvider.GetRequiredService<IInstallmentRepaymentClaimSchemaInitializer>();
         await installmentRepaymentClaimSchemaInitializer.InitializeAsync();
 

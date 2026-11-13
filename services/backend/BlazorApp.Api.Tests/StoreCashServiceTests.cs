@@ -28,6 +28,7 @@ public sealed class StoreCashServiceTests : IDisposable
     private readonly SqlSugarClient _db;
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 8, 2, 0, 0, TimeSpan.Zero));
     private readonly FakeCloseSource _closes = new();
+    private readonly FakePosMovementSource _posMovements = new();
     private readonly FakeCosService _cos = new();
 
     public StoreCashServiceTests()
@@ -681,10 +682,97 @@ public sealed class StoreCashServiceTests : IDisposable
 
     // ───────────────────────── 工具 ─────────────────────────
 
+
+    // ───────────────────────── 收银端现金存入 / 取出 ─────────────────────────
+
+    [Fact]
+    public async Task Daily_入池金额等于实点加取出减存入_并带出收银端进出明细()
+    {
+        var service = CreateService();
+        var day = new DateOnly(2026, 10, 7);
+        // 实点 865.60，交店长 400 + 小额支出 18.50 = 取出 418.50，补零钱 50 → 入池 1,234.10。
+        _closes.Archives.Add(Close("c1", day, 865.60m, expected: 866m, cashIn: 50m, cashOut: 418.50m));
+        var safeDrop = Guid.NewGuid();
+        _posMovements.Movements.AddRange(new[]
+        {
+            Movement(1, PosCashMovementReasons.ChangeTopUp, "In", 50m, day),
+            Movement(2, PosCashMovementReasons.SafeDrop, "Out", 300m, day, guid: safeDrop),
+            Movement(3, PosCashMovementReasons.SafeDrop, "In", 300m, day, "金额输错", voids: safeDrop),
+            Movement(4, PosCashMovementReasons.SafeDrop, "Out", 400m, day),
+            Movement(5, PosCashMovementReasons.PaidOut, "Out", 18.50m, day, "Woolworths 牛奶"),
+        });
+
+        var row = (await service.GetDailyAsync(Manager(), "S001", day, day, default)).Data!.Rows.Single();
+
+        Assert.Equal(1234.10m, row.InflowCash);
+        var archive = row.Devices.Single().Archives.Single();
+        Assert.Equal(50m, archive.CashIn);
+        Assert.Equal(418.50m, archive.CashOut);
+        Assert.Equal(1234.10m, archive.PoolInflow);
+        Assert.Equal(-0.40m, archive.Variance);
+        Assert.Equal(5, row.PosMovements.Count);
+        Assert.True(row.PosMovements.Single(item => item.MovementGuid == safeDrop).IsVoided);
+        Assert.Equal(safeDrop, row.PosMovements.Single(item => item.VoidsMovementGuid is not null).VoidsMovementGuid);
+    }
+
+    [Fact]
+    public async Task Daily_收银端明细表未建时照常返回_没有进出明细()
+    {
+        _posMovements.IsConnected = false;
+        var service = CreateService();
+        var day = new DateOnly(2026, 10, 7);
+        _closes.Archives.Add(Close("c1", day, 100m));
+
+        var row = (await service.GetDailyAsync(Manager(), "S001", day, day, default)).Data!.Rows.Single();
+
+        Assert.Equal(100m, row.InflowCash);
+        Assert.Empty(row.PosMovements);
+    }
+
+    [Fact]
+    public async Task PaidOut_自动生成现金支出_重复同步不重复_冲正后作废_现金池只扣一次()
+    {
+        var service = CreateService();
+        var day = new DateOnly(2026, 10, 7);
+        await SetOpeningAsync(service, Finance(), day, 0m);
+        // 实点 81.50，小额支出 18.50 → 入池 100；自动支出再扣 18.50 → 余额 81.50 = 钱箱里实际的钱。
+        _closes.Archives.Add(Close("c1", day, 81.50m, cashOut: 18.50m));
+        var paidOut = Guid.NewGuid();
+        _posMovements.Movements.Add(Movement(7, PosCashMovementReasons.PaidOut, "Out", 18.50m, day, "Woolworths 牛奶", paidOut));
+
+        Assert.Equal(1, await CreatePaidOutSynchronizer().SyncOnceAsync(default));
+        Assert.Equal(0, await CreatePaidOutSynchronizer().SyncOnceAsync(default));
+
+        var expense = (await service.ListExpensesAsync(Finance(), "S001", day, day, null, null, false, 50, 0, default))
+            .Data!.Items.Single();
+        Assert.Equal(StoreCashConstants.ExpenseCategory.Purchase, expense.Category);
+        Assert.Equal(18.50m, expense.Amount);
+        Assert.True(expense.IsFromPos);
+        Assert.False(expense.CanVoid);
+        Assert.Contains("Woolworths 牛奶", expense.Note);
+        var summary = (await service.GetSummaryAsync(Manager(), "S001", default)).Data!;
+        Assert.Equal(100m, summary.InflowTotal);
+        Assert.Equal(81.50m, summary.PoolBalance);
+
+        // 后台有作废权限也不能作废收银端自动生成的支出。
+        var blocked = await service.VoidExpenseAsync(Finance(), expense.ExpenseGuid, new CashVoidRequest { Reason = "试试作废" }, default);
+        Assert.Equal(StoreCashConstants.ErrorCodes.VoidNotAllowed, blocked.ErrorCode);
+
+        // 收银端冲正：自动支出被作废。
+        _posMovements.Movements.Add(Movement(8, PosCashMovementReasons.PaidOut, "In", 18.50m, day, "录错了", voids: paidOut));
+        var synchronizer = CreatePaidOutSynchronizer();
+        Assert.Equal(1, await synchronizer.SyncOnceAsync(default));
+        Assert.Equal(8, synchronizer.Watermark);
+        var voided = await _db.Queryable<StoreCashExpense>().SingleAsync(item => item.ExpenseGuid == expense.ExpenseGuid);
+        Assert.Equal(StoreCashConstants.RecordStatus.Voided, voided.Status);
+        Assert.Contains("录错了", voided.VoidReason);
+    }
+
+
     private StoreCashService CreateService()
     {
         var attachments = new StoreCashAttachmentService(_db, _cos, NullLogger<StoreCashAttachmentService>.Instance, _time);
-        return new StoreCashService(_db, _closes, attachments, NullLogger<StoreCashService>.Instance, _time);
+        return new StoreCashService(_db, _closes, attachments, NullLogger<StoreCashService>.Instance, _time, _posMovements);
     }
 
     private static CashAccess Manager(params string[] stores) =>
@@ -714,7 +802,9 @@ public sealed class StoreCashServiceTests : IDisposable
         int fromHour = 0,
         int toHour = 24,
         string store = "S001",
-        decimal? expected = null
+        decimal? expected = null,
+        decimal cashIn = 0m,
+        decimal cashOut = 0m
     )
     {
         var midnight = date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
@@ -727,7 +817,9 @@ public sealed class StoreCashServiceTests : IDisposable
             midnight.AddHours(toHour),
             midnight.AddHours(savedHour),
             counted,
-            expected ?? counted
+            expected ?? counted,
+            cashIn,
+            cashOut
         );
     }
 
@@ -840,6 +932,64 @@ public sealed class StoreCashServiceTests : IDisposable
 
         public void Advance(TimeSpan delta) => _now += delta;
     }
+
+    private sealed class FakePosMovementSource : IPosCashMovementSource
+    {
+        public bool IsConnected { get; set; } = true;
+        public List<PosCashMovement> Movements { get; } = new();
+
+        public Task<IReadOnlyList<PosCashMovement>> GetByStoreAsync(
+            string storeCode,
+            DateOnly from,
+            DateOnly to,
+            CancellationToken cancellationToken
+        ) => Task.FromResult<IReadOnlyList<PosCashMovement>>(
+            Movements
+                .Where(item => item.StoreCode == storeCode && item.BusinessDate >= from && item.BusinessDate <= to)
+                .OrderBy(item => item.OccurredAtUtc)
+                .ToList()
+        );
+
+        public Task<IReadOnlyList<PosCashMovement>> GetPaidOutsAfterAsync(long afterId, int take, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<PosCashMovement>>(
+                Movements
+                    .Where(item => item.ReasonCode == PosCashMovementReasons.PaidOut && item.Id > afterId)
+                    .OrderBy(item => item.Id)
+                    .Take(take)
+                    .ToList()
+            );
+    }
+
+    private static PosCashMovement Movement(
+        long id,
+        string reason,
+        string direction,
+        decimal amount,
+        DateOnly date,
+        string? note = null,
+        Guid? guid = null,
+        Guid? voids = null
+    ) =>
+        new(
+            id,
+            guid ?? Guid.NewGuid(),
+            "S001",
+            "POS_1",
+            direction,
+            reason,
+            amount,
+            note,
+            voids,
+            date,
+            date.ToDateTime(new TimeOnly(4, (int)id % 60), DateTimeKind.Utc),
+            "Lily",
+            null,
+            $"CM-{id:0000}",
+            date.ToDateTime(new TimeOnly(5, 0), DateTimeKind.Utc)
+        );
+
+    private PosPaidOutExpenseSynchronizer CreatePaidOutSynchronizer() =>
+        new(_db, _posMovements, _time, NullLogger.Instance);
 
     private sealed class FakeCloseSource : ICashDailyCloseSource
     {

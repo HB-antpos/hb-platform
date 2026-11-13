@@ -296,6 +296,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyStoreSpecialProductCategoryAsync(CancellationToken cancellationToken);
 
+    Task ApplyPosCashMovementPermissionAsync(CancellationToken cancellationToken);
+
+    Task VerifyPosCashMovementPermissionAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1888,6 +1892,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             StoreSpecialProductCategorySchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPosCashMovementPermissionAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosCashMovementPermissionSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 三个权限码确认在库后协调器才登记账本。
+        await VerifyPosCashMovementPermissionAsync(cancellationToken);
+    }
+
+    public async Task VerifyPosCashMovementPermissionAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosCashMovementPermissionSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

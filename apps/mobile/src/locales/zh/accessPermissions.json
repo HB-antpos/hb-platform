@@ -382,6 +382,18 @@
       "name": "打开钱箱",
       "description": "收银端钱箱 - 打开钱箱按钮"
     },
+    "Permissions.PosTerminal.CashMovement.CashIn": {
+      "name": "现金存入",
+      "description": "收银端钱箱 - 现金存入（补零钱、其他存入）"
+    },
+    "Permissions.PosTerminal.CashMovement.CashOut": {
+      "name": "现金取出",
+      "description": "收银端钱箱 - 现金取出（交店长 / 入保险柜、小额现金支出）"
+    },
+    "Permissions.PosTerminal.CashMovement.Void": {
+      "name": "冲正现金进出",
+      "description": "收银端钱箱 - 冲正本期（未日结）的现金存入 / 取出记录"
+    },
     "Permissions.PosTerminal.CustomerDisplay.Manage": {
       "name": "管理客显",
       "description": "收银端客显 - 管理客显按钮"

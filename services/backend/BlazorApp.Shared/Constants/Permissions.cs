@@ -282,6 +282,14 @@ namespace BlazorApp.Shared.Constants
                 public const string Open = "Permissions.PosTerminal.CashDrawer.Open";
             }
 
+            /// <summary>收银端现金存入 / 取出与冲正（迁移 20261113.001 入库）。</summary>
+            public static class CashMovement
+            {
+                public const string CashIn = "Permissions.PosTerminal.CashMovement.CashIn";
+                public const string CashOut = "Permissions.PosTerminal.CashMovement.CashOut";
+                public const string Void = "Permissions.PosTerminal.CashMovement.Void";
+            }
+
             public static class Receipt
             {
                 public const string PrintLast = "Permissions.PosTerminal.Receipt.PrintLast";

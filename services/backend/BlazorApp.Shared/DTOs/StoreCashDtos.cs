@@ -233,6 +233,15 @@ public sealed class CashCloseArchiveDto
     public decimal ExpectedCash { get; set; }
     public decimal Variance { get; set; }
 
+    /// <summary>本期收银端现金存入合计（补零钱等），入池时扣回。</summary>
+    public decimal CashIn { get; set; }
+
+    /// <summary>本期收银端现金取出合计（交店长、小额支出），入池时加回。</summary>
+    public decimal CashOut { get; set; }
+
+    /// <summary>入池金额 = 实点 + 取出 − 存入。</summary>
+    public decimal PoolInflow { get; set; }
+
     /// <summary>当前是否纳入现金池。</summary>
     public bool Included { get; set; }
 }
@@ -276,6 +285,36 @@ public sealed class CashDailyRowDto
     public decimal ExpenseTotal { get; set; }
 
     public List<CashDailyDeviceDto> Devices { get; set; } = [];
+
+    /// <summary>当天全部设备的收银端现金存入 / 取出明细（含冲正），按发生时间排序；只读。</summary>
+    public List<CashPosMovementDto> PosMovements { get; set; } = [];
+}
+
+/// <summary>一笔收银端现金进出。</summary>
+public sealed class CashPosMovementDto
+{
+    public Guid MovementGuid { get; set; }
+    public string DeviceCode { get; set; } = string.Empty;
+
+    /// <summary>In / Out。</summary>
+    public string Direction { get; set; } = string.Empty;
+
+    /// <summary>ChangeTopUp / OtherIn / SafeDrop / PaidOut。</summary>
+    public string ReasonCode { get; set; } = string.Empty;
+
+    public decimal Amount { get; set; }
+    public string? Note { get; set; }
+
+    /// <summary>非空表示这是一条冲正记录，指向被冲正的原记录。</summary>
+    public Guid? VoidsMovementGuid { get; set; }
+
+    /// <summary>原记录已被冲正。</summary>
+    public bool IsVoided { get; set; }
+
+    public DateTime OccurredAtUtc { get; set; }
+    public string CashierName { get; set; } = string.Empty;
+    public string? AuthorizedByName { get; set; }
+    public string? DisplayNumber { get; set; }
 }
 
 /// <summary>GET cash/daily?storeCode=&amp;from=&amp;to=（含两端，最多 93 天）。</summary>
@@ -472,6 +511,9 @@ public class CashExpenseListItemDto
     public string? CreatedByName { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public bool CanVoid { get; set; }
+
+    /// <summary>由收银端小额支出（Paid out）自动生成；只能在收银端冲正，后台不能作废。</summary>
+    public bool IsFromPos { get; set; }
 }
 
 public sealed class CashExpenseDetailDto : CashExpenseListItemDto

@@ -1467,7 +1467,12 @@ builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashAccessResolver,
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.ICashDailyCloseSource>(sp =>
     new BlazorApp.Api.Services.StoreCash.PosmCashDailyCloseSource(sp.GetRequiredService<POSMSqlSugarContext>().Db));
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashAttachmentService, BlazorApp.Api.Services.StoreCash.StoreCashAttachmentService>();
+// 收银端现金存入 / 取出明细（POSM_CashMovement，由 POS API 建表，后台只读）。
+builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IPosCashMovementSource>(sp =>
+    new BlazorApp.Api.Services.StoreCash.PosmCashMovementSource(sp.GetRequiredService<POSMSqlSugarContext>().Db));
 builder.Services.AddScoped<BlazorApp.Api.Services.StoreCash.IStoreCashService, BlazorApp.Api.Services.StoreCash.StoreCashService>();
+// 收银端小额支出 → 后台现金支出（类别 Purchase），每 2 分钟增量同步。
+builder.Services.AddHostedService<BlazorApp.Api.Services.StoreCash.PosPaidOutExpenseSyncBackgroundService>();
 builder.Services.AddScoped<ISalesDashboardCacheWarmer, SalesDashboardCacheWarmer>();
 builder.Services.AddScoped<IProductMovementReportService, ProductMovementReportService>();
 builder.Services.AddScoped<IBatchProductSalesAnalysisService, BatchProductSalesAnalysisService>();

@@ -116,6 +116,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string StaffNotificationSmsSenderMigrationId = "20261107.001-staff-notification-sms-sender";
     internal const string SupplierPreorderHqAdjustMigrationId = "20261111.001-supplier-preorder-hq-adjust";
     internal const string StoreSpecialProductCategoryMigrationId = "20261111.002-store-special-product-category";
+    internal const string PosCashMovementPermissionMigrationId = "20261113.001-pos-cash-movement-permissions";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -482,6 +483,11 @@ internal sealed class SchemaMigrationCoordinator
             StoreSpecialProductCategoryMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyStoreSpecialProductCategoryAsync(cancellationToken)
+        ),
+        new(
+            PosCashMovementPermissionMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPosCashMovementPermissionAsync(cancellationToken)
         ),
     ];
 

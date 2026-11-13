@@ -173,7 +173,14 @@ export default function ExpensesTab({ context, filters, query, active, tr, tf, e
       width: 150,
       render: (_, item) => (
         <div className="store-cash-cell-stack">
-          <span>{item.createdByName || EMPTY_CELL}</span>
+          <span className="store-cash-pills">
+            <span>{item.createdByName || EMPTY_CELL}</span>
+            {item.isFromPos ? (
+              <Tooltip title={tr('expenses.fromPosHint')}>
+                <span><StatusPill tone="blue">{tr('expenses.fromPos')}</StatusPill></span>
+              </Tooltip>
+            ) : null}
+          </span>
           <span className="store-cash-sub">{formatStoreDateTime(item.createdAtUtc, timeZone)}</span>
         </div>
       ),

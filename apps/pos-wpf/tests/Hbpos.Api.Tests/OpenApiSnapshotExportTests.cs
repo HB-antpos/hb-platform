@@ -44,6 +44,8 @@ public sealed class OpenApiSnapshotExportTests
         Assert.Contains("/api/v1/daily-closes/sync", document, StringComparison.Ordinal);
         Assert.Contains("DailyCloseSyncRequest", document, StringComparison.Ordinal);
         Assert.Contains("DailyCloseSyncResponse", document, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/cash-movements/sync", document, StringComparison.Ordinal);
+        Assert.Contains("CashMovementSyncRequest", document, StringComparison.Ordinal);
 
         AssertSharedSaleCartOpenApiContract(document);
         AssertDeviceActivationRequestOpenApiContract(document);
@@ -567,6 +569,8 @@ public sealed class OpenApiSnapshotExportTests
                 services.AddSingleton<ILinklySettlementSchemaInitializer>(new NoOp());
                 services.RemoveAll<IDailyCloseSchemaInitializer>();
                 services.AddSingleton<IDailyCloseSchemaInitializer>(new NoOp());
+                services.RemoveAll<ICashMovementSchemaInitializer>();
+                services.AddSingleton<ICashMovementSchemaInitializer>(new NoOp());
                 services.RemoveAll<IInstallmentRepaymentClaimSchemaInitializer>();
                 services.AddSingleton<IInstallmentRepaymentClaimSchemaInitializer>(new NoOp());
                 services.RemoveAll<IInstallmentCancelClaimSchemaInitializer>();
@@ -682,6 +686,7 @@ public sealed class OpenApiSnapshotExportTests
         ILinklyCloudBackendAsyncSchemaInitializer,
         ILinklySettlementSchemaInitializer,
         IDailyCloseSchemaInitializer,
+        ICashMovementSchemaInitializer,
         IInstallmentRepaymentClaimSchemaInitializer,
         IInstallmentCancelClaimSchemaInitializer,
         ISquareWebhookSchemaInitializer,

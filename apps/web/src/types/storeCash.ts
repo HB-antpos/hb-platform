@@ -156,8 +156,35 @@ export interface CashCloseArchive {
   countedCash: number
   expectedCash: number
   variance: number
+  /** 本期收银端现金存入合计（补零钱等），入池时扣回；旧客户端为 0。 */
+  cashIn: number
+  /** 本期收银端现金取出合计（交店长、小额支出），入池时加回；旧客户端为 0。 */
+  cashOut: number
+  /** 入池金额 = 实点 + 取出 − 存入。 */
+  poolInflow: number
   /** 当前是否纳入现金池。 */
   included: boolean
+}
+
+export type CashPosMovementDirection = 'In' | 'Out'
+export type CashPosMovementReason = 'ChangeTopUp' | 'OtherIn' | 'SafeDrop' | 'PaidOut'
+
+/** 一笔收银端现金存入 / 取出（只读）。 */
+export interface CashPosMovement {
+  movementGuid: string
+  deviceCode: string
+  direction: CashPosMovementDirection | string
+  reasonCode: CashPosMovementReason | string
+  amount: number
+  note: string | null
+  /** 非空表示这是一条冲正记录。 */
+  voidsMovementGuid: string | null
+  /** 原记录已被冲正。 */
+  isVoided: boolean
+  occurredAtUtc: string
+  cashierName: string
+  authorizedByName: string | null
+  displayNumber: string | null
 }
 
 export interface CashDailyDevice {
@@ -181,6 +208,8 @@ export interface CashDailyRow {
   coveredByDepositGuid: string | null
   expenseTotal: number
   devices: CashDailyDevice[]
+  /** 当天全部设备的收银端现金进出明细（含冲正），按发生时间排序；旧后端不返回时视为空。 */
+  posMovements?: CashPosMovement[]
 }
 
 /** GET cash/daily?storeCode=&from=&to= */
@@ -266,6 +295,8 @@ export interface CashExpenseListItem {
   createdByName: string | null
   createdAtUtc: string
   canVoid: boolean
+  /** 由收银端小额支出自动生成，只能在收银端冲正。 */
+  isFromPos?: boolean
 }
 
 export interface CashExpenseDetail extends CashExpenseListItem {

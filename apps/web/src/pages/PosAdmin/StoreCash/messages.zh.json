@@ -155,10 +155,32 @@
         "counted": "实点",
         "expected": "应有",
         "variance": "差异",
+        "cashIn": "收银端存入",
+        "cashOut": "收银端取出",
+        "poolInflow": "入池金额",
+        "poolInflowHint": "入池金额 = 实点 + 收银端取出 − 收银端存入（交店长的钱加回、补零钱扣回）",
         "included": "纳入",
         "yes": "已纳入",
         "no": "未纳入",
         "empty": "没有日结存档"
+      },
+      "pos": {
+        "title": "收银端现金进出（{{count}} 笔）",
+        "time": "时间",
+        "device": "设备",
+        "type": "类型",
+        "amount": "金额",
+        "cashier": "收银员 / 授权",
+        "note": "备注",
+        "voided": "已冲正",
+        "reversal": "冲正",
+        "reasons": {
+          "ChangeTopUp": "补零钱",
+          "OtherIn": "其他存入",
+          "SafeDrop": "交店长 / 入保险柜",
+          "PaidOut": "小额现金支出"
+        },
+        "paidOutHint": "已自动生成支出"
       }
     },
     "selection": {
@@ -256,7 +278,9 @@
         "review": "核对标记"
       },
       "receiptsTitle": "收据照片（{{count}} 张）",
-      "receiptAlt": "收据照片 {{index}}"
+      "receiptAlt": "收据照片 {{index}}",
+      "fromPos": "收银端",
+      "fromPosHint": "收银端小额支出自动生成，只能在收银端冲正"
     },
     "drawer": {
       "reload": "重新加载",

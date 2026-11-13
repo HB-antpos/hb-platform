@@ -17,6 +17,9 @@ internal sealed class PosmCashDailyCloseSource : ICashDailyCloseSource
     // 表一旦确认存在就不会消失：按连接串记住「已确认」，之后整个进程不再查元数据；不存在时每次都重查，表建好后自动接入。
     private static readonly ConcurrentDictionary<string, bool> s_tableConfirmed = new(StringComparer.Ordinal);
 
+    // 现金存入 / 取出两列由新版 POS API 启动时补加；同样按连接串记住「已确认」，未补加前按 0 处理。
+    private static readonly ConcurrentDictionary<string, bool> s_cashMovementColumnsConfirmed = new(StringComparer.Ordinal);
+
     private readonly ISqlSugarClient _posmDb;
 
     public PosmCashDailyCloseSource(ISqlSugarClient posmDb)
@@ -91,6 +94,10 @@ internal sealed class PosmCashDailyCloseSource : ICashDailyCloseSource
                 })
                 .ToListAsync(cancellationToken);
 
+            var movementTotals = await LoadCashMovementTotalsAsync(
+                rows.Select(row => row.DailyCloseGuid).ToList(),
+                cancellationToken
+            );
             foreach (var row in rows)
             {
                 var businessDate = DateOnly.FromDateTime(row.BusinessDate);
@@ -110,12 +117,74 @@ internal sealed class PosmCashDailyCloseSource : ICashDailyCloseSource
                         row.PeriodToUtc ?? dayStart.AddDays(1),
                         row.SavedAtUtc,
                         counted,
-                        expected
+                        expected,
+                        movementTotals.TryGetValue(row.DailyCloseGuid, out var totals) ? totals.CashIn : 0m,
+                        totals.CashOut
                     )
                 );
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// 单独读现金存入 / 取出合计，而不是加进 PosmDailyClose 实体：实体还被日结查询页整表读取，
+    /// 主后台若先于 POS API 上线，表里还没有这两列，加进实体会让那些查询直接报错。
+    /// </summary>
+    private async Task<Dictionary<Guid, (decimal CashIn, decimal CashOut)>> LoadCashMovementTotalsAsync(
+        IReadOnlyList<Guid> guids,
+        CancellationToken cancellationToken
+    )
+    {
+        var result = new Dictionary<Guid, (decimal CashIn, decimal CashOut)>();
+        if (guids.Count == 0 || !HasCashMovementColumns())
+        {
+            return result;
+        }
+
+        foreach (var chunk in guids.Chunk(StoreCodeChunkSize))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var parameters = chunk
+                .Select((guid, index) => new SugarParameter($"@g{index}", guid))
+                .ToArray();
+            var sql =
+                "SELECT [DailyCloseGuid], [CashInAmount], [CashOutAmount] FROM [dbo].[POSM_DailyClose] "
+                + "WHERE ([CashInAmount] IS NOT NULL OR [CashOutAmount] IS NOT NULL) AND [DailyCloseGuid] IN ("
+                + string.Join(", ", parameters.Select(parameter => parameter.ParameterName))
+                + ")";
+            var rows = await _posmDb.Ado.SqlQueryAsync<CashMovementTotalsRow>(sql, parameters);
+            foreach (var row in rows)
+            {
+                result[row.DailyCloseGuid] = (row.CashInAmount ?? 0m, row.CashOutAmount ?? 0m);
+            }
+        }
+
+        return result;
+    }
+
+    private bool HasCashMovementColumns()
+    {
+        var key = _posmDb.CurrentConnectionConfig.ConnectionString ?? string.Empty;
+        if (s_cashMovementColumnsConfirmed.ContainsKey(key))
+        {
+            return true;
+        }
+
+        var exists = _posmDb.DbMaintenance.IsAnyColumn("POSM_DailyClose", "CashOutAmount", false);
+        if (exists)
+        {
+            s_cashMovementColumnsConfirmed.TryAdd(key, true);
+        }
+
+        return exists;
+    }
+
+    private sealed class CashMovementTotalsRow
+    {
+        public Guid DailyCloseGuid { get; set; }
+        public decimal? CashInAmount { get; set; }
+        public decimal? CashOutAmount { get; set; }
     }
 }

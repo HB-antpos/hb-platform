@@ -5,7 +5,7 @@ import { useMemo } from 'react'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import StatusPill from '../../../components/listToolbar/StatusPill'
 import { getCashDaily } from '../../../services/storeCashService'
-import type { CashCloseArchive, CashDaily, CashDailyDevice, CashDailyRow } from '../../../types/storeCash'
+import type { CashCloseArchive, CashDaily, CashDailyDevice, CashDailyRow, CashPosMovement } from '../../../types/storeCash'
 import { buildDailyCsv } from './csv'
 import {
   buildCashExportFileName,
@@ -186,8 +186,15 @@ export default function DailyTab({ context, filters, query, active, tr, tf, erro
           scroll={{ x: 860 }}
           locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tr('daily.empty')} /> }}
           expandable={{
-            rowExpandable: (row) => row.devices.length > 0,
-            expandedRowRender: (row) => <DeviceList devices={row.devices} timeZone={timeZone} tr={tr} tf={tf} />,
+            rowExpandable: (row) => row.devices.length > 0 || (row.posMovements?.length ?? 0) > 0,
+            expandedRowRender: (row) => (
+              <>
+                <DeviceList devices={row.devices} timeZone={timeZone} tr={tr} tf={tf} />
+                {row.posMovements && row.posMovements.length > 0 ? (
+                  <PosMovementList movements={row.posMovements} timeZone={timeZone} tr={tr} tf={tf} />
+                ) : null}
+              </>
+            ),
           }}
         />
       </section>
@@ -271,6 +278,32 @@ function ArchiveTable({ archives, timeZone, tr }: { archives: CashCloseArchive[]
       render: (_, archive) => <VarianceAmount value={archive.variance} tr={tr} />,
     },
     {
+      title: tr('daily.archive.cashOut'),
+      key: 'cashOut',
+      align: 'right',
+      width: 110,
+      // 旧后端不返回这三列时按 0 显示，与旧口径一致。
+      render: (_, archive) => <Amount value={archive.cashOut ?? 0} muted={!archive.cashOut} />,
+    },
+    {
+      title: tr('daily.archive.cashIn'),
+      key: 'cashIn',
+      align: 'right',
+      width: 110,
+      render: (_, archive) => <Amount value={archive.cashIn ?? 0} muted={!archive.cashIn} />,
+    },
+    {
+      title: (
+        <Tooltip title={tr('daily.archive.poolInflowHint')}>
+          <span>{tr('daily.archive.poolInflow')} <InfoCircleOutlined aria-hidden="true" /></span>
+        </Tooltip>
+      ),
+      key: 'poolInflow',
+      align: 'right',
+      width: 120,
+      render: (_, archive) => <Amount value={archive.poolInflow ?? archive.countedCash} strong />,
+    },
+    {
       title: tr('daily.archive.included'),
       key: 'included',
       width: 100,
@@ -287,8 +320,97 @@ function ArchiveTable({ archives, timeZone, tr }: { archives: CashCloseArchive[]
       columns={columns}
       dataSource={archives}
       pagination={false}
-      scroll={{ x: 830 }}
+      scroll={{ x: 1170 }}
       locale={{ emptyText: tr('daily.archive.empty') }}
     />
+  )
+}
+
+// 原因码 → 文案键：写成字面量，便于文案契约测试静态核对。
+const POS_REASON_KEYS: Record<string, string> = {
+  ChangeTopUp: 'storeCash.daily.pos.reasons.ChangeTopUp',
+  OtherIn: 'storeCash.daily.pos.reasons.OtherIn',
+  SafeDrop: 'storeCash.daily.pos.reasons.SafeDrop',
+  PaidOut: 'storeCash.daily.pos.reasons.PaidOut',
+}
+
+/**
+ * 当天收银端现金存入 / 取出明细（只读）。冲正记录与被冲正的原记录都保留，
+ * 原记录标「已冲正」，两条金额互相抵消；小额支出提示已自动生成支出。
+ */
+function PosMovementList({ movements, timeZone, tr, tf }: { movements: CashPosMovement[]; timeZone: string; tr: Tr; tf: Tr }) {
+  const columns: ColumnsType<CashPosMovement> = [
+    {
+      title: tr('daily.pos.time'),
+      key: 'time',
+      width: 150,
+      render: (_, item) => formatStoreDateTime(item.occurredAtUtc, timeZone),
+    },
+    {
+      title: tr('daily.pos.device'),
+      key: 'device',
+      width: 120,
+      render: (_, item) => (
+        <span>
+          {item.deviceCode}
+          {item.displayNumber ? <span className="store-cash-muted"> {item.displayNumber}</span> : null}
+        </span>
+      ),
+    },
+    {
+      title: tr('daily.pos.type'),
+      key: 'type',
+      width: 190,
+      render: (_, item) => {
+        const label = POS_REASON_KEYS[item.reasonCode] ? tf(POS_REASON_KEYS[item.reasonCode]) : item.reasonCode
+        return (
+          <span className="store-cash-pills">
+            <span>{label}</span>
+            {item.voidsMovementGuid ? <StatusPill tone="gray">{tr('daily.pos.reversal')}</StatusPill> : null}
+            {item.isVoided ? <StatusPill tone="gray">{tr('daily.pos.voided')}</StatusPill> : null}
+            {item.reasonCode === 'PaidOut' && !item.voidsMovementGuid && !item.isVoided
+              ? <StatusPill tone="blue">{tr('daily.pos.paidOutHint')}</StatusPill>
+              : null}
+          </span>
+        )
+      },
+    },
+    {
+      title: tr('daily.pos.amount'),
+      key: 'amount',
+      align: 'right',
+      width: 110,
+      // 存入为正、取出为负，与收银端日结的加减方向一致。
+      render: (_, item) => <Amount value={item.direction === 'In' ? item.amount : -item.amount} signed muted={item.isVoided} />,
+    },
+    {
+      title: tr('daily.pos.cashier'),
+      key: 'cashier',
+      width: 160,
+      render: (_, item) => (item.authorizedByName ? `${item.cashierName} / ${item.authorizedByName}` : item.cashierName || EMPTY_CELL),
+    },
+    {
+      title: tr('daily.pos.note'),
+      key: 'note',
+      render: (_, item) => (item.note
+        ? <Tooltip title={item.note}><span className="store-cash-ellipsis">{item.note}</span></Tooltip>
+        : <span className="store-cash-empty">{EMPTY_CELL}</span>),
+    },
+  ]
+  return (
+    <div className="store-cash-device">
+      <div className="store-cash-device-head">
+        <span className="store-cash-device-code">{tr('daily.pos.title', { count: movements.length })}</span>
+      </div>
+      <MeasuredTable<CashPosMovement>
+        metricId="pos-admin.store-cash.daily-pos-movement-table"
+        rowKey={(item) => item.movementGuid}
+        size="small"
+        columns={columns}
+        dataSource={movements}
+        pagination={false}
+        scroll={{ x: 900 }}
+      />
+    </div>
   )
 }

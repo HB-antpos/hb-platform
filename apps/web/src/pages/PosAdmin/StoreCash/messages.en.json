@@ -155,10 +155,32 @@
         "counted": "Counted",
         "expected": "Expected",
         "variance": "Variance",
+        "cashIn": "Cash in",
+        "cashOut": "Cash out",
+        "poolInflow": "To cash pool",
+        "poolInflowHint": "To cash pool = counted + cash out − cash in (safe drops are added back, change top-ups are deducted)",
         "included": "Counted",
         "yes": "Counted",
         "no": "Not counted",
         "empty": "No daily close archives"
+      },
+      "pos": {
+        "title": "POS cash in / out ({{count}})",
+        "time": "Time",
+        "device": "Till",
+        "type": "Type",
+        "amount": "Amount",
+        "cashier": "Cashier / authorised by",
+        "note": "Note",
+        "voided": "Voided",
+        "reversal": "Void",
+        "reasons": {
+          "ChangeTopUp": "Change top-up",
+          "OtherIn": "Other cash in",
+          "SafeDrop": "Safe drop",
+          "PaidOut": "Paid out"
+        },
+        "paidOutHint": "Expense created"
       }
     },
     "selection": {
@@ -256,7 +278,9 @@
         "review": "Review flag"
       },
       "receiptsTitle": "Receipt photos ({{count}})",
-      "receiptAlt": "Receipt photo {{index}}"
+      "receiptAlt": "Receipt photo {{index}}",
+      "fromPos": "POS",
+      "fromPosHint": "Created from a POS paid-out; void it on the POS"
     },
     "drawer": {
       "reload": "Reload",
