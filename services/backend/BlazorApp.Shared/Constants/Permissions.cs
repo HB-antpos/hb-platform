@@ -364,6 +364,15 @@ namespace BlazorApp.Shared.Constants
             public const string ViewFullNumber = "Container.ViewFullNumber";
         }
 
+        /// <summary>
+        /// 分店扫码打包：分店扫码装箱、封箱打标、组托盘、本店存放、店间调货发出与扫码签收、商品位置查询。
+        /// 只能操作自己在 UserStore 里关联的分店。新码不写入角色模板，上线后由管理员在角色管理里授予店长（及需要的店员）。
+        /// </summary>
+        public static class StorePacking
+        {
+            public const string Use = "StorePacking.Use";
+        }
+
         public static class Warehouse
         {
             public const string Manage = "Warehouse.Manage";
@@ -372,7 +381,7 @@ namespace BlazorApp.Shared.Constants
             public const string ManageLocations = "Warehouse.ManageLocations";
             public const string ManageOrders = "Warehouse.ManageOrders";
             public const string Picking = "Warehouse.Picking";
-            /// <summary>扫码打包：装箱、封箱打标、组托盘、指定去向与商品位置查询。</summary>
+            /// <summary>扫码打包（总仓）：装箱、封箱打标、组托盘、发往分店与商品位置查询。</summary>
             public const string Packing = "Warehouse.Packing";
             /// <summary>
             /// 打印配货单时自动「开始配货」（订单 已提交 → 配货中）。与订单编辑权限分开授权：

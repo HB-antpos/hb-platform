@@ -50,6 +50,9 @@ export const P = {
     Edit: 'Orders.Edit',
     Delete: 'Orders.Delete',
   },
+  StorePacking: {
+    Use: 'StorePacking.Use',
+  },
   Warehouse: {
     Manage: 'Warehouse.Manage',
     ManageProducts: 'Warehouse.ManageProducts',

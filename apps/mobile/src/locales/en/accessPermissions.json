@@ -916,7 +916,11 @@
     },
     "Warehouse.Packing": {
       "name": "Pack cartons and pallets",
-      "description": "In the app and on the web (Packing), scan items into cartons, seal and print carton labels, build pallets, set destinations and look up where an item is. Included with Manage warehouse or Manage warehouse orders."
+      "description": "In the app and on the web (Packing), warehouse staff scan items into cartons, seal and print carton labels, build pallets, ship to stores and look up where an item is. Included with Manage warehouse or Manage warehouse orders."
+    },
+    "StorePacking.Use": {
+      "name": "Pack cartons and pallets (store)",
+      "description": "In the app and on the web (Packing), store staff scan items into cartons, seal and print carton labels, build pallets, keep stock in the store, send cartons to other stores or the warehouse, receive deliveries by scanning, and look up where an item is. Limited to the stores the user belongs to."
     },
     "Warehouse.StartPicking": {
       "name": "Start picking on print",

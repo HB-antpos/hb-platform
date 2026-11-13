@@ -204,8 +204,8 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Contains("VerifySupplierPreorderHqAdjustAsync", runtimeMethods);
         Assert.Contains("ApplyStoreSpecialProductCategoryAsync", runtimeMethods);
         Assert.Contains("VerifyStoreSpecialProductCategoryAsync", runtimeMethods);
-        Assert.Contains("ApplyWarehousePackingAsync", runtimeMethods);
-        Assert.Contains("VerifyWarehousePackingAsync", runtimeMethods);
+        Assert.Contains("ApplyScanPackingAsync", runtimeMethods);
+        Assert.Contains("VerifyScanPackingAsync", runtimeMethods);
         Assert.Contains("ApplyPosmBaselineAsync", runtimeMethods);
         Assert.Contains("ApplyMobileDeviceActivationAsync", runtimeMethods);
         Assert.Contains("ApplyLinklyMultiTerminalAsync", runtimeMethods);
@@ -811,7 +811,7 @@ public sealed class SchemaMigrationCoordinatorTests
         );
         runtime.MarkApplied(
             SchemaDatabase.Main,
-            SchemaMigrationCoordinator.WarehousePackingMigrationId
+            SchemaMigrationCoordinator.ScanPackingMigrationId
         );
         runtime.MarkApplied(SchemaDatabase.Posm, SchemaMigrationCoordinator.PosmMigrationId);
         runtime.MarkApplied(
@@ -1320,7 +1320,7 @@ public sealed class SchemaMigrationCoordinatorTests
                 "Check:Main:20261107.001-staff-notification-sms-sender",
                 "Check:Main:20261111.001-supplier-preorder-hq-adjust",
                 "Check:Main:20261111.002-store-special-product-category",
-                "Check:Main:20261113.001-warehouse-packing",
+                "Check:Main:20261114.001-scan-packing",
                 "Check:Posm:20260827.001-hbweb-posm-baseline",
                 "Check:Posm:20260831.001-mobile-device-activation",
                 "Check:Posm:20260903.001-linkly-multi-terminal",
@@ -1848,7 +1848,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.MainMigrationSteps[^2].MigrationId
         );
         Assert.Equal(
-            SchemaMigrationCoordinator.WarehousePackingMigrationId,
+            SchemaMigrationCoordinator.ScanPackingMigrationId,
             SchemaMigrationCoordinator.MainMigrationSteps[^1].MigrationId
         );
         Assert.Equal("20261007.001-store-receipt-profile-release", SchemaMigrationCoordinator.StoreReceiptProfileReleaseMigrationId);
@@ -1899,7 +1899,7 @@ public sealed class SchemaMigrationCoordinatorTests
         Assert.Equal("20261107.001-staff-notification-sms-sender", SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId);
         Assert.Equal("20261111.001-supplier-preorder-hq-adjust", SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId);
         Assert.Equal("20261111.002-store-special-product-category", SchemaMigrationCoordinator.StoreSpecialProductCategoryMigrationId);
-        Assert.Equal("20261113.001-warehouse-packing", SchemaMigrationCoordinator.WarehousePackingMigrationId);
+        Assert.Equal("20261114.001-scan-packing", SchemaMigrationCoordinator.ScanPackingMigrationId);
         Assert.Equal("20261024.004-pos-device-api-entry", SchemaMigrationCoordinator.PosDeviceApiEntryMigrationId);
         Assert.True((await coordinator.MigrateAsync(CancellationToken.None)).Success);
         foreach (var migrationId in new[]
@@ -1965,7 +1965,7 @@ public sealed class SchemaMigrationCoordinatorTests
             SchemaMigrationCoordinator.StaffNotificationSmsSenderMigrationId,
             SchemaMigrationCoordinator.SupplierPreorderHqAdjustMigrationId,
             SchemaMigrationCoordinator.StoreSpecialProductCategoryMigrationId,
-            SchemaMigrationCoordinator.WarehousePackingMigrationId,
+            SchemaMigrationCoordinator.ScanPackingMigrationId,
         })
         {
             var apply = $"Apply:Main:{migrationId}";
@@ -2447,10 +2447,10 @@ public sealed class SchemaMigrationCoordinatorTests
             && specialCategoryVerify < specialCategoryRecord);
         // 仓库扫码打包六张表（11-13）：Apply → 列 / 主键 / 索引签名校验 → 登记。
         var packingApply = runtime.Events.IndexOf(
-            $"Apply:Main:{SchemaMigrationCoordinator.WarehousePackingMigrationId}");
-        var packingVerify = runtime.Events.IndexOf("VerifyWarehousePacking", packingApply);
+            $"Apply:Main:{SchemaMigrationCoordinator.ScanPackingMigrationId}");
+        var packingVerify = runtime.Events.IndexOf("VerifyScanPacking", packingApply);
         var packingRecord = runtime.Events.IndexOf(
-            $"Record:Main:{SchemaMigrationCoordinator.WarehousePackingMigrationId}");
+            $"Record:Main:{SchemaMigrationCoordinator.ScanPackingMigrationId}");
         Assert.True(packingApply >= 0
             && packingApply < packingVerify
             && packingVerify < packingRecord);
@@ -2734,7 +2734,7 @@ public sealed class SchemaMigrationCoordinatorTests
             Assert.DoesNotContain($"THROW {code}", PlanogramSchema.ApplySql, StringComparison.Ordinal);
         }
 
-        // 六张表都是不存在才建（可重复执行），唯一索引与普通索引同样不存在才建。
+        // 七张表都是不存在才建（可重复执行），唯一索引与普通索引同样不存在才建。
         foreach (var table in new[]
                  {
                      "PlanogramShelfModel", "PlanogramHookModel", "ProductDisplaySpec",
@@ -2901,69 +2901,79 @@ public sealed class SchemaMigrationCoordinatorTests
     }
 
     [Fact]
-    public void WarehousePackingSchema_错误号自成一段_六张表幂等新建_箱号托盘号唯一_权限码随迁移入库_只在Main迁移链()
+    public void PackingSchema_错误号自成一段_七张表幂等新建_箱号托盘号位置条码唯一_权限码随迁移入库_只在Main迁移链()
     {
         // 54480–54482 自成一段（紧接分店特殊商品分类的 54470–54474 及其预留段），只出现在 VerifySql。
         foreach (var code in new[] { "54480", "54481", "54482" })
         {
-            Assert.Contains($"THROW {code}", WarehousePackingSchema.VerifySql, StringComparison.Ordinal);
-            Assert.DoesNotContain($"THROW {code}", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
+            Assert.Contains($"THROW {code}", PackingSchema.VerifySql, StringComparison.Ordinal);
+            Assert.DoesNotContain($"THROW {code}", PackingSchema.ApplySql, StringComparison.Ordinal);
         }
 
-        // 六张表都是不存在才建（可重复执行），并且都进只读校验。
+        // 七张表都是不存在才建（可重复执行），并且都进只读校验。
         foreach (var table in new[]
                  {
-                     "WarehousePackCarton",
-                     "WarehousePackCartonItem",
-                     "WarehousePackPallet",
-                     "WarehousePackCarrier",
-                     "WarehousePackEvent",
-                     "WarehousePackSequence",
+                     "PackCarton",
+                     "PackCartonItem",
+                     "PackPallet",
+                     "PackCarrier",
+                     "PackLocation",
+                     "PackEvent",
+                     "PackSequence",
                  })
         {
-            Assert.Contains($"OBJECT_ID(N'dbo.{table}', N'U') IS NULL", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-            Assert.Contains($"CONSTRAINT [PK_{table}] PRIMARY KEY", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-            Assert.Contains($"OBJECT_ID(N'dbo.{table}', N'U') IS NULL", WarehousePackingSchema.VerifySql, StringComparison.Ordinal);
-            Assert.Contains($"OBJECT_ID(N'dbo.{table}') AND [type] = N'PK'", WarehousePackingSchema.VerifySql, StringComparison.Ordinal);
+            Assert.Contains($"OBJECT_ID(N'dbo.{table}', N'U') IS NULL", PackingSchema.ApplySql, StringComparison.Ordinal);
+            Assert.Contains($"CONSTRAINT [PK_{table}] PRIMARY KEY", PackingSchema.ApplySql, StringComparison.Ordinal);
+            Assert.Contains($"OBJECT_ID(N'dbo.{table}', N'U') IS NULL", PackingSchema.VerifySql, StringComparison.Ordinal);
+            Assert.Contains($"OBJECT_ID(N'dbo.{table}') AND [type] = N'PK'", PackingSchema.VerifySql, StringComparison.Ordinal);
         }
 
-        // 箱号、托盘号是标签上的条码内容，运输公司名称供选择：三者都必须唯一，校验里同样锁定。
+        // 箱号、托盘号、位置条码是标签上的条码内容，运输公司名称、同店位置名称供选择：都必须唯一，校验里同样锁定。
         foreach (var index in new[]
                  {
-                     "UX_WarehousePackCarton_CartonNo",
-                     "UX_WarehousePackPallet_PalletNo",
-                     "UX_WarehousePackCarrier_Name",
+                     "UX_PackCarton_CartonNo",
+                     "UX_PackPallet_PalletNo",
+                     "UX_PackCarrier_Name",
+                     "UX_PackLocation_Owner_Name",
+                     "UX_PackLocation_Barcode",
                  })
         {
-            Assert.Contains($"CREATE UNIQUE NONCLUSTERED INDEX [{index}]", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-            Assert.Contains($"[name] = N'{index}' AND [is_unique] = 1", WarehousePackingSchema.VerifySql, StringComparison.Ordinal);
+            Assert.Contains($"CREATE UNIQUE NONCLUSTERED INDEX [{index}]", PackingSchema.ApplySql, StringComparison.Ordinal);
+            Assert.Contains($"[name] = N'{index}' AND [is_unique] = 1", PackingSchema.VerifySql, StringComparison.Ordinal);
         }
 
         // 位置查询按商品找箱的索引。
-        Assert.Contains("IX_WarehousePackCartonItem_Product", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-        Assert.Contains("IX_WarehousePackCartonItem_Product", WarehousePackingSchema.VerifySql, StringComparison.Ordinal);
-        Assert.Contains("PRIMARY KEY CLUSTERED ([CartonGUID], [ProductCode])", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("IX_PackCartonItem_Product", PackingSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("IX_PackCartonItem_Product", PackingSchema.VerifySql, StringComparison.Ordinal);
+        Assert.Contains("PRIMARY KEY CLUSTERED ([CartonGUID], [ProductCode])", PackingSchema.ApplySql, StringComparison.Ordinal);
 
         // 新权限码随迁移幂等入库（启动不跑种子），文案与种子保持一致。
-        Assert.Contains("N'Warehouse.Packing'", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-        Assert.Contains("WHERE NOT EXISTS", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-        var seed = BlazorApp.Shared.Constants.PermissionSeedData.AllPermissions.Single(item => item.Code == BlazorApp.Shared.Constants.Permissions.Warehouse.Packing);
-        Assert.Contains($"N'{seed.Name}'", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
-        Assert.Contains($"N'{seed.Description}'", WarehousePackingSchema.ApplySql, StringComparison.Ordinal);
+        Assert.Contains("WHERE NOT EXISTS", PackingSchema.ApplySql, StringComparison.Ordinal);
+        foreach (var permissionCode in new[]
+                 {
+                     BlazorApp.Shared.Constants.Permissions.Warehouse.Packing,
+                     BlazorApp.Shared.Constants.Permissions.StorePacking.Use,
+                 })
+        {
+            Assert.Contains($"N'{permissionCode}'", PackingSchema.ApplySql, StringComparison.Ordinal);
+            var seed = BlazorApp.Shared.Constants.PermissionSeedData.AllPermissions.Single(item => item.Code == permissionCode);
+            Assert.Contains($"N'{seed.Name}'", PackingSchema.ApplySql, StringComparison.Ordinal);
+            Assert.Contains($"N'{seed.Description}'", PackingSchema.ApplySql, StringComparison.Ordinal);
+        }
 
         // 纯新增：不动既有表，不删不改数据。
-        Assert.DoesNotContain("DROP ", WarehousePackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("UPDATE ", WarehousePackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DELETE ", WarehousePackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ALTER ", WarehousePackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DROP ", PackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("UPDATE ", PackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DELETE ", PackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("ALTER ", PackingSchema.ApplySql, StringComparison.OrdinalIgnoreCase);
 
         Assert.Contains(
             SchemaMigrationCoordinator.MainMigrationSteps,
-            step => step.MigrationId == SchemaMigrationCoordinator.WarehousePackingMigrationId
+            step => step.MigrationId == SchemaMigrationCoordinator.ScanPackingMigrationId
         );
         Assert.DoesNotContain(
             SchemaMigrationCoordinator.PosmMigrationSteps,
-            step => step.MigrationId == SchemaMigrationCoordinator.WarehousePackingMigrationId
+            step => step.MigrationId == SchemaMigrationCoordinator.ScanPackingMigrationId
         );
     }
 
@@ -4742,20 +4752,20 @@ public sealed class SchemaMigrationCoordinatorTests
             return Task.CompletedTask;
         }
 
-        public async Task ApplyWarehousePackingAsync(CancellationToken cancellationToken)
+        public async Task ApplyScanPackingAsync(CancellationToken cancellationToken)
         {
             await ApplyAsync(
                 SchemaDatabase.Main,
-                SchemaMigrationCoordinator.WarehousePackingMigrationId,
+                SchemaMigrationCoordinator.ScanPackingMigrationId,
                 cancellationToken
             );
-            await VerifyWarehousePackingAsync(cancellationToken);
+            await VerifyScanPackingAsync(cancellationToken);
         }
 
-        public Task VerifyWarehousePackingAsync(CancellationToken cancellationToken)
+        public Task VerifyScanPackingAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Events.Add("VerifyWarehousePacking");
+            Events.Add("VerifyScanPacking");
             return Task.CompletedTask;
         }
 
