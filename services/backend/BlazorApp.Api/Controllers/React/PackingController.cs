@@ -206,6 +206,11 @@ public sealed class PackingController(
     public Task<IActionResult> UpdateLocation(string locationGuid, [FromBody] PackingLocationSaveRequestDto request) =>
         RunAsync(nameof(UpdateLocation), op => packingService.SaveLocationAsync(op, locationGuid.Trim(), request ?? new PackingLocationSaveRequestDto()));
 
+    /// <summary>选「其他分店 / 总仓」时的候选地点：启用的分店（不含发出地点自己）加总仓；店员没有查看分店权限，用这个接口。</summary>
+    [HttpGet("destinations")]
+    public Task<IActionResult> ListDestinations([FromQuery] string? ownerCode) =>
+        RunAsync(nameof(ListDestinations), op => packingService.ListDestinationsAsync(op, ownerCode));
+
     /// <summary>总仓装箱时选择关联订货单（二期边拣边装用）：只列已提交和配货中的订货单。</summary>
     [HttpGet("orders")]
     public Task<IActionResult> SearchOrders([FromQuery] string? keyword) =>

@@ -76,6 +76,8 @@ public interface IPackingService
 
     Task<PackingResult<PackingLocationDto>> SaveLocationAsync(PackingOperator op, string? locationGuid, PackingLocationSaveRequestDto request);
 
+    Task<PackingResult<List<PackingOwnerDto>>> ListDestinationsAsync(PackingOperator op, string? ownerCode);
+
     Task<PackingResult<List<PackingOrderOptionDto>>> SearchOrdersAsync(PackingOperator op, string? keyword);
 }
 
