@@ -169,6 +169,22 @@ public sealed class PackingController(
     public Task<IActionResult> LookupForReceive([FromQuery] string? code) =>
         RunAsync(nameof(LookupForReceive), op => packingService.LookupForReceiveAsync(op, code));
 
+    /// <summary>
+    /// 按订单签收（二期）：该订单发给本店的箱（含托盘上的）、签收进度与按商品的订货 / 配货 / 已发对照。
+    /// 订货单的分店不在账号的地点范围内时按 404 处理。
+    /// </summary>
+    [HttpGet("receive/orders/{orderGuid}")]
+    public Task<IActionResult> GetOrderReceive(string orderGuid) =>
+        RunAsync(nameof(GetOrderReceive), op => packingService.GetOrderReceiveAsync(op, orderGuid.Trim()));
+
+    /// <summary>
+    /// 按订单一次签收：必须带实到箱数，和系统记录里「该订单发给本店、还在路上」的箱数不一致返回 409 COUNT_MISMATCH，什么都不签。
+    /// 不回写订货单任何字段。
+    /// </summary>
+    [HttpPost("receive/orders/{orderGuid}")]
+    public Task<IActionResult> ReceiveOrder(string orderGuid, [FromBody] PackingReceiveOrderRequestDto? request) =>
+        RunAsync(nameof(ReceiveOrder), op => packingService.ReceiveOrderAsync(op, orderGuid.Trim(), request?.ExpectedCartonCount));
+
     // ---- 扫码识别、位置查询、主数据 ----
 
     /// <summary>识别扫到的是箱号（BX…）还是托盘号（PL…）；都不是时返回 404，客户端按商品码处理。</summary>

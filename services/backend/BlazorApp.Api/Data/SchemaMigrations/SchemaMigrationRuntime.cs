@@ -300,6 +300,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyScanPackingAsync(CancellationToken cancellationToken);
 
+    Task ApplyPickRecordCartonAsync(CancellationToken cancellationToken);
+
+    Task VerifyPickRecordCartonAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1914,6 +1918,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             PackingSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPickRecordCartonAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderPickRecordCartonSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 新增列的签名（类型 / 长度 / 可空）通过后协调器才登记账本。
+        await VerifyPickRecordCartonAsync(cancellationToken);
+    }
+
+    public async Task VerifyPickRecordCartonAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            WarehouseOrderPickRecordCartonSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

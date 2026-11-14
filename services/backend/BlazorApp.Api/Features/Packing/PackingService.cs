@@ -79,6 +79,28 @@ public interface IPackingService
     Task<PackingResult<List<PackingOwnerDto>>> ListDestinationsAsync(PackingOperator op, string? ownerCode);
 
     Task<PackingResult<List<PackingOrderOptionDto>>> SearchOrdersAsync(PackingOperator op, string? keyword);
+
+    // 按订货单装箱（二期：总仓拣货端边拣边装 / 先拣后装）。箱必须属于该订货单、归总仓、还在装箱中；
+    // 在调用方已开的事务里执行时加入该事务（见 PackingService.ExecuteInTransactionAsync）。
+    /// <summary>该商品在箱里加 / 减 delta 件（可为负）；减到负数返回 409 CARTON_QTY_INSUFFICIENT，什么都不改。</summary>
+    Task<PackingResult<PackingCartonDetailDto>> AdjustOrderCartonItemAsync(PackingOperator op, string orderGuid, string cartonGuid, string productCode, int delta);
+
+    /// <summary>把该商品在箱里的件数设为绝对值（0 = 移除；箱里原本没有也可以直接设），同一请求重复提交结果相同。</summary>
+    Task<PackingResult<PackingCartonDetailDto>> SetOrderCartonItemQuantityAsync(PackingOperator op, string orderGuid, string cartonGuid, string productCode, int quantity);
+
+    /// <summary>封箱；传了 palletGuid 时同一事务里再放上托盘，任一步失败整体回滚。</summary>
+    Task<PackingResult<PackingCartonDetailDto>> SealOrderCartonAsync(PackingOperator op, string orderGuid, string cartonGuid, PackingSealRequestDto request, string? palletGuid);
+
+    /// <summary>订货单名下全部非作废箱与各商品装箱合计（只读）。</summary>
+    Task<PackingOrderSnapshot> GetOrderSnapshotAsync(string orderGuid);
+
+    /// <summary>把订货单名下「装箱中且没有任何商品」的空箱作废（写操作记录），返回作废的箱数。</summary>
+    Task<PackingResult<int>> VoidEmptyOrderCartonsAsync(PackingOperator op, string orderGuid);
+
+    // 分店按订单签收（二期）。订货单的分店必须在操作人的地点范围内，否则按「找不到订单」处理。
+    Task<PackingResult<PackingOrderReceiveDto>> GetOrderReceiveAsync(PackingOperator op, string orderGuid);
+
+    Task<PackingResult<PackingOrderReceiveDto>> ReceiveOrderAsync(PackingOperator op, string orderGuid, int? expectedCartonCount);
 }
 
 /// <summary>

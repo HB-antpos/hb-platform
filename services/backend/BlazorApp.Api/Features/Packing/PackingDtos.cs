@@ -75,6 +75,9 @@ public static class PackingErrorCodes
     public const string NotInTransit = "NOT_IN_TRANSIT";
     public const string NotForYou = "NOT_FOR_YOU";
     public const string CountMismatch = "COUNT_MISMATCH";
+
+    /// <summary>边拣边装减件时，箱里该商品现有件数不够减。</summary>
+    public const string CartonQtyInsufficient = "CARTON_QTY_INSUFFICIENT";
 }
 
 // ---- 请求 ----
@@ -518,4 +521,81 @@ public sealed class PackingLocateDto
     public int CartonCount { get; set; }
     public int PalletCount { get; set; }
     public List<PackingLocateRowDto> Rows { get; set; } = new();
+}
+
+// ---- 二期：按订货单装箱（总仓拣货端边拣边装）与分店按订单签收 ----
+
+/// <summary>某张订货单名下的一只非作废箱（拣货端汇总与提交对账用的轻量读模型）。</summary>
+public sealed class PackingOrderCartonRow
+{
+    public string CartonGuid { get; set; } = string.Empty;
+    public string CartonNo { get; set; } = string.Empty;
+    public int Status { get; set; }
+    public int SkuCount { get; set; }
+    public int PieceCount { get; set; }
+    public string? PalletNo { get; set; }
+    public string CreatedByUserGuid { get; set; } = string.Empty;
+    public string CreatedByName { get; set; } = string.Empty;
+}
+
+/// <summary>某张订货单的装箱快照：全部非作废箱，加上各商品在这些箱里的件数合计。</summary>
+public sealed class PackingOrderSnapshot
+{
+    public List<PackingOrderCartonRow> Cartons { get; set; } = new();
+
+    /// <summary>ProductCode → 非作废箱内合计件数。</summary>
+    public Dictionary<string, int> PackedByProduct { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class PackingReceiveOrderRequestDto
+{
+    /// <summary>收货人数过的实到箱数；必须等于该订单发给本店、还在路上的箱数，否则 409 COUNT_MISMATCH，什么都不签。</summary>
+    public int? ExpectedCartonCount { get; set; }
+}
+
+public sealed class PackingOrderReceiveCartonDto
+{
+    public string CartonGuid { get; set; } = string.Empty;
+    public string CartonNo { get; set; } = string.Empty;
+    public int Status { get; set; }
+    public string? PalletNo { get; set; }
+    public int SkuCount { get; set; }
+    public int PieceCount { get; set; }
+}
+
+public sealed class PackingOrderReceiveProductDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string? ProductName { get; set; }
+    public string? ItemNumber { get; set; }
+
+    /// <summary>订货数（订单行订货数量合计，退货行不计）。</summary>
+    public decimal OrderedPieces { get; set; }
+
+    /// <summary>配货数（订单行 AllocQuantity 合计）；所有行都没有配货数时为空。</summary>
+    public decimal? AllocPieces { get; set; }
+
+    /// <summary>已发出件数：该订单在途（发给本店）加已签收的箱内件数合计。</summary>
+    public int ShippedPieces { get; set; }
+}
+
+/// <summary>分店按订单签收：该订单发给本店的箱、签收进度与按商品的订货 / 配货 / 已发对照。</summary>
+public sealed class PackingOrderReceiveDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public string? OrderNo { get; set; }
+    public string StoreCode { get; set; } = string.Empty;
+
+    /// <summary>发给本店的箱（含托盘上的）：在路上的，以及已签收归属本店的。</summary>
+    public List<PackingOrderReceiveCartonDto> Cartons { get; set; } = new();
+
+    public int InTransitCount { get; set; }
+
+    /// <summary>已签收：目前归属本店且已封箱的箱数。</summary>
+    public int ReceivedCount { get; set; }
+
+    public List<PackingOrderReceiveProductDto> Products { get; set; } = new();
+
+    /// <summary>仅 409 COUNT_MISMATCH 时带回：系统记录里该订单发给本店、还在路上的箱数。</summary>
+    public int? ActualInTransitCartonCount { get; set; }
 }

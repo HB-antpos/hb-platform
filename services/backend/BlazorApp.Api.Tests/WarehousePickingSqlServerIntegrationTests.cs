@@ -332,7 +332,7 @@ public sealed class WarehousePickingSqlServerIntegrationTests
     }
 
     private static WarehousePickingService CreateService(IsolatedDatabase database) =>
-        new(CreateContext(database.CreateClient()), Mock.Of<IProductWarehouseReactService>(), NullLogger<WarehousePickingService>.Instance);
+        PickingPackingTestSupport.PickingService(database.CreateClient(), Mock.Of<IProductWarehouseReactService>());
 
     private static SqlSugarContext CreateContext(ISqlSugarClient db)
     {
@@ -377,6 +377,11 @@ CREATE TABLE dbo.HbwebSysPermissions (
             await database.ExecuteAsync(WarehouseOrderPickStockoutSchema.VerifySql);
             await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.ApplySql);
             await database.ExecuteAsync(WarehouseOrderPickAssignmentSchema.VerifySql);
+            // 拣货记录「所装箱」列与扫码打包七张表：写记录、提交对账要用（迁移 20261114.001 / 20261114.002）。
+            await database.ExecuteAsync(PackingSchema.ApplySql);
+            await database.ExecuteAsync(PackingSchema.VerifySql);
+            await database.ExecuteAsync(WarehouseOrderPickRecordCartonSchema.ApplySql);
+            await database.ExecuteAsync(WarehouseOrderPickRecordCartonSchema.VerifySql);
             using var db = database.CreateClient();
             db.CodeFirst.InitTables(
                 typeof(WareHouseOrder),
