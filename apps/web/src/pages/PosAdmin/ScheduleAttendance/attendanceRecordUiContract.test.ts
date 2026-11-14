@@ -259,3 +259,18 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('releaseLandscape()'), '退出看板要还原方向锁定与全屏')
 }
 
+
+// 分店改为左侧列表（宽屏常驻，窄屏收起成工具栏按钮），周切换为「‹ 本周 ›」+ 周范围
+{
+  assert(!pageSource.includes("placeholder={t('posAdmin.scheduleAttendance.filters.store')}"), '分店不再用下拉框选择')
+  assert(pageSource.includes('<StorePicker\n              variant="docked"'), '宽屏应有常驻左侧的分店列表')
+  assert(pageSource.includes('<StorePicker\n          variant="floating"'), '侧栏收起后分店按钮应弹出同一份分店列表')
+  assert(pageSource.includes('title={storeSwitcher ?? ('), '侧栏收起时分店按钮放在卡片标题位置')
+  assert(pageSource.includes("const storeSidebarDocked = activeTab !== 'review' && shouldDockSidebar({"), '侧栏是否展开由 shouldDockSidebar 决定，考勤审核页签不显示')
+  assert(pageSource.includes('onSelect={selectStore}'), '选分店要经过 selectStore（记住上次分店与最近使用）')
+  assert(pageSource.includes('resolveInitialStore(storeOptions, safeStorageGet(storage, STORAGE_KEYS.lastStore))'), '进入页面要恢复上次选的分店')
+  assert(pageSource.includes("t('posAdmin.scheduleAttendance.weekNav.thisWeek')"), '周切换应有「本周」按钮')
+  assert(pageSource.includes('onClick={() => setSelectedWeek(dayjs())}'), '「本周」按钮回到当前周')
+  assert(pageSource.includes('format={(value) => formatWeekRange(value)}'), '周选择器显示周范围')
+  assert(!pageSource.includes('<Tag color="blue" style={{ lineHeight'), '原来的蓝色周标签已并入周范围')
+}
