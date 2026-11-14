@@ -273,6 +273,23 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                RouteName = "packing",
+                TitleKey = "tabs.packing",
+                Icon = "package-variant",
+                // 分店与总仓共用：分店打包专用权限，或总仓打包权限（管理仓库 / 管理仓库订货按别名自动具备）任一即可见；
+                // 具体能操作哪些分店 / 总仓由 /packing/scope 按账号算出。打包接口只接受登录账号（要记操作人），所以不进仓库设备菜单。
+                Permission = Permissions.StorePacking.Use,
+                AnyPermissions = new[]
+                {
+                    Permissions.StorePacking.Use,
+                    Permissions.Warehouse.Packing,
+                    Permissions.Warehouse.Manage,
+                    Permissions.Warehouse.ManageOrders,
+                },
+                Order = 43,
+            },
+            new()
+            {
                 RouteName = "domestic-purchase",
                 TitleKey = "tabs.domesticPurchase",
                 Icon = "shopping-outline",
