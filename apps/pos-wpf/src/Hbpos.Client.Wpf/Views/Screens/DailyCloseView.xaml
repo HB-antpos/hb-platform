@@ -1696,6 +1696,15 @@
                                             <TextBlock Text="{loc:Loc dailyClose.cashRounding}" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding CashRoundingAmount, StringFormat={}{0:+$0.00;-$0.00;$0.00}}" FontSize="13" HorizontalAlignment="Right" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                         </Grid>
+                                        <!-- 收银端现金存入 / 取出：今天没有时不显示，界面与原来一致。 -->
+                                        <Grid Margin="14,8,14,0" Visibility="{Binding HasCashMovements, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{loc:Loc dailyClose.cashIn}" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                                            <TextBlock Text="{Binding CashInAmount, StringFormat={}{0:+$0.00;-$0.00;$0.00}}" FontSize="13" HorizontalAlignment="Right" Foreground="{DynamicResource PosSuccessBrush}" />
+                                        </Grid>
+                                        <Grid Margin="14,8,14,0" Visibility="{Binding HasCashMovements, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{loc:Loc dailyClose.cashOut}" FontSize="13" VerticalAlignment="Center" Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                                            <TextBlock Text="{Binding CashOutAmount, StringFormat={}-{0:$0.00}}" FontSize="13" HorizontalAlignment="Right" Foreground="{DynamicResource PosDangerBrush}" />
+                                        </Grid>
                                         <Grid Margin="14,8" >
                                             <TextBlock Text="{loc:Loc dailyClose.expectedCash}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{DynamicResource PosTextSecondaryBrush}" />
                                             <TextBlock Text="{Binding ExpectedCashAmount, StringFormat={}{0:C2}}" Style="{StaticResource SettlementValueStyle}" FontSize="20" HorizontalAlignment="Right" />

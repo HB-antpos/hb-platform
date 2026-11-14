@@ -206,7 +206,8 @@ public sealed partial class LocalDailyCloseRepository : ILocalDailyCloseUploadRe
                        VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
                        CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount,
                        InstallmentCashReceivedAmount, InstallmentCashRefundAmount, InstallmentCardReceivedAmount, InstallmentCardRefundAmount,
-                       InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount
+                       InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount,
+                       CashChangeTopUpAmount, CashOtherInAmount, CashSafeDropAmount, CashPaidOutAmount
                 FROM LocalDailyCloses
                 WHERE DailyCloseGuid = $DailyCloseGuid;
                 """;
