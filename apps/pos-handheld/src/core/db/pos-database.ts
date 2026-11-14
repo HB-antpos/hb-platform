@@ -37,6 +37,7 @@ import type {
 import type { TerminalCartFence } from "@hb/pos-domain/core/contracts/terminal-cart";
 import { SqliteApplicationLogOutbox } from "../logging/application-log";
 import { PaymentMethodSettingsRepository } from "@/features/settings/payment-method-settings";
+import { PosSettingsSyncRepository } from "./pos-settings-sync-repository";
 
 import { SqliteCatalogCodeConflictRepository } from "./catalog-code-conflict-repository";
 import { SqliteCatalogLookupOverlayRepository } from "./catalog-lookup-overlay-repository";
@@ -366,6 +367,11 @@ export class PosDatabase implements DatabasePort {
 
   public paymentMethodSettings(): PaymentMethodSettingsRepository {
     return new PaymentMethodSettingsRepository(this.connection, this.nowIso);
+  }
+
+  /** 总部设置下发的本机快照与 cashMovement 本机值；只触达两个固定 app_settings 键。 */
+  public posSettingsSync(): PosSettingsSyncRepository {
+    return new PosSettingsSyncRepository(this.connection, this.nowIso);
   }
 
   /** Settings 危险动作只读取一致风险计数，不取得订单、支付、队列或裸连接。 */

@@ -740,6 +740,54 @@ test("组合层把当前门店小票资料载入能力接入设置呈现器", as
   assert.equal(presenter.getState().printer.returnPolicy, "Refunds within 14 days.");
 });
 
+test("总部设置：posSettings 输入透传给设置页，保存付款方式遇到 POS_SETTING_MANAGED 提示由总部管理且生效值不变", async () => {
+  const view = {
+    items: [
+      { key: "payment.manualCard", value: true, source: "store", isManaged: true, isLocked: false, isOfflineOverride: false },
+    ],
+    isOnline: true,
+    lastSyncedAtIso: null,
+    showsOfflineBanner: false,
+    hasLockedItems: false,
+  };
+  let syncCalls = 0;
+  let saveCalls = 0;
+  const runtime = createProductionSettingsComposition(
+    dependencies({
+      posSettings: {
+        getView: () => view,
+        subscribe: () => () => undefined,
+        load: async () => view,
+        syncNow: async () => {
+          syncCalls += 1;
+          return { status: "updated", hash: "h", ackPending: false };
+        },
+      },
+      paymentMethods: {
+        load: async () => ({ useManualCard: false, giftCardEnabled: false }),
+        save: async () => {
+          saveCalls += 1;
+          throw Object.assign(new Error("POS_SETTING_MANAGED"), { code: "POS_SETTING_MANAGED" });
+        },
+      },
+    }),
+  );
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+  assert.equal(presenter.getState().posSettings?.items[0]?.key, "payment.manualCard");
+
+  await presenter.syncPosSettings();
+  assert.equal(syncCalls, 1);
+  assert.equal(presenter.getState().statusCode, "pos-settings-synced");
+
+  presenter.setUseManualCard(true);
+  await presenter.savePaymentMethods();
+  assert.equal(saveCalls, 1);
+  assert.equal(presenter.getState().statusCode, "pos-settings-managed");
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+  presenter.destroy();
+});
+
 test("设置页测试打印只要求已保存 peripheralId，不受自动打印开关限制", async () => {
   const events: string[] = [];
   const runtime = createProductionSettingsComposition(

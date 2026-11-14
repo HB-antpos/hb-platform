@@ -25,6 +25,7 @@ import {
   type SettingsLinklySetupControlPort,
   type SettingsPaymentSettingsInput,
   type SettingsPendingDataSnapshot,
+  type SettingsPosSettingsPort,
   type SettingsReceiptProfileDraft,
   type SettingsReceiptProfileSyncResult,
   type SettingsScannerTestResult,
@@ -136,6 +137,11 @@ export type ProductionSettingsCompositionInput = Readonly<{
     load(): Promise<PaymentMethodSettings>;
     save(settings: PaymentMethodSettings): Promise<void>;
   }>;
+  /**
+   * 总部「收银端设置下发」的视图 / 订阅 / 立即同步 / 载入；缺省 = 不支持，设置页按没有总部设置处理。
+   * paymentMethods.save 应已由组合根包上总部策略守卫（锁定时抛 POS_SETTING_MANAGED）。
+   */
+  posSettings?: SettingsPosSettingsPort | undefined;
   paymentConfigurationTransition: Readonly<{
     run<T>(operation: () => Promise<T>): Promise<T>;
   }>;
@@ -424,6 +430,7 @@ export function createProductionSettingsComposition(
     receiptProfile: input.receiptProfile,
   });
   const control: SettingsControlPort = Object.assign(productionControl, {
+    ...(input.posSettings ? { posSettings: input.posSettings } : {}),
     ...(squareSetup
       ? {
           squareSetup: Object.freeze({

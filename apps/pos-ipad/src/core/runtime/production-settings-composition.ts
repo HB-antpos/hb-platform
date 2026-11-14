@@ -29,6 +29,7 @@ import {
   type SettingsControlPort,
   type SettingsPaymentSettingsInput,
   type SettingsPendingDataSnapshot,
+  type SettingsPosSettingsPort,
   type SettingsReceiptProfileDraft,
   type SettingsReceiptProfileSyncResult,
   type SettingsLinklyPairingPort,
@@ -81,6 +82,11 @@ export type ProductionSettingsCompositionInput = Readonly<{
     load(): Promise<PaymentMethodSettings>;
     save(input: PaymentMethodSettings): Promise<unknown>;
   }>;
+  /**
+   * 总部「收银端设置下发」端口（可选，缺省 = 不支持）。`paymentMethods.save` 的守卫由组合根在传入前包好，
+   * 这里只把视图 / 订阅 / 立即同步透传给设置页。
+   */
+  posSettings?: SettingsPosSettingsPort | undefined;
   currentCashier: CurrentCashierSession;
   terminal: TerminalScope;
   activeCart: Pick<
@@ -471,6 +477,7 @@ export function createProductionSettingsComposition(
     receiptProfile: input.receiptProfile,
   });
   const control: SettingsControlPort = Object.assign(productionControl, {
+    ...(input.posSettings ? { posSettings: input.posSettings } : {}),
     ...(squareSetup
       ? {
           squareSetup: Object.freeze({

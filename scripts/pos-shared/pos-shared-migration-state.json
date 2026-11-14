@@ -197,8 +197,8 @@
       "package": "pos-sync",
       "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400",
       "baselineCanonicalRuntimeSha256": "1320cf6ac0ade04e774ee613faf5fff1c562384f7e8d6397c3a45a3e3adaac58",
-      "canonicalRuntimeSha256": "3e3143c07c49f141d4da90a5e4f11069b4b8b24226c5535a93ab8242498c7fe6",
-      "canonicalTypeSha256": "108246e230572095955b875a0a09b5362271b22ad7d5b3d6fa05da07c940ece5",
+      "canonicalRuntimeSha256": "e31930157e58831cef3282eb839a3c10254358d7016e4f4b7f435a3eb75ff874",
+      "canonicalTypeSha256": "19d8cb139c33838f2fc9debe0933fdf42c94d7482e1cca740f555f2c634bc3ba",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",

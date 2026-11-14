@@ -881,6 +881,87 @@ test("清除打印机把保存前 session 复核回调转发给组合层且不�
   assert.equal(sessionChecks, 2);
 });
 
+test("总部设置端口：视图 / 订阅透传，读取与同步过 lease 复核，换班后旧 presenter 不再收到通知", async () => {
+  let epoch = 1;
+  const listeners = new Set<() => void>();
+  let loadCalls = 0;
+  let syncCalls = 0;
+  const view = {
+    items: [],
+    isOnline: true,
+    lastSyncedAtIso: null,
+    showsOfflineBanner: false,
+    hasLockedItems: false,
+  };
+  const runtime = createProductionSettingsRuntime({
+    createSessionLease: () => ({
+      get: () => {
+        if (epoch !== 1) throw new Error("SESSION_REPLACED");
+        return {
+          storeCode: "S1",
+          deviceCode: "IPAD-1",
+          permissionCodes: [
+            "Permissions.PosTerminal.Settings.View",
+            "Permissions.PosTerminal.Settings.PaymentTerminal",
+          ],
+        };
+      },
+    }),
+    control: fakeControl({
+      loadSnapshot: async () => SNAPSHOT,
+      posSettings: {
+        getView: () => view,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          return () => { listeners.delete(listener); };
+        },
+        load: async () => { loadCalls += 1; return view; },
+        syncNow: async () => {
+          syncCalls += 1;
+          return { status: "up-to-date", hash: "h", ackPending: false };
+        },
+      },
+    }),
+    runDangerousExclusive: (operation) => operation(),
+  });
+  const presenter = runtime.createPresenter();
+  assert.equal(presenter.getState().posSettings, view);
+  await presenter.load();
+  assert.equal(loadCalls, 1);
+  assert.equal(listeners.size, 1);
+
+  await presenter.syncPosSettings();
+  assert.equal(syncCalls, 1);
+  assert.equal(presenter.getState().statusCode, "pos-settings-synced");
+
+  // 换班后：同步被 lease 拒绝（底层零调用），订阅通知不再传给旧 presenter。
+  epoch = 2;
+  let notified = 0;
+  presenter.subscribe(() => { notified += 1; });
+  for (const listener of [...listeners]) listener();
+  assert.equal(notified, 0);
+  const before = syncCalls;
+  await presenter.syncPosSettings();
+  assert.equal(syncCalls, before);
+});
+
+test("控制端没有总部设置端口时，presenter 视为不支持（posSettings 为 null）", async () => {
+  const runtime = createProductionSettingsRuntime({
+    createSessionLease: () => ({
+      get: () => ({
+        storeCode: "S1",
+        deviceCode: "IPAD-1",
+        permissionCodes: ["Permissions.PosTerminal.Settings.View"],
+      }),
+    }),
+    control: fakeControl({ loadSnapshot: async () => SNAPSHOT }),
+    runDangerousExclusive: (operation) => operation(),
+  });
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+  assert.equal(presenter.getState().posSettings, null);
+});
+
 function fakeControl(
   overrides: Partial<SettingsControlPort>,
 ): SettingsControlPort {

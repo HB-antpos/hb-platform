@@ -78,6 +78,10 @@ import { PosPressable } from "@/ui/controls/pos-pressable";
 import { PosSegmented } from "@/ui/controls/pos-segmented";
 import { PosSwitch } from "@/ui/controls/pos-switch";
 import {
+  POS_SETTING_KEYS,
+  type PosSettingsView,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
+import {
   type TouchSoundKind,
   usePosSound,
 } from "@/ui/feedback/pos-sound-context";
@@ -123,6 +127,7 @@ export type SettingsScreenPresenter = Pick<
   | "refreshSquareDeviceCode"
   | "savePaymentSettings"
   | "savePaymentMethods"
+  | "syncPosSettings"
   | "setUseManualCard"
   | "setGiftCardEnabled"
   | "savePrinterSettings"
@@ -1194,25 +1199,62 @@ function PaymentsPane({
         {catalogRefreshRunning ? (
           <CatalogBusyNotice text={t("payments.catalogBusy")} />
         ) : null}
+        {state.posSettings ? (
+          <PosSettingsStatusBar
+            disabled={disabled}
+            locale={locale}
+            presenter={presenter}
+            view={state.posSettings}
+          />
+        ) : null}
         <SectionCard
           hint={t("payments.methodsHint")}
           title={t("payments.methodsTitle")}
         >
           <View style={styles.paymentMethodsRow}>
             {([
-              { key: "manual", label: "payments.manualCard", hint: "payments.manualCardHint", value: state.paymentMethodsDraft.useManualCard, change: (value: boolean) => presenter.setUseManualCard(value) },
-              { key: "gift", label: "payments.giftCard", hint: "payments.giftCardHint", value: state.paymentMethodsDraft.giftCardEnabled, change: (value: boolean) => presenter.setGiftCardEnabled(value) },
-            ] as const).map((method) => (
+              { key: "manual", label: "payments.manualCard", hint: "payments.manualCardHint", value: state.paymentMethodsDraft.useManualCard, change: (value: boolean) => presenter.setUseManualCard(value), settingKey: POS_SETTING_KEYS.manualCard },
+              { key: "gift", label: "payments.giftCard", hint: "payments.giftCardHint", value: state.paymentMethodsDraft.giftCardEnabled, change: (value: boolean) => presenter.setGiftCardEnabled(value), settingKey: POS_SETTING_KEYS.voucher },
+            ] as const).map((method) => {
+              // 总部管理的项：在线锁定（灰显 + 来源标签）；离线可临时修改并提示；离线改过则打「临时修改」标签。
+              const managed = state.posSettings?.items.find((item) => item.key === method.settingKey);
+              const locked = managed?.isLocked === true;
+              const switchDisabled = disabled || catalogRefreshRunning || !state.paymentMethodsAvailable || locked;
+              return (
               <View key={method.key} style={styles.switchRow}>
                 <View style={styles.switchCopy}>
                   <Text style={styles.switchLabel}>{t(method.label)}</Text>
                   <Text style={styles.switchHint}>{t(method.hint)}</Text>
+                  {managed?.isManaged ? (
+                    <View style={styles.posSettingsTags}>
+                      <PosPill
+                        label={t("posSettings.managedBy", { source: posSettingSourceLabel(locale, managed.source) })}
+                        testID={`settings-payment-method-${method.key}-managed`}
+                        tone="info"
+                      />
+                      {managed.isOfflineOverride ? (
+                        <PosPill
+                          label={t("posSettings.offlineOverride")}
+                          testID={`settings-payment-method-${method.key}-override`}
+                          tone="warning"
+                        />
+                      ) : null}
+                    </View>
+                  ) : null}
+                  {managed?.isManaged && !locked ? (
+                    <Text
+                      style={styles.posSettingsOfflineHint}
+                      testID={`settings-payment-method-${method.key}-offline-hint`}
+                    >
+                      {t("posSettings.offlineEditable")}
+                    </Text>
+                  ) : null}
                 </View>
                 <PosSwitch
                   accessibilityLabel={t(method.label)}
                   accessibilityRole="switch"
-                  accessibilityState={{ checked: method.value, disabled: disabled || catalogRefreshRunning || !state.paymentMethodsAvailable }}
-                  disabled={disabled || catalogRefreshRunning || !state.paymentMethodsAvailable}
+                  accessibilityState={{ checked: method.value, disabled: switchDisabled }}
+                  disabled={switchDisabled}
                   onValueChange={method.change}
                   style={styles.settingSwitch}
                   testID={`settings-payment-method-${method.key}`}
@@ -1220,7 +1262,8 @@ function PaymentsPane({
                   value={method.value}
                 />
               </View>
-            ))}
+              );
+            })}
             <ActionButton
               disabled={disabled || catalogRefreshRunning || !state.paymentMethodsAvailable}
               icon="content-save-outline"
@@ -4009,6 +4052,86 @@ function HardwareCard({
   );
 }
 
+/** 总部设置来源（门店 / 全局 / 设备）的显示名；未知来源按「默认」。 */
+function posSettingSourceLabel(locale: SettingsLocale, source: string | null): string {
+  switch (source) {
+    case "store":
+      return settingsText(locale, "posSettings.source.store");
+    case "global":
+      return settingsText(locale, "posSettings.source.global");
+    case "device":
+      return settingsText(locale, "posSettings.source.device");
+    default:
+      return settingsText(locale, "posSettings.source.other");
+  }
+}
+
+/** 最近同步时间的本地 hh:mm。 */
+function formatLocalClock(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.valueOf())) return "—";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+/**
+ * 付款方式分区顶部的紧凑「总部设置」状态条：已同步 hh:mm / 离线（黄色提示）/ 暂未下发，
+ * 右侧「立即同步」。只在设置页拿到总部设置端口时渲染（无端口 = 完全不出现）。
+ */
+function PosSettingsStatusBar({
+  disabled,
+  locale,
+  presenter,
+  view,
+}: Readonly<{
+  disabled: boolean;
+  locale: SettingsLocale;
+  presenter: SettingsScreenPresenter;
+  view: PosSettingsView;
+}>) {
+  usePosThemeVersion();
+  const t = (
+    key: SettingsCopyKey,
+    values?: Readonly<Record<string, string | number>>,
+  ) => settingsText(locale, key, values);
+  const anyManaged = view.items.some((item) => item.isManaged);
+  const offline = !view.isOnline;
+  const text = offline
+    ? t("posSettings.offline")
+    : view.lastSyncedAtIso && anyManaged
+      ? t("posSettings.syncedAt", { time: formatLocalClock(view.lastSyncedAtIso) })
+      : t("posSettings.notPublished");
+  return (
+    <View
+      style={[styles.posSettingsBar, offline && styles.posSettingsBarOffline]}
+      testID="settings-pos-settings-bar"
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={offline ? posColors.yellow : posColors.accent}
+        name={offline ? "cloud-off-outline" : "cloud-check-outline"}
+        size={20}
+      />
+      <Text style={styles.posSettingsBarTitle}>{t("posSettings.title")}</Text>
+      <Text
+        style={[styles.posSettingsBarText, offline && styles.posSettingsBarTextOffline]}
+        testID="settings-pos-settings-status"
+      >
+        {text}
+      </Text>
+      <ActionButton
+        compact
+        disabled={disabled}
+        icon="sync"
+        label={t("posSettings.syncNow")}
+        onPress={() => void presenter.syncPosSettings()}
+        testID="settings-pos-settings-sync"
+        tone="quiet"
+      />
+    </View>
+  );
+}
+
 /** 分区顶部的一句说明（原来的分区副标题）；分区名称已经在左侧目录里高亮，不再重复大标题。 */
 function PaneHint({ text }: Readonly<{ text: string }>) {
   usePosThemeVersion();
@@ -4427,6 +4550,7 @@ function isSuccessStatus(statusCode: SettingsStatusCode): boolean {
     "linkly-paired",
     "payment-settings-saved",
     "payment-test-passed",
+    "pos-settings-synced",
     "printer-connected",
     "printer-cleared",
     "printer-scan-finished",
@@ -4652,6 +4776,38 @@ const styles = createPosStyles((colors) => ({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 22,
+  },
+  // 总部设置状态条与受管开关的标签。
+  posSettingsBar: {
+    alignItems: "center",
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    borderRadius: posRadius.medium,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  posSettingsBarOffline: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowSoft,
+  },
+  posSettingsBarTitle: { color: colors.ink, fontSize: 14, fontWeight: "900" },
+  posSettingsBarText: {
+    color: colors.mutedInk,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  posSettingsBarTextOffline: { color: colors.yellowInk },
+  posSettingsTags: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  posSettingsOfflineHint: {
+    color: colors.yellowInk,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
+    marginTop: 4,
   },
 
   // ---- 只读信息 ----

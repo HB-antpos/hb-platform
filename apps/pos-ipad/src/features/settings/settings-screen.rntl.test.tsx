@@ -3898,3 +3898,168 @@ function snapshot(): SettingsSnapshot {
     },
   };
 }
+
+// ───────────── 总部「收银端设置下发」：付款方式分区的状态条与受管开关 ─────────────
+
+type ScreenPosItem = {
+  key: string;
+  value: boolean;
+  source: string | null;
+  isManaged: boolean;
+  isLocked: boolean;
+  isOfflineOverride: boolean;
+};
+
+function screenPosView(
+  items: readonly ScreenPosItem[],
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    items,
+    isOnline: true,
+    lastSyncedAtIso: null,
+    showsOfflineBanner: false,
+    hasLockedItems: items.some((item) => item.isLocked),
+    ...extra,
+  };
+}
+
+function managedItem(key: string, value: boolean, extra: Partial<ScreenPosItem> = {}): ScreenPosItem {
+  return { key, value, source: "store", isManaged: true, isLocked: true, isOfflineOverride: false, ...extra };
+}
+
+function posSettingsPort(view: ReturnType<typeof screenPosView>) {
+  return {
+    view,
+    syncCalls: 0,
+    getView() { return this.view; },
+    subscribe: () => () => undefined,
+    async load() { return this.view; },
+    async syncNow() {
+      this.syncCalls += 1;
+      return { status: "up-to-date" as const, hash: "h", ackPending: false };
+    },
+  };
+}
+
+/** 与界面同口径的本地 hh:mm，避免断言依赖运行机器的时区。 */
+function localClock(iso: string): string {
+  const parsed = new Date(iso);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+async function renderPaymentsWithPosSettings(
+  posSettings: ReturnType<typeof posSettingsPort> | null,
+  locale: "zh" | "en" = "zh",
+) {
+  const port = new ScreenSettingsPort();
+  const saved: unknown[] = [];
+  Object.assign(port, {
+    savePaymentMethods: async (input: unknown) => { saved.push(input); },
+    ...(posSettings ? { posSettings } : {}),
+  });
+  const presenter = createPresenter(port);
+  await presenter.load();
+  const screen = await render(<SettingsScreen locale={locale} presenter={presenter} />);
+  await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+  return { screen, presenter, port, saved };
+}
+
+describe("SettingsScreen 总部设置", () => {
+  it("没有总部设置端口时完全不渲染状态条与标签，开关保持原有可用状态", async () => {
+    const { screen } = await renderPaymentsWithPosSettings(null);
+    expect(screen.queryByTestId("settings-pos-settings-bar")).toBeNull();
+    expect(screen.queryByTestId("settings-payment-method-manual-managed")).toBeNull();
+    expect(screen.getByTestId("settings-payment-method-manual").props.disabled).toBe(false);
+    expect(screen.getByTestId("settings-payment-method-gift").props.disabled).toBe(false);
+  });
+
+  it("在线且受管：开关灰显并显示「总部设置 · 门店」，未受管的项仍可改；状态条显示已同步 hh:mm", async () => {
+    const syncedAt = "2026-11-14T03:25:00.000Z";
+    const { screen } = await renderPaymentsWithPosSettings(
+      posSettingsPort(
+        screenPosView(
+          [
+            managedItem("payment.manualCard", true),
+            { key: "payment.voucher", value: false, source: null, isManaged: false, isLocked: false, isOfflineOverride: false },
+          ],
+          { lastSyncedAtIso: syncedAt },
+        ),
+      ),
+    );
+    const manual = screen.getByTestId("settings-payment-method-manual");
+    expect(manual.props.disabled).toBe(true);
+    expect(manual.props.value).toBe(true);
+    expect(screen.getByTestId("settings-payment-method-gift").props.disabled).toBe(false);
+    expect(within(screen.getByTestId("settings-payment-method-manual-managed")).getByText("总部设置 · 门店")).toBeTruthy();
+    expect(screen.queryByTestId("settings-payment-method-gift-managed")).toBeNull();
+    expect(screen.queryByTestId("settings-payment-method-manual-offline-hint")).toBeNull();
+    expect(screen.getByTestId("settings-pos-settings-status").props.children).toBe(`已同步 ${localClock(syncedAt)}`);
+  });
+
+  it("英文界面：来源标签为 Head office · Store / All stores / This device", async () => {
+    const { screen } = await renderPaymentsWithPosSettings(
+      posSettingsPort(
+        screenPosView([
+          managedItem("payment.manualCard", true, { source: "global" }),
+          managedItem("payment.voucher", false, { source: "device" }),
+        ]),
+      ),
+      "en",
+    );
+    expect(within(screen.getByTestId("settings-payment-method-manual-managed")).getByText("Head office · All stores")).toBeTruthy();
+    expect(within(screen.getByTestId("settings-payment-method-gift-managed")).getByText("Head office · This device")).toBeTruthy();
+  });
+
+  it("离线且受管：可临时修改，显示离线提示与「离线临时修改」标签，状态条显示离线", async () => {
+    const { screen } = await renderPaymentsWithPosSettings(
+      posSettingsPort(
+        screenPosView(
+          [managedItem("payment.manualCard", false, { isLocked: false, isOfflineOverride: true })],
+          { isOnline: false, showsOfflineBanner: true },
+        ),
+      ),
+    );
+    expect(screen.getByTestId("settings-payment-method-manual").props.disabled).toBe(false);
+    expect(screen.getByText("离线可临时修改，恢复联网后将按总部设置恢复")).toBeTruthy();
+    expect(within(screen.getByTestId("settings-payment-method-manual-override")).getByText("离线临时修改")).toBeTruthy();
+    expect(screen.getByTestId("settings-pos-settings-status").props.children).toBe("离线：使用本机值");
+  });
+
+  it("总部还没有下发任何项：状态条显示「暂未下发」，没有标签", async () => {
+    const { screen } = await renderPaymentsWithPosSettings(
+      posSettingsPort(screenPosView([
+        { key: "payment.manualCard", value: false, source: null, isManaged: false, isLocked: false, isOfflineOverride: false },
+      ])),
+    );
+    expect(screen.getByTestId("settings-pos-settings-status").props.children).toBe("暂未下发");
+    expect(screen.queryByTestId("settings-payment-method-manual-managed")).toBeNull();
+  });
+
+  it("「立即同步」调用端口并显示结果状态", async () => {
+    const posSettings = posSettingsPort(screenPosView([managedItem("payment.manualCard", true)]));
+    const { screen } = await renderPaymentsWithPosSettings(posSettings);
+    await fireEvent.press(screen.getByTestId("settings-pos-settings-sync"));
+    await waitFor(() => expect(posSettings.syncCalls).toBe(1));
+    await waitFor(() => expect(screen.getByText("总部设置已是最新")).toBeTruthy());
+  });
+
+  it("保存时被总部锁定：提示由总部管理，草稿恢复为生效值，开关回到总部值", async () => {
+    const posSettings = posSettingsPort(
+      screenPosView([managedItem("payment.manualCard", false, { isLocked: false })]),
+    );
+    const { screen, port } = await renderPaymentsWithPosSettings(posSettings);
+    await fireEvent(screen.getByTestId("settings-payment-method-manual"), "valueChange", true);
+    // 保存瞬间总部锁定生效。
+    posSettings.view = screenPosView([managedItem("payment.manualCard", false)]);
+    Object.assign(port, {
+      savePaymentMethods: async () => {
+        throw Object.assign(new Error("POS_SETTING_MANAGED"), { code: "POS_SETTING_MANAGED" });
+      },
+    });
+    await fireEvent.press(screen.getByTestId("settings-payment-methods-save"));
+    await waitFor(() => expect(screen.getByText("该项由总部管理，无法修改")).toBeTruthy());
+    expect(screen.getByTestId("settings-payment-method-manual").props.value).toBe(false);
+  });
+});

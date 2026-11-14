@@ -327,7 +327,77 @@ export class HbposStoreApi {
     });
     unwrapHbposEnvelope(response.data);
   }
+
+  /**
+   * 轮询总部「收银端设置下发」：本机已应用指纹作为 knownHash（空串 = 从未同步），指纹没变时服务端只回
+   * {changed:false}。门店与设备只取认证声明，这里不拼任何门店/设备参数。
+   * 生成类型字段全可选：changed 缺失按 false，hash 缺失按空串（由同步服务判为无效响应并丢弃）。
+   */
+  public async syncPosSettings(
+    knownHash: string,
+    signal?: AbortSignal,
+  ): Promise<PosSettingsSyncResult> {
+    const response = await this.transport.request<
+      HbposEnvelope<components["schemas"]["PosSettingsSyncDto"]>
+    >({
+      method: "GET",
+      url: "/api/v1/stores/current/pos-settings/sync",
+      params: { knownHash },
+      ...(signal ? { signal } : {}),
+    });
+    const data = unwrapHbposEnvelope(response.data);
+    let settings: Record<string, Readonly<{ value: boolean; source: string }>> | null = null;
+    if (data.settings && typeof data.settings === "object") {
+      settings = {};
+      for (const [key, item] of Object.entries(data.settings)) {
+        // 只收布尔值；不是布尔的项视为缺失，交给同步服务按「没管」处理。
+        if (!item || typeof item.value !== "boolean") continue;
+        settings[key] = Object.freeze({ value: item.value, source: item.source ?? "" });
+      }
+    }
+    return Object.freeze({
+      changed: data.changed === true,
+      hash: data.hash ?? "",
+      settings,
+    });
+  }
+
+  /** 回执：已应用指纹、各开关实际生效值、应用版本、累计离线修改次数。服务端不认账返回 400。 */
+  public async ackPosSettings(
+    payload: PosSettingsAckInput,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const response = await this.transport.request<
+      HbposEnvelope<components["schemas"]["PosSettingsAckResultDto"]>
+    >({
+      method: "POST",
+      url: "/api/v1/stores/current/pos-settings/ack",
+      data: {
+        hash: payload.hash,
+        applied: payload.applied,
+        appVersion: payload.appVersion,
+        offlineOverrideCount: nonNegativeInteger(payload.offlineOverrideCount),
+      },
+      ...(signal ? { signal } : {}),
+    });
+    unwrapHbposEnvelope(response.data);
+  }
 }
+
+/** pos-settings 回执入参（与共享同步服务的 PosSettingsAckPayload 同形，这里不反向依赖共享包）。 */
+export type PosSettingsAckInput = Readonly<{
+  hash: string;
+  applied: Readonly<Record<string, boolean>>;
+  appVersion: string | null;
+  offlineOverrideCount: number;
+}>;
+
+/** 一次 pos-settings sync 的容错结果（与共享同步服务的 PosSettingsSyncResponse 同形）。 */
+export type PosSettingsSyncResult = Readonly<{
+  changed: boolean;
+  hash: string;
+  settings: Record<string, Readonly<{ value: boolean; source: string }>> | null;
+}>;
 
 /** 一次 sync 的容错结果；profile 带下发版本号（缺失按 0，由同步控制器判为无效响应）。 */
 export type StoreReceiptProfileSyncResult = Readonly<{

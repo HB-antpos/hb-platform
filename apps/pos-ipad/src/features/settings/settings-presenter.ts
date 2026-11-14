@@ -18,6 +18,11 @@ import {
   DEFAULT_RECEIPT_PRINTER_SETTINGS,
   type ReceiptPrinterSettings,
 } from "@/core/db/pos-settings-repository";
+import {
+  POS_SETTING_KEYS,
+  type PosSettingsSyncResult,
+  type PosSettingsView,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
 import { isTrustedLocalHbposApiOrigin } from "@hb/pos-domain/core/security/pos-api-addresses";
 import { RECEIPT_TERMS_TEXT_MAX_LENGTH } from "@hb/pos-receipt-core/features/receipts/receipt-terms-text";
 import type { CatalogRefreshState } from "@/features/catalog/catalog-refresh-coordinator";
@@ -509,7 +514,24 @@ export type SettingsDangerousActionResult =
       catalog: SettingsCatalogSnapshot;
     }>;
 
+/** 保存付款方式时，被总部锁定的开关抛出的错误码（message 与 code 同值）。 */
+export const POS_SETTING_MANAGED_ERROR_CODE = "POS_SETTING_MANAGED";
+
+/**
+ * 总部「收银端设置下发」给设置页的窄端口：只读视图、订阅变化、进入页面时读取、立即同步。
+ * 缺省 = 本构建不支持，设置页按「没有总部设置」处理（不渲染状态条、开关不受锁定影响）。
+ */
+export interface SettingsPosSettingsPort {
+  getView(): PosSettingsView;
+  subscribe(listener: () => void): () => void;
+  load(): Promise<PosSettingsView>;
+  /** 永不 reject；结果状态直接映射为设置页状态文案。 */
+  syncNow(): Promise<PosSettingsSyncResult>;
+}
+
 export interface SettingsControlPort {
+  /** 总部下发的收银端设置（可选）。 */
+  posSettings?: SettingsPosSettingsPort | undefined;
   squareSetup?: SettingsSquareSetupControlPort | undefined;
   /** 只允许读取 health；配对必须经过 executeDangerousAction。 */
   linklySetup?: SettingsLinklySetupReadPort | undefined;
@@ -642,6 +664,10 @@ export type SettingsStatusCode =
   | "payment-test-passed"
   | "pending-local-data"
   | "permission-required"
+  | "pos-settings-managed"
+  | "pos-settings-sync-failed"
+  | "pos-settings-sync-unsupported"
+  | "pos-settings-synced"
   | "printer-connect-failed"
   | "printer-connected"
   | "printer-connected-save-failed"
@@ -699,6 +725,8 @@ export type SettingsState = Readonly<{
   paymentMethods: PaymentMethodSettings;
   paymentMethodsDraft: PaymentMethodSettings;
   paymentMethodsAvailable: boolean;
+  /** 总部下发设置视图；null = 本构建没有该端口（设置页不显示状态条、不锁开关）。 */
+  posSettings: PosSettingsView | null;
   printer: ReceiptPrinterSettings;
   printerDevices: readonly SettingsPrinterDevice[];
   square: SettingsSquareSnapshot;
@@ -724,6 +752,7 @@ export class SettingsPresenter {
   private catalogRefreshUnsubscribe: () => void = () => undefined;
   private deviceReregistrationCommittedUnsubscribe: () => void =
     () => undefined;
+  private posSettingsUnsubscribe: () => void = () => undefined;
   private state: SettingsState;
   private destroyed = false;
   private loadGeneration = 0;
@@ -743,6 +772,12 @@ export class SettingsPresenter {
       options.port.squareSetup !== undefined,
       options.port.linklySetup !== undefined,
     );
+    if (options.port.posSettings) {
+      this.state = Object.freeze({
+        ...this.state,
+        posSettings: options.port.posSettings.getView(),
+      });
+    }
     this.catalogRefreshUnsubscribe =
       options.port.subscribeCatalogRefresh(
         this.handleCatalogRefreshChanged,
@@ -780,6 +815,8 @@ export class SettingsPresenter {
     this.catalogRefreshUnsubscribe = () => undefined;
     this.deviceReregistrationCommittedUnsubscribe();
     this.deviceReregistrationCommittedUnsubscribe = () => undefined;
+    this.posSettingsUnsubscribe();
+    this.posSettingsUnsubscribe = () => undefined;
     this.lifetime.abort();
     this.listeners.clear();
   }
@@ -796,10 +833,14 @@ export class SettingsPresenter {
     const generation = ++this.loadGeneration;
     this.patch({ kind: "loading", statusCode: null });
     try {
+      // 总部设置视图读取失败不能拖垮设置页：沿用端口当前视图（锁定判断仍由保存守卫兜底）。
+      const posSettingsView = await this.loadPosSettingsView();
       const snapshot = normalizeSnapshot(
         await this.options.port.loadSnapshot(this.lifetime.signal),
       );
       if (!this.isCurrentLoad(generation)) return;
+      this.subscribePosSettings();
+      const loadedPaymentMethods = normalizePaymentMethodSettings(snapshot.paymentMethods);
       this.patch({
         apiBaseUrl: snapshot.apiBaseUrl,
         apiAddressDraft: snapshot.apiBaseUrl,
@@ -824,9 +865,11 @@ export class SettingsPresenter {
           : null,
         paymentProvider: snapshot.paymentProvider,
         paymentProviderDraft: snapshot.paymentProvider,
-        paymentMethods: normalizePaymentMethodSettings(snapshot.paymentMethods),
-        paymentMethodsDraft: normalizePaymentMethodSettings(snapshot.paymentMethods),
+        paymentMethods: loadedPaymentMethods,
+        // 被总部锁定的项，草稿一律取生效值（与开关灰显同口径）。
+        paymentMethodsDraft: applyLockedPosSettings(loadedPaymentMethods, posSettingsView),
         paymentMethodsAvailable: this.options.port.savePaymentMethods !== undefined,
+        posSettings: posSettingsView,
         printer: snapshot.printer,
         square: snapshot.square,
         squareDraft: {
@@ -1779,11 +1822,14 @@ export class SettingsPresenter {
 
   public setUseManualCard(value: boolean): void {
     if (!this.canEditPayments() || !this.state.paymentMethodsAvailable) return;
+    // 防御：总部锁定的项即使界面漏灰显也不能改草稿。
+    if (this.isPosSettingLocked(POS_SETTING_KEYS.manualCard)) return;
     this.patch({ paymentMethodsDraft: Object.freeze({ ...this.state.paymentMethodsDraft, useManualCard: value }), statusCode: null });
   }
 
   public setGiftCardEnabled(value: boolean): void {
     if (!this.canEditPayments() || !this.state.paymentMethodsAvailable) return;
+    if (this.isPosSettingLocked(POS_SETTING_KEYS.voucher)) return;
     this.patch({ paymentMethodsDraft: Object.freeze({ ...this.state.paymentMethodsDraft, giftCardEnabled: value }), statusCode: null });
   }
 
@@ -1803,6 +1849,17 @@ export class SettingsPresenter {
         this.patch({ paymentMethods: input, statusCode: "payment-settings-saved" });
       } catch (error) {
         if (!this.destroyed) {
+          if (isPosSettingManagedError(error)) {
+            // 总部管理的项在线时不可改：草稿恢复为生效值，并提示原因。
+            this.patch({
+              paymentMethodsDraft: applyLockedPosSettings(
+                this.state.paymentMethods,
+                this.options.port.posSettings?.getView() ?? this.state.posSettings,
+              ),
+              statusCode: "pos-settings-managed",
+            });
+            return;
+          }
           const code = error instanceof Error ? error.message : "";
           this.patch({ statusCode: code === "SETTINGS_PERMISSION_DENIED"
             ? "permission-required"
@@ -1812,6 +1869,35 @@ export class SettingsPresenter {
                 ? "payment-method-settings-unavailable"
                 : "payment-settings-save-failed" });
         }
+      }
+    });
+  }
+
+  /** 付款方式分区「立即同步」总部设置；结果映射为状态文案，视图由订阅自动刷新。 */
+  public syncPosSettings(): Promise<void> {
+    if (!this.requirePermission(this.state.access.canConfigurePayments)) {
+      return Promise.resolve();
+    }
+    return this.runAction(async () => {
+      const port = this.options.port.posSettings;
+      if (!port) {
+        this.patch({ statusCode: "pos-settings-sync-unsupported" });
+        return;
+      }
+      let result: PosSettingsSyncResult;
+      try {
+        result = await port.syncNow();
+      } catch {
+        this.patch({ statusCode: "pos-settings-sync-failed" });
+        return;
+      }
+      if (this.destroyed) return;
+      if (result.status === "updated" || result.status === "up-to-date") {
+        this.patch({ statusCode: "pos-settings-synced" });
+      } else if (result.status === "failed" && result.reason === "unsupported") {
+        this.patch({ statusCode: "pos-settings-sync-unsupported" });
+      } else {
+        this.patch({ statusCode: "pos-settings-sync-failed" });
       }
     });
   }
@@ -3493,6 +3579,85 @@ export class SettingsPresenter {
   private catalogRefreshRunning(): boolean {
     return this.state.catalogRefresh.kind === "running";
   }
+
+  private isPosSettingLocked(key: string): boolean {
+    return (
+      this.state.posSettings?.items.some(
+        (item) => item.key === key && item.isLocked,
+      ) === true
+    );
+  }
+
+  private async loadPosSettingsView(): Promise<PosSettingsView | null> {
+    const port = this.options.port.posSettings;
+    if (!port) return null;
+    try {
+      return await port.load();
+    } catch {
+      return port.getView();
+    }
+  }
+
+  /** 只订阅一次；destroy 时取消。 */
+  private subscribePosSettings(): void {
+    const port = this.options.port.posSettings;
+    if (!port || this.destroyed) return;
+    this.posSettingsUnsubscribe();
+    this.posSettingsUnsubscribe = port.subscribe(this.handlePosSettingsChanged);
+  }
+
+  /**
+   * 总部设置视图变化（同步写穿、联网状态切换、离线修改）：
+   * 值被外部改变的付款项，生效值与草稿一并跟随；仍锁定的项草稿恒等于生效值。
+   */
+  private readonly handlePosSettingsChanged = (): void => {
+    const port = this.options.port.posSettings;
+    if (this.destroyed || !port) return;
+    const previous = this.state.posSettings;
+    const next = port.getView();
+    let paymentMethods = this.state.paymentMethods;
+    let draft = this.state.paymentMethodsDraft;
+    for (const [key, field] of POS_PAYMENT_FIELDS) {
+      const before = previous?.items.find((item) => item.key === key);
+      const after = next.items.find((item) => item.key === key);
+      if (!after) continue;
+      if (before === undefined || before.value !== after.value) {
+        paymentMethods = Object.freeze({ ...paymentMethods, [field]: after.value });
+        draft = Object.freeze({ ...draft, [field]: after.value });
+      } else if (after.isLocked) {
+        draft = Object.freeze({ ...draft, [field]: after.value });
+      }
+    }
+    this.patch({ posSettings: next, paymentMethods, paymentMethodsDraft: draft });
+  };
+}
+
+/** 总部设置键 → 付款方式设置字段。 */
+const POS_PAYMENT_FIELDS: readonly (readonly [string, keyof PaymentMethodSettings])[] = [
+  [POS_SETTING_KEYS.manualCard, "useManualCard"],
+  [POS_SETTING_KEYS.voucher, "giftCardEnabled"],
+];
+
+/** 被总部锁定的付款项取视图里的生效值，其余沿用传入值。 */
+function applyLockedPosSettings(
+  settings: PaymentMethodSettings,
+  view: PosSettingsView | null,
+): PaymentMethodSettings {
+  if (!view) return settings;
+  let next = settings;
+  for (const [key, field] of POS_PAYMENT_FIELDS) {
+    const item = view.items.find((candidate) => candidate.key === key);
+    if (item?.isLocked) next = Object.freeze({ ...next, [field]: item.value });
+  }
+  return next;
+}
+
+function isPosSettingManagedError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  return (
+    (error as { code?: unknown }).code === POS_SETTING_MANAGED_ERROR_CODE ||
+    (error as { message?: unknown }).message === POS_SETTING_MANAGED_ERROR_CODE
+  );
 }
 
 export function normalizeApiAddress(value: string): string {
@@ -3609,6 +3774,7 @@ function initialState(
     paymentMethods: DEFAULT_PAYMENT_METHOD_SETTINGS,
     paymentMethodsDraft: DEFAULT_PAYMENT_METHOD_SETTINGS,
     paymentMethodsAvailable: false,
+    posSettings: null,
     printer,
     printerDevices: Object.freeze([]),
     square,

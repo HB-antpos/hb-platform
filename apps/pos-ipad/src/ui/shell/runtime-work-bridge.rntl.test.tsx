@@ -345,3 +345,116 @@ test("促销规则搭同一个前台定时器：联网与定时都触发，后�
     AppState.currentState = previous;
   }
 });
+
+test("收银端设置同步：启动、联网、定时（60 秒）各带触发源，后台不轮询；联网状态 online / offline 变化报告给服务，checking 不报告", async () => {
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
+  const requestSync = jest.fn(async (_trigger: string) => undefined);
+  const reportConnectivity = jest.fn((_isOnline: boolean) => undefined);
+  const { services } = receiptProfileServices({
+    posSettingsSync: { requestSync, reportConnectivity },
+  });
+  mockRuntime = { services };
+  const previous = AppState.currentState;
+  try {
+    AppState.currentState = "active";
+    const screen = await render(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    expect(requestSync).toHaveBeenCalledWith("startup");
+    expect(requestSync).toHaveBeenCalledWith("network");
+    expect(reportConnectivity).toHaveBeenLastCalledWith(true);
+    requestSync.mockClear();
+
+    await act(async () => { jest.advanceTimersByTime(59_000); });
+    expect(requestSync).not.toHaveBeenCalled();
+    await act(async () => { jest.advanceTimersByTime(1_000); });
+    expect(requestSync).toHaveBeenCalledTimes(1);
+    expect(requestSync).toHaveBeenLastCalledWith("timer");
+
+    // 转离线：报告 false，不再轮询；checking 不报告。
+    reportConnectivity.mockClear();
+    mockConnectivity = "offline";
+    await screen.rerender(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    expect(reportConnectivity).toHaveBeenCalledTimes(1);
+    expect(reportConnectivity).toHaveBeenLastCalledWith(false);
+    requestSync.mockClear();
+    await act(async () => { jest.advanceTimersByTime(180_000); });
+    expect(requestSync).not.toHaveBeenCalled();
+
+    reportConnectivity.mockClear();
+    mockConnectivity = "checking";
+    await screen.rerender(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    expect(reportConnectivity).not.toHaveBeenCalled();
+
+    // 恢复在线：先报在线，再补一次 network 同步。
+    mockConnectivity = "online";
+    await screen.rerender(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    expect(reportConnectivity).toHaveBeenLastCalledWith(true);
+    expect(requestSync).toHaveBeenCalledWith("network");
+
+    // 后台不轮询
+    requestSync.mockClear();
+    AppState.currentState = "background";
+    await act(async () => { jest.advanceTimersByTime(180_000); });
+    expect(requestSync).not.toHaveBeenCalled();
+    await screen.unmount();
+  } finally {
+    AppState.currentState = previous;
+  }
+});
+
+test("设备未认证时不暴露收银端设置同步：启动、联网、定时都不请求也不报告联网状态", async () => {
+  jest.useFakeTimers({ now: new Date(2026, 9, 27, 12, 0, 0) });
+  for (const device of ["registration-required", "pending-approval", "locked"]) {
+    const requestSync = jest.fn(async (_trigger: string) => undefined);
+    const reportConnectivity = jest.fn((_isOnline: boolean) => undefined);
+    mockRuntime = {
+      services: receiptProfileServices({
+        device,
+        posSettingsSync: { requestSync, reportConnectivity },
+      }).services,
+    };
+    const previous = AppState.currentState;
+    try {
+      AppState.currentState = "active";
+      const screen = await render(<RuntimeWorkBridge />);
+      await act(async () => { await Promise.resolve(); });
+      await act(async () => { jest.advanceTimersByTime(180_000); });
+      expect(requestSync).not.toHaveBeenCalled();
+      expect(reportConnectivity).not.toHaveBeenCalled();
+      await screen.unmount();
+    } finally {
+      AppState.currentState = previous;
+    }
+  }
+});
+
+test("回到前台立即触发一次收银端设置同步", async () => {
+  const requestSync = jest.fn(async (_trigger: string) => undefined);
+  const { services } = receiptProfileServices({
+    posSettingsSync: { requestSync, reportConnectivity: jest.fn() },
+  });
+  mockRuntime = { services };
+  const previous = AppState.currentState;
+  const listeners: ((state: string) => void)[] = [];
+  jest.spyOn(AppState, "addEventListener").mockImplementation(((
+    _event: string,
+    listener: (state: string) => void,
+  ) => {
+    listeners.push(listener);
+    return { remove: jest.fn() };
+  }) as never);
+  try {
+    AppState.currentState = "background";
+    await render(<RuntimeWorkBridge />);
+    await act(async () => { await Promise.resolve(); });
+    requestSync.mockClear();
+
+    await act(async () => { listeners.forEach((listener) => listener("active")); });
+    expect(requestSync).toHaveBeenCalledWith("foreground");
+  } finally {
+    AppState.currentState = previous;
+  }
+});

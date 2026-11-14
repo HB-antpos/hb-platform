@@ -3201,3 +3201,142 @@ function snapshot(): SettingsSnapshot {
     },
   };
 }
+
+describe("SettingsScreen 总部设置（posSettings）", () => {
+  type PosView = import("@hb/pos-sync/features/pos-settings/pos-settings-service").PosSettingsView;
+
+  function posView(
+    item: Partial<PosView["items"][number]> = {},
+    view: Partial<PosView> = {},
+  ): PosView {
+    const entry = {
+      key: "payment.manualCard",
+      value: true,
+      source: "store",
+      isManaged: true,
+      isLocked: true,
+      isOfflineOverride: false,
+      ...item,
+    };
+    return {
+      items: [entry],
+      isOnline: true,
+      lastSyncedAtIso: "2026-11-14T01:02:03.000Z",
+      showsOfflineBanner: false,
+      hasLockedItems: entry.isLocked,
+      ...view,
+    };
+  }
+
+  function portWith(view: PosView | null, syncNow = jest.fn(async () => ({ status: "updated", hash: "h", ackPending: false }) as const)) {
+    const port = new ScreenSettingsPort();
+    if (view) {
+      Object.assign(port, {
+        posSettings: {
+          getView: () => view,
+          subscribe: () => () => undefined,
+          load: async () => view,
+          syncNow,
+        },
+      });
+    }
+    return { port, syncNow };
+  }
+
+  async function openPayments(port: ScreenSettingsPort, locale: "en" | "zh" = "en") {
+    const presenter = createPresenter(port);
+    await presenter.load();
+    const screen = await render(<SettingsScreen locale={locale} presenter={presenter} />);
+    await fireEvent.press(screen.getByTestId("settings-nav-payments"));
+    return { presenter, screen };
+  }
+
+  it("没有 posSettings 端口时完全不渲染状态条与来源标签，手动刷卡可正常操作", async () => {
+    const { port } = portWith(null);
+    const { screen } = await openPayments(port);
+
+    expect(screen.queryByTestId("settings-pos-settings-bar")).toBeNull();
+    expect(screen.queryByTestId("settings-payment-manual-card-source")).toBeNull();
+    expect(screen.queryByTestId("settings-payment-manual-card-locked")).toBeNull();
+    expect(screen.getByTestId("settings-payment-manual-card").props.accessibilityState.disabled).toBe(false);
+  });
+
+  it("在线且受管：开关与保存按钮灰显，显示来源标签与锁定说明，点击不改草稿", async () => {
+    const { port } = portWith(posView({ value: false, isLocked: true }));
+    const { presenter, screen } = await openPayments(port);
+
+    expect(screen.getByTestId("settings-payment-manual-card").props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByTestId("settings-payment-manual-card-save").props.accessibilityState.disabled).toBe(true);
+    expect(screen.getByText("Head office · Store")).toBeTruthy();
+    expect(screen.getByTestId("settings-payment-manual-card-locked")).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("settings-payment-manual-card"));
+    expect(presenter.getState().paymentMethods.useManualCard).toBe(false);
+  });
+
+  it("来源标签区分全局 / 门店 / 设备", async () => {
+    for (const [source, text] of [
+      ["global", "Head office · Global"],
+      ["store", "Head office · Store"],
+      ["device", "Head office · Device"],
+    ] as const) {
+      const { port } = portWith(posView({ source }));
+      const { screen } = await openPayments(port);
+      expect(screen.getByText(text)).toBeTruthy();
+      await screen.unmount();
+    }
+  });
+
+  it("离线且受管：可临时修改，显示离线说明、离线临时修改标签与黄色离线状态条", async () => {
+    const { port } = portWith(
+      posView(
+        { value: false, isLocked: false, isOfflineOverride: true },
+        { isOnline: false, showsOfflineBanner: true, hasLockedItems: false },
+      ),
+    );
+    const { screen } = await openPayments(port);
+
+    expect(screen.getByTestId("settings-payment-manual-card").props.accessibilityState.disabled).toBe(false);
+    expect(screen.getByTestId("settings-payment-manual-card-offline-editable")).toBeTruthy();
+    expect(screen.getByTestId("settings-payment-manual-card-offline-override")).toBeTruthy();
+    expect(screen.getByTestId("settings-pos-settings-state").props.children).toBe(
+      "Offline: managed settings can be changed temporarily",
+    );
+    const bar = StyleSheet.flatten(screen.getByTestId("settings-pos-settings-bar").props.style);
+    expect(bar.backgroundColor).toBe(posColors.yellowSoft);
+  });
+
+  it("状态条：已同步显示本机时区 hh:mm，没有受管项时显示暂未下发", async () => {
+    const iso = "2026-11-14T01:02:03.000Z";
+    const date = new Date(iso);
+    const clock = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+    const synced = await openPayments(portWith(posView({}, { lastSyncedAtIso: iso })).port);
+    expect(synced.screen.getByTestId("settings-pos-settings-state").props.children).toBe(`Synced ${clock}`);
+    await synced.screen.unmount();
+
+    const empty = await openPayments(
+      portWith({ items: [], isOnline: true, lastSyncedAtIso: null, showsOfflineBanner: false, hasLockedItems: false }).port,
+    );
+    expect(empty.screen.getByTestId("settings-pos-settings-state").props.children).toBe("Nothing published yet");
+    expect(empty.screen.queryByTestId("settings-payment-manual-card-source")).toBeNull();
+    expect(empty.screen.getByTestId("settings-payment-manual-card").props.accessibilityState.disabled).toBe(false);
+  });
+
+  it("状态条：中文文案", async () => {
+    const { port } = portWith(posView({ isLocked: true }));
+    const { screen } = await openPayments(port, "zh");
+    expect(screen.getByText("总部设置")).toBeTruthy();
+    expect(screen.getByText("立即同步")).toBeTruthy();
+    expect(screen.getByText("总部设置 · 门店")).toBeTruthy();
+    expect(screen.getByText("由总部管理，此处无法修改。")).toBeTruthy();
+  });
+
+  it("点击立即同步调用同步并显示成功状态", async () => {
+    const { port, syncNow } = portWith(posView());
+    const { screen } = await openPayments(port);
+
+    await fireEvent.press(screen.getByTestId("settings-pos-settings-sync"));
+
+    await waitFor(() => expect(syncNow).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Head office settings synced")).toBeTruthy();
+  });
+});

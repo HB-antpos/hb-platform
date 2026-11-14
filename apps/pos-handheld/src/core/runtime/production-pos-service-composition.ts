@@ -167,6 +167,17 @@ import {
   type ReceiptProfileSyncResult,
   type ReceiptProfileSyncTrigger,
 } from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
+import {
+  PosSettingsService,
+  type PosSettingsLogEvent,
+  type PosSettingsSyncResult,
+  type PosSettingsSyncTrigger,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
+import {
+  createPosSettingBindings,
+  createPosSettingsAudit,
+  guardPaymentMethodsSave,
+} from "./production-pos-settings";
 import { HbposStoreApi, type HbposTransport } from "../api/hbpos-api";
 import { createAud, type CartSnapshot } from "../contracts";
 import type { NewTransactionGate } from "../contracts/app-updates";
@@ -434,6 +445,16 @@ export type ProductionPosRuntimeServices = Readonly<{
       trigger: Exclude<ReceiptProfileSyncTrigger, "manual">,
     ): Promise<ReceiptProfileSyncResult>;
   }>;
+  /**
+   * 总部「收银端设置下发」的后台同步入口：壳层在设备就绪、回前台、网络恢复、每 60 秒调用 requestSync，
+   * 并把联网探测结果经 reportConnectivity 告知（离线时受管开关允许临时修改）。requestSync 永不 reject。
+   */
+  posSettingsSync: Readonly<{
+    requestSync(
+      trigger: Exclude<PosSettingsSyncTrigger, "manual">,
+    ): Promise<PosSettingsSyncResult>;
+    reportConnectivity(isOnline: boolean): void;
+  }>;
   fulfilment: PosFulfilmentRuntimeService;
   sync: Readonly<{
     requestDrain: PosSyncCoordinator["requestDrain"];
@@ -552,6 +573,10 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   /** 总部下发小票资料同步的日志旁路（只含版本号、原因等非敏感标量）；缺省时静默。 */
   reportReceiptProfileSync?:
     | ((event: ReceiptProfileSyncLogEvent) => void)
+    | undefined;
+  /** 总部设置下发同步的日志旁路（只含键名、布尔值、指纹前缀、状态码等非敏感标量）；缺省时静默。 */
+  reportPosSettingsSync?:
+    | ((event: PosSettingsLogEvent) => void)
     | undefined;
   /**
    * 接收后台为本店设置的 POS API 首选入口（receipt-profile/sync 顶层 apiEntryMode 的原始取值）。
@@ -884,6 +909,47 @@ export function createProductionPosRuntimeServices(
     now: () => input.clock.now().getTime(),
     ...(input.reportReceiptProfileSync
       ? { log: input.reportReceiptProfileSync }
+      : {}),
+  });
+  // 总部「收银端设置下发」：总部值写穿回各开关原来的本机存储（消费方不改），
+  // 受管项在线时锁定、离线可临时修改（恢复联网后被总部值覆盖并写审计），并回执。
+  const posSettingsStore = input.database.posSettingsSync();
+  // 原始（未加守卫）的付款方式存取：写穿 binding 必须用它，它在落盘后会刷新支付 bootstrap 的内存快照。
+  const rawPaymentMethods = input.settings?.paymentMethods;
+  const posSettingsService = new PosSettingsService({
+    api: {
+      sync: (knownHash, signal) =>
+        receiptProfileApi.syncPosSettings(knownHash, signal),
+      ack: (payload, signal) =>
+        receiptProfileApi.ackPosSettings(payload, signal),
+    },
+    store: posSettingsStore,
+    bindings: createPosSettingBindings({
+      store: posSettingsStore,
+      paymentMethods: rawPaymentMethods,
+    }),
+    boundStoreCode: () => {
+      // 与小票资料同步同口径：未注册设备没有可信门店，不发请求。
+      const storeCode = input.auditMetadata.storeCode.trim();
+      return storeCode === "" || storeCode === "unregistered" ? null : storeCode;
+    },
+    appVersion: () => input.auditMetadata.appVersion,
+    now: () => input.clock.now().getTime(),
+    audit: createPosSettingsAudit({
+      append: (events) => repositories.audit.append(events),
+      nowIso: () => input.clock.nowIso(),
+      createId: createOperationAuditId,
+      readActor: () => {
+        const session = currentCashier.require();
+        return {
+          cashierId: session.cashierId,
+          cashierName: session.cashierName,
+          userGuid: session.userGuid,
+        };
+      },
+    }),
+    ...(input.reportPosSettingsSync
+      ? { log: input.reportPosSettingsSync }
       : {}),
   });
   const createCashCheckout = (cashierLease: TrustedCashierLease) =>
@@ -1687,6 +1753,25 @@ export function createProductionPosRuntimeServices(
   const settings: PosSettingsRuntimeService = input.settings
     ? createProductionSettingsComposition({
         ...input.settings,
+        // 用户保存付款方式必须经总部策略：受管且在线锁定时拒绝（POS_SETTING_MANAGED），其余经 trySet 写穿。
+        ...(rawPaymentMethods
+          ? {
+              paymentMethods: {
+                load: rawPaymentMethods.load,
+                save: guardPaymentMethodsSave({
+                  service: posSettingsService,
+                  load: rawPaymentMethods.load,
+                  save: rawPaymentMethods.save,
+                }),
+              },
+            }
+          : {}),
+        posSettings: {
+          getView: () => posSettingsService.getView(),
+          subscribe: (listener) => posSettingsService.subscribe(listener),
+          syncNow: () => posSettingsService.syncNow(),
+          load: () => posSettingsService.load(),
+        },
         currentCashier,
         terminal: input.auditMetadata,
         activeCart: activePricingCart,
@@ -2089,6 +2174,7 @@ export function createProductionPosRuntimeServices(
         disposeDeviceScopeListener();
         // 中止在途的下发资料同步请求，之后的触发一律跳过。
         receiptProfileSync.dispose();
+        posSettingsService.dispose();
         if (refundSettlementTimer !== null) clearInterval(refundSettlementTimer);
         shutdown ??= Promise.all([
           catalogRefreshCoordinator.shutdown(),
@@ -2154,6 +2240,11 @@ export function createProductionPosRuntimeServices(
     receiptSettings,
     receiptProfileSync: {
       requestSync: (trigger) => receiptProfileSync.requestSync(trigger),
+    },
+    posSettingsSync: {
+      requestSync: (trigger) => posSettingsService.requestSync(trigger),
+      reportConnectivity: (isOnline) =>
+        posSettingsService.reportConnectivity(isOnline),
     },
     fulfilment: {
       drainAutomaticQueue: () => fulfilment.drainAutomaticQueue(),

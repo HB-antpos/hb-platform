@@ -24,6 +24,19 @@ export type RuntimeBackgroundWorkPort = Readonly<{
       }>
     | undefined;
   /**
+   * 总部「收银端设置下发」的后台同步，节奏与小票资料完全一致。缺省（设备未就绪、旧组合）时静默跳过；
+   * 实现保证永不 reject，单飞、404 退避与失败日志都在服务内部。
+   * reportConnectivity 把联网探测结果告知服务（在线锁定总部管理项、离线可临时修改）。
+   */
+  posSettingsSync?:
+    | Readonly<{
+        requestSync(
+          trigger: "startup" | "foreground" | "network" | "timer",
+        ): Promise<unknown>;
+        reportConnectivity?(isOnline: boolean): void;
+      }>
+    | undefined;
+  /**
    * 促销规则的后台刷新（只拉促销，不碰商品目录）。缺省时整条链路静默跳过；
    * 实现保证永不 reject，且自身负责单飞、与目录刷新互斥和购物车忙时的延后装入。
    */
@@ -50,6 +63,7 @@ export class RuntimeWorkController {
 
   public onApplicationStarted(): Promise<void> {
     this.requestReceiptProfileSync("startup");
+    this.requestPosSettingsSync("startup");
     return this.runWithHardware(
       () => this.services.sync.onApplicationStarted(),
       () => this.services.appUpdates?.refreshOnStartup(),
@@ -58,6 +72,7 @@ export class RuntimeWorkController {
 
   public onForeground(): Promise<void> {
     this.requestReceiptProfileSync("foreground");
+    this.requestPosSettingsSync("foreground");
     this.requestPromotionSync("foreground");
     return this.runWithHardware(
       () => this.services.sync.onForeground(),
@@ -66,9 +81,12 @@ export class RuntimeWorkController {
   }
 
   public async onNetworkChanged(isOnline: boolean): Promise<void> {
+    // 先告知联网状态再触发同步：恢复联网后的第一次同步要按「在线」把总部值核对写回。
+    this.reportPosSettingsConnectivity(isOnline);
     // 联网（含离线恢复）才去检查总部下发资料；断网不发请求，继续用本机资料。
     if (isOnline) {
       this.requestReceiptProfileSync("network");
+      this.requestPosSettingsSync("network");
       this.requestPromotionSync("network");
     }
     await this.services.sync.onNetworkChanged(isOnline);
@@ -80,6 +98,8 @@ export class RuntimeWorkController {
   /** 前台常驻时每 60 秒由壳层定时器调用一次，让总部下发在一分钟内生效。 */
   public onReceiptProfileTimer(): void {
     this.requestReceiptProfileSync("timer");
+    // 收银端设置下发与小票资料共用同一个前台定时器（含夜间降频）。
+    this.requestPosSettingsSync("timer");
   }
 
   /**
@@ -88,6 +108,29 @@ export class RuntimeWorkController {
    */
   public onPromotionTimer(): void {
     this.requestPromotionSync("timer");
+  }
+
+  /** 收银端设置同步与其他触发器互不依赖：不等待、不让异常外溢；单飞与退避在服务内部。 */
+  private requestPosSettingsSync(
+    trigger: "startup" | "foreground" | "network" | "timer",
+  ): void {
+    const port = this.services.posSettingsSync;
+    if (!port) return;
+    try {
+      void Promise.resolve(port.requestSync(trigger)).catch(() => {
+        // 失败只记日志（服务内部处理）。
+      });
+    } catch {
+      // 入口同步抛错时同样不能影响启动、前台与联网流程。
+    }
+  }
+
+  private reportPosSettingsConnectivity(isOnline: boolean): void {
+    try {
+      this.services.posSettingsSync?.reportConnectivity?.(isOnline);
+    } catch {
+      // 联网状态通知出错不能影响订单同步与其他后台工作。
+    }
   }
 
   /**

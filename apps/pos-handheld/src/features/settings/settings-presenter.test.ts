@@ -32,8 +32,13 @@ import {
   type SettingsPendingDataSnapshot,
   type SettingsReceiptProfileDraft,
   type SettingsReceiptProfileSyncResult,
+  type SettingsPosSettingsPort,
   type SettingsSnapshot,
 } from "./settings-presenter";
+import type {
+  PosSettingsSyncResult,
+  PosSettingsView,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
 
 import {
   DEFAULT_RECEIPT_PRINTER_SETTINGS,
@@ -3894,4 +3899,271 @@ test("立即同步结果里的条款不合规：状态为 invalid，草稿原样
     assert.equal(presenter.getState().statusCode, "receipt-profile-sync-invalid");
     assert.deepEqual(presenter.getState().printer, before);
   }
+});
+
+// ───────────────────────── 总部设置下发（posSettings） ─────────────────────────
+
+function manualCardView(
+  patch: Partial<PosSettingsView["items"][number]> = {},
+  view: Partial<PosSettingsView> = {},
+): PosSettingsView {
+  const item = {
+    key: "payment.manualCard",
+    value: true,
+    source: "store",
+    isManaged: true,
+    isLocked: true,
+    isOfflineOverride: false,
+    ...patch,
+  };
+  return {
+    items: [item],
+    isOnline: true,
+    lastSyncedAtIso: "2026-11-14T01:02:03.000Z",
+    showsOfflineBanner: false,
+    hasLockedItems: item.isLocked,
+    ...view,
+  };
+}
+
+class FakePosSettings implements SettingsPosSettingsPort {
+  public view: PosSettingsView;
+  public loadCalls = 0;
+  public syncCalls = 0;
+  public failLoad = false;
+  public syncResult: PosSettingsSyncResult = { status: "updated", hash: "h", ackPending: false };
+  public failSync = false;
+  private readonly listeners = new Set<() => void>();
+
+  public constructor(view: PosSettingsView) {
+    this.view = view;
+  }
+
+  public get listenerCount(): number {
+    return this.listeners.size;
+  }
+
+  public getView(): PosSettingsView {
+    return this.view;
+  }
+
+  public subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  public async load(): Promise<PosSettingsView> {
+    this.loadCalls += 1;
+    if (this.failLoad) throw new Error("load failed");
+    return this.view;
+  }
+
+  public async syncNow(): Promise<PosSettingsSyncResult> {
+    this.syncCalls += 1;
+    if (this.failSync) throw new Error("sync failed");
+    return this.syncResult;
+  }
+
+  public emit(view: PosSettingsView): void {
+    this.view = view;
+    for (const listener of [...this.listeners]) listener();
+  }
+}
+
+function portWithPosSettings(fake: FakePosSettings | null): FakeSettingsPort {
+  const port = new FakeSettingsPort();
+  if (fake) Object.assign(port, { posSettings: fake });
+  return port;
+}
+
+test("总部设置：端口缺省时状态为 null，手动刷卡行为不变", async () => {
+  const port = portWithPosSettings(null);
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  assert.equal(presenter.getState().posSettings, null);
+  presenter.setUseManualCard(true);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-sync-failed");
+});
+
+test("总部设置：load 取视图并订阅，destroy 取消订阅", async () => {
+  const fake = new FakePosSettings(manualCardView());
+  const presenter = createPresenter(portWithPosSettings(fake));
+  await presenter.load();
+
+  assert.equal(fake.loadCalls, 1);
+  assert.equal(fake.listenerCount, 1);
+  assert.equal(presenter.getState().posSettings?.items[0]?.key, "payment.manualCard");
+  assert.equal(presenter.getState().posSettings?.items[0]?.isLocked, true);
+
+  // 重复 load 不累积订阅。
+  await presenter.load();
+  assert.equal(fake.listenerCount, 1);
+
+  presenter.destroy();
+  assert.equal(fake.listenerCount, 0);
+});
+
+test("总部设置：load 失败时按没有总部设置处理，设置页仍可用", async () => {
+  const fake = new FakePosSettings(manualCardView());
+  fake.failLoad = true;
+  const presenter = createPresenter(portWithPosSettings(fake));
+  await presenter.load();
+
+  assert.equal(presenter.getState().kind, "ready");
+  assert.equal(presenter.getState().posSettings, null);
+  presenter.setUseManualCard(true);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+});
+
+test("总部设置：手动刷卡被锁定时 setUseManualCard 直接忽略", async () => {
+  const fake = new FakePosSettings(manualCardView({ value: false, isLocked: true }));
+  const presenter = createPresenter(portWithPosSettings(fake));
+  await presenter.load();
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+
+  presenter.setUseManualCard(true);
+
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+});
+
+test("总部设置：离线受管（未锁定）时可修改并保存，保存带离线覆盖标记视图", async () => {
+  const port = portWithPosSettings(
+    new FakePosSettings(manualCardView({ value: false, isLocked: false }, { isOnline: false, showsOfflineBanner: true })),
+  );
+  const presenter = createPresenter(port);
+  await presenter.load();
+
+  presenter.setUseManualCard(true);
+  await presenter.saveManualCardSettings();
+
+  assert.deepEqual(port.savedPaymentMethods, [{ useManualCard: true }]);
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+});
+
+test("总部设置：保存遇到 POS_SETTING_MANAGED 显示受管提示，草稿与最近保存值恢复为生效值", async () => {
+  const fake = new FakePosSettings(manualCardView({ value: true, isLocked: false }, { isOnline: false }));
+  const port = portWithPosSettings(fake);
+  const presenter = createPresenter(port);
+  await presenter.load();
+  presenter.setUseManualCard(false);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+
+  // 保存期间联网恢复并锁定：保存回调返回受管错误。
+  port.savePaymentMethodSettings = async () => {
+    fake.emit(manualCardView({ value: true, isLocked: true }));
+    throw Object.assign(new Error("managed"), { code: "POS_SETTING_MANAGED" });
+  };
+  await presenter.saveManualCardSettings();
+
+  assert.equal(presenter.getState().statusCode, "pos-settings-managed");
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  // 之后再因其他原因保存失败，回退的也是生效值而不是旧的本机值。
+  port.savePaymentMethodSettings = async () => {
+    throw new Error("boom");
+  };
+  fake.emit(manualCardView({ value: true, isLocked: false }));
+  presenter.setUseManualCard(false);
+  await presenter.saveManualCardSettings();
+  assert.equal(presenter.getState().statusCode, "payment-settings-save-failed");
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+});
+
+test("总部设置：普通保存失败不显示受管提示", async () => {
+  const port = portWithPosSettings(new FakePosSettings(manualCardView({ isLocked: false }, { isOnline: false })));
+  const presenter = createPresenter(port);
+  await presenter.load();
+  port.failPaymentMethodSave = true;
+  presenter.setUseManualCard(false);
+  await presenter.saveManualCardSettings();
+  assert.equal(presenter.getState().statusCode, "payment-settings-save-failed");
+});
+
+test("总部设置：视图变化时草稿跟随生效值（未编辑 / 被锁定），编辑中且未锁定则保持草稿", async () => {
+  const fake = new FakePosSettings(manualCardView({ value: false, isManaged: false, source: null, isLocked: false }));
+  const presenter = createPresenter(portWithPosSettings(fake));
+  await presenter.load();
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+
+  // 未编辑：同步把总部值写穿后，设置页跟着变。
+  fake.emit(manualCardView({ value: true, isLocked: true }));
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  assert.equal(presenter.getState().posSettings?.items[0]?.isLocked, true);
+
+  // 离线可改：用户正在编辑，视图再通知（例如联网状态变化但未锁定）不覆盖草稿。
+  fake.emit(manualCardView({ value: true, isLocked: false }, { isOnline: false }));
+  presenter.setUseManualCard(false);
+  fake.emit(manualCardView({ value: true, isLocked: false }, { isOnline: false, lastSyncedAtIso: null }));
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+
+  // 恢复联网被锁定：编辑中的草稿作废，回到总部值。
+  fake.emit(manualCardView({ value: true, isLocked: true }));
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+});
+
+test("总部设置：立即同步按结果映射状态码，并取最新视图", async () => {
+  const fake = new FakePosSettings(manualCardView({ value: false, isLocked: false, isManaged: false, source: null }));
+  const presenter = createPresenter(portWithPosSettings(fake));
+  await presenter.load();
+
+  fake.syncResult = { status: "updated", hash: "h", ackPending: false };
+  await presenter.syncPosSettings();
+  assert.equal(fake.syncCalls, 1);
+  assert.equal(presenter.getState().statusCode, "pos-settings-synced");
+  assert.equal(presenter.getState().busy, false);
+
+  fake.syncResult = { status: "up-to-date", hash: "h", ackPending: false };
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-synced");
+
+  fake.syncResult = { status: "failed", reason: "unsupported" };
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-sync-unsupported");
+
+  fake.syncResult = { status: "failed", reason: "offline" };
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-sync-failed");
+
+  fake.syncResult = { status: "skipped", reason: "not-ready" };
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-sync-failed");
+
+  fake.failSync = true;
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-sync-failed");
+  assert.equal(presenter.getState().busy, false);
+});
+
+test("总部设置：无支付配置权限时不执行立即同步", async () => {
+  const fake = new FakePosSettings(manualCardView());
+  const presenter = new SettingsPresenter({
+    permissions: [SETTINGS_VIEW_PERMISSION],
+    port: portWithPosSettings(fake),
+  });
+  await presenter.load();
+  await presenter.syncPosSettings();
+  assert.equal(fake.syncCalls, 0);
+});
+
+test("总部设置：保存遇到 POS_SETTING_MANAGED 且视图尚未推送变化时，草稿仍立即恢复为生效值", async () => {
+  // 生效值 true（总部管理），但此刻视图还显示「离线可改」；保存瞬间守卫判定已锁定。
+  const fake = new FakePosSettings(manualCardView({ value: true, isLocked: false }, { isOnline: false }));
+  const port = portWithPosSettings(fake);
+  const presenter = createPresenter(port);
+  await presenter.load();
+  presenter.setUseManualCard(false);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+  port.savePaymentMethodSettings = async () => {
+    throw Object.assign(new Error("managed"), { code: "POS_SETTING_MANAGED" });
+  };
+
+  await presenter.saveManualCardSettings();
+
+  assert.equal(presenter.getState().statusCode, "pos-settings-managed");
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
 });

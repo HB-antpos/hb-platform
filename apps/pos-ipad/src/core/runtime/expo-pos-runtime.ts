@@ -934,6 +934,15 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
           properties: event.properties,
         });
       },
+      // 收银端设置下发：只含键名、布尔值、指纹前缀、触发源与状态码，不含任何收银员或顾客信息。
+      reportPosSettingsSync(event) {
+        applicationLog?.record({
+          level: event.level,
+          message: event.message,
+          category: "settings.pos-settings",
+          properties: event.properties,
+        });
+      },
       // 促销后台刷新：只记触发源、规则数与异常类型，不带规则内容；失败 / 延后只在进入该状态时记一条。
       reportPromotionRefresh(event) {
         applicationLog?.record({

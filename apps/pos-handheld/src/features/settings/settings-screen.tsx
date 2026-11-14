@@ -32,6 +32,7 @@ import {
 } from "./settings-copy";
 import {
   hasLinklyCloudCredentials,
+  POS_SETTING_MANUAL_CARD_KEY,
   type PaymentEnvironment,
   type SettingsDangerousConfirmation,
   type SettingsPane,
@@ -92,6 +93,7 @@ export type SettingsScreenPresenter = Pick<
   | "loadSquareLocations"
   | "loadReceiptProfile"
   | "syncReceiptProfile"
+  | "syncPosSettings"
   | "requestApiAddressChange"
   | "requestAppRestart"
   | "requestCatalogReset"
@@ -961,6 +963,12 @@ function PaymentsPane({
     state.confirmation !== null ||
     !state.access.canConfigurePayments;
   const catalogRefreshRunning = state.catalogRefresh.kind === "running";
+  // 总部下发的手动刷卡项：在线且受管时锁定（灰显）；离线受管项可临时修改。
+  const manualCardItem =
+    state.posSettings?.items.find(
+      (item) => item.key === POS_SETTING_MANUAL_CARD_KEY,
+    ) ?? null;
+  const manualCardLocked = manualCardItem?.isLocked === true;
   const squareAvailable =
     state.square.available && state.square.blockerCode === null;
   const squareNeedsInitialSetup =
@@ -1030,6 +1038,14 @@ function PaymentsPane({
         subtitle={t("payments.subtitle")}
         title={t("payments.title")}
       />
+      {state.posSettings ? (
+        <PosSettingsStatusBar
+          disabled={disabled}
+          locale={locale}
+          onSync={() => void presenter.syncPosSettings()}
+          view={state.posSettings}
+        />
+      ) : null}
       <SectionCard
         eyebrow={t("eyebrow.activeCardTerminal")}
         title={t("payments.provider")}
@@ -1065,12 +1081,45 @@ function PaymentsPane({
               : t("payments.linklySelected")}
         </Text>
         <View style={styles.actionRow}>
-          <View>
+          <View style={styles.manualCardCopy}>
             <Text style={styles.fieldLabel}>{t("payments.manualCard")}</Text>
+            {manualCardItem?.isManaged ? (
+              <View style={styles.posSettingsTagRow}>
+                <Text
+                  style={styles.posSettingsTag}
+                  testID="settings-payment-manual-card-source"
+                >
+                  {posSettingSourceLabel(locale, manualCardItem.source)}
+                </Text>
+                {manualCardItem.isOfflineOverride ? (
+                  <Text
+                    style={[styles.posSettingsTag, styles.posSettingsTagWarning]}
+                    testID="settings-payment-manual-card-offline-override"
+                  >
+                    {t("posSettings.offlineOverride")}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             <Text style={styles.sectionCopy}>{t("payments.manualCardHint")}</Text>
+            {manualCardLocked ? (
+              <Text
+                style={styles.sectionCopy}
+                testID="settings-payment-manual-card-locked"
+              >
+                {t("posSettings.managedLocked")}
+              </Text>
+            ) : manualCardItem?.isManaged ? (
+              <Text
+                style={styles.sectionCopy}
+                testID="settings-payment-manual-card-offline-editable"
+              >
+                {t("posSettings.offlineEditable")}
+              </Text>
+            ) : null}
           </View>
           <ToggleButton
-            disabled={disabled}
+            disabled={disabled || manualCardLocked}
             label={state.paymentMethods.useManualCard ? t("payments.manualCardOn") : t("payments.manualCardOff")}
             onPress={() => presenter.setUseManualCard(!state.paymentMethods.useManualCard)}
             selected={state.paymentMethods.useManualCard}
@@ -1079,7 +1128,7 @@ function PaymentsPane({
         </View>
         <ActionButton
           compact
-          disabled={disabled}
+          disabled={disabled || manualCardLocked}
           label={t("payments.saveManualCard")}
           onPress={() => void presenter.saveManualCardSettings()}
           testID="settings-payment-manual-card-save"
@@ -2050,6 +2099,81 @@ function squareDevicePickerOption(
     meta: [device.id, device.code, device.status].filter(Boolean).join(" · "),
     name: device.name,
   });
+}
+
+/** 总部设置状态条：已同步 hh:mm / 离线（黄色提示）/ 暂未下发，加「立即同步」。 */
+function PosSettingsStatusBar({
+  disabled,
+  locale,
+  onSync,
+  view,
+}: Readonly<{
+  disabled: boolean;
+  locale: SettingsLocale;
+  onSync(): void;
+  view: NonNullable<SettingsState["posSettings"]>;
+}>) {
+  const hasManaged = view.items.some((item) => item.isManaged);
+  const clock = formatLocalClock(view.lastSyncedAtIso);
+  const text = view.showsOfflineBanner
+    ? settingsText(locale, "posSettings.offline")
+    : hasManaged && clock
+      ? settingsText(locale, "posSettings.synced", { time: clock })
+      : settingsText(locale, "posSettings.notPublished");
+  return (
+    <View
+      style={[
+        styles.posSettingsBar,
+        view.showsOfflineBanner && styles.posSettingsBarOffline,
+      ]}
+      testID="settings-pos-settings-bar"
+    >
+      <View style={styles.posSettingsBarCopy}>
+        <Text style={styles.posSettingsBarTitle}>
+          {settingsText(locale, "posSettings.title")}
+        </Text>
+        <Text
+          style={styles.posSettingsBarText}
+          testID="settings-pos-settings-state"
+        >
+          {text}
+        </Text>
+      </View>
+      <ActionButton
+        compact
+        disabled={disabled}
+        label={settingsText(locale, "posSettings.syncNow")}
+        onPress={onSync}
+        testID="settings-pos-settings-sync"
+        tone="secondary"
+      />
+    </View>
+  );
+}
+
+function posSettingSourceLabel(
+  locale: SettingsLocale,
+  source: string | null,
+): string {
+  switch (source) {
+    case "global":
+      return settingsText(locale, "posSettings.sourceGlobal");
+    case "store":
+      return settingsText(locale, "posSettings.sourceStore");
+    case "device":
+      return settingsText(locale, "posSettings.sourceDevice");
+    default:
+      return settingsText(locale, "posSettings.sourceDefault");
+  }
+}
+
+/** ISO 时间转本机时区的 hh:mm；无法解析返回 null。 */
+function formatLocalClock(iso: string | null): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.valueOf())) return null;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
 }
 
 function ReceiptStoreProfileCard({
@@ -3477,6 +3601,7 @@ function isSuccessStatus(statusCode: SettingsStatusCode): boolean {
     "linkly-paired",
     "payment-settings-saved",
     "payment-test-passed",
+    "pos-settings-synced",
     "printer-connected",
     "printer-cleared",
     "printer-scan-finished",
@@ -3671,6 +3796,47 @@ const styles = StyleSheet.create({
   soundPreferenceHint: { fontSize: 13, lineHeight: 19, marginBottom: 0 },
   soundSwitch: { minHeight: SETTINGS_MIN_TOUCH_TARGET, minWidth: 52 },
   twoColumn: { flexDirection: "column", gap: 14 },
+  manualCardCopy: { flexBasis: "60%", flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  posSettingsBar: {
+    alignItems: "center",
+    backgroundColor: posColors.blueSoft,
+    borderRadius: 8,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    justifyContent: "space-between",
+    marginBottom: 12,
+    padding: 12,
+  },
+  posSettingsBarOffline: { backgroundColor: posColors.yellowSoft },
+  posSettingsBarCopy: { flexBasis: "55%", flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  posSettingsBarTitle: {
+    color: posColors.ink,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  posSettingsBarText: {
+    color: posColors.mutedInk,
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  posSettingsTagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  posSettingsTag: {
+    backgroundColor: posColors.blueSoft,
+    borderRadius: 999,
+    color: posColors.blue,
+    fontSize: 12,
+    fontWeight: "800",
+    overflow: "hidden",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  posSettingsTagWarning: {
+    backgroundColor: posColors.yellowSoft,
+    color: posColors.yellow,
+  },
   actionRow: {
     alignItems: "center",
     flexDirection: "row",
