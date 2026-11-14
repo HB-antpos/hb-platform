@@ -46,6 +46,9 @@ public sealed class OpenApiSnapshotExportTests
         Assert.Contains("DailyCloseSyncResponse", document, StringComparison.Ordinal);
         Assert.Contains("/api/v1/cash-movements/sync", document, StringComparison.Ordinal);
         Assert.Contains("CashMovementSyncRequest", document, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/stores/current/pos-settings/sync", document, StringComparison.Ordinal);
+        Assert.Contains("/api/v1/stores/current/pos-settings/ack", document, StringComparison.Ordinal);
+        Assert.Contains("PosSettingsSyncDto", document, StringComparison.Ordinal);
 
         AssertSharedSaleCartOpenApiContract(document);
         AssertDeviceActivationRequestOpenApiContract(document);

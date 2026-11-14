@@ -119,6 +119,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string PosCashMovementPermissionMigrationId = "20261113.001-pos-cash-movement-permissions";
     internal const string ScanPackingMigrationId = "20261114.001-scan-packing";
     internal const string PickRecordCartonMigrationId = "20261114.002-pick-record-carton";
+    internal const string PosSettingsMigrationId = "20261114.003-pos-settings";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -500,6 +501,11 @@ internal sealed class SchemaMigrationCoordinator
             PickRecordCartonMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyPickRecordCartonAsync(cancellationToken)
+        ),
+        new(
+            PosSettingsMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPosSettingsAsync(cancellationToken)
         ),
     ];
 

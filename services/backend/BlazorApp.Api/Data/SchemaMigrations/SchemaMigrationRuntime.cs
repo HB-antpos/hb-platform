@@ -308,6 +308,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyPickRecordCartonAsync(CancellationToken cancellationToken);
 
+    Task ApplyPosSettingsAsync(CancellationToken cancellationToken);
+
+    Task VerifyPosSettingsAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1966,6 +1970,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             WarehouseOrderPickRecordCartonSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPosSettingsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosSettingsSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 三张表的列 / 主键 / CHECK 签名与两个权限码确认后协调器才登记账本。
+        await VerifyPosSettingsAsync(cancellationToken);
+    }
+
+    public async Task VerifyPosSettingsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PosSettingsSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

@@ -373,6 +373,8 @@ const backendNavigationEntryCases: Array<[string, string]> = [
   [P.Cash.OverviewView, '/pos-admin/store-cash'],
   [P.SeasonalCards.Remaining.ViewAllStores, '/pos-admin/seasonal-card-stats'],
   [P.FaceCapture.CamerasManage, '/system/face-cameras'],
+  [P.PosSettings.View, '/system/pos-settings'],
+  [P.PosSettings.Manage, '/system/pos-settings'],
   [P.Myob.ConnectionManage, '/pos-admin/myob'],
   [P.Myob.EmployeeBind, '/pos-admin/myob'],
   [P.Attendance.PayrollEdit, '/pos-admin/myob'],
@@ -395,6 +397,19 @@ for (const [permission, expectedPath] of backendNavigationEntryCases) {
     `${permission} should default to its first authorized backend page`,
   )
 }
+
+// 收银端设置：View / Manage 任一可进入页面；只有 Manage 才能编辑（保存按钮、三态控件）；权限码与后端 Permissions.PosSettings 一致。
+assertEqual(P.PosSettings.View, 'PosSettings.View', '前端权限码需与后端 Permissions.PosSettings.View 一致')
+assertEqual(P.PosSettings.Manage, 'PosSettings.Manage', '前端权限码需与后端 Permissions.PosSettings.Manage 一致')
+const posSettingsViewAccess = buildAccess(createCurrentUser({ permissions: [P.PosSettings.View] }))
+assertEqual(posSettingsViewAccess.canViewPosSettings, true, 'PosSettings.View 可进入收银端设置页')
+assertEqual(posSettingsViewAccess.canManagePosSettings, false, '只有 PosSettings.View 不能编辑')
+const posSettingsManageAccess = buildAccess(createCurrentUser({ permissions: [P.PosSettings.Manage] }))
+assertEqual(posSettingsManageAccess.canViewPosSettings, true, 'PosSettings.Manage 同样可进入页面（即使没单独授予 View）')
+assertEqual(posSettingsManageAccess.canManagePosSettings, true, 'PosSettings.Manage 可编辑')
+const posSettingsNoneAccess = buildAccess(createCurrentUser({ permissions: [P.Cash.OverviewView] }))
+assertEqual(posSettingsNoneAccess.canViewPosSettings, false, '没有收银端设置权限不能进入页面')
+assertEqual(posSettingsNoneAccess.canManagePosSettings, false, '没有收银端设置权限不能编辑')
 
 // 查看抓拍图片（敏感生物识别信息）与管理摄像机分开授予：单独拥有它既不能进入摄像机管理页，也不会解锁后台壳；
 // 管理摄像机权限同样不会自动获得它（页面是否显示「查看图片」以后端返回的 canViewImages 为准）。

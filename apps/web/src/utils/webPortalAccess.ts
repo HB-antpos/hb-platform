@@ -162,6 +162,12 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     canAccess: (access) => access.hasPermission(P.SeasonalCards.Remaining.ViewAllStores),
   },
   {
+    // 收银端设置：只有 PosSettings.View / Manage 的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
+    defaultPath: '/system/pos-settings',
+    targetPrefixes: ['/system/pos-settings'],
+    canAccess: (access) => access.hasPermission(P.PosSettings.View) || access.hasPermission(P.PosSettings.Manage),
+  },
+  {
     // 人脸抓拍摄像机管理：只有该独立权限的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
     defaultPath: '/system/face-cameras',
     targetPrefixes: ['/system/face-cameras', '/system/face-recognition'],
