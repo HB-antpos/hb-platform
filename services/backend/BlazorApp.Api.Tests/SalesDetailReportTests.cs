@@ -82,6 +82,38 @@ public sealed class SalesDetailReportTests : IDisposable
     }
 
     [Fact]
+    public async Task 商品栏可按营业额与均价全量排序后分页_没有均价的商品始终排最后()
+    {
+        var day = new DateTime(2026, 9, 24);
+        // 数量 / 营业额 / 均价：A 10 件 $50（5）、B 2 件 $40（20）、C 5 件 $100（20，营业额更高）、D 退货抵减为 0 件 $0（无均价）。
+        foreach (var (code, quantity, amount) in new[] { ("P-A", 10, 50m), ("P-B", 2, 40m), ("P-C", 5, 100m), ("P-D", 0, 0m) })
+        {
+            await SeedProductAsync(code);
+            await SeedStatisticAsync(day, "S1", "A1", code, quantity, amount);
+        }
+        var service = CreateService();
+        async Task<string[]> CodesAsync(SalesDetailProductSortField field, bool ascending, int pageIndex = 1, int pageSize = 20)
+            => (await service.GetSalesDetailReportFilteredAsync(Range(day, day), SalesDetailKind.Australia, new() { "S1" },
+                    pageIndex: pageIndex, pageSize: pageSize, sections: new[] { SalesDetailSection.Products },
+                    productSortField: field, productSortAscending: ascending))
+                .Data!.Products!.Rows.Select(row => row.Code).ToArray();
+
+        // 默认（不传排序）仍按数量降序，与改版前一致。
+        var legacy = await service.GetSalesDetailReportAsync(Range(day, day), SalesDetailKind.Australia, new() { "S1" },
+            sections: new[] { SalesDetailSection.Products });
+        Assert.Equal(new[] { "P-A", "P-C", "P-B", "P-D" }, legacy.Data!.Products!.Rows.Select(row => row.Code));
+
+        Assert.Equal(new[] { "P-C", "P-A", "P-B", "P-D" }, await CodesAsync(SalesDetailProductSortField.Revenue, false));
+        Assert.Equal(new[] { "P-D", "P-B", "P-A", "P-C" }, await CodesAsync(SalesDetailProductSortField.Revenue, true));
+        // 均价相同（B、C 都是 20）时营业额高的在前；无均价的 D 升降序都在最后。
+        Assert.Equal(new[] { "P-C", "P-B", "P-A", "P-D" }, await CodesAsync(SalesDetailProductSortField.AverageUnitPrice, false));
+        Assert.Equal(new[] { "P-A", "P-C", "P-B", "P-D" }, await CodesAsync(SalesDetailProductSortField.AverageUnitPrice, true));
+        // 先全量排序再分页：第 2 页（每页 2 条）接着第 1 页往下。
+        Assert.Equal(new[] { "P-A", "P-D" }, await CodesAsync(SalesDetailProductSortField.AverageUnitPrice, false, pageIndex: 2, pageSize: 2));
+        await Assert.ThrowsAsync<ArgumentException>(() => CodesAsync((SalesDetailProductSortField)99, false));
+    }
+
+    [Fact]
     public async Task 同一天本期同期仍各保留一份并按数量分页排序()
     {
         var day = new DateTime(2026, 7, 1);

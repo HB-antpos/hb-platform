@@ -62,6 +62,62 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
         Assert.DoesNotContain(result.Data.Branches.Rows, row => row.Code == "B2");
     }
 
+    /// <summary>
+    /// 商品栏按营业额 / 均价排序在 SQL Server 各条路径（分组集、选中分店的普通查询、关键词投影、月投影）都先全量排序再分页，
+    /// 且均价排序的聚合表达式能在 GROUP BY 子查询里编译。
+    /// </summary>
+    [SalesDetailReportSqlServerFact]
+    public async Task 商品栏按营业额与均价排序在各SQL路径一致且无均价商品排最后()
+    {
+        await using var fixture = await SalesDetailSqlServerFixture.CreateAsync();
+        var month = new DateTime(2026, 7, 1);
+        var day = new DateTime(2026, 7, 15);
+        await fixture.SeedFreshStateAsync(day);
+        await fixture.SeedStoreAsync("B1", "一店");
+        await fixture.SeedLocalSupplierAsync("AUS1", "澳洲供应商");
+        // 数量 / 营业额 / 均价：A 10 件 $50（5）、B 2 件 $40（20）、C 5 件 $100（20）、D 0 件 $0（无均价）。
+        foreach (var (code, quantity, amount) in new[] { ("P-A", 10, 50m), ("P-B", 2, 40m), ("P-C", 5, 100m), ("P-D", 0, 0m) })
+        {
+            await fixture.SeedProductAsync(code, $"Sortable {code}");
+            await fixture.SeedFactAsync(day, "B1", "AUS1", code, quantity, amount, $"Sortable {code}");
+        }
+        await fixture.EnableProjectionAsync(day);
+
+        async Task<string[]> CodesAsync(DateRangeDto range, SalesDetailProductSortField field, bool ascending,
+            string? selectedBranch = null, string? search = null, int pageIndex = 1, int pageSize = 20)
+        {
+            var response = await fixture.CreateService().GetSalesDetailReportFilteredAsync(range, SalesDetailKind.Australia,
+                new() { "B1" }, selectedBranchCode: selectedBranch, search: search, pageIndex: pageIndex, pageSize: pageSize,
+                sections: new[] { SalesDetailSection.Products }, productSortField: field, productSortAscending: ascending);
+            Assert.Equal(SalesStatisticRefreshStatus.Fresh, response.StatisticStatus);
+            Assert.Equal(4, response.Data!.Products!.Total);
+            return response.Data.Products.Rows.Select(row => row.Code).ToArray();
+        }
+
+        async Task AssertOrdersAsync(DateRangeDto range, string? selectedBranch = null, string? search = null)
+        {
+            Assert.Equal(new[] { "P-A", "P-C", "P-B", "P-D" }, await CodesAsync(range, SalesDetailProductSortField.Quantity, false, selectedBranch, search));
+            Assert.Equal(new[] { "P-C", "P-A", "P-B", "P-D" }, await CodesAsync(range, SalesDetailProductSortField.Revenue, false, selectedBranch, search));
+            Assert.Equal(new[] { "P-D", "P-B", "P-A", "P-C" }, await CodesAsync(range, SalesDetailProductSortField.Revenue, true, selectedBranch, search));
+            Assert.Equal(new[] { "P-C", "P-B", "P-A", "P-D" }, await CodesAsync(range, SalesDetailProductSortField.AverageUnitPrice, false, selectedBranch, search));
+            Assert.Equal(new[] { "P-A", "P-C", "P-B", "P-D" }, await CodesAsync(range, SalesDetailProductSortField.AverageUnitPrice, true, selectedBranch, search));
+            Assert.Equal(new[] { "P-A", "P-D" }, await CodesAsync(range, SalesDetailProductSortField.AverageUnitPrice, false, selectedBranch, search, pageIndex: 2, pageSize: 2));
+        }
+
+        var dayRange = new DateRangeDto { StartDate = day, EndDate = day };
+        await AssertOrdersAsync(dayRange);                          // 分组集
+        await AssertOrdersAsync(dayRange, selectedBranch: "B1");    // 选中分店的普通查询
+        await AssertOrdersAsync(dayRange, search: "Sortable");      // 关键词日投影
+
+        // 月投影要求整月每天都有已完成的统计与日投影，否则报表停在 Pending。
+        var monthDays = Enumerable.Range(0, DateTime.DaysInMonth(month.Year, month.Month)).Select(offset => month.AddDays(offset)).ToList();
+        foreach (var monthDay in monthDays.Where(value => value != day)) await fixture.SeedFreshStateAsync(monthDay);
+        await fixture.EnableMonthlyProjectionAsync();
+        foreach (var monthDay in monthDays) await fixture.RefreshDailyAsync(monthDay);
+        await fixture.RefreshMonthlyAsync(month);
+        await AssertOrdersAsync(new DateRangeDto { StartDate = month, EndDate = month.AddMonths(1).AddDays(-1) }); // 月投影
+    }
+
     [SalesDetailReportSqlServerFact]
     public async Task 不同销售种类和所选供应商保持供应商归属口径()
     {
@@ -1992,7 +2048,8 @@ public sealed class SalesDetailReportSqlServerIntegrationTests
                 var builder = typeof(SalesDashboardReactService).GetMethod("BuildSalesDetailReportSqlServerCoreWithFilters", BindingFlags.Static | BindingFlags.NonPublic)!;
                 sql = (string)builder.Invoke(null, new object?[] { _databaseName, range, kind, branches, selectedBranch, supplierList.FirstOrDefault(),
                     selectedProduct, search, 1, 20, wanted, null, mode == ReportSqlMode.Projected, false, supplierList,
-                    supplierCategories ?? Array.Empty<string>(), warehouseCategories ?? Array.Empty<string>(), mode == ReportSqlMode.CategoryPrefetch })!;
+                    supplierCategories ?? Array.Empty<string>(), warehouseCategories ?? Array.Empty<string>(), mode == ReportSqlMode.CategoryPrefetch,
+                    default(SalesDashboardReactService.SalesDetailProductOrder) })!;
             }
             await using var connection = new SqlConnection(_databaseConnectionString);
             await connection.OpenAsync();

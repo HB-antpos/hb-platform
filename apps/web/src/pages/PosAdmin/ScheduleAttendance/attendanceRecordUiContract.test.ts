@@ -188,21 +188,19 @@ assert(recordColumnsSource.includes('buildAttendanceMealPaySummary(record)'), '�
 
 console.log('attendanceRecordUiContract.test.ts: ok')
 
-// 编辑排班时员工、分店锁定（后端 UpdateSchedule 不改这两项）；可上班时间按日期范围查询、列表显示后端回填的员工名。
+// 员工、分店在编辑时不能直接改（后端 UpdateSchedule 不改这两项）：旧的「新建 / 编辑排班」抽屉已移除，
+// 编辑只走浮层（沿用原员工），换人走「新建给对方 + 删除原班次」；可上班时间按日期范围查询、列表显示后端回填的员工名。
+assert(!pageSource.includes("drawer.createSchedule") && !pageSource.includes('openScheduleDrawer'), '旧的新建 / 编辑排班抽屉应已移除')
 assert(
-  /name="storeCode"[\s\S]{0,400}disabled=\{Boolean\(editingSchedule\)\}/.test(pageSource),
-  '编辑排班时分店应禁用',
-)
-assert(
-  /name="userGuid"[\s\S]{0,400}disabled=\{Boolean\(editingSchedule\)\}/.test(pageSource),
-  '编辑排班时员工应禁用',
+  /await updateAttendanceSchedule\(schedule\.scheduleGuid, payload\)/.test(pageSource) && /userGuid: row\.userGuid,/.test(pageSource),
+  '编辑已有班次应沿用原员工走更新接口',
 )
 assert(
   pageSource.includes('getAttendanceAvailability({ ...queryParams(page, pageSize), weekStartDate: undefined })'),
   '可上班时间应按 fromDate / toDate 查询，不再带 weekStartDate',
 )
 
-// 周排班拖拽 / 复制 / 托盘添加 / 右上角「×」：源码接线契约（交互本身靠目测与逻辑单测）
+// 周排班（按天分列）拖拽 / 复制 / 托盘拖到某天 / 右上角「×」：源码接线契约（交互本身靠目测与逻辑单测）
 {
   const dragStart = pageSource.indexOf('const runDrop = async')
   const dragEnd = pageSource.indexOf('const deleteScheduleViaX', dragStart)
@@ -216,16 +214,48 @@ assert(
   // 同员工换日期走更新接口；复制与托盘添加走新建；撤销都有对应的回退
   assert(runDropSource.includes('updateAttendanceSchedule(origin.scheduleGuid, buildMoveUpdatePayload(origin, dateKey))'), '同员工换日期应调用更新接口')
   assert(runDropSource.includes('buildCopyPayload(origin, row.userGuid, dateKey)'), '⌥ 复制应新建草稿')
-  assert(runDropSource.includes('buildPresetPayload(targetStoreCode, row.userGuid, dateKey'), '托盘添加应新建草稿')
+  // 托盘里的常用班次不再直接建班：落到某一天只打开排班弹窗（预选这一天和这个时段），由弹窗预览后再创建
+  assert(!runDropSource.includes('buildPresetPayload('), '托盘拖放不应绕过弹窗直接建班')
   assert(runDropSource.includes('restoreAttendanceSchedule(origin.scheduleGuid)'), '换员工的撤销要把原班次恢复回来')
 }
 assert(pageSource.includes('draggable={canDrag}'), '班次块只有 canDrag 时才可拖')
 assert(pageSource.includes('isScheduleLocked({'), '已有打卡记录的班次要锁定')
 assert(pageSource.includes('schedule.status !== \'Cancelled\' && !locked'), '已取消 / 已锁定的班次不可拖')
-assert(pageSource.includes('className="sce-chip-x"'), '班次块右上角要有「×」')
+assert(pageSource.includes('className="sce-card-x"'), '班次卡片右上角要有「×」')
 assert(/<Popconfirm[\s\S]{0,400}onConfirm=\{\(\) => deleteScheduleViaX\(schedule\)\}/.test(pageSource), '「×」要先弹删除确认')
 assert(pageSource.includes('onClick={(event) => event.stopPropagation()}'), '点「×」不能触发外层的编辑浮层')
 assert(pageSource.includes('SHIFT_PRESETS.map((preset) => ('), '拖拽托盘使用固定的 5 个常用班次')
-assert(pageSource.includes('getDropVerdict(source,'), '格子要按落点判定显示可放 / 提醒 / 不能放')
+assert(/getDropVerdict\(\s*source,/.test(pageSource), '每一天的列要按落点判定显示可放 / 提醒 / 不能放')
+assert(pageSource.includes('openBatchModal({ dateKeys: [dateKey], start: source.start, end: source.end })'), '托盘常用班次落到某天要打开排班弹窗并预填')
 assert(pageSource.includes("window.setTimeout(() => {\n      setAltCopy(alt)"), '拖动开始要异步改界面，避免浏览器取消拖动')
 assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDefaultShift'), '常用班次不再按本周班次推导')
+
+// 按天分列的周视图：不再有员工行，每天一列；卡片按「开始时间 → 员工名」排序，一人一色
+{
+  assert(pageSource.includes('<WeekBoard'), '周排班应使用按天分列的看板')
+  assert(!pageSource.includes('scheduleColumns') && !pageSource.includes('renderScheduleCell'), '周排班不应再用员工行的表格')
+  assert(!pageSource.includes('filterRowsByKeyword'), '搜索员工只做高亮，不再过滤出员工行')
+  assert(pageSource.includes('groupSchedulesByDay(weekSchedules, weekDateKeys, nameOf)'), '每天的班次要按时间、员工名排序后再渲染')
+  assert(pageSource.includes('assignStaffColors('), '员工颜色统一由 assignStaffColors 分配')
+  // 编辑浮层「改给其他员工」复用拖拽换人的落地逻辑（新建给对方 + 删除原班次，可撤销）
+  const transferStart = pageSource.indexOf('const transferSchedule = async')
+  const transferEnd = pageSource.indexOf('const deleteScheduleViaX', transferStart)
+  assert(transferStart >= 0 && transferEnd > transferStart, '应能定位换人逻辑')
+  assert(/await runDrop\(\s*\{ kind: 'move', schedule,/.test(pageSource.slice(transferStart, transferEnd)), '换人要复用拖拽移动的落地逻辑')
+  assert(pageSource.includes('onTransfer: (targetUserGuid: string) => void transferSchedule(schedule, targetUserGuid)'), '编辑浮层要接上换人')
+  // 工具栏入口改为批量排班弹窗；弹窗创建成功后刷新周视图
+  assert(pageSource.includes('onClick={() => openBatchModal()}'), '工具栏「排班」按钮应打开批量排班弹窗')
+  assert(pageSource.includes('<BatchScheduleModal'), '页面应挂载批量排班弹窗')
+}
+
+// 手机横屏看板：手机横过来自动进入，竖着拿点按钮进入；旋转兜底模式只读（浮层、弹窗不会跟着旋转）
+{
+  assert(pageSource.includes('getShellMode({ phone: phoneEnv.phone, landscape: phoneEnv.landscape, requested: shellRequested, autoDismissed: shellDismissed })'), '横屏看板的显示方式应由 getShellMode 决定')
+  assert(pageSource.includes('<LandscapeShell mode={shellMode}>'), '页面应挂载手机横屏看板外壳')
+  assert(pageSource.includes("const shellReadOnly = shellMode === 'rotated'"), '旋转兜底模式应只读')
+  assert(pageSource.includes('const canEditSchedule = !shellReadOnly &&'), '只读模式下卡片不能点开编辑')
+  assert(pageSource.includes('const canAdd = !shellReadOnly &&'), '只读模式下不显示添加班次入口')
+  assert(pageSource.includes('void tryLockLandscape()'), '点「横屏查看整周」要尝试锁定横屏')
+  assert(pageSource.includes('releaseLandscape()'), '退出看板要还原方向锁定与全屏')
+}
+

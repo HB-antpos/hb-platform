@@ -13,13 +13,13 @@ import {
 import { usePickerStore } from "./picker-store";
 import type { PickOrderFilter } from "./types";
 
-const BASE = "/react/v1/warehouse-picking";
+export const BASE = "/react/v1/warehouse-picking";
 
 /**
  * 扫员工码确认的拣货人通过请求头带凭证；账号本人拣货不带，由后端按登录账号记人。
  * 设备会话的 X-Device-Id / X-Auth-Code 由请求拦截器统一补齐。
  */
-function pickerConfig() {
+export function pickerConfig() {
   const ticket = usePickerStore.getState().picker?.ticket;
   return ticket ? { headers: { "X-Picker-Ticket": ticket } } : {};
 }
@@ -78,6 +78,8 @@ export interface PickRecordInput {
   matchedBy?: number | null;
   pieces?: number | null;
   clientRequestId: string;
+  /** 边拣边装：同时把这次拣的件数装进这只箱；不传则与旧版完全一致。 */
+  cartonGuid?: string | null;
 }
 
 export async function postPickRecord(orderGuid: string, input: PickRecordInput) {
@@ -92,7 +94,7 @@ export async function postPickRecord(orderGuid: string, input: PickRecordInput) 
 export async function putPickLineTotal(
   orderGuid: string,
   detailGuid: string,
-  input: { total: number; expectedTotal: number; clientRequestId: string },
+  input: { total: number; expectedTotal: number; clientRequestId: string; cartonGuid?: string | null },
 ) {
   const response = await apiClient.put(
     `${BASE}/orders/${encodeURIComponent(orderGuid)}/lines/${encodeURIComponent(detailGuid)}/total`,

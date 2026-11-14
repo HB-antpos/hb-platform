@@ -145,6 +145,61 @@ public sealed class WarehousePickingController(
         RunWithPickerAsync(nameof(Submit), recheckEligibility: true, picker =>
             pickingService.SubmitAsync(orderGuid.Trim(), picker));
 
+    // ---- 拣货与装箱联动（二期）：箱的操作都走拣货人身份，客户端不直接调打包接口 ----
+
+    /// <summary>装箱进度：各商品订货 / 拣货 / 已装件数，本订单的箱与对账状态。认不出拣货人时 isMine 全为 false。</summary>
+    [HttpGet("orders/{orderGuid}/pack-progress")]
+    public Task<IActionResult> GetPackProgress(string orderGuid) =>
+        RunAsync(nameof(GetPackProgress), async () =>
+        {
+            var terminal = await ResolveTerminalAsync();
+            if (terminal.Error != null)
+            {
+                return terminal.Error;
+            }
+
+            // 与订单列表同一做法：认得出拣货人（员工码凭证或账号本人）才标 isMine，认不出不报错。
+            var picker = await ResolvePickerAsync(terminal, recheckEligibility: false);
+            return ToActionResult(await pickingService.GetPackProgressAsync(orderGuid.Trim(), picker.Context));
+        });
+
+    /// <summary>新建一只关联本订单的箱；不传去向时默认发往订货单的分店。</summary>
+    [HttpPost("orders/{orderGuid}/cartons")]
+    public Task<IActionResult> CreateCarton(
+        string orderGuid,
+        [FromBody] WarehousePickingCreateCartonRequestDto? request
+    ) =>
+        RunWithPickerAsync(nameof(CreateCarton), recheckEligibility: false, picker =>
+            pickingService.CreateCartonAsync(orderGuid.Trim(), request ?? new WarehousePickingCreateCartonRequestDto(), picker));
+
+    /// <summary>封箱（可同时放上托盘）；返回箱详情，客户端据此打印箱标签。</summary>
+    [HttpPost("orders/{orderGuid}/cartons/{cartonGuid}/seal")]
+    public Task<IActionResult> SealCarton(
+        string orderGuid,
+        string cartonGuid,
+        [FromBody] WarehousePickingSealCartonRequestDto? request
+    ) =>
+        RunWithPickerAsync(nameof(SealCarton), recheckEligibility: false, picker =>
+            pickingService.SealCartonAsync(orderGuid.Trim(), cartonGuid.Trim(), request ?? new WarehousePickingSealCartonRequestDto(), picker));
+
+    /// <summary>先拣后装：把商品在箱里的件数设为绝对值（0 移除），重复提交结果相同；超装只提示不拦截。</summary>
+    [HttpPut("orders/{orderGuid}/cartons/{cartonGuid}/items/{productCode}")]
+    public Task<IActionResult> SetCartonItem(
+        string orderGuid,
+        string cartonGuid,
+        string productCode,
+        [FromBody] WarehousePickingSetCartonItemRequestDto? request
+    ) =>
+        RunWithPickerAsync(nameof(SetCartonItem), recheckEligibility: false, picker =>
+            // 没带请求体不能当成数量 0：那会把商品从箱里移除。
+            request == null
+                ? Task.FromResult(WarehousePickingResult<WarehousePickingSetCartonItemResultDto>.Fail(
+                    400,
+                    WarehousePickingErrorCodes.InvalidRequest,
+                    "缺少数量"
+                ))
+                : pickingService.SetCartonItemAsync(orderGuid.Trim(), cartonGuid.Trim(), productCode, request, picker));
+
     /// <summary>派单：可以派拣货任务的员工及手上在拣的订单数。</summary>
     [HttpGet("pickers")]
     public Task<IActionResult> ListPickerCandidates() =>
