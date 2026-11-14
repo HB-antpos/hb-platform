@@ -452,6 +452,23 @@ public sealed class PackingIncomingItemDto
     public string? DispatchedByName { get; set; }
     public DateTime? ReceivedAtUtc { get; set; }
     public string? ReceivedByName { get; set; }
+
+    /// <summary>散箱：这只箱关联的订货单（总仓按订货单装箱的箱才有）；托盘行为空。</summary>
+    public string? OrderGuid { get; set; }
+
+    public string? OrderNo { get; set; }
+
+    /// <summary>
+    /// 托盘行：托盘上相关箱所属的订货单（去重，按订单号排序，最多 20 个；没有订单关联的箱不计，一个都没有时为空）。
+    /// 待签收的托盘取仍在路上的箱，最近签收的托盘取已签收的箱。散箱行为空。
+    /// </summary>
+    public List<PackingIncomingOrderDto>? Orders { get; set; }
+}
+
+public sealed class PackingIncomingOrderDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public string? OrderNo { get; set; }
 }
 
 public sealed class PackingIncomingDto
@@ -536,6 +553,16 @@ public sealed class PackingOrderCartonRow
     public string? PalletNo { get; set; }
     public string CreatedByUserGuid { get; set; } = string.Empty;
     public string CreatedByName { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; }
+
+    /// <summary>箱内商品明细（按商品编码排序）。</summary>
+    public List<PackingOrderCartonItemRow> Items { get; set; } = new();
+}
+
+public sealed class PackingOrderCartonItemRow
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public int Quantity { get; set; }
 }
 
 /// <summary>某张订货单的装箱快照：全部非作废箱，加上各商品在这些箱里的件数合计。</summary>

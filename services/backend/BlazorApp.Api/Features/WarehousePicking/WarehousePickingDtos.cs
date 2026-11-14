@@ -419,6 +419,19 @@ public sealed class WarehousePickingPackProgressCartonDto
 
     /// <summary>箱是当前拣货人建的。</summary>
     public bool IsMine { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; }
+
+    /// <summary>
+    /// 装箱中（Status = 1）的箱才带：箱内商品明细（按商品编码排序，不论创建人），用于接着装旧箱；已封 / 在途的箱不带。
+    /// </summary>
+    public List<WarehousePickingPackProgressCartonItemDto>? Items { get; set; }
+}
+
+public sealed class WarehousePickingPackProgressCartonItemDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public int Quantity { get; set; }
 }
 
 public sealed class WarehousePickingPackProgressDto

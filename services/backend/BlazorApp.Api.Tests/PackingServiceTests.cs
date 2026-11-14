@@ -1266,6 +1266,178 @@ public sealed class PackingServiceTests : IDisposable
         Assert.Equal(3, await _db.Queryable<PackCarton>().CountAsync(item => item.OwnerCode == "1013" && item.Status == PackCartonStatuses.Sealed));
     }
 
+    [Fact]
+    public async Task 按订单签收_订单引用可以是订单号_先按OrderGUID再按订单号_订单号去首尾空格且忽略大小写()
+    {
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-ci", OrderNo = "so-Abc-9", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var service = CreateService();
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+
+        var byNumber = await service.GetOrderReceiveAsync(Lily, " 2026-0412 ");
+        var byGuid = await service.GetOrderReceiveAsync(Lily, "order-1");
+        var byOtherCase = await service.GetOrderReceiveAsync(Lily, "SO-ABC-9");
+
+        Assert.True(byNumber.Success, byNumber.Message);
+        Assert.Equal("order-1", byNumber.Data!.OrderGuid);
+        Assert.Equal("2026-0412", byNumber.Data.OrderNo);
+        Assert.Equal(1, byNumber.Data.InTransitCount);
+        Assert.Equal("order-1", byGuid.Data!.OrderGuid);
+        Assert.Equal("order-ci", byOtherCase.Data!.OrderGuid);
+
+        // 先按 OrderGUID：别的订单的订单号恰好等于这个 guid 时，仍然命中 guid 对应的订单。
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-trap", OrderNo = "order-1", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var guidFirst = await service.GetOrderReceiveAsync(Lily, "order-1");
+        Assert.Equal("order-1", guidFirst.Data!.OrderGuid);
+
+        // 按订单号一次签收，响应仍带解析出的 orderGuid。
+        var received = await service.ReceiveOrderAsync(Lily, "2026-0412", 1);
+        Assert.True(received.Success, received.Message);
+        Assert.Equal("order-1", received.Data!.OrderGuid);
+        Assert.Equal(1, received.Data.ReceivedCount);
+        Assert.Equal("1013", (await _db.Queryable<PackCarton>().SingleAsync()).OwnerCode);
+    }
+
+    [Fact]
+    public async Task 按订单签收_订单号对应的订单在账号范围外_和不存在的订单一样404_不泄露存在与否()
+    {
+        var service = CreateService();
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+
+        foreach (var outsider in new[] { Ian, Pete, Wendy })
+        {
+            var get = await service.GetOrderReceiveAsync(outsider, "2026-0412");
+            var receive = await service.ReceiveOrderAsync(outsider, "2026-0412", 1);
+            Assert.Equal(404, get.StatusCode);
+            Assert.Equal(PackingErrorCodes.OrderNotFound, get.ErrorCode);
+            Assert.Equal(404, receive.StatusCode);
+            Assert.Equal(PackingErrorCodes.OrderNotFound, receive.ErrorCode);
+            Assert.Equal(get.Message, (await service.GetOrderReceiveAsync(outsider, "NO-SUCH-NO")).Message);
+        }
+
+        foreach (var blank in new[] { "NO-SUCH-NO", " ", "" })
+        {
+            Assert.Equal(PackingErrorCodes.OrderNotFound, (await service.GetOrderReceiveAsync(Lily, blank)).ErrorCode);
+        }
+
+        Assert.Equal(PackCartonStatuses.InTransit, (await _db.Queryable<PackCarton>().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task 按订单签收_订单号重复时只在账号分店范围内取_范围内有多张优先有装箱的再取下单最新的()
+    {
+        await _db.Insertable(new List<WareHouseOrder>
+        {
+            new() { OrderGUID = "dup-a", OrderNo = "DUP-1", StoreCode = "1013", FlowStatus = 3, OrderDate = new DateTime(2026, 11, 1) },
+            new() { OrderGUID = "dup-b", OrderNo = "DUP-1", StoreCode = "1013", FlowStatus = 3, OrderDate = new DateTime(2026, 11, 5) },
+            new() { OrderGUID = "dup-c", OrderNo = "DUP-1", StoreCode = "1020", FlowStatus = 3, OrderDate = new DateTime(2026, 11, 9) },
+        }).ExecuteCommandAsync();
+        var service = CreateService();
+
+        // 范围只含 1013 的账号只看得到 dup-a / dup-b，其中没有装箱关联时取下单时间最新的；dup-c 在范围外，不参与。
+        Assert.Equal("dup-b", (await service.GetOrderReceiveAsync(Lily, "DUP-1")).Data!.OrderGuid);
+        Assert.Equal("dup-c", (await service.GetOrderReceiveAsync(Ian, "DUP-1")).Data!.OrderGuid);
+        Assert.Equal(PackingErrorCodes.OrderNotFound, (await service.GetOrderReceiveAsync(Pete, "DUP-1")).ErrorCode);
+        Assert.Equal(PackingErrorCodes.OrderNotFound, (await service.GetOrderReceiveAsync(Wendy, "DUP-1")).ErrorCode);
+
+        // dup-a 有了装箱关联：优先取它。
+        await DispatchedOrderCartonAsync(service, "dup-a", ("HB23817", 12));
+        var lily = await service.GetOrderReceiveAsync(Lily, "DUP-1");
+        Assert.Equal("dup-a", lily.Data!.OrderGuid);
+        Assert.Equal(1, lily.Data.InTransitCount);
+        // 管理员范围含全部分店：三张都在范围内，同样优先有装箱的。
+        Assert.Equal("dup-a", (await service.GetOrderReceiveAsync(Admin, "DUP-1")).Data!.OrderGuid);
+
+        var received = await service.ReceiveOrderAsync(Lily, "DUP-1", 1);
+        Assert.True(received.Success, received.Message);
+        Assert.Equal("dup-a", received.Data!.OrderGuid);
+    }
+
+    // ---- 待签收清单带订单信息（二期） ----
+
+    [Fact]
+    public async Task 待签收清单_散箱带订单信息_托盘带在途箱的去重订单_没有订单的箱不计_已签收的托盘按托盘上的箱取()
+    {
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-2", OrderNo = "2026-0413", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var service = CreateService();
+        var loose = await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+        var noOrder = await SealedCartonAsync(service, Wendy, Dest(PackDestinationTypes.Store, "1013"), ("HB24102", 3));
+        Assert.True((await service.DispatchCartonAsync(Wendy, noOrder.CartonGuid)).Success);
+        var cartonA = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 10));
+        var cartonB = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 5));
+        var cartonC = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-2" }, ("HB24102", 4));
+        var cartonD = await SealedCartonAsync(service, Wendy, Dest(PackDestinationTypes.Store, "1013"), ("HB24102", 2));
+        var pallet = (await service.CreatePalletAsync(Wendy, PalletDest(PackDestinationTypes.Store, "1013"))).Data!;
+        foreach (var carton in new[] { cartonA, cartonB, cartonC, cartonD })
+        {
+            Assert.True((await service.AddCartonToPalletAsync(Wendy, pallet.PalletGuid, new PackingAddCartonRequestDto { Code = carton.CartonNo })).Success);
+        }
+
+        Assert.True((await service.SealPalletAsync(Wendy, pallet.PalletGuid, new PackingSealRequestDto())).Success);
+        Assert.True((await service.DispatchPalletAsync(Wendy, pallet.PalletGuid)).Success);
+
+        var pending = (await service.ListIncomingAsync(Lily, null)).Data!.Pending;
+        var looseRow = pending.Single(item => item.Guid == loose.CartonGuid);
+        Assert.Equal("order-1", looseRow.OrderGuid);
+        Assert.Equal("2026-0412", looseRow.OrderNo);
+        Assert.Null(looseRow.Orders);
+        var noOrderRow = pending.Single(item => item.Guid == noOrder.CartonGuid);
+        Assert.Null(noOrderRow.OrderGuid);
+        Assert.Null(noOrderRow.OrderNo);
+        var palletRow = pending.Single(item => item.Kind == "pallet");
+        // 去重（order-1 有两只箱只算一个），按订单号排序，没有订单的箱 D 不计。
+        Assert.Equal(new[] { "order-1", "order-2" }, palletRow.Orders!.Select(order => order.OrderGuid));
+        Assert.Equal(new[] { "2026-0412", "2026-0413" }, palletRow.Orders!.Select(order => order.OrderNo));
+        Assert.Null(palletRow.OrderGuid);
+        // 别的分店看不到这批货，也就看不到订单信息。
+        Assert.Empty((await service.ListIncomingAsync(Ian, null)).Data!.Pending);
+
+        // order-1 的两只箱逐箱签收后，待签收的托盘只剩仍在路上的箱的订单。
+        foreach (var carton in new[] { cartonA, cartonB })
+        {
+            Assert.True((await service.ReceiveCartonAsync(Lily, carton.CartonGuid, new PackingReceiveCartonRequestDto())).Success);
+        }
+
+        var partial = (await service.ListIncomingAsync(Lily, null)).Data!.Pending.Single(item => item.Kind == "pallet");
+        Assert.Equal(new[] { "order-2" }, partial.Orders!.Select(order => order.OrderGuid));
+
+        // 托盘整个签完，进「最近签收」：按托盘上（已签收）的箱取订单。
+        var finished = await service.ReceivePalletAsync(Lily, pallet.PalletGuid, new PackingReceivePalletRequestDto { ExpectedCartonCount = 2 });
+        Assert.True(finished.Success, finished.Message);
+        var recent = (await service.ListIncomingAsync(Lily, null)).Data!.Recent.Single(item => item.Kind == "pallet");
+        Assert.Equal(new[] { "order-1", "order-2" }, recent.Orders!.Select(order => order.OrderGuid));
+        Assert.DoesNotContain(
+            (await service.ListIncomingAsync(Lily, null)).Data!.Pending,
+            item => item.Kind == "pallet"
+        );
+    }
+
+    [Fact]
+    public async Task 待签收清单_托盘最多带20个订单_按订单号排序_散箱与托盘的订单号批量查询()
+    {
+        var orders = Enumerable.Range(1, 22)
+            .Select(index => new WareHouseOrder { OrderGUID = $"bulk-{index:D2}", OrderNo = $"2026-{1000 + index}", StoreCode = "1013", FlowStatus = 3 })
+            .ToList();
+        await _db.Insertable(orders).ExecuteCommandAsync();
+        var service = CreateService();
+        var pallet = (await service.CreatePalletAsync(Wendy, PalletDest(PackDestinationTypes.Store, "1013"))).Data!;
+        foreach (var order in orders)
+        {
+            var carton = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = order.OrderGUID }, ("HB23817", 1));
+            Assert.True((await service.AddCartonToPalletAsync(Wendy, pallet.PalletGuid, new PackingAddCartonRequestDto { Code = carton.CartonNo })).Success);
+        }
+
+        Assert.True((await service.SealPalletAsync(Wendy, pallet.PalletGuid, new PackingSealRequestDto())).Success);
+        Assert.True((await service.DispatchPalletAsync(Wendy, pallet.PalletGuid)).Success);
+
+        var row = (await service.ListIncomingAsync(Lily, null)).Data!.Pending.Single();
+
+        Assert.Equal(22, row.CartonCount);
+        Assert.Equal(20, row.Orders!.Count);
+        Assert.Equal("2026-1001", row.Orders.First().OrderNo);
+        Assert.Equal("2026-1020", row.Orders.Last().OrderNo);
+        Assert.Equal(row.Orders.Select(order => order.OrderNo).OrderBy(no => no, StringComparer.Ordinal), row.Orders.Select(order => order.OrderNo));
+    }
+
     // ---- 测试辅助 ----
 
     /// <summary>总仓按订货单装箱 → 封箱 → 发出：箱默认发往订货单的分店，对方可按订单签收。</summary>

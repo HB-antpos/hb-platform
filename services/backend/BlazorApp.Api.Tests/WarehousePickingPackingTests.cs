@@ -524,6 +524,65 @@ public sealed class WarehousePickingPackingTests : IDisposable
         Assert.Equal(WarehousePickingErrorCodes.OrderNotFound, missing.ErrorCode);
     }
 
+    [Fact]
+    public async Task 装箱进度_装箱中的箱带明细_不论创建人_已封的箱不带_箱按创建时间升序再按箱号()
+    {
+        var service = await JoinedServiceAsync();
+        var cartonA = await NewCartonAsync(service, picker: Alex);
+        var cartonB = await NewCartonAsync(service, picker: Mia);
+        var cartonC = await NewCartonAsync(service, picker: Alex);
+        var cartonD = await NewCartonAsync(service, picker: Mia);
+        await service.AppendRecordAsync(OrderGuid, Scan("d-sponge", cartonA), Alex);
+        await service.AppendRecordAsync(OrderGuid, Scan("d-cup", cartonA), Alex);
+        await service.AppendRecordAsync(OrderGuid, Scan("d-cup", cartonB), Mia);
+        Assert.True((await service.SealCartonAsync(OrderGuid, cartonB, new WarehousePickingSealCartonRequestDto(), Mia)).Success);
+        // 先拣后装：Mia 的装箱中的箱 D 装了 5 件杯子（不是 Alex 建的，Alex 也要看得到明细）。
+        Assert.True((await service.SetCartonItemAsync(OrderGuid, cartonD, "P-CUP", new WarehousePickingSetCartonItemRequestDto { Quantity = 5 }, Mia)).Success);
+        // 箱号 B 比 A 大，但创建时间最早：排在最前。
+        var earliest = DateTime.UtcNow.AddHours(-2);
+        await _db.Updateable<PackCarton>().SetColumns(carton => carton.CreatedAtUtc == earliest).Where(carton => carton.CartonGUID == cartonB).ExecuteCommandAsync();
+        var rows = await _db.Queryable<PackCarton>().ToListAsync();
+
+        var cartons = (await service.GetPackProgressAsync(OrderGuid, Alex)).Data!.Cartons;
+
+        Assert.Equal(new[] { cartonB, cartonA, cartonC, cartonD }, cartons.Select(carton => carton.CartonGuid));
+        Assert.All(cartons, carton => Assert.Equal(rows.Single(row => row.CartonGUID == carton.CartonGuid).CreatedAtUtc, carton.CreatedAtUtc));
+        // 已封箱：不带明细。
+        Assert.Null(cartons.Single(carton => carton.CartonGuid == cartonB).Items);
+        // 装箱中：带明细，按商品编码排序；空箱是空数组（不是缺失），客户端据此区分「装箱中的空箱」。
+        var itemsA = cartons.Single(carton => carton.CartonGuid == cartonA).Items!;
+        Assert.Equal(new[] { ("P-CUP", 12), ("P-SPONGE", 6) }, itemsA.Select(item => (item.ProductCode, item.Quantity)));
+        Assert.Empty(cartons.Single(carton => carton.CartonGuid == cartonC).Items!);
+        var itemsD = cartons.Single(carton => carton.CartonGuid == cartonD).Items!;
+        Assert.Equal(("P-CUP", 5), (Assert.Single(itemsD).ProductCode, itemsD[0].Quantity));
+        // 别的拣货人（或认不出拣货人）看到的明细一样。
+        var asMia = (await service.GetPackProgressAsync(OrderGuid, Mia)).Data!.Cartons;
+        Assert.Equal(cartons.Select(carton => carton.CartonGuid), asMia.Select(carton => carton.CartonGuid));
+        Assert.Equal(2, asMia.Single(carton => carton.CartonGuid == cartonA).Items!.Count);
+        Assert.Null((await service.GetPackProgressAsync(OrderGuid, null)).Data!.Cartons.Single(carton => carton.CartonGuid == cartonB).Items);
+    }
+
+    [Fact]
+    public async Task 装箱进度_订单上没有的商品只要装进箱就出现在lines里_订货数为0()
+    {
+        var service = await JoinedServiceAsync();
+        await _db.Insertable(new Product { ProductCode = "P-EXTRA", ItemNumber = "HB99999", Barcode = "9312345999999", ProductName = "Extra" }).ExecuteCommandAsync();
+        var carton = await NewCartonAsync(service);
+        Assert.True((await service.SetCartonItemAsync(OrderGuid, carton, "P-EXTRA", new WarehousePickingSetCartonItemRequestDto { Quantity = 3 }, Alex)).Success);
+
+        var lines = (await service.GetPackProgressAsync(OrderGuid, Alex)).Data!.Lines;
+
+        var extra = lines.Single(line => line.ProductCode == "P-EXTRA");
+        Assert.Equal(0m, extra.OrderedPieces);
+        Assert.Equal(0, extra.PickedPieces);
+        Assert.Equal(3, extra.PackedPieces);
+        Assert.Equal("Extra", extra.ProductName);
+        Assert.Equal("HB99999", extra.ItemNumber);
+        // 订单上的商品照常都在。
+        Assert.Contains(lines, line => line.ProductCode == "P-CUP" && line.OrderedPieces == 36m);
+        Assert.Contains(lines, line => line.ProductCode == "P-SPONGE" && line.OrderedPieces == 12m);
+    }
+
     // ---- 新建箱 ----
 
     [Fact]

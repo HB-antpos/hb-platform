@@ -334,6 +334,11 @@ internal sealed partial class WarehousePickingService
                 PalletNo = carton.PalletNo,
                 CreatedByName = carton.CreatedByName,
                 IsMine = picker != null && string.Equals(carton.CreatedByUserGuid, picker.UserGuid, StringComparison.OrdinalIgnoreCase),
+                CreatedAtUtc = carton.CreatedAtUtc,
+                // 只有装箱中的箱带明细：设备会话读不了打包的箱接口，接着装旧箱要靠这里；已封 / 在途的箱不需要。
+                Items = carton.Status == PackCartonStatuses.Packing
+                    ? carton.Items.Select(item => new WarehousePickingPackProgressCartonItemDto { ProductCode = item.ProductCode, Quantity = item.Quantity }).ToList()
+                    : null,
             }).ToList(),
             OpenCartonCount = openCartons.Count,
             EmptyCartonCount = openCartons.Count - nonEmptyOpen,

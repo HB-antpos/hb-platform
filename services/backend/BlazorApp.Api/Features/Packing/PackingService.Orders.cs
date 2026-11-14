@@ -167,11 +167,13 @@ internal sealed partial class PackingService
     public async Task<PackingOrderSnapshot> GetOrderSnapshotAsync(string orderGuid)
     {
         var snapshot = new PackingOrderSnapshot();
-        var cartons = await _db.Queryable<PackCarton>()
-            .Where(carton => carton.OrderGUID == orderGuid && carton.Status != PackCartonStatuses.Voided)
+        // 排序明确为创建时间升序、再按箱号（按序数比较，不依赖数据库排序规则）。
+        var cartons = (await _db.Queryable<PackCarton>()
+                .Where(carton => carton.OrderGUID == orderGuid && carton.Status != PackCartonStatuses.Voided)
+                .ToListAsync())
             .OrderBy(carton => carton.CreatedAtUtc)
-            .OrderBy(carton => carton.CartonNo)
-            .ToListAsync();
+            .ThenBy(carton => carton.CartonNo, StringComparer.Ordinal)
+            .ToList();
         if (cartons.Count == 0)
         {
             return snapshot;
@@ -202,6 +204,11 @@ internal sealed partial class PackingService
             PalletNo = carton.PalletGUID == null ? null : palletNos.GetValueOrDefault(carton.PalletGUID),
             CreatedByUserGuid = carton.CreatedByUserGuid,
             CreatedByName = carton.CreatedByName,
+            CreatedAtUtc = carton.CreatedAtUtc,
+            Items = itemsByCarton[carton.CartonGUID]
+                .OrderBy(item => item.ProductCode, StringComparer.Ordinal)
+                .Select(item => new PackingOrderCartonItemRow { ProductCode = item.ProductCode, Quantity = item.Quantity })
+                .ToList(),
         }).ToList();
         foreach (var group in items.GroupBy(item => item.ProductCode, StringComparer.OrdinalIgnoreCase))
         {
@@ -300,15 +307,15 @@ internal sealed partial class PackingService
 
     // ---- 分店按订单签收 ----
 
-    public async Task<PackingResult<PackingOrderReceiveDto>> GetOrderReceiveAsync(PackingOperator op, string orderGuid)
+    public async Task<PackingResult<PackingOrderReceiveDto>> GetOrderReceiveAsync(PackingOperator op, string orderRef)
     {
-        var scope = await ResolveReceiveOrderAsync(op, orderGuid);
+        var scope = await ResolveReceiveOrderAsync(op, orderRef);
         return scope.Denied ?? PackingResult<PackingOrderReceiveDto>.Ok(await BuildOrderReceiveAsync(scope.Order!, scope.StoreCode!));
     }
 
-    public async Task<PackingResult<PackingOrderReceiveDto>> ReceiveOrderAsync(PackingOperator op, string orderGuid, int? expectedCartonCount)
+    public async Task<PackingResult<PackingOrderReceiveDto>> ReceiveOrderAsync(PackingOperator op, string orderRef, int? expectedCartonCount)
     {
-        var scope = await ResolveReceiveOrderAsync(op, orderGuid);
+        var scope = await ResolveReceiveOrderAsync(op, orderRef);
         if (scope.Denied != null)
         {
             return scope.Denied;
@@ -384,19 +391,79 @@ internal sealed partial class PackingService
         });
     }
 
-    /// <summary>订货单必须存在，且它的分店在操作人的地点范围内；否则统一按「找不到订货单」处理，不暴露其它分店的订单。</summary>
+    /// <summary>
+    /// 订单引用既可以是 OrderGUID，也可以是订单号（订单条码 HBSO: 后面是订单号）：先按 OrderGUID 精确匹配，没有再按订单号精确匹配
+    /// （去首尾空格、忽略大小写）。订货单必须存在，且它的分店在操作人的地点范围内；否则统一按「找不到订货单」处理，
+    /// 不暴露其它分店的订单是否存在。订单号不唯一时只在操作人的分店范围内取：
+    /// 范围内仍有多张，优先取已经有装箱（非作废箱）关联的，再取下单时间最新的。
+    /// </summary>
     private async Task<(WareHouseOrder? Order, string? StoreCode, PackingResult<PackingOrderReceiveDto>? Denied)> ResolveReceiveOrderAsync(
         PackingOperator op,
-        string orderGuid
+        string orderRef
     )
     {
-        var order = string.IsNullOrWhiteSpace(orderGuid) ? null : await LoadOrderAsync(orderGuid.Trim());
-        var owner = string.IsNullOrWhiteSpace(order?.StoreCode)
-            ? null
-            : op.Owners.FirstOrDefault(item => !PackOwners.IsWarehouse(item.Code) && SameCode(item.Code, order!.StoreCode));
-        return order == null || owner == null
-            ? (null, null, PackingResult<PackingOrderReceiveDto>.Fail(404, PackingErrorCodes.OrderNotFound, "找不到该订货单"))
-            : (order, owner.Code, null);
+        var notFound = (Order: (WareHouseOrder?)null, StoreCode: (string?)null, Denied: (PackingResult<PackingOrderReceiveDto>?)PackingResult<PackingOrderReceiveDto>.Fail(404, PackingErrorCodes.OrderNotFound, "找不到该订货单"));
+        var reference = orderRef?.Trim();
+        var storeOwners = op.Owners.Where(item => !PackOwners.IsWarehouse(item.Code)).ToList();
+        // 只有总仓范围的账号没有任何分店订单可签，省掉查询。
+        if (string.IsNullOrEmpty(reference) || storeOwners.Count == 0)
+        {
+            return notFound;
+        }
+
+        PackingOwner? OwnerOf(WareHouseOrder order) =>
+            string.IsNullOrWhiteSpace(order.StoreCode) ? null : storeOwners.FirstOrDefault(item => SameCode(item.Code, order.StoreCode));
+
+        var byGuid = await LoadOrderAsync(reference);
+        if (byGuid != null)
+        {
+            var guidOwner = OwnerOf(byGuid);
+            return guidOwner == null ? notFound : (byGuid, guidOwner.Code, null);
+        }
+
+        // SQL Server 默认排序规则不区分大小写，等值查询即可命中（并用上 OrderNo 的唯一索引）；
+        // 区分大小写的库（如测试用 SQLite）等值查不到时，再按大写比较补一次。
+        var candidates = await _db.Queryable<WareHouseOrder>()
+            .Where(order => !order.IsDeleted && order.OrderNo == reference)
+            .ToListAsync();
+        if (candidates.Count == 0)
+        {
+            var upper = reference.ToUpperInvariant();
+            candidates = await _db.Queryable<WareHouseOrder>()
+                .Where(order => !order.IsDeleted && order.OrderNo != null && order.OrderNo.ToUpper() == upper)
+                .ToListAsync();
+        }
+
+        var inScope = candidates
+            .Select(order => (Order: order, Owner: OwnerOf(order)))
+            .Where(item => item.Owner != null)
+            .ToList();
+        if (inScope.Count == 0)
+        {
+            return notFound;
+        }
+
+        if (inScope.Count > 1)
+        {
+            // OrderNo 的唯一索引是启动时尽力创建的，不能保证没有重号：同号多张时先看谁有装箱关联。
+            var guids = inScope.Select(item => item.Order.OrderGUID).ToList();
+            var withCartons = (await _db.Queryable<PackCarton>()
+                    .Where(carton => carton.OrderGUID != null && guids.Contains(carton.OrderGUID) && carton.Status != PackCartonStatuses.Voided)
+                    .Select(carton => carton.OrderGUID)
+                    .Distinct()
+                    .ToListAsync())
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (inScope.Any(item => withCartons.Contains(item.Order.OrderGUID)))
+            {
+                inScope = inScope.Where(item => withCartons.Contains(item.Order.OrderGUID)).ToList();
+            }
+        }
+
+        var picked = inScope
+            .OrderByDescending(item => item.Order.OrderDate ?? DateTime.MinValue)
+            .ThenBy(item => item.Order.OrderGUID, StringComparer.Ordinal)
+            .First();
+        return (picked.Order, picked.Owner!.Code, null);
     }
 
     /// <summary>

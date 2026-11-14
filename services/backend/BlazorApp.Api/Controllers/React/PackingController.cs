@@ -171,19 +171,19 @@ public sealed class PackingController(
 
     /// <summary>
     /// 按订单签收（二期）：该订单发给本店的箱（含托盘上的）、签收进度与按商品的订货 / 配货 / 已发对照。
-    /// 订货单的分店不在账号的地点范围内时按 404 处理。
+    /// orderRef 可以是 OrderGUID 或订单号（订单条码 HBSO: 后面是订单号）；订货单的分店不在账号的地点范围内时按 404 处理。
     /// </summary>
-    [HttpGet("receive/orders/{orderGuid}")]
-    public Task<IActionResult> GetOrderReceive(string orderGuid) =>
-        RunAsync(nameof(GetOrderReceive), op => packingService.GetOrderReceiveAsync(op, orderGuid.Trim()));
+    [HttpGet("receive/orders/{orderRef}")]
+    public Task<IActionResult> GetOrderReceive(string orderRef) =>
+        RunAsync(nameof(GetOrderReceive), op => packingService.GetOrderReceiveAsync(op, orderRef.Trim()));
 
     /// <summary>
     /// 按订单一次签收：必须带实到箱数，和系统记录里「该订单发给本店、还在路上」的箱数不一致返回 409 COUNT_MISMATCH，什么都不签。
     /// 不回写订货单任何字段。
     /// </summary>
-    [HttpPost("receive/orders/{orderGuid}")]
-    public Task<IActionResult> ReceiveOrder(string orderGuid, [FromBody] PackingReceiveOrderRequestDto? request) =>
-        RunAsync(nameof(ReceiveOrder), op => packingService.ReceiveOrderAsync(op, orderGuid.Trim(), request?.ExpectedCartonCount));
+    [HttpPost("receive/orders/{orderRef}")]
+    public Task<IActionResult> ReceiveOrder(string orderRef, [FromBody] PackingReceiveOrderRequestDto? request) =>
+        RunAsync(nameof(ReceiveOrder), op => packingService.ReceiveOrderAsync(op, orderRef.Trim(), request?.ExpectedCartonCount));
 
     // ---- 扫码识别、位置查询、主数据 ----
 

@@ -97,10 +97,11 @@ public interface IPackingService
     /// <summary>把订货单名下「装箱中且没有任何商品」的空箱作废（写操作记录），返回作废的箱数。</summary>
     Task<PackingResult<int>> VoidEmptyOrderCartonsAsync(PackingOperator op, string orderGuid);
 
-    // 分店按订单签收（二期）。订货单的分店必须在操作人的地点范围内，否则按「找不到订单」处理。
-    Task<PackingResult<PackingOrderReceiveDto>> GetOrderReceiveAsync(PackingOperator op, string orderGuid);
+    // 分店按订单签收（二期）。orderRef 可以是 OrderGUID 或订单号（订单条码 HBSO: 后面是订单号）；
+    // 订货单的分店必须在操作人的地点范围内，否则按「找不到订单」处理。
+    Task<PackingResult<PackingOrderReceiveDto>> GetOrderReceiveAsync(PackingOperator op, string orderRef);
 
-    Task<PackingResult<PackingOrderReceiveDto>> ReceiveOrderAsync(PackingOperator op, string orderGuid, int? expectedCartonCount);
+    Task<PackingResult<PackingOrderReceiveDto>> ReceiveOrderAsync(PackingOperator op, string orderRef, int? expectedCartonCount);
 }
 
 /// <summary>
@@ -121,6 +122,9 @@ internal sealed partial class PackingService(
     internal const string LocationPrefix = "LC";
     private const int MaxListItems = 200;
     private const int MaxPiecesPerItem = 100000;
+
+    /// <summary>待签收 / 最近签收列表里每个托盘最多带多少个订货单。</summary>
+    private const int MaxIncomingPalletOrders = 20;
     private const string DefaultTimeZoneId = "Australia/Brisbane";
 
     private readonly ISqlSugarClient _db = context.Db;
