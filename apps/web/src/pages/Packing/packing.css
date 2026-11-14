@@ -801,6 +801,34 @@
   border-radius: 50%;
 }
 
+/* 按订单签收入口：面板里每张订单一行（订单号 + 该订单在这里的箱数 + 按钮） */
+.wh-packing-receive-orders {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wh-packing-receive-order {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fafafa;
+  font-size: 13px;
+}
+
+.wh-packing-receive-order-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
 .wh-packing-receive-foot {
   display: flex;
   gap: 8px;

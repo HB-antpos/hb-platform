@@ -327,6 +327,38 @@
       "countMismatchTitle": "实到箱数和系统记录不一致",
       "countMismatchBody": "你填的是 {{actual}} 箱，系统记录还在路上 {{expected}} 箱。请在右侧逐箱核对，只签收已核对的箱。",
       "countMismatchOk": "去逐箱核对"
+    },
+    "orderReceive": {
+      "entry": "按订单签收",
+      "entryOrder": "订单 {{no}}",
+      "entryCartons": "这里有 {{count}} 箱",
+      "title": "按订单签收",
+      "orderNo": "订单 {{no}}",
+      "summary": "在路上 {{transit}} 箱 · 已签收 {{received}} 箱",
+      "cartonsTitle": "该订单发给本店的箱",
+      "productsTitle": "商品对照",
+      "cartonsEmpty": "没有发给本店的箱",
+      "productsEmpty": "没有商品",
+      "columns": {
+        "cartonNo": "箱号",
+        "pallet": "托盘",
+        "itemNumber": "货号",
+        "product": "商品",
+        "ordered": "订货",
+        "alloc": "配货",
+        "shipped": "本次发出"
+      },
+      "shipMismatch": "发出数和配货数不一致",
+      "receiveAll": "签收全部 {{count}} 箱",
+      "nothingPending": "这个订单没有在路上的箱，没有可签收的。",
+      "countTitle": "按订单签收：先数一数实到几箱",
+      "countBody": "请数一数这个订单实际到了几箱（托盘上的箱也算），填在下面。数量和系统记录一致才会一次签收；对不上时一只都不会签收。",
+      "countOk": "确认实到 {{count}} 箱，全部签收",
+      "received": "订单 {{no}} 已签收 {{count}} 箱",
+      "countMismatchTitle": "实到箱数和系统记录不一致",
+      "countMismatchBody": "你填的是 {{entered}} 箱，系统记录这个订单实际在途 {{actual}} 箱。一只都没有签收，请重新数一遍。",
+      "countMismatchOk": "重新数一数",
+      "notInTransit": "这个订单已经没有在路上的箱了（可能刚被签收），已刷新。"
     }
   }
 }

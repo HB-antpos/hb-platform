@@ -327,6 +327,38 @@
       "countMismatchTitle": "Count does not match the system",
       "countMismatchBody": "You entered {{actual}} but the system shows {{expected}} in transit. Check the cartons one by one on the right and receive only the checked ones.",
       "countMismatchOk": "Check one by one"
+    },
+    "orderReceive": {
+      "entry": "Receive by order",
+      "entryOrder": "Order {{no}}",
+      "entryCartons": "{{count}} cartons here",
+      "title": "Receive by order",
+      "orderNo": "Order {{no}}",
+      "summary": "In transit {{transit}} · Received {{received}}",
+      "cartonsTitle": "Cartons of this order sent to your store",
+      "productsTitle": "By product",
+      "cartonsEmpty": "No cartons sent to your store",
+      "productsEmpty": "No products",
+      "columns": {
+        "cartonNo": "Carton no.",
+        "pallet": "Pallet",
+        "itemNumber": "Item no.",
+        "product": "Product",
+        "ordered": "Ordered",
+        "alloc": "Allocated",
+        "shipped": "Shipped"
+      },
+      "shipMismatch": "Shipped does not match allocated",
+      "receiveAll": "Receive all {{count}} cartons",
+      "nothingPending": "This order has no cartons in transit, nothing to receive.",
+      "countTitle": "Receive by order: count the cartons first",
+      "countBody": "Count how many cartons of this order actually arrived (cartons on pallets included) and enter it below. All of them are received at once only if it matches the system record. If not, none is received.",
+      "countOk": "Confirm {{count}} cartons and receive all",
+      "received": "Order {{no}}: {{count}} cartons received",
+      "countMismatchTitle": "Count does not match the system",
+      "countMismatchBody": "You entered {{entered}} but the system shows {{actual}} of this order in transit. No carton was received. Please count again.",
+      "countMismatchOk": "Count again",
+      "notInTransit": "This order has no cartons in transit any more (they may have just been received). Refreshed."
     }
   }
 }

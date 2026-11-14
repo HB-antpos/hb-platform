@@ -410,6 +410,75 @@ export function incomingState(item: {
   return { kind: 'transit' }
 }
 
+// ---- 按订单签收（二期）----
+
+/** 核对面板里一张订单的「按订单签收」入口：同一订单只给一个，cartonCount 是面板里这张订单还在路上的箱数。 */
+export interface PackOrderReceiveEntry {
+  orderGuid: string
+  orderNo: string
+  cartonCount: number
+}
+
+/**
+ * 从面板里的箱（托盘上的箱 / 扫到的散箱）收集「按订单签收」入口：只看还在路上、且带订单号的箱，
+ * 同一订单合并成一个入口，按首次出现的顺序排列。
+ */
+export function collectOrderReceiveEntries(
+  cartons: Pick<PackCartonSummary, 'status' | 'orderGuid' | 'orderNo'>[],
+): PackOrderReceiveEntry[] {
+  const entries = new Map<string, PackOrderReceiveEntry>()
+  for (const carton of cartons) {
+    const orderGuid = carton.orderGuid?.trim()
+    const orderNo = carton.orderNo?.trim()
+    if (carton.status !== PACK_CARTON_STATUS.InTransit || !orderGuid || !orderNo) {
+      continue
+    }
+    const key = orderGuid.toLowerCase()
+    const existing = entries.get(key)
+    if (existing) {
+      existing.cartonCount += 1
+    } else {
+      entries.set(key, { orderGuid, orderNo, cartonCount: 1 })
+    }
+  }
+  return [...entries.values()]
+}
+
+/** 订单发给本店的箱里还在路上（没签收）的。 */
+export function pendingOrderCartons<T extends { status: number }>(order: { cartons: T[] }): T[] {
+  return order.cartons.filter((carton) => carton.status === PACK_CARTON_STATUS.InTransit)
+}
+
+/** 本次发出数和配货数对不上（发出≠配货）：订单所有行都没有配货数时无从比较，不算。 */
+export function isOrderShipMismatch(product: { allocPieces?: number | null; shippedPieces: number }): boolean {
+  if (product.allocPieces === null || product.allocPieces === undefined) {
+    return false
+  }
+  return Number(product.allocPieces) !== Number(product.shippedPieces)
+}
+
+export type PackOrderReceiveFailure = 'countMismatch' | 'notInTransit' | 'notFound' | 'other'
+
+/** 按订单签收失败的类型（后端错误码）：数量对不上、没有在途箱、订单不在本店范围内。 */
+export function classifyOrderReceiveFailure(errorCode: string | null | undefined): PackOrderReceiveFailure {
+  switch (errorCode) {
+    case PACK_ERROR_CODE.CountMismatch:
+      return 'countMismatch'
+    case PACK_ERROR_CODE.NotInTransit:
+      return 'notInTransit'
+    case PACK_ERROR_CODE.OrderNotFound:
+      return 'notFound'
+    default:
+      return 'other'
+  }
+}
+
+/** 409 COUNT_MISMATCH 带回的「实际在途箱数」；没带（或不是非负整数）时用当前读到的在途数兜底。 */
+export function resolveActualInTransitCount(data: { actualInTransitCartonCount?: number | null } | null | undefined, fallback: number): number {
+  const actual = data?.actualInTransitCartonCount
+  return typeof actual === 'number' && Number.isInteger(actual) && actual >= 0 ? actual : fallback
+}
+
 // ---- 商品位置 ----
 
 export const LOCATE_GROUP_ORDER = ['stored', 'transit', 'elsewhere', 'other'] as const
