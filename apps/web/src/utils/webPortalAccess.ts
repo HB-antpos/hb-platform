@@ -210,10 +210,7 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
     defaultPath: '/packing',
     targetPrefixes: ['/packing'],
     canAccess: (access) =>
-      access.hasPermission(P.StorePacking.Use) ||
-      access.hasPermission(P.Warehouse.Packing) ||
-      access.canManageWarehouse ||
-      access.canManageWarehouseOrders,
+      access.hasPermission(P.StorePacking.Use) || access.hasPermission(P.Warehouse.Packing) || access.canManageWarehouseOrders,
   },
   {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。

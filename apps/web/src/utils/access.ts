@@ -343,12 +343,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
   const canManageWarehouseLocations =
     isAdmin || hasPermission(P.Warehouse.ManageLocations) || hasPermission(P.Warehouse.Manage)
   // 扫码打包：分店用 StorePacking.Use；总仓用 Warehouse.Packing，管理仓库 / 管理仓库订货与后端别名同一口径，无需重新授权。
-  const canUsePacking =
-    isAdmin ||
-    hasPermission(P.StorePacking.Use) ||
-    hasPermission(P.Warehouse.Packing) ||
-    hasPermission(P.Warehouse.Manage) ||
-    hasPermission(P.Warehouse.ManageOrders)
+  // canManageWarehouseOrders 已含管理员 / ManageOrders / Manage，这里直接复用，避免重复写权限码（首屏包体预算很紧）。
+  const canUsePacking = canManageWarehouseOrders || hasPermission(P.StorePacking.Use) || hasPermission(P.Warehouse.Packing)
   const canViewContainers = isAdmin || hasPermission(P.Container.View)
   const canCreateContainer = isAdmin || hasPermission(P.Container.Create)
   const canEditContainer = isAdmin || hasPermission(P.Container.Edit)
