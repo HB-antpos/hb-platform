@@ -99,6 +99,7 @@ assertArrayEqual(
     'containers',
     'container-new-products',
     'warehouse-picking',
+    'packing',
     'domestic-purchase',
     'local-supplier-invoices',
     'advertisements',
@@ -351,6 +352,33 @@ assertEqual(
   buildPreview([P.Orders.View]).allRoutes.find((route) => route.routeName === 'warehouse-picking')?.visible,
   false,
   '只有订单查看权限时不应显示订单拣货入口',
+)
+
+// 扫码打包入口分店、总仓共用，与后端 FullAppMenu 的 AnyPermissions 同口径：
+// 分店打包权限、总仓打包权限或两个仓库管理权限任一即可见。
+const packingRoute = completePreview.allRoutes.find((route) => route.routeName === 'packing')
+assertArrayEqual(
+  packingRoute?.permissionCodes ?? [],
+  [P.StorePacking.Use, P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+  '扫码打包入口应声明 StorePacking.Use / Warehouse.Packing / Warehouse.Manage / Warehouse.ManageOrders 任选权限',
+)
+assertEqual(packingRoute?.path, '/(shell)/packing', '扫码打包入口应指向移动端 packing 路由')
+for (const permissionCode of [P.StorePacking.Use, P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders]) {
+  assertEqual(
+    buildPreview([permissionCode]).allRoutes.find((route) => route.routeName === 'packing')?.visible,
+    true,
+    `仅有 ${permissionCode} 时应显示扫码打包入口`,
+  )
+}
+assertEqual(
+  buildPreview([P.Warehouse.Picking]).allRoutes.find((route) => route.routeName === 'packing')?.visible,
+  false,
+  '只有拣货权限时不应显示扫码打包入口',
+)
+assertEqual(
+  buildPreview([P.StorePacking.Use]).allRoutes.find((route) => route.routeName === 'warehouse-picking')?.visible,
+  false,
+  '只有分店打包权限时不应连带显示订单拣货入口',
 )
 
 // 新品到店入口与后端 FullAppMenu 同口径：只认移动端新品到店专用权限，货柜查看权限不会连带显示。

@@ -21,10 +21,14 @@ import {
 import { usePickPreferences } from "../pick-preferences";
 import { activeTeammates, relativeMinutes, shortPickerName, stockoutReasonKey } from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
+import { readPackSubmitBlock } from "../pack-api-normalization";
+import { encodePackedParam } from "../pack-carton-logic";
+import { packReviewRoute } from "../pack-routes";
 import { PICKER_RECONFIRM_CODES, pickingErrorMessage } from "../picking-errors";
 import { PICK_SESSION_STATUS } from "../types";
 import type { PickSheet, PickSheetLine } from "../types";
 import { IncompleteSegmentRows } from "../components/IncompleteSegments";
+import { PackFinishCard } from "../components/PackFinishCard";
 import { Avatar, PickHeader } from "../components/PickHeader";
 import { ProductThumb } from "../components/ProductThumb";
 import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
@@ -112,14 +116,24 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
     setConfirmVisible(false);
     setSubmitting(true);
     try {
-      await submitPickOrder(orderGuid);
+      const result = await submitPickOrder(orderGuid);
       await queryClient.invalidateQueries({ queryKey: ["warehousePicking", "orders"] });
-      router.dismissTo(PICKING_HOME);
+      // 订单装过箱：把「共 N 只箱 · M 件」带回订单列表提示；没装过箱与原来完全一样。
+      router.dismissTo(
+        (result.cartonCount != null
+          ? { pathname: PICKING_HOME, params: { packed: encodePackedParam(result.cartonCount, result.packedPieces ?? 0) } }
+          : PICKING_HOME) as Parameters<typeof router.dismissTo>[0],
+      );
     } catch (error) {
-      const { code } = readPickingError(error);
+      const { code, data } = readPickingError(error);
       if (code && PICKER_RECONFIRM_CODES.has(code)) {
         clearPicker();
         router.dismissTo(PICKING_HOME);
+        return;
+      }
+      if (readPackSubmitBlock(code, data)) {
+        // 还有没封的箱 / 拣货数与装箱数对不上：去核对页处理，处理完在那里重新提交。
+        router.push(packReviewRoute(orderGuid));
         return;
       }
       if (code === "SEGMENTS_INCOMPLETE") {
@@ -216,6 +230,8 @@ export function PickFinishScreen({ orderGuid }: { orderGuid: string }) {
             })}
           </View>
         ) : null}
+
+        <PackFinishCard orderGuid={orderGuid} />
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{t("finish.variances")}</Text>

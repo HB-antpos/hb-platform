@@ -58,6 +58,8 @@ public sealed class WarehousePickingServiceTests : IDisposable
             typeof(WarehouseOrderPickStockout),
             typeof(WarehouseOrderPickAssignment)
         );
+        // 提交拣货时会查订单有没有装箱，拣货测试库也要有打包表。
+        _db.CodeFirst.InitTables(PickingPackingTestSupport.PackTables);
     }
 
     [Fact]
@@ -621,7 +623,7 @@ public sealed class WarehousePickingServiceTests : IDisposable
     };
 
     private WarehousePickingService CreateService() =>
-        new(CreateSqlSugarContext(_db), _productWarehouseService.Object, NullLogger<WarehousePickingService>.Instance);
+        PickingPackingTestSupport.PickingService(_db, _productWarehouseService.Object);
 
     private static SqlSugarContext CreateSqlSugarContext(ISqlSugarClient db)
     {
