@@ -477,6 +477,8 @@ function closeSummary(): DailyCloseSummary {
       },
     ],
     cashRoundingCents: 0,
+    cashInCents: 0,
+    cashOutCents: 0,
     expectedCashCents: 1_000,
   };
 }

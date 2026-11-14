@@ -132,6 +132,18 @@ function check(
       : decimalOf(wire.cashRoundingAmount);
   withinLimit(roundingDecimal, "AMOUNT_OUT_OF_RANGE");
   const cashRounding = roundMoneyCents(roundingDecimal);
+  // cashInAmount / cashOutAmount 同样可选（旧客户端不发，按 0）；是冲正抵消后的非负净额（服务端 INVALID_CASH_MOVEMENT_TOTAL）。
+  const optionalMoneyCents = (value: unknown): bigint => {
+    const decimal =
+      value === undefined || value === null ? { unscaled: 0n, scale: 0 } : decimalOf(value);
+    withinLimit(decimal, "AMOUNT_OUT_OF_RANGE");
+    return roundMoneyCents(decimal);
+  };
+  const cashIn = optionalMoneyCents(wire.cashInAmount);
+  const cashOut = optionalMoneyCents(wire.cashOutAmount);
+  if (cashIn < 0n || cashOut < 0n) {
+    throw new RuleViolation("INVALID_CASH_MOVEMENT_TOTAL");
+  }
   // installmentPaymentCount 是可选字段（旧客户端不发，按 0 处理），不能为负。
   const installmentPaymentCount = wire.installmentPaymentCount ?? 0;
   if (
@@ -159,8 +171,10 @@ function check(
   if (counted !== noteCents + coinCents) {
     throw new RuleViolation("INVALID_COUNTED_CASH_AMOUNT");
   }
-  // 差额 = 实点 − 应有现金（现金净额 + 现金进位），容差 0.01（1 分）。
-  if (abs(difference - (counted - (cashNetCents + cashRounding))) > 1n) {
+  // 差额 = 实点 − 应有现金（现金净额 + 现金进位 + 存入 − 取出），容差 0.01（1 分）。
+  if (
+    abs(difference - (counted - (cashNetCents + cashRounding + cashIn - cashOut))) > 1n
+  ) {
     throw new RuleViolation("INVALID_CASH_DIFFERENCE");
   }
 }

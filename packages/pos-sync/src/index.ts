@@ -7,5 +7,8 @@ export * from "./core/sync/hbpos-sync-adapters";
 export * from "./core/sync/daily-close-sync-request";
 export * from "./core/sync/hbpos-daily-close-sync-adapter";
 export * from "./core/sync/daily-close-upload-service";
+export * from "./core/sync/cash-movement-sync-request";
+export * from "./core/sync/hbpos-cash-movement-sync-adapter";
+export * from "./core/sync/cash-movement-upload-service";
 export * from "./features/receipt-profile/receipt-profile-sync-controller";
 export * from "./features/pos-settings/pos-settings-service";

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "baseline": "ddcca999b9d6a90e07b7b3d88c5b93a28d0c7b13",
-  "reviewedModuleTopologySha256": "d9e9661aad9fb53cfe03111823e272454192d9ee1d63135ed38d5dc78ee46f0c",
+  "reviewedModuleTopologySha256": "92110421207569701b803c85d8ea498c88d19abeee516fcd0fd56239d5777b55",
   "migratedPaths": {
     "pos-domain": [
       "core/contracts/audit-actor.test.ts",
@@ -195,10 +195,10 @@
     {
       "path": "core/sync/hbpos-sync-adapters.ts",
       "package": "pos-sync",
-      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400",
+      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400；员工审计上传白名单新增 CASH_IN / CASH_OUT / CASH_MOVEMENT_VOID（现金进出，服务端白名单已有）",
       "baselineCanonicalRuntimeSha256": "1320cf6ac0ade04e774ee613faf5fff1c562384f7e8d6397c3a45a3e3adaac58",
-      "canonicalRuntimeSha256": "e31930157e58831cef3282eb839a3c10254358d7016e4f4b7f435a3eb75ff874",
-      "canonicalTypeSha256": "19d8cb139c33838f2fc9debe0933fdf42c94d7482e1cca740f555f2c634bc3ba",
+      "canonicalRuntimeSha256": "d415dc2a96183e588c3b1a63b5ec82efe495c5383f0a4179c0376bba977778ec",
+      "canonicalTypeSha256": "00728a8bf1bee7aaf5da7ec2beb6269f42431a5a55cf987db9f25b42d191f637",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -217,10 +217,10 @@
     {
       "path": "core/sync/sync-coordinator.ts",
       "package": "pos-sync",
-      "reason": "换店门禁需要同步协调器在更新切换释放后补做定时唤醒，并向双端运行时发布脱敏的单飞 drain 终态；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；新增可选的日结上传端口：每次 drain 末尾补传本地日结（异常隔离、关闭感知、重试时间参与定时唤醒并钳到至少 1 秒）",
+      "reason": "换店门禁需要同步协调器在更新切换释放后补做定时唤醒，并向双端运行时发布脱敏的单飞 drain 终态；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；新增可选的日结上传端口：每次 drain 末尾补传本地日结（异常隔离、关闭感知、重试时间参与定时唤醒并钳到至少 1 秒）；新增可选 cashMovementUpload：每次 drain 在日结上传之前先传现金进出，异常隔离、关闭感知，并入定时唤醒；日结与现金进出共用同一唤醒钳制",
       "baselineCanonicalRuntimeSha256": "3ea1a760b8bef7d1df2cd3e2db0a3a10597e193bfa8fb3dd5b9af5e5657cc7dc",
-      "canonicalRuntimeSha256": "d92c9a18946720bfa5eac4203a00f82bcbfc486fcd7b5d4f6fe5e5f140071f35",
-      "canonicalTypeSha256": "6e03b31ad6e159d6cc21195ff14816350a76394e94d6a10ed3d7ea12f4a32b6d",
+      "canonicalRuntimeSha256": "9a866a0107a04cc3e1255ddf1584ae499dfb6860354ad66a3cd206d20cd9b012",
+      "canonicalTypeSha256": "5482d0ecd7da326889c43db1dc460113fece32c82c9ff0f99a7e9eaa52e65c56",
       "behaviorTests": [
         {
           "workspace": "packages/pos-sync",
@@ -647,10 +647,10 @@
     {
       "path": "core/contracts/daily-close.ts",
       "package": "pos-domain",
-      "reason": "日结对齐 WPF #914：汇总与存档新增现金进位 cashRoundingCents（应有现金 = 现金净额 + 逐单 5 分进位），新增 sumCashRoundingCents 按订单合并现金 tender 后进位，并引入 money 的 roundAudCash",
+      "reason": "日结对齐 WPF #914：汇总与存档新增现金进位 cashRoundingCents（应有现金 = 现金净额 + 逐单 5 分进位），新增 sumCashRoundingCents 按订单合并现金 tender 后进位，并引入 money 的 roundAudCash；现金进出（Cash In / Out）：汇总与存档新增 cashInCents / cashOutCents（冲正抵消后的非负净额，旧存档补 0），应有现金 = 现金净额 + 分期现金 + 进位 + 存入 − 取出",
       "baselineCanonicalRuntimeSha256": "011edd57ad1d3a3605bb4710efd7ae6a3ad16967b1db2608cc3d9b0436586c22",
       "canonicalRuntimeSha256": "b7f9f583bd84bb84cabfd5f2ad8486a559d3755d9c7b5785ffa179b2d6aa6b54",
-      "canonicalTypeSha256": "26241ce4b50aa5ca04089dc9a6c15484468ebe759ecae86ccb3fa5be8a75e5ff",
+      "canonicalTypeSha256": "9caee00ecb3a2797a4d5bb09112bf0279d659eff4cea59d3f81fe653ad3a750f",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -675,10 +675,10 @@
     {
       "path": "core/db/sqlite-daily-close-repository.ts",
       "package": "pos-db",
-      "reason": "日结对齐 WPF #914：汇总按订单合并现金 tender 计算进位，应有现金含进位；存档校验 应有现金 = 现金净额 + 进位（进位不得超过订单数×2 分）并持久化 cash_rounding_cents，列不存在时按 0 读取",
+      "reason": "日结对齐 WPF #914：汇总按订单合并现金 tender 计算进位，应有现金含进位；存档校验 应有现金 = 现金净额 + 进位（进位不得超过订单数×2 分）并持久化 cash_rounding_cents，列不存在时按 0 读取；现金进出：汇总在同一事务快照内并入本期存入 / 取出（按 occurred_at 营业日窗口，不看上传状态），应有现金含存入与取出；存档校验、INSERT、读回（旧列缺失按 0）同步带两项",
       "baselineCanonicalRuntimeSha256": "bf0e2926c5fc979d72ade18eef8da2e100e85a0f66600f497ae73145f7e36c7c",
-      "canonicalRuntimeSha256": "65a8d0613a05b15317c3d0a0141902256b10e24e90e34fc6802dd9c2623828f1",
-      "canonicalTypeSha256": "8c238b890d76ecbf3394e877a8fee91cbc82438b848c2aae3fde72f3d1ea1d00",
+      "canonicalRuntimeSha256": "116963bdf0402a01da8eafe9124d88a5d5138bc44a30c422868ecbf91178c46d",
+      "canonicalTypeSha256": "c80aaf86fb394ca5e4149d0fe8f73e3925928bfef668fb395d0aa3b6e90950e6",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
@@ -709,10 +709,10 @@
     {
       "path": "features/receipts/daily-close-receipt.ts",
       "package": "pos-receipt-core",
-      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值；日结小票营业日期单独成块并加粗、保存日与营业日期不一致时追加核对提示，新增日结现金单（对齐 WPF #478）",
+      "reason": "日结对齐 WPF #914：日结小票在应有现金前新增 Cash Rounding（现金进位）一行，应有现金取含进位的存档值；日结小票营业日期单独成块并加粗、保存日与营业日期不一致时追加核对提示，新增日结现金单（对齐 WPF #478）；日结回单有现金存入 / 取出时在应有现金前打印 Cash In（Change top-up / Other cash in）与 Cash Out（Safe drop / Paid out），没有记录时整段不打",
       "baselineCanonicalRuntimeSha256": "bb57fd4e6d35bb7ee0915adf32f0e46462df76f70a7e087797e4451e05808f3b",
-      "canonicalRuntimeSha256": "33378b0956794954a0f0f9b4e79b36c70a66bf5a18f79ec681c9c7a3975c6ede",
-      "canonicalTypeSha256": "dd9ba8f346c17f0c82b1c78cef575c878a9f26a8298f62a2a4189d846832e565",
+      "canonicalRuntimeSha256": "2484e9d83047414888530acaff09bebdf753254d787d93a17de7d0b30d0ebd65",
+      "canonicalTypeSha256": "b467e6fb0be632a23218d3236c96903b3230ff611adc6cd13b62de1691e490a2",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",

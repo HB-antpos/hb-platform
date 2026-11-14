@@ -112,6 +112,10 @@ export function mapDailyCloseArchiveToSyncRequest(
     cashDifference: centsToAmount(archive.varianceCents),
     // 现金进位（5 分进位）：服务端按 差额 = 实点 − (现金净额 + 进位) 校验，缺省按 0 处理（旧客户端）。
     cashRoundingAmount: centsToAmount(archive.cashRoundingCents),
+    // 现金存入 / 取出合计（冲正抵消后的非负净额）：服务端按 应有现金 = 现金净额 + 进位 + 存入 − 取出 核对差额；
+    // 旧客户端不带这两项服务端按 0，所以没有现金进出时发 0 与旧口径一致。
+    cashInAmount: centsToAmount(archive.cashInCents),
+    cashOutAmount: centsToAmount(archive.cashOutCents),
     installmentPaymentCount: archive.installmentPaymentCount,
   };
 }
