@@ -76,6 +76,37 @@ for (const group of ['stored', 'transit', 'elsewhere', 'other']) {
   assert(zhKeys.includes(`locate.group.${group}`), `缺少位置分组文案: locate.group.${group}`)
 }
 
+// 4b) 二期「按订单签收」：这一组文案必须齐全，且中英文的插值变量一致（写错变量名界面会显示空白或原样的 {{xxx}}）。
+const placeholders = (text: string) => [...text.matchAll(/\{\{\s*(\w+)\s*\}\}/g)].map((match) => match[1]).sort().join(',')
+const flatZh = flatten(zh[NAMESPACE] as Json)
+const flatEn = flatten(en[NAMESPACE] as Json)
+for (const key of [
+  'entry',
+  'entryOrder',
+  'entryCartons',
+  'incomingOrders',
+  'coveredHint',
+  'title',
+  'summary',
+  'receiveAll',
+  'countTitle',
+  'countBody',
+  'countOk',
+  'received',
+  'countMismatchTitle',
+  'countMismatchBody',
+  'countMismatchOk',
+  'notInTransit',
+  'nothingPending',
+  'shipMismatch',
+  'columns.shipped',
+]) {
+  assert(`orderReceive.${key}` in flatZh && `orderReceive.${key}` in flatEn, `缺少按订单签收文案: orderReceive.${key}`)
+}
+for (const key of Object.keys(flatZh).filter((name) => name.startsWith('orderReceive.'))) {
+  assert(placeholders(String(flatZh[key])) === placeholders(String(flatEn[key])), `按订单签收文案中英文插值变量不一致: ${key}`)
+}
+
 // 5) 不再有旧命名空间的残留引用。
 for (const name of sources) {
   assert(!readFileSync(join(ROOT, name), 'utf8').includes('warehouseUi.packing'), `${name} 仍引用旧文案命名空间 warehouseUi.packing`)

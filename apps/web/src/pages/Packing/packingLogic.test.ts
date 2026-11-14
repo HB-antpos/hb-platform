@@ -1,7 +1,9 @@
+import { normalizePackOrderReceive } from '../../services/packingService'
 import type {
   PackCartonItem,
   PackCartonSummary,
   PackLocateRow,
+  PackOrderReceive,
   PackOwner,
   PackPalletDetail,
   PackPalletSummary,
@@ -11,9 +13,12 @@ import {
   UNASSIGNED_DESTINATION,
   buildPalletSteps,
   canDispatchCarton,
+  assignIncomingOrderEntries,
   canDispatchPallet,
   cartonStateKind,
   checkScannedCarton,
+  classifyOrderReceiveFailure,
+  collectOrderReceiveEntries,
   destinationKind,
   destinationPlaceName,
   destinationToRequest,
@@ -21,8 +26,10 @@ import {
   findCartonItemByCode,
   formatPackTime,
   groupLocateRows,
+  incomingItemOrders,
   incomingState,
   isCartonCountConfirmed,
+  isOrderShipMismatch,
   isReadOnlyForOwner,
   isSameDestination,
   isShippableDestination,
@@ -31,7 +38,9 @@ import {
   palletStateKind,
   parsePackUtc,
   parseWeightInput,
+  pendingOrderCartons,
   pendingPalletCartons,
+  resolveActualInTransitCount,
   resolveInitialOwnerCode,
   resolveOrderProgress,
   resolveReceiveBlock,
@@ -360,6 +369,150 @@ assertEqual(sections.map((section) => section.quantity).join(','), '101,12,7,8',
 assertEqual(sections[0].rows.map((entry) => entry.cartonGuid).join(','), 'c-4,c-3,c-2,c-1', '本地存放：有位置的按位置排序在前（同位置最近变动在前），没位置的最后')
 assertEqual(sections[3].rows.map((entry) => entry.cartonGuid).join(','), 'c-8,c-7,c-9', '其他分店按所属分店名排序')
 assertEqual(groupLocateRows([]).length, 0, '没有行就没有分组')
+
+// ---- 按订单签收（二期）----
+const inTransit = { status: 3 }
+const sealedCarton = { status: 2 }
+assertDeepEqual(
+  collectOrderReceiveEntries([
+    { ...inTransit, orderGuid: 'o-1', orderNo: 'SO001' },
+    { ...inTransit, orderGuid: 'o-2', orderNo: 'SO002' },
+    { ...inTransit, orderGuid: 'O-1', orderNo: 'SO001' },
+    { ...inTransit, orderGuid: 'o-1', orderNo: 'SO001' },
+  ]),
+  [
+    { orderGuid: 'o-1', orderNo: 'SO001', cartonCount: 3 },
+    { orderGuid: 'o-2', orderNo: 'SO002', cartonCount: 1 },
+  ],
+  '同一订单（忽略 GUID 大小写）只给一个入口，按首次出现的顺序，统计这里的在途箱数',
+)
+assertDeepEqual(
+  collectOrderReceiveEntries([
+    { ...inTransit },
+    { ...inTransit, orderGuid: null, orderNo: 'SO003' },
+    { ...inTransit, orderGuid: 'o-4', orderNo: '  ' },
+    { ...sealedCarton, orderGuid: 'o-5', orderNo: 'SO005' },
+    { status: 1, orderGuid: 'o-6', orderNo: 'SO006' },
+  ]),
+  [],
+  '没订单号 / 没订单 GUID / 不在路上的箱不给入口',
+)
+assertDeepEqual(
+  collectOrderReceiveEntries([{ status: 3, orderGuid: ' o-7 ', orderNo: ' SO007 ' }]),
+  [{ orderGuid: 'o-7', orderNo: 'SO007', cartonCount: 1 }],
+  '订单号 / GUID 去掉首尾空白',
+)
+assertEqual(
+  pendingOrderCartons({ cartons: [{ status: 3 }, { status: 2 }, { status: 3 }, { status: 1 }] }).length,
+  2,
+  '订单里还在路上的箱数',
+)
+assertEqual(pendingOrderCartons({ cartons: [] }).length, 0, '没有箱就没有在途箱')
+
+// ---- 待签收清单里的「按订单签收」入口 ----
+// 散箱行：用 orderGuid / orderNo；没有订单关联（或旧后端没有该字段）没有入口。
+assertDeepEqual(
+  incomingItemOrders({ kind: 'carton', orderGuid: 'o-1', orderNo: 'SO001' }),
+  [{ orderGuid: 'o-1', label: 'SO001' }],
+  '散箱行取 orderGuid / orderNo',
+)
+assertDeepEqual(incomingItemOrders({ kind: 'carton' }), [], '散箱没有订单关联（旧后端缺字段）没有入口')
+assertDeepEqual(incomingItemOrders({ kind: 'carton', orderGuid: '  ', orderNo: 'SO001' }), [], '订单 GUID 为空白不给入口')
+assertDeepEqual(
+  incomingItemOrders({ kind: 'carton', orderGuid: 'abcdef12-0000-0000-0000-000000000000', orderNo: null }),
+  [{ orderGuid: 'abcdef12-0000-0000-0000-000000000000', label: 'abcdef12' }],
+  '没有订单号时用 GUID 前 8 位当显示名',
+)
+// 托盘行：用 orders[]，散箱字段不参与；同一行按 GUID（忽略大小写）去重，缺 GUID 的丢弃。
+assertDeepEqual(
+  incomingItemOrders({
+    kind: 'pallet',
+    orderGuid: 'ignored',
+    orderNo: 'IGNORED',
+    orders: [
+      { orderGuid: 'o-1', orderNo: 'SO001' },
+      { orderGuid: 'o-2', orderNo: ' SO002 ' },
+      { orderGuid: 'O-1', orderNo: 'SO001' },
+      { orderGuid: '', orderNo: 'SO003' },
+    ],
+  }),
+  [
+    { orderGuid: 'o-1', label: 'SO001' },
+    { orderGuid: 'o-2', label: 'SO002' },
+  ],
+  '托盘行取 orders[]，行内去重、丢弃缺 GUID 的',
+)
+assertDeepEqual(incomingItemOrders({ kind: 'pallet' }), [], '托盘没有订单关联时 orders 缺失，没有入口')
+assertDeepEqual(incomingItemOrders({ kind: 'pallet', orders: null }), [], 'orders 为 null 也没有入口')
+assertEqual(
+  incomingItemOrders({ kind: 'pallet', orders: Array.from({ length: 20 }, (_, index) => ({ orderGuid: `o-${index}`, orderNo: `SO${index}` })) }).length,
+  20,
+  '托盘最多 20 个订单，全部保留',
+)
+
+// 清单里同一订单只在第一次出现的行给入口，后面的行只显示订单号。
+const assigned = assignIncomingOrderEntries([
+  { key: 'pending:p1', orders: [{ orderGuid: 'o-1', label: 'SO001' }, { orderGuid: 'o-2', label: 'SO002' }] },
+  { key: 'pending:p2', orders: [{ orderGuid: 'O-2', label: 'SO002' }, { orderGuid: 'o-3', label: 'SO003' }] },
+  { key: 'pending:c1', orders: [{ orderGuid: 'o-1', label: 'SO001' }] },
+  { key: 'pending:c2', orders: [] },
+  { key: 'pending:p3', orders: [{ orderGuid: 'o-4', label: 'SO004' }] },
+])
+assertDeepEqual(assigned.get('pending:p1'), { entries: [{ orderGuid: 'o-1', label: 'SO001' }, { orderGuid: 'o-2', label: 'SO002' }], covered: [] }, '托盘多订单：每个订单一个入口')
+assertDeepEqual(
+  assigned.get('pending:p2'),
+  { entries: [{ orderGuid: 'o-3', label: 'SO003' }], covered: [{ orderGuid: 'O-2', label: 'SO002' }] },
+  '后面的托盘：已出现过的订单（忽略 GUID 大小写）只显示订单号，新订单给入口',
+)
+assertDeepEqual(
+  assigned.get('pending:c1'),
+  { entries: [], covered: [{ orderGuid: 'o-1', label: 'SO001' }] },
+  '散箱的订单前面已给过入口：只显示订单号，不重复占位',
+)
+assertEqual(assigned.has('pending:c2'), false, '没有订单的行不在结果里')
+assertDeepEqual(assigned.get('pending:p3'), { entries: [{ orderGuid: 'o-4', label: 'SO004' }], covered: [] }, '只有一个订单：一个入口')
+assertEqual(assigned.size, 4, '结果只含有订单的行')
+assertEqual(assignIncomingOrderEntries([]).size, 0, '空清单没有入口')
+// 清单被「来自」过滤后重新分配：入口跟着留下来的第一行走，不会因为前面的行被过滤掉而消失。
+assertDeepEqual(
+  assignIncomingOrderEntries([{ key: 'pending:c1', orders: [{ orderGuid: 'o-1', label: 'SO001' }] }]).get('pending:c1'),
+  { entries: [{ orderGuid: 'o-1', label: 'SO001' }], covered: [] },
+  '过滤后第一次出现的行拿到入口',
+)
+
+// 实到箱数核对与整托签收同一做法：必须是非负整数且等于在途箱数；没有在途箱不能签收。
+assertEqual(isCartonCountConfirmed(3, 3), true, '数对了可以签收全部')
+assertEqual(isCartonCountConfirmed(2, 3), false, '少数了不能签收')
+assertEqual(isCartonCountConfirmed(4, 3), false, '多数了不能签收')
+assertEqual(isCartonCountConfirmed(null, 3), false, '没填不能签收')
+assertEqual(isCartonCountConfirmed(0, 0), false, '没有在途箱不能签收')
+
+assertEqual(isOrderShipMismatch({ allocPieces: 12, shippedPieces: 12 }), false, '发出 = 配货不高亮')
+assertEqual(isOrderShipMismatch({ allocPieces: 12, shippedPieces: 10 }), true, '少发了高亮')
+assertEqual(isOrderShipMismatch({ allocPieces: 12, shippedPieces: 14 }), true, '多发了高亮')
+assertEqual(isOrderShipMismatch({ allocPieces: 0, shippedPieces: 0 }), false, '配货 0 且发出 0 不高亮')
+assertEqual(isOrderShipMismatch({ allocPieces: null, shippedPieces: 5 }), false, '没有配货数无从比较，不高亮')
+assertEqual(isOrderShipMismatch({ shippedPieces: 5 }), false, '配货数缺失（null 不输出）不高亮')
+
+assertEqual(classifyOrderReceiveFailure('COUNT_MISMATCH'), 'countMismatch', '409 数量不符')
+assertEqual(classifyOrderReceiveFailure('NOT_IN_TRANSIT'), 'notInTransit', '409 没有在途箱')
+assertEqual(classifyOrderReceiveFailure('ORDER_NOT_FOUND'), 'notFound', '404 订单不在范围内')
+assertEqual(classifyOrderReceiveFailure('PACKING_NOT_ALLOWED'), 'other', '其他错误码')
+assertEqual(classifyOrderReceiveFailure(undefined), 'other', '没有错误码')
+
+assertEqual(resolveActualInTransitCount({ actualInTransitCartonCount: 5 }, 3), 5, '用后端带回的实际在途数')
+assertEqual(resolveActualInTransitCount({ actualInTransitCartonCount: 0 }, 3), 0, '实际在途 0 也要如实提示')
+assertEqual(resolveActualInTransitCount({}, 3), 3, '没带回时用当前读到的在途数')
+assertEqual(resolveActualInTransitCount(null, 3), 3, '没有 data 时用当前读到的在途数')
+assertEqual(resolveActualInTransitCount({ actualInTransitCartonCount: -1 }, 3), 3, '非法值回退')
+
+const receiveNormalized = normalizePackOrderReceive({ orderGuid: 'o-1', storeCode: '1008' } as PackOrderReceive)
+assertDeepEqual(
+  [receiveNormalized.cartons, receiveNormalized.products, receiveNormalized.inTransitCount, receiveNormalized.receivedCount],
+  [[], [], 0, 0],
+  '按订单签收返回缺字段时补默认值',
+)
+assertEqual(receiveNormalized.actualInTransitCartonCount, undefined, '可空字段保持缺失')
 
 // ---- 存放位置名称 ----
 assertEqual(normalizeLocationName('  后仓 A 架 '), '后仓 A 架', '去掉首尾空白')

@@ -1,5 +1,5 @@
-import { BarcodeOutlined, CheckCircleFilled, CheckOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Input, InputNumber, Modal, Select, Tag, Typography, message } from 'antd'
+import { BarcodeOutlined, CheckCircleFilled, CheckOutlined, DownOutlined } from '@ant-design/icons'
+import { Alert, Button, Dropdown, Empty, Input, InputNumber, Modal, Select, Tag, Typography, message } from 'antd'
 import type { InputRef } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -13,18 +13,86 @@ import { PACK_CARTON_STATUS, PACK_ERROR_CODE } from '../../types/packing'
 import { isScanFeedbackUnlocked, playScanFeedback, unlockScanFeedback } from '../../utils/scanFeedback'
 
 import LocationSelect from './LocationSelect'
+import OrderReceiveDrawer from './OrderReceiveDrawer'
 import {
+  assignIncomingOrderEntries,
   checkScannedCarton,
+  collectOrderReceiveEntries,
   formatPackTime,
+  incomingItemOrders,
   incomingState,
   isCartonCountConfirmed,
   pendingPalletCartons,
   resolveReceiveBlock,
   selectCheckedCartons,
 } from './packingLogic'
+import type { PackIncomingOrderRef, PackIncomingRowOrders } from './packingLogic'
 import { showPackingError, usePackingPage } from './packingShared'
 
 type IncomingRow = PackIncomingItem & { section: 'pending' | 'recent' }
+
+/**
+ * 待签收清单一行里的订单信息（编号下面的一行小字）：
+ * - 待签收行：这一行提供入口的订单——1 个订单是订单号加「按订单签收」按钮，多个订单是「N 张订单」加一个下拉菜单；
+ *   已在前面的行给过入口的订单只显示订单号（同一订单在清单里只占一个入口）；
+ * - 最近签收行：只显示订单号，没有入口。
+ */
+function IncomingOrdersLine({
+  record,
+  rowOrders,
+  onOpen,
+}: {
+  record: IncomingRow
+  rowOrders?: PackIncomingRowOrders
+  onOpen: (order: PackIncomingOrderRef) => void
+}) {
+  const { t } = useTranslation()
+  if (record.section === 'recent') {
+    const labels = incomingItemOrders(record).map((order) => order.label)
+    return labels.length > 0 ? <div className="wh-packing-incoming-orders wh-packing-mono wh-packing-muted">{labels.join(' · ')}</div> : null
+  }
+  if (!rowOrders) {
+    return null
+  }
+  const { entries, covered } = rowOrders
+  return (
+    <div className="wh-packing-incoming-orders">
+      {entries.length === 1 ? (
+        <>
+          <span className="wh-packing-mono wh-packing-muted">{entries[0].label}</span>
+          <Button type="link" size="small" className="wh-packing-incoming-entry" onClick={() => onOpen(entries[0])}>
+            {t('packingUi.orderReceive.entry')}
+          </Button>
+        </>
+      ) : entries.length > 1 ? (
+        <>
+          <span className="wh-packing-muted">{t('packingUi.orderReceive.incomingOrders', { count: entries.length })}</span>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: entries.map((order) => ({ key: order.orderGuid, label: order.label })),
+              onClick: ({ key }) => {
+                const order = entries.find((entry) => entry.orderGuid === key)
+                if (order) {
+                  onOpen(order)
+                }
+              },
+            }}
+          >
+            <Button type="link" size="small" className="wh-packing-incoming-entry">
+              {t('packingUi.orderReceive.entry')} <DownOutlined />
+            </Button>
+          </Dropdown>
+        </>
+      ) : null}
+      {covered.length > 0 ? (
+        <span className="wh-packing-mono wh-packing-muted" title={t('packingUi.orderReceive.coveredHint')}>
+          {covered.map((order) => order.label).join(' · ')}
+        </span>
+      ) : null}
+    </div>
+  )
+}
 
 /**
  * 到货签收：扫托盘标签或箱标签（托盘标签丢了，扫托盘上任意一只箱的标签同样打开整个托盘），
@@ -43,6 +111,8 @@ export default function ReceiveTab({ active }: { active: boolean }) {
   const [scanError, setScanError] = useState<string | null>(null)
   const [countOpen, setCountOpen] = useState(false)
   const [countInput, setCountInput] = useState<number | null>(0)
+  /** 正在按订单签收的订单（抽屉打开时为非空）。 */
+  const [orderReceive, setOrderReceive] = useState<{ orderGuid: string; orderNo: string } | null>(null)
   const scanInputRef = useRef<InputRef>(null)
   const lookupRef = useRef<PackReceiveLookup | null>(null)
   lookupRef.current = lookup
@@ -55,10 +125,10 @@ export default function ReceiveTab({ active }: { active: boolean }) {
   }, [active, dataVersion, reloadIncoming])
 
   useEffect(() => {
-    if (active && !countOpen) {
+    if (active && !countOpen && !orderReceive) {
       scanInputRef.current?.focus()
     }
-  }, [active, countOpen])
+  }, [active, countOpen, orderReceive])
 
   const selectLookup = useCallback((next: PackReceiveLookup | null, resetChecks: boolean) => {
     setLookup(next)
@@ -108,7 +178,8 @@ export default function ReceiveTab({ active }: { active: boolean }) {
     [selectLookup, t],
   )
 
-  useBarcodeScanner({ enabled: active && !countOpen, onScan: (value) => void handleScan(value) })
+  // 数箱弹窗和按订单签收抽屉打开时不接管扫码枪。
+  useBarcodeScanner({ enabled: active && !countOpen && !orderReceive, onScan: (value) => void handleScan(value) })
 
   const submitScanInput = () => {
     const value = scanText
@@ -233,6 +304,35 @@ export default function ReceiveTab({ active }: { active: boolean }) {
     }
   }
 
+  /** 面板里的箱按订单分组的「按订单签收」入口：同一订单只一个；只有能签收时才给。 */
+  const orderEntries = useMemo(
+    () => (canReceive ? collectOrderReceiveEntries(pallet ? pallet.cartons : singleCarton ? [singleCarton] : []) : []),
+    [canReceive, pallet, singleCarton],
+  )
+
+  /** 按订单签收成功（或发现已无在途箱）：刷新待签收清单，并重新读取当前打开的托盘 / 箱，没有可签收的就收起面板。 */
+  const afterOrderReceive = async () => {
+    playScanFeedback('success')
+    notifyChanged()
+    reloadIncoming()
+    const current = lookupRef.current
+    const code = current?.kind === 'pallet' ? current.pallet?.palletNo : current?.carton?.cartonNo
+    if (!code) {
+      return
+    }
+    try {
+      const refreshed = await lookupPackReceive(code)
+      if (refreshed.canReceive) {
+        selectLookup(refreshed, false)
+        setChecked(new Set())
+      } else {
+        selectLookup(null, true)
+      }
+    } catch {
+      selectLookup(null, true)
+    }
+  }
+
   // ---- 左侧列表 ----
   const pendingRows: IncomingRow[] = incoming.pending.map((item) => ({ ...item, section: 'pending' }))
   const recentRows: IncomingRow[] = incoming.recent.map((item) => ({ ...item, section: 'recent' }))
@@ -243,14 +343,27 @@ export default function ReceiveTab({ active }: { active: boolean }) {
   const visiblePending = fromFilter ? pendingRows.filter((row) => row.originName === fromFilter) : pendingRows
   const pendingCartonTotal = pendingRows.reduce((sum, row) => sum + (row.cartonCount - row.receivedCartonCount), 0)
 
+  /** 清单（按显示顺序，已按「来自」过滤）里每个待签收行的「按订单签收」入口：同一订单只在第一次出现的行给入口。 */
+  const incomingOrderMap = useMemo(() => {
+    const rows = fromFilter ? incoming.pending.filter((item) => item.originName === fromFilter) : incoming.pending
+    return assignIncomingOrderEntries(rows.map((item) => ({ key: `pending:${item.guid}`, orders: incomingItemOrders(item) })))
+  }, [fromFilter, incoming.pending])
+
   const columns = useMemo<ColumnsType<IncomingRow>>(
     () => [
       {
         title: t('packingUi.receive.columns.no'),
         dataIndex: 'no',
-        width: 150,
+        width: 200,
         render: (value: string, record) => (
-          <b className={record.section === 'pending' ? 'wh-packing-mono' : 'wh-packing-mono wh-packing-muted'}>{value}</b>
+          <>
+            <b className={record.section === 'pending' ? 'wh-packing-mono' : 'wh-packing-mono wh-packing-muted'}>{value}</b>
+            <IncomingOrdersLine
+              record={record}
+              rowOrders={incomingOrderMap.get(`${record.section}:${record.guid}`)}
+              onOpen={(order) => setOrderReceive({ orderGuid: order.orderGuid, orderNo: order.label })}
+            />
+          </>
         ),
       },
       {
@@ -311,7 +424,7 @@ export default function ReceiveTab({ active }: { active: boolean }) {
           ),
       },
     ],
-    [handleScan, openCarton, openPallet, t],
+    [handleScan, incomingOrderMap, openCarton, openPallet, t],
   )
 
   // ---- 渲染 ----
@@ -401,6 +514,25 @@ export default function ReceiveTab({ active }: { active: boolean }) {
                 />
               ) : null}
 
+              {orderEntries.length > 0 ? (
+                <div className="wh-packing-receive-orders">
+                  {orderEntries.map((entry) => (
+                    <div className="wh-packing-receive-order" key={entry.orderGuid}>
+                      <span className="wh-packing-receive-order-info">
+                        <b className="wh-packing-mono">{t('packingUi.orderReceive.entryOrder', { no: entry.orderNo })}</b>
+                        <span className="wh-packing-muted">{t('packingUi.orderReceive.entryCartons', { count: entry.cartonCount })}</span>
+                      </span>
+                      <Button
+                        size="small"
+                        onClick={() => setOrderReceive({ orderGuid: entry.orderGuid, orderNo: entry.orderNo })}
+                      >
+                        {t('packingUi.orderReceive.entry')}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
               {pallet ? (
                 <div className="wh-packing-receive-cartons">
                   {panelCartons.map((carton) => {
@@ -421,6 +553,7 @@ export default function ReceiveTab({ active }: { active: boolean }) {
                           <span className="wh-packing-chk-off" />
                         )}
                         <span className="wh-packing-mono">{carton.cartonNo}</span>
+                        {carton.orderNo ? <span className="wh-packing-mono wh-packing-muted">{carton.orderNo}</span> : null}
                         <span className="wh-packing-mini-spacer" />
                         <span className="wh-packing-muted">
                           {pending
@@ -436,6 +569,7 @@ export default function ReceiveTab({ active }: { active: boolean }) {
                   <div className="wh-packing-chk wh-packing-chk-static">
                     <CheckCircleFilled className="wh-packing-chk-on" />
                     <span className="wh-packing-mono">{singleCarton.cartonNo}</span>
+                    {singleCarton.orderNo ? <span className="wh-packing-mono wh-packing-muted">{singleCarton.orderNo}</span> : null}
                     <span className="wh-packing-mini-spacer" />
                     <span className="wh-packing-muted">
                       {t('packingUi.summary.skuPieces', { sku: singleCarton.skuCount, pieces: singleCarton.pieceCount })}
@@ -532,6 +666,13 @@ export default function ReceiveTab({ active }: { active: boolean }) {
           {t('packingUi.receive.countMismatchHint')}
         </Typography.Paragraph>
       </Modal>
+
+      <OrderReceiveDrawer
+        orderGuid={orderReceive?.orderGuid ?? null}
+        orderNo={orderReceive?.orderNo}
+        onClose={() => setOrderReceive(null)}
+        onReceived={() => void afterOrderReceive()}
+      />
     </div>
   )
 }

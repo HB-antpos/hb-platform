@@ -1,0 +1,168 @@
+/* 订单详情「装箱情况」卡片与完成出库提醒。普通 CSS（CI 测试把 .css 当空模块，不能用 CSS Modules）。 */
+
+/* 与订货明细页其它卡片同一套外观（白底、#e7eaf0 边框、10px 圆角） */
+.pack-progress-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.pack-progress-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 12px 16px;
+}
+
+.pack-progress-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pack-progress-spacer {
+  flex: 1 1 auto;
+}
+
+.pack-progress-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pack-progress-pill.is-warn {
+  background: #fff1db;
+  color: #8a4b00;
+}
+
+.pack-progress-pill.is-ok {
+  background: #e8f6ec;
+  color: #1f7a3a;
+}
+
+.pack-progress-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid #eef0f4;
+}
+
+.pack-progress-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pack-progress-stat {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f8f9fb;
+}
+
+.pack-progress-stat.is-warn {
+  background: #fff1db;
+}
+
+.pack-progress-stat-label {
+  color: #667085;
+  font-size: 12px;
+}
+
+.pack-progress-stat-value {
+  color: #1f2430;
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 28px;
+}
+
+.pack-progress-stat.is-warn .pack-progress-stat-value,
+.pack-progress-stat.is-warn .pack-progress-stat-note {
+  color: #8a4b00;
+}
+
+.pack-progress-stat-note {
+  color: #667085;
+  font-size: 12px;
+}
+
+.pack-progress-tables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  gap: 14px;
+}
+
+.pack-progress-table-block {
+  min-width: 0;
+}
+
+.pack-progress-subtitle {
+  margin: 0 0 6px;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pack-progress-table .ant-table-thead > tr > th {
+  background: #f8f9fb;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.pack-progress-table .ant-table-tbody > tr.pack-progress-row-warn > td {
+  background: #fffaf0;
+}
+
+.pack-progress-diff {
+  font-variant-numeric: tabular-nums;
+}
+
+.pack-progress-diff.is-warn {
+  color: #cf1322;
+  font-weight: 600;
+}
+
+.pack-progress-mono {
+  font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+/* 完成出库确认弹窗里的提醒：与确认文案隔开一点 */
+.pack-progress-reminder {
+  margin-top: 12px;
+}
+
+.pack-progress-reminder-list {
+  margin: 0 0 4px;
+  padding-left: 18px;
+}
+
+@media (max-width: 1100px) {
+  .pack-progress-tables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .pack-progress-stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

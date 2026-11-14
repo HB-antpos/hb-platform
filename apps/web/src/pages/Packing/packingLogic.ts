@@ -3,6 +3,7 @@ import type {
   PackCartonSummary,
   PackDestination,
   PackDestinationRequest,
+  PackIncomingItem,
   PackLocateRow,
   PackOwner,
   PackPalletDetail,
@@ -408,6 +409,137 @@ export function incomingState(item: {
     return { kind: 'partial', received: item.receivedCartonCount, total: item.cartonCount }
   }
   return { kind: 'transit' }
+}
+
+// ---- 按订单签收（二期）----
+
+/** 核对面板里一张订单的「按订单签收」入口：同一订单只给一个，cartonCount 是面板里这张订单还在路上的箱数。 */
+export interface PackOrderReceiveEntry {
+  orderGuid: string
+  orderNo: string
+  cartonCount: number
+}
+
+/**
+ * 从面板里的箱（托盘上的箱 / 扫到的散箱）收集「按订单签收」入口：只看还在路上、且带订单号的箱，
+ * 同一订单合并成一个入口，按首次出现的顺序排列。
+ */
+export function collectOrderReceiveEntries(
+  cartons: Pick<PackCartonSummary, 'status' | 'orderGuid' | 'orderNo'>[],
+): PackOrderReceiveEntry[] {
+  const entries = new Map<string, PackOrderReceiveEntry>()
+  for (const carton of cartons) {
+    const orderGuid = carton.orderGuid?.trim()
+    const orderNo = carton.orderNo?.trim()
+    if (carton.status !== PACK_CARTON_STATUS.InTransit || !orderGuid || !orderNo) {
+      continue
+    }
+    const key = orderGuid.toLowerCase()
+    const existing = entries.get(key)
+    if (existing) {
+      existing.cartonCount += 1
+    } else {
+      entries.set(key, { orderGuid, orderNo, cartonCount: 1 })
+    }
+  }
+  return [...entries.values()]
+}
+
+/** 待签收清单里一行关联的订货单：label 是显示用的订单号（后端没给订单号时退回 GUID 前 8 位）。 */
+export interface PackIncomingOrderRef {
+  orderGuid: string
+  label: string
+}
+
+/**
+ * 待签收 / 最近签收清单一行关联的订货单：散箱行取 orderGuid / orderNo，托盘行取 orders[]（后端已去重、按订单号排序）；
+ * 没有订单 GUID 的丢弃，同一行里按 GUID（忽略大小写）再去重一次。旧后端没有这些字段时返回空。
+ */
+export function incomingItemOrders(
+  item: Pick<PackIncomingItem, 'kind' | 'orderGuid' | 'orderNo' | 'orders'>,
+): PackIncomingOrderRef[] {
+  const candidates =
+    item.kind === 'pallet' ? (item.orders ?? []) : [{ orderGuid: item.orderGuid, orderNo: item.orderNo }]
+  const refs = new Map<string, PackIncomingOrderRef>()
+  for (const candidate of candidates) {
+    const orderGuid = candidate.orderGuid?.trim()
+    if (!orderGuid || refs.has(orderGuid.toLowerCase())) {
+      continue
+    }
+    refs.set(orderGuid.toLowerCase(), { orderGuid, label: candidate.orderNo?.trim() || orderGuid.slice(0, 8) })
+  }
+  return [...refs.values()]
+}
+
+/** 一行在清单里的订单：entries 在这一行给「按订单签收」入口，covered 已经在前面的行给过入口，这里只显示订单号。 */
+export interface PackIncomingRowOrders {
+  entries: PackIncomingOrderRef[]
+  covered: PackIncomingOrderRef[]
+}
+
+/**
+ * 给待签收清单（按显示顺序）的每一行分配「按订单签收」入口：同一订单（按 GUID，忽略大小写）只在第一次出现的行给入口，
+ * 后面的行只显示订单号，不重复占位。按订单签收签的是这个订单发给本店的全部在途箱，与从哪一行点进去无关。
+ * 返回 key → 该行的订单；没有任何订单的行不在结果里。
+ */
+export function assignIncomingOrderEntries(
+  rows: readonly { key: string; orders: PackIncomingOrderRef[] }[],
+): Map<string, PackIncomingRowOrders> {
+  const owned = new Set<string>()
+  const result = new Map<string, PackIncomingRowOrders>()
+  for (const row of rows) {
+    if (row.orders.length === 0) {
+      continue
+    }
+    const entries: PackIncomingOrderRef[] = []
+    const covered: PackIncomingOrderRef[] = []
+    for (const order of row.orders) {
+      const key = order.orderGuid.toLowerCase()
+      if (owned.has(key)) {
+        covered.push(order)
+      } else {
+        owned.add(key)
+        entries.push(order)
+      }
+    }
+    result.set(row.key, { entries, covered })
+  }
+  return result
+}
+
+/** 订单发给本店的箱里还在路上（没签收）的。 */
+export function pendingOrderCartons<T extends { status: number }>(order: { cartons: T[] }): T[] {
+  return order.cartons.filter((carton) => carton.status === PACK_CARTON_STATUS.InTransit)
+}
+
+/** 本次发出数和配货数对不上（发出≠配货）：订单所有行都没有配货数时无从比较，不算。 */
+export function isOrderShipMismatch(product: { allocPieces?: number | null; shippedPieces: number }): boolean {
+  if (product.allocPieces === null || product.allocPieces === undefined) {
+    return false
+  }
+  return Number(product.allocPieces) !== Number(product.shippedPieces)
+}
+
+export type PackOrderReceiveFailure = 'countMismatch' | 'notInTransit' | 'notFound' | 'other'
+
+/** 按订单签收失败的类型（后端错误码）：数量对不上、没有在途箱、订单不在本店范围内。 */
+export function classifyOrderReceiveFailure(errorCode: string | null | undefined): PackOrderReceiveFailure {
+  switch (errorCode) {
+    case PACK_ERROR_CODE.CountMismatch:
+      return 'countMismatch'
+    case PACK_ERROR_CODE.NotInTransit:
+      return 'notInTransit'
+    case PACK_ERROR_CODE.OrderNotFound:
+      return 'notFound'
+    default:
+      return 'other'
+  }
+}
+
+/** 409 COUNT_MISMATCH 带回的「实际在途箱数」；没带（或不是非负整数）时用当前读到的在途数兜底。 */
+export function resolveActualInTransitCount(data: { actualInTransitCartonCount?: number | null } | null | undefined, fallback: number): number {
+  const actual = data?.actualInTransitCartonCount
+  return typeof actual === 'number' && Number.isInteger(actual) && actual >= 0 ? actual : fallback
 }
 
 // ---- 商品位置 ----

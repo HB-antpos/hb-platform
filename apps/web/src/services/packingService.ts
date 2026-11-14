@@ -12,6 +12,7 @@ import type {
   PackLocateResult,
   PackLocation,
   PackLocationSaveRequest,
+  PackOrderReceive,
   PackOwner,
   PackPalletDetail,
   PackPalletFilter,
@@ -234,6 +235,38 @@ export async function listPackIncoming(ownerCode?: string) {
 export async function lookupPackReceive(code: string) {
   return unwrapApiData(
     await request.get<ApiResponse<PackReceiveLookup>>(`${API_BASE}/receive/lookup`, { params: { code: code.trim() } }),
+  )
+}
+
+// ---- 按订单签收（二期）----
+
+/** 后端 null 字段不输出：列表 / 计数缺失时补默认值，界面不用再判空。 */
+export function normalizePackOrderReceive(raw: PackOrderReceive): PackOrderReceive {
+  return {
+    ...raw,
+    cartons: raw.cartons ?? [],
+    products: raw.products ?? [],
+    inTransitCount: raw.inTransitCount ?? 0,
+    receivedCount: raw.receivedCount ?? 0,
+  }
+}
+
+const orderReceiveUrl = (orderGuid: string) => `${API_BASE}/receive/orders/${segment(orderGuid)}`
+
+/** 该订单发给本店的箱（在路上的与已签收归本店的）、签收进度与按商品的订货 / 配货 / 已发对照；范围外 / 不存在为 404 ORDER_NOT_FOUND。 */
+export async function getPackOrderReceive(orderGuid: string, signal?: AbortSignal) {
+  return normalizePackOrderReceive(
+    unwrapApiData(await request.get<ApiResponse<PackOrderReceive>>(orderReceiveUrl(orderGuid), { signal })),
+  )
+}
+
+/**
+ * 按订单一次签收：必须带收货人数过的实到在途箱数；和系统记录不一致返回 409 COUNT_MISMATCH（带 actualInTransitCartonCount，一只都不签），
+ * 期望 0 且没有在途箱返回 409 NOT_IN_TRANSIT。成功返回签收后的同结构数据。
+ */
+export async function receivePackOrder(orderGuid: string, expectedCartonCount: number) {
+  return normalizePackOrderReceive(
+    unwrapApiData(await request.post<ApiResponse<PackOrderReceive>>(orderReceiveUrl(orderGuid), { expectedCartonCount })),
   )
 }
 
