@@ -116,6 +116,8 @@
     <Compile Include="StoreReceiptProfilePipelineTests.cs" />
     <Compile Include="StoreCashServiceTests.cs" />
     <Compile Include="StoreCashRulesTests.cs" />
+    <Compile Include="PosSettingMergerTests.cs" />
+    <Compile Include="PosSettingsServiceTests.cs" />
     <Compile Include="PosmCashDailyCloseSourceTests.cs" />
     <Compile Include="PosmCashDailyCloseSourceSqlServerTests.cs" />
     <Compile Include="SchemaMigrationSqlServerIntegrationTests.cs" />

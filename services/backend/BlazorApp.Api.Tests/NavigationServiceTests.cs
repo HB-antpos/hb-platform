@@ -1090,6 +1090,30 @@ public class NavigationServiceTests
         Assert.Equal(new[] { "/pos-admin/settlement-cash" }, posAdmin.Children!.Select(item => item.Path));
     }
 
+    [Theory]
+    [InlineData(Permissions.PosSettings.View)]
+    [InlineData(Permissions.PosSettings.Manage)]
+    public void BuildMenu_只有收银端设置权限也能进后台且只看到收银端设置页(string permission)
+    {
+        var menu = _service.BuildMenu(CreateUser(new Claim("permission", permission)));
+
+        var system = Assert.Single(menu, item => item.Path == "/system");
+        Assert.Equal(new[] { "/system/pos-settings" }, system.Children!.Select(item => item.Path));
+    }
+
+    [Fact]
+    public void BuildAppMenu_收银端设置只给有查看权限的账号_只有管理权限看不到()
+    {
+        var viewer = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.PosSettings.View)));
+        var managerOnly = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.PosSettings.Manage)));
+        var none = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Cash.OverviewView)));
+
+        // 读接口要 View，所以 App 菜单项以 View 为准：只有 Manage 进去也读不到数据，不显示入口。
+        Assert.Contains(viewer, item => item.RouteName == "pos-settings");
+        Assert.DoesNotContain(managerOnly, item => item.RouteName == "pos-settings");
+        Assert.DoesNotContain(none, item => item.RouteName == "pos-settings");
+    }
+
     [Fact]
     public void BuildMenu_只有预订单下单入口也能进后台且只看到下单页()
     {
@@ -1118,7 +1142,8 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(48, menu.Count);
+        Assert.Equal(49, menu.Count);
+        Assert.Contains(menu, item => item.RouteName == "pos-settings");
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "payslips");
         Assert.Contains(menu, item => item.RouteName == "pricing-strategies");

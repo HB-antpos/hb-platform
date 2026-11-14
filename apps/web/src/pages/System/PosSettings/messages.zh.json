@@ -1,0 +1,196 @@
+{
+  "posSettings": {
+    "title": "收银端设置",
+    "subtitle": "总部下发到收银机的业务开关；硬件参数（打印机、刷卡机、扫码枪）仍在收银机本机设置",
+    "historyButton": "修改记录",
+    "tabs": {
+      "global": "全局与门店",
+      "devices": "设备"
+    },
+    "actions": {
+      "retry": "重试",
+      "edit": "编辑",
+      "view": "查看",
+      "save": "保存并下发",
+      "cancel": "取消",
+      "reset": "放弃修改"
+    },
+    "tri": {
+      "inheritGlobal": "未设置",
+      "inheritStore": "跟随全局",
+      "inheritDevice": "跟随门店",
+      "on": "开",
+      "off": "关"
+    },
+    "value": {
+      "on": "开",
+      "off": "关",
+      "native": "沿用本机"
+    },
+    "source": {
+      "global": "来自全局",
+      "store": "来自门店",
+      "device": "来自设备",
+      "default": "默认值",
+      "none": "本机设置"
+    },
+    "clientKind": {
+      "wpf": "WPF",
+      "ipad": "iPad",
+      "handheld": "手持",
+      "other": "其他"
+    },
+    "newBadge": "新",
+    "settings": {
+      "cashMovement": {
+        "name": "现金存入 / 取出",
+        "desc": "侧栏「钱箱」面板的存入、取出与今日记录"
+      },
+      "noSaleRescan": {
+        "name": "只开钱箱需再扫员工码",
+        "desc": "No Sale 时即使本人有权限也要扫码"
+      },
+      "returnsRescan": {
+        "name": "退货需再扫员工码",
+        "desc": "点「退货」时再扫一次员工码"
+      },
+      "bankReceipt": {
+        "name": "客人小票附银行收据",
+        "desc": "刷卡小票后面附银行交易凭条"
+      },
+      "manualCard": {
+        "name": "手动刷卡",
+        "desc": "付款页显示「手动刷卡」（不连刷卡机）"
+      },
+      "voucher": {
+        "name": "代金券 / 购物券",
+        "desc": "付款页可以收代金券"
+      },
+      "orderList": {
+        "name": "付款页显示订单列表",
+        "desc": "付款页左侧显示商品列表"
+      },
+      "autoRestart": {
+        "name": "日结后凌晨自动重启",
+        "desc": "日结后提示并在凌晨重启收银机"
+      },
+      "zellerUnmatchedRefund": {
+        "name": "Zeller 无关联退款",
+        "desc": "允许不关联原交易直接退款"
+      }
+    },
+    "readOnlyNote": "你只有查看权限，不能修改设置。",
+    "global": {
+      "title": "全局默认",
+      "subtitle": "所有门店、所有设备的起点；「未设置」= 不下发，收银机沿用本机值",
+      "colSetting": "设置",
+      "colValue": "全局默认",
+      "hintDefault": "未设置时按「{{value}}」处理",
+      "hintNative": "未设置时收银机沿用本机设置",
+      "adminOnly": "全局默认的改动只有管理员可以保存。"
+    },
+    "stores": {
+      "title": "门店覆盖",
+      "subtitle": "只列出与全局不同的项；没有覆盖的门店跟随全局",
+      "searchPlaceholder": "搜索门店",
+      "colStore": "门店",
+      "colOverrides": "覆盖项",
+      "colDeviceOverrides": "设备覆盖",
+      "colApplied": "设备已应用",
+      "followGlobal": "跟随全局",
+      "deviceCount": "{{count}} 台",
+      "footer": "共 {{total}} 家门店，{{overridden}} 家有覆盖 · 设备在下次同步（约 1 分钟内）后生效",
+      "empty": "没有可见的门店",
+      "noMatch": "没有匹配的门店",
+      "tableLabel": "门店覆盖列表"
+    },
+    "storeDrawer": {
+      "title": "门店覆盖 · {{name}} ({{code}})",
+      "info": "门店覆盖优先于全局；单台设备还可以在「设备」页签里再覆盖。",
+      "colSetting": "设置",
+      "colOwn": "本店设置",
+      "colEffective": "本店最终值",
+      "devicesTitle": "本店设备应用情况",
+      "noDevices": "这家门店还没有注册设备",
+      "colDevice": "设备",
+      "colType": "类型",
+      "colStatus": "状态",
+      "colAppliedAt": "应用时间",
+      "updatedBy": "最近修改：{{time}} · {{name}}"
+    },
+    "devices": {
+      "storeLabel": "门店",
+      "storePlaceholder": "选择门店",
+      "title": "设备列表",
+      "subtitle": "点一行编辑这台设备的覆盖；设备回报来自收银机应用设置后的回执",
+      "colCode": "设备编号",
+      "colClient": "端类型",
+      "colVersion": "版本",
+      "colStatus": "状态",
+      "colOverride": "设备覆盖",
+      "colOffline": "离线临时修改",
+      "colAppliedAt": "应用时间",
+      "overridden": "已覆盖",
+      "offlineTimes": "{{count}} 次",
+      "offlineLast": "最近 {{time}}",
+      "empty": "这家门店还没有注册设备",
+      "noStores": "没有可见的门店，无法查看设备",
+      "tableLabel": "设备列表"
+    },
+    "deviceStatus": {
+      "applied": "已应用最新",
+      "pending": "待同步",
+      "never": "尚未同步",
+      "neverHint": "旧版本不支持，或还没联过网",
+      "pendingHint": "有新的设置改动，设备还没回报应用"
+    },
+    "deviceDrawer": {
+      "title": "设备设置 · {{code}}",
+      "meta": "{{store}} · {{client}} {{version}}",
+      "bannerApplied": "已应用最新设置（{{time}}）",
+      "bannerPending": "有新改动还没应用到这台设备",
+      "bannerNever": "这台设备还没回报过设置：旧版本不支持，或还没联过网",
+      "offline": "离线期间曾临时修改 {{count}} 次 · 最近一次 {{time}}",
+      "colSetting": "设置",
+      "colOwn": "本设备设置",
+      "colEffective": "应生效",
+      "colReported": "设备回报",
+      "pendingTag": "待同步",
+      "notReported": "未回报",
+      "footnote": "「设备回报」是收银机应用设置后回传的实际值；与「应生效」不一致时标「待同步」。",
+      "noSettings": "这台设备的端类型没有可下发的设置"
+    },
+    "confirm": {
+      "titleGlobal": "确认保存全局默认",
+      "titleStore": "确认保存门店覆盖 · {{name}}",
+      "titleDevice": "确认保存设备覆盖 · {{code}}",
+      "description": "共 {{count}} 项改动，保存后设备在下次同步时生效：",
+      "okText": "确认保存并下发",
+      "arrow": "→"
+    },
+    "saved": "已保存，设备将在下次同步后生效",
+    "history": {
+      "title": "修改记录",
+      "hint": "最近 50 条修改",
+      "empty": "还没有修改记录",
+      "colTime": "时间",
+      "colScope": "范围",
+      "colSetting": "设置",
+      "colChange": "改动",
+      "colBy": "操作人",
+      "scopeGlobal": "全局",
+      "scopeStore": "门店 {{name}}",
+      "scopeDevice": "设备 {{code}}",
+      "unset": "未设置",
+      "cleared": "已清除"
+    },
+    "errors": {
+      "network": "网络异常，请检查网络后重试",
+      "forbidden": "没有权限执行这个操作",
+      "notFound": "没有找到对应的记录",
+      "server": "服务器开小差了，请稍后重试",
+      "unknown": "操作失败，请稍后重试"
+    },
+    "emptyCatalog": "暂时没有可下发的设置项"
+  }
+}

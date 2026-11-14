@@ -100,6 +100,12 @@ export const P = {
     Void: 'Cash.Void',
     AllStoresView: 'Cash.AllStores.View',
   },
+  // 收银端设置下发（系统菜单「收银端设置」）：Web 与员工 App 共用，与后端 Permissions.PosSettings 一致。
+  // View 只读；Manage 才能保存（全局层改动另有后端的管理员限制，前端不自行判断）。
+  PosSettings: {
+    View: 'PosSettings.View',
+    Manage: 'PosSettings.Manage',
+  },
   DomesticPurchase: {
     ManageSuppliers: 'DomesticPurchase.ManageSuppliers',
     ManageProducts: 'DomesticPurchase.ManageProducts',

@@ -329,6 +329,8 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.InstallmentOrders.View, "查看分期付款订单", "分店财务", "移动端「分期订单」- 查看分店分期付款订单与支付记录"),
                 new(Permissions.StoreVouchers.View, "查看分店代金券", "分店财务", "移动端「分店代金券」- 查看分店代金券使用情况与关联订单"),
                 // 现金管理五个码仅注册，不写入角色模板：涉及现金流水，由管理员显式授予；入库由版本号迁移 20261008.001 幂等完成。
+                new(Permissions.PosSettings.View, "查看收银端设置", "POS 管理", "Web 页面 /system/pos-settings 与员工 App「收银端设置」- 查看全局、门店、设备的收银端设置与设备应用情况"),
+                new(Permissions.PosSettings.Manage, "管理收银端设置", "POS 管理", "Web 页面 /system/pos-settings 与员工 App「收银端设置」- 修改全局、门店、设备的收银端设置并下发到收银机"),
                 new(Permissions.Cash.OverviewView, "查看现金管理", "分店财务", "移动端「现金」- 查看分店现金池余额、按日明细、存款与现金支出记录；店长只限自己关联的分店"),
                 new(Permissions.Cash.DepositCreate, "登记存银行", "分店财务", "移动端「现金」- 登记现金存银行并上传存单、选择纳入现金池的日结、录入期初现金与盘点"),
                 new(Permissions.Cash.ExpenseCreate, "录入现金支出", "分店财务", "移动端「现金」- 录入现金工资、现金购物、T2 与其他现金支出，录入即生效"),

@@ -336,6 +336,16 @@ namespace BlazorApp.Shared.Constants
         }
 
         /// <summary>
+        /// 收银端设置下发：后台 / 员工 App 给全局、门店、设备下发收银端业务开关（迁移 20261114.001 入库，不授予任何角色）。
+        /// 全局层的修改另外限定管理员（服务端校验，权限码本身不区分）。
+        /// </summary>
+        public static class PosSettings
+        {
+            public const string View = "PosSettings.View";
+            public const string Manage = "PosSettings.Manage";
+        }
+
+        /// <summary>
         /// 分店现金管理：店长把现金存银行、记现金支出，管理员与财务查看统计并对账。
         /// 新码不写入角色模板，上线后由管理员在角色管理里显式授予。
         /// </summary>

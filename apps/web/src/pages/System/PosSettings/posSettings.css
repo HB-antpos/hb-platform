@@ -1,0 +1,310 @@
+/* 收银端设置页（普通 CSS + 全局类名前缀 pos-settings-：测试打包把 .css 当空模块，不能用 CSS Modules）。
+   视觉沿用现金管理页：白底细边框面板、12px 间距。窄屏时两栏改上下堆叠，宽表格只在表格容器里横向滚动。 */
+
+.pos-settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pos-settings-tabs .ant-tabs-nav {
+  margin-bottom: 12px;
+}
+
+.pos-settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+}
+
+.pos-settings-panel {
+  min-width: 0;
+  padding: 12px 16px 16px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.pos-settings-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+}
+
+.pos-settings-panel-title {
+  margin: 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pos-settings-note {
+  color: #667085;
+  font-size: 12px;
+}
+
+.pos-settings-search {
+  width: 220px;
+  max-width: 100%;
+  margin-left: auto;
+}
+
+.pos-settings-footer {
+  margin: 10px 0 0;
+  color: #667085;
+  font-size: 12px;
+}
+
+.pos-settings-muted {
+  color: #667085;
+  font-size: 12px;
+}
+
+.pos-settings-section-title {
+  margin: 8px 0 0;
+  color: #1f2430;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ---------- 设置名称单元格 ---------- */
+
+.pos-settings-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pos-settings-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #1f2430;
+  font-weight: 600;
+}
+
+.pos-settings-new {
+  margin: 0;
+  line-height: 18px;
+}
+
+.pos-settings-desc {
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* 新功能行：浅黄底提醒「这一项是新上的，默认关」。 */
+.pos-settings-row-new > td {
+  background: #fffbe6;
+}
+
+/* ---------- 三态控件 ---------- */
+
+.pos-settings-control-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.pos-settings-tri {
+  white-space: nowrap;
+}
+
+/* 「不覆盖」选中时用中性灰蓝，开 / 关选中沿用主色，一眼分出「这一层有没有设置」。 */
+.pos-settings-tri.is-inherit .ant-radio-button-wrapper-checked {
+  border-color: #667085;
+  background: #667085;
+}
+
+.pos-settings-tri.is-inherit .ant-radio-button-wrapper-checked:not(.ant-radio-button-wrapper-disabled)::before {
+  background-color: #667085;
+}
+
+.pos-settings-effective,
+.pos-settings-reported {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.pos-settings-value {
+  margin: 0;
+}
+
+.pos-settings-value.is-native {
+  border-style: dashed;
+}
+
+.pos-settings-pending {
+  padding: 0 6px;
+  border: 1px solid #ffd591;
+  border-radius: 4px;
+  background: #fff7e6;
+  color: #ad4e00;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.pos-settings-override-tag {
+  margin: 0;
+}
+
+.pos-settings-override-flag {
+  padding: 0 6px;
+  border: 1px solid #d3adf7;
+  border-radius: 4px;
+  background: #f9f0ff;
+  color: #531dab;
+  font-size: 12px;
+}
+
+.pos-settings-store-name {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pos-settings-cell-stack {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* ---------- 设备页签 ---------- */
+
+.pos-settings-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  padding: 12px 16px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.pos-settings-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pos-settings-field-label {
+  color: #667085;
+  font-size: 12px;
+}
+
+.pos-settings-store-select {
+  width: 300px;
+  max-width: 100%;
+}
+
+.pos-settings-clickable-table .ant-table-tbody > tr {
+  cursor: pointer;
+}
+
+/* ---------- 抽屉、确认弹窗、底部操作条 ---------- */
+
+.pos-settings-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pos-settings-device-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pos-settings-drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.pos-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-top: 12px;
+}
+
+.pos-settings-confirm-desc {
+  margin: 0 0 8px;
+  color: #344054;
+}
+
+.pos-settings-confirm-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pos-settings-confirm-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f2f5;
+}
+
+.pos-settings-confirm-name {
+  font-weight: 600;
+}
+
+.pos-settings-confirm-change {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.pos-settings-confirm-from {
+  color: #667085;
+}
+
+/* ---------- 窄屏与减少动画 ---------- */
+
+@media (max-width: 1100px) {
+  .pos-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .pos-settings-search {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .pos-settings-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos-settings-panel,
+  .pos-settings-tri {
+    transition: none;
+    animation: none;
+  }
+}

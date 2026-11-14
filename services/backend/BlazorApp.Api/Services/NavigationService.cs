@@ -88,6 +88,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/system/payments-invoices", TitleKey = "menu.groupPaymentsInvoices", Icon = "WalletOutlined", Permission = Permissions.System.ManageSettings },
                     // 人脸识别：人脸抓拍摄像机 / 人脸比对（比对五个独立权限，任一即可见，页内再按各自权限显示页签）。
                     new() { Path = "/system/face-recognition", TitleKey = "menu.groupFaceRecognition", Icon = "VideoCameraOutlined", AnyPermissions = new List<string> { Permissions.FaceCapture.Cameras.Manage, Permissions.FaceMatch.Manage, Permissions.FaceMatch.Traffic.View, Permissions.FaceMatch.Unwelcome.Manage, Permissions.FaceMatch.Unwelcome.Approve, Permissions.FaceMatch.Unwelcome.Review } },
+                    // 收银端设置下发：全局 / 门店 / 设备三层开关；与手机端「收银端设置」同一套权限。
+                    new() { Path = "/system/pos-settings", TitleKey = "menu.posSettings", Icon = "ControlOutlined", AnyPermissions = new List<string> { Permissions.PosSettings.View, Permissions.PosSettings.Manage } },
                     // 版本发布中心：App 原生 / OTA 与 WPF 安装包合并为一页，旧 /system/wpf-versions 由 Web 重定向到其 WPF 终端。
                     new() { Path = "/system/app-downloads", TitleKey = "menu.appDownloads", Icon = "QrcodeOutlined", Permission = Permissions.System.ViewAppDownloads },
                 },
@@ -395,6 +397,14 @@ namespace BlazorApp.Api.Services
                 Icon = "bank-transfer",
                 Permission = Permissions.Cash.OverviewView,
                 Order = 53,
+            },
+            new()
+            {
+                RouteName = "pos-settings",
+                TitleKey = "tabs.posSettings",
+                Icon = "tune-variant",
+                Permission = Permissions.PosSettings.View,
+                Order = 54,
             },
             new()
             {
@@ -926,6 +936,9 @@ namespace BlazorApp.Api.Services
                 Permissions.SupplierPreorder.Manage,
                 Permissions.DeviceRegistration.ActivationCodes.Manage,
                 Permissions.DeviceRegistration.MobileActivationCodes.Manage,
+                // 收银端设置：只有该权限的账号也要能拿到后台菜单。
+                Permissions.PosSettings.View,
+                Permissions.PosSettings.Manage,
                 // MYOB 对接：只有该权限的账号也要能拿到后台菜单，否则前端只能退回本地菜单。
                 Permissions.Myob.Connection.Manage,
                 Permissions.Myob.Employee.Bind,

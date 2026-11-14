@@ -1,0 +1,169 @@
+{
+  "title": "POS Settings",
+  "tabs": {
+    "global": "Global",
+    "stores": "Stores",
+    "devices": "Devices"
+  },
+  "states": {
+    "loading": "Loading…",
+    "loadFailed": "Failed to load. Please try again later.",
+    "notAllowed": "This account cannot view POS settings.",
+    "readOnly": "This account can view POS settings but cannot change them.",
+    "noStores": "No stores to show.",
+    "noDevices": "No POS devices are registered for this store yet.",
+    "noResults": "No stores match.",
+    "pickStoreFirst": "Pick a store first to see its POS devices."
+  },
+  "choice": {
+    "global": { "inherit": "Not set", "on": "On", "off": "Off" },
+    "store": { "inherit": "Use global", "on": "On", "off": "Off" },
+    "device": { "inherit": "Use store", "on": "On", "off": "Off" }
+  },
+  "effective": {
+    "label": "In effect",
+    "reported": "Reported by device",
+    "unreported": "Not reported",
+    "pendingSync": "Pending",
+    "combined": "{{value}} · {{source}}",
+    "value": { "on": "On", "off": "Off", "local": "Keep local" },
+    "source": {
+      "global": "global",
+      "store": "store",
+      "device": "device",
+      "default": "default",
+      "none": ""
+    }
+  },
+  "badge": {
+    "new": "New",
+    "changed": "Edited"
+  },
+  "clients": {
+    "wpf": "WPF",
+    "ipad": "iPad",
+    "handheld": "Handheld",
+    "other": "Other"
+  },
+  "deviceStatus": {
+    "applied": "Up to date",
+    "pending": "Pending",
+    "never": "Not synced",
+    "neverHint": "Old version without support, or never been online"
+  },
+  "global": {
+    "intro": "“Not set” sends nothing, so each POS terminal keeps its own local value. “On” or “Off” overrides the local setting on every store’s POS terminals. Changes reach terminals within about {{minutes}} minute after saving. Hardware settings stay on the terminal itself.",
+    "updatedBy": "Last changed {{time}} by {{name}}",
+    "updatedAt": "Last changed {{time}}"
+  },
+  "stores": {
+    "searchPlaceholder": "Search store name or code",
+    "filterAll": "All {{count}}",
+    "filterOverrides": "Overridden {{count}}",
+    "filterUnsynced": "Not synced {{count}}",
+    "followGlobal": "Using global",
+    "applied": "Applied {{applied}}/{{total}}",
+    "pending": "{{applied}}/{{total}} applied",
+    "noDevices": "No devices",
+    "overrideTag": "{{name}}: {{value}}",
+    "deviceOverrides": "{{count}} device(s) with own settings"
+  },
+  "storeDetail": {
+    "title": "{{store}} · Store overrides",
+    "intro": "“Use global” follows the global value. “On” or “Off” applies to this store only.",
+    "devicesTitle": "Store devices",
+    "devicesEmpty": "No POS devices are registered for this store yet."
+  },
+  "devices": {
+    "currentStore": "Store",
+    "pickStore": "Select store",
+    "switchStore": "Switch",
+    "hasOverride": "Own settings",
+    "offlineCount": "{{count}} offline change(s)",
+    "version": "Version {{version}}",
+    "unknownVersion": "Version unknown"
+  },
+  "deviceDetail": {
+    "title": "Device {{device}}",
+    "intro": "“Use store” follows this store’s value. “On” or “Off” applies to this device only.",
+    "appliedAt": "Last applied {{time}}",
+    "offlineNotice": "Changed temporarily while offline {{count}} time(s), most recently {{time}}",
+    "offlineNoticeNoTime": "Changed temporarily while offline {{count}} time(s)",
+    "notFound": "This device was not found.",
+    "unsupportedNone": "This device type has no settings that can be pushed."
+  },
+  "actions": {
+    "save": "Save and push",
+    "saving": "Saving…",
+    "discard": "Discard changes"
+  },
+  "confirm": {
+    "titleGlobal": "Push global settings?",
+    "titleStore": "Push to {{target}}?",
+    "titleDevice": "Push to device {{target}}?",
+    "subtitleGlobal": "These changes reach every store’s POS terminals within about {{minutes}} minute",
+    "subtitleStore": "These changes reach this store’s POS terminals within about {{minutes}} minute",
+    "subtitleDevice": "These changes reach this device within about {{minutes}} minute",
+    "change": "{{from}} → {{to}}",
+    "inheritWith": "{{label}} ({{value}})",
+    "impact": "Devices affected",
+    "impactCount": "{{count}}",
+    "impactAll": "All stores’ POS terminals",
+    "impactNone": "No matching devices",
+    "notSyncedWarning": "{{devices}}: version too old, or never online. Changes apply after upgrading or connecting.",
+    "cancel": "Cancel",
+    "confirm": "Push now",
+    "saveFailed": "Failed to save. Please try again later."
+  },
+  "saved": {
+    "global": "Global settings saved. POS terminals sync within about {{minutes}} minute.",
+    "store": "Store settings saved. POS terminals sync within about {{minutes}} minute.",
+    "device": "Device settings saved. This device syncs within about {{minutes}} minute."
+  },
+  "leave": {
+    "discardTitle": "Discard unsaved changes?",
+    "discardMessage": "You changed POS settings but have not saved and pushed them. They will be lost if you leave.",
+    "keepEditing": "Keep editing",
+    "discard": "Discard",
+    "busyTitle": "Saving",
+    "busyMessage": "POS settings are being saved. Please wait before leaving."
+  },
+  "settings": {
+    "cashMovement_enabled": {
+      "name": "Cash in / out",
+      "hint": "Record cash handed to the manager, change top-ups and small expenses"
+    },
+    "cashDrawer_noSaleRescan": {
+      "name": "Re-scan staff code to open drawer only",
+      "hint": "Ask for the staff code again when the drawer is opened without a sale"
+    },
+    "returns_rescan": {
+      "name": "Re-scan staff code for returns",
+      "hint": "Ask for the staff code again before a return"
+    },
+    "receipt_bankReceipt": {
+      "name": "Attach bank receipt to customer receipt",
+      "hint": "Print the bank receipt with the customer receipt after a card payment"
+    },
+    "payment_manualCard": {
+      "name": "Manual card entry",
+      "hint": "Let cashiers key in card amounts manually"
+    },
+    "payment_voucher": {
+      "name": "Vouchers / gift cards",
+      "hint": "Allow vouchers and gift cards on the payment page"
+    },
+    "payment_orderList": {
+      "name": "Show order list on payment page",
+      "hint": "Show the items of the current order beside the payment options"
+    },
+    "maintenance_autoRestart": {
+      "name": "Restart after end of day",
+      "hint": "Restart the POS terminal early in the morning after end of day"
+    },
+    "zeller_unmatchedRefund": {
+      "name": "Zeller unlinked refunds",
+      "hint": "Allow Zeller refunds that have no original transaction to link to"
+    }
+  }
+}

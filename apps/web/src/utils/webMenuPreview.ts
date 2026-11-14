@@ -100,6 +100,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canViewAttendanceHours: [P.Attendance.PunchViewManagedStore, P.Attendance.PayrollView],
   canManageStoreOps: [P.Store.ManageOperations],
   canViewStoreCash: [P.Cash.OverviewView],
+  // 任一权限可见；从菜单授予时只补第一个（View），移除时 View / Manage 一并撤销。
+  canViewPosSettings: [P.PosSettings.View, P.PosSettings.Manage],
   canViewOperationAudits: [P.PosTerminal.AuditView],
   canViewLegacyEmployeeLogs: [P.LegacyEmployeeLogs.View],
   // 合并页任一权限可见；从菜单授予时只补第一个（老收银查看），移除时两个来源权限一并撤销。
@@ -136,6 +138,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
     title: 'menu.system',
     children: [
       { path: '/system/stores', title: 'menu.systemStores', accessKey: 'canReadStore' },
+      { path: '/system/pos-settings', title: 'menu.posSettings', accessKey: 'canViewPosSettings' },
       // 合并页：组节点本身不授权，按下面各标签（原页面）逐个授予 / 撤销；RustDesk 远程维护仅管理员，不在预览里。
       {
         path: '/system/devices',
@@ -286,7 +289,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
 ]
 
 /** 自带后台入口规则（见 webPortalAccess 的 ADMIN_ENTRY_RULES）的独立页面：从菜单授予时不连带授予工作台。 */
-const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms'])
+const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms', '/system/pos-settings'])
 
 const warehouseStaffVisibleMenuPaths = new Set([
   '/warehouse',

@@ -109,6 +109,10 @@ export interface AccessControl {
   canManageStoreOps: boolean
   /** 分店现金管理页（/pos-admin/store-cash）：只认 Cash.Overview.View。 */
   canViewStoreCash: boolean
+  /** 收银端设置页（/system/pos-settings）：PosSettings.View 或 Manage 任一即可进入。 */
+  canViewPosSettings: boolean
+  /** 收银端设置的保存按钮与三态控件：只认 PosSettings.Manage。 */
+  canManagePosSettings: boolean
   canManageLocalPurchase: boolean
   canEditLocalPurchase: boolean
   canPushLocalPurchaseToHq: boolean

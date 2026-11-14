@@ -450,6 +450,30 @@ assertEqual(
   "store cash route is registered as a valid tab path"
 );
 
+assertEqual(
+  TAB_PATHS["pos-settings"],
+  "/(shell)/pos-settings",
+  "pos settings route is registered as a valid tab path"
+);
+
+// 收银端设置按账号权限授权：设备会话必须隐藏，账号会话照后端菜单显示。
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["product-query", "pos-settings"],
+    isDeviceMode: true,
+  }).join(","),
+  "workbench,product-query,settings",
+  "设备模式收到显式收银端设置菜单时也必须隐藏该入口"
+);
+assertEqual(
+  getVisibleTabRouteNames({
+    routeNames: ["device-management", "pos-settings"],
+    isDeviceMode: false,
+  }).join(","),
+  "workbench,device-management,pos-settings,settings",
+  "账号会话必须保留后端下发的收银端设置入口"
+);
+
 // 现金入口按账号权限与可操作分店授权：设备会话必须隐藏，账号会话照后端菜单显示。
 assertEqual(
   getVisibleTabRouteNames({

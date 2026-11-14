@@ -4853,6 +4853,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stores/current/pos-settings/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    knownHash?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PosSettingsSyncDtoApiResult"];
+                        "application/json": components["schemas"]["PosSettingsSyncDtoApiResult"];
+                        "text/json": components["schemas"]["PosSettingsSyncDtoApiResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stores/current/pos-settings/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["PosSettingsAckRequest"];
+                    "text/json": components["schemas"]["PosSettingsAckRequest"];
+                    "application/*+json": components["schemas"]["PosSettingsAckRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["PosSettingsAckResultDtoApiResult"];
+                        "application/json": components["schemas"]["PosSettingsAckResultDtoApiResult"];
+                        "text/json": components["schemas"]["PosSettingsAckResultDtoApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/promotions/rules": {
         parameters: {
             query?: never;
@@ -8088,6 +8170,41 @@ export interface components {
         PosIpadOtaUpdateResponseApiResult: {
             success?: boolean;
             data?: components["schemas"]["PosIpadOtaUpdateResponse"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        PosSettingValueDto: {
+            value?: boolean;
+            source?: string | null;
+        };
+        PosSettingsAckRequest: {
+            hash?: string | null;
+            applied?: {
+                [key: string]: boolean;
+            } | null;
+            appVersion?: string | null;
+            /** Format: int32 */
+            offlineOverrideCount?: number;
+        };
+        PosSettingsAckResultDto: {
+            appliedHash?: string | null;
+        };
+        PosSettingsAckResultDtoApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["PosSettingsAckResultDto"];
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        PosSettingsSyncDto: {
+            changed?: boolean;
+            hash?: string | null;
+            settings?: {
+                [key: string]: components["schemas"]["PosSettingValueDto"];
+            } | null;
+        };
+        PosSettingsSyncDtoApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["PosSettingsSyncDto"];
             errorCode?: string | null;
             message?: string | null;
         };

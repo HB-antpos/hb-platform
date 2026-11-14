@@ -94,6 +94,8 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       // 旧的「抓拍与比对 / 不受欢迎人员名单 / 人脸比对设置」三个入口只给旧版 App 用，新版菜单里已去掉（见 default-route 的 getVisibleTabRouteNames）。
       { routeName: "face-hub", labelKey: "routes.faceHub", icon: "face-recognition" },
       { routeName: "device-management", labelKey: "routes.deviceManagement", icon: "cellphone-cog" },
+      // 收银端设置下发：全局 / 门店 / 设备三层开关，与设备管理同属门店设备运维，放在它后面。
+      { routeName: "pos-settings", labelKey: "routes.posSettings", icon: "tune-variant" },
       { routeName: "app-install", labelKey: "routes.appInstall", icon: "qrcode" },
       // 版本发布中心：App 安装包 / OTA 与 WPF 收银端合并为一页；wpf-versions 路由仅保留为跳转到其 WPF 终端的旧入口。
       { routeName: "app-downloads", labelKey: "routes.appDownloads", icon: "rocket-launch-outline" },
