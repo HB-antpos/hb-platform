@@ -108,6 +108,61 @@ public sealed class DailyCloseSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncAsync_expected_cash_adds_cash_in_and_subtracts_cash_out()
+    {
+        var repository = new FakeRepository();
+        // 现金净额 400.00 + 存入 50.00 − 取出 418.50 = 应有现金 31.50；实点 401.35 → 差额 369.85。
+        var request = CreateRequest() with { CashInAmount = 50m, CashOutAmount = 418.50m, CashDifference = 369.85m };
+
+        var response = await CreateService(repository).SyncAsync(request, "S001", "POS-01", CancellationToken.None);
+
+        Assert.True(response.Accepted);
+        var stored = Assert.Single(repository.Records);
+        Assert.Equal(31.50m, stored.ExpectedCashAmount);
+        Assert.Equal(50m, stored.CashInAmount);
+        Assert.Equal(418.50m, stored.CashOutAmount);
+        Assert.Equal(369.85m, stored.CashDifference);
+
+        // 差额仍按旧公式（不扣取出）算的客户端数据要被拒，不能静默入库。
+        var stale = await Assert.ThrowsAsync<DailyCloseValidationException>(() =>
+            CreateService(new FakeRepository()).SyncAsync(
+                request with { CashDifference = 1.35m },
+                "S001",
+                "POS-01",
+                CancellationToken.None));
+        Assert.Equal("INVALID_CASH_DIFFERENCE", stale.Code);
+    }
+
+    [Theory]
+    [InlineData(-0.01, 0)]
+    [InlineData(0, -5)]
+    public async Task SyncAsync_rejects_negative_cash_movement_totals(decimal cashIn, decimal cashOut)
+    {
+        var rejected = await Assert.ThrowsAsync<DailyCloseValidationException>(() =>
+            CreateService(new FakeRepository()).SyncAsync(
+                CreateRequest() with { CashInAmount = cashIn, CashOutAmount = cashOut },
+                "S001",
+                "POS-01",
+                CancellationToken.None));
+        Assert.Equal("INVALID_CASH_MOVEMENT_TOTAL", rejected.Code);
+    }
+
+    [Fact]
+    public async Task SyncAsync_treats_null_cash_movement_columns_of_older_rows_as_zero_on_retry()
+    {
+        // 升级前入库的行这两列为 NULL；旧客户端重传（默认 0）必须仍判为幂等，而不是内容冲突。
+        var stored = ToRecord(CreateRequest(), "S001", "POS-01");
+        stored.CashInAmount = null;
+        stored.CashOutAmount = null;
+        var repository = new FakeRepository();
+        repository.Records.Add(stored);
+
+        var response = await CreateService(repository).SyncAsync(CreateRequest(), "S001", "POS-01", CancellationToken.None);
+
+        Assert.True(response.AlreadySynced);
+    }
+
+    [Fact]
     public async Task SyncAsync_old_clients_without_cash_rounding_keep_the_previous_behavior()
     {
         var repository = new FakeRepository();

@@ -1017,6 +1017,9 @@ public sealed class SquareControllerTests
                 services.RemoveAll<IDailyCloseSchemaInitializer>();
                 services.AddSingleton<IDailyCloseSchemaInitializer>(
                     new TestNoOpDailyCloseSchemaInitializer());
+                services.RemoveAll<ICashMovementSchemaInitializer>();
+                services.AddSingleton<ICashMovementSchemaInitializer>(
+                    new TestNoOpCashMovementSchemaInitializer());
 
                 services.RemoveAll<IAdvertisementSchemaInitializer>();
                 services.AddSingleton<IAdvertisementSchemaInitializer>(new NoOpAdvertisementSchemaInitializer());

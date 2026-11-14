@@ -5,6 +5,9 @@
 export const ALL_POS_TERMINAL_PERMISSIONS = Object.freeze([
   "Permissions.PosTerminal.Audit.View",
   "Permissions.PosTerminal.CashDrawer.Open",
+  "Permissions.PosTerminal.CashMovement.CashIn",
+  "Permissions.PosTerminal.CashMovement.CashOut",
+  "Permissions.PosTerminal.CashMovement.Void",
   "Permissions.PosTerminal.CustomerDisplay.Manage",
   "Permissions.PosTerminal.DailyClose.Reprint",
   "Permissions.PosTerminal.DailyClose.Save",

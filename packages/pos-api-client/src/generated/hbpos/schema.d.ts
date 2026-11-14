@@ -273,6 +273,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cash-movements/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CashMovementSyncRequest"];
+                    "text/json": components["schemas"]["CashMovementSyncRequest"];
+                    "application/*+json": components["schemas"]["CashMovementSyncRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["CashMovementSyncResponse"];
+                        "application/json": components["schemas"]["CashMovementSyncResponse"];
+                        "text/json": components["schemas"]["CashMovementSyncResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/catalog/stores": {
         parameters: {
             query?: never;
@@ -6047,6 +6090,45 @@ export interface components {
             receiptText?: string | null;
             refundReference?: string | null;
         };
+        CashMovementSync: {
+            /** Format: uuid */
+            movementGuid?: string;
+            direction?: string | null;
+            reasonCode?: string | null;
+            /** Format: double */
+            amount?: number;
+            note?: string | null;
+            /** Format: uuid */
+            voidsMovementGuid?: string | null;
+            /** Format: date */
+            businessDate?: string;
+            /** Format: date-time */
+            occurredAt?: string;
+            cashierId?: string | null;
+            cashierName?: string | null;
+            authorizedById?: string | null;
+            authorizedByName?: string | null;
+            displayNumber?: string | null;
+        };
+        CashMovementSyncRequest: {
+            /** Format: int32 */
+            schemaVersion?: number;
+            storeCode?: string | null;
+            deviceCode?: string | null;
+            clientKind?: string | null;
+            appVersion?: string | null;
+            movements?: components["schemas"]["CashMovementSync"][] | null;
+        };
+        CashMovementSyncResponse: {
+            results?: components["schemas"]["CashMovementSyncResult"][] | null;
+        };
+        CashMovementSyncResult: {
+            /** Format: uuid */
+            movementGuid?: string;
+            status?: string | null;
+            code?: string | null;
+            message?: string | null;
+        };
         CashierBarcodeLoginRequest: {
             storeCode?: string | null;
             userBarcode?: string | null;
@@ -6421,6 +6503,10 @@ export interface components {
             cashRoundingAmount?: number;
             /** Format: int32 */
             installmentPaymentCount?: number;
+            /** Format: double */
+            cashInAmount?: number;
+            /** Format: double */
+            cashOutAmount?: number;
         };
         DailyCloseSyncResponse: {
             accepted?: boolean;

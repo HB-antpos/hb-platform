@@ -328,6 +328,9 @@ public sealed partial class StoreCashService
             : null;
     }
 
+    private static bool IsPosGenerated(StoreCashExpense expense) =>
+        string.Equals(expense.CreatedByUserGuid, PosPaidOutExpenseSynchronizer.SystemCreatorGuid, StringComparison.Ordinal);
+
     private T MapExpenseListItem<T>(
         StoreCashExpense row,
         CashAccess access,
@@ -351,7 +354,10 @@ public sealed partial class StoreCashService
             Status = row.Status,
             CreatedByName = row.CreatedByName,
             CreatedAtUtc = StoreCashClock.AsUtc(row.CreatedAtUtc),
+            // 收银端小额支出自动生成的记录只能在收银端冲正，后台不能作废，否则现金池会多算一次。
+            IsFromPos = IsPosGenerated(row),
             CanVoid = row.Status == StoreCashConstants.RecordStatus.Active
+                && !IsPosGenerated(row)
                 && CashVisibilityRules.CanVoid(access, access.CanCreateExpense, row.CreatedByUserGuid, row.CreatedAtUtc, Now),
         };
 
@@ -481,6 +487,14 @@ public sealed partial class StoreCashService
         if (expense.Status == StoreCashConstants.RecordStatus.Voided)
         {
             return ApiResponse<CashExpenseDetailDto>.OK(await BuildExpenseDetailAsync(expense, access, cancellationToken));
+        }
+
+        if (IsPosGenerated(expense))
+        {
+            return Fail<CashExpenseDetailDto>(
+                "收银端小额支出自动生成的记录不能在后台作废，请在收银端冲正",
+                StoreCashConstants.ErrorCodes.VoidNotAllowed
+            );
         }
 
         if (!CashVisibilityRules.CanVoid(access, access.CanCreateExpense, expense.CreatedByUserGuid, expense.CreatedAtUtc, Now))

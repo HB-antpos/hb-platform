@@ -23,6 +23,7 @@ public sealed partial class StoreCashService : IStoreCashService
 
     private readonly ISqlSugarClient _db;
     private readonly ICashDailyCloseSource _closeSource;
+    private readonly IPosCashMovementSource? _posMovements;
     private readonly IStoreCashAttachmentService _attachments;
     private readonly ILogger<StoreCashService> _logger;
     private readonly TimeProvider _timeProvider;
@@ -32,20 +33,23 @@ public sealed partial class StoreCashService : IStoreCashService
         ICashDailyCloseSource closeSource,
         IStoreCashAttachmentService attachments,
         ILogger<StoreCashService> logger,
-        TimeProvider timeProvider
+        TimeProvider timeProvider,
+        IPosCashMovementSource posMovements
     )
-        : this(context.Db, closeSource, attachments, logger, timeProvider) { }
+        : this(context.Db, closeSource, attachments, logger, timeProvider, posMovements) { }
 
     internal StoreCashService(
         ISqlSugarClient db,
         ICashDailyCloseSource closeSource,
         IStoreCashAttachmentService attachments,
         ILogger<StoreCashService> logger,
-        TimeProvider timeProvider
+        TimeProvider timeProvider,
+        IPosCashMovementSource? posMovements = null
     )
     {
         _db = db;
         _closeSource = closeSource;
+        _posMovements = posMovements;
         _attachments = attachments;
         _logger = logger;
         _timeProvider = timeProvider;
@@ -360,6 +364,15 @@ public sealed partial class StoreCashService : IStoreCashService
             .GroupBy(item => StoreCashClock.FromColumn(item.ExpenseDate))
             .ToDictionary(group => group.Key, group => group.Sum(item => item.Amount));
 
+        var posMovements = _posMovements is { IsConnected: true }
+            ? await _posMovements.GetByStoreAsync(code, from, to, cancellationToken)
+            : Array.Empty<PosCashMovement>();
+        var voidedGuids = posMovements
+            .Where(item => item.VoidsMovementGuid is not null)
+            .Select(item => item.VoidsMovementGuid!.Value)
+            .ToHashSet();
+        var movementsByDate = posMovements.ToLookup(item => item.BusinessDate);
+
         var archivesByDate = archives.ToLookup(archive => archive.BusinessDate);
         var rows = new List<CashDailyRowDto>();
         for (var date = from; date <= to; date = date.AddDays(1))
@@ -385,6 +398,23 @@ public sealed partial class StoreCashService : IStoreCashService
                     CoveredByDepositGuid = covering?.DepositGuid,
                     ExpenseTotal = decimal.Round(expenseByDate.GetValueOrDefault(date), 2),
                     Devices = devices,
+                    PosMovements = movementsByDate[date]
+                        .Select(item => new CashPosMovementDto
+                        {
+                            MovementGuid = item.MovementGuid,
+                            DeviceCode = item.DeviceCode,
+                            Direction = item.Direction,
+                            ReasonCode = item.ReasonCode,
+                            Amount = item.Amount,
+                            Note = item.Note,
+                            VoidsMovementGuid = item.VoidsMovementGuid,
+                            IsVoided = voidedGuids.Contains(item.MovementGuid),
+                            OccurredAtUtc = StoreCashClock.AsUtc(item.OccurredAtUtc),
+                            CashierName = item.CashierName,
+                            AuthorizedByName = item.AuthorizedByName,
+                            DisplayNumber = item.DisplayNumber,
+                        })
+                        .ToList(),
                 }
             );
         }
@@ -427,6 +457,9 @@ public sealed partial class StoreCashService : IStoreCashService
                     CountedCash = archive.CountedCash,
                     ExpectedCash = archive.ExpectedCash,
                     Variance = archive.Variance,
+                    CashIn = archive.CashIn,
+                    CashOut = archive.CashOut,
+                    PoolInflow = archive.PoolInflow,
                     Included = includedIds.Contains(archive.CloseId),
                 })
                 .ToList(),

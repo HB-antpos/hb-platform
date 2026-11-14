@@ -183,7 +183,7 @@ public sealed class DailyCloseSchemaInitializerTests
         var columns = ExtractColumnList(sql);
 
         Assert.Equal(columns.Count, columns.Distinct().Count());
-        Assert.Equal(35, columns.Count);
+        Assert.Equal(37, columns.Count);
         Assert.DoesNotContain("Id", columns);
         foreach (var column in columns)
         {
@@ -261,6 +261,32 @@ public sealed class DailyCloseSchemaInitializerTests
     }
 
     /// <summary>把连续空白折叠成单个空格，断言不依赖原始 SQL 的缩进与换行。</summary>
+    [Fact]
+    public void Schema_adds_nullable_cash_movement_total_columns_to_existing_tables()
+    {
+        var sql = Flat(SqlSugarDailyCloseSchemaInitializer.EnsureTableSql);
+
+        Assert.Contains("IF COL_LENGTH(N'dbo.POSM_DailyClose', N'CashInAmount') IS NULL ALTER TABLE [dbo].[POSM_DailyClose] ADD [CashInAmount] DECIMAL(18,2) NULL;", sql, StringComparison.Ordinal);
+        Assert.Contains("IF COL_LENGTH(N'dbo.POSM_DailyClose', N'CashOutAmount') IS NULL ALTER TABLE [dbo].[POSM_DailyClose] ADD [CashOutAmount] DECIMAL(18,2) NULL;", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Cash_movement_schema_is_created_idempotently_with_guid_void_and_store_indexes()
+    {
+        var executor = new CapturingExecutor();
+        await new SqlSugarCashMovementSchemaInitializer(executor).InitializeAsync();
+
+        var sql = Flat(Assert.Single(executor.Commands));
+        Assert.Contains("N'Hbpos.CashMovement.Schema.v1'", sql, StringComparison.Ordinal);
+        Assert.Contains("IF OBJECT_ID(N'[dbo].[POSM_CashMovement]', N'U') IS NULL", sql, StringComparison.Ordinal);
+        Assert.Contains("[Amount] DECIMAL(18,2) NOT NULL", sql, StringComparison.Ordinal);
+        Assert.Contains("CHECK ([ReasonCode] IN (N'ChangeTopUp', N'OtherIn', N'SafeDrop', N'PaidOut'))", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE UNIQUE INDEX [UX_POSM_CashMovement_Guid] ON [dbo].[POSM_CashMovement] ([MovementGuid]);", sql, StringComparison.Ordinal);
+        Assert.Contains("CREATE UNIQUE INDEX [UX_POSM_CashMovement_Voids] ON [dbo].[POSM_CashMovement] ([VoidsMovementGuid]) WHERE [VoidsMovementGuid] IS NOT NULL;", sql, StringComparison.Ordinal);
+        Assert.Contains("[IX_POSM_CashMovement_StoreBusinessDate]", sql, StringComparison.Ordinal);
+        Assert.Contains("COMMIT TRANSACTION", sql, StringComparison.Ordinal);
+    }
+
     private static string Flat(string sql) =>
         System.Text.RegularExpressions.Regex.Replace(sql, @"\s+", " ");
 
@@ -299,6 +325,11 @@ public sealed class DailyCloseSchemaInitializerTests
 /// 给会真正执行 Program 启动流程、又配置了 PosmConnection 的测试宿主用：避免在没有 SQL Server 的机器上建表。
 /// </summary>
 internal sealed class TestNoOpDailyCloseSchemaInitializer : IDailyCloseSchemaInitializer
+{
+    public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+}
+
+internal sealed class TestNoOpCashMovementSchemaInitializer : ICashMovementSchemaInitializer
 {
     public Task InitializeAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 }

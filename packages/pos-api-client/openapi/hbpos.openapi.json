@@ -298,6 +298,54 @@
         }
       }
     },
+    "/api/v1/cash-movements/sync": {
+      "post": {
+        "tags": [
+          "CashMovements"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementSyncRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementSyncRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementSyncRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashMovementSyncResponse"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashMovementSyncResponse"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashMovementSyncResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/catalog/stores": {
       "get": {
         "tags": [
@@ -7567,6 +7615,133 @@
         },
         "additionalProperties": false
       },
+      "CashMovementSync": {
+        "type": "object",
+        "properties": {
+          "movementGuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "direction": {
+            "type": "string",
+            "nullable": true
+          },
+          "reasonCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "amount": {
+            "type": "number",
+            "format": "double"
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "voidsMovementGuid": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true
+          },
+          "businessDate": {
+            "type": "string",
+            "format": "date"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cashierId": {
+            "type": "string",
+            "nullable": true
+          },
+          "cashierName": {
+            "type": "string",
+            "nullable": true
+          },
+          "authorizedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "authorizedByName": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayNumber": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CashMovementSyncRequest": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "storeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "deviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "clientKind": {
+            "type": "string",
+            "nullable": true
+          },
+          "appVersion": {
+            "type": "string",
+            "nullable": true
+          },
+          "movements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashMovementSync"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CashMovementSyncResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CashMovementSyncResult"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CashMovementSyncResult": {
+        "type": "object",
+        "properties": {
+          "movementGuid": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "nullable": true
+          },
+          "code": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "CashierBarcodeLoginRequest": {
         "type": "object",
         "properties": {
@@ -8798,6 +8973,14 @@
           "installmentPaymentCount": {
             "type": "integer",
             "format": "int32"
+          },
+          "cashInAmount": {
+            "type": "number",
+            "format": "double"
+          },
+          "cashOutAmount": {
+            "type": "number",
+            "format": "double"
           }
         },
         "additionalProperties": false

@@ -277,6 +277,9 @@ public static class ServiceRegistration
         services.AddScoped<IDailyCloseSyncService, DailyCloseSyncService>();
         services.AddScoped<IDailyCloseSchemaSqlExecutor, SqlSugarDailyCloseSchemaSqlExecutor>();
         services.AddScoped<IDailyCloseSchemaInitializer, SqlSugarDailyCloseSchemaInitializer>();
+        services.AddScoped<ICashMovementRepository, SqlSugarCashMovementRepository>();
+        services.AddScoped<ICashMovementSyncService, CashMovementSyncService>();
+        services.AddScoped<ICashMovementSchemaInitializer, SqlSugarCashMovementSchemaInitializer>();
         services.AddScoped<ISquareTokenRepository, SqlSugarSquareTokenRepository>();
         // 门店范围从当前请求的设备令牌声明读取；AddHttpContextAccessor 幂等，让本注册链不依赖 Program.cs 的先行注册。
         services.AddHttpContextAccessor();

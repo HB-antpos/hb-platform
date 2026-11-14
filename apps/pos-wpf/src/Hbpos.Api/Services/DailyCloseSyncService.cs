@@ -175,12 +175,22 @@ internal sealed class DailyCloseSyncService(
         RequireWithinLimit(request.CountedCashAmount, "AMOUNT_OUT_OF_RANGE", "countedCashAmount");
         RequireWithinLimit(request.CashDifference, "AMOUNT_OUT_OF_RANGE", "cashDifference");
         RequireWithinLimit(request.CashRoundingAmount, "AMOUNT_OUT_OF_RANGE", "cashRoundingAmount");
+        RequireWithinLimit(request.CashInAmount, "AMOUNT_OUT_OF_RANGE", "cashInAmount");
+        RequireWithinLimit(request.CashOutAmount, "AMOUNT_OUT_OF_RANGE", "cashOutAmount");
 
         var noteSubtotal = RoundMoney(request.NoteSubtotal);
         var coinSubtotal = RoundMoney(request.CoinSubtotal);
         var countedCashAmount = RoundMoney(request.CountedCashAmount);
         var cashDifference = RoundMoney(request.CashDifference);
         var cashRoundingAmount = RoundMoney(request.CashRoundingAmount);
+        var cashInAmount = RoundMoney(request.CashInAmount);
+        var cashOutAmount = RoundMoney(request.CashOutAmount);
+
+        // 现金存入 / 取出合计是冲正抵消后的非负金额；负数说明客户端汇总有误。
+        if (cashInAmount < 0 || cashOutAmount < 0)
+        {
+            throw Invalid("INVALID_CASH_MOVEMENT_TOTAL", "cashInAmount and cashOutAmount cannot be negative.");
+        }
 
         // 每张订单的现金进位最多 ±2 分（5 分进位），合计不可能超过 订单数 × 2 分；
         // 超出说明客户端数据有问题，直接拒绝，避免用进位去掩盖真实的现金差异。
@@ -196,8 +206,8 @@ internal sealed class DailyCloseSyncService(
             throw Invalid("INVALID_CASH_ROUNDING", "cashRoundingAmount exceeds the maximum possible cash rounding for the order and installment payment count.");
         }
 
-        // 应有现金 = 现金净额 + 现金进位；旧客户端进位为 0，结果与此前一致。
-        var expectedCashAmount = RoundMoney(cash.NetAmount + cashRoundingAmount);
+        // 应有现金 = 现金净额 + 现金进位 + 现金存入 − 现金取出；旧客户端后三项为 0，结果与此前一致。
+        var expectedCashAmount = RoundMoney(cash.NetAmount + cashRoundingAmount + cashInAmount - cashOutAmount);
 
         // 盘点金额只能由数量推出，客户端汇总值必须与之精确一致。
         // 纸币 + 硬币 = 实点现金由这三个等式共同保证，无需再单独校验一次。
@@ -216,10 +226,10 @@ internal sealed class DailyCloseSyncService(
             throw Invalid("INVALID_COUNTED_CASH_AMOUNT", "countedCashAmount does not match the cash counts.");
         }
 
-        // 差额 = 实点 − 应有现金（现金净额 + 现金进位）；正为长款、负为短款。
+        // 差额 = 实点 − 应有现金（现金净额 + 现金进位 + 存入 − 取出）；正为长款、负为短款。
         if (Math.Abs(cashDifference - (countedCashAmount - expectedCashAmount)) > RoundingTolerance)
         {
-            throw Invalid("INVALID_CASH_DIFFERENCE", "cashDifference must equal countedCashAmount minus the expected cash (cash net amount plus cash rounding).");
+            throw Invalid("INVALID_CASH_DIFFERENCE", "cashDifference must equal countedCashAmount minus the expected cash (cash net amount plus cash rounding plus cash in minus cash out).");
         }
 
         return new PosmDailyCloseRecord
@@ -252,6 +262,8 @@ internal sealed class DailyCloseSyncService(
             VoucherNetAmount = voucher.NetAmount,
             RefundAmount = RoundMoney(request.RefundAmount),
             ExpectedCashAmount = expectedCashAmount,
+            CashInAmount = cashInAmount,
+            CashOutAmount = cashOutAmount,
             CountedCashAmount = countedCashAmount,
             CashDifference = cashDifference,
             NoteSubtotal = noteSubtotal,
@@ -394,6 +406,9 @@ internal sealed class DailyCloseSyncService(
             ("VoucherNetAmount", existing.VoucherNetAmount == incoming.VoucherNetAmount),
             ("RefundAmount", existing.RefundAmount == incoming.RefundAmount),
             ("ExpectedCashAmount", existing.ExpectedCashAmount == incoming.ExpectedCashAmount),
+            // 旧记录这两列为 NULL，与旧客户端重传的 0 视为相同。
+            ("CashInAmount", (existing.CashInAmount ?? 0m) == (incoming.CashInAmount ?? 0m)),
+            ("CashOutAmount", (existing.CashOutAmount ?? 0m) == (incoming.CashOutAmount ?? 0m)),
             ("CountedCashAmount", existing.CountedCashAmount == incoming.CountedCashAmount),
             ("CashDifference", existing.CashDifference == incoming.CashDifference),
             ("NoteSubtotal", existing.NoteSubtotal == incoming.NoteSubtotal),

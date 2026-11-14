@@ -382,6 +382,18 @@
       "name": "Open cash drawer",
       "description": "Use the Open cash drawer button on the POS."
     },
+    "Permissions.PosTerminal.CashMovement.CashIn": {
+      "name": "Cash in",
+      "description": "Put cash into the POS drawer (change top-up or other cash in)."
+    },
+    "Permissions.PosTerminal.CashMovement.CashOut": {
+      "name": "Cash out",
+      "description": "Take cash out of the POS drawer (safe drop to the manager or a small paid-out expense)."
+    },
+    "Permissions.PosTerminal.CashMovement.Void": {
+      "name": "Void cash in / out",
+      "description": "Void a cash in or cash out record of the current period, before the daily close."
+    },
     "Permissions.PosTerminal.CustomerDisplay.Manage": {
       "name": "Manage customer display",
       "description": "Use the Manage customer display button on the POS."

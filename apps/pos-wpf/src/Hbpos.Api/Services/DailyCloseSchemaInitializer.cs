@@ -14,7 +14,8 @@ public interface IDailyCloseSchemaSqlExecutor
 
 /// <summary>
 /// 启动时幂等创建 POSM_DailyClose。该表同时被两类写入方使用：本 API 的收银端上传（ClientUpload）
-/// 与运维回填脚本（AuditBackfill）；后台只读查询另有独立实体，所以这里不做任何结构迁移，只建表与索引。
+/// 与运维回填脚本（AuditBackfill）；后台只读查询另有独立实体。这里只建表、建索引，
+/// 以及幂等补加后续新增的可空列（不改、不删已有列）。
 /// </summary>
 public sealed class SqlSugarDailyCloseSchemaInitializer(
     IDailyCloseSchemaSqlExecutor sqlExecutor) : IDailyCloseSchemaInitializer
@@ -82,6 +83,13 @@ public sealed class SqlSugarDailyCloseSchemaInitializer(
         END;
 
         -- DailyCloseGuid 全局唯一：上传幂等键，同时挡住并发重复插入。
+        -- 收银端现金进出合计（2026-11 新增）：已存在的表补加可空列，旧行保持 NULL，读取方按 0 处理。
+        IF COL_LENGTH(N'dbo.POSM_DailyClose', N'CashInAmount') IS NULL
+            ALTER TABLE [dbo].[POSM_DailyClose] ADD [CashInAmount] DECIMAL(18,2) NULL;
+
+        IF COL_LENGTH(N'dbo.POSM_DailyClose', N'CashOutAmount') IS NULL
+            ALTER TABLE [dbo].[POSM_DailyClose] ADD [CashOutAmount] DECIMAL(18,2) NULL;
+
         IF NOT EXISTS (
             SELECT 1 FROM sys.indexes
             WHERE [object_id] = OBJECT_ID(N'[dbo].[POSM_DailyClose]', N'U')

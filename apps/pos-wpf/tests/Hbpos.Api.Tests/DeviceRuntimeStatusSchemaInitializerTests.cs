@@ -137,6 +137,9 @@ public sealed class DeviceRuntimeStatusSchemaInitializerTests
                 services.RemoveAll<IDailyCloseSchemaInitializer>();
                 services.AddSingleton<IDailyCloseSchemaInitializer>(
                     new TestNoOpDailyCloseSchemaInitializer());
+                services.RemoveAll<ICashMovementSchemaInitializer>();
+                services.AddSingleton<ICashMovementSchemaInitializer>(
+                    new TestNoOpCashMovementSchemaInitializer());
 
                 services.RemoveAll<ISquareTokenSchemaInitializer>();
                 services.AddSingleton<ISquareTokenSchemaInitializer>(new NoOpSquareTokenSchemaInitializer());
