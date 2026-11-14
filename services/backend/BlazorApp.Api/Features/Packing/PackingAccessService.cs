@@ -21,6 +21,12 @@ public interface IPackingAccessService
     /// 没有任何打包权限、或没有可操作的地点时返回 403。
     /// </summary>
     Task<PackingAccessResult> ResolveAsync(ClaimsPrincipal user);
+
+    /// <summary>
+    /// 仓库拣货端「边拣边装」用的操作人：拣货控制器已经验明终端和拣货人（扫员工码或账号本人），
+    /// 这里只把拣货人换成能操作总仓的打包操作人。只能操作总仓，不是经理、不是管理员（不能重新开箱、不能改运输公司）。
+    /// </summary>
+    PackingOperator WarehousePickerOperator(string userGuid, string name);
 }
 
 /// <summary>
@@ -88,6 +94,15 @@ internal sealed class PackingAccessService(
 
         return PackingAccessResult.Allowed(new PackingOperator(userGuid, name.Trim(), isManager, isAdmin, owners));
     }
+
+    public PackingOperator WarehousePickerOperator(string userGuid, string name) =>
+        new(
+            userGuid,
+            string.IsNullOrWhiteSpace(name) ? userGuid : name.Trim(),
+            IsManager: false,
+            IsAdmin: false,
+            new[] { new PackingOwner(PackOwners.Warehouse, PackingConfig.WarehouseName(configuration), true) }
+        );
 
     private async Task<List<PackingOwner>> LoadStoreOwnersAsync(string userGuid, bool allStores)
     {

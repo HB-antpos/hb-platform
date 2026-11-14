@@ -4375,6 +4375,58 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 拣货记录所装箱列_只加一个可空列_可重复执行_不动既有记录_识别缺列和类型漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 先有拣货记录表（拣货建表迁移）：此时还没有所装箱列 → 54483。
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickingSchema.ApplySql);
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql));
+        Assert.Equal(54483, missing.Number);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.WarehouseOrderPickRecord
+                (RecordGUID, OrderGUID, DetailGUID, ProductCode, QuantityDelta, Source, PickerUserGuid, PickerName, ClientRequestId, CreatedAtUtc)
+            VALUES (N'r-old', N'o-1', N'd-1', N'P-1', 12, 1, N'u-1', N'Alex', NEWID(), SYSUTCDATETIME());
+            """);
+
+        // 新增列、可重复执行；旧记录的新列为 NULL，数据不丢。
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.WarehouseOrderPickRecord WHERE RecordGUID = N'r-old' AND QuantityDelta = 12 AND CartonGUID IS NULL"));
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.WarehouseOrderPickRecord
+                (RecordGUID, OrderGUID, DetailGUID, ProductCode, QuantityDelta, Source, PickerUserGuid, PickerName, ClientRequestId, CreatedAtUtc, CartonGUID)
+            VALUES (N'r-new', N'o-1', N'd-1', N'P-1', 12, 1, N'u-1', N'Alex', NEWID(), SYSUTCDATETIME(), N'0194c0de0000000000000000000000aa');
+            """);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.WarehouseOrderPickRecord WHERE CartonGUID = N'0194c0de0000000000000000000000aa'"));
+
+        // 拣货建表迁移的校验不受新增列影响（只校验既有列的签名）。
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickingSchema.VerifySql);
+
+        // 类型 / 长度漂移 → 54483；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WarehouseOrderPickRecord ALTER COLUMN CartonGUID nvarchar(32) NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql));
+        Assert.Equal(54483, drift.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WarehouseOrderPickRecord ALTER COLUMN CartonGUID nvarchar(50) NULL;");
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql);
+
+        // 缺列 → 54483；重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.WarehouseOrderPickRecord DROP COLUMN CartonGUID;");
+        var dropped = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql));
+        Assert.Equal(54483, dropped.Number);
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, WarehouseOrderPickRecordCartonSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 分店特殊商品分类两张表_新表_同店名称唯一_归属主键_可重复执行_识别漂移和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

@@ -1,0 +1,46 @@
+{
+  "storeOrders": {
+    "packProgress": {
+      "title": "装箱情况",
+      "refresh": "刷新装箱情况",
+      "statPicked": "已拣件数",
+      "statPacked": "已装箱件数",
+      "statCartons": "箱数",
+      "statPackedWarn": "与已拣不一致",
+      "cartonBreakdown": "装箱中 {{packing}} · 已封 {{sealed}} · 在途 {{transit}}",
+      "pillReconciled": "拣货与装箱已对上",
+      "pillMismatch": "{{count}} 个商品拣货与装箱对不上",
+      "pillOpenCartons": "{{count}} 只箱未封",
+      "linesTitle": "按商品对照",
+      "cartonsTitle": "箱",
+      "col": {
+        "itemNumber": "货号",
+        "product": "商品",
+        "ordered": "订货",
+        "picked": "已拣",
+        "packed": "已装",
+        "diff": "差",
+        "diffTip": "差 = 已拣 - 已装；正数是拣了没装进箱，负数是箱里装多了",
+        "cartonNo": "箱号",
+        "status": "状态",
+        "pallet": "托盘",
+        "sku": "品数",
+        "pieces": "件数"
+      },
+      "status": {
+        "packing": "装箱中",
+        "sealed": "已封",
+        "transit": "在途",
+        "unknown": "未知"
+      },
+      "reminder": {
+        "title": "该订单的装箱还没对完",
+        "openCartons": "{{count}} 只箱还没封箱",
+        "openCartonsWithEmpty": "{{count}} 只箱还没封箱（含 {{empty}} 只空箱）",
+        "mismatchLines": "{{count}} 个商品的拣货数与装箱数不一致",
+        "notReconciled": "拣货数与装箱数还没对上",
+        "footer": "不影响完成出库，建议先到订单页的「装箱情况」核对。"
+      }
+    }
+  }
+}

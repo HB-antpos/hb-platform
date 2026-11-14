@@ -705,3 +705,1322 @@
   color: rgba(0, 0, 0, 0.4);
   white-space: nowrap;
 }
+
+/* ===== 按天分列的周视图：每天一列，卡片写员工名，一人一色 ===== */
+.sce-board-wrap {
+  overflow: hidden;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fff;
+}
+
+/* 员工图例：颜色对照 + 本周合计；点一下高亮他的班次 */
+.sce-staff-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.sce-staff-legend-caption {
+  margin-right: 4px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-staff-legend-spacer {
+  flex: 1;
+}
+
+.sce-staff-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--sce-bg);
+  color: var(--sce-ink);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 0.15s, box-shadow 0.15s;
+}
+
+.sce-staff-pill i {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--sce-bar);
+}
+
+.sce-staff-pill b {
+  font-weight: 600;
+}
+
+.sce-staff-pill small {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.sce-staff-pill.is-on {
+  border-color: var(--sce-bar);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sce-bar) 25%, transparent);
+}
+
+.sce-staff-pill.is-off {
+  opacity: 0.4;
+}
+
+/* 状态图例：实线 = 已发布，虚线斜纹 = 草稿，灰底 = 已取消（颜色只用来区分员工） */
+.sce-status-legend {
+  display: inline-flex;
+  gap: 12px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-status-legend i {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  margin-right: 4px;
+  border: 1px solid #9aa4b2;
+  border-radius: 3px;
+  background: #eef1f5;
+  vertical-align: -2px;
+}
+
+.sce-status-legend i.is-Draft {
+  border-style: dashed;
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.8) 0 3px, transparent 3px 6px);
+}
+
+.sce-status-legend i.is-Cancelled {
+  border-color: #d9d9d9;
+  background: #f5f5f5;
+}
+
+.sce-board {
+  display: grid;
+  /* 每列最小 132px：13 寸屏 1280 宽（看板可用约 950px）也能一屏放下 7 天；更窄才横向滚动 */
+  grid-template-columns: repeat(7, minmax(132px, 1fr));
+  overflow-x: auto;
+}
+
+.sce-col {
+  position: relative;
+  min-width: 0;
+  border-right: 1px solid #f0f0f0;
+}
+
+.sce-col:last-child {
+  border-right: 0;
+}
+
+.sce-col--weekend {
+  background: #fbfcfe;
+}
+
+.sce-col-head {
+  padding: 8px 10px 7px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+
+.sce-col--weekend .sce-col-head {
+  background: #f6f8fc;
+}
+
+.sce-col-date {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.sce-col-date strong {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sce-col-date span {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-col-stat {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.sce-col-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-height: 120px;
+  padding: 7px 5px 8px;
+  border-radius: 8px;
+}
+
+/* 班次卡片：左侧色条 + 底色 = 员工；虚线斜纹 = 草稿；灰底划线 = 已取消 */
+.sce-card {
+  position: relative;
+  min-width: 0;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--sce-bar) 35%, transparent);
+  border-radius: 6px;
+  background: var(--sce-bg);
+  color: var(--sce-ink);
+  text-align: left;
+  cursor: default;
+  transition: box-shadow 0.15s, opacity 0.15s;
+}
+
+.sce-card::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--sce-bar);
+}
+
+.sce-card-line1,
+.sce-card-line2 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.sce-card-line1 b {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sce-card-age {
+  flex: none;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.sce-card-tag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 4px;
+  border: 1px dashed #ff7875;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.6);
+  color: #cf1322;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.sce-card-line2 {
+  gap: 3px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sce-card-time {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sce-card-hours {
+  margin-left: auto;
+  font-size: 10.5px;
+  opacity: 0.75;
+}
+
+/* 手动指定过用餐次数：工时下面一条点状下划线 */
+.sce-card-hours--meal {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.sce-card-warn {
+  font-size: 10px;
+  color: #fa8c16;
+}
+
+.sce-card-lock {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.sce-card--Draft {
+  border-color: var(--sce-bar);
+  border-style: dashed;
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0 5px, transparent 5px 10px);
+}
+
+.sce-card--Cancelled {
+  border-color: #e0e0e0;
+  background: #f5f5f5;
+  color: #8c8c8c;
+}
+
+.sce-card--Cancelled .sce-card-line1 b,
+.sce-card--Cancelled .sce-card-time {
+  text-decoration: line-through;
+}
+
+.sce-card--editable {
+  cursor: pointer;
+}
+
+.sce-card--editable:hover,
+.sce-card--editable:focus-visible {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.sce-card--draggable {
+  cursor: grab;
+}
+
+.sce-card--draggable:active {
+  cursor: grabbing;
+}
+
+.sce-card--active {
+  outline: 2px solid var(--sce-bar);
+  outline-offset: 1px;
+}
+
+/* 与员工上报的可上班 / 不能上班时间冲突：橙色描边 + ⚠，不改卡片本身的颜色 */
+.sce-card--conflict {
+  box-shadow: inset 0 0 0 1px #fa8c16;
+}
+
+.sce-card--dim {
+  filter: saturate(0.3);
+  opacity: 0.28;
+}
+
+.sce-card--hi {
+  box-shadow: 0 0 0 2px var(--sce-bar);
+}
+
+/* 拖动中：原位置留一个淡影 */
+.sce-card--drag-src {
+  opacity: 0.42;
+  outline: 1.5px dashed #8c8c8c;
+  outline-offset: -2px;
+}
+
+/* 右侧「×」：悬停 / 键盘聚焦才出现，出现时让位给右侧的小标签和工时；触屏没有悬停，常驻 */
+.sce-card-x {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid #d9d9d9;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  color: #8c8c8c;
+  font-size: 9px;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.15s, color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.sce-card:hover .sce-card-x,
+.sce-card:focus-within .sce-card-x,
+.sce-card-x:focus-visible {
+  opacity: 1;
+}
+
+.sce-card:hover .sce-card-tag,
+.sce-card:focus-within .sce-card-tag,
+.sce-card--editable:hover .sce-card-hours,
+.sce-card--editable:focus-within .sce-card-hours {
+  visibility: hidden;
+}
+
+.sce-card-x:hover {
+  border-color: #ff7875;
+  background: #fff1f0;
+  color: #ff4d4f;
+}
+
+@media (hover: none) {
+  .sce-card-x {
+    opacity: 1;
+  }
+}
+
+/* 每天一列的底部：可上班未排、添加班次 */
+.sce-free-note {
+  display: block;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: #389e0d;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sce-free-note::before {
+  content: '● ';
+  font-size: 8px;
+  vertical-align: 1px;
+}
+
+.sce-free-note.is-static {
+  cursor: default;
+}
+
+.sce-col-add {
+  height: 28px;
+  border: 1px dashed transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: transparent;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+}
+
+.sce-col:hover .sce-col-add,
+.sce-col:focus-within .sce-col-add {
+  border-color: #91caff;
+  background: #f0f7ff;
+  color: #1677ff;
+}
+
+/* 拖拽：整列的落点状态（可放 / 提醒 / 不能放 / 当前悬停）与占位框 */
+.sce-col--drop-ok .sce-col-body {
+  outline: 1px dashed #91caff;
+  outline-offset: -4px;
+  background: #f0f7ff;
+}
+
+.sce-col--drop-warn .sce-col-body {
+  outline: 1px dashed #ffc069;
+  outline-offset: -4px;
+  background: #fffbe6;
+}
+
+.sce-col--drop-bad .sce-col-body {
+  outline: 1px dashed #ff7875;
+  outline-offset: -4px;
+  background: repeating-linear-gradient(135deg, #fff1f0 0 6px, #fff 6px 12px);
+  cursor: not-allowed;
+}
+
+.sce-col--drop-target .sce-col-body {
+  outline: 2px solid #1677ff;
+  outline-offset: -4px;
+  background: #e6f4ff;
+}
+
+.sce-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 4px 6px;
+  border: 2px dashed #1677ff;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #1677ff;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* 编辑浮层里的「改给其他员工」 */
+.sce-transfer {
+  display: flex;
+  gap: 8px;
+}
+
+.sce-transfer .ant-select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===== 批量排班弹窗（sbm = schedule batch modal） ===== */
+.sbm-modal .ant-modal-body {
+  padding: 0;
+}
+
+.sbm-title small {
+  margin-left: 10px;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-body {
+  display: grid;
+  grid-template-columns: 344px minmax(0, 1fr);
+  /* 行高也要受 max-height 约束，否则员工多时左列会撑开、溢出到底部按钮栏下面 */
+  grid-template-rows: minmax(0, 1fr);
+  max-height: calc(100vh - 230px);
+  min-height: 420px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.sbm-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 16px 16px 12px;
+  overflow: hidden;
+  border-right: 1px solid #f0f0f0;
+  background: #fcfdff;
+}
+
+.sbm-right {
+  min-height: 0;
+  padding: 16px 20px 8px;
+  overflow: auto;
+}
+
+.sbm-sec {
+  margin-bottom: 16px;
+}
+
+.sbm-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sbm-label small {
+  font-size: 12px;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-quick {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.sbm-quick button,
+.sbm-pill {
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sbm-quick button:hover,
+.sbm-pill:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+
+.sbm-pill.is-on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #1677ff;
+}
+
+.sbm-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sbm-list {
+  flex: 1 1 auto;
+  min-height: 160px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.sbm-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+}
+
+.sbm-item:last-child {
+  border-bottom: 0;
+}
+
+.sbm-item.is-on {
+  background: #e6f4ff;
+}
+
+.sbm-check {
+  display: grid;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  background: #fff;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.sbm-item.is-on .sbm-check {
+  border-color: #1677ff;
+  background: #1677ff;
+}
+
+.sbm-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sbm-item-main b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sbm-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sbm-dot {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.sbm-age {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid #ffe58f;
+  border-radius: 4px;
+  background: #fffbe6;
+  color: #d48806;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.sbm-item-main small {
+  display: block;
+  margin-top: 1px;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sbm-ok {
+  color: #389e0d;
+}
+
+.sbm-bad {
+  margin-left: 6px;
+  color: #cf1322;
+}
+
+.sbm-week {
+  flex: none;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-week.is-empty {
+  color: #fa8c16;
+}
+
+.sbm-empty {
+  padding: 18px 12px;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+
+.sbm-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sbm-day {
+  min-height: 62px;
+  padding: 7px 9px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sbm-day b {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.sbm-day b em {
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-day small {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-day.is-on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+}
+
+.sbm-day.is-on b {
+  color: #0958d9;
+}
+
+.sbm-holiday {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 0 4px;
+  border: 1px solid #ffd591;
+  border-radius: 3px;
+  background: #fff7e6;
+  color: #d46b08;
+  font-size: 10.5px;
+}
+
+.sbm-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.sbm-preset {
+  padding: 0 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 28px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.sbm-preset.is-on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #0958d9;
+}
+
+.sbm-shift-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  margin-top: 10px;
+}
+
+.sbm-meal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sbm-remark {
+  width: 260px;
+}
+
+.sbm-preview {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.sbm-preview-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+  font-size: 12.5px;
+}
+
+.sbm-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sbm-key::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #d9d9d9;
+}
+
+.sbm-key.is-warn::before {
+  background: #fa8c16;
+}
+
+.sbm-key.is-no::before {
+  background: #ff7875;
+}
+
+.sbm-matrix {
+  display: grid;
+  overflow-x: auto;
+}
+
+.sbm-mh {
+  padding: 5px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.sbm-mrow {
+  display: contents;
+}
+
+.sbm-mname {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px 0 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sbm-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 26px;
+  margin: 6px 5px;
+  border: 1px dashed var(--sce-bar);
+  border-radius: 5px;
+  background: var(--sce-bg);
+  color: var(--sce-ink);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sbm-cell.is-new,
+.sbm-cell.is-warn {
+  background-image: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.6) 0 5px, transparent 5px 10px);
+}
+
+.sbm-cell.is-warn {
+  box-shadow: inset 0 0 0 1px #fa8c16;
+}
+
+.sbm-cell.is-skip {
+  border-color: #d0d0d0;
+  background: #f5f5f5;
+  color: rgba(0, 0, 0, 0.45);
+  font-weight: 400;
+  cursor: default;
+}
+
+.sbm-cell.is-bad {
+  border-color: #ff4d4f;
+  background: #fff1f0;
+  color: #cf1322;
+  font-weight: 400;
+}
+
+.sbm-cell.is-off {
+  border-color: #d0d0d0;
+  background: #fff;
+  color: rgba(0, 0, 0, 0.35);
+  font-weight: 400;
+}
+
+.sbm-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
+  border-radius: 0 0 8px 8px;
+}
+
+.sbm-foot-hint {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-run,
+.sbm-result {
+  padding: 18px 20px;
+}
+
+.sbm-run-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sbm-bar {
+  height: 8px;
+  margin: 10px 0 6px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #f0f0f0;
+}
+
+.sbm-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: #1677ff;
+  transition: width 0.2s;
+}
+
+.sbm-run-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.sbm-run-row .is-ok {
+  color: #52c41a;
+}
+
+.sbm-wait {
+  color: #bfbfbf;
+}
+
+.sbm-run-state {
+  margin-left: auto;
+  font-size: 12px;
+}
+
+.sbm-result-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 34px;
+}
+
+.sbm-result-head .is-ok {
+  color: #52c41a;
+}
+
+.sbm-result-head .is-warn {
+  color: #fa8c16;
+}
+
+.sbm-result-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sbm-result-head h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.sbm-result-head small {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12.5px;
+}
+
+.sbm-group {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.sbm-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fafafa;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sbm-group-head span {
+  margin-left: auto;
+  font-weight: 400;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sbm-group.is-fail .sbm-group-head {
+  background: #fff1f0;
+  color: #cf1322;
+  cursor: default;
+}
+
+.sbm-fail-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.sbm-fail-row b {
+  min-width: 112px;
+  font-weight: 500;
+}
+
+.sbm-why {
+  flex: 1;
+  color: #cf1322;
+}
+
+.sbm-list-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  padding: 8px 12px;
+  overflow: auto;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 12.5px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sce-card,
+  .sce-card-x,
+  .sce-staff-pill,
+  .sce-col-add,
+  .sbm-bar i {
+    transition: none;
+  }
+}
+
+/* ===== 手机：横屏看板 + 触屏适配 ===== */
+
+/* 触屏没有悬停：每天底部的「＋ 添加班次」常显 */
+@media (hover: none) {
+  .sce-col-add {
+    border-color: #91caff;
+    background: #f0f7ff;
+    color: #1677ff;
+  }
+}
+
+/* 横屏看板打开时锁住底下页面的滚动 */
+body.sce-shell-open {
+  overflow: hidden;
+}
+
+/* 铺满屏幕的一层；z-index 低于弹窗 / 浮层（1000+），弹窗、编辑浮层能盖在它上面 */
+.sce-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+
+/* 旋转兜底：手机竖着拿、锁不了横屏时，整层旋转 90° 铺满屏幕（只读） */
+.sce-shell--rotated {
+  inset: auto;
+  top: 0;
+  left: 0;
+  width: 100vh;
+  width: 100dvh;
+  height: 100vw;
+  height: 100dvw;
+  transform: translateX(100vw) rotate(90deg);
+  transform-origin: top left;
+}
+
+.sce-shell-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 10px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+
+.sce-shell-week {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sce-shell-store,
+.sce-shell-hint {
+  overflow: hidden;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sce-shell-body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 看板：图例单行横向滑动，只有看板区域滚动，每天的表头吸顶 */
+.sce-shell .ant-spin-nested-loading,
+.sce-shell .ant-spin-container {
+  height: 100%;
+}
+
+.sce-shell .sce-board-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.sce-shell .sce-staff-legend {
+  flex: none;
+  flex-wrap: nowrap;
+  padding: 4px 8px;
+  overflow-x: auto;
+}
+
+.sce-shell .sce-staff-legend-caption {
+  flex: none;
+}
+
+.sce-shell .sce-staff-pill {
+  flex: none;
+}
+
+.sce-shell .sce-board {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: repeat(7, minmax(100px, 1fr));
+  overflow: auto;
+  align-content: start;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sce-shell .sce-col-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding: 5px 7px 4px;
+}
+
+.sce-shell .sce-col-body {
+  padding: 5px 4px 6px;
+}
+
+/* 窄列里的卡片：名字 + 时间，隐藏工时（表头有当天合计）和「×」（误触风险大，删除走编辑浮层） */
+.sce-shell .sce-card {
+  padding: 3px 4px 3px 8px;
+}
+
+.sce-shell .sce-card-line1 b {
+  font-size: 12px;
+}
+
+.sce-shell .sce-card-line2 {
+  font-size: 11px;
+}
+
+.sce-shell .sce-card-hours,
+.sce-shell .sce-card-x {
+  display: none;
+}
+
+.sce-shell .sce-col-date strong {
+  font-size: 12px;
+}
+
+.sce-shell .sce-col-date span {
+  font-size: 11px;
+}
+
+.sce-shell .sce-free-note {
+  font-size: 11px;
+}
+
+/* 手机上编辑浮层改为居中弹窗：内容超过屏幕高度时弹窗内部滚动 */
+.sce-editor-modal .ant-modal-body {
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+}
+
+.sce-editor-modal .sce-editor {
+  width: auto;
+  max-width: none;
+}
+
+/* 批量排班弹窗在小屏幕上铺满整个屏幕 */
+@media (max-width: 900px), (max-height: 520px) {
+  /* antd 的 className 挂在弹窗元素自身上，不是它的祖先，所以写成 .ant-modal.sbm-modal */
+  .ant-modal.sbm-modal {
+    top: 0;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    margin: 0;
+    padding-bottom: 0;
+  }
+
+  .sbm-modal .ant-modal-content {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .sbm-modal .ant-modal-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .sbm-body {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .sbm-foot {
+    flex: none;
+    flex-wrap: wrap;
+    border-radius: 0;
+  }
+
+  .sbm-days {
+    grid-template-columns: repeat(7, minmax(60px, 1fr));
+    gap: 6px;
+  }
+
+  .sbm-day {
+    padding: 6px;
+  }
+
+  /* 日期和星期上下排，避免在窄卡片里被折成三行 */
+  .sbm-day b {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+    white-space: nowrap;
+  }
+
+  /* 铺满屏幕后不再需要桌面版的四周留白 */
+  .ant-modal.sbm-modal .ant-modal-content {
+    padding: 0;
+  }
+
+  .ant-modal.sbm-modal .ant-modal-header {
+    margin: 0;
+    padding: 10px 14px;
+  }
+
+  .ant-modal.sbm-modal .ant-modal-close {
+    top: 8px;
+    inset-inline-end: 10px;
+  }
+
+  .sbm-label {
+    flex-wrap: wrap;
+  }
+}
+
+/* 竖屏手机：两栏改成上下排，整体滚动 */
+@media (max-width: 700px) {
+  .sbm-body {
+    display: block;
+    overflow: auto;
+  }
+
+  .sbm-left {
+    max-height: 340px;
+    border-right: 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .sbm-right {
+    overflow: visible;
+  }
+
+  .sbm-days {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .sbm-remark {
+    width: 100%;
+  }
+}

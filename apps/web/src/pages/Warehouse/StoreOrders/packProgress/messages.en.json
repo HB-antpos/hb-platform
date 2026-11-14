@@ -1,0 +1,46 @@
+{
+  "storeOrders": {
+    "packProgress": {
+      "title": "Packing status",
+      "refresh": "Refresh packing status",
+      "statPicked": "Picked pieces",
+      "statPacked": "Packed pieces",
+      "statCartons": "Cartons",
+      "statPackedWarn": "Differs from picked",
+      "cartonBreakdown": "Packing {{packing}} · Sealed {{sealed}} · In transit {{transit}}",
+      "pillReconciled": "Picked and packed match",
+      "pillMismatch": "{{count}} products: picked and packed differ",
+      "pillOpenCartons": "{{count}} cartons not sealed",
+      "linesTitle": "By product",
+      "cartonsTitle": "Cartons",
+      "col": {
+        "itemNumber": "Item no.",
+        "product": "Product",
+        "ordered": "Ordered",
+        "picked": "Picked",
+        "packed": "Packed",
+        "diff": "Diff",
+        "diffTip": "Diff = Picked - Packed. Positive: picked but not packed into a carton. Negative: more packed than picked.",
+        "cartonNo": "Carton no.",
+        "status": "Status",
+        "pallet": "Pallet",
+        "sku": "SKUs",
+        "pieces": "Pieces"
+      },
+      "status": {
+        "packing": "Packing",
+        "sealed": "Sealed",
+        "transit": "In transit",
+        "unknown": "Unknown"
+      },
+      "reminder": {
+        "title": "Packing for this order is not finished",
+        "openCartons": "{{count}} cartons are not sealed",
+        "openCartonsWithEmpty": "{{count}} cartons are not sealed ({{empty}} empty)",
+        "mismatchLines": "{{count}} products have different picked and packed pieces",
+        "notReconciled": "Picked and packed pieces do not match yet",
+        "footer": "You can still complete the order. Check the Packing status section on the order page first."
+      }
+    }
+  }
+}

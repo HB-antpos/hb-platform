@@ -4,6 +4,8 @@ import { isUnsupportedPrinterTransport, requiresSystemPairing } from "@/modules/
 import {
   buildCashRegisterUserBarcodeLabelCommand,
   buildEmployeeCashierBarcodeLabelCommand,
+  buildPackCartonLabelCommand,
+  buildPackPalletLabelCommand,
 } from "@/modules/printer/cpcl-labels";
 import {
   connectPrinter,
@@ -32,6 +34,8 @@ import { usePrinterStore, useReceiptPrinterStore } from "@/modules/printer/state
 import type {
   CashRegisterUserBarcodeLabelPrintPayload,
   EmployeeCashierBarcodeLabelPrintPayload,
+  PackCartonLabelPrintPayload,
+  PackPalletLabelPrintPayload,
   PrinterDevice,
   PrinterStatus,
   ProductLabelPrintPayload,
@@ -820,4 +824,39 @@ export async function printCashRegisterUserBarcodeLabel(
   }
   // 老收银系统员工条码与个人码共用标签打印机链路；CPCL 在 JS 生成，走已有原生 print，无需重建原生包。
   return runLabelPrint(() => printRawCommand(buildCashRegisterUserBarcodeLabelCommand(payload)));
+}
+
+/** 打包箱标签：CPCL 在 JS 生成，走已有原生 print，无需重建原生包；多份逐张发送。 */
+export async function printPackCartonLabel(
+  payload: PackCartonLabelPrintPayload,
+  options?: { printType?: string | null; copies?: number }
+) {
+  if (isIosReviewSessionActive()) {
+    return true;
+  }
+  const copies = Math.max(1, Math.min(10, Math.trunc(options?.copies ?? 1)));
+  const rawCommand = buildPackCartonLabelCommand(payload, options?.printType);
+  for (let index = 0; index < copies; index++) {
+    await runLabelPrint(() => printRawCommand(rawCommand));
+  }
+  return true;
+}
+
+/** 打包托盘标签：每张带 1/N 张数，逐张生成并发送。 */
+export async function printPackPalletLabel(
+  payload: PackPalletLabelPrintPayload,
+  options?: { printType?: string | null; copies?: number }
+) {
+  if (isIosReviewSessionActive()) {
+    return true;
+  }
+  const copies = Math.max(1, Math.min(10, Math.trunc(options?.copies ?? 1)));
+  for (let index = 1; index <= copies; index++) {
+    const rawCommand = buildPackPalletLabelCommand(
+      { ...payload, sheetIndex: index, sheetTotal: copies },
+      options?.printType
+    );
+    await runLabelPrint(() => printRawCommand(rawCommand));
+  }
+  return true;
 }

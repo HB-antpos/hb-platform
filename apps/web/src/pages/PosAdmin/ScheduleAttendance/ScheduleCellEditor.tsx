@@ -1,5 +1,5 @@
 import { DeleteOutlined } from '@ant-design/icons'
-import { Button, Input, Segmented, TimePicker } from 'antd'
+import { Button, Input, Segmented, Select, TimePicker } from 'antd'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import type { KeyboardEvent } from 'react'
@@ -39,6 +39,14 @@ export interface CellEditorWeekDay {
   isoIndex: number
 }
 
+/** 「改给其他员工」：日期、时间不变，班次换到另一位员工名下。 */
+export interface CellEditorTransfer {
+  options: { value: string; label: string }[]
+  /** 有值 = 不能换人（例如已有打卡记录），文案会显示在下拉下面。 */
+  disabledReason?: string
+  onTransfer: (userGuid: string) => void
+}
+
 interface ScheduleCellEditorProps {
   employeeName: string
   dateLabel: string
@@ -46,6 +54,8 @@ interface ScheduleCellEditorProps {
   /** 有值 = 编辑已有班次；无值 = 在空白格新建。 */
   schedule?: AttendanceScheduleDto
   weekDays: CellEditorWeekDay[]
+  /** 仅编辑已有班次时传入。 */
+  transfer?: CellEditorTransfer
   saving: boolean
   onSave: (values: CellEditorValues, options: { advance: boolean }) => void
   onDelete: () => void
@@ -63,6 +73,7 @@ export default function ScheduleCellEditor({
   currentDateKey,
   schedule,
   weekDays,
+  transfer,
   saving,
   onSave,
   onDelete,
@@ -78,6 +89,7 @@ export default function ScheduleCellEditor({
   const [remark, setRemark] = useState(schedule?.remark ?? '')
   const [status, setStatus] = useState<AttendanceScheduleStatus>(schedule?.status ?? 'Draft')
   const [extraDateKeys, setExtraDateKeys] = useState<string[]>([])
+  const [transferTarget, setTransferTarget] = useState<string | undefined>(undefined)
 
   // 打开后把焦点放到浮层根节点，Enter / Esc 才能直接生效，不用先点一下
   useEffect(() => {
@@ -247,6 +259,28 @@ export default function ScheduleCellEditor({
         onChange={(event) => setRemark(event.target.value)}
         onPressEnter={() => submit(true)}
       />
+
+      {schedule && transfer ? (
+        <>
+          <div className="sce-label"><span>{t('posAdmin.scheduleAttendance.cellEditor.transfer.title')}</span></div>
+          <div className="sce-transfer">
+            <Select
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              placeholder={t('posAdmin.scheduleAttendance.cellEditor.transfer.placeholder')}
+              disabled={Boolean(transfer.disabledReason) || saving}
+              options={transfer.options}
+              value={transferTarget}
+              onChange={(value) => setTransferTarget(value)}
+            />
+            <Button disabled={!transferTarget || Boolean(transfer.disabledReason) || saving} onClick={() => transferTarget && transfer.onTransfer(transferTarget)}>
+              {t('posAdmin.scheduleAttendance.cellEditor.transfer.action')}
+            </Button>
+          </div>
+          {transfer.disabledReason ? <div className="sce-hint">{transfer.disabledReason}</div> : null}
+        </>
+      ) : null}
 
       {!schedule && weekDays.length > 1 ? (
         <>

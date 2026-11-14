@@ -774,8 +774,19 @@ internal sealed partial class PackingService
         }).ExecuteCommandAsync();
     }
 
+    /// <summary>
+    /// 在事务里执行。调用方已经开了事务（如拣货写记录时同步装箱：拣货记录与箱必须同成同败）时直接加入外层事务：
+    /// SQL Server 不支持嵌套 BeginTran，加入后提交 / 回滚由外层负责——
+    /// 因此 action 返回失败结果时，外层调用方必须据此回滚（拣货侧的 ExecuteInTransactionAsync 就是这样做的）；
+    /// 抛异常时这里也不回滚，原样抛给外层，由外层回滚。
+    /// </summary>
     private async Task<PackingResult<T>> ExecuteInTransactionAsync<T>(Func<Task<PackingResult<T>>> action)
     {
+        if (_db.Ado.IsAnyTran())
+        {
+            return await action();
+        }
+
         await _db.Ado.BeginTranAsync();
         try
         {

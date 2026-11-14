@@ -47,6 +47,7 @@
     "warehouse": "Products & locations",
     "containers": "Containers",
     "warehousePicking": "Order picking",
+    "packing": "Packing",
     "warehouseProductInsights": "Warehouse activity",
     "seasonalProductInsights": "Seasonal products",
     "containerNewProducts": "HB new arrivals",

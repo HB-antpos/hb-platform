@@ -261,6 +261,12 @@ public sealed class WarehousePickingRecordRequestDto
     public int? Pieces { get; set; }
 
     public Guid ClientRequestId { get; set; }
+
+    /// <summary>
+    /// 边拣边装：同时把这次拣的件数装进这只箱（须是本订单、总仓、装箱中的箱）。为空 = 只记拣货，行为与旧版完全一致。
+    /// 拣货记录与装箱在同一个事务里，任一边失败都不留痕迹。
+    /// </summary>
+    public string? CartonGuid { get; set; }
 }
 
 public sealed class WarehousePickingSetTotalRequestDto
@@ -268,6 +274,9 @@ public sealed class WarehousePickingSetTotalRequestDto
     public int Total { get; set; }
     public int ExpectedTotal { get; set; }
     public Guid ClientRequestId { get; set; }
+
+    /// <summary>边拣边装：改总数产生的差额（正加负减）同步到这只箱；为空 = 只改拣货数。</summary>
+    public string? CartonGuid { get; set; }
 }
 
 public sealed class WarehousePickingLineMutationDto
@@ -275,6 +284,21 @@ public sealed class WarehousePickingLineMutationDto
     public WarehousePickingLineProgressDto Line { get; set; } = new();
     public int AppliedDelta { get; set; }
     public bool Duplicate { get; set; }
+
+    /// <summary>请求带了 CartonGuid 时：这次同步后该箱的情况；CARTON_QTY_INSUFFICIENT 失败时带箱现状。不装箱的请求为空。</summary>
+    public WarehousePickingCartonSyncDto? Carton { get; set; }
+}
+
+/// <summary>边拣边装同步到箱之后，箱的汇总与该商品在箱里的件数。</summary>
+public sealed class WarehousePickingCartonSyncDto
+{
+    public string CartonGuid { get; set; } = string.Empty;
+    public string CartonNo { get; set; } = string.Empty;
+    public int SkuCount { get; set; }
+    public int PieceCount { get; set; }
+
+    /// <summary>这次涉及的商品在该箱里现有的件数。</summary>
+    public int ItemPieces { get; set; }
 }
 
 public sealed class WarehousePickingMinOrderQuantityRequestDto
@@ -295,6 +319,150 @@ public sealed class WarehousePickingSubmitResultDto
     public int LineCount { get; set; }
     public int ShortLineCount { get; set; }
     public int OverLineCount { get; set; }
+
+    /// <summary>订单有装箱时：成功提交后本订单的非作废箱数；没有装过箱为空。</summary>
+    public int? CartonCount { get; set; }
+
+    /// <summary>订单有装箱时：成功提交后各箱合计件数；没有装过箱为空。</summary>
+    public int? PackedPieces { get; set; }
+
+    /// <summary>仅 409 PACKING_OPEN_CARTONS 时带回：还没封箱的箱。</summary>
+    public List<WarehousePickingOpenCartonDto>? OpenCartons { get; set; }
+
+    /// <summary>仅 409 PACKING_NOT_RECONCILED 时带回：拣货数与装箱数对不上的商品。</summary>
+    public List<WarehousePickingReconcileMismatchDto>? Mismatches { get; set; }
+}
+
+public sealed class WarehousePickingOpenCartonDto
+{
+    public string CartonGuid { get; set; } = string.Empty;
+    public string CartonNo { get; set; } = string.Empty;
+    public int SkuCount { get; set; }
+    public int PieceCount { get; set; }
+}
+
+/// <summary>提交对账不一致的一个商品：Diff = Picked - Packed（正：拣多了没装进箱；负：箱里装多了）。</summary>
+public sealed class WarehousePickingReconcileMismatchDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string? ProductName { get; set; }
+    public string? ItemNumber { get; set; }
+
+    /// <summary>本订单上该商品的订单行；商品不在订单上（只在箱里）时为空列表。</summary>
+    public List<string> DetailGuids { get; set; } = new();
+
+    public int Picked { get; set; }
+    public int Packed { get; set; }
+    public int Diff { get; set; }
+}
+
+// ---- 拣货与装箱联动（二期） ----
+
+/// <summary>新建一只关联本订单的箱：去向可选，不传则默认发往订货单的分店。</summary>
+public sealed class WarehousePickingCreateCartonRequestDto : BlazorApp.Api.Features.Packing.PackingDestinationRequestDto
+{
+}
+
+public sealed class WarehousePickingSealCartonRequestDto
+{
+    public decimal? WeightKg { get; set; }
+
+    /// <summary>封箱后同一事务里放上这个托盘（须是总仓的、组托中的托盘）；不传则不上托盘。</summary>
+    public string? PalletGuid { get; set; }
+}
+
+public sealed class WarehousePickingSetCartonItemRequestDto
+{
+    /// <summary>该商品在这只箱里的绝对件数；0 表示移除。</summary>
+    public int Quantity { get; set; }
+}
+
+public sealed class WarehousePickingSetCartonItemResultDto
+{
+    public BlazorApp.Api.Features.Packing.PackingCartonDetailDto Carton { get; set; } = new();
+
+    /// <summary>该商品全订单装箱合计超过拣货合计（只提示，不拦截）。</summary>
+    public bool OverPacked { get; set; }
+
+    /// <summary>超装件数 = 装箱合计 - 拣货合计，大于 0 时才有意义，否则为 0。</summary>
+    public int OverPackedBy { get; set; }
+}
+
+public sealed class WarehousePickingPackProgressLineDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public string? ProductName { get; set; }
+    public string? ItemNumber { get; set; }
+
+    /// <summary>订货件数（订单行订货数量合计，退货行不计）。</summary>
+    public decimal OrderedPieces { get; set; }
+
+    /// <summary>拣货记录合计（会话已提交时同样按记录合计）。</summary>
+    public int PickedPieces { get; set; }
+
+    /// <summary>本订单全部非作废箱里该商品的件数合计。</summary>
+    public int PackedPieces { get; set; }
+}
+
+public sealed class WarehousePickingPackProgressCartonDto
+{
+    public string CartonGuid { get; set; } = string.Empty;
+    public string CartonNo { get; set; } = string.Empty;
+
+    /// <summary>1 装箱中 / 2 已封箱 / 3 在途（作废的箱不返回）。</summary>
+    public int Status { get; set; }
+
+    public int SkuCount { get; set; }
+    public int PieceCount { get; set; }
+    public string? PalletNo { get; set; }
+    public string CreatedByName { get; set; } = string.Empty;
+
+    /// <summary>箱是当前拣货人建的。</summary>
+    public bool IsMine { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; }
+
+    /// <summary>
+    /// 装箱中（Status = 1）的箱才带：箱内商品明细（按商品编码排序，不论创建人），用于接着装旧箱；已封 / 在途的箱不带。
+    /// </summary>
+    public List<WarehousePickingPackProgressCartonItemDto>? Items { get; set; }
+}
+
+public sealed class WarehousePickingPackProgressCartonItemDto
+{
+    public string ProductCode { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+}
+
+public sealed class WarehousePickingPackProgressDto
+{
+    public string OrderGuid { get; set; } = string.Empty;
+    public string? OrderNo { get; set; }
+    public string? StoreCode { get; set; }
+    public string? StoreName { get; set; }
+    public DateTime? OrderDate { get; set; }
+    public int FlowStatus { get; set; }
+
+    /// <summary>拣货会话状态：1 拣货中 / 2 已提交；还没开始拣货为空。</summary>
+    public int? SessionStatus { get; set; }
+
+    public List<WarehousePickingPackProgressLineDto> Lines { get; set; } = new();
+    public List<WarehousePickingPackProgressCartonDto> Cartons { get; set; } = new();
+
+    /// <summary>装箱中的箱数（含空箱；提交时空箱会被自动作废，其余装箱中的箱会拦住提交）。</summary>
+    public int OpenCartonCount { get; set; }
+
+    /// <summary>其中没有任何商品的空箱数（提交时自动作废）。</summary>
+    public int EmptyCartonCount { get; set; }
+
+    /// <summary>已封箱（含已发出）的箱数。</summary>
+    public int SealedCartonCount { get; set; }
+
+    /// <summary>
+    /// 对账通过：每个商品拣货数 = 装箱数，且没有非空的装箱中的箱（空箱提交时自动作废，不拦）。
+    /// 按公式计算：订单还没有任何箱时，拣了货就是 false；但提交接口在订单没有任何箱时不做对账（沿用旧行为）。
+    /// </summary>
+    public bool Reconciled { get; set; }
 }
 
 public sealed class WarehousePickingCodeLookupDto
