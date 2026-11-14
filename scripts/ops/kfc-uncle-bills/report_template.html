@@ -321,9 +321,12 @@
   .state-tag { display: inline-block; font-size: 10.5px; font-weight: 600; padding: 0 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-soft); }
   .holder-group + .holder-group { margin-top: 10px; }
   /* 各州一张小表，固定列宽让不同州的表上下对齐 */
-  .holder-group table.mini { table-layout: fixed; width: 100%; max-width: 600px; }
+  .holder-group table.mini { table-layout: fixed; width: 100%; min-width: 560px; max-width: 760px; }
   .holder-group table.mini th { white-space: normal; vertical-align: bottom; }
-  .holder-group table.mini th:first-child { width: 44%; }
+  .holder-group table.mini th:first-child { width: 34%; }
+  .holder-group table.mini td:first-child { white-space: normal; }
+  /* 本店、没有余量或没有记录的店淡化，调货时一眼看到有货的店 */
+  .holder-group table.mini tr.dim td { color: var(--ink-soft); }
   .holder-group h5 { font-size: 12px; margin: 0 0 4px; display: flex; gap: 6px; align-items: baseline; }
   .more { font-size: 11px; color: var(--accent); font-weight: 600; }
   .muted { color: var(--ink-soft); }
@@ -580,7 +583,7 @@
         gapTrusted: "可信缺口", gapUnknown: "未知店目标量", stores: "分店销量", topShort: "主要缺货店",
         lastIn: "最近到货", soldSince: "到货后销量", remaining: "到货后余量", est180: "180天估算",
         targetStock: "目标库存", gap: "缺口", urgent: "紧急", conf: "可信度", transfer: "调拨来源", delta: "较上次",
-        holders: "有货门店（按州）", surplus: "28天后富余", state: "州",
+        holders: "有货门店（按州）", surplus: "28天后富余", state: "州", f28: "预测28天",
         store: "分店", qty7: "近7天", share: "占比"
       },
       storesCell: function (n) { return n + " 店"; },
@@ -592,11 +595,11 @@
       shortChip: function (s, n) { return s + " 缺" + n; },
       firstRun: "首次",
       allStores: function (n) { return "全部门店（" + n + "）"; },
-      allStates: "全部州", stateUnknown: "未知", sameState: "同州", warehouseTag: "仓库",
+      allStates: "全部州", stateUnknown: "未知", sameState: "同州", warehouseTag: "仓库", ownStoreTag: "本店", noRecord: "无记录",
       holderSum: function (st, n, q) { return st + " · " + n + " 店 · " + q + " 件"; },
-      holdersTitle: function (name, n) { return name + " · " + n + " 家门店有到货后余量"; },
-      holdersNote: "余量是进货减销量的估算，含在途，不是货架实数；「28天后富余」= 余量 − 预测 28 天，> 0 才建议调出。",
-      noHolders: "没有其它门店有到货后余量",
+      holdersTitle: function (name, total, n) { return name + " · 全部 " + total + " 家分店，其中 " + n + " 家（不含本店）有到货后余量"; },
+      groupSum: function (total, n, q) { return total + " 店 · " + n + " 店有货 · " + q + " 件"; },
+      holdersNote: "列出全部分店（含本店、余量为 0 或负数、没有进货与销量记录的店）。余量是进货减销量的估算，含在途，不是货架实数；「28天后富余」= 余量 − 预测 28 天，> 0 才建议调出。",
       urgentOnly: "只看紧急",
       gapItems: function (n) { return n + " 个缺口商品"; },
       noGaps: "本次运行没有门店触发缺货阈值。",
@@ -642,7 +645,7 @@
             "<strong>预测</strong>：有去年基线时按「去年同期同店销量 × 同比系数」与「近 28 天日均 × 季节比」加权融合，权重随去年同期样本量升到 1；新品或去年未在售，退化为近期外推 × 季节比。<strong>建议保持库存</strong> = 预测 14 天 × " + p.safety_factor + "。",
             "<strong>到货后余量</strong> = 近 180 天内所有批次进货量之和 − 自第一批到货日起至今的销量（多次到货都计入；近 180 天没有到货的，只看最近一批）。<strong>缺口</strong> = 目标库存 − max(余量, 0)。判定「缺货」需同时满足：有可信余量数据、预测 14 天 ≥ " + p.min_forecast_for_shortage + "、缺口 > 0。",
             "<strong>调拨来源</strong>：来源店需「高」可信度且（余量 − 预测 28 天）> 0，按盈余从高到低最多取 3 家，同一批余量在多个目标店之间贪心分配，不会重复推荐。" + p.warehouse_store + " 仓库店只作来源，不计入需求。",
-            "<strong>有货门店</strong>：列出该商品「到货后余量」≥ 1 的其它门店（含仓库，不含测试店），按州分组，缺货店所在州排在最前。州由门店地址里的邮编推导，地址没写邮编时按门店时区判断。有余量不等于可以调出，「28天后富余」> 0 才说明对方够卖 28 天还有剩。",
+            "<strong>有货门店</strong>：单元格汇总该商品「到货后余量」≥ 1 的其它门店（含仓库，不含测试店），按州分组，缺货店所在州排在最前；点行展开列出全部分店的余量、近 28 天销量、预测 28 天与富余，没有记录的店也列出。州由门店地址里的邮编推导，地址没写邮编时按门店时区判断。有余量不等于可以调出，「28天后富余」> 0 才说明对方够卖 28 天还有剩。",
             "<strong>分店销量</strong>：只统计需求侧门店（不含仓库与测试店），占比按这些门店合计计算。",
             "<strong>进销累计</strong>：起始日（默认最近一个 8 月 1 日）以来的进货量与累计已售，售出率 = 累计已售 ÷ 进货量。起始日之前的库存不计入，所以售出率可能超过 100%。进货均价 = 进货单金额 ÷ 进货量，销售均价 = 销售额 ÷ 已售，两者的含税口径可能不同。"
           ],
@@ -708,7 +711,7 @@
         gapTrusted: "Known gap", gapUnknown: "Unknown-store target", stores: "Sales by store", topShort: "Stores short",
         lastIn: "Last delivery", soldSince: "Sold since", remaining: "Stock since delivery", est180: "180d estimate",
         targetStock: "Target", gap: "Gap", urgent: "Urgent", conf: "Confidence", transfer: "Transfer from", delta: "vs last run",
-        holders: "Stores with stock (by state)", surplus: "Spare after 28d", state: "State",
+        holders: "Stores with stock (by state)", surplus: "Spare after 28d", state: "State", f28: "Fcst 28d",
         store: "Store", qty7: "Units 7d", share: "Share"
       },
       storesCell: function (n) { return n + (n === 1 ? " store" : " stores"); },
@@ -720,11 +723,11 @@
       shortChip: function (s, n) { return s + " short " + n; },
       firstRun: "First run",
       allStores: function (n) { return "All stores (" + n + ")"; },
-      allStates: "All states", stateUnknown: "Unknown", sameState: "Same state", warehouseTag: "Warehouse",
+      allStates: "All states", stateUnknown: "Unknown", sameState: "Same state", warehouseTag: "Warehouse", ownStoreTag: "This store", noRecord: "No record",
       holderSum: function (st, n, q) { return st + " · " + n + (n === 1 ? " store · " : " stores · ") + q + " units"; },
-      holdersTitle: function (name, n) { return name + " · " + n + (n === 1 ? " store has" : " stores have") + " stock since delivery"; },
-      holdersNote: "Stock is purchases minus sales, includes stock in transit and is not a shelf count. “Spare after 28d” = stock − 28-day forecast; only > 0 is worth transferring out.",
-      noHolders: "No other store has stock since delivery",
+      holdersTitle: function (name, total, n) { return name + " · all " + total + " stores, " + n + (n === 1 ? " other store has" : " other stores have") + " stock since delivery"; },
+      groupSum: function (total, n, q) { return total + (total === 1 ? " store · " : " stores · ") + n + " with stock · " + q + " units"; },
+      holdersNote: "Every store is listed, including this store and stores with zero, negative or no records. Stock is purchases minus sales, includes stock in transit and is not a shelf count. “Spare after 28d” = stock − 28-day forecast; only > 0 is worth transferring out.",
       urgentOnly: "Urgent only",
       gapItems: function (n) { return n + (n === 1 ? " product short" : " products short"); },
       noGaps: "No store crossed the shortage threshold in this run.",
@@ -770,7 +773,7 @@
             "<strong>Forecast</strong>: when last year has history, it blends “same store, same period last year × year-on-year factor” with “28-day daily rate × seasonal ratio”. The weight moves fully to last year as its sample grows. New items or items not sold last year use the recent rate × seasonal ratio only. <strong>Target stock</strong> = 14-day forecast × " + p.safety_factor + ".",
             "<strong>Stock since delivery</strong> = units delivered across all batches in the last 180 days − units sold since the first of those deliveries (with no delivery in 180 days, only the latest batch is used). <strong>Gap</strong> = target − max(stock, 0). A store is <em>short</em> when it has usable stock data, a 14-day forecast ≥ " + p.min_forecast_for_shortage + ", and a gap > 0.",
             "<strong>Transfer sources</strong>: a source needs High confidence and (stock − 28-day forecast) > 0. Up to 3 sources are picked by surplus, and one surplus is shared out greedily so it is never offered twice. Store " + p.warehouse_store + " (warehouse) is a source only and is not counted as demand.",
-            "<strong>Stores with stock</strong>: other stores (warehouse included, test store excluded) whose stock since delivery is at least 1, grouped by state with the short store's own state first. The state comes from the postcode in the store address, or the store time zone when the address has no postcode. Having stock does not mean it can be spared; only “spare after 28d” > 0 means that store still has stock left after 28 days of its own sales.",
+            "<strong>Stores with stock</strong>: the cell sums up other stores (warehouse included, test store excluded) whose stock since delivery is at least 1, grouped by state with the short store's own state first. Tap the row to list every store with its stock, 28-day sales, 28-day forecast and spare stock, including stores with no records. The state comes from the postcode in the store address, or the store time zone when the address has no postcode. Having stock does not mean it can be spared; only “spare after 28d” > 0 means that store still has stock left after 28 days of its own sales.",
             "<strong>Sales by store</strong>: retail stores only (warehouse and test store excluded). Share is against the total of those stores.",
             "<strong>Sell-through</strong>: units purchased and sold since the start date (by default the most recent 1 August). Sell-through = sold ÷ purchased. Stock from before the start date is not counted, so it can exceed 100%. Avg cost = invoice amount ÷ units purchased; avg sell price = sales ÷ units sold. The two may differ in GST treatment."
           ],
@@ -917,15 +920,35 @@
     if (!f) return "";
     return '<span class="badge flag' + (f === "疑似停售" ? " stale" : "") + '">' + esc(v("flag", f)) + "</span>";
   }
-  // ---------- 有货门店（按州分组）----------
-  // 数据按商品存一份（DATA.stock_holders），行上挂了所属缺货店 _store / _state，
-  // 这里排除缺货店自己，按州分组；缺货店所在州排最前，其余州按字母，未知州最后。
+  // ---------- 有货门店 / 各店余量（按州分组）----------
+  // 数据按商品存一份（DATA.stock_holders），行上挂了所属缺货店 _store / _state。
+  // 单元格摘要只统计「到货后余量」≥ 1 的其它门店；点行展开列出全部分店（含本店、余量为 0 / 负数、没有记录的店），供调货看全貌。
+  // 门店名与州从外壳门店名单 BOOT.stores 查；旧数据里逐条带的 store_name / state 作兜底。
+  // 分组顺序：缺货店所在州最前，其余州按字母，未知州最后。
   function stateLabel(st) { return st || L().stateUnknown; }
-  function holderGroups(r) {
-    var list = ((DATA.stock_holders || {})[r.product_code] || []).filter(function (h) { return h.store_code !== r._store; });
+  var STORE_BY_CODE = {};
+  (BOOT.stores || []).forEach(function (s) { STORE_BY_CODE[s.store_code] = s; });
+  function holderStore(h) {
+    var s = STORE_BY_CODE[h.store_code] || {};
+    return { name: s.store_name || h.store_name || h.store_code, state: s.state || h.state || "" };
+  }
+  function hasStock(h) { return h.remaining !== null && h.remaining !== undefined && h.remaining >= 1; }
+  // 全部分店：数据里有记录的店 + 门店名单里其余没有记录的店（补成空行）
+  function allStoreHolders(r) {
+    var list = ((DATA.stock_holders || {})[r.product_code] || []).slice(), seen = {};
+    list.forEach(function (h) { seen[h.store_code] = true; });
+    var wh = META && META.params ? META.params.warehouse_store : null;
+    (BOOT.stores || []).forEach(function (s) {
+      if (!seen[s.store_code]) {
+        list.push({ store_code: s.store_code, remaining: null, surplus: null, qty28: null, forecast28: null, confidence: null, warehouse: s.store_code === wh, none: true });
+      }
+    });
+    return list;
+  }
+  function holderGroups(r, list) {
     var map = {}, order = [];
     list.forEach(function (h) {
-      var k = h.state || "";
+      var k = holderStore(h).state;
       if (!map[k]) { map[k] = []; order.push(k); }
       map[k].push(h);
     });
@@ -934,36 +957,50 @@
       return ra - rb || (a < b ? -1 : a > b ? 1 : 0);
     });
     return order.map(function (k) {
-      var hs = map[k];
-      return { state: k, same: !!k && k === r._state, holders: hs, qty: hs.reduce(function (t, h) { return t + h.remaining; }, 0) };
+      var hs = map[k].slice().sort(function (a, b) {
+        // 本店置顶，其余按余量从高到低，没有余量数据的排最后
+        var oa = a.store_code === r._store ? 0 : 1, ob = b.store_code === r._store ? 0 : 1;
+        var va = a.remaining === null || a.remaining === undefined ? -Infinity : a.remaining;
+        var vb = b.remaining === null || b.remaining === undefined ? -Infinity : b.remaining;
+        return oa - ob || vb - va || (a.store_code < b.store_code ? -1 : a.store_code > b.store_code ? 1 : 0);
+      });
+      var stocked = hs.filter(function (h) { return h.store_code !== r._store && hasStock(h); });
+      return { state: k, same: !!k && k === r._state, holders: hs, stocked: stocked.length,
+        qty: stocked.reduce(function (t, h) { return t + h.remaining; }, 0) };
     });
   }
   function holdersCell(r) {
-    var l = L(), groups = holderGroups(r);
-    if (!groups.length) return '<span class="muted">—</span>';
+    var l = L(), groups = holderGroups(r, allStoreHolders(r)).filter(function (g) { return g.stocked > 0; });
+    if (!groups.length) return '<span class="muted">—</span> <span class="more"><span class="caret">▶</span></span>';
     return groups.map(function (g) {
       return '<span class="chip state' + (g.same ? " same" : "") + '"' + (g.same ? ' title="' + esc(l.sameState) + '"' : "") + ">" +
-        esc(l.holderSum(stateLabel(g.state), g.holders.length, fmtNum(g.qty))) + "</span>";
+        esc(l.holderSum(stateLabel(g.state), g.stocked, fmtNum(g.qty))) + "</span>";
     }).join("") + ' <span class="more"><span class="caret">▶</span></span>';
   }
   function holdersDetail(r) {
-    var l = L(), c = l.col, groups = holderGroups(r);
-    if (!groups.length) return '<div class="detail-box"><h4>' + esc(l.noHolders) + "</h4></div>";
-    var n = groups.reduce(function (t, g) { return t + g.holders.length; }, 0);
+    var l = L(), c = l.col, all = allStoreHolders(r), groups = holderGroups(r, all);
+    var stockedTotal = groups.reduce(function (t, g) { return t + g.stocked; }, 0);
+    var dash = '<span class="muted">—</span>';
     var body = groups.map(function (g) {
       var rows = g.holders.map(function (h) {
-        return "<tr><td>" + esc(h.store_name) + ' <span class="itemnum">' + esc(h.store_code) + "</span>" +
+        var own = h.store_code === r._store;
+        return '<tr' + (hasStock(h) && !own ? "" : ' class="dim"') + "><td>" + esc(holderStore(h).name) + ' <span class="itemnum">' + esc(h.store_code) + "</span>" +
+          (own ? ' <span class="chip short">' + esc(l.ownStoreTag) + "</span>" : "") +
           (h.warehouse ? ' <span class="chip priority">' + esc(l.warehouseTag) + "</span>" : "") + "</td>" +
-          '<td class="num">' + fmtNum(h.remaining) + "</td>" +
-          '<td class="num">' + (h.surplus > 0 ? fmtNum(h.surplus) : '<span class="muted">—</span>') + "</td>" +
-          "<td>" + confBadge(h.confidence) + "</td></tr>";
+          '<td class="num">' + (h.remaining === null || h.remaining === undefined ? dash : fmtNum(h.remaining)) + "</td>" +
+          '<td class="num">' + (h.qty28 ? fmtNum(h.qty28) : dash) + "</td>" +
+          '<td class="num">' + (h.forecast28 ? fmtNum(h.forecast28) : dash) + "</td>" +
+          '<td class="num">' + (h.surplus > 0 && !own ? fmtNum(h.surplus) : dash) + "</td>" +
+          "<td>" + (h.none ? '<span class="muted">' + esc(l.noRecord) + "</span>" : confBadge(h.confidence)) + "</td></tr>";
       }).join("");
       return '<div class="holder-group"><h5><span class="state-tag">' + esc(stateLabel(g.state)) + "</span>" +
-        (g.same ? '<span class="muted">' + esc(l.sameState) + "</span>" : "") + "</h5>" +
+        (g.same ? '<span class="muted">' + esc(l.sameState) + "</span>" : "") +
+        '<span class="muted">' + esc(l.groupSum(g.holders.length, g.stocked, fmtNum(g.qty))) + "</span></h5>" +
         '<div style="overflow-x:auto"><table class="mini"><thead><tr><th>' + esc(c.store) + '</th><th class="num">' + esc(c.remaining) +
+        '</th><th class="num">' + esc(c.qty28) + '</th><th class="num">' + esc(c.f28) +
         '</th><th class="num">' + esc(c.surplus) + "</th><th>" + esc(c.conf) + "</th></tr></thead><tbody>" + rows + "</tbody></table></div></div>";
     }).join("");
-    return '<div class="detail-box"><h4>' + esc(l.holdersTitle(r.name, n)) + '</h4><p class="muted" style="margin:0 0 8px;font-size:11.5px">' +
+    return '<div class="detail-box"><h4>' + esc(l.holdersTitle(r.name, all.length, stockedTotal)) + '</h4><p class="muted" style="margin:0 0 8px;font-size:11.5px">' +
       esc(l.holdersNote) + "</p>" + body + "</div>";
   }
 

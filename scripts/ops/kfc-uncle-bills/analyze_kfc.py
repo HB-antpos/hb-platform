@@ -1137,26 +1137,35 @@ def run_analysis(cfg: Config, as_of: date, warn_out: list) -> dict:
                                     "brand_name": store_brand.get(store), "state": store_state.get(store),
                                     "rows": no_purchase_rows})
 
-        # 有货门店：缺口表里出现的每个商品，列出哪些门店「到货后余量」> 0（含视图外门店，供调拨参考）。
+        # 各店余量：缺口表里出现的每个商品，列出所有门店（含视图外门店、余量为 0 或负数、没有进货记录的店）
+        # 的余量与销量，供调货时看全貌；页面的「有货门店」摘要只统计余量 ≥ 1 的店，展开明细列全部分店。
         # 按商品只存一份，缺口行用商品编码引用，避免同一份门店清单在多家缺货店的行里重复。
+        # 门店名与州不逐条存，页面从外壳的门店名单（BOOT.stores）查，控制单店数据文件体积；
+        # 连销量和余量都没有的门店不存，由页面按门店名单补成「无记录」行。
         # surplus = 余量 − 未来 28 天预测，> 0 才算有富余可调；余量是进货减销量的估算，含在途，不是货架实数。
         stock_holders = {}
         for product in sorted({r["product_code"] for sg in store_gaps for r in sg["rows"]}):
             holders = []
             for s, row in by_product_ps.get(product, []):
-                if s not in supply_stores or row["remaining"] is None or row["remaining"] < 1:
+                if s not in supply_stores:
                     continue
+                w = windows.get((s, product))
+                remaining = row["remaining"]
                 holders.append({
                     "store_code": s,
-                    "store_name": store_name.get(s, s),
-                    "state": store_state.get(s),
-                    "remaining": math.floor(row["remaining"]),
-                    "surplus": math.floor(row["remaining"] - row["forecast28"]),
+                    "remaining": math.floor(remaining) if remaining is not None else None,
+                    "surplus": math.floor(remaining - row["forecast28"]) if remaining is not None else None,
+                    "qty28": round(w[W_Q28], 1) if w else 0.0,
+                    "forecast28": math.ceil(row["forecast28"]),
                     "confidence": row["confidence"],
                     "warehouse": s == cfg.warehouse_store,
                 })
             if holders:
-                holders.sort(key=lambda h: (h["state"] or "~", -h["remaining"], h["store_code"]))
+                holders.sort(key=lambda h: (
+                    store_state.get(h["store_code"]) or "~",
+                    -(h["remaining"] if h["remaining"] is not None else -10**9),
+                    h["store_code"],
+                ))
                 stock_holders[product] = holders
 
         recent28_q = sum(v[W_Q28] for v in metrics.values())
