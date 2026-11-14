@@ -13,6 +13,9 @@ export type OperationAuthorizationCopyKey =
   | "paymentRecoverySquareRefundOtherwise"
   | "paymentTenderVoidUnreleased"
   | "returnResolveUnknownRefund"
+  | "cashIn"
+  | "cashOut"
+  | "cashMovementVoid"
   | "inputLabel"
   | "inputHint"
   | "keyboard"
@@ -42,6 +45,9 @@ const COPY: Readonly<
     paymentRecoverySquareRefundOtherwise: "Confirm rejected Square refund was refunded another way",
     paymentTenderVoidUnreleased: "Void blocked gift card tender",
     returnResolveUnknownRefund: "Resolve an unknown card refund",
+    cashIn: "Put cash into the drawer (cash in)",
+    cashOut: "Take cash out of the drawer (cash out)",
+    cashMovementVoid: "Void a cash in / cash out record",
     inputLabel: "Supervisor barcode",
     inputHint: "Scan supervisor barcode",
     keyboard: "Keyboard",
@@ -73,6 +79,9 @@ const COPY: Readonly<
     paymentRecoverySquareRefundOtherwise: "确认被拒的 Square 退款已用其他方式退给顾客",
     paymentTenderVoidUnreleased: "作废已阻断的购物券付款",
     returnResolveUnknownRefund: "主管结案：退款结果未知",
+    cashIn: "向钱箱存入现金",
+    cashOut: "从钱箱取出现金",
+    cashMovementVoid: "冲正现金存入 / 取出记录",
     inputLabel: "主管条码",
     inputHint: "扫描主管条码",
     keyboard: "键盘",
@@ -124,6 +133,12 @@ export function operationAuthorizationActionCopyKey(
       return "paymentTenderVoidUnreleased";
     case "resolve-unknown-refund":
       return "returnResolveUnknownRefund";
+    case "cash-in":
+      return "cashIn";
+    case "cash-out":
+      return "cashOut";
+    case "cash-movement-void":
+      return "cashMovementVoid";
     default:
       return null;
   }

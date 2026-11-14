@@ -30,6 +30,10 @@ import {
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import { canDownloadCatalog } from "@/features/catalog/maintenance";
+import {
+  CashMovementPresenter,
+  CashMovementScreen,
+} from "@/features/cash-movement";
 import { DAILY_CLOSE_VIEW_PERMISSION } from "@/features/daily-close";
 import {
   INSTALLMENTS_VIEW_PERMISSION,
@@ -142,6 +146,69 @@ export default function SalesRoute() {
       : null;
   const scanner = runtime.services?.scanner.router ?? null;
   const operationAuthorization = runtime.services?.operationAuthorization;
+  // 现金存入 / 取出：开关只决定「钱箱」入口是否显示，默认关；services 没提供该字段时（旧 mock）等同关闭。
+  const cashMovementService = runtime.services?.cashMovement;
+  const subscribeCashMovementEnabled = useCallback(
+    (listener: () => void) =>
+      cashMovementService?.subscribeCashMovementEnabled(listener) ??
+      (() => undefined),
+    [cashMovementService],
+  );
+  const getCashMovementEnabled = useCallback(
+    () => cashMovementService?.isCashMovementEnabled() ?? false,
+    [cashMovementService],
+  );
+  const cashMovementEnabled = useSyncExternalStore(
+    subscribeCashMovementEnabled,
+    getCashMovementEnabled,
+    getCashMovementEnabled,
+  );
+  const [cashMovementPresenter, setCashMovementPresenter] =
+    useState<CashMovementPresenter | null>(null);
+  const [cashMovementAuthorizationPending, setCashMovementAuthorizationPending] =
+    useState(false);
+  const openCashMovement = useCallback(() => {
+    if (!cashMovementService) return;
+    try {
+      // 运行时绑定当前收银员会话；没有可信会话时 createRuntime 会抛错，此时不打开弹窗。
+      setCashMovementPresenter(
+        new CashMovementPresenter({
+          runtime: cashMovementService.createRuntime(),
+          createId: () => Crypto.randomUUID(),
+        }),
+      );
+    } catch {
+      setCashMovementPresenter(null);
+    }
+  }, [cashMovementService]);
+  const closeCashMovement = useCallback(() => {
+    setCashMovementPresenter(null);
+  }, []);
+  useEffect(() => {
+    if (!cashMovementPresenter) return undefined;
+    return () => cashMovementPresenter.destroy();
+  }, [cashMovementPresenter]);
+  useEffect(() => {
+    // 收银员换人 / 锁屏（销售 presenter 失效）或开关被总部关闭时，钱箱弹窗随之关闭。
+    if (!presenter || !cashMovementEnabled) setCashMovementPresenter(null);
+  }, [cashMovementEnabled, presenter]);
+  useEffect(() => {
+    if (
+      !cashMovementPresenter ||
+      !operationAuthorization ||
+      operationAuthorization.status !== "available"
+    ) {
+      setCashMovementAuthorizationPending(false);
+      return undefined;
+    }
+    // 主管授权弹窗是独立的全屏 Modal：期间临时隐藏钱箱弹窗，状态保存在 presenter 里，授权结束后原样恢复。
+    const update = () =>
+      setCashMovementAuthorizationPending(
+        operationAuthorization.getState().kind === "awaiting-supervisor",
+      );
+    update();
+    return operationAuthorization.subscribe(update);
+  }, [cashMovementPresenter, operationAuthorization]);
   useFocusEffect(
     useCallback(() => {
       // 支付页位于同一导航栈时销售路由不会卸载；回焦必须释放结账冻结态。
@@ -450,7 +517,11 @@ export default function SalesRoute() {
     <>
       <RouteHidScannerCapture
         context="product"
-        enabled={!cameraScannerActive && !manualInputActive}
+        enabled={
+          !cameraScannerActive &&
+          !manualInputActive &&
+          cashMovementPresenter === null
+        }
         onHidTextChange={noteHidTextChange}
         onScan={handleRoutedScan}
         path="/sales"
@@ -535,6 +606,9 @@ export default function SalesRoute() {
             await services.fulfilment.openCashDrawer.execute(),
           )
         }
+        {...(cashMovementEnabled && cashMovementService
+          ? { onOpenCashMovement: openCashMovement }
+          : {})}
         onOpenPayment={(cart) => {
           if (
             cart.lines.length === 0 ||
@@ -574,6 +648,13 @@ export default function SalesRoute() {
             }
           : {})}
       />
+      {cashMovementPresenter ? (
+        <CashMovementScreen
+          onClose={closeCashMovement}
+          presenter={cashMovementPresenter}
+          visible={!cashMovementAuthorizationPending}
+        />
+      ) : null}
     </>
   );
 }

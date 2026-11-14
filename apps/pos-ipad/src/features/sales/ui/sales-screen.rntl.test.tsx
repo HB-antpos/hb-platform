@@ -2184,6 +2184,47 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
+  it("没有传钱箱入口时不显示「钱箱」按钮，原开箱按钮不变；传入后显示并可点击（中英文案）", async () => {
+    const withoutEntry = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const hidden = await render(
+      <SalesScreen
+        locale="zh"
+        onOpenCashDrawer={async () => ({ kind: "completed" as const })}
+        presenter={withoutEntry}
+        showStatusStrip={false}
+      />,
+    );
+    expect(hidden.queryByTestId("sales-cash-movement")).toBeNull();
+    expect(hidden.getByTestId("sales-open-cash-drawer")).toBeTruthy();
+    withoutEntry.destroy();
+    await hidden.unmount();
+
+    for (const [locale, label] of [
+      ["zh", "钱箱"],
+      ["en", "Cash"],
+    ] as const) {
+      const onOpenCashMovement = jest.fn();
+      const withEntry = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+      const shown = await render(
+        <SalesScreen
+          locale={locale}
+          onOpenCashDrawer={async () => ({ kind: "completed" as const })}
+          onOpenCashMovement={onOpenCashMovement}
+          presenter={withEntry}
+          showStatusStrip={false}
+        />,
+      );
+      // 新增按钮在「开箱」旁边，不替换它。
+      expect(shown.getByTestId("sales-open-cash-drawer")).toBeTruthy();
+      const button = shown.getByTestId("sales-cash-movement");
+      expect(shown.getAllByText(label).length).toBeGreaterThan(0);
+      await fireEvent.press(button);
+      expect(onOpenCashMovement).toHaveBeenCalledTimes(1);
+      withEntry.destroy();
+      await shown.unmount();
+    }
+  });
+
   it("强制更新或门禁关闭时空车禁止开始交易，并保留明确更新入口", async () => {
     const onOpenRequiredUpdate = jest.fn();
     const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));

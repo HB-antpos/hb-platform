@@ -39,6 +39,8 @@ function archive(overrides: Partial<DailyCloseArchive> = {}): DailyCloseArchive 
     ],
     installmentPaymentCount: 0,
     cashRoundingCents: 0,
+    cashInCents: 0,
+    cashOutCents: 0,
     expectedCashCents: 1_200,
     closeId: "close-1",
     savedCashierId: "C1",

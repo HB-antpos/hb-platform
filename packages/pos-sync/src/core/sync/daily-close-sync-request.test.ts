@@ -419,3 +419,46 @@ test("现金进位：请求带 cashRoundingAmount，差额按 实点 − (现金
   assert.equal(negative.cashRoundingAmount, -0.02);
   assert.deepEqual(validateAgainstServerRules(negative, SCOPE), { ok: true });
 });
+
+test("现金存入 / 取出：请求带 cashInAmount / cashOutAmount，差额按 实点 − (现金净额 + 进位 + 存入 − 取出) 通过服务端规则；漏带或漏减被拒", () => {
+  // 现金净额 108.00，进位 +0.03，存入 50.00，取出 20.00 → 应有现金 138.03；实点 112.15，差额 = −25.88。
+  const archive = archiveFixture({ cashRoundingCents: 3, cashInCents: 5_000, cashOutCents: 2_000 });
+  assert.equal(archive.expectedCashCents, 13_803);
+  assert.equal(archive.varianceCents, -2_588);
+
+  const request = mapDailyCloseArchiveToSyncRequest(archive, { clientKind: "Ipad" });
+  assert.equal(request.cashInAmount, 50);
+  assert.equal(request.cashOutAmount, 20);
+  assert.equal(request.cashDifference, -25.88);
+  assert.deepEqual(validateAgainstServerRules(request, SCOPE), { ok: true });
+
+  // 没有现金进出的旧存档：两项为 0，口径与之前完全一致。
+  const plain = mapDailyCloseArchiveToSyncRequest(archiveFixture(), { clientKind: "Handheld" });
+  assert.equal(plain.cashInAmount, 0);
+  assert.equal(plain.cashOutAmount, 0);
+  assert.deepEqual(validateAgainstServerRules(plain, SCOPE), { ok: true });
+
+  // 漏带存入 / 取出（等同客户端没升级）：差额对不上，超出 1 分容差。
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, cashInAmount: 0 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_DIFFERENCE" },
+  );
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, cashOutAmount: 0 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_DIFFERENCE" },
+  );
+  // 存入与取出调换位置同样被拒；负数的合计服务端直接拒绝。
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, cashInAmount: 20, cashOutAmount: 50 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_DIFFERENCE" },
+  );
+  assert.deepEqual(
+    validateAgainstServerRules({ ...request, cashOutAmount: -1 }, SCOPE),
+    { ok: false, code: "INVALID_CASH_MOVEMENT_TOTAL" },
+  );
+  // 旧客户端不带这两项服务端按 0：只有在确实没有现金进出时才与新口径一致。
+  const legacy = { ...plain } as Record<string, unknown>;
+  delete legacy.cashInAmount;
+  delete legacy.cashOutAmount;
+  assert.deepEqual(validateAgainstServerRules(legacy as typeof plain, SCOPE), { ok: true });
+});

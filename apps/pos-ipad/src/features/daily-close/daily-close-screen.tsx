@@ -551,6 +551,21 @@ function SummaryCard({
             label={dailyCloseText(locale, "metric.cashRounding")}
             value={signedMoney(summary.cashRoundingCents)}
           />
+          {/* 现金存入 / 取出只在有发生额时显示：应有现金已含它们，店员要对得上账。 */}
+          {summary.cashInCents !== 0 ? (
+            <Metric
+              label={dailyCloseText(locale, "metric.cashIn")}
+              testID="daily-close-metric-cash-in"
+              value={`+${money(summary.cashInCents)}`}
+            />
+          ) : null}
+          {summary.cashOutCents !== 0 ? (
+            <Metric
+              label={dailyCloseText(locale, "metric.cashOut")}
+              testID="daily-close-metric-cash-out"
+              value={`−${money(summary.cashOutCents)}`}
+            />
+          ) : null}
           {/* 应有现金是点钞时要对的数，加粗描边突出。 */}
           <Metric
             emphasized
@@ -674,11 +689,20 @@ function TenderRow({
 function Metric({
   emphasized = false,
   label,
+  testID,
   value,
-}: Readonly<{ emphasized?: boolean; label: string; value: string }>) {
+}: Readonly<{
+  emphasized?: boolean;
+  label: string;
+  testID?: string;
+  value: string;
+}>) {
   usePosThemeVersion();
   return (
-    <View style={[styles.metric, emphasized && styles.metricEmphasized]}>
+    <View
+      style={[styles.metric, emphasized && styles.metricEmphasized]}
+      testID={testID}
+    >
       <Text numberOfLines={1} style={styles.metricLabel}>
         {label}
       </Text>
@@ -851,6 +875,20 @@ function ArchiveDetails({
           label={dailyCloseText(locale, "archive.label.rounding")}
           value={signedMoney(archive.cashRoundingCents)}
         />
+        {archive.cashInCents !== 0 ? (
+          <DetailRow
+            label={dailyCloseText(locale, "archive.label.cashIn")}
+            testID="daily-close-archive-cash-in"
+            value={`+${money(archive.cashInCents)}`}
+          />
+        ) : null}
+        {archive.cashOutCents !== 0 ? (
+          <DetailRow
+            label={dailyCloseText(locale, "archive.label.cashOut")}
+            testID="daily-close-archive-cash-out"
+            value={`−${money(archive.cashOutCents)}`}
+          />
+        ) : null}
         <DetailRow
           label={dailyCloseText(locale, "archive.label.expected")}
           value={money(archive.expectedCashCents)}
@@ -875,18 +913,23 @@ function DetailRow({
   first = false,
   label,
   strong = false,
+  testID,
   tone,
   value,
 }: Readonly<{
   first?: boolean;
   label: string;
   strong?: boolean;
+  testID?: string;
   tone?: "balanced" | "different";
   value: string;
 }>) {
   usePosThemeVersion();
   return (
-    <View style={[styles.detailRow, !first && styles.detailRowDivider]}>
+    <View
+      style={[styles.detailRow, !first && styles.detailRowDivider]}
+      testID={testID}
+    >
       <Text numberOfLines={1} style={styles.detailLabel}>
         {label}
       </Text>

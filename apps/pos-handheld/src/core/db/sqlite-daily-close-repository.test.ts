@@ -1064,6 +1064,8 @@ function archive(
   closeId: string,
   auditId: string,
   cashRoundingCents = 0,
+  cashInCents = 0,
+  cashOutCents = 0,
 ): Parameters<SqliteDailyCloseRepository["saveArchive"]>[0] {
   const denominations = normalizeDailyCloseCounts([
     { denominationCents: 10_000, quantity: 1 },
@@ -1116,13 +1118,16 @@ function archive(
       },
     ],
     cashRoundingCents,
-    // 应有现金 = 现金净额 800 + 现金进位。
-    expectedCashCents: 800 + cashRoundingCents,
+    cashInCents,
+    cashOutCents,
+    // 应有现金 = 现金净额 800 + 现金进位 + 现金存入 − 现金取出。
+    expectedCashCents: 800 + cashRoundingCents + cashInCents - cashOutCents,
     denominations,
     notesSubtotalCents,
     coinsSubtotalCents,
     countedCashCents,
-    varianceCents: countedCashCents - (800 + cashRoundingCents),
+    varianceCents:
+      countedCashCents - (800 + cashRoundingCents + cashInCents - cashOutCents),
   };
   return {
     archive: archiveValue,

@@ -20,6 +20,10 @@ import {
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import { canDownloadCatalog } from "@/features/catalog/maintenance";
+import {
+  CashMovementScreen,
+  type CashMovementPresenter,
+} from "@/features/cash-movement";
 import { DAILY_CLOSE_VIEW_PERMISSION } from "@/features/daily-close";
 import {
   INSTALLMENTS_VIEW_PERMISSION,
@@ -89,9 +93,28 @@ export default function SalesRoute() {
     getUpdateGate,
     getUpdateGate,
   );
+  // 钱箱入口开关：只决定工具栏是否显示入口；旧组合 / 测试替身没有该能力时视为关闭。
+  const cashMovementRuntime = runtime.services?.cashMovement;
+  const subscribeCashMovementEnabled = useCallback(
+    (listener: () => void) =>
+      cashMovementRuntime?.subscribeCashMovementEnabled(listener) ??
+      (() => undefined),
+    [cashMovementRuntime],
+  );
+  const getCashMovementEnabled = useCallback(
+    () => cashMovementRuntime?.isCashMovementEnabled() ?? false,
+    [cashMovementRuntime],
+  );
+  const cashMovementEnabled = useSyncExternalStore(
+    subscribeCashMovementEnabled,
+    getCashMovementEnabled,
+    getCashMovementEnabled,
+  );
   const [binding, setBinding] = useState<SalesPresenterBinding | null>(null);
   const [manualInputActive, setManualInputActive] = useState(false);
   const [cameraScannerVisible, setCameraScannerVisible] = useState(false);
+  const [cashMovementPresenter, setCashMovementPresenter] =
+    useState<CashMovementPresenter | null>(null);
   const [toolbarOrder, setToolbarOrder] = useState<
     readonly SalesToolbarActionId[]
   >(() => reconcileSalesToolbarOrder(readSalesToolbarOrder()));
@@ -168,6 +191,31 @@ export default function SalesRoute() {
   );
 
   useEffect(() => clearHidRestoreTimer, [clearHidRestoreTimer]);
+
+  // 钱箱弹窗的 presenter 只在打开期间存在；收银员 / 服务切换或开关被关闭时一并销毁，弹窗随之关闭。
+  useEffect(() => {
+    return () => {
+      setCashMovementPresenter((current) => {
+        current?.destroy();
+        return null;
+      });
+    };
+  }, [activeCashier, runtime.services, cashMovementEnabled]);
+
+  const openCashMovement = useCallback(() => {
+    try {
+      const created = cashMovementRuntime?.createPresenter();
+      if (created) setCashMovementPresenter(created);
+    } catch {
+      // 没有可信收银员或运行时未就绪：不弹出钱箱。
+    }
+  }, [cashMovementRuntime]);
+  const closeCashMovement = useCallback(() => {
+    setCashMovementPresenter((current) => {
+      current?.destroy();
+      return null;
+    });
+  }, []);
 
   useEffect(() => {
     if (
@@ -310,7 +358,12 @@ export default function SalesRoute() {
     <>
       <RouteHidScannerCapture
         context="product"
-        enabled={!manualInputActive && !cameraScannerVisible}
+        // 钱箱弹窗打开时不能让 HID 扫码枪把输入写进后面的购物车。
+        enabled={
+          !manualInputActive &&
+          !cameraScannerVisible &&
+          cashMovementPresenter === null
+        }
         onHidTextChange={noteHidTextChange}
         onScan={addScannedProduct}
         path="/sales"
@@ -373,6 +426,9 @@ export default function SalesRoute() {
             }
           : {})}
         onOpenAttendanceAudit={() => push("/attendance-audit" as Href)}
+        {...(cashMovementEnabled
+          ? { onOpenCashMovement: openCashMovement }
+          : {})}
         onOpenCashDrawer={async () =>
           mapSalesUtilityResult(
             await services.fulfilment.openCashDrawer.execute(),
@@ -415,6 +471,12 @@ export default function SalesRoute() {
             }
           : {})}
       />
+      {cashMovementPresenter ? (
+        <CashMovementScreen
+          onClose={closeCashMovement}
+          presenter={cashMovementPresenter}
+        />
+      ) : null}
       <CameraScannerModal
         context="product"
         onClose={() => setCameraScannerVisible(false)}

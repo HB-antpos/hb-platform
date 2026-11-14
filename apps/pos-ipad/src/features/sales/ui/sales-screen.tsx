@@ -152,6 +152,11 @@ export type SalesScreenProps = Readonly<{
   }) => Promise<string | null>;
   onOpenAttendanceAudit?: () => void;
   onOpenCashDrawer?: () => Promise<SalesUtilityActionResult>;
+  /**
+   * 打开「钱箱」弹窗（现金存入 / 取出 / 今日记录）。路由仅在本机开关 cashMovement.enabled 开启时才传，
+   * 不传则不显示「钱箱」按钮，原有「开箱」按钮不变。
+   */
+  onOpenCashMovement?: () => void;
   onOpenCatalogMaintenance?: () => void;
   onOpenDailyClose?: () => void;
   onOpenHeldOrders?: () => void;
@@ -210,6 +215,7 @@ export function SalesScreen({
   resolveCartProductImage,
   onOpenAttendanceAudit,
   onOpenCashDrawer,
+  onOpenCashMovement,
   onOpenCatalogMaintenance,
   onOpenDailyClose,
   onOpenHeldOrders,
@@ -1565,6 +1571,21 @@ export function SalesScreen({
                 testID="sales-open-cash-drawer"
                 tone="quiet"
               />
+              {onOpenCashMovement ? (
+                <ActionButton
+                  disabled={
+                    transactionActionsDisabled || utilityActionPending !== null
+                  }
+                  icon="cash-plus"
+                  label={t("functions.cashMovement")}
+                  onPress={onOpenCashMovement}
+                  size="large"
+                  sound="navigate"
+                  style={styles.functionAction}
+                  testID="sales-cash-movement"
+                  tone="quiet"
+                />
+              ) : null}
             </View>
             {utilityActionResult ? (
               <Text

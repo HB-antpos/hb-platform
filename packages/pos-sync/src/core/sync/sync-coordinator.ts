@@ -64,6 +64,12 @@ export interface DailyCloseUploadDrainPort {
   nextReadyAtIso(): Promise<string | null>;
 }
 
+/**
+ * 现金进出（Cash In / Out）上传：与日结上传同一形状的 drain 端口。
+ * 协调器在每次 drain 里先传现金进出、再传日结（日结汇总已经包含这些明细，服务端先收到明细更利于对账）。
+ */
+export type CashMovementUploadDrainPort = DailyCloseUploadDrainPort;
+
 export interface SyncRetryTimerPort {
   set(delayMs: number, callback: () => void): unknown;
   clear(handle: unknown): void;
@@ -104,6 +110,8 @@ export type PosSyncCoordinatorOptions = Readonly<{
   auditUploader: AuditBatchUploadPort;
   /** 日结记录上传 outbox；缺省时不上传日结（旧测试/适配器无需改动）。 */
   dailyCloseUpload?: DailyCloseUploadDrainPort;
+  /** 现金进出上传 outbox；缺省时不上传（旧测试/适配器无需改动）。与 cashMovement.enabled 开关无关。 */
+  cashMovementUpload?: CashMovementUploadDrainPort;
   security: SyncSecurityPort;
   now: () => Date;
   random?: () => number;
@@ -313,7 +321,24 @@ export class PosSyncCoordinator {
     if (this.stopped) return;
     await this.syncPendingAudits(report);
     if (this.stopped) return;
+    // 现金进出先于日结：两者互相隔离，任一方的失败都不能阻塞另一方。
+    await this.syncCashMovements();
+    if (this.stopped) return;
     await this.syncDailyCloses();
+  }
+
+  /**
+   * 现金进出补传放在订单与审计之后、日结之前：它的任何异常都不能让订单/审计/日结的 drain 变成失败
+   * （记录仍在本地 pending，等待下一次触发或定时唤醒）。
+   */
+  private async syncCashMovements(): Promise<void> {
+    const upload = this.options.cashMovementUpload;
+    if (!upload) return;
+    try {
+      await upload.drain({ shouldStop: () => this.stopped });
+    } catch {
+      // 读取/上传基础设施故障保持现金进出 pending，不改变其它上传的 drain 结果。
+    }
   }
 
   /**
@@ -544,6 +569,7 @@ export class PosSyncCoordinator {
       this.options.outbox.nextReadyAtIso?.(),
       this.options.auditDelivery?.nextReadyAtIso(),
       this.nextDailyCloseReadyAtIso(),
+      this.nextCashMovementReadyAtIso(),
     ]);
     if (this.stopped) return;
     const nextReadyAt = candidates
@@ -571,8 +597,18 @@ export class PosSyncCoordinator {
    * 日结重试的唤醒时间至少晚于现在 1 秒：即使日结仓储给出已过期的时间
    * （例如本轮 drain 因故没处理掉它），也不能让定时器 0ms 反复自旋。
    */
-  private async nextDailyCloseReadyAtIso(): Promise<string | null> {
-    const upload = this.options.dailyCloseUpload;
+  private nextDailyCloseReadyAtIso(): Promise<string | null> {
+    return this.nextUploadReadyAtIso(this.options.dailyCloseUpload);
+  }
+
+  /** 现金进出上传的唤醒时间，与日结同样至少晚于现在 1 秒，防止 0ms 自旋。 */
+  private nextCashMovementReadyAtIso(): Promise<string | null> {
+    return this.nextUploadReadyAtIso(this.options.cashMovementUpload);
+  }
+
+  private async nextUploadReadyAtIso(
+    upload: DailyCloseUploadDrainPort | undefined,
+  ): Promise<string | null> {
     if (!upload) return null;
     try {
       const readyAt = await upload.nextReadyAtIso();

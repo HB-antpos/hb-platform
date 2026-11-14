@@ -55,7 +55,14 @@ export type DailyCloseSummary = DailyCloseScope &
      * 对齐 WPF #914 的 CashRoundingAmount。分期现金同样逐笔进位，计入这个合计。
      */
     cashRoundingCents: number;
-    /** 应有现金 = 订单现金 tender 净额 + 分期现金净额 + cashRoundingCents。 */
+    /**
+     * 本期现金存入合计（分，>= 0）= ChangeTopUp + OtherIn，冲正抵消后的净额（见 cash-movement.ts）。
+     * 来自本机现金进出明细，按营业日窗口、不看上传状态与开关。旧存档补 0。
+     */
+    cashInCents: number;
+    /** 本期现金取出合计（分，>= 0）= SafeDrop + PaidOut，冲正抵消后的净额。旧存档补 0。 */
+    cashOutCents: number;
+    /** 应有现金 = 订单现金 tender 净额 + 分期现金净额 + cashRoundingCents + cashInCents − cashOutCents。 */
     expectedCashCents: number;
   }>;
 

@@ -51,6 +51,7 @@ test("默认顺序优先展示交易功能，再展示低频终端功能", () =>
     "held-orders",
     "reprint-receipt",
     "cash-drawer",
+    "cash-movement",
     "daily-close",
     "remote-history",
     "installments",
@@ -134,6 +135,7 @@ test("重排可见操作时，隐藏操作保留其原来的槽位", () => {
       "hold",
       "reprint-receipt",
       "cash-drawer",
+      "cash-movement",
       "daily-close",
       "remote-history",
       "installments",
@@ -157,4 +159,26 @@ test("可见顺序中的无效或重复值不会挤占有效操作槽位", () =>
     ]),
     [...DEFAULT_SALES_TOOLBAR_ORDER],
   );
+});
+
+test("钱箱是新增操作：旧的已保存顺序（没有它）会把它补在「开箱」之后，不打乱用户排序", () => {
+  const saved = ["lock", "language", ...DEFAULT_SALES_TOOLBAR_ORDER.filter(
+    (actionId) => actionId !== "cash-movement" && actionId !== "lock" && actionId !== "language",
+  )];
+  const reconciled = reconcileSalesToolbarOrder(saved);
+  const drawer = reconciled.indexOf("cash-drawer");
+  assert.equal(reconciled[drawer + 1], "cash-movement");
+  assert.deepEqual(
+    reconciled.filter((actionId) => actionId !== "cash-movement"),
+    saved,
+  );
+});
+
+test("入口被隐藏（开关关闭）时重排可见项，不改动钱箱已占的槽位，也不丢失用户顺序", () => {
+  const canonical = reconcileSalesToolbarOrder(DEFAULT_SALES_TOOLBAR_ORDER);
+  const visible = canonical.filter((actionId) => actionId !== "cash-movement");
+  const reordered = [...visible].reverse();
+  const merged = mergeVisibleSalesToolbarOrder(canonical, reordered);
+  assert.equal(merged.indexOf("cash-movement"), canonical.indexOf("cash-movement"));
+  assert.deepEqual(merged.filter((actionId) => actionId !== "cash-movement"), reordered);
 });

@@ -13,6 +13,7 @@ import {
 } from "@hb/pos-domain/core/contracts/daily-close";
 import type { AuditEventDraft } from "@hb/pos-domain/core/contracts/order";
 
+import { summarizeCashMovementsInPeriod } from "./sqlite-cash-movement-repository";
 import type { SqliteConnectionPort, SqlValue } from "./types";
 
 const COMPLETED_ORDER_STATES = Object.freeze([
@@ -61,6 +62,8 @@ type DailyCloseRow = Readonly<{
   return_quantity: unknown;
   expected_cash_cents: unknown;
   cash_rounding_cents: unknown;
+  cash_in_cents: unknown;
+  cash_out_cents: unknown;
   installment_payment_count: unknown;
   installment_cash_sales_cents: unknown;
   installment_cash_refund_cents: unknown;
@@ -153,10 +156,11 @@ export class SqliteDailyCloseRepository
           installment_cash_sales_cents, installment_cash_refund_cents,
           installment_card_sales_cents, installment_card_refund_cents,
           installment_voucher_sales_cents, installment_voucher_refund_cents,
+          cash_in_cents, cash_out_cents,
           source_kind, state
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?,
           'native', 'Preparing'
         )`,
         [
@@ -185,6 +189,8 @@ export class SqliteDailyCloseRepository
           installmentTender(archive.installmentPayments, "card").refundCents,
           installmentTender(archive.installmentPayments, "voucher").salesCents,
           installmentTender(archive.installmentPayments, "voucher").refundCents,
+          archive.cashInCents,
+          archive.cashOutCents,
         ],
       );
       for (const tender of archive.tenders) {
@@ -450,14 +456,28 @@ async function summarizeSnapshot(
   );
   const cashNetCents =
     tenders.find((item) => item.method === "cash")?.netCents ?? 0;
-  // 应有现金 = 订单现金净额 + 分期现金净额（都是精确金额）+ 现金进位：钱箱实点必然是 5 分整数倍。
+  // 现金存入 / 取出（Cash In / Out）：同一营业日窗口、同一事务快照，按原因码累加、冲正抵消，
+  // 不看上传状态也不看设置开关（开关只管销售页入口；关闭后已有记录照常汇总）。
+  const cashMovements = await summarizeCashMovementsInPeriod(
+    connection,
+    normalizedScope,
+  );
+  // 应有现金 = 订单现金净额 + 分期现金净额（都是精确金额）+ 现金进位 + 存入 − 取出：钱箱实点必然是 5 分整数倍。
   const expectedCashCents = safeSum(
     safeSum(
-      cashNetCents,
-      installmentTender(installments.payments, "cash").netCents,
-      "daily close cash net",
+      safeSum(
+        cashNetCents,
+        installmentTender(installments.payments, "cash").netCents,
+        "daily close cash net",
+      ),
+      cashRoundingCents,
+      "daily close expected cash",
     ),
-    cashRoundingCents,
+    safeSum(
+      cashMovements.cashInCents,
+      -cashMovements.cashOutCents,
+      "daily close cash movements",
+    ),
     "daily close expected cash",
   );
 
@@ -469,6 +489,8 @@ async function summarizeSnapshot(
     installmentPayments: installments.payments,
     installmentPaymentCount: installments.paymentCount,
     cashRoundingCents,
+    cashInCents: cashMovements.cashInCents,
+    cashOutCents: cashMovements.cashOutCents,
     expectedCashCents,
   });
 }
@@ -666,6 +688,9 @@ async function readArchive(
       row.cash_rounding_cents ?? 0,
       "cash rounding",
     ),
+    // 迁移给旧存档补 0：旧存档不含现金进出，应有现金口径不变；列不存在（M61 / M58 之前的库结构）等同于没有。
+    cashInCents: safeInteger(row.cash_in_cents ?? 0, "cash in"),
+    cashOutCents: safeInteger(row.cash_out_cents ?? 0, "cash out"),
     expectedCashCents: safeInteger(
       row.expected_cash_cents,
       "expected cash",
@@ -733,6 +758,8 @@ function validateLegacyArchive(input: DailyCloseArchive): DailyCloseArchive {
       input.cashRoundingCents,
       "cash rounding",
     ),
+    cashInCents: nonNegativeInteger(input.cashInCents, "cash in"),
+    cashOutCents: nonNegativeInteger(input.cashOutCents, "cash out"),
     expectedCashCents: safeInteger(
       input.expectedCashCents,
       "expected cash",
@@ -785,6 +812,9 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     input.cashRoundingCents,
     "cash rounding",
   );
+  // 存入 / 取出合计是冲正抵消后的净额，恒 >= 0（服务端 INVALID_CASH_MOVEMENT_TOTAL）。
+  const cashInCents = nonNegativeInteger(input.cashInCents, "cash in");
+  const cashOutCents = nonNegativeInteger(input.cashOutCents, "cash out");
   const cash = tenders.find((item) => item.method === "cash");
   const installments = normalizeInstallmentFacts(
     input.installmentPayments,
@@ -802,16 +832,20 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     !cash ||
     safeSum(
       safeSum(
-        cash.netCents,
-        installmentTender(installments.installmentPayments, "cash").netCents,
+        safeSum(
+          cash.netCents,
+          installmentTender(installments.installmentPayments, "cash").netCents,
+          "expected cash",
+        ),
+        cashRoundingCents,
         "expected cash",
       ),
-      cashRoundingCents,
+      safeSum(cashInCents, -cashOutCents, "expected cash"),
       "expected cash",
     ) !== expectedCashCents
   ) {
     throw new TypeError(
-      "Daily close expected cash does not match cash net plus installment cash plus rounding.",
+      "Daily close expected cash does not match cash net plus installment cash plus rounding plus cash in minus cash out.",
     );
   }
   const denominations = normalizeDailyCloseCounts(input.denominations);
@@ -875,6 +909,8 @@ function validateArchive(input: DailyCloseArchive): DailyCloseArchive {
     tenders,
     ...installments,
     cashRoundingCents,
+    cashInCents,
+    cashOutCents,
     expectedCashCents,
     denominations,
     notesSubtotalCents,

@@ -389,6 +389,68 @@ describe("DailyCloseScreen", () => {
   });
 });
 
+describe("DailyCloseScreen 现金存入 / 取出", () => {
+  it("存入与取出都为 0 时汇总和存档详情都不显示这两行", async () => {
+    mockLanguage = "en";
+    const presenter = new ScreenPresenter();
+    const screen = await render(<DailyCloseScreen presenter={presenter} />);
+
+    expect(screen.queryByTestId("daily-close-metric-cash-in")).toBeNull();
+    expect(screen.queryByTestId("daily-close-metric-cash-out")).toBeNull();
+    await fireEvent.press(screen.getByTestId("daily-close-show-history"));
+    expect(screen.queryByTestId("daily-close-archive-cash-in")).toBeNull();
+    expect(screen.queryByTestId("daily-close-archive-cash-out")).toBeNull();
+    await screen.unmount();
+  });
+
+  it("非 0 时汇总显示带正负号的金额，存档详情同样显示", async () => {
+    mockLanguage = "en";
+    const presenter = new ScreenPresenter({
+      cashInCents: 7_050,
+      cashOutCents: 1_250,
+    });
+    const screen = await render(<DailyCloseScreen presenter={presenter} />);
+
+    const cashIn = screen.getByTestId("daily-close-metric-cash-in");
+    expect(within(cashIn).getByText("Cash in")).toBeTruthy();
+    expect(within(cashIn).getByText("+$70.50")).toBeTruthy();
+    const cashOut = screen.getByTestId("daily-close-metric-cash-out");
+    expect(within(cashOut).getByText("Cash out")).toBeTruthy();
+    expect(within(cashOut).getByText("−$12.50")).toBeTruthy();
+
+    await fireEvent.press(screen.getByTestId("daily-close-show-history"));
+    expect(
+      within(screen.getByTestId("daily-close-archive-cash-in")).getByText(
+        "+$70.50",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("daily-close-archive-cash-out")).getByText(
+        "−$12.50",
+      ),
+    ).toBeTruthy();
+    await screen.unmount();
+  });
+
+  it("只有取出时只显示取出一行；中文界面使用中文文案", async () => {
+    mockLanguage = "zh";
+    try {
+      const presenter = new ScreenPresenter({ cashOutCents: 300 });
+      const screen = await render(<DailyCloseScreen presenter={presenter} />);
+
+      expect(screen.queryByTestId("daily-close-metric-cash-in")).toBeNull();
+      expect(
+        within(screen.getByTestId("daily-close-metric-cash-out")).getByText(
+          "现金取出",
+        ),
+      ).toBeTruthy();
+      await screen.unmount();
+    } finally {
+      mockLanguage = "en";
+    }
+  });
+});
+
 const installmentPayments = [
   { method: "cash", salesCents: 2_000, refundCents: -500, netCents: 1_500 },
   { method: "card", salesCents: 800, refundCents: 0, netCents: 800 },
@@ -408,6 +470,8 @@ class ScreenPresenter implements DailyCloseScreenPresenter {
 
   public constructor(
     options: Partial<{
+      cashInCents: number;
+      cashOutCents: number;
       installments: boolean;
       permissions: readonly string[];
     }> = {},
@@ -417,8 +481,14 @@ class ScreenPresenter implements DailyCloseScreenPresenter {
       options.installments
         ? { ...value, installmentPayments, installmentPaymentCount: 4 }
         : value;
-    const selectedArchive = withInstallments(archive());
-    const summary = withInstallments(closeSummary());
+    // 现金存入 / 取出：汇总与归档都带同一份（应有现金公式的一部分，这里只验证展示）。
+    const withCashMovements = <T extends DailyCloseSummary>(value: T): T => ({
+      ...value,
+      cashInCents: options.cashInCents ?? 0,
+      cashOutCents: options.cashOutCents ?? 0,
+    });
+    const selectedArchive = withCashMovements(withInstallments(archive()));
+    const summary = withCashMovements(withInstallments(closeSummary()));
     this.state = {
       access: resolveDailyCloseAccess(
         options.permissions ?? [
@@ -549,6 +619,8 @@ function closeSummary(): DailyCloseSummary {
       },
     ],
     cashRoundingCents: 0,
+    cashInCents: 0,
+    cashOutCents: 0,
     expectedCashCents: 1_000,
   };
 }

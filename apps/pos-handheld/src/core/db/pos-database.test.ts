@@ -10,6 +10,10 @@ import { PosDatabase } from "./pos-database";
 import { PosHandheldOtaUpdatePolicyRepository } from "./pos-handheld-ota-update-policy-repository";
 import { PosHandheldUpdatePolicyRepository } from "./pos-handheld-update-policy-repository";
 import { PosSettingsRepository } from "./pos-settings-repository";
+import {
+  SqliteCashMovementRepository,
+  SqliteCashMovementUploadRepository,
+} from "@hb/pos-db/core/db/sqlite-cash-movement-repository";
 import { SqliteDailyCloseRepository } from "@hb/pos-db/core/db/sqlite-daily-close-repository";
 import { SqliteFulfilmentStore } from "./sqlite-fulfilment-store";
 import { SqliteOrderSyncMaterialResolver } from "./sqlite-order-sync-material";
@@ -459,6 +463,10 @@ test("PosDatabase 只暴露履约 facade，不向 feature 泄露 SQLCipher 连�
     }) instanceof PosHandheldOtaUpdatePolicyRepository,
   );
   assert.ok(database.dailyCloses() instanceof SqliteDailyCloseRepository);
+  assert.ok(database.cashMovements() instanceof SqliteCashMovementRepository);
+  assert.ok(
+    database.cashMovementUploads() instanceof SqliteCashMovementUploadRepository,
+  );
   assert.ok(
     database.specialProducts() instanceof SqliteSpecialProductsRepository,
   );

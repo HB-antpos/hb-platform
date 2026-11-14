@@ -8,6 +8,7 @@ import {
   type ReceiptPaper,
 } from "./receipt-document";
 
+import type { CashMovementSummary } from "@hb/pos-domain/core/contracts/cash-movement";
 import type { DailyCloseArchive } from "@hb/pos-domain/core/contracts/daily-close";
 
 export const DAILY_CLOSE_RECEIPT_WIDTH = 42;
@@ -33,6 +34,11 @@ export type DailyCloseReceiptInput = Readonly<{
   brandName?: string | undefined;
   storeName: string;
   returnPolicy?: string | undefined;
+  /**
+   * 本期现金存入 / 取出按原因码的明细（来自 summarizePeriod 的 byReason）。
+   * 存档只保存合计，所以明细行由调用方提供；缺省或与存档合计对不上时只打合计，不打可能误导的明细。
+   */
+  cashMovementByReason?: CashMovementSummary["byReason"] | undefined;
 }>;
 
 const DENOMINATION_LABELS = new Map<number, string>([
@@ -154,6 +160,7 @@ export function buildDailyCloseReceipt(
       width,
     ),
   );
+  appendCashMovementBlock(lines, input.archive, input.cashMovementByReason, zh, width);
   lines.push(
     twoColumns(
       zh ? "应有现金/Expected" : "Expected Cash",
@@ -397,6 +404,64 @@ function appendInstallmentBlock(
   lines.push(
     twoColumns(zh ? "分期净额/Lay-by Net" : "Lay-by Net", money(netCents), width),
   );
+}
+
+/**
+ * 现金存入 / 取出（Cash In / Out）区块：应有现金 = 现金净额 + 进位 + 存入 − 取出，
+ * 有存入或取出时必须让收银员看到这两项，才对得上账。没有任何记录时整段不打，小票与之前逐字节一致。
+ * 明细行（Change top-up / Other cash in、Safe drop / Paid out）只在调用方给了明细、
+ * 且与存档合计一致时才打印。
+ */
+function appendCashMovementBlock(
+  lines: string[],
+  archive: DailyCloseArchive,
+  byReason: CashMovementSummary["byReason"] | undefined,
+  zh: boolean,
+  width: DailyCloseReceiptWidth,
+): void {
+  if (archive.cashInCents <= 0 && archive.cashOutCents <= 0) return;
+  const consistent =
+    byReason !== undefined &&
+    byReason.ChangeTopUp + byReason.OtherIn === archive.cashInCents &&
+    byReason.SafeDrop + byReason.PaidOut === archive.cashOutCents;
+  lines.push(
+    twoColumns(zh ? "现金存入/Cash In" : "Cash In", money(archive.cashInCents), width),
+  );
+  if (consistent) {
+    lines.push(
+      twoColumns(
+        zh ? "  补零钱/Change top-up" : "  Change top-up",
+        money(byReason.ChangeTopUp),
+        width,
+      ),
+    );
+    lines.push(
+      twoColumns(
+        zh ? "  其他存入/Other cash in" : "  Other cash in",
+        money(byReason.OtherIn),
+        width,
+      ),
+    );
+  }
+  lines.push(
+    twoColumns(zh ? "现金取出/Cash Out" : "Cash Out", money(archive.cashOutCents), width),
+  );
+  if (consistent) {
+    lines.push(
+      twoColumns(
+        zh ? "  交店长/Safe drop" : "  Safe drop",
+        money(byReason.SafeDrop),
+        width,
+      ),
+    );
+    lines.push(
+      twoColumns(
+        zh ? "  现金支出/Paid out" : "  Paid out",
+        money(byReason.PaidOut),
+        width,
+      ),
+    );
+  }
 }
 
 /** 每种面额一行：面额、张数/枚数、小计。日结单与现金单共用。 */

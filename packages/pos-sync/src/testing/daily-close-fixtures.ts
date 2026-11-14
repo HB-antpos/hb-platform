@@ -43,11 +43,16 @@ export function archiveFixture(
     rest.installmentPayments ?? emptyDailyCloseTenders();
   // 应有现金 = 订单现金净额 + 分期现金净额 + 现金进位（默认 0，与未进位的旧口径一致）。
   const cashRoundingCents = rest.cashRoundingCents ?? 0;
+  // 现金存入 / 取出（冲正抵消后的非负净额）：默认没有，应有现金要加存入、减取出。
+  const cashInCents = rest.cashInCents ?? 0;
+  const cashOutCents = rest.cashOutCents ?? 0;
   const expectedCashCents =
     (tenders.find((entry) => entry.method === "cash")?.netCents ?? 0) +
     (installmentPayments.find((entry) => entry.method === "cash")?.netCents ??
       0) +
-    cashRoundingCents;
+    cashRoundingCents +
+    cashInCents -
+    cashOutCents;
   return {
     businessDate: "2026-10-07",
     periodFromIso: "2026-10-06T14:00:00.000Z",
@@ -59,6 +64,8 @@ export function archiveFixture(
     installmentPayments,
     installmentPaymentCount: 0,
     cashRoundingCents,
+    cashInCents,
+    cashOutCents,
     expectedCashCents,
     closeId: DAILY_CLOSE_FIXTURE_GUID,
     savedCashierId: "cashier-1",

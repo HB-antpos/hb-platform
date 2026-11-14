@@ -313,6 +313,19 @@ export function DailyCloseScreen({ onBack, presenter }: DailyCloseScreenProps) {
                       label={dailyCloseText(locale, "metric.cashRounding")}
                       value={signedMoney(state.summary.cashRoundingCents)}
                     />
+                    {/* 现金存入 / 取出只在非 0 时显示，位于「进位」与「应有现金」之间。 */}
+                    {state.summary.cashInCents !== 0 ? (
+                      <Metric
+                        label={dailyCloseText(locale, "metric.cashIn")}
+                        value={signedMoney(state.summary.cashInCents)}
+                      />
+                    ) : null}
+                    {state.summary.cashOutCents !== 0 ? (
+                      <Metric
+                        label={dailyCloseText(locale, "metric.cashOut")}
+                        value={signedMoney(-state.summary.cashOutCents)}
+                      />
+                    ) : null}
                     <Metric
                       label={dailyCloseText(locale, "metric.expectedCash")}
                       value={money(state.summary.expectedCashCents)}
@@ -691,6 +704,20 @@ function ArchiveDetails({
           amount: signedMoney(archive.cashRoundingCents),
         })}
       </Text>
+      {archive.cashInCents !== 0 ? (
+        <Text style={styles.detailLine}>
+          {dailyCloseText(locale, "archive.cashIn", {
+            amount: signedMoney(archive.cashInCents),
+          })}
+        </Text>
+      ) : null}
+      {archive.cashOutCents !== 0 ? (
+        <Text style={styles.detailLine}>
+          {dailyCloseText(locale, "archive.cashOut", {
+            amount: signedMoney(-archive.cashOutCents),
+          })}
+        </Text>
+      ) : null}
       <Text style={styles.detailLine}>
         {dailyCloseText(locale, "archive.expected", {
           amount: money(archive.expectedCashCents),

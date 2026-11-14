@@ -1,3 +1,4 @@
+import { CASH_MOVEMENT_MIGRATION_SQL } from "@hb/pos-db/core/db/cash-movement-schema";
 import type { SqliteConnectionPort } from "@hb/pos-db/core/db/types";
 
 export type DatabaseMigration = Readonly<{
@@ -7751,6 +7752,15 @@ CREATE INDEX IF NOT EXISTS ix_local_special_product_category_items_category
 `;
 const M60 = specialProductCategoriesDdl;
 
+/**
+ * M61 现金存入 / 取出（Cash In / Out）：local_cash_movements 明细表（写入后不可改、不可删，冲正靠 VoidsMovementGuid 唯一）、
+ * 日结存档新增 cash_in_cents / cash_out_cents（旧存档补 0，口径不变）并重建不可变 / 归档转换触发器
+ * （应有现金 = 订单现金净额 + 分期现金净额 + 进位 + 存入 − 取出）。
+ * DDL 在 @hb/pos-db 的 cash-movement-schema 里，iPad（M61）与手持（M58）引用同一份，版本号不同但内容字节一致。
+ * 整个迁移在 applyMigrations 的独占事务内执行，要么全成功要么全回滚；本迁移不可回退。
+ */
+const M61_CASH_MOVEMENTS = CASH_MOVEMENT_MIGRATION_SQL;
+
 export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 1, name: "M1_security_and_time", sql: M1 },
   { version: 2, name: "M2_catalog", sql: M2 },
@@ -7811,7 +7821,7 @@ export const POS_DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
   { version: 57, name: "M57_installment_attempts_zeller_manual", sql: M57 },
   { version: 58, name: "M58_terminal_blocking_zeller", sql: M58 },
   { version: 59, name: "M59_recovery_reconciliation_zeller", sql: M59 },
-  { version: 60, name: "M60_special_product_categories", sql: M60 },
+  { version: 60, name: "M60_special_product_categories", sql: M60 },  { version: 61, name: "M61_cash_movements", sql: M61_CASH_MOVEMENTS },
 ];
 
 export async function applyMigrations(

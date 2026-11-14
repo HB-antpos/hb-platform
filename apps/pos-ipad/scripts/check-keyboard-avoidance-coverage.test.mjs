@@ -14,6 +14,7 @@ const sourceRoots = [
 
 const keyboardAwareHosts = new Set([
   "src/features/attendance-audit/attendance-audit-screen.tsx",
+  "src/features/cash-movement/cash-movement-screen.tsx",
   "src/features/cashier-login/cashier-login-screen.tsx",
   "src/features/device-registration/device-registration-screen.tsx",
   "src/features/device-registration/server-connection-panel.tsx",

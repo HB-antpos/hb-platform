@@ -275,12 +275,14 @@ class MemoryRepository implements DailyCloseRepositoryPort {
   public readonly commits: DailyCloseArchiveCommit[] = [];
   public readonly summaryScopes: DailyCloseScope[] = [];
   public saveFails = false;
+  /** 模拟点钞期间本机又发生了新的订单 / 现金存取：下一次 summarize 读到的汇总。 */
+  public summaryPatch: Partial<DailyCloseSummary> = {};
 
   public constructor(private readonly events: string[]) {}
 
   public async summarize(scope: DailyCloseScope): Promise<DailyCloseSummary> {
     this.summaryScopes.push(scope);
-    return summary(scope);
+    return { ...summary(scope), ...this.summaryPatch };
   }
 
   public async saveArchive(input: DailyCloseArchiveCommit) {
@@ -349,6 +351,8 @@ function summary(scope: DailyCloseScope): DailyCloseSummary {
       },
     ],
     cashRoundingCents: 0,
+    cashInCents: 0,
+    cashOutCents: 0,
     expectedCashCents: 1_000,
   };
 }
@@ -381,3 +385,41 @@ function archive(closeId: string): DailyCloseArchive {
     varianceCents: -1_000,
   };
 }
+
+test("点钞期间新增订单与新增现金存入 / 取出走同一条重新核对路径：刷新后汇总、应有现金与差额一并更新，已点数量保留", async () => {
+  const cases: readonly (readonly [string, Partial<DailyCloseSummary>, number])[] = [
+    // 新增一笔现金订单：现金净额 +500。
+    ["新增订单", { orderCount: 5, expectedCashCents: 1_500 }, 1_500],
+    // 新增一笔现金存入 $50：汇总里带 cashInCents，应有现金同步包含。
+    ["新增现金存入", { cashInCents: 5_000, expectedCashCents: 6_000 }, 6_000],
+    // 新增一笔现金取出 $2：应有现金同步扣减。
+    ["新增现金取出", { cashOutCents: 200, expectedCashCents: 800 }, 800],
+  ];
+  for (const [name, patch, expected] of cases) {
+    const harness = createHarness();
+    await harness.presenter.load();
+    harness.presenter.setCount(10_000, 1);
+    assert.equal(harness.presenter.getState().varianceCents, 9_000, name);
+    harness.repository.summaryPatch = patch;
+    await harness.presenter.load();
+    const state = harness.presenter.getState();
+    assert.equal(state.summary?.expectedCashCents, expected, name);
+    assert.equal(state.varianceCents, 10_000 - expected, `${name}：差额按新应有现金重算`);
+    assert.equal(state.countedCashCents, 10_000, `${name}：未保存的点钞数量保留`);
+    if ("cashInCents" in patch) assert.equal(state.summary?.cashInCents, 5_000, name);
+    if ("cashOutCents" in patch) assert.equal(state.summary?.cashOutCents, 200, name);
+  }
+});
+
+test("保存归档冻结的是界面当前展示的汇总（含存入 / 取出合计）；与订单一致，点钞期间新增须先刷新", async () => {
+  const harness = createHarness();
+  harness.repository.summaryPatch = { cashInCents: 5_000, cashOutCents: 200, expectedCashCents: 5_800 };
+  await harness.presenter.load();
+  harness.presenter.setCount(10_000, 1);
+  await harness.presenter.saveAndPrint();
+  const archive = harness.repository.commits[0]?.archive;
+  assert.equal(archive?.cashInCents, 5_000);
+  assert.equal(archive?.cashOutCents, 200);
+  assert.equal(archive?.expectedCashCents, 5_800);
+  assert.equal(archive?.varianceCents, 4_200);
+});

@@ -16,11 +16,11 @@ import { applyMigrations, POS_DATABASE_MIGRATIONS } from "./migrations";
 const T0 = "2026-11-11T00:00:00.000Z";
 const T1 = "2026-11-11T01:00:00.000Z";
 
-test("M60 是最新迁移，建出两张分类表和索引，且不动 local_special_products", async () => {
+test("M60 建出两张分类表和索引，且不动 local_special_products", async () => {
   await withDatabase(async (connection) => {
-    const latest = POS_DATABASE_MIGRATIONS.at(-1);
-    assert.equal(latest?.version, 60);
-    assert.equal(latest?.name, "M60_special_product_categories");
+    // 按版本号查找：M60 之后还会有新迁移（M61 现金进出），不能再断言它是最后一个。
+    const m60 = POS_DATABASE_MIGRATIONS.find((migration) => migration.version === 60);
+    assert.equal(m60?.name, "M60_special_product_categories");
 
     // 先停在 M59，造一条特殊商品和一条设置，再升级到 M60，确认旧数据原样保留。
     await applyMigrations(
@@ -34,7 +34,7 @@ test("M60 是最新迁移，建出两张分类表和索引，且不动 local_spe
     );
     await applyMigrations(connection, () => T1);
 
-    assert.equal(await maxVersion(connection), 60);
+    assert.equal(await maxVersion(connection), POS_DATABASE_MIGRATIONS.at(-1)?.version);
     const names = (
       await connection.getAll<{ name: string }>(
         `SELECT name FROM sqlite_master

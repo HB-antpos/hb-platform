@@ -1313,3 +1313,152 @@ test("考勤服务创建失败（例如没有可用的收银员 lease）时不�
   expect(screen.getByTestId("sales-screen")).toBeTruthy();
   await screen.unmount();
 });
+
+// ───────────────────────── 现金存入 / 取出入口（钱箱） ─────────────────────────
+
+function cashMovementService(initialEnabled: boolean) {
+  const listeners = new Set<() => void>();
+  const runtime = {
+    listToday: jest.fn(async () => ({
+      businessDate: "2026-11-14",
+      businessTimeZone: "Australia/Brisbane",
+      movements: [],
+      latestDailyCloseSavedAtIso: null,
+      cashInCents: 0,
+      cashOutCents: 0,
+    })),
+    submit: jest.fn(),
+    voidMovement: jest.fn(),
+    reprint: jest.fn(),
+  };
+  const state = { enabled: initialEnabled };
+  const service = {
+    isCashMovementEnabled: () => state.enabled,
+    subscribeCashMovementEnabled: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    createRuntime: jest.fn(() => runtime),
+  };
+  return {
+    service,
+    runtime,
+    setEnabled(next: boolean) {
+      state.enabled = next;
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+
+test("services 没有 cashMovement 字段（旧 mock）或开关关闭：不传钱箱入口，原开箱回调不变", async () => {
+  await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(mockSalesScreenProps).not.toBeNull();
+  });
+  expect(mockSalesScreenProps.onOpenCashMovement).toBeUndefined();
+  expect(typeof mockSalesScreenProps.onOpenCashDrawer).toBe("function");
+
+  const disabled = cashMovementService(false);
+  mockRuntime.services.cashMovement = disabled.service;
+  mockSalesScreenProps = null;
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(mockSalesScreenProps).not.toBeNull();
+  });
+  expect(mockSalesScreenProps.onOpenCashMovement).toBeUndefined();
+  expect(typeof mockSalesScreenProps.onOpenCashDrawer).toBe("function");
+  expect(screen.queryByTestId("cash-movement-screen")).toBeNull();
+});
+
+test("开关开启：传入钱箱入口，点击后创建运行时并打开弹窗，HID 扫码暂停；关闭后恢复", async () => {
+  const enabled = cashMovementService(true);
+  mockRuntime.services.cashMovement = enabled.service;
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(typeof mockSalesScreenProps?.onOpenCashMovement).toBe("function");
+  });
+  expect(screen.queryByTestId("cash-movement-screen")).toBeNull();
+  expect(mockRouteCaptureProps.enabled).toBe(true);
+
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+    await Promise.resolve();
+  });
+  expect(enabled.service.createRuntime).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("cash-movement-screen")).toBeTruthy();
+  expect(screen.getByTestId("cash-movement-tab-in")).toBeTruthy();
+  expect(screen.getByTestId("cash-movement-tab-out")).toBeTruthy();
+  expect(screen.getByTestId("cash-movement-tab-records")).toBeTruthy();
+  // 弹窗里有输入框：路由的隐藏 HID 输入必须让出焦点。
+  expect(mockRouteCaptureProps.enabled).toBe(false);
+  await waitFor(() => {
+    expect(enabled.runtime.listToday).toHaveBeenCalled();
+  });
+
+  await fireEvent.press(screen.getByTestId("cash-movement-close"));
+  expect(screen.queryByTestId("cash-movement-screen")).toBeNull();
+  expect(mockRouteCaptureProps.enabled).toBe(true);
+});
+
+test("开关被总部关闭时入口消失，打开着的弹窗随之关闭；没有可信会话（createRuntime 抛错）时不打开弹窗", async () => {
+  const toggle = cashMovementService(true);
+  mockRuntime.services.cashMovement = toggle.service;
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(typeof mockSalesScreenProps?.onOpenCashMovement).toBe("function");
+  });
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+    await Promise.resolve();
+  });
+  expect(screen.getByTestId("cash-movement-screen")).toBeTruthy();
+
+  await act(async () => {
+    toggle.setEnabled(false);
+    await Promise.resolve();
+  });
+  expect(mockSalesScreenProps.onOpenCashMovement).toBeUndefined();
+  expect(screen.queryByTestId("cash-movement-screen")).toBeNull();
+
+  await act(async () => {
+    toggle.setEnabled(true);
+    await Promise.resolve();
+  });
+  toggle.service.createRuntime.mockImplementationOnce(() => {
+    throw new Error("CURRENT_CASHIER_REQUIRED");
+  });
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+    await Promise.resolve();
+  });
+  expect(screen.queryByTestId("cash-movement-screen")).toBeNull();
+});
+
+test("主管授权弹窗出现时临时隐藏钱箱弹窗，授权结束后恢复（表单状态在 presenter 里不丢）", async () => {
+  const enabled = cashMovementService(true);
+  mockRuntime.services.cashMovement = enabled.service;
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(typeof mockSalesScreenProps?.onOpenCashMovement).toBe("function");
+  });
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+    await Promise.resolve();
+  });
+  await fireEvent.press(screen.getByTestId("cash-movement-key-7"));
+  expect(screen.getByTestId("cash-movement-amount").props.children).toBe("$7");
+
+  await act(async () => {
+    mockAuthorizationState = { kind: "awaiting-supervisor" };
+    mockAuthorizationListener?.();
+    await Promise.resolve();
+  });
+  expect(screen.queryByTestId("cash-movement-screen")).toBeNull();
+
+  await act(async () => {
+    mockAuthorizationState = { kind: "idle" };
+    mockAuthorizationListener?.();
+    await Promise.resolve();
+  });
+  expect(screen.getByTestId("cash-movement-amount").props.children).toBe("$7");
+});
