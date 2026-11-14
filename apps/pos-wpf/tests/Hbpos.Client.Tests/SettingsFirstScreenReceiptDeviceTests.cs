@@ -657,7 +657,8 @@ public sealed class SettingsFirstScreenReceiptDeviceRuntimeTests(PaymentViewRunt
     private static SettingsPageHost PageAt(SettingsView view, int index)
     {
         var pages = PaymentViewRuntimeStaTestHost.FindVisualDescendants<SettingsPageHost>(view).ToList();
-        Assert.Equal(6, pages.Count);
+        // 6 个原有分类页 + 「业务开关」页（排在最后，所以收据页 2、设备页 3 的索引不变）。
+        Assert.Equal(7, pages.Count);
         return pages[index];
     }
 

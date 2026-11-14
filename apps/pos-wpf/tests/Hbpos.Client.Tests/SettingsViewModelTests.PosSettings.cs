@@ -415,6 +415,16 @@ public sealed partial class SettingsViewModelTests
             CancellationToken cancellationToken = default)
         {
             SetCalls.Add((key, value, actor));
+            // 与真实服务一致：写入成功后 Current 里该项就是新值。视图模型成功后会按 Current 重读开关，
+            // 替身若不更新 Current，开关会被重读拨回去。
+            if (NextOutcome == PosSettingChangeOutcome.Applied && Current.Find(key) is { } existing)
+            {
+                Current = Current with
+                {
+                    Items = Current.Items.Select(item => ReferenceEquals(item, existing) ? item with { Value = value } : item).ToList()
+                };
+            }
+
             return Task.FromResult(NextOutcome);
         }
 
