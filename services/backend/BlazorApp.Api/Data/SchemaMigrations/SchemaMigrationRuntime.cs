@@ -300,6 +300,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyPosCashMovementPermissionAsync(CancellationToken cancellationToken);
 
+    Task ApplyScanPackingAsync(CancellationToken cancellationToken);
+
+    Task VerifyScanPackingAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1914,6 +1918,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             PosCashMovementPermissionSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyScanPackingAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PackingSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 七张表的列 / 主键 / 索引签名通过后协调器才登记账本。
+        await VerifyScanPackingAsync(cancellationToken);
+    }
+
+    public async Task VerifyScanPackingAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PackingSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

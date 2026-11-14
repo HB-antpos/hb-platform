@@ -1,10 +1,22 @@
 export type WarehouseProductFlowSelectionMode = 'allFiltered' | 'included'
 
+/** 批量货号匹配方式：仅货号，或货号 / 条码 / 商品编码任一。 */
+export type WarehouseProductFlowItemNumberMatchMode = 'itemNumber' | 'any'
+
 export interface WarehouseProductFlowFilter {
   keyword?: string
   warehouseCategoryGuids: string[]
   supplierCodes: string[]
   documentKeyword?: string
+  /** 从 Excel 粘贴的批量货号，按粘贴顺序；后端精确匹配。 */
+  itemNumbers?: string[]
+  itemNumberMatchMode?: WarehouseProductFlowItemNumberMatchMode
+}
+
+export interface WarehouseProductFlowItemNumberMatch {
+  requestedCount: number
+  matchedCount: number
+  unmatchedItemNumbers: string[]
 }
 
 export interface WarehouseProductFlowPeriod {
@@ -63,6 +75,8 @@ export interface WarehouseProductFlowCandidatesData {
   total: number
   pageNumber: number
   pageSize: number
+  /** 只在筛选带批量货号时返回。 */
+  itemNumberMatch?: WarehouseProductFlowItemNumberMatch
 }
 
 export interface WarehouseProductFlowSupplierOption {
