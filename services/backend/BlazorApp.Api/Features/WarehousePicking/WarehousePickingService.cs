@@ -1,4 +1,5 @@
 using BlazorApp.Api.Data;
+using BlazorApp.Api.Features.Packing;
 using BlazorApp.Api.Interfaces.React;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
@@ -62,16 +63,53 @@ public interface IWarehousePickingService
     );
 
     Task<WarehousePickingResult<WarehousePickingCodeLookupDto>> LookupCodeAsync(string? code);
+
+    // ---- 拣货与装箱联动（二期，见 WarehousePickingService.Packing.cs）----
+
+    /// <summary>本订单的装箱进度：各商品订货 / 拣货 / 已装件数，非作废箱列表与对账状态。picker 为空（认不出拣货人）时 isMine 全为 false。</summary>
+    Task<WarehousePickingResult<WarehousePickingPackProgressDto>> GetPackProgressAsync(
+        string orderGuid,
+        WarehousePickerContext? picker
+    );
+
+    /// <summary>新建一只关联本订单的箱（总仓持有，去向默认订货单的分店）。</summary>
+    Task<WarehousePickingResult<PackingCartonDetailDto>> CreateCartonAsync(
+        string orderGuid,
+        WarehousePickingCreateCartonRequestDto request,
+        WarehousePickerContext picker
+    );
+
+    /// <summary>封箱；带托盘时同一事务里放上托盘。</summary>
+    Task<WarehousePickingResult<PackingCartonDetailDto>> SealCartonAsync(
+        string orderGuid,
+        string cartonGuid,
+        WarehousePickingSealCartonRequestDto request,
+        WarehousePickerContext picker
+    );
+
+    /// <summary>先拣后装：把商品在箱里的件数设为绝对值（0 移除），超装只提示不拦截；会话已提交的订单同样可用。</summary>
+    Task<WarehousePickingResult<WarehousePickingSetCartonItemResultDto>> SetCartonItemAsync(
+        string orderGuid,
+        string cartonGuid,
+        string productCode,
+        WarehousePickingSetCartonItemRequestDto request,
+        WarehousePickerContext picker
+    );
 }
 
 /// <summary>
 /// 仓库订单拣货：拣货记录只追加，行合计 = 记录求和；提交时把合计写入订单行配货数（AllocQuantity）。
 /// 同一订单的所有写入先对拣货会话行加更新锁再执行，多人一起拣时串行化，
 /// 保证“先读合计再写记录”（手动改总数、减一个中包、提交）在并发下不丢更新。
+/// 边拣边装（请求带 CartonGuid）：拣货记录与装箱在同一个事务里，锁序固定为「拣货会话行 → 箱」。
+/// 打包服务与拣货服务共用同一个请求作用域里的数据库连接，打包写入加入这里已开的事务
+/// （打包服务的 ExecuteInTransactionAsync 检测到已有事务就直接加入），失败结果由这里的事务回滚。
 /// </summary>
-internal sealed class WarehousePickingService(
+internal sealed partial class WarehousePickingService(
     SqlSugarContext context,
     IProductWarehouseReactService productWarehouseService,
+    IPackingService packingService,
+    IPackingAccessService packingAccessService,
     ILogger<WarehousePickingService> logger
 ) : IWarehousePickingService
 {
@@ -374,7 +412,7 @@ internal sealed class WarehousePickingService(
                 return gate;
             }
 
-            var duplicate = await FindDuplicateAsync(orderGuid, request.ClientRequestId);
+            var duplicate = await FindDuplicateAsync(orderGuid, request.ClientRequestId, picker);
             if (duplicate != null)
             {
                 return duplicate;
@@ -412,7 +450,8 @@ internal sealed class WarehousePickingService(
                 request.Source,
                 request.ClientRequestId,
                 isScan ? Truncate(request.ScannedCode, 100) : null,
-                isScan ? request.MatchedBy : null
+                isScan ? request.MatchedBy : null,
+                request.CartonGuid
             );
         });
     }
@@ -445,7 +484,7 @@ internal sealed class WarehousePickingService(
                 return gate;
             }
 
-            var duplicate = await FindDuplicateAsync(orderGuid, request.ClientRequestId);
+            var duplicate = await FindDuplicateAsync(orderGuid, request.ClientRequestId, picker);
             if (duplicate != null)
             {
                 return duplicate;
@@ -485,7 +524,8 @@ internal sealed class WarehousePickingService(
                 WarehouseOrderPickSources.SetTotal,
                 request.ClientRequestId,
                 scannedCode: null,
-                matchedBy: null
+                matchedBy: null,
+                request.CartonGuid
             );
         });
     }
@@ -798,6 +838,14 @@ internal sealed class WarehousePickingService(
                 }
             }
 
+            // 边拣边装 / 先拣后装的订单：提交前对账，拣货数与装箱数对不上或还有没封的箱就不能提交。
+            // 订单没有任何箱时这里什么都不做，行为与旧版完全一致。对账失败返回失败结果，整个事务回滚（自动作废的空箱也一并撤销）。
+            var reconcile = await ReconcilePackingAsync(orderGuid, picker, details);
+            if (reconcile.Failure != null)
+            {
+                return reconcile.Failure;
+            }
+
             // 订单行批量改配货数经审计拦截器落库的是 UTC；这里显式写 UTC 与拣货人，保持同一口径。
             var now = DateTime.UtcNow;
             foreach (var detail in details)
@@ -867,6 +915,8 @@ internal sealed class WarehousePickingService(
                     LineCount = details.Count,
                     ShortLineCount = shortLines,
                     OverLineCount = overLines,
+                    CartonCount = reconcile.CartonCount,
+                    PackedPieces = reconcile.PackedPieces,
                 }
             );
         });
@@ -1001,15 +1051,19 @@ internal sealed class WarehousePickingService(
         return null;
     }
 
-    /// <summary>同一请求编号重放（网络重试）：不重复计数，直接返回该行当前合计。</summary>
+    /// <summary>
+    /// 同一请求编号重放（网络重试）：不重复计数，直接返回该行当前合计。
+    /// 上次请求同时装了箱的：只回显上次装的那只箱现状，绝不会再装一次。
+    /// </summary>
     private async Task<WarehousePickingResult<WarehousePickingLineMutationDto>?> FindDuplicateAsync(
         string orderGuid,
-        Guid clientRequestId
+        Guid clientRequestId,
+        WarehousePickerContext picker
     )
     {
         var existing = await _db.Queryable<WarehouseOrderPickRecord>()
             .Where(record => record.ClientRequestId == clientRequestId)
-            .Select(record => new { record.OrderGUID, record.DetailGUID, record.QuantityDelta })
+            .Select(record => new { record.OrderGUID, record.DetailGUID, record.QuantityDelta, record.ProductCode, record.CartonGUID })
             .FirstAsync();
         if (existing == null)
         {
@@ -1032,12 +1086,23 @@ internal sealed class WarehousePickingService(
             existing.DetailGUID,
             line?.MinOrderQuantity
         );
+        WarehousePickingCartonSyncDto? carton = null;
+        if (!string.IsNullOrWhiteSpace(existing.CartonGUID))
+        {
+            var cartonResult = await packingService.GetCartonAsync(
+                packingAccessService.WarehousePickerOperator(picker.UserGuid, picker.Name),
+                existing.CartonGUID
+            );
+            carton = cartonResult.Success ? ToCartonSync(cartonResult.Data, existing.ProductCode) : null;
+        }
+
         return WarehousePickingResult<WarehousePickingLineMutationDto>.Ok(
             new WarehousePickingLineMutationDto
             {
                 Line = progress,
                 AppliedDelta = existing.QuantityDelta,
                 Duplicate = true,
+                Carton = carton,
             }
         );
     }
@@ -1050,9 +1115,36 @@ internal sealed class WarehousePickingService(
         int source,
         Guid clientRequestId,
         string? scannedCode,
-        int? matchedBy
+        int? matchedBy,
+        string? cartonGuid
     )
     {
+        // 边拣边装：先把同样的件数同步到箱（箱校验、扣减不够都在这里失败）。失败结果返回给外层事务整体回滚，
+        // 所以失败时拣货记录也不会写；记录本身放在箱同步成功之后写，顺序即「会话行锁 → 箱锁 → 记录」。
+        var normalizedCartonGuid = cartonGuid?.Trim();
+        if (string.IsNullOrEmpty(normalizedCartonGuid))
+        {
+            normalizedCartonGuid = null;
+        }
+
+        WarehousePickingCartonSyncDto? carton = null;
+        if (normalizedCartonGuid != null)
+        {
+            var sync = await SyncCartonAsync(orderGuid, line, picker, normalizedCartonGuid, delta);
+            if (!sync.Success)
+            {
+                var current = await WarehousePickingQueries.BuildLineProgressAsync(_db, orderGuid, line.DetailGUID, line.MinOrderQuantity);
+                return WarehousePickingResult<WarehousePickingLineMutationDto>.Fail(
+                    sync.StatusCode,
+                    sync.ErrorCode!,
+                    sync.Message!,
+                    new WarehousePickingLineMutationDto { Line = current, Carton = ToCartonSync(sync.Data, line.ProductCode) }
+                );
+            }
+
+            carton = ToCartonSync(sync.Data, line.ProductCode);
+        }
+
         var now = DateTime.UtcNow;
         await _db.Insertable(new WarehouseOrderPickRecord
         {
@@ -1071,6 +1163,7 @@ internal sealed class WarehousePickingService(
             AuthUserGuid = picker.AuthUserGuid,
             DeviceCode = picker.DeviceCode,
             ClientRequestId = clientRequestId,
+            CartonGUID = normalizedCartonGuid,
             CreatedAtUtc = now,
         }).ExecuteCommandAsync();
         if (delta > 0)
@@ -1088,7 +1181,7 @@ internal sealed class WarehousePickingService(
             line.MinOrderQuantity
         );
         return WarehousePickingResult<WarehousePickingLineMutationDto>.Ok(
-            new WarehousePickingLineMutationDto { Line = progress, AppliedDelta = delta }
+            new WarehousePickingLineMutationDto { Line = progress, AppliedDelta = delta, Carton = carton }
         );
     }
 

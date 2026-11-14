@@ -41,6 +41,8 @@
     <Compile Include="WarehousePickingServiceTests.cs" />
     <Compile Include="PackingServiceTests.cs" />
     <Compile Include="PackingAccessServiceTests.cs" />
+    <Compile Include="PickingPackingTestSupport.cs" />
+    <Compile Include="WarehousePickingPackingTests.cs" />
     <Compile Include="WarehousePickingAssignmentServiceTests.cs" />
     <Compile Include="WarehousePickerTests.cs" />
     <Compile Include="WarehousePickingSqlServerIntegrationTests.cs" />
