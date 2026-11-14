@@ -5202,4 +5202,208 @@
   <data name="installment.text.ce2676c8" xml:space="preserve">
     <value>本机之前那笔付款已确认收款并入账，本次没有再收款。请重新打开这张分期单核对余额。</value>
   </data>
+  <data name="cashMovement.tile" xml:space="preserve">
+    <value>钱箱</value>
+  </data>
+  <data name="cashMovement.panel.title" xml:space="preserve">
+    <value>钱箱</value>
+  </data>
+  <data name="cashMovement.panel.todayIn" xml:space="preserve">
+    <value>今日存入</value>
+  </data>
+  <data name="cashMovement.panel.todayOut" xml:space="preserve">
+    <value>今日取出</value>
+  </data>
+  <data name="cashMovement.panel.count" xml:space="preserve">
+    <value>记录</value>
+  </data>
+  <data name="cashMovement.panel.cashIn" xml:space="preserve">
+    <value>存入</value>
+  </data>
+  <data name="cashMovement.panel.cashInHint" xml:space="preserve">
+    <value>补零钱等</value>
+  </data>
+  <data name="cashMovement.panel.cashOut" xml:space="preserve">
+    <value>取出</value>
+  </data>
+  <data name="cashMovement.panel.cashOutHint" xml:space="preserve">
+    <value>交店长 / 小额支出</value>
+  </data>
+  <data name="cashMovement.panel.noSale" xml:space="preserve">
+    <value>只开钱箱</value>
+  </data>
+  <data name="cashMovement.panel.records" xml:space="preserve">
+    <value>今日记录</value>
+  </data>
+  <data name="cashMovement.panel.periodHint" xml:space="preserve">
+    <value>「今日」与日结统计一致：本机、本地自然日。</value>
+  </data>
+  <data name="cashMovement.dialog.cashInTitle" xml:space="preserve">
+    <value>现金存入</value>
+  </data>
+  <data name="cashMovement.dialog.cashOutTitle" xml:space="preserve">
+    <value>现金取出</value>
+  </data>
+  <data name="cashMovement.dialog.confirmIn" xml:space="preserve">
+    <value>确认存入 {0}</value>
+  </data>
+  <data name="cashMovement.dialog.confirmOut" xml:space="preserve">
+    <value>确认取出 {0}</value>
+  </data>
+  <data name="cashMovement.dialog.reason" xml:space="preserve">
+    <value>原因（必选）</value>
+  </data>
+  <data name="cashMovement.dialog.amount" xml:space="preserve">
+    <value>金额</value>
+  </data>
+  <data name="cashMovement.dialog.noteRequired" xml:space="preserve">
+    <value>备注（必填，至少 2 个字）</value>
+  </data>
+  <data name="cashMovement.dialog.noteOptional" xml:space="preserve">
+    <value>备注（选填）</value>
+  </data>
+  <data name="cashMovement.dialog.expected" xml:space="preserve">
+    <value>今日应有现金</value>
+  </data>
+  <data name="cashMovement.dialog.expectedAfter" xml:space="preserve">
+    <value>确认后</value>
+  </data>
+  <data name="cashMovement.reason.ChangeTopUp" xml:space="preserve">
+    <value>补零钱</value>
+  </data>
+  <data name="cashMovement.reason.ChangeTopUp.hint" xml:space="preserve">
+    <value>从保险柜拿零钱放进钱箱</value>
+  </data>
+  <data name="cashMovement.reason.OtherIn" xml:space="preserve">
+    <value>其他存入</value>
+  </data>
+  <data name="cashMovement.reason.OtherIn.hint" xml:space="preserve">
+    <value>必须写原因</value>
+  </data>
+  <data name="cashMovement.reason.SafeDrop" xml:space="preserve">
+    <value>交店长 / 入保险柜</value>
+  </data>
+  <data name="cashMovement.reason.SafeDrop.hint" xml:space="preserve">
+    <value>钱还在店里，日结后入现金池</value>
+  </data>
+  <data name="cashMovement.reason.PaidOut" xml:space="preserve">
+    <value>小额现金支出</value>
+  </data>
+  <data name="cashMovement.reason.PaidOut.hint" xml:space="preserve">
+    <value>自动生成后台「现金支出」</value>
+  </data>
+  <data name="cashMovement.quickNotes.paidOut" xml:space="preserve">
+    <value>牛奶|清洁用品|垃圾袋|邮费</value>
+  </data>
+  <data name="cashMovement.quickNotes.safeDrop" xml:space="preserve">
+    <value>交给店长|放保险柜</value>
+  </data>
+  <data name="cashMovement.quickNotes.changeTopUp" xml:space="preserve">
+    <value>硬币|小面额纸币</value>
+  </data>
+  <data name="cashMovement.records.title" xml:space="preserve">
+    <value>现金进出 {0}</value>
+  </data>
+  <data name="cashMovement.records.in" xml:space="preserve">
+    <value>存入</value>
+  </data>
+  <data name="cashMovement.records.out" xml:space="preserve">
+    <value>取出</value>
+  </data>
+  <data name="cashMovement.records.void" xml:space="preserve">
+    <value>冲正</value>
+  </data>
+  <data name="cashMovement.records.synced" xml:space="preserve">
+    <value>已上传</value>
+  </data>
+  <data name="cashMovement.records.rejected" xml:space="preserve">
+    <value>被拒</value>
+  </data>
+  <data name="cashMovement.records.pending" xml:space="preserve">
+    <value>待上传</value>
+  </data>
+  <data name="cashMovement.records.voided" xml:space="preserve">
+    <value>已冲正</value>
+  </data>
+  <data name="cashMovement.records.reprint" xml:space="preserve">
+    <value>补打</value>
+  </data>
+  <data name="cashMovement.records.voidAction" xml:space="preserve">
+    <value>冲正</value>
+  </data>
+  <data name="cashMovement.records.closeHint" xml:space="preserve">
+    <value>记录不能修改、删除；输错只能冲正，且只能冲正今天、日结保存之前的记录。</value>
+  </data>
+  <data name="cashMovement.void.title" xml:space="preserve">
+    <value>冲正这条记录？</value>
+  </data>
+  <data name="cashMovement.void.hint" xml:space="preserve">
+    <value>会生成一条反向记录抵消原记录，原记录保留。</value>
+  </data>
+  <data name="cashMovement.void.reasonPlaceholder" xml:space="preserve">
+    <value>原因（必填）</value>
+  </data>
+  <data name="cashMovement.void.confirm" xml:space="preserve">
+    <value>确认冲正</value>
+  </data>
+  <data name="cashMovement.status.reprinted" xml:space="preserve">
+    <value>凭条已补打。</value>
+  </data>
+  <data name="cashMovement.status.savedIn" xml:space="preserve">
+    <value>已存入 {0}（{1}）。</value>
+  </data>
+  <data name="cashMovement.status.savedOut" xml:space="preserve">
+    <value>已取出 {0}（{1}）。</value>
+  </data>
+  <data name="cashMovement.status.voided" xml:space="preserve">
+    <value>已冲正 {0}（{1}）。</value>
+  </data>
+  <data name="cashMovement.status.drawerFailed" xml:space="preserve">
+    <value>钱箱没有打开。</value>
+  </data>
+  <data name="cashMovement.status.printFailed" xml:space="preserve">
+    <value>凭条没有打印出来。</value>
+  </data>
+  <data name="cashMovement.error.reasonRequired" xml:space="preserve">
+    <value>请选择原因。</value>
+  </data>
+  <data name="cashMovement.error.invalidAmount" xml:space="preserve">
+    <value>请输入大于 0 的金额（最多两位小数）。</value>
+  </data>
+  <data name="cashMovement.error.noteRequired" xml:space="preserve">
+    <value>这个原因必须写备注，至少 2 个字。</value>
+  </data>
+  <data name="cashMovement.error.voidNoteRequired" xml:space="preserve">
+    <value>请写冲正原因，至少 2 个字。</value>
+  </data>
+  <data name="cashMovement.error.saveFailed" xml:space="preserve">
+    <value>保存失败，请重试。</value>
+  </data>
+  <data name="cashMovement.error.loadFailed" xml:space="preserve">
+    <value>今日记录读取失败。</value>
+  </data>
+  <data name="cashMovement.error.cannotVoidVoid" xml:space="preserve">
+    <value>冲正记录不能再冲正。</value>
+  </data>
+  <data name="cashMovement.error.otherDevice" xml:space="preserve">
+    <value>只能冲正本机的记录。</value>
+  </data>
+  <data name="cashMovement.error.notToday" xml:space="preserve">
+    <value>只能冲正今天的记录。</value>
+  </data>
+  <data name="cashMovement.error.closedAfter" xml:space="preserve">
+    <value>这条记录之后已经保存过日结，不能再冲正。</value>
+  </data>
+  <data name="cashMovement.error.alreadyVoided" xml:space="preserve">
+    <value>这条记录已经冲正过了。</value>
+  </data>
+  <data name="cashMovement.error.deviceNotRegistered" xml:space="preserve">
+    <value>本机还没有注册。</value>
+  </data>
+  <data name="dailyClose.cashIn" xml:space="preserve">
+    <value>现金存入</value>
+  </data>
+  <data name="dailyClose.cashOut" xml:space="preserve">
+    <value>现金取出</value>
+  </data>
 </root>

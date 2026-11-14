@@ -74,6 +74,17 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private decimal _cashRoundingAmount;
 
+    // 今天本机的收银端现金存入 / 取出（冲正已抵消）；应有现金已包含它们，单列出来让收银员看懂应有现金的来历。
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCashMovements))]
+    private decimal _cashInAmount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCashMovements))]
+    private decimal _cashOutAmount;
+
+    public bool HasCashMovements => CashInAmount != 0m || CashOutAmount != 0m;
+
     [ObservableProperty]
     private decimal _grossAmount;
 
@@ -602,6 +613,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
         PaymentSummaries.Clear();
         ExpectedCashAmount = 0m;
         CashRoundingAmount = 0m;
+        CashInAmount = 0m;
+        CashOutAmount = 0m;
         GrossAmount = 0m;
         NetAmount = 0m;
         RefundAmount = 0m;
@@ -1581,6 +1594,8 @@ public sealed partial class DailyCloseViewModel : ObservableObject, IDisposable
             summary.NetAmount,
             summary.TransactionCount)).Concat(installmentRows));
         CashRoundingAmount = report.CashRoundingAmount;
+        CashInAmount = report.CashInAmount;
+        CashOutAmount = report.CashOutAmount;
         ExpectedCashAmount = report.ExpectedCashAmount;
         GrossAmount = report.SalesAmount;
         NetAmount = report.NetAmount;

@@ -53,8 +53,16 @@ public sealed record DailyCloseReport(
     // 分期付款不属于销售订单，所以单列，不并进 PaymentSummaries；旧存档没有这项，为 null。
     IReadOnlyList<DailyClosePaymentSummary>? InstallmentSummaries = null,
     // 分期收款与退款的笔数（现金进位按笔计算，上传时服务端据此核对进位上限）。
-    int InstallmentPaymentCount = 0)
+    int InstallmentPaymentCount = 0,
+    // 本机当天的收银端现金存入 / 取出（按原因码汇总、冲正已抵消）；旧存档没有这项，为 null（按 0）。
+    DailyCloseCashMovementTotals? CashMovements = null)
 {
+    public DailyCloseCashMovementTotals CashMovementTotals => CashMovements ?? DailyCloseCashMovementTotals.Empty;
+
+    public decimal CashInAmount => CashMovementTotals.CashIn;
+
+    public decimal CashOutAmount => CashMovementTotals.CashOut;
+
     public decimal SalesAmount => Round(PaymentSummaries.Sum(summary => summary.SalesAmount));
 
     public decimal NetAmount => Round(PaymentSummaries.Sum(summary => summary.NetAmount));
@@ -89,7 +97,8 @@ public sealed record DailyCloseReport(
 
     // 应有现金 = 精确现金净额 + 现金进位：澳洲现金按 5 分进位，钱箱里实际多出/少出的是进位后的金额，
     // 所以实点现金必然是 5 分的整数倍，对账必须拿进位后的金额比，否则每天都会有几分钱的假差额。
-    public decimal ExpectedCashAmount => Round(SystemCashAmount + CashRoundingAmount);
+    // 收银端现金存入（补零钱等）进了钱箱、取出（交店长、小额支出）离开了钱箱，应有现金要随之加减。
+    public decimal ExpectedCashAmount => Round(SystemCashAmount + CashRoundingAmount + CashInAmount - CashOutAmount);
 
     /// <summary>
     /// 两份汇总的订单数和现金数字是否一致（订单数、现金销售/退款/净额、现金进位）。
@@ -101,7 +110,9 @@ public sealed record DailyCloseReport(
     {
         if (OrderCount != other.OrderCount ||
             CashRoundingAmount != other.CashRoundingAmount ||
-            InstallmentPaymentCount != other.InstallmentPaymentCount)
+            InstallmentPaymentCount != other.InstallmentPaymentCount ||
+            // 点钞期间又有人存入 / 取出现金，应有现金变了，同样要重新核对。
+            CashMovementTotals != other.CashMovementTotals)
         {
             return false;
         }
@@ -383,6 +394,13 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
         var returnQuantity = await ReadReturnQuantityAsync(connection, orderGuids, cancellationToken);
         var cashRoundingAmount = await ReadCashRoundingAmountAsync(connection, orderGuids, cancellationToken);
         var installments = await ReadInstallmentPaymentsAsync(connection, session, period.From, period.To, cancellationToken);
+        var cashMovements = await LocalCashMovementRepository.ReadPeriodAsync(
+            connection,
+            session.StoreCode,
+            session.DeviceCode,
+            period.From,
+            period.To,
+            cancellationToken);
 
         return new DailyCloseReport(
             businessDate.Date,
@@ -398,7 +416,8 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             returnQuantity,
             Round(cashRoundingAmount + installments.CashRoundingAmount),
             installments.Summaries,
-            installments.PaymentCount);
+            installments.PaymentCount,
+            DailyCloseCashMovementTotals.FromMovements(cashMovements));
     }
 
     /// <summary>
@@ -507,7 +526,7 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
         var noteSubtotal = Round(normalizedCounts.Where(count => count.Kind == CashDenominationKind.Note).Sum(count => count.Amount));
         var coinSubtotal = Round(normalizedCounts.Where(count => count.Kind == CashDenominationKind.Coin).Sum(count => count.Amount));
         var countedCashAmount = Round(noteSubtotal + coinSubtotal);
-        // 现金差额 = 钱箱实盘现金 - 应有现金（现金支付净额 + 现金进位）。
+        // 现金差额 = 钱箱实盘现金 - 应有现金（现金支付净额 + 现金进位 + 现金存入 − 现金取出）。
         var cashDifference = Round(countedCashAmount - report.ExpectedCashAmount);
 
         await using var connection = await store.OpenConnectionAsync(cancellationToken);
@@ -523,14 +542,16 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
                  VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
                  CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount,
                  InstallmentCashReceivedAmount, InstallmentCashRefundAmount, InstallmentCardReceivedAmount, InstallmentCardRefundAmount,
-                 InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount)
+                 InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount,
+                 CashChangeTopUpAmount, CashOtherInAmount, CashSafeDropAmount, CashPaidOutAmount)
                 VALUES
                 ($DailyCloseGuid, $StoreCode, $DeviceCode, $CashierId, $CashierName, $BusinessDate, $PeriodFrom, $PeriodTo, $SavedAt,
                  $OrderCount, $CashSalesAmount, $CashRefundAmount, $CashNetAmount, $CardSalesAmount, $CardRefundAmount, $CardNetAmount,
                  $VoucherSalesAmount, $VoucherRefundAmount, $VoucherNetAmount, $RefundAmount, $ReturnQuantity, $NoteSubtotal,
                  $CoinSubtotal, $CountedCashAmount, $CashDifference, $CashRoundingAmount,
                  $InstallmentCashReceivedAmount, $InstallmentCashRefundAmount, $InstallmentCardReceivedAmount, $InstallmentCardRefundAmount,
-                 $InstallmentVoucherReceivedAmount, $InstallmentVoucherRefundAmount, $InstallmentPaymentCount);
+                 $InstallmentVoucherReceivedAmount, $InstallmentVoucherRefundAmount, $InstallmentPaymentCount,
+                 $CashChangeTopUpAmount, $CashOtherInAmount, $CashSafeDropAmount, $CashPaidOutAmount);
                 """;
             command.Parameters.AddWithValue("$DailyCloseGuid", dailyCloseGuid.ToString());
             command.Parameters.AddWithValue("$StoreCode", report.StoreCode);
@@ -554,6 +575,10 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
             AddInstallmentParameter(command, report, PaymentMethodKind.Card, "Card");
             AddInstallmentParameter(command, report, PaymentMethodKind.Voucher, "Voucher");
             command.Parameters.AddWithValue("$InstallmentPaymentCount", report.InstallmentPaymentCount);
+            command.Parameters.AddWithValue("$CashChangeTopUpAmount", report.CashMovementTotals.ChangeTopUp);
+            command.Parameters.AddWithValue("$CashOtherInAmount", report.CashMovementTotals.OtherIn);
+            command.Parameters.AddWithValue("$CashSafeDropAmount", report.CashMovementTotals.SafeDrop);
+            command.Parameters.AddWithValue("$CashPaidOutAmount", report.CashMovementTotals.PaidOut);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
@@ -593,7 +618,8 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
                    VoucherSalesAmount, VoucherRefundAmount, VoucherNetAmount, RefundAmount, ReturnQuantity, NoteSubtotal,
                    CoinSubtotal, CountedCashAmount, CashDifference, CashRoundingAmount,
                    InstallmentCashReceivedAmount, InstallmentCashRefundAmount, InstallmentCardReceivedAmount, InstallmentCardRefundAmount,
-                   InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount
+                   InstallmentVoucherReceivedAmount, InstallmentVoucherRefundAmount, InstallmentPaymentCount,
+                   CashChangeTopUpAmount, CashOtherInAmount, CashSafeDropAmount, CashPaidOutAmount
             FROM LocalDailyCloses
             WHERE StoreCode = $StoreCode
               AND DeviceCode = $DeviceCode
@@ -652,7 +678,12 @@ public sealed partial class LocalDailyCloseRepository(LocalSqliteStore store, Ti
                 ReadInstallmentSummary(reader, PaymentMethodKind.Card, "Card"),
                 ReadInstallmentSummary(reader, PaymentMethodKind.Voucher, "Voucher")
             ],
-            reader.GetInt32(reader.GetOrdinal("InstallmentPaymentCount")));
+            reader.GetInt32(reader.GetOrdinal("InstallmentPaymentCount")),
+            new DailyCloseCashMovementTotals(
+                ReadDecimal(reader, "CashChangeTopUpAmount"),
+                ReadDecimal(reader, "CashOtherInAmount"),
+                ReadDecimal(reader, "CashSafeDropAmount"),
+                ReadDecimal(reader, "CashPaidOutAmount")));
         return new DailyCloseArchiveRow(
             ReadGuid(reader, "DailyCloseGuid"),
             report,

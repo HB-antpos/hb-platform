@@ -542,6 +542,11 @@ public static class ServiceRegistration
         services.AddSingleton<ICashDrawerService, CashDrawerService>();
         services.AddSingleton<IDailyCloseService, DailyCloseService>();
         services.AddSingleton<IDailyClosePrintService, DailyClosePrintService>();
+        services.AddSingleton<ILocalCashMovementRepository, LocalCashMovementRepository>();
+        services.AddSingleton<ICashMovementService>(sp => new CashMovementService(
+            sp.GetRequiredService<ILocalCashMovementRepository>(),
+            sp.GetRequiredService<IDailyCloseUploadScheduler>()));
+        services.AddSingleton<ICashMovementPrintService, CashMovementPrintService>();
         services.AddSingleton<IOrderUploadService, OrderUploadService>();
         services.AddSingleton<IOrderUploadExecutionService, OrderUploadExecutionService>();
         services.AddSingleton<IInstallmentOperationService, InstallmentOperationService>();
@@ -618,8 +623,23 @@ public static class ServiceRegistration
             sp.GetRequiredService<IDailyCloseSyncApiClient>(),
             sp.GetRequiredService<DeviceAuthorizationState>(),
             appVersion: sp.GetRequiredService<ClientLogIdentity>().AppVersion));
+        // 收银端现金存入 / 取出：本地仓储、业务服务、凭条打印与上传（复用日结上传 Worker，每轮先传现金进出）。
+        services.AddHttpClient<ICashMovementSyncApiClient, CashMovementSyncApiClient>(client =>
+        {
+            client.BaseAddress = initialApiAddress;
+            client.Timeout = TimeSpan.FromSeconds(30);
+        })
+        .AddRuntimeApiEndpoint()
+        .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        services.AddSingleton(sp => new CashMovementUploadService(
+            sp.GetRequiredService<ILocalCashMovementRepository>(),
+            sp.GetRequiredService<ICashMovementSyncApiClient>(),
+            sp.GetRequiredService<DeviceAuthorizationState>(),
+            appVersion: sp.GetRequiredService<ClientLogIdentity>().AppVersion));
         services.AddSingleton<IDailyCloseUploadExecutionService>(sp =>
-            sp.GetRequiredService<DailyCloseUploadService>());
+            new CashMovementFirstUploadExecutionService(
+                sp.GetRequiredService<CashMovementUploadService>(),
+                sp.GetRequiredService<DailyCloseUploadService>()));
         services.AddSingleton<DailyCloseUploadWorker>();
         services.AddSingleton<IDailyCloseUploadScheduler>(sp =>
             sp.GetRequiredService<DailyCloseUploadWorker>());
@@ -838,7 +858,9 @@ public static class ServiceRegistration
                 catalogSyncStatusService: sp.GetRequiredService<ICatalogSyncStatusService>(),
                 receiptProfileSyncService: sp.GetRequiredService<IReceiptProfileSyncService>(),
                 mobileAppDownloadService: sp.GetRequiredService<IMobileAppDownloadService>(),
-                heldOrderTodayCountService: sp.GetRequiredService<IHeldOrderTodayCountService>());
+                heldOrderTodayCountService: sp.GetRequiredService<IHeldOrderTodayCountService>(),
+                cashMovementService: sp.GetRequiredService<ICashMovementService>(),
+                cashMovementPrintService: sp.GetRequiredService<ICashMovementPrintService>());
             viewModel.ConfigureRestartPrompt(
                 () => sp.GetService<IPostDailyCloseRestartCoordinator>(),
                 sp.GetRequiredService<ISystemRestartSettingsStore>());

@@ -23,9 +23,12 @@ public sealed class PosTerminalViewLayoutTests
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
 
+        // 钱箱弹窗（DataContext = CashMovement）自带一个数字键盘，同样绑定 KeypadInputCommand 且有退格键；
+        // 这里只检查主收银区的退格键，所以排除弹窗里的按钮。
         var backspaceButton = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
             (string?)button.Attribute("CommandParameter") == "Back" &&
-            ((string?)button.Attribute("Command"))?.Contains("KeypadInputCommand", StringComparison.Ordinal) == true));
+            ((string?)button.Attribute("Command"))?.Contains("KeypadInputCommand", StringComparison.Ordinal) == true &&
+            !button.Ancestors().Any(ancestor => (string?)ancestor.Attribute("DataContext") == "{Binding CashMovement}")));
         Assert.Equal("44", Metric((string?)backspaceButton.Attribute("Height")));
 
         var inputBorder = Assert.Single(view.Descendants(presentation + "Border").Where(border =>
@@ -525,7 +528,8 @@ public sealed class PosTerminalViewLayoutTests
                 "{Binding OpenReturnsCommand}",
                 "{Binding HoldOrderCommand}",
                 "{Binding RecallOrderCommand}",
-                "{Binding OpenCashDrawerCommand}",
+                // 钱箱格：开启现金进出且已接入时打开钱箱面板，否则退回「开钱箱」。
+                "{Binding CashDrawerTileCommand}",
                 "{Binding PrintLastReceiptCommand}",
                 "{Binding LockCashierCommand}",
                 "{Binding OpenDailyCloseCommand}",
