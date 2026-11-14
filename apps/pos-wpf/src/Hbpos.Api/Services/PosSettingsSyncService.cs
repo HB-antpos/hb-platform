@@ -13,7 +13,7 @@ public sealed record PosSettingLayers(
     IReadOnlyDictionary<string, bool> Device);
 
 /// <summary>
-/// 设置下发的数据读写。三张表由 HBweb 迁移 20261114.001-pos-settings 创建，Hbpos.Api 不建表；
+/// 设置下发的数据读写。三张表由 HBweb 迁移 20261114.002-pos-settings 创建，Hbpos.Api 不建表；
 /// 表尚不存在（部署先后顺序出错）时按「没有任何设置」处理，不能让每分钟一次的轮询报 500。
 /// </summary>
 public interface IPosSettingsRepository

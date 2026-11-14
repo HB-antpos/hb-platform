@@ -4,6 +4,8 @@ import {
   filterWarehouseProductFlowCategoryOptions,
   filterWarehouseProductFlowSupplierOptions,
   createWarehouseProductFlowFilter,
+  findItemNumberPasteLine,
+  parsePastedItemNumbers,
   isValidWarehouseProductFlowRange,
   filterWarehouseProductFlowShipments,
   sortWarehouseProductFlowBranches,
@@ -67,5 +69,25 @@ const branch = (branchCode: string, netSalesQuantity: number): WarehouseProductF
 const unsortedBranches = [branch('B', 3), branch('D', -2), branch('C', 10), branch('E', 0), branch('A', 3)]
 assertDeepEqual(sortWarehouseProductFlowBranches(unsortedBranches).map((row) => row.branchCode), ['C', 'A', 'B', 'E', 'D'], '分店必须按净销量降序，同销量按分店编码稳定排序，退货负数排在零之后')
 assertDeepEqual(unsortedBranches.map((row) => row.branchCode), ['B', 'D', 'C', 'E', 'A'], '排序不得修改接口返回的原始数组')
+
+assertDeepEqual(createWarehouseProductFlowFilter('', [], [], '', ['10235', 'A-1'], 'any'), {
+  warehouseCategoryGuids: [], supplierCodes: [], itemNumbers: ['10235', 'A-1'], itemNumberMatchMode: 'any',
+}, '批量货号与匹配方式必须进入筛选条件')
+assertEqual('itemNumbers' in createWarehouseProductFlowFilter('', [], [], ''), false, '没有批量货号时筛选条件不得带 itemNumbers')
+
+// Excel 复制一列（含表头、重复、空行、引号、首尾空格、末尾换行）
+const pasted = parsePastedItemNumbers('货号\r\n10235\r\n 10236 \r\n\r\n10236\r\n"A-1093"\r\na-1093\r\n')
+assertDeepEqual(pasted.itemNumbers, ['10235', '10236', 'A-1093'], '必须跳过表头、空行，去引号、去空格并不区分大小写去重，保留粘贴顺序')
+assertEqual(pasted.lineCount, 7, '末尾换行不计入粘贴行数')
+assertEqual(pasted.skippedCount, 4, '表头、空行、重复都计入丢弃数')
+assertDeepEqual(pasted.lineByItemNumber, { '10235': 2, '10236': 3, 'A-1093': 6 }, '行号从 1 起且含表头行，等于从 A1 复制时的 Excel 行号')
+// 多列（Tab）、逗号、空格分隔；英文表头；数字开头的首行不算表头
+assertDeepEqual(parsePastedItemNumbers('Item No\tBarcode\nK1\t931001\nK2, K3 K4').itemNumbers, ['K1', '931001', 'K2', 'K3', 'K4'], '必须按 Tab、逗号、空格拆分并识别英文表头')
+assertDeepEqual(parsePastedItemNumbers('000\n001').itemNumbers, ['000', '001'], '首行是货号时不得当成表头')
+assertEqual(parsePastedItemNumbers('  \n\n').lineCount, 0, '只有空白时没有行')
+
+assertEqual(findItemNumberPasteLine({ productCode: 'P1', itemNumber: 'a-1093 ', barcode: '10235' }, pasted.lineByItemNumber, 'itemNumber'), 6, '仅货号模式只按货号找行号（不区分大小写、去空格）')
+assertEqual(findItemNumberPasteLine({ productCode: 'P1', itemNumber: 'a-1093', barcode: '10235' }, pasted.lineByItemNumber, 'any'), 2, 'any 模式取货号、条码、商品编码中最靠前的行号')
+assertEqual(findItemNumberPasteLine({ productCode: 'P9', itemNumber: 'ZZZ' }, pasted.lineByItemNumber, 'any'), undefined, '未命中返回 undefined')
 
 console.log('warehouseProductFlowAnalysis.logic.test: ok')

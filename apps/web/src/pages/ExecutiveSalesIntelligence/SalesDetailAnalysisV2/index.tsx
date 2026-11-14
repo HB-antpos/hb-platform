@@ -11,7 +11,7 @@ import { toProductImagePreviewUrl, toProductThumbnailUrl } from '../../../utils/
 import { MetricPair, ReportControls, useReportText } from '../ReportWorkbench/ReportControls'
 import { growth, normalizeKeyword, reportPeriod } from '../ReportWorkbench/logic'
 import { useReportQuery, type ReportQueryState } from '../ReportWorkbench/useReportQuery'
-import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, RAIL_DEFAULT_WIDTH, resolveSupplierOptions, selectDimension, sumProductPage, type CompareView, type DetailTotals, type DetailViewPreference, type RememberedSupplierOptions } from './logic'
+import { applyKeyword, clampRailWidth, defaultDetailView, emptySelection, exceedsSalesDetailSelectionLimit, initialCategoryState, initialDetailState, MAX_CATEGORY_SELECTIONS, MAX_PRODUCT_IMAGE_EXPORT_ROWS, MAX_SUPPLIER_SELECTIONS, parseDetailView, productSortParams, RAIL_DEFAULT_WIDTH, resolveSupplierOptions, selectDimension, sortProductRows, sumProductPage, toggleProductSort, DEFAULT_PRODUCT_SORT, type CompareView, type ProductSort, type ProductSortKey, type DetailTotals, type DetailViewPreference, type RememberedSupplierOptions } from './logic'
 import ProductBranchDrawer from './ProductBranchDrawer'
 import { fetchSalesDetailReport, type ReportSection, type SalesDetailPage, type SalesDetailQuery, type SalesDetailReport, type SalesDetailRow, type SupplierKind } from './reportService'
 import { buildSalesDetailSupplierCategoryTree, fetchSalesDetailCategoryOptions, type SalesDetailCategoryGroup, type SalesDetailCategoryTreeNode } from './categoryOptionsService'
@@ -122,6 +122,8 @@ export default function SalesDetailAnalysisV2() {
   const [exportProgress, setExportProgress] = useState('')
   const exportAbort = useRef<AbortController | null>(null)
   const [sorts, setSorts] = useState<Record<RailPanel, Sort>>({ suppliers: { key: 'revenue', ascending: false }, branches: { key: 'revenue', ascending: false } })
+  // 商品明细排序交给服务端全量排序再分页（商品可能上万件，只排当前页会误导）。
+  const [productSort, setProductSort] = useState<ProductSort>(DEFAULT_PRODUCT_SORT)
   const page = useRef<HTMLElement>(null)
   const [pageOffset, setPageOffset] = useState<number>()
   const workspace = useRef<HTMLDivElement>(null)
@@ -207,7 +209,7 @@ export default function SalesDetailAnalysisV2() {
     supplierCategoryGuids: selection.supplierCategoryGuids.length ? selection.supplierCategoryGuids : undefined,
     warehouseCategoryGuids: selection.warehouseCategoryGuids.length ? selection.warehouseCategoryGuids : undefined,
     selectedProductCode: selection.product, search: selection.keyword || undefined,
-    pageIndex: selection.page, pageSize: selection.pageSize }
+    pageIndex: selection.page, pageSize: selection.pageSize, ...productSortParams(productSort) }
   useEffect(() => {
     const controller = new AbortController()
     setCategoryGroups(undefined)
@@ -359,10 +361,8 @@ export default function SalesDetailAnalysisV2() {
     setSelection(value => kind === 'australia' ? ({ ...value, supplierCategoryGuids: values, page: 1 }) : ({ ...value, warehouseCategoryGuids: values, page: 1 }))
   }
   const storeRows = sortedRows('branches', stores.data?.rows ?? [])
-  // 后端保证全量分页顺序；前端再排序当前页，兼容缓存或旧接口返回的非确定顺序。
-  const productRows = [...(products.data?.rows ?? [])].sort((left, right) => right.quantity - left.quantity
-    || (right.compareQuantity ?? 0) - (left.compareQuantity ?? 0)
-    || left.code.localeCompare(right.code))
+  // 后端保证全量分页顺序；前端按同一口径再排序当前页，兼容缓存或旧接口返回的非确定顺序。
+  const productRows = sortProductRows(products.data?.rows ?? [], productSort)
   // COS 上按原文件名换过的图带版本号，绕开缩略图 30 天强缓存；没换过的图地址不变。
   const imageVersion = useProductImageVersions(productRows.map(row => row.productImage))
   // 预览组只收本页能正常显示的图片，按表格顺序排列，预览中左右键即可逐个翻看本页商品。
@@ -459,9 +459,23 @@ export default function SalesDetailAnalysisV2() {
 
   // ---------- 商品明细：上下对比 / 仅本期 / 左右对比 ----------
   const productFields = metrics('products') as (ProductMetric | 'growth')[]
-  const productHead = (field: ProductMetric) => field === 'quantity'
-    ? <Tooltip title={text('商品按本期数量降序排列', 'Sorted by current quantity, descending')}><span className={styles.sortedHead}>{labels.quantity} ↓</span></Tooltip>
-    : labels[field]
+  const isProductSortable = (field: ProductMetric): field is ProductSortKey => field === 'revenue' || field === 'quantity' || field === 'averageUnitPrice'
+  // 换排序回到第 1 页：否则停在第 N 页看到的是新顺序中间的一段。
+  const changeProductSort = (field: ProductSortKey) => {
+    setProductSort(value => toggleProductSort(value, field))
+    setSelection(value => value.page === 1 ? value : { ...value, page: 1 })
+  }
+  const productAriaSort = (field: ProductMetric) => isProductSortable(field) && productSort.key === field
+    ? productSort.ascending ? 'ascending' as const : 'descending' as const : undefined
+  const productHead = (field: ProductMetric) => {
+    if (!isProductSortable(field)) return labels[field]
+    const active = productSort.key === field
+    const tip = field === 'averageUnitPrice'
+      ? text('按本期均价（营业额 ÷ 数量）全量排序；数量 ≤ 0 的商品排在最后', 'Sort all products by current unit price (revenue ÷ qty); items with qty ≤ 0 stay last')
+      : text(`按本期${labels[field]}全量排序，再次点击切换升降序`, `Sort all products by current ${labels[field].toLowerCase()}; click again to reverse`)
+    return <Tooltip title={tip}><button type="button" onClick={() => changeProductSort(field)}>
+      {labels[field]} {active ? productSort.ascending ? '↑' : '↓' : '↕'}</button></Tooltip>
+  }
   const productTable = (rows: SalesDetailRow[]) => {
     const side = compareView === 'side'
     const rowStart = (selection.page - 1) * selection.pageSize
@@ -481,10 +495,10 @@ export default function SalesDetailAnalysisV2() {
       <thead>{side ? <>
         <tr><th rowSpan={2}>{text('货号 / 商品名称', 'Item / Product')}</th>{productFields.map(field => field === 'growth'
           ? <th key={field} rowSpan={2} className={styles.groupStart}>{text('增长率', 'Growth')}</th>
-          : <th key={field} colSpan={2} className={`${styles.groupHead} ${styles.groupStart}`}>{productHead(field)}</th>)}</tr>
+          : <th key={field} colSpan={2} aria-sort={productAriaSort(field)} className={`${styles.groupHead} ${styles.groupStart}`}>{productHead(field)}</th>)}</tr>
         <tr>{productFields.map(field => field !== 'growth' && <Fragment key={field}>
           <th className={styles.groupStart}>{text('本期', 'Current')}</th><th>{text('同期', 'Previous')}</th></Fragment>)}</tr>
-      </> : <tr><th>{text('货号 / 商品名称', 'Item / Product')}</th>{productFields.map(field => <th key={field} className={field === 'grossProfit' ? styles.groupStart : undefined}>
+      </> : <tr><th>{text('货号 / 商品名称', 'Item / Product')}</th>{productFields.map(field => <th key={field} aria-sort={field === 'growth' ? undefined : productAriaSort(field)} className={field === 'grossProfit' ? styles.groupStart : undefined}>
         {field === 'growth' ? text('增长率', 'Growth') : productHead(field)}</th>)}</tr>}</thead>
       <tbody>{rows.map((row, index) => <tr key={row.code} className={selection.product === row.code ? styles.selected : ''}>
         <td><div className={styles.productName}>

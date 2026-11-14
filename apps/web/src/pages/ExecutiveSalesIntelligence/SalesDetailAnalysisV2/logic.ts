@@ -60,7 +60,54 @@ export function selectDimension(state: DetailSelection, dimension: 'supplier' | 
 
 /** 商品反查只固定商品条件，清除分店和关键字，保留当前日期、类别、供应商与账号分店范围。 */
 export function productBranchDrawerQuery(query: SalesDetailQuery, productCode: string): SalesDetailQuery {
-  return { ...query, selectedProductCode: productCode, selectedBranchCode: undefined, search: undefined, pageIndex: 1 }
+  // 抽屉只读分店栏，商品排序与它无关；去掉后换排序不会让已打开的抽屉重新请求。
+  return { ...query, selectedProductCode: productCode, selectedBranchCode: undefined, search: undefined, pageIndex: 1,
+    productSortField: undefined, productSortOrder: undefined }
+}
+
+/** 商品明细可排序的列：营业额、数量、均价。服务端全量排序后分页，前端只防御性重排当前页。 */
+export type ProductSortKey = 'revenue' | 'quantity' | 'averageUnitPrice'
+export interface ProductSort { key: ProductSortKey; ascending: boolean }
+/** 默认数量降序，与改版前的固定顺序一致。 */
+export const DEFAULT_PRODUCT_SORT: ProductSort = { key: 'quantity', ascending: false }
+const PRODUCT_SORT_FIELD: Record<ProductSortKey, NonNullable<SalesDetailQuery['productSortField']>> = {
+  revenue: 'Revenue', quantity: 'Quantity', averageUnitPrice: 'AverageUnitPrice',
+}
+
+/** 点同一列切换升降序，换列从降序开始（先看最大的）。 */
+export function toggleProductSort(current: ProductSort, key: ProductSortKey): ProductSort {
+  return current.key === key ? { key, ascending: !current.ascending } : { key, ascending: false }
+}
+
+/** 默认排序不带参数：请求与查询键和改版前完全相同，旧缓存继续命中。 */
+export function productSortParams(sort: ProductSort): Pick<SalesDetailQuery, 'productSortField' | 'productSortOrder'> {
+  return sort.key === DEFAULT_PRODUCT_SORT.key && sort.ascending === DEFAULT_PRODUCT_SORT.ascending
+    ? {} : { productSortField: PRODUCT_SORT_FIELD[sort.key], productSortOrder: sort.ascending ? 'asc' : 'desc' }
+}
+
+/**
+ * 与服务端同一口径重排当前页（兼容缓存或旧接口返回的非确定顺序）：
+ * 数量 / 营业额同值再比同期值，均价同值比营业额（高的在前），最后按商品代码；没有均价的商品升降序都排最后。
+ */
+export function sortProductRows(rows: readonly SalesDetailRow[], sort: ProductSort): SalesDetailRow[] {
+  return [...rows].sort((left, right) => compareProductRows(left, right, sort))
+}
+
+function compareProductRows(left: SalesDetailRow, right: SalesDetailRow, sort: ProductSort): number {
+  const direction = sort.ascending ? 1 : -1
+  if (sort.key === 'averageUnitPrice') {
+    const a = unitPrice(left.revenue, left.quantity), b = unitPrice(right.revenue, right.quantity)
+    if (a == null || b == null) {
+      if (a != null) return -1
+      if (b != null) return 1
+      return right.revenue - left.revenue || left.code.localeCompare(right.code)
+    }
+    return (a - b) * direction || right.revenue - left.revenue || left.code.localeCompare(right.code)
+  }
+  const compareKey = sort.key === 'revenue' ? 'compareRevenue' : 'compareQuantity'
+  return (left[sort.key] - right[sort.key]) * direction
+    || ((left[compareKey] ?? 0) - (right[compareKey] ?? 0)) * direction
+    || left.code.localeCompare(right.code)
 }
 
 export function applyKeyword(state: DetailSelection, keyword: string): DetailSelection {
