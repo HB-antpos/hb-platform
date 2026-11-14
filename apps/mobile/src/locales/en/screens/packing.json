@@ -397,7 +397,10 @@
     "actualCountHint": "Count the cartons on the pallet",
     "countDecrease": "One carton less",
     "countIncrease": "One carton more",
-    "mismatchCaption": "If your count differs from the {{count}} cartons on record, check carton by carton instead"
+    "mismatchCaption": "If your count differs from the {{count}} cartons on record, check carton by carton instead",
+    "byOrder": "Receive by order",
+    "byOrderWithNo": "Receive by order · {{orderNo}}",
+    "byOrderHint": "This shipment belongs to a store order. You can receive every in-transit carton of that order at once, without scanning each pallet or carton."
   },
   "locate": {
     "title": "Product location",
@@ -461,5 +464,32 @@
     "NOT_IN_TRANSIT": "This is not in transit, so it cannot be received",
     "NOT_FOR_YOU": "This was not sent to where you are now",
     "COUNT_MISMATCH": "The count differs from the system record. Check carton by carton."
+  },
+  "orderReceive": {
+    "title": "Receive by order",
+    "subtitle": "Order {{orderNo}}",
+    "summary": "In transit {{inTransit}} ctn · received {{received}} ctn",
+    "nothingToReceive": "This order has no cartons in transit to your store right now.",
+    "inTransitTitle": "Cartons to receive",
+    "receivedTitle": "Received cartons",
+    "onPallet": "Pallet {{palletNo}}",
+    "looseCarton": "Loose carton",
+    "productsTitle": "Products: ordered / allocated / shipped",
+    "productsHint": "Shipped = pieces in this order's in-transit and received cartons. While more cartons are on the way, the number can look low.",
+    "ordered": "Ordered {{count}}",
+    "alloc": "Allocated {{count}}",
+    "noAlloc": "Not allocated",
+    "shipped": "Shipped {{count}}",
+    "shipMatch": "Matches",
+    "shipShort": "Short {{count}}",
+    "shipOver": "Over {{count}}",
+    "receiveAll": "Receive all {{count}} cartons",
+    "countTitle": "Confirm cartons received",
+    "countSubtitle": "Order {{orderNo}}",
+    "actualCountHint": "Count the cartons sent for this order (including those on pallets)",
+    "mismatchCaption": "If your count differs from the {{count}} cartons on record, nothing is received — check the cartons one by one instead",
+    "countMismatch": "You counted {{entered}} cartons but the system has {{actual}}, so nothing was received. Go back to Receive and scan each carton label to check.",
+    "doneTitle": "Order {{orderNo}} received",
+    "doneDetail": "{{cartons}} cartons now belong to your store"
   }
 }

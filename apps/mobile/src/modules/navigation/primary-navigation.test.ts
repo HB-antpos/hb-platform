@@ -206,6 +206,9 @@ assert.equal(shouldHidePrimaryTabBar("/packing/carton/abc123"), true, "箱页同
 assert.equal(shouldHidePrimaryTabBar("/packingx"), false, "只按完整路径段匹配，避免误伤相似路由");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-picking"), true, "拣货入口是 PDA 全屏作业，不显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/finish"), true, "拣货子页同样不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/pack"), true, "先拣后装页在拣货前缀下，底部是封箱操作栏，不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/warehouse-picking/abc123/pack-review"), true, "提交拣货前核对页同样不显示全局底栏");
+assert.equal(shouldHidePrimaryTabBar("/packing/receive-order"), true, "按订单签收页在打包前缀下，底部是签收按钮，不显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse"), false, "仓库页等其它页面仍显示全局底栏");
 assert.equal(shouldHidePrimaryTabBar("/warehouse-pickingx"), false, "只按完整路径段匹配，避免误伤相似路由");
 assert.equal(shouldHidePrimaryTabBar("/attendance-leave-paid"), true, "带薪假申请页底部有固定提交按钮，不显示全局底栏");

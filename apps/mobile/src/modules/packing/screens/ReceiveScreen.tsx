@@ -26,9 +26,11 @@ import {
   validCheckedGuids,
 } from "../packing-logic";
 import { PACKING_HOME, cartonRoute, palletRoute } from "../pack-print";
+import { orderEntriesOf, receiveOrderRoute } from "../order-receive-logic";
 import { usePackScope } from "../use-pack-scope";
 import { CARTON_STATUS, type PackIncomingItem, type PackReceiveLookup } from "../types";
 import { LocationPickerSheet } from "../components/LocationPickerSheet";
+import { OrderReceiveEntries } from "../components/OrderReceiveEntry";
 import { OwnerBar } from "../components/OwnerBar";
 import { ReceiveSheet } from "../components/ReceiveSheet";
 import { KeyValueRow, PACK_COLORS, ScanBar, SectionTitle, Tag, UnitRow, packStyles } from "../components/pack-ui";
@@ -490,6 +492,9 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
             )}
           </>
         ) : null}
+
+        {/* 这批货属于订货单：可以改成按订单一次签收发给本店的全部在途箱。 */}
+        {current ? <OrderReceiveEntries entries={orderEntriesOf(current)} onOpen={(orderGuid) => router.push(receiveOrderRoute(orderGuid))} /> : null}
 
         {!current && !loading ? (
           <>

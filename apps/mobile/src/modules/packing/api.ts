@@ -9,6 +9,7 @@ import {
   normalizeLocate,
   normalizeLocation,
   normalizeLocations,
+  normalizeOrderReceive,
   normalizePalletDetail,
   normalizePalletList,
   normalizeReceiveLookup,
@@ -217,6 +218,21 @@ export async function fetchIncoming(ownerCode: string, signal?: AbortSignal) {
 export async function lookupForReceive(code: string, signal?: AbortSignal) {
   const response = await apiClient.get(`${BASE}/receive/lookup`, { params: { code }, signal });
   return normalizeReceiveLookup(response.data);
+}
+
+/** 按订单签收：该订单发给本店的箱（在途 + 已签收）与按商品的订货 / 配货 / 已发对照。 */
+export async function fetchOrderReceive(orderGuid: string, signal?: AbortSignal) {
+  const response = await apiClient.get(`${BASE}/receive/orders/${encodeURIComponent(orderGuid)}`, { signal });
+  return normalizeOrderReceive(response.data);
+}
+
+/**
+ * 按订单签收这张订单发给本店、还在路上的全部箱。必须带实到箱数（expectedCartonCount），和系统记录不一致返回
+ * 409 COUNT_MISMATCH（一只都不签，错误里带 actualInTransitCartonCount）；期望 0 且没有在途的箱返回 409 NOT_IN_TRANSIT。
+ */
+export async function receiveOrder(orderGuid: string, expectedCartonCount: number) {
+  const response = await apiClient.post(`${BASE}/receive/orders/${encodeURIComponent(orderGuid)}`, { expectedCartonCount });
+  return normalizeOrderReceive(response.data);
 }
 
 // ---- 扫码识别、位置查询、主数据 ----

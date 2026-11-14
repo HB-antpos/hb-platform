@@ -17,10 +17,12 @@ import { readPickingError } from "../api-normalization";
 import { pickingErrorMessage } from "../picking-errors";
 import { isSlipCode } from "../code-resolver";
 import { claimRouteParams, shortPickerName } from "../pick-view-model";
+import { parsePackedParam } from "../pack-carton-logic";
+import { packLaterRoute } from "../pack-routes";
 import { PickHeader, PickerChip } from "../components/PickHeader";
 import { PickCameraSheet } from "../components/PickCameraSheet";
 import { MONO_FONT, PICK_COLORS, segmentColor } from "../components/pick-theme";
-import type { PickerIdentity, PickOrderFilter, PickOrderListItem } from "../types";
+import { PICK_SESSION_STATUS, type PickerIdentity, type PickOrderFilter, type PickOrderListItem } from "../types";
 import { listSeparator } from "@/shared/i18n/punctuation";
 
 const FLOW_PICKING = 3;
@@ -52,7 +54,7 @@ export function PickOrderListView({
 }) {
   const { t, language } = useAppTranslation("warehousePicking");
   const router = useRouter();
-  const params = useLocalSearchParams<{ saved?: string }>();
+  const params = useLocalSearchParams<{ saved?: string; packed?: string }>();
   const focused = useIsFocused();
   const [filter, setFilter] = useState<PickOrderFilter>("all");
   // 第一次拿到“派给我”的数量且大于 0 时默认切过去；拣货员手动选过筛选后不再自动切换。
@@ -76,6 +78,15 @@ export function PickOrderListView({
     setSnackbar(t("orders.savedExit"));
     router.setParams({ saved: undefined });
   }, [savedFlag, router, t]);
+  // 提交成功回到列表：订单装过箱时提示「共 N 只箱 · M 件」，并清掉参数。
+  const packedFlag = parsePackedParam(params.packed);
+  const packedCartons = packedFlag?.cartons ?? null;
+  const packedPieces = packedFlag?.pieces ?? 0;
+  useEffect(() => {
+    if (packedCartons === null) return;
+    setSnackbar(t("orders.submittedPacked", { cartons: packedCartons, pieces: packedPieces }));
+    router.setParams({ packed: undefined });
+  }, [packedCartons, packedPieces, router, t]);
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedKeyword(keyword.trim()), 300);
     return () => clearTimeout(timer);
@@ -239,7 +250,13 @@ export function PickOrderListView({
           )
         }
         renderItem={({ item }) => (
-          <OrderCard item={item} localeTag={localeTag} myUserGuid={picker.userGuid} onPress={() => openOrder(item.orderGuid)} />
+          <OrderCard
+            item={item}
+            localeTag={localeTag}
+            myUserGuid={picker.userGuid}
+            onPress={() => openOrder(item.orderGuid)}
+            onPackLater={() => router.push(packLaterRoute(item.orderGuid))}
+          />
         )}
       />
 
@@ -264,11 +281,13 @@ function OrderCard({
   localeTag,
   myUserGuid,
   onPress,
+  onPackLater,
 }: {
   item: PickOrderListItem;
   localeTag: string;
   myUserGuid: string;
   onPress: () => void;
+  onPackLater: () => void;
 }) {
   const { t } = useAppTranslation("warehousePicking");
   const picking = item.flowStatus === FLOW_PICKING;
@@ -316,6 +335,13 @@ function OrderCard({
             ? t("orders.pickedLines", { picked: item.pickedLineCount, total: item.lineCount })
             : t("orders.summary", { lines: item.lineCount, pieces: item.totalQuantity })}
         </Text>
+        {item.sessionStatus === PICK_SESSION_STATUS.submitted ? (
+          // 已提交的订单：拣货不能再改，可以接着按已拣数量装箱（先拣后装）。
+          <Pressable accessibilityRole="button" onPress={onPackLater} style={styles.packChip}>
+            <MaterialCommunityIcons name="package-variant-closed" size={16} color={PICK_COLORS.action} />
+            <Text style={styles.packChipText}>{t("orders.packLater")}</Text>
+          </Pressable>
+        ) : null}
         <View style={styles.cta}>
           <Text style={styles.ctaText}>{picking ? t("orders.join") : t("orders.start")}</Text>
           <MaterialCommunityIcons name="chevron-right" size={18} color={PICK_COLORS.action} />
@@ -381,6 +407,8 @@ const styles = StyleSheet.create({
   progressFill: { height: 6, borderRadius: 3, backgroundColor: PICK_COLORS.warningStrong },
   cardBottom: { flexDirection: "row", alignItems: "center" },
   summary: { flex: 1, fontSize: 13, lineHeight: 20, color: PICK_COLORS.textSecondary, fontVariant: ["tabular-nums"] },
+  packChip: { minHeight: 36, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, marginRight: 6, borderRadius: 8, borderWidth: 1, borderColor: PICK_COLORS.infoBorder, backgroundColor: PICK_COLORS.infoBg },
+  packChipText: { fontSize: 13, fontWeight: "700", color: PICK_COLORS.action },
   cta: { minHeight: 32, flexDirection: "row", alignItems: "center", gap: 2 },
   ctaText: { fontSize: 14, fontWeight: "700", color: PICK_COLORS.action },
   hiddenInput: { position: "absolute", width: 1, height: 1, opacity: 0, left: -100 },

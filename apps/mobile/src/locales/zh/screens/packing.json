@@ -397,7 +397,10 @@
     "actualCountHint": "数一下托盘上有几只箱",
     "countDecrease": "少一箱",
     "countIncrease": "多一箱",
-    "mismatchCaption": "实到箱数和系统记录的 {{count}} 箱不一致时，改为逐箱扫码核对"
+    "mismatchCaption": "实到箱数和系统记录的 {{count}} 箱不一致时，改为逐箱扫码核对",
+    "byOrder": "按订单签收",
+    "byOrderWithNo": "按订单签收 · {{orderNo}}",
+    "byOrderHint": "这批货属于订货单，可以按订单一次签收发给本店的全部在途箱，不用逐托盘、逐箱扫。"
   },
   "locate": {
     "title": "商品位置",
@@ -461,5 +464,32 @@
     "NOT_IN_TRANSIT": "这批货不在路上，不能签收",
     "NOT_FOR_YOU": "这批货不是发给你当前所在地点的",
     "COUNT_MISMATCH": "实到箱数和系统记录对不上，请逐箱扫码核对"
+  },
+  "orderReceive": {
+    "title": "按订单签收",
+    "subtitle": "订单 {{orderNo}}",
+    "summary": "在途 {{inTransit}} 箱 · 已签收 {{received}} 箱",
+    "nothingToReceive": "这张订单现在没有发给本店、还在路上的箱。",
+    "inTransitTitle": "待签收的箱",
+    "receivedTitle": "已签收的箱",
+    "onPallet": "托盘 {{palletNo}}",
+    "looseCarton": "散箱",
+    "productsTitle": "商品对照：订货 / 配货 / 本次发出",
+    "productsHint": "「本次发出」是这张订单在途加已签收的箱内件数合计；还有箱在路上时，先到的数量会偏少。",
+    "ordered": "订货 {{count}}",
+    "alloc": "配货 {{count}}",
+    "noAlloc": "未配货",
+    "shipped": "发出 {{count}}",
+    "shipMatch": "与应发一致",
+    "shipShort": "少 {{count}}",
+    "shipOver": "多 {{count}}",
+    "receiveAll": "签收全部 {{count}} 箱",
+    "countTitle": "确认实到箱数",
+    "countSubtitle": "订单 {{orderNo}}",
+    "actualCountHint": "数一下这张订单发来的箱有几只（含托盘上的）",
+    "mismatchCaption": "实到箱数和系统记录的 {{count}} 箱不一致时，一只都不会签收，需要改为逐箱扫码核对",
+    "countMismatch": "实到 {{entered}} 箱，系统记录 {{actual}} 箱，对不上，这次一只都没签收。请回「签收到货」逐箱扫箱标签核对。",
+    "doneTitle": "已按订单签收 {{orderNo}}",
+    "doneDetail": "{{cartons}} 箱已归本店"
   }
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { unwrapApiEnvelope } from "../../shared/api/api-envelope";
+import { readCartonSync } from "./pack-api-normalization";
 import type {
   PickCodeLookupResult,
   PickerResolveResult,
@@ -123,6 +124,8 @@ const mutationSchema = z.object({
   line: lineProgressSchema,
   appliedDelta: number,
   duplicate: z.boolean().nullish().transform((value) => value ?? false),
+  // 边拣边装：只有请求带了 cartonGuid 才有；格式不对按没有处理，不让装箱信息影响拣货结果。
+  carton: z.unknown().optional().transform((value) => readCartonSync(value)),
 });
 
 const orderListSchema = z.object({
@@ -177,6 +180,9 @@ const submitSchema = z.object({
   lineCount: number,
   shortLineCount: number,
   overLineCount: number,
+  // 订单装过箱时才有：提交后的箱数与各箱合计件数。
+  cartonCount: nullableNumber,
+  packedPieces: nullableNumber,
 });
 
 const lookupSchema = z.object({

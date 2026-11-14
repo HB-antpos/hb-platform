@@ -260,3 +260,38 @@ export interface DestinationFormValue {
   consignmentNo: string;
   remark: string;
 }
+
+/** 分店按订单签收：发给本店的一只箱（在途的，或已签收归本店的）。 */
+export interface PackOrderReceiveCarton {
+  cartonGuid: string;
+  cartonNo: string;
+  status: number;
+  palletNo: string | null;
+  skuCount: number;
+  pieceCount: number;
+}
+
+/** 按商品的订货 / 配货 / 已发出对照。 */
+export interface PackOrderReceiveProduct {
+  productCode: string;
+  productName: string | null;
+  itemNumber: string | null;
+  orderedPieces: number;
+  /** 配货数；所有订单行都没有配货数时为 null。 */
+  allocPieces: number | null;
+  /** 已发出件数：该订单在途（发给本店）加已签收的箱内件数合计。 */
+  shippedPieces: number;
+}
+
+/** GET / POST receive/orders/{orderGuid} 的同一结构。 */
+export interface PackOrderReceive {
+  orderGuid: string;
+  orderNo: string | null;
+  storeCode: string;
+  cartons: PackOrderReceiveCarton[];
+  inTransitCount: number;
+  receivedCount: number;
+  products: PackOrderReceiveProduct[];
+  /** 仅 409 COUNT_MISMATCH：系统记录里该订单发给本店、还在路上的箱数。 */
+  actualInTransitCartonCount: number | null;
+}
