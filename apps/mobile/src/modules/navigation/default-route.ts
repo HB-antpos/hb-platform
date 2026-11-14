@@ -18,6 +18,7 @@ export type AppTabPath =
   | "/(shell)/warehouse"
   | "/(shell)/containers"
   | "/(shell)/warehouse-picking"
+  | "/(shell)/packing"
   | "/(shell)/domestic-purchase"
   | "/(shell)/local-supplier-invoices"
   | "/(shell)/installment-orders"
@@ -71,6 +72,7 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   // 货柜管理是独立菜单入口；列表页在 containers 栈内，明细页仍由根 Stack 接管。
   containers: "/(shell)/containers",
   "warehouse-picking": "/(shell)/warehouse-picking",
+  "packing": "/(shell)/packing",
   "domestic-purchase": "/(shell)/domestic-purchase",
   "local-supplier-invoices": "/(shell)/local-supplier-invoices",
   "installment-orders": "/(shell)/installment-orders",
@@ -121,6 +123,8 @@ export const SUPPORTED_TAB_ROUTE_NAMES = new Set(Object.keys(TAB_PATHS));
 export const SETTINGS_FALLBACK_ROUTE_NAME = "settings";
 
 const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
+  // 扫码打包要记操作人，接口只接受登录账号，设备会话（含仓库设备）不展示入口。
+  "packing",
   // 安装页按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。
   "app-install",
   "app-downloads",

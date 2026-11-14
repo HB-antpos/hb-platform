@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using BlazorApp.Api.Controllers.React;
+using BlazorApp.Api.Features.Packing;
 using BlazorApp.Api.Features.WarehousePicking;
 using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.Models.POSM;
@@ -246,6 +247,150 @@ public sealed class WarehousePickingControllerTests
         Assert.False(staff.CanOverwriteMinOrderQuantity);
         Assert.True(manager.CanOverwriteMinOrderQuantity);
         Assert.Equal("Full u-mgr", manager.Name);
+    }
+
+    // ---- 拣货与装箱联动（二期）的新端点 ----
+
+    [Fact]
+    public async Task 装箱进度只需终端校验_认得出拣货人才传入_认不出不报错()
+    {
+        WarehousePickerContext? captured = new("unset", "unset", false, null, null);
+        _picking
+            .Setup(service => service.GetPackProgressAsync(OrderGuid, It.IsAny<WarehousePickerContext?>()))
+            .Callback<string, WarehousePickerContext?>((_, picker) => captured = picker)
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingPackProgressDto>.Ok(new WarehousePickingPackProgressDto()));
+        var (ticket, _) = _tickets.Issue(new WarehousePickerTicketIdentity("u-mia", "Mia Wong", false), "hw:DEV-1", DateTime.UtcNow);
+        var withTicket = DeviceHeaders();
+        withTicket[WarehousePickingController.PickerTicketHeader] = ticket;
+
+        var withoutPicker = await CreateController(user: null, headers: DeviceHeaders()).GetPackProgress(OrderGuid);
+        Assert.Equal(200, StatusOf(withoutPicker));
+        Assert.Null(captured);
+
+        var withPicker = await CreateController(user: null, withTicket).GetPackProgress(OrderGuid);
+        Assert.Equal(200, StatusOf(withPicker));
+        Assert.Equal("u-mia", captured!.UserGuid);
+
+        var anonymous = await CreateController(user: null, headers: new()).GetPackProgress(OrderGuid);
+        var notWarehouse = await CreateController(User("u-store", "StoreStaff"), headers: new()).GetPackProgress(OrderGuid);
+        Assert.Equal(401, StatusOf(anonymous));
+        Assert.Equal(403, StatusOf(notWarehouse));
+        Assert.Equal(WarehousePickingErrorCodes.PickerNotAllowed, ErrorCodeOf(notWarehouse));
+    }
+
+    [Fact]
+    public async Task 新建箱_封箱_先拣后装都要先确认拣货人_设备会话没有凭证时被拒绝且不调用服务()
+    {
+        var device = DeviceHeaders();
+
+        var create = await CreateController(user: null, device).CreateCarton(OrderGuid, new WarehousePickingCreateCartonRequestDto());
+        var seal = await CreateController(user: null, device).SealCarton(OrderGuid, "c-1", new WarehousePickingSealCartonRequestDto());
+        var item = await CreateController(user: null, device).SetCartonItem(OrderGuid, "c-1", "P-1", new WarehousePickingSetCartonItemRequestDto { Quantity = 3 });
+        var anonymous = await CreateController(user: null, headers: new()).CreateCarton(OrderGuid, null);
+        var notWarehouse = await CreateController(User("u-store", "StoreStaff"), headers: new()).SealCarton(OrderGuid, "c-1", null);
+
+        foreach (var result in new[] { create, seal, item })
+        {
+            Assert.Equal(403, StatusOf(result));
+            Assert.Equal(WarehousePickingErrorCodes.PickerRequired, ErrorCodeOf(result));
+        }
+
+        Assert.Equal(401, StatusOf(anonymous));
+        Assert.Equal(WarehousePickingErrorCodes.PickerNotAllowed, ErrorCodeOf(notWarehouse));
+        _picking.Verify(service => service.CreateCartonAsync(It.IsAny<string>(), It.IsAny<WarehousePickingCreateCartonRequestDto>(), It.IsAny<WarehousePickerContext>()), Times.Never);
+        _picking.Verify(service => service.SealCartonAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSealCartonRequestDto>(), It.IsAny<WarehousePickerContext>()), Times.Never);
+        _picking.Verify(service => service.SetCartonItemAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSetCartonItemRequestDto>(), It.IsAny<WarehousePickerContext>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task 新建箱_封箱_先拣后装按凭证里的拣货人调用服务_订单号箱号去首尾空格_没带请求体按默认值处理()
+    {
+        WarehousePickerContext? picker = null;
+        string? orderGuid = null;
+        string? cartonGuid = null;
+        string? productCode = null;
+        WarehousePickingSealCartonRequestDto? sealRequest = null;
+        _picking
+            .Setup(service => service.CreateCartonAsync(It.IsAny<string>(), It.IsAny<WarehousePickingCreateCartonRequestDto>(), It.IsAny<WarehousePickerContext>()))
+            .Callback<string, WarehousePickingCreateCartonRequestDto, WarehousePickerContext>((order, _, who) => { orderGuid = order; picker = who; })
+            .ReturnsAsync(WarehousePickingResult<PackingCartonDetailDto>.Ok(new PackingCartonDetailDto { CartonGuid = "c-1" }));
+        _picking
+            .Setup(service => service.SealCartonAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSealCartonRequestDto>(), It.IsAny<WarehousePickerContext>()))
+            .Callback<string, string, WarehousePickingSealCartonRequestDto, WarehousePickerContext>((_, carton, request, who) => { cartonGuid = carton; sealRequest = request; picker = who; })
+            .ReturnsAsync(WarehousePickingResult<PackingCartonDetailDto>.Ok(new PackingCartonDetailDto { CartonGuid = "c-1" }));
+        _picking
+            .Setup(service => service.SetCartonItemAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSetCartonItemRequestDto>(), It.IsAny<WarehousePickerContext>()))
+            .Callback<string, string, string, WarehousePickingSetCartonItemRequestDto, WarehousePickerContext>((_, carton, product, _, who) => { cartonGuid = carton; productCode = product; picker = who; })
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingSetCartonItemResultDto>.Ok(new WarehousePickingSetCartonItemResultDto()));
+        var (ticket, _) = _tickets.Issue(new WarehousePickerTicketIdentity("u-mia", "Mia Wong", false), "hw:DEV-1", DateTime.UtcNow);
+        var headers = DeviceHeaders();
+        headers[WarehousePickingController.PickerTicketHeader] = ticket;
+
+        var create = await CreateController(user: null, headers).CreateCarton(" order-1 ", null);
+        Assert.Equal(200, StatusOf(create));
+        Assert.Equal("order-1", orderGuid);
+        Assert.Equal("u-mia", picker!.UserGuid);
+        Assert.Equal("PDA-07", picker.DeviceCode);
+
+        var seal = await CreateController(user: null, headers).SealCarton(OrderGuid, " c-1 ", null);
+        Assert.Equal(200, StatusOf(seal));
+        Assert.Equal("c-1", cartonGuid);
+        Assert.Null(sealRequest!.PalletGuid);
+        Assert.Null(sealRequest.WeightKg);
+
+        picker = null;
+        var item = await CreateController(user: null, headers).SetCartonItem(OrderGuid, "c-1", "P-1", new WarehousePickingSetCartonItemRequestDto { Quantity = 3 });
+        Assert.Equal(200, StatusOf(item));
+        Assert.Equal("P-1", productCode);
+        Assert.Equal("u-mia", picker!.UserGuid);
+    }
+
+    [Fact]
+    public async Task 先拣后装没带请求体_400_不会当成数量0把商品从箱里移除()
+    {
+        var result = await CreateController(User("u-staff", "WarehouseStaff"), headers: new()).SetCartonItem(OrderGuid, "c-1", "P-1", null);
+
+        Assert.Equal(400, StatusOf(result));
+        Assert.Equal(WarehousePickingErrorCodes.InvalidRequest, ErrorCodeOf(result));
+        _picking.Verify(service => service.SetCartonItemAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSetCartonItemRequestDto>(), It.IsAny<WarehousePickerContext>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task 箱操作失败原样映射状态码错误码与数据_拣货记录与改总数请求把箱号传给服务()
+    {
+        _picking
+            .Setup(service => service.SealCartonAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSealCartonRequestDto>(), It.IsAny<WarehousePickerContext>()))
+            .ReturnsAsync(WarehousePickingResult<PackingCartonDetailDto>.Fail(409, PackingErrorCodes.PalletNotBuilding, "该托盘已封托"));
+        WarehousePickingRecordRequestDto? record = null;
+        WarehousePickingSetTotalRequestDto? total = null;
+        _picking
+            .Setup(service => service.AppendRecordAsync(It.IsAny<string>(), It.IsAny<WarehousePickingRecordRequestDto>(), It.IsAny<WarehousePickerContext>()))
+            .Callback<string, WarehousePickingRecordRequestDto, WarehousePickerContext>((_, request, _) => record = request)
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingLineMutationDto>.Fail(
+                409,
+                PackingErrorCodes.CartonQtyInsufficient,
+                "这只箱里该商品只有 6 件，不够减 12 件",
+                new WarehousePickingLineMutationDto { Carton = new WarehousePickingCartonSyncDto { ItemPieces = 6 } }
+            ));
+        _picking
+            .Setup(service => service.SetLineTotalAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<WarehousePickingSetTotalRequestDto>(), It.IsAny<WarehousePickerContext>()))
+            .Callback<string, string, WarehousePickingSetTotalRequestDto, WarehousePickerContext>((_, _, request, _) => total = request)
+            .ReturnsAsync(WarehousePickingResult<WarehousePickingLineMutationDto>.Ok(new WarehousePickingLineMutationDto()));
+        var staff = User("u-staff", "WarehouseStaff");
+
+        var sealResult = await CreateController(staff, headers: new()).SealCarton(OrderGuid, "c-1", new WarehousePickingSealCartonRequestDto { PalletGuid = "p-1" });
+        var append = await CreateController(staff, headers: new()).AppendRecord(OrderGuid, new WarehousePickingRecordRequestDto { CartonGuid = "c-1" });
+        var setTotal = await CreateController(staff, headers: new()).SetLineTotal(OrderGuid, "d-1", new WarehousePickingSetTotalRequestDto { CartonGuid = "c-2" });
+
+        Assert.Equal(409, StatusOf(sealResult));
+        Assert.Equal(PackingErrorCodes.PalletNotBuilding, ErrorCodeOf(sealResult));
+        Assert.Equal(409, StatusOf(append));
+        Assert.Equal(PackingErrorCodes.CartonQtyInsufficient, ErrorCodeOf(append));
+        var data = ((ObjectResult)append).Value!.GetType().GetProperty("data")!.GetValue(((ObjectResult)append).Value) as WarehousePickingLineMutationDto;
+        Assert.Equal(6, data!.Carton!.ItemPieces);
+        Assert.Equal("c-1", record!.CartonGuid);
+        Assert.Equal(200, StatusOf(setTotal));
+        Assert.Equal("c-2", total!.CartonGuid);
     }
 
     private WarehousePickingController CreateController(ClaimsPrincipal? user, Dictionary<string, string> headers)

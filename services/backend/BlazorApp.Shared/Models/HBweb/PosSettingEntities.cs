@@ -5,7 +5,7 @@ namespace BlazorApp.Shared.Models;
 /// <summary>
 /// 收银端设置下发的「已设置值」：每层每项一行（没设置 = 没有这一行）。主键 (Scope, ScopeKey, SettingKey)。
 /// Scope = global / store / device；ScopeKey：全局固定 "*"，门店为门店代码，设备为设备编号（认证声明 hbpos_device_code）。
-/// 实体不进 SqlSugarContext 的自动建表清单，由版本号迁移 20261114.002-pos-settings 创建。
+/// 实体不进 SqlSugarContext 的自动建表清单，由版本号迁移 20261114.003-pos-settings 创建。
 /// </summary>
 [SugarTable("PosSettingValue")]
 public sealed class PosSettingValue

@@ -72,6 +72,8 @@ import { useKeepAliveContext } from 'keepalive-for-react'
 import {
   useCallback,
   useEffect,
+  lazy,
+  Suspense,
   useId,
   useMemo,
   useRef,
@@ -228,6 +230,12 @@ import { MeasuredTable } from '../../../components/MeasuredTable'
 
 // 订货明细重设计新增的文案随页面代码块懒注册，不进首屏 i18n 包（首屏 gzip 预算很紧）。
 registerPageMessages({ zh: storeOrderDetailMessagesZh, en: storeOrderDetailMessagesEn })
+
+// 订单「装箱情况」卡片与完成出库的装箱提醒（扫码打包二期，只读）：同一个懒加载代码块，自带文案，不增加详情页主代码块体积。
+// 只保留一处动态 import（每处都会内联一份预加载依赖清单，两处会多出约 1KB）。
+const loadPackProgress = () => import('./packProgress/PackProgressSection')
+const PackProgressSection = lazy(loadPackProgress)
+const PackCompleteReminder = lazy(() => loadPackProgress().then((module) => ({ default: module.PackCompleteReminder })))
 
 function formatCount(value?: number | null) {
   return Number(value ?? 0).toLocaleString('en-US')
@@ -3155,7 +3163,15 @@ export default function StoreOrderDetailPage() {
     }
     Modal.confirm({
       title: t('storeOrders.detail.confirmCompleteTitle'),
-      content: t('storeOrders.detail.confirmCompleteContent'),
+      content: (
+        <>
+          {t('storeOrders.detail.confirmCompleteContent')}
+          {/* 装箱提醒：弹窗打开后自行读取，有未封箱 / 没对上账才出现；只提醒不拦截，读取失败时什么都不显示。 */}
+          <Suspense fallback={null}>
+            <PackCompleteReminder orderGuid={detail.orderGUID} />
+          </Suspense>
+        </>
+      ),
       okText: t('common.confirm'),
       cancelText: t('common.cancel'),
       onOk: async () => {
@@ -4875,6 +4891,13 @@ export default function StoreOrderDetailPage() {
               }
               onAssignmentChange={setLineAssignees}
             />
+          ) : null}
+
+          {/* 扫码打包二期：订单名下有箱时才显示「装箱情况」；无权限 / 读取失败 / 没用装箱时整块隐藏。 */}
+          {canUseStoreOrderDetailExtraActions ? (
+            <Suspense fallback={null}>
+              <PackProgressSection orderGuid={detail.orderGUID} active={active} flowStatus={detail.flowStatus} />
+            </Suspense>
           ) : null}
 
           <section
