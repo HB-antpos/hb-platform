@@ -3,6 +3,7 @@ import type {
   PackCartonSummary,
   PackDestination,
   PackDestinationRequest,
+  PackIncomingItem,
   PackLocateRow,
   PackOwner,
   PackPalletDetail,
@@ -442,6 +443,68 @@ export function collectOrderReceiveEntries(
     }
   }
   return [...entries.values()]
+}
+
+/** 待签收清单里一行关联的订货单：label 是显示用的订单号（后端没给订单号时退回 GUID 前 8 位）。 */
+export interface PackIncomingOrderRef {
+  orderGuid: string
+  label: string
+}
+
+/**
+ * 待签收 / 最近签收清单一行关联的订货单：散箱行取 orderGuid / orderNo，托盘行取 orders[]（后端已去重、按订单号排序）；
+ * 没有订单 GUID 的丢弃，同一行里按 GUID（忽略大小写）再去重一次。旧后端没有这些字段时返回空。
+ */
+export function incomingItemOrders(
+  item: Pick<PackIncomingItem, 'kind' | 'orderGuid' | 'orderNo' | 'orders'>,
+): PackIncomingOrderRef[] {
+  const candidates =
+    item.kind === 'pallet' ? (item.orders ?? []) : [{ orderGuid: item.orderGuid, orderNo: item.orderNo }]
+  const refs = new Map<string, PackIncomingOrderRef>()
+  for (const candidate of candidates) {
+    const orderGuid = candidate.orderGuid?.trim()
+    if (!orderGuid || refs.has(orderGuid.toLowerCase())) {
+      continue
+    }
+    refs.set(orderGuid.toLowerCase(), { orderGuid, label: candidate.orderNo?.trim() || orderGuid.slice(0, 8) })
+  }
+  return [...refs.values()]
+}
+
+/** 一行在清单里的订单：entries 在这一行给「按订单签收」入口，covered 已经在前面的行给过入口，这里只显示订单号。 */
+export interface PackIncomingRowOrders {
+  entries: PackIncomingOrderRef[]
+  covered: PackIncomingOrderRef[]
+}
+
+/**
+ * 给待签收清单（按显示顺序）的每一行分配「按订单签收」入口：同一订单（按 GUID，忽略大小写）只在第一次出现的行给入口，
+ * 后面的行只显示订单号，不重复占位。按订单签收签的是这个订单发给本店的全部在途箱，与从哪一行点进去无关。
+ * 返回 key → 该行的订单；没有任何订单的行不在结果里。
+ */
+export function assignIncomingOrderEntries(
+  rows: readonly { key: string; orders: PackIncomingOrderRef[] }[],
+): Map<string, PackIncomingRowOrders> {
+  const owned = new Set<string>()
+  const result = new Map<string, PackIncomingRowOrders>()
+  for (const row of rows) {
+    if (row.orders.length === 0) {
+      continue
+    }
+    const entries: PackIncomingOrderRef[] = []
+    const covered: PackIncomingOrderRef[] = []
+    for (const order of row.orders) {
+      const key = order.orderGuid.toLowerCase()
+      if (owned.has(key)) {
+        covered.push(order)
+      } else {
+        owned.add(key)
+        entries.push(order)
+      }
+    }
+    result.set(row.key, { entries, covered })
+  }
+  return result
 }
 
 /** 订单发给本店的箱里还在路上（没签收）的。 */

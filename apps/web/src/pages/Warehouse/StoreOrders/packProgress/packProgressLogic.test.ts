@@ -176,4 +176,17 @@ assertEqual(
   'reconciled 为 true 时保留',
 )
 
+// 新后端装箱中的箱带 createdAtUtc / items，旧后端没有：两种都能读，汇总不受影响，字段原样保留（界面暂不展示）。
+const withNewFields = normalizeWarehousePackProgress(
+  progress({
+    cartons: [
+      carton('BX1', 1, 5, { createdAtUtc: '2026-11-14T01:00:00Z', items: [{ productCode: 'A', quantity: 5 }] }),
+      carton('BX2', 2, 7),
+    ],
+  }),
+)
+assertDeepEqual(withNewFields.cartons[0].items, [{ productCode: 'A', quantity: 5 }], '装箱中的箱的 items 原样保留')
+assertEqual(withNewFields.cartons[1].createdAtUtc, undefined, '旧后端没有 createdAtUtc 时保持缺失')
+assertEqual(summarizePackProgress(withNewFields).cartonCount, 2, '新字段不影响汇总')
+
 console.log('packProgressLogic.test: ok')

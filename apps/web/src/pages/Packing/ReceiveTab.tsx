@@ -1,5 +1,5 @@
-import { BarcodeOutlined, CheckCircleFilled, CheckOutlined } from '@ant-design/icons'
-import { Alert, Button, Empty, Input, InputNumber, Modal, Select, Tag, Typography, message } from 'antd'
+import { BarcodeOutlined, CheckCircleFilled, CheckOutlined, DownOutlined } from '@ant-design/icons'
+import { Alert, Button, Dropdown, Empty, Input, InputNumber, Modal, Select, Tag, Typography, message } from 'antd'
 import type { InputRef } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -15,18 +15,84 @@ import { isScanFeedbackUnlocked, playScanFeedback, unlockScanFeedback } from '..
 import LocationSelect from './LocationSelect'
 import OrderReceiveDrawer from './OrderReceiveDrawer'
 import {
+  assignIncomingOrderEntries,
   checkScannedCarton,
   collectOrderReceiveEntries,
   formatPackTime,
+  incomingItemOrders,
   incomingState,
   isCartonCountConfirmed,
   pendingPalletCartons,
   resolveReceiveBlock,
   selectCheckedCartons,
 } from './packingLogic'
+import type { PackIncomingOrderRef, PackIncomingRowOrders } from './packingLogic'
 import { showPackingError, usePackingPage } from './packingShared'
 
 type IncomingRow = PackIncomingItem & { section: 'pending' | 'recent' }
+
+/**
+ * 待签收清单一行里的订单信息（编号下面的一行小字）：
+ * - 待签收行：这一行提供入口的订单——1 个订单是订单号加「按订单签收」按钮，多个订单是「N 张订单」加一个下拉菜单；
+ *   已在前面的行给过入口的订单只显示订单号（同一订单在清单里只占一个入口）；
+ * - 最近签收行：只显示订单号，没有入口。
+ */
+function IncomingOrdersLine({
+  record,
+  rowOrders,
+  onOpen,
+}: {
+  record: IncomingRow
+  rowOrders?: PackIncomingRowOrders
+  onOpen: (order: PackIncomingOrderRef) => void
+}) {
+  const { t } = useTranslation()
+  if (record.section === 'recent') {
+    const labels = incomingItemOrders(record).map((order) => order.label)
+    return labels.length > 0 ? <div className="wh-packing-incoming-orders wh-packing-mono wh-packing-muted">{labels.join(' · ')}</div> : null
+  }
+  if (!rowOrders) {
+    return null
+  }
+  const { entries, covered } = rowOrders
+  return (
+    <div className="wh-packing-incoming-orders">
+      {entries.length === 1 ? (
+        <>
+          <span className="wh-packing-mono wh-packing-muted">{entries[0].label}</span>
+          <Button type="link" size="small" className="wh-packing-incoming-entry" onClick={() => onOpen(entries[0])}>
+            {t('packingUi.orderReceive.entry')}
+          </Button>
+        </>
+      ) : entries.length > 1 ? (
+        <>
+          <span className="wh-packing-muted">{t('packingUi.orderReceive.incomingOrders', { count: entries.length })}</span>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: entries.map((order) => ({ key: order.orderGuid, label: order.label })),
+              onClick: ({ key }) => {
+                const order = entries.find((entry) => entry.orderGuid === key)
+                if (order) {
+                  onOpen(order)
+                }
+              },
+            }}
+          >
+            <Button type="link" size="small" className="wh-packing-incoming-entry">
+              {t('packingUi.orderReceive.entry')} <DownOutlined />
+            </Button>
+          </Dropdown>
+        </>
+      ) : null}
+      {covered.length > 0 ? (
+        <span className="wh-packing-mono wh-packing-muted" title={t('packingUi.orderReceive.coveredHint')}>
+          {covered.map((order) => order.label).join(' · ')}
+        </span>
+      ) : null}
+    </div>
+  )
+}
 
 /**
  * 到货签收：扫托盘标签或箱标签（托盘标签丢了，扫托盘上任意一只箱的标签同样打开整个托盘），
@@ -277,14 +343,27 @@ export default function ReceiveTab({ active }: { active: boolean }) {
   const visiblePending = fromFilter ? pendingRows.filter((row) => row.originName === fromFilter) : pendingRows
   const pendingCartonTotal = pendingRows.reduce((sum, row) => sum + (row.cartonCount - row.receivedCartonCount), 0)
 
+  /** 清单（按显示顺序，已按「来自」过滤）里每个待签收行的「按订单签收」入口：同一订单只在第一次出现的行给入口。 */
+  const incomingOrderMap = useMemo(() => {
+    const rows = fromFilter ? incoming.pending.filter((item) => item.originName === fromFilter) : incoming.pending
+    return assignIncomingOrderEntries(rows.map((item) => ({ key: `pending:${item.guid}`, orders: incomingItemOrders(item) })))
+  }, [fromFilter, incoming.pending])
+
   const columns = useMemo<ColumnsType<IncomingRow>>(
     () => [
       {
         title: t('packingUi.receive.columns.no'),
         dataIndex: 'no',
-        width: 150,
+        width: 200,
         render: (value: string, record) => (
-          <b className={record.section === 'pending' ? 'wh-packing-mono' : 'wh-packing-mono wh-packing-muted'}>{value}</b>
+          <>
+            <b className={record.section === 'pending' ? 'wh-packing-mono' : 'wh-packing-mono wh-packing-muted'}>{value}</b>
+            <IncomingOrdersLine
+              record={record}
+              rowOrders={incomingOrderMap.get(`${record.section}:${record.guid}`)}
+              onOpen={(order) => setOrderReceive({ orderGuid: order.orderGuid, orderNo: order.label })}
+            />
+          </>
         ),
       },
       {
@@ -345,7 +424,7 @@ export default function ReceiveTab({ active }: { active: boolean }) {
           ),
       },
     ],
-    [handleScan, openCarton, openPallet, t],
+    [handleScan, incomingOrderMap, openCarton, openPallet, t],
   )
 
   // ---- 渲染 ----

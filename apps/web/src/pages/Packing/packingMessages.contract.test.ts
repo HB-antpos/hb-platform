@@ -84,6 +84,8 @@ for (const key of [
   'entry',
   'entryOrder',
   'entryCartons',
+  'incomingOrders',
+  'coveredHint',
   'title',
   'summary',
   'receiveAll',

@@ -332,6 +332,8 @@
       "entry": "按订单签收",
       "entryOrder": "订单 {{no}}",
       "entryCartons": "这里有 {{count}} 箱",
+      "incomingOrders": "{{count}} 张订单",
+      "coveredHint": "这张订单的「按订单签收」入口在上面的行",
       "title": "按订单签收",
       "orderNo": "订单 {{no}}",
       "summary": "在路上 {{transit}} 箱 · 已签收 {{received}} 箱",

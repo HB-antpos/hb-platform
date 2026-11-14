@@ -13,6 +13,7 @@ import {
   UNASSIGNED_DESTINATION,
   buildPalletSteps,
   canDispatchCarton,
+  assignIncomingOrderEntries,
   canDispatchPallet,
   cartonStateKind,
   checkScannedCarton,
@@ -25,6 +26,7 @@ import {
   findCartonItemByCode,
   formatPackTime,
   groupLocateRows,
+  incomingItemOrders,
   incomingState,
   isCartonCountConfirmed,
   isOrderShipMismatch,
@@ -406,6 +408,77 @@ assertEqual(
   '订单里还在路上的箱数',
 )
 assertEqual(pendingOrderCartons({ cartons: [] }).length, 0, '没有箱就没有在途箱')
+
+// ---- 待签收清单里的「按订单签收」入口 ----
+// 散箱行：用 orderGuid / orderNo；没有订单关联（或旧后端没有该字段）没有入口。
+assertDeepEqual(
+  incomingItemOrders({ kind: 'carton', orderGuid: 'o-1', orderNo: 'SO001' }),
+  [{ orderGuid: 'o-1', label: 'SO001' }],
+  '散箱行取 orderGuid / orderNo',
+)
+assertDeepEqual(incomingItemOrders({ kind: 'carton' }), [], '散箱没有订单关联（旧后端缺字段）没有入口')
+assertDeepEqual(incomingItemOrders({ kind: 'carton', orderGuid: '  ', orderNo: 'SO001' }), [], '订单 GUID 为空白不给入口')
+assertDeepEqual(
+  incomingItemOrders({ kind: 'carton', orderGuid: 'abcdef12-0000-0000-0000-000000000000', orderNo: null }),
+  [{ orderGuid: 'abcdef12-0000-0000-0000-000000000000', label: 'abcdef12' }],
+  '没有订单号时用 GUID 前 8 位当显示名',
+)
+// 托盘行：用 orders[]，散箱字段不参与；同一行按 GUID（忽略大小写）去重，缺 GUID 的丢弃。
+assertDeepEqual(
+  incomingItemOrders({
+    kind: 'pallet',
+    orderGuid: 'ignored',
+    orderNo: 'IGNORED',
+    orders: [
+      { orderGuid: 'o-1', orderNo: 'SO001' },
+      { orderGuid: 'o-2', orderNo: ' SO002 ' },
+      { orderGuid: 'O-1', orderNo: 'SO001' },
+      { orderGuid: '', orderNo: 'SO003' },
+    ],
+  }),
+  [
+    { orderGuid: 'o-1', label: 'SO001' },
+    { orderGuid: 'o-2', label: 'SO002' },
+  ],
+  '托盘行取 orders[]，行内去重、丢弃缺 GUID 的',
+)
+assertDeepEqual(incomingItemOrders({ kind: 'pallet' }), [], '托盘没有订单关联时 orders 缺失，没有入口')
+assertDeepEqual(incomingItemOrders({ kind: 'pallet', orders: null }), [], 'orders 为 null 也没有入口')
+assertEqual(
+  incomingItemOrders({ kind: 'pallet', orders: Array.from({ length: 20 }, (_, index) => ({ orderGuid: `o-${index}`, orderNo: `SO${index}` })) }).length,
+  20,
+  '托盘最多 20 个订单，全部保留',
+)
+
+// 清单里同一订单只在第一次出现的行给入口，后面的行只显示订单号。
+const assigned = assignIncomingOrderEntries([
+  { key: 'pending:p1', orders: [{ orderGuid: 'o-1', label: 'SO001' }, { orderGuid: 'o-2', label: 'SO002' }] },
+  { key: 'pending:p2', orders: [{ orderGuid: 'O-2', label: 'SO002' }, { orderGuid: 'o-3', label: 'SO003' }] },
+  { key: 'pending:c1', orders: [{ orderGuid: 'o-1', label: 'SO001' }] },
+  { key: 'pending:c2', orders: [] },
+  { key: 'pending:p3', orders: [{ orderGuid: 'o-4', label: 'SO004' }] },
+])
+assertDeepEqual(assigned.get('pending:p1'), { entries: [{ orderGuid: 'o-1', label: 'SO001' }, { orderGuid: 'o-2', label: 'SO002' }], covered: [] }, '托盘多订单：每个订单一个入口')
+assertDeepEqual(
+  assigned.get('pending:p2'),
+  { entries: [{ orderGuid: 'o-3', label: 'SO003' }], covered: [{ orderGuid: 'O-2', label: 'SO002' }] },
+  '后面的托盘：已出现过的订单（忽略 GUID 大小写）只显示订单号，新订单给入口',
+)
+assertDeepEqual(
+  assigned.get('pending:c1'),
+  { entries: [], covered: [{ orderGuid: 'o-1', label: 'SO001' }] },
+  '散箱的订单前面已给过入口：只显示订单号，不重复占位',
+)
+assertEqual(assigned.has('pending:c2'), false, '没有订单的行不在结果里')
+assertDeepEqual(assigned.get('pending:p3'), { entries: [{ orderGuid: 'o-4', label: 'SO004' }], covered: [] }, '只有一个订单：一个入口')
+assertEqual(assigned.size, 4, '结果只含有订单的行')
+assertEqual(assignIncomingOrderEntries([]).size, 0, '空清单没有入口')
+// 清单被「来自」过滤后重新分配：入口跟着留下来的第一行走，不会因为前面的行被过滤掉而消失。
+assertDeepEqual(
+  assignIncomingOrderEntries([{ key: 'pending:c1', orders: [{ orderGuid: 'o-1', label: 'SO001' }] }]).get('pending:c1'),
+  { entries: [{ orderGuid: 'o-1', label: 'SO001' }], covered: [] },
+  '过滤后第一次出现的行拿到入口',
+)
 
 // 实到箱数核对与整托签收同一做法：必须是非负整数且等于在途箱数；没有在途箱不能签收。
 assertEqual(isCartonCountConfirmed(3, 3), true, '数对了可以签收全部')

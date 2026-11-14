@@ -332,6 +332,8 @@
       "entry": "Receive by order",
       "entryOrder": "Order {{no}}",
       "entryCartons": "{{count}} cartons here",
+      "incomingOrders": "{{count}} orders",
+      "coveredHint": "Receive this order from the row above",
       "title": "Receive by order",
       "orderNo": "Order {{no}}",
       "summary": "In transit {{transit}} · Received {{received}}",

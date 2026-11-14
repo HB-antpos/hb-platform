@@ -208,6 +208,12 @@ export interface PackEvent {
   createdAtUtc: string
 }
 
+/** 托盘行里关联的订货单（后端去重、按订单号排序、最多 20 个）。 */
+export interface PackIncomingOrder {
+  orderGuid: string
+  orderNo?: string | null
+}
+
 /** 待签收 / 最近签收列表里的一行：一个托盘，或一只散箱。 */
 export interface PackIncomingItem {
   kind: 'pallet' | 'carton'
@@ -225,6 +231,11 @@ export interface PackIncomingItem {
   dispatchedByName?: string | null
   receivedAtUtc?: string | null
   receivedByName?: string | null
+  /** 散箱行：这只箱关联的订货单（总仓按订货单装的箱才有）；托盘行缺失。旧后端没有该字段。 */
+  orderGuid?: string | null
+  orderNo?: string | null
+  /** 托盘行：托盘上相关箱所属的订货单（待签收取仍在路上的箱，最近签收取已签收的箱）；没有订单关联时缺失。 */
+  orders?: PackIncomingOrder[] | null
 }
 
 export interface PackIncoming {
@@ -330,6 +341,12 @@ export interface WarehousePackProgressLine {
   packedPieces: number
 }
 
+/** 装箱中的箱里的一个商品（只用于拣货端接着装旧箱，Web 的装箱情况区不展示）。 */
+export interface WarehousePackProgressCartonItem {
+  productCode: string
+  quantity: number
+}
+
 /** 订单名下的一只箱（作废的不返回）。 */
 export interface WarehousePackProgressCarton {
   cartonGuid: string
@@ -342,6 +359,10 @@ export interface WarehousePackProgressCarton {
   createdByName: string
   /** Web 账号认不出拣货人，恒为 false；界面不使用。 */
   isMine: boolean
+  /** 创建时间（UTC）；旧后端没有该字段，界面暂不展示。 */
+  createdAtUtc?: string | null
+  /** 仅装箱中（status = 1）的箱带：箱内商品明细；界面暂不展示，旧后端没有该字段。 */
+  items?: WarehousePackProgressCartonItem[] | null
 }
 
 export interface WarehousePackProgress {
