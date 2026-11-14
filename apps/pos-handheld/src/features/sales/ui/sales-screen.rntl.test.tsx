@@ -2492,6 +2492,52 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
+  it("钱箱入口：没有 onOpenCashMovement（开关关闭）时工具栏不出现；传入后出现在「开箱」之后、日结之前，点击触发回调", async () => {
+    const off = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const offScreen = await render(
+      <SalesScreen
+        locale="zh"
+        onOpenCashDrawer={jest.fn(async () => ({ kind: "completed" as const }))}
+        onOpenDailyClose={jest.fn()}
+        presenter={off}
+        showStatusStrip={false}
+      />,
+    );
+    await fireEvent.press(offScreen.getByTestId("sales-toolbar"));
+    expect(offScreen.queryByTestId("sales-open-cash-movement")).toBeNull();
+    expect(offScreen.getByTestId("sales-open-cash-drawer")).toBeTruthy();
+    off.destroy();
+    await offScreen.unmount();
+
+    const onOpenCashMovement = jest.fn();
+    const on = presenter(new ScreenCartPort(EMPTY_SALE_CART));
+    const onScreen = await render(
+      <SalesScreen
+        locale="zh"
+        onOpenCashDrawer={jest.fn(async () => ({ kind: "completed" as const }))}
+        onOpenCashMovement={onOpenCashMovement}
+        onOpenDailyClose={jest.fn()}
+        presenter={on}
+        showStatusStrip={false}
+      />,
+    );
+    await fireEvent.press(onScreen.getByTestId("sales-toolbar"));
+    const menuTestIds = descendantTestIds(onScreen.getByTestId("sales-toolbar-actions"));
+    expect(menuTestIds.indexOf("sales-open-cash-drawer")).toBeLessThan(
+      menuTestIds.indexOf("sales-open-cash-movement"),
+    );
+    expect(menuTestIds.indexOf("sales-open-cash-movement")).toBeLessThan(
+      menuTestIds.indexOf("sales-open-daily-close"),
+    );
+    const entry = onScreen.getByTestId("sales-open-cash-movement");
+    expect(StyleSheet.flatten(entry.props.style).minHeight).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET);
+    expect(onScreen.getByText("钱箱")).toBeTruthy();
+    await fireEvent.press(entry);
+    expect(onOpenCashMovement).toHaveBeenCalledTimes(1);
+    on.destroy();
+    await onScreen.unmount();
+  });
+
   it("强制更新或门禁关闭时空车禁止开始交易，并保留明确更新入口", async () => {
     const onOpenRequiredUpdate = jest.fn();
     const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));

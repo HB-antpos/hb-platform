@@ -317,6 +317,70 @@ describe("DailyCloseScreen", () => {
   });
 });
 
+describe("DailyCloseScreen 现金存入 / 取出", () => {
+  const viewOnly = ["Permissions.PosTerminal.DailyClose.View"];
+
+  it("存取都为 0 时汇总与归档详情都不显示这两行", async () => {
+    const screen = await render(
+      <DailyCloseScreen presenter={new ScreenPresenter({ permissions: viewOnly })} />,
+    );
+    expect(screen.queryByText("Cash in")).toBeNull();
+    expect(screen.queryByText("Cash out")).toBeNull();
+    await fireEvent.press(screen.getByTestId("daily-close-show-history"));
+    expect(screen.queryByText(/^Cash in /)).toBeNull();
+    expect(screen.queryByText(/^Cash out /)).toBeNull();
+    await screen.unmount();
+  });
+
+  it("存取非 0 时汇总显示带符号金额，位于进位与应有现金之间；归档详情同样显示", async () => {
+    const presenter = new ScreenPresenter({
+      permissions: viewOnly,
+      cash: { cashIn: 5_000, cashOut: 2_050 },
+    });
+    const screen = await render(<DailyCloseScreen presenter={presenter} />);
+    expect(screen.getByText("Cash in")).toBeTruthy();
+    expect(screen.getByText("+$50.00")).toBeTruthy();
+    expect(screen.getByText("Cash out")).toBeTruthy();
+    expect(screen.getByText("-$20.50")).toBeTruthy();
+    const labels = screen
+      .getAllByText(/^(Cash rounding|Cash in|Cash out|Expected cash)$/)
+      .map((node) => node.props.children);
+    expect(labels).toEqual(["Cash rounding", "Cash in", "Cash out", "Expected cash"]);
+    await fireEvent.press(screen.getByTestId("daily-close-show-history"));
+    expect(screen.getByText("Cash in +$50.00")).toBeTruthy();
+    expect(screen.getByText("Cash out -$20.50")).toBeTruthy();
+    await screen.unmount();
+  });
+
+  it("只有存入或只有取出时只显示对应的一行；中文文案", async () => {
+    mockLanguage = "zh";
+    try {
+      const onlyIn = await render(
+        <DailyCloseScreen
+          presenter={new ScreenPresenter({ permissions: viewOnly, cash: { cashIn: 1_000, cashOut: 0 } })}
+        />,
+      );
+      expect(onlyIn.getByText("现金存入")).toBeTruthy();
+      expect(onlyIn.getByText("+$10.00")).toBeTruthy();
+      expect(onlyIn.queryByText("现金取出")).toBeNull();
+      await onlyIn.unmount();
+      const onlyOut = await render(
+        <DailyCloseScreen
+          presenter={new ScreenPresenter({ permissions: viewOnly, cash: { cashIn: 0, cashOut: 300 } })}
+        />,
+      );
+      expect(onlyOut.getByText("现金取出")).toBeTruthy();
+      expect(onlyOut.getByText("-$3.00")).toBeTruthy();
+      expect(onlyOut.queryByText("现金存入")).toBeNull();
+      await fireEvent.press(onlyOut.getByTestId("daily-close-show-history"));
+      expect(onlyOut.getByText("现金取出 -$3.00")).toBeTruthy();
+      await onlyOut.unmount();
+    } finally {
+      mockLanguage = "en";
+    }
+  });
+});
+
 const installmentPayments = [
   { method: "cash", salesCents: 2_000, refundCents: -500, netCents: 1_500 },
   { method: "card", salesCents: 800, refundCents: 0, netCents: 800 },
@@ -338,13 +402,25 @@ class ScreenPresenter implements DailyCloseScreenPresenter {
     options: Partial<{
       installments: boolean;
       permissions: readonly string[];
+      /** 本期现金存入 / 取出（分，>= 0）；缺省 0。 */
+      cash: Readonly<{ cashIn: number; cashOut: number }>;
     }> = {},
   ) {
     // installments 为真时，汇总与归档都带 4 笔分期付款。
-    const withInstallments = <T extends DailyCloseSummary>(value: T): T =>
-      options.installments
-        ? { ...value, installmentPayments, installmentPaymentCount: 4 }
+    const withInstallments = <T extends DailyCloseSummary>(value: T): T => {
+      const withCash = options.cash
+        ? {
+            ...value,
+            cashInCents: options.cash.cashIn,
+            cashOutCents: options.cash.cashOut,
+            expectedCashCents:
+              value.expectedCashCents + options.cash.cashIn - options.cash.cashOut,
+          }
         : value;
+      return options.installments
+        ? { ...withCash, installmentPayments, installmentPaymentCount: 4 }
+        : withCash;
+    };
     const selectedArchive = withInstallments(archive());
     const summary = withInstallments(closeSummary());
     this.state = {

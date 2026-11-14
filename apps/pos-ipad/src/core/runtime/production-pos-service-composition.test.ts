@@ -133,6 +133,9 @@ import {
 } from "../security/secure-storage";
 
 import { reregisterSettingsDevice } from "./expo-settings-configuration";
+import { CASH_MOVEMENT_PERMISSIONS } from "./production-cash-movement";
+import { MemoryCashMovementStore } from "./test-support/memory-cash-movement-store";
+import { cashMovementFixture } from "@hb/pos-sync/testing/cash-movement-fixtures";
 import type { PaymentProviderRuntimeBootstrap } from "./payment-provider-runtime-bootstrap";
 import type {
   InstallmentProviderAttemptPlan,
@@ -6854,6 +6857,323 @@ function unavailableHeldOrderRecords(): HeldOrderRecordRepositoryPort {
 }
 
 /** 总部设置下发本机存储的内存替身（与真实 PosSettingsSyncRepository 同接口）。 */
+
+// ───────────────────────── 现金存入 / 取出 ─────────────────────────
+
+const CASH_SEED_AT = "2026-07-28T00:00:00.000Z";
+
+function cashMovementTransport(requests: HbposTransportRequest[]): HbposTransport {
+  return {
+    async request<T>(request: HbposTransportRequest) {
+      requests.push(request);
+      if (request.url === "/api/v1/cash-movements/sync") {
+        const movements = (request.data as { movements: { movementGuid: string }[] }).movements;
+        return {
+          status: 200,
+          data: {
+            results: movements.map((movement) => ({ movementGuid: movement.movementGuid, status: "Accepted" })),
+          } as T,
+        };
+      }
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+}
+
+async function waitUntil(condition: () => boolean, message: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (condition()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.ok(condition(), message);
+}
+
+test("现金进出：开关关闭（默认）时入口为 false，但已有记录照常上传、列表与汇总不被过滤", async () => {
+  const store = new MemoryCashMovementStore();
+  store.rows.push(
+    cashMovementFixture({
+      movementGuid: "6f9619ff-8b86-4011-b42d-00c04fc96401",
+      storeCode: "S001",
+      deviceCode: "IPAD-1",
+      occurredAtIso: CASH_SEED_AT,
+      businessDate: "2026-07-28",
+    }),
+    // 其它终端范围的记录保持 pending，不被这台上传。
+    cashMovementFixture({
+      movementGuid: "6f9619ff-8b86-4011-b42d-00c04fc96402",
+      storeCode: "S001",
+      deviceCode: "IPAD-2",
+      occurredAtIso: CASH_SEED_AT,
+      businessDate: "2026-07-28",
+    }),
+  );
+  const requests: HbposTransportRequest[] = [];
+  const services = createTestComposition(
+    databaseFor([], { cashMovements: store, dailyCloseUploads: new IdleDailyCloseUploadRepository() }),
+    { cashierPermissions: GUID_PERMISSIONS, createId: uuidFactory(), transport: cashMovementTransport(requests) },
+  );
+  await services.initialize();
+  assert.equal(services.cashMovement?.isCashMovementEnabled(), false);
+
+  await services.sync.requestDrain();
+  const uploads = requests.filter((request) => request.url === "/api/v1/cash-movements/sync");
+  assert.equal(uploads.length, 1, "关闭开关不影响现金进出上传");
+  const body = uploads[0]!.data as Record<string, unknown>;
+  assert.equal(body.clientKind, "Ipad");
+  assert.equal(body.storeCode, "S001");
+  assert.equal(body.deviceCode, "IPAD-1");
+  assert.equal(store.rows[0]?.uploadState, "synced");
+  assert.equal(store.rows[1]?.uploadState, "pending", "其它终端的记录不动");
+  assert.deepEqual(store.claimScopes[0], { storeCode: "S001", deviceCode: "IPAD-1" });
+
+  // 开关关闭时今日列表与汇总照常包含记录。
+  await services.cashierSession.signIn("cashier");
+  const view = await services.cashMovement!.createRuntime().listToday();
+  assert.equal(view.movements.length, 1);
+  assert.equal(view.cashInCents, 5_000);
+});
+
+test("现金进出开关：启动时先用本机键值初始化；总部下发改变后订阅方收到通知（开 → 关），记录不受影响", async () => {
+  const localStore = new MemoryPosSettingsSync();
+  localStore.cashMovementEnabled = true;
+  let syncData: unknown = { changed: true, hash: "h1", settings: { "cashMovement.enabled": { value: true, source: "global" } } };
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      if (request.url === BACKGROUND_PROMOTIONS_URL) throw new Error("promotions are not part of this scenario");
+      if (request.url === "/api/v1/stores/current/pos-settings/sync") {
+        return { status: 200, data: { success: true, data: syncData } as T };
+      }
+      if (request.url === "/api/v1/stores/current/pos-settings/ack") {
+        return { status: 200, data: { success: true, data: {} } as T };
+      }
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+  const store = new MemoryCashMovementStore();
+  const services = createTestComposition(
+    databaseFor([], { posSettingsSync: localStore, cashMovements: store }),
+    { transport, createId: uuidFactory() },
+  );
+  assert.equal(services.cashMovement?.isCashMovementEnabled(), false, "initialize 之前是默认关闭");
+  await services.initialize();
+  assert.equal(services.cashMovement?.isCashMovementEnabled(), true, "本机键值为开启");
+
+  let notified = 0;
+  const unsubscribe = services.cashMovement!.subscribeCashMovementEnabled(() => {
+    notified += 1;
+  });
+  syncData = { changed: true, hash: "h2", settings: { "cashMovement.enabled": { value: false, source: "global" } } };
+  await services.posSettingsSync.requestSync("startup");
+  assert.equal(localStore.cashMovementEnabled, false);
+  assert.equal(services.cashMovement?.isCashMovementEnabled(), false);
+  assert.equal(notified, 1);
+  unsubscribe();
+  syncData = { changed: true, hash: "h3", settings: { "cashMovement.enabled": { value: true, source: "global" } } };
+  await services.posSettingsSync.requestSync("startup");
+  assert.equal(services.cashMovement?.isCashMovementEnabled(), true);
+  assert.equal(notified, 1, "取消订阅后不再通知");
+});
+
+test("现金进出：没有可信收银员时不能创建运行时", async () => {
+  const services = createTestComposition(databaseFor([]), { createId: uuidFactory() });
+  await services.initialize();
+  assert.throws(() => services.cashMovement!.createRuntime(), /CURRENT_CASHIER_REQUIRED/u);
+});
+
+test("现金进出保存：本人有权限时无授权人；开钱箱 + 打印凭条；并唤醒协调器完成上传", async () => {
+  const store = new MemoryCashMovementStore();
+  const requests: HbposTransportRequest[] = [];
+  const events: string[] = [];
+  const printed: string[] = [];
+  const services = createTestComposition(
+    databaseFor([], { cashMovements: store, dailyCloseUploads: new IdleDailyCloseUploadRepository() }),
+    {
+      cashierPermissions: [CASH_MOVEMENT_PERMISSIONS.cashIn],
+      supervisorPermissions: [CASH_MOVEMENT_PERMISSIONS.cashOut],
+      createId: uuidFactory(),
+      transport: cashMovementTransport(requests),
+      onDrawerOpen: () => events.push("drawer"),
+      onPrint: (jobId, bytes) => {
+        events.push("print");
+        printed.push(`${jobId}|${new TextDecoder().decode(bytes)}`);
+      },
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const runtime = services.cashMovement!.createRuntime();
+  const result = await runtime.submit({
+    movementGuid: "50000000-0000-4000-8000-000000000001",
+    reasonCode: "ChangeTopUp",
+    amountCents: 5_000,
+    note: null,
+  });
+  assert.equal(result.kind, "saved");
+  const row = store.rows[0]!;
+  assert.equal(row.authorizedById, null);
+  assert.equal(row.cashierId, "cashier-1");
+  assert.equal(row.businessDate, "2026-07-28");
+  assert.deepEqual(events, ["drawer", "print"]);
+  assert.match(printed[0]!, /^cash-movement:50000000-0000-4000-8000-000000000001:.*CASH IN/su);
+  // 保存路径自己唤醒上传（不手动 drain）。
+  await waitUntil(() => store.rows[0]?.uploadState === "synced", "保存后应由唤醒的协调器完成上传");
+  assert.equal(requests.filter((request) => request.url === "/api/v1/cash-movements/sync").length, 1);
+});
+
+test("现金进出保存：无权限时主管扫码授权，授权人写入记录；扫码前不落库", async () => {
+  const store = new MemoryCashMovementStore();
+  const services = createTestComposition(
+    databaseFor([], { cashMovements: store, dailyCloseUploads: new IdleDailyCloseUploadRepository() }),
+    {
+      cashierPermissions: [],
+      supervisorPermissions: [CASH_MOVEMENT_PERMISSIONS.cashOut],
+      createId: uuidFactory(),
+      transport: cashMovementTransport([]),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const runtime = services.cashMovement!.createRuntime();
+  const pending = runtime.submit({
+    movementGuid: "50000000-0000-4000-8000-000000000002",
+    reasonCode: "SafeDrop",
+    amountCents: 20_000,
+    note: null,
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(services.operationAuthorization.status, "available");
+  if (services.operationAuthorization.status !== "available") return;
+  assert.equal(services.operationAuthorization.getState().kind, "awaiting-supervisor");
+  assert.equal(store.rows.length, 0, "授权前不落库");
+  const scan = await services.operationAuthorization.submitSupervisorBarcode("supervisor-barcode");
+  assert.equal(scan.consumed && scan.outcome, "authorized");
+  const result = await pending;
+  assert.equal(result.kind, "saved");
+  assert.equal(store.rows[0]?.cashierId, "cashier-1");
+  assert.equal(store.rows[0]?.authorizedById, "supervisor-1");
+  assert.equal(store.rows[0]?.authorizedByName, "Supervisor");
+  assert.equal(store.audits[0]?.payload.authorizingCashierId, "supervisor-1");
+  assert.equal(store.audits[0]?.eventType, "CASH_OUT");
+});
+
+test("现金进出保存：落库失败不开钱箱不打印；打印失败不回滚记录", async () => {
+  const failing = new MemoryCashMovementStore();
+  failing.appendError = new Error("disk full");
+  const effects: string[] = [];
+  const services = createTestComposition(
+    databaseFor([], { cashMovements: failing }),
+    {
+      cashierPermissions: [CASH_MOVEMENT_PERMISSIONS.cashIn],
+      createId: uuidFactory(),
+      onDrawerOpen: () => effects.push("drawer"),
+      onPrint: () => effects.push("print"),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const failed = await services.cashMovement!.createRuntime().submit({
+    movementGuid: "50000000-0000-4000-8000-000000000003",
+    reasonCode: "ChangeTopUp",
+    amountCents: 100,
+    note: null,
+  });
+  assert.deepEqual(failed, { kind: "failed" });
+  assert.deepEqual(effects, [], "落库失败时没有任何硬件动作");
+
+  const kept = new MemoryCashMovementStore();
+  const second = createTestComposition(databaseFor([], { cashMovements: kept }), {
+    cashierPermissions: [CASH_MOVEMENT_PERMISSIONS.cashIn],
+    createId: uuidFactory(),
+    onPrint: () => {
+      throw new Error("printer jammed");
+    },
+  });
+  await second.initialize();
+  await second.cashierSession.signIn("cashier");
+  const result = await second.cashMovement!.createRuntime().submit({
+    movementGuid: "50000000-0000-4000-8000-000000000004",
+    reasonCode: "ChangeTopUp",
+    amountCents: 100,
+    note: null,
+  });
+  assert.equal(result.kind, "saved");
+  assert.equal(result.kind === "saved" && result.print, "failed");
+  assert.equal(result.kind === "saved" && result.drawer, "opened");
+  assert.equal(kept.rows.length, 1, "打印失败不回滚记录");
+});
+
+test("日结回单带现金存入 / 取出按原因的明细（取自 summarizePeriod），日结汇总含存取", async () => {
+  const store = new MemoryCashMovementStore();
+  store.rows.push(
+    cashMovementFixture({
+      movementGuid: "6f9619ff-8b86-4011-b42d-00c04fc96411",
+      storeCode: "S001",
+      deviceCode: "IPAD-1",
+      reasonCode: "ChangeTopUp",
+      amountCents: 5_000,
+      occurredAtIso: CASH_SEED_AT,
+      businessDate: "2026-07-28",
+    }),
+    cashMovementFixture({
+      movementGuid: "6f9619ff-8b86-4011-b42d-00c04fc96412",
+      storeCode: "S001",
+      deviceCode: "IPAD-1",
+      direction: "Out",
+      reasonCode: "SafeDrop",
+      amountCents: 2_000,
+      occurredAtIso: CASH_SEED_AT,
+      businessDate: "2026-07-28",
+    }),
+  );
+  const dailyClose = new MemoryDailyCloseRepository(store);
+  const printed: string[] = [];
+  const services = createTestComposition(
+    databaseFor([], { dailyClose, cashMovements: store }),
+    {
+      cashierPermissions: GUID_PERMISSIONS,
+      createId: uuidFactory(),
+      onPrint: (_jobId, bytes) => printed.push(new TextDecoder().decode(bytes)),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const presenter = services.dailyClose.createPresenter();
+  await presenter.load();
+  assert.equal(presenter.getState().summary?.cashInCents, 5_000);
+  assert.equal(presenter.getState().summary?.cashOutCents, 2_000);
+  assert.equal(presenter.getState().summary?.expectedCashCents, 4_000);
+  presenter.setCount(100, 40);
+  await presenter.saveAndPrint();
+  assert.equal(presenter.getState().statusCode, "saved-printed");
+  const report = printed[0]!;
+  assert.match(report, /Cash In/u);
+  assert.match(report, /Change top-up/u);
+  assert.match(report, /Safe drop/u);
+  assert.match(report, /Cash Out/u);
+  presenter.destroy();
+});
+
+test("日结回单没有存取时不带明细段（与旧回单一致）", async () => {
+  const store = new MemoryCashMovementStore();
+  const printed: string[] = [];
+  const services = createTestComposition(
+    databaseFor([], { dailyClose: new MemoryDailyCloseRepository(store), cashMovements: store }),
+    {
+      cashierPermissions: GUID_PERMISSIONS,
+      createId: uuidFactory(),
+      onPrint: (_jobId, bytes) => printed.push(new TextDecoder().decode(bytes)),
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  const presenter = services.dailyClose.createPresenter();
+  await presenter.load();
+  presenter.setCount(100, 10);
+  await presenter.saveAndPrint();
+  assert.doesNotMatch(printed[0]!, /Cash In|Change top-up/u);
+  presenter.destroy();
+});
+
 class MemoryPosSettingsSync {
   public state: import("@hb/pos-sync/features/pos-settings/pos-settings-service").PosSettingsLocalState | null = null;
   public cashMovementEnabled = false;
@@ -6884,6 +7204,8 @@ function databaseFor(
     specialProductCategories?: Partial<SpecialProductCategoriesRepositoryPort>;
     dailyClose?: DailyCloseRepositoryPort;
     dailyCloseUploads?: DailyCloseUploadRepositoryPort;
+    /** 现金存入 / 取出仓储与上传端口的内存替身；缺省为各用例独立的空实例。 */
+    cashMovements?: MemoryCashMovementStore;
     onSyncHistoryRestore?(): void;
     onRefundVoucherPrintMaterialCreated?(): void;
     returnRecoveryRequired?: boolean;
@@ -6923,6 +7245,7 @@ function databaseFor(
 ): PosDatabase {
   let activeCatalogMetadata = options.activeCatalogMetadata ?? null;
   const posSettingsSyncStore = options.posSettingsSync ?? new MemoryPosSettingsSync();
+  const cashMovementStore = options.cashMovements ?? new MemoryCashMovementStore();
   const lookupOverlays = new Map<string, LocalCatalogMatch | null>();
   const codeConflicts = new Map<string, readonly LocalCatalogMatch[]>();
   let stagingCatalog: Readonly<{
@@ -7248,6 +7571,8 @@ function databaseFor(
       options.dailyClose ?? new MemoryDailyCloseRepository(),
     dailyCloseUploads: () =>
       options.dailyCloseUploads ?? new IdleDailyCloseUploadRepository(),
+    cashMovements: () => cashMovementStore,
+    cashMovementUploads: () => cashMovementStore,
     settings: () => settings,
     posSettingsSync: () => posSettingsSyncStore,
     settingsSafety: () => ({
@@ -7640,7 +7965,13 @@ class MemoryDailyCloseRepository implements DailyCloseRepositoryPort {
   public readonly saved: DailyCloseArchiveCommit[] = [];
   private readonly archives: DailyCloseArchiveCommit["archive"][] = [];
 
+  /** 提供现金进出替身时，汇总的存入 / 取出 / 应有现金按它计算（与真实仓储同口径）。 */
+  public constructor(private readonly cashMovements?: MemoryCashMovementStore) {}
+
   public async summarize(scope: DailyCloseScope): Promise<DailyCloseSummary> {
+    const cash = this.cashMovements
+      ? await this.cashMovements.summarizePeriod(scope)
+      : { cashInCents: 0, cashOutCents: 0 };
     return {
       ...scope,
       orderCount: 1,
@@ -7673,9 +8004,9 @@ class MemoryDailyCloseRepository implements DailyCloseRepositoryPort {
         },
       ],
       cashRoundingCents: 0,
-      cashInCents: 0,
-      cashOutCents: 0,
-      expectedCashCents: 1_000,
+      cashInCents: cash.cashInCents,
+      cashOutCents: cash.cashOutCents,
+      expectedCashCents: 1_000 + cash.cashInCents - cash.cashOutCents,
     };
   }
 

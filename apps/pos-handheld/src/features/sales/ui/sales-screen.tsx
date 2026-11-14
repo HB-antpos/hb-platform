@@ -128,6 +128,8 @@ export type SalesScreenProps = Readonly<{
   }) => Promise<string | null>;
   onOpenAttendanceAudit?: () => void;
   onOpenCashDrawer?: () => Promise<SalesUtilityActionResult>;
+  /** 钱箱（现金存入 / 取出）入口；只有组合根开关开启时路由才会传入，缺省则工具栏不出现该项。 */
+  onOpenCashMovement?: () => void;
   onOpenCatalogMaintenance?: () => void;
   onOpenCameraScanner?: () => void;
   onOpenDailyClose?: () => void;
@@ -176,6 +178,7 @@ export function SalesScreen({
   resolveCartProductImage,
   onOpenAttendanceAudit,
   onOpenCashDrawer,
+  onOpenCashMovement,
   onOpenCameraScanner,
   onOpenCatalogMaintenance,
   onOpenDailyClose,
@@ -1355,6 +1358,17 @@ export function SalesScreen({
       testID: "sales-open-cash-drawer",
       tone: "quiet",
     },
+    ...(onOpenCashMovement
+      ? [
+          {
+            id: "cash-movement" as const,
+            label: t("functions.cashMovement"),
+            onPress: onOpenCashMovement,
+            testID: "sales-open-cash-movement",
+            tone: "quiet" as const,
+          },
+        ]
+      : []),
     ...(onOpenDailyClose
       ? [
           {

@@ -32,6 +32,12 @@ import { CATALOG_DOWNLOAD_PERMISSION } from "@hb/pos-domain/features/catalog/mai
 import type { CatalogFileSyncPort } from "../../features/catalog/catalog-file-sync";
 import { HbposCatalogLookupApi } from "../../features/catalog/remote-catalog-fallback";
 import { DurableCashCheckoutService } from "../../features/checkout/cash";
+import { CashMovementPresenter } from "../../features/cash-movement/cash-movement-presenter";
+import {
+  createCashMovementRuntimeService,
+  type CashMovementHardwarePort,
+  type PosCashMovementRuntimeService,
+} from "../../features/cash-movement/cash-movement-runtime";
 import { DailyClosePresenter } from "../../features/daily-close/daily-close-presenter";
 import type { DailyCloseRuntimeFactory } from "../../features/daily-close/daily-close-runtime";
 import {
@@ -168,6 +174,7 @@ import {
   type ReceiptProfileSyncTrigger,
 } from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
 import {
+  POS_SETTING_KEYS,
   PosSettingsService,
   type PosSettingsLogEvent,
   type PosSettingsSyncResult,
@@ -203,7 +210,9 @@ import type {
   CashierAuthenticationService,
 } from "../security/cashier-authentication";
 import { subscribeDeviceScopeChange } from "../security/device-session";
+import { CashMovementUploadService } from "@hb/pos-sync/core/sync/cash-movement-upload-service";
 import { DailyCloseUploadService } from "@hb/pos-sync/core/sync/daily-close-upload-service";
+import { HbposCashMovementSyncAdapter } from "@hb/pos-sync/core/sync/hbpos-cash-movement-sync-adapter";
 import { HbposDailyCloseSyncAdapter } from "@hb/pos-sync/core/sync/hbpos-daily-close-sync-adapter";
 import {
   HbposAuditBatchAdapter,
@@ -472,6 +481,11 @@ export type ProductionPosRuntimeServices = Readonly<{
   remoteHistory: RemoteHistoryPresenterFactory;
   specialProducts: SpecialProductsRuntimeFactory;
   dailyClose: DailyCloseRuntimeFactory;
+  /**
+   * 现金存入 / 取出（钱箱）：开关读取 / 订阅与弹窗 presenter 工厂。字段可选，旧组合 / 测试替身无需提供；
+   * 开关只决定销售页入口是否显示，不参与任何记录的汇总、上传与日结。
+   */
+  cashMovement?: PosCashMovementRuntimeService;
   sales: PosSalesRuntimeService;
   heldOrders: PosHeldOrdersRuntimeService;
   sharedHeldOrders: PosSharedHeldOrdersRuntimeService;
@@ -1388,11 +1402,26 @@ export function createProductionPosRuntimeServices(
     appVersion: input.auditMetadata.appVersion,
     now: input.clock.now,
   });
+  const cashMovementRepository = input.database.cashMovements();
+  const cashMovementUpload = new CashMovementUploadService({
+    repository: input.database.cashMovementUploads(),
+    sync: new HbposCashMovementSyncAdapter(input.transport),
+    // 上传范围固定为当前可信终端（storeCode/deviceCode），不随营业日变化；其它范围的行保持 pending 不动。
+    scope: () => ({
+      storeCode: input.auditMetadata.storeCode,
+      deviceCode: input.auditMetadata.deviceCode,
+    }),
+    clientKind: "Handheld",
+    appVersion: input.auditMetadata.appVersion,
+    now: input.clock.now,
+  });
   const coordinator = new PosSyncCoordinator({
     outbox: repositories.outbox,
     auditRepository: repositories.audit,
     auditDelivery: repositories.auditDelivery,
     dailyCloseUpload,
+    // 现金存入 / 取出上传：与 cashMovement.enabled 开关无关，注入即传；协调器每次 drain 先传现金进出、再传日结。
+    cashMovementUpload,
     orderSync: new HbposOrderSyncAdapter(
       input.transport,
       repositories.orders,
@@ -1422,6 +1451,105 @@ export function createProductionPosRuntimeServices(
     () => coordinator.requestDrain(),
   );
   const lifecycle = new SyncLifecycleController(coordinator);
+  // ───── 现金存入 / 取出（钱箱）─────
+  // 开关：优先取总部设置下发视图里的值；视图在 load() / 首次同步前 items 为空，此时用本机键值（默认关闭）兜底。
+  let cashMovementLocalEnabled = false;
+  const readCashMovementEnabled = (): boolean =>
+    posSettingsService
+      .getView()
+      .items.find((item) => item.key === POS_SETTING_KEYS.cashMovementEnabled)
+      ?.value ?? cashMovementLocalEnabled;
+  const cashMovementEnabledListeners = new Set<() => void>();
+  let lastNotifiedCashMovementEnabled = readCashMovementEnabled();
+  const notifyCashMovementEnabledChanged = (): void => {
+    const next = readCashMovementEnabled();
+    if (next === lastNotifiedCashMovementEnabled) return;
+    lastNotifiedCashMovementEnabled = next;
+    for (const listener of [...cashMovementEnabledListeners]) {
+      try {
+        listener();
+      } catch {
+        // 订阅方（界面刷新）出错不能影响设置同步。
+      }
+    }
+  };
+  const unsubscribeCashMovementEnabled = posSettingsService.subscribe(
+    notifyCashMovementEnabledChanged,
+  );
+  /** 启动时先读本机键值，再让设置视图可用；任何一步失败都保持关闭 / 旧值，不影响启动。 */
+  const initializeCashMovementEnabled = async (): Promise<void> => {
+    try {
+      cashMovementLocalEnabled = await posSettingsStore.readCashMovementEnabled();
+      notifyCashMovementEnabledChanged();
+    } catch {
+      // 读不到本机键值按关闭处理。
+    }
+    try {
+      await posSettingsService.load();
+    } catch {
+      // 视图保持空，继续使用本机键值。
+    }
+  };
+  // 开钱箱 / 打印凭条直接走硬件端口：不再要求 CashDrawer.Open 权限，设置里关闭则跳过，失败只提示。
+  const cashMovementHardware: CashMovementHardwarePort = {
+    async openDrawer(eventId) {
+      try {
+        const current = await baseReceiptSettings.get();
+        if (!current.drawerEnabled) return "skipped";
+        if (!isValidPeripheralId(current.peripheralId)) return "failed";
+        await printer.connect(current.peripheralId);
+        const result = await printer.open(eventId);
+        return result.status === "completed" ? "ok" : "failed";
+      } catch {
+        return "failed";
+      }
+    },
+    async printSlip(jobId, bytes) {
+      try {
+        const current = await baseReceiptSettings.get();
+        if (!current.printEnabled) return "skipped";
+        if (!isValidPeripheralId(current.peripheralId)) return "failed";
+        await printer.connect(current.peripheralId);
+        const result = await printer.print(jobId, bytes);
+        return result.status === "printed" ? "ok" : "failed";
+      } catch {
+        return "failed";
+      }
+    },
+    async receiptContext() {
+      const current = await baseReceiptSettings.get();
+      return {
+        paper: current.paper,
+        brandName: current.brandName,
+        storeName: current.storeName,
+      };
+    },
+  };
+  const cashMovementService = createCashMovementRuntimeService({
+    repository: cashMovementRepository,
+    authorization: operationAuthorization,
+    session: () => {
+      const session = trustedSalesSession(
+        currentCashier.createLease(),
+        input.auditMetadata,
+      );
+      return {
+        cashierId: session.cashierId,
+        cashierName: session.cashierName,
+        userGuid: session.userGuid,
+        permissionCodes: session.permissionCodes,
+        storeCode: session.storeCode,
+        deviceCode: session.deviceCode,
+      };
+    },
+    businessTimeZone: resolveRuntimeBusinessTimeZone(input.businessTimeZone),
+    createId: input.createId,
+    now: input.clock.now,
+    requestDrain: () => {
+      void coordinator.requestDrain().catch(() => undefined);
+    },
+    hardware: cashMovementHardware,
+  });
   const syncHistory = createSyncHistoryRuntime(
     input,
     coordinator,
@@ -1888,6 +2016,7 @@ export function createProductionPosRuntimeServices(
     async () => {
       dailyCloseReceiptSettings = await baseReceiptSettings.get();
       await recoverVoucherBalancePrints();
+      await initializeCashMovementEnabled();
     },
   );
   const initialize = (() =>
@@ -2174,6 +2303,7 @@ export function createProductionPosRuntimeServices(
         disposeDeviceScopeListener();
         // 中止在途的下发资料同步请求，之后的触发一律跳过。
         receiptProfileSync.dispose();
+        unsubscribeCashMovementEnabled();
         posSettingsService.dispose();
         if (refundSettlementTimer !== null) clearInterval(refundSettlementTimer);
         shutdown ??= Promise.all([
@@ -2287,6 +2417,21 @@ export function createProductionPosRuntimeServices(
     localHistory,
     remoteHistory,
     specialProducts,
+    cashMovement: {
+      isCashMovementEnabled: readCashMovementEnabled,
+      subscribeCashMovementEnabled: (listener) => {
+        cashMovementEnabledListeners.add(listener);
+        return () => {
+          cashMovementEnabledListeners.delete(listener);
+        };
+      },
+      createPresenter: () => {
+        assertRuntimeInitialized(initialize);
+        // 没有可信收银员 / 设备范围不符时直接抛错，路由不会弹出钱箱。
+        trustedSalesSession(currentCashier.createLease(), input.auditMetadata);
+        return new CashMovementPresenter({ service: cashMovementService });
+      },
+    },
     dailyClose: {
       createPresenter: () => {
         assertRuntimeInitialized(initialize);
@@ -2416,7 +2561,24 @@ export function createProductionPosRuntimeServices(
               ) {
                 throw new Error("DAILY_CLOSE_PRINTER_UNAVAILABLE");
               }
+              // 有现金存取才需要按原因拆分（取自同一营业日窗口的明细，不受开关与上传状态影响）；
+              // 读不到就不带拆分，回单仍会打印存入 / 取出合计。
+              let cashMovementByReason:
+                | Awaited<
+                    ReturnType<typeof cashMovementRepository.summarizePeriod>
+                  >["byReason"]
+                | undefined;
+              if (job.archive.cashInCents > 0 || job.archive.cashOutCents > 0) {
+                try {
+                  cashMovementByReason = (
+                    await cashMovementRepository.summarizePeriod(job.archive)
+                  ).byReason;
+                } catch {
+                  cashMovementByReason = undefined;
+                }
+              }
               const receiptInput = {
+                ...(cashMovementByReason ? { cashMovementByReason } : {}),
                 archive: job.archive,
                 locale: currentSettings.locale,
                 paper: currentSettings.paper,

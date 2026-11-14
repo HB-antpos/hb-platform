@@ -47,6 +47,7 @@ import {
   type ProductImageCacheFileSystemPort,
 } from "../../features/customer-display";
 import { CustomerDisplaySensitiveContentGuard } from "../../features/customer-display/customer-display-sensitive-content-guard";
+import type { PosCashMovementRuntimeService } from "../../features/cash-movement/cash-movement-runtime";
 import { DailyClosePresenter } from "../../features/daily-close/daily-close-presenter";
 import type { DailyCloseRuntimeFactory } from "../../features/daily-close/daily-close-runtime";
 import {
@@ -187,6 +188,7 @@ import {
   type ReceiptProfileSyncTrigger,
 } from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
 import {
+  POS_SETTING_KEYS,
   PosSettingsService,
   type PosSettingsLogEvent,
   type PosSettingsSyncResult,
@@ -224,6 +226,8 @@ import type {
 import { subscribeDeviceScopeChange } from "../security/device-session";
 import { DailyCloseUploadService } from "@hb/pos-sync/core/sync/daily-close-upload-service";
 import { HbposDailyCloseSyncAdapter } from "@hb/pos-sync/core/sync/hbpos-daily-close-sync-adapter";
+import { CashMovementUploadService } from "@hb/pos-sync/core/sync/cash-movement-upload-service";
+import { HbposCashMovementSyncAdapter } from "@hb/pos-sync/core/sync/hbpos-cash-movement-sync-adapter";
 import {
   HbposAuditBatchAdapter,
   HbposOrderSyncAdapter,
@@ -284,6 +288,7 @@ import {
   createPosSettingsAuditPort,
   createPosSettingsBindings,
 } from "./production-pos-settings";
+import { createCashMovementRuntime } from "./production-cash-movement";
 import { resolveTrustedReceiptPrinterSettings } from "./trusted-receipt-settings";
 
 export type { PosCashierSummary } from "./current-cashier-session";
@@ -529,6 +534,11 @@ export type ProductionPosRuntimeServices = Readonly<{
   specialProducts: SpecialProductsRuntimeFactory;
   customerDisplay: PosCustomerDisplayRuntimeService;
   dailyClose: DailyCloseRuntimeFactory;
+  /**
+   * 现金存入 / 取出（钱箱弹窗）。可选字段：缺省时销售页不显示「钱箱」入口。
+   * 开关 cashMovement.enabled 只控制入口是否显示，不参与记录的汇总、上传与日结。
+   */
+  cashMovement?: PosCashMovementRuntimeService;
   sales: PosSalesRuntimeService;
   heldOrders: PosHeldOrdersRuntimeService;
   sharedHeldOrders: PosSharedHeldOrdersRuntimeService;
@@ -1708,11 +1718,25 @@ export function createProductionPosRuntimeServices(
     appVersion: input.auditMetadata.appVersion,
     now: input.clock.now,
   });
+  const cashMovementUpload = new CashMovementUploadService({
+    repository: input.database.cashMovementUploads(),
+    sync: new HbposCashMovementSyncAdapter(input.transport),
+    scope: () => ({
+      storeCode: input.auditMetadata.storeCode,
+      deviceCode: input.auditMetadata.deviceCode,
+    }),
+    clientKind: "Ipad",
+    appVersion: input.auditMetadata.appVersion,
+    now: input.clock.now,
+  });
   const coordinator = new PosSyncCoordinator({
     outbox: repositories.outbox,
     auditRepository: repositories.audit,
     auditDelivery: repositories.auditDelivery,
     dailyCloseUpload,
+    // 现金存入 / 取出上传：与开关 cashMovement.enabled 无关，注入即传（关闭开关后已有记录照常上传）。
+    // scope 每轮现取可信终端范围，其它范围的行保持 pending 不动。
+    cashMovementUpload,
     orderSync: new HbposOrderSyncAdapter(
       input.transport,
       repositories.orders,
@@ -2213,11 +2237,95 @@ export function createProductionPosRuntimeServices(
           status: "unavailable",
           reason: "ATTENDANCE_SECURITY_ADAPTER_MISSING",
         };
+  // 现金存入 / 取出：开关 cashMovement.enabled 只控制销售页「钱箱」入口是否显示（默认关）。
+  // 关闭后已有记录照常汇总、上传、日结，所以仓储、上传与日结口径都不读这个值。
+  // 总部下发视图在 load() 之前是空的，先用本机键值初始化，再随视图订阅更新。
+  const cashMovementRepository = input.database.cashMovements();
+  let cashMovementEnabled = false;
+  const cashMovementEnabledListeners = new Set<() => void>();
+  const applyCashMovementEnabled = (enabled: boolean): void => {
+    if (cashMovementEnabled === enabled) return;
+    cashMovementEnabled = enabled;
+    for (const listener of [...cashMovementEnabledListeners]) {
+      try {
+        listener();
+      } catch {
+        // 界面订阅方出错不能影响设置同步。
+      }
+    }
+  };
+  const syncCashMovementEnabledFromView = (): void => {
+    const item = posSettingsService
+      .getView()
+      .items.find((entry) => entry.key === POS_SETTING_KEYS.cashMovementEnabled);
+    if (item) applyCashMovementEnabled(item.value);
+  };
+  posSettingsService.subscribe(syncCashMovementEnabledFromView);
+  const initializeCashMovementEnabled = async (): Promise<void> => {
+    try {
+      applyCashMovementEnabled(await posSettingsSyncStore.loadCashMovementEnabled());
+    } catch {
+      // 读不到本机键值按默认关闭，不阻止收银启动。
+    }
+    try {
+      await posSettingsService.load();
+      syncCashMovementEnabledFromView();
+    } catch {
+      // 视图加载失败时保持本机键值初始化的结果。
+    }
+  };
+  const cashMovement: PosCashMovementRuntimeService = {
+    isCashMovementEnabled: () => cashMovementEnabled,
+    subscribeCashMovementEnabled: (listener) => {
+      cashMovementEnabledListeners.add(listener);
+      return () => {
+        cashMovementEnabledListeners.delete(listener);
+      };
+    },
+    createRuntime: () => {
+      assertRuntimeInitialized(initialize);
+      const cashierLease = currentCashier.createLease();
+      // 没有可信收银员时这里直接抛 CURRENT_CASHIER_REQUIRED。
+      trustedSalesSession(cashierLease, input.auditMetadata);
+      return createCashMovementRuntime({
+        repository: cashMovementRepository,
+        authorization: operationAuthorization,
+        session: () => {
+          const session = trustedSalesSession(cashierLease, input.auditMetadata);
+          return {
+            cashierId: session.cashierId,
+            cashierName: session.cashierName,
+            userGuid: session.userGuid,
+            storeCode: session.storeCode,
+            deviceCode: session.deviceCode,
+            permissionCodes: session.permissionCodes,
+          };
+        },
+        businessTimeZone: resolveRuntimeBusinessTimeZone(input.businessTimeZone),
+        now: input.clock.now,
+        createId: input.createId,
+        readHardwareSettings: async () => {
+          const settings = await baseReceiptSettings.get();
+          return {
+            printEnabled: settings.printEnabled,
+            drawerEnabled: settings.drawerEnabled,
+            peripheralId: settings.peripheralId,
+            paper: settings.paper,
+            brandName: settings.brandName,
+            storeName: settings.storeName,
+          };
+        },
+        hardware: printer,
+        requestDrain: () => coordinator.requestDrain(),
+      });
+    },
+  };
   const combinedInitialize = createCombinedTerminalInitializer(
     heldCartInitialize,
     paymentRuntime.initializeRecovery,
     async () => {
       dailyCloseReceiptSettings = await baseReceiptSettings.get();
+      await initializeCashMovementEnabled();
       await customerDisplayCoordinator?.initialize();
       await recoverVoucherBalancePrints();
     },
@@ -2487,6 +2595,7 @@ export function createProductionPosRuntimeServices(
         // 中止在途的下发资料同步请求，之后的触发一律跳过。
         receiptProfileSync.dispose();
         posSettingsService.dispose();
+        cashMovementEnabledListeners.clear();
         if (refundSettlementTimer !== null) clearInterval(refundSettlementTimer);
         // 停止商品缩略图的排队与完成回调，退出后不再触发客显刷新。
         customerDisplayProductImageResolver?.dispose();
@@ -2670,6 +2779,7 @@ export function createProductionPosRuntimeServices(
             status: "unavailable",
             reason: "EXTERNAL_DISPLAY_ADAPTER_MISSING",
           },
+    cashMovement,
     dailyClose: {
       createPresenter: () => {
         assertRuntimeInitialized(initialize);
@@ -2799,8 +2909,31 @@ export function createProductionPosRuntimeServices(
               ) {
                 throw new Error("DAILY_CLOSE_PRINTER_UNAVAILABLE");
               }
+              // 有存入 / 取出时回单要打印按原因的明细：存档只存合计，明细按存档自己的营业日窗口重新汇总；
+              // 读取失败只丢明细（回单只打合计），不影响日结回单本身。
+              let cashMovementByReason:
+                | Awaited<
+                    ReturnType<typeof cashMovementRepository.summarizePeriod>
+                  >["byReason"]
+                | undefined;
+              if (job.archive.cashInCents > 0 || job.archive.cashOutCents > 0) {
+                try {
+                  cashMovementByReason = (
+                    await cashMovementRepository.summarizePeriod({
+                      businessDate: job.archive.businessDate,
+                      periodFromIso: job.archive.periodFromIso,
+                      periodToIso: job.archive.periodToIso,
+                      storeCode: job.archive.storeCode,
+                      deviceCode: job.archive.deviceCode,
+                    })
+                  ).byReason;
+                } catch {
+                  cashMovementByReason = undefined;
+                }
+              }
               const receiptInput = {
                 archive: job.archive,
+                cashMovementByReason,
                 locale: currentSettings.locale,
                 paper: currentSettings.paper,
                 reprint: job.reprint,

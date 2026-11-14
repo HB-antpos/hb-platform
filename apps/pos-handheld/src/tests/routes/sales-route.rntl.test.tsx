@@ -8,6 +8,7 @@ let mockActiveCashier: any;
 let mockSalesScreenProps: any;
 let mockRouteCaptureProps: any;
 let mockCameraScannerProps: any;
+let mockCashMovementScreenProps: any;
 let mockUpdateGate: any;
 let mockUpdatePolicy: any;
 let mockSalesRouteFocusEffect: (() => void) | null;
@@ -170,6 +171,22 @@ jest.mock("@/features/sales/ui", () => {
   };
 });
 
+jest.mock("@/features/cash-movement", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  const { Text } =
+    jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    CashMovementScreen: (props: unknown) => {
+      mockCashMovementScreenProps = props;
+      return React.createElement(
+        Text,
+        { testID: "cash-movement-screen-mock" },
+        "cash-movement",
+      );
+    },
+  };
+});
+
 jest.mock("@/features/sales/ui/sales-toolbar-order", () => ({
   reconcileSalesToolbarOrder: (order: readonly string[] | null | undefined) =>
     mockReconcileSalesToolbarOrder(order),
@@ -243,6 +260,7 @@ jest.mock("@/ui/shell/status-strip", () => {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSalesScreenProps = null;
+  mockCashMovementScreenProps = null;
   mockRouteCaptureProps = null;
   mockCameraScannerProps = null;
   mockSalesRouteFocusEffect = null;
@@ -1129,3 +1147,105 @@ function assertUtilityResult(
 ): void {
   expect(result).toEqual({ kind: expectedKind });
 }
+
+/** 钱箱运行时替身：开关可变、订阅可触发；createPresenter 返回带 destroy 的替身 presenter。 */
+function installCashMovementRuntime(initialEnabled: boolean) {
+  const state = { enabled: initialEnabled };
+  const listeners = new Set<() => void>();
+  const destroy = jest.fn();
+  const createPresenter = jest.fn(() => ({ destroy }));
+  mockRuntime.services.cashMovement = {
+    isCashMovementEnabled: () => state.enabled,
+    subscribeCashMovementEnabled: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    createPresenter,
+  };
+  return {
+    createPresenter,
+    destroy,
+    setEnabled(next: boolean) {
+      state.enabled = next;
+      for (const listener of [...listeners]) listener();
+    },
+  };
+}
+
+test("钱箱入口：服务没有钱箱能力（旧组合）或开关关闭时不暴露入口", async () => {
+  const absent = await render(<SalesRoute />);
+  await waitFor(() => expect(absent.getByTestId("sales-screen")).toBeTruthy());
+  expect(mockSalesScreenProps.onOpenCashMovement).toBeUndefined();
+  await absent.unmount();
+
+  mockRuntime = readyRuntime();
+  installCashMovementRuntime(false);
+  const off = await render(<SalesRoute />);
+  await waitFor(() => expect(off.getByTestId("sales-screen")).toBeTruthy());
+  expect(mockSalesScreenProps.onOpenCashMovement).toBeUndefined();
+  await off.unmount();
+});
+
+test("钱箱入口：开关开启时暴露入口，点击创建 presenter 并打开弹窗，关闭时销毁", async () => {
+  const cash = installCashMovementRuntime(true);
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => expect(screen.getByTestId("sales-screen")).toBeTruthy());
+  expect(typeof mockSalesScreenProps.onOpenCashMovement).toBe("function");
+  expect(screen.queryByTestId("cash-movement-screen-mock")).toBeNull();
+  // 弹窗没打开时 HID 扫码保持启用。
+  expect(mockRouteCaptureProps.enabled).toBe(true);
+
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+  });
+  expect(cash.createPresenter).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("cash-movement-screen-mock")).toBeTruthy();
+  // 弹窗打开期间不能让 HID 扫码枪写进后面的购物车。
+  expect(mockRouteCaptureProps.enabled).toBe(false);
+
+  await act(async () => {
+    mockCashMovementScreenProps.onClose();
+  });
+  expect(screen.queryByTestId("cash-movement-screen-mock")).toBeNull();
+  expect(cash.destroy).toHaveBeenCalledTimes(1);
+  expect(mockRouteCaptureProps.enabled).toBe(true);
+  await screen.unmount();
+});
+
+test("钱箱入口：运行中开关被总部关闭，入口消失且已打开的弹窗随之关闭；再次开启入口恢复", async () => {
+  const cash = installCashMovementRuntime(true);
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => expect(screen.getByTestId("sales-screen")).toBeTruthy());
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+  });
+  expect(screen.getByTestId("cash-movement-screen-mock")).toBeTruthy();
+
+  await act(async () => {
+    cash.setEnabled(false);
+  });
+  expect(mockSalesScreenProps.onOpenCashMovement).toBeUndefined();
+  expect(screen.queryByTestId("cash-movement-screen-mock")).toBeNull();
+  expect(cash.destroy).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    cash.setEnabled(true);
+  });
+  expect(typeof mockSalesScreenProps.onOpenCashMovement).toBe("function");
+  await screen.unmount();
+});
+
+test("钱箱入口：presenter 创建失败（无可信收银员等）时不弹出钱箱，也不影响销售页", async () => {
+  const cash = installCashMovementRuntime(true);
+  cash.createPresenter.mockImplementation(() => {
+    throw new Error("no trusted cashier");
+  });
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => expect(screen.getByTestId("sales-screen")).toBeTruthy());
+  await act(async () => {
+    mockSalesScreenProps.onOpenCashMovement();
+  });
+  expect(screen.queryByTestId("cash-movement-screen-mock")).toBeNull();
+  expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  await screen.unmount();
+});

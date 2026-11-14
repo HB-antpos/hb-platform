@@ -498,7 +498,8 @@
       "tests": [
         "apps/pos-ipad/src/features/daily-close/daily-close-domain.test.ts",
         "apps/pos-ipad/src/features/daily-close/daily-close-screen.rntl.test.tsx",
-        "apps/pos-ipad/src/features/daily-close/daily-close-route.rntl.test.tsx"
+        "apps/pos-ipad/src/features/daily-close/daily-close-route.rntl.test.tsx",
+        "apps/pos-ipad/src/features/daily-close/daily-close-cash-movement-recheck.test.ts"
       ],
       "blockers": [
         {
@@ -589,12 +590,16 @@
       "ipad": [
         "apps/pos-ipad/src/core/peripherals/printer/native/hb-printer-adapter.ts",
         "packages/pos-domain/src/features/fulfilment/fulfilment-service.ts",
-        "apps/pos-ipad/src/core/runtime/production-pos-service-composition.ts"
+        "apps/pos-ipad/src/core/runtime/production-pos-service-composition.ts",
+        "apps/pos-ipad/src/features/cash-movement/cash-movement-screen.tsx",
+        "apps/pos-ipad/src/core/runtime/production-cash-movement.ts"
       ],
       "tests": [
         "apps/pos-ipad/src/core/peripherals/printer/native/hb-printer-adapter.test.ts",
         "apps/pos-ipad/src/features/fulfilment/fulfilment-service.test.ts",
-        "apps/pos-ipad/src/core/db/sqlite-fulfilment-store.test.ts"
+        "apps/pos-ipad/src/core/db/sqlite-fulfilment-store.test.ts",
+        "apps/pos-ipad/src/features/cash-movement/cash-movement-presenter.test.ts",
+        "apps/pos-ipad/src/core/runtime/production-cash-movement.test.ts"
       ],
       "blockers": [
         {

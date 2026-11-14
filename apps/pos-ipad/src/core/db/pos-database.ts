@@ -51,6 +51,10 @@ import {
   SqliteAttendanceSecurityFacade,
   type AttendanceSecurityTerminalScope,
 } from "./sqlite-attendance-security-repository";
+import {
+  SqliteCashMovementRepository,
+  SqliteCashMovementUploadRepository,
+} from "@hb/pos-db/core/db/sqlite-cash-movement-repository";
 import { SqliteDailyCloseRepository } from "@hb/pos-db/core/db/sqlite-daily-close-repository";
 import { SqliteDailyCloseUploadRepository } from "@hb/pos-db/core/db/sqlite-daily-close-upload-repository";
 import { SqliteOrderSyncStatusRepository } from "@hb/pos-db";
@@ -311,6 +315,16 @@ export class PosDatabase implements DatabasePort {
   /** 日结记录上传 outbox（升级后补传历史日结）只经此窄 facade 访问上传状态列。 */
   public dailyCloseUploads(): SqliteDailyCloseUploadRepository {
     return new SqliteDailyCloseUploadRepository(this.connection);
+  }
+
+  /** 现金存入 / 取出明细：写入、今日列表、汇总只经此仓储（记录不可改不可删，冲正是新记录）。 */
+  public cashMovements(): SqliteCashMovementRepository {
+    return new SqliteCashMovementRepository(this.connection);
+  }
+
+  /** 现金进出上传 outbox（认领 / 租约 / 退避）只经此窄 facade 访问上传状态列。 */
+  public cashMovementUploads(): SqliteCashMovementUploadRepository {
+    return new SqliteCashMovementUploadRepository(this.connection);
   }
 
   /** 特殊商品全量替换、标记和设备本地顺序统一由同一事务仓储维护。 */

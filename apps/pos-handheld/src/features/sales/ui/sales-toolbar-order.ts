@@ -7,6 +7,7 @@ export type SalesToolbarActionId =
   | "held-orders"
   | "reprint-receipt"
   | "cash-drawer"
+  | "cash-movement"
   | "daily-close"
   | "remote-history"
   | "installments"
@@ -26,6 +27,7 @@ export const DEFAULT_SALES_TOOLBAR_ORDER = [
   "held-orders",
   "reprint-receipt",
   "cash-drawer",
+  "cash-movement",
   "daily-close",
   "remote-history",
   "installments",
