@@ -52,6 +52,10 @@ internal static class OperationAuditTypes
 
     // 日结后提示并重启收银机；Outcome 取 Succeeded（已下发重启）/ Failed（命令失败）/ Skipped（稍后、取消、被拦）。
     public const string SystemRestart = "SYSTEM_RESTART";
+
+    // 离线期间在本机临时改了总部下发的业务开关（恢复联网后会被总部值覆盖）；ReasonCode 取 OFFLINE（在业务开关页改的）
+    // / DETECTED（重连时发现某项与总部值不一致、但没有登记过修改，例如在原来的付款方式页里改的）。
+    public const string PosSettingOfflineOverride = "POS_SETTING_OFFLINE_OVERRIDE";
 }
 
 internal sealed record OperationAuditCartSnapshot(

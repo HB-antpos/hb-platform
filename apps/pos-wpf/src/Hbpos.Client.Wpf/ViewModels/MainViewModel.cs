@@ -61,6 +61,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IReceiptTextFormatter _receiptTextFormatter;
     private readonly IStoreReceiptProfileApiClient? _storeReceiptProfileApiClient;
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
+    private IPosSettingsService? _posSettingsService;
     private readonly IMobileAppDownloadService? _mobileAppDownloadService;
     private readonly IHeldOrderTodayCountService? _heldOrderTodayCountService;
     private readonly ICashMovementService? _cashMovementService;
@@ -884,6 +885,34 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     internal void ConfigureZellerSettings(Services.Zeller.ZellerSettingsCoordinator? coordinator)
     {
         _mainChildViewModelFactory.ZellerSettingsCoordinator = coordinator;
+    }
+
+    /// <summary>
+    /// 配置总部下发的收银端设置（业务开关）：联网探测结果告诉它（在线锁定 / 离线解锁）、搭探测节拍同步，
+    /// 并立刻读一遍本机缓存——离线启动时没有探测成功的那一拍，钱箱面板等也要按上次下发的值显示。
+    /// </summary>
+    internal void ConfigurePosSettings(IPosSettingsService? service)
+    {
+        _posSettingsService = service;
+        _mainChildViewModelFactory.PosSettingsService = service;
+        if (service is null)
+        {
+            return;
+        }
+
+        _ = RefreshPosSettingsAtStartupAsync(service);
+    }
+
+    private static async Task RefreshPosSettingsAtStartupAsync(IPosSettingsService service)
+    {
+        try
+        {
+            await service.RefreshAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.Write("PosSettings", $"startup refresh failed error={ex.GetType().Name}");
+        }
     }
 
     /// <summary>收银员登录成功后切换到其个人配色（没有偏好时由回调弹首次选择窗）；未配置时保持本机配色。</summary>
@@ -2663,6 +2692,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // 小票资料同步放在待传订单重试之前：它每 4 拍才真正请求一次、单轮有 20 秒预算，
                 // 而订单重试可能很久，不能让总部下发的资料被它拖慢生效。
                 await TrySyncReceiptProfileAsync(refreshCancellation);
+                // 总部下发的业务开关紧跟在小票资料之后：同样每 4 拍才真正请求一次，且同样要先于订单重试生效。
+                await TrySyncPosSettingsAsync(refreshCancellation);
                 // 促销同样放在订单重试之前：PDA / 后台新建的促销要尽快在收银端生效。
                 await TryRefreshPromotionsAsync(refreshCancellation);
                 await TryAutoRetryPendingOrdersAsync(refreshCancellation);
@@ -2716,9 +2747,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 Session = Session with { IsOnline = isOnline };
             }
-
-            return true;
         }
+
+        // 总部下发的开关：在线锁定、离线解锁，与状态栏「在线 / 离线」同一个判断；状态没变时服务内部不会再通知。
+        _posSettingsService?.ReportConnectivity(isOnline);
+        return true;
     }
 
     private async Task TryInitialCatalogSyncAsync()
@@ -2774,6 +2807,28 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         catch (Exception ex)
         {
             ConsoleLog.Write("ReceiptProfile", $"scheduled sync failed error={ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>挂在连接探测流程里同步总部下发的业务开关；失败只记日志，不影响探测。</summary>
+    private async Task TrySyncPosSettingsAsync(CancellationToken cancellationToken)
+    {
+        if (_posSettingsService is null || IsLifetimeEnding)
+        {
+            return;
+        }
+
+        try
+        {
+            await _posSettingsService.RunScheduledTickAsync(cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || IsLifetimeEnding)
+        {
+            // 关闭时的预期取消。
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.Write("PosSettings", $"scheduled sync failed error={ex.GetType().Name}");
         }
     }
 

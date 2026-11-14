@@ -666,4 +666,46 @@
   <data name="settings.zeller.unmatchedRefund.status.enabled" xml:space="preserve"><value>Unmatched refunds are on. A refund can now go to any card the customer presents.</value></data>
   <data name="settings.zeller.unmatchedRefund.status.disabled" xml:space="preserve"><value>Unmatched refunds are off.</value></data>
   <data name="settings.zeller.unmatchedRefund.status.saveFailed" xml:space="preserve"><value>Could not save the unmatched refund setting. Please try again.</value></data>
+  <data name="settings.category.posSettings" xml:space="preserve"><value>Business switches</value></data>
+  <data name="settings.subtitle.posSettings" xml:space="preserve"><value>Business switches</value></data>
+  <data name="settings.page.posSettings.description" xml:space="preserve"><value>Switches set by head office are locked on this register, with the level they come from shown next to each one.</value></data>
+  <data name="settings.posSettings.syncedAt" xml:space="preserve"><value>Head office settings · last synced {0}</value></data>
+  <data name="settings.posSettings.neverSynced" xml:space="preserve"><value>Head office settings · not synced yet</value></data>
+  <data name="settings.posSettings.syncNow" xml:space="preserve"><value>Sync now</value></data>
+  <data name="settings.posSettings.syncing" xml:space="preserve"><value>Syncing...</value></data>
+  <data name="settings.posSettings.offline.title" xml:space="preserve"><value>Offline: head office settings can be changed on this register for now</value></data>
+  <data name="settings.posSettings.offline.detail" xml:space="preserve"><value>Temporary changes only apply on this register. Once the connection is back and settings sync, head office settings overwrite them and the changes are reported.</value></data>
+  <data name="settings.posSettings.status.locked" xml:space="preserve"><value>Head office · {0}</value></data>
+  <data name="settings.posSettings.status.lockedDefault" xml:space="preserve"><value>Head office default</value></data>
+  <data name="settings.posSettings.status.offlineEditable" xml:space="preserve"><value>Editable offline</value></data>
+  <data name="settings.posSettings.status.offlineOverride" xml:space="preserve"><value>Changed offline</value></data>
+  <data name="settings.posSettings.scope.global" xml:space="preserve"><value>Global</value></data>
+  <data name="settings.posSettings.scope.store" xml:space="preserve"><value>Store</value></data>
+  <data name="settings.posSettings.scope.device" xml:space="preserve"><value>Device</value></data>
+  <data name="settings.posSettings.toggle.locked" xml:space="preserve"><value>This setting is controlled by head office and cannot be changed here.</value></data>
+  <data name="settings.posSettings.toggle.failed" xml:space="preserve"><value>Could not save the setting. It was not changed.</value></data>
+  <data name="settings.posSettings.sync.applied" xml:space="preserve"><value>Head office settings updated.</value></data>
+  <data name="settings.posSettings.sync.upToDate" xml:space="preserve"><value>Head office settings are already up to date.</value></data>
+  <data name="settings.posSettings.sync.discarded" xml:space="preserve"><value>Head office settings response was invalid and was ignored.</value></data>
+  <data name="settings.posSettings.sync.failed" xml:space="preserve"><value>Could not sync head office settings. Will retry automatically.</value></data>
+  <data name="settings.posSettings.sync.serverUnsupported" xml:space="preserve"><value>The server does not support head office settings yet. This register keeps its own values.</value></data>
+  <data name="settings.posSettings.sync.notReady" xml:space="preserve"><value>This register is not registered yet, so there are no head office settings to sync.</value></data>
+  <data name="settings.posSettings.item.cashMovement.title" xml:space="preserve"><value>Cash in / out</value></data>
+  <data name="settings.posSettings.item.cashMovement.description" xml:space="preserve"><value>Cash in, cash out and today's records in the drawer panel on the sidebar</value></data>
+  <data name="settings.posSettings.item.noSaleRescan.title" xml:space="preserve"><value>Rescan staff code for No Sale</value></data>
+  <data name="settings.posSettings.item.noSaleRescan.description" xml:space="preserve"><value>Opening the drawer without a sale needs a staff code scan even if you have permission</value></data>
+  <data name="settings.posSettings.item.returnsRescan.title" xml:space="preserve"><value>Rescan staff code for returns</value></data>
+  <data name="settings.posSettings.item.returnsRescan.description" xml:space="preserve"><value>Scan a staff code again when tapping Returns</value></data>
+  <data name="settings.posSettings.item.bankReceipt.title" xml:space="preserve"><value>Attach bank receipt to customer receipt</value></data>
+  <data name="settings.posSettings.item.bankReceipt.description" xml:space="preserve"><value>Print the bank transaction slip after the card receipt</value></data>
+  <data name="settings.posSettings.item.manualCard.title" xml:space="preserve"><value>Manual card</value></data>
+  <data name="settings.posSettings.item.manualCard.description" xml:space="preserve"><value>Show Manual card on the payment page (no card terminal)</value></data>
+  <data name="settings.posSettings.item.voucher.title" xml:space="preserve"><value>Vouchers</value></data>
+  <data name="settings.posSettings.item.voucher.description" xml:space="preserve"><value>Accept vouchers on the payment page</value></data>
+  <data name="settings.posSettings.item.orderList.title" xml:space="preserve"><value>Show order list on payment page</value></data>
+  <data name="settings.posSettings.item.orderList.description" xml:space="preserve"><value>Show the item list on the left of the payment page</value></data>
+  <data name="settings.posSettings.item.autoRestart.title" xml:space="preserve"><value>Restart overnight after daily close</value></data>
+  <data name="settings.posSettings.item.autoRestart.description" xml:space="preserve"><value>Prompt after daily close and restart this register overnight</value></data>
+  <data name="settings.posSettings.item.zellerUnmatchedRefund.title" xml:space="preserve"><value>Zeller unmatched refunds</value></data>
+  <data name="settings.posSettings.item.zellerUnmatchedRefund.description" xml:space="preserve"><value>Allow refunds that are not linked to the original transaction</value></data>
 </root>

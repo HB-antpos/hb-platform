@@ -80,6 +80,12 @@ public sealed partial class SettingsViewModel
             return;
         }
 
+        // 总部锁定的开关只能由同步写入，界面上的变化不保存。
+        if (IsPosSettingLocked(PosSettingKeys.AutoRestart))
+        {
+            return;
+        }
+
         // 自动保存开启时交给保存跟踪器：失败会显示在卡片上，离开设置页时提示。
         if (_autoSaveEnabled)
         {

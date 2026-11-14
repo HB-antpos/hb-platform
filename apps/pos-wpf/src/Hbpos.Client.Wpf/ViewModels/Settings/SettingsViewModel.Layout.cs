@@ -38,6 +38,7 @@ public sealed partial class SettingsViewModel
         SettingsCategory.ReceiptPrinter => ReceiptPrinterTitleText,
         SettingsCategory.DeviceRegistration => T("settings.category.deviceRegistrationNav"),
         SettingsCategory.RemoteMaintenance => RemoteMaintenanceTitleText,
+        SettingsCategory.PosSettings => PosSettingsTitleText,
         _ => T("settings.category.mobileAppDownload")
     };
 
@@ -48,6 +49,7 @@ public sealed partial class SettingsViewModel
         SettingsCategory.ReceiptPrinter => T("settings.receiptPrinter.description"),
         SettingsCategory.DeviceRegistration => T("settings.page.deviceRegistration.description"),
         SettingsCategory.RemoteMaintenance => RemoteMaintenanceDescriptionText,
+        SettingsCategory.PosSettings => T("settings.page.posSettings.description"),
         _ => T("mobileApp.description")
     };
 

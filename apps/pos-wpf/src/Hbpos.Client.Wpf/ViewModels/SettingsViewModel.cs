@@ -21,7 +21,9 @@ public enum SettingsCategory
     ReceiptPrinter,
     DeviceRegistration,
     RemoteMaintenance,
-    MobileAppDownload
+    MobileAppDownload,
+    // 追加在末尾：设置页 XAML 里分类页面的并列顺序与枚举值一一对应，不能打乱前六项的下标。
+    PosSettings
 }
 
 public enum LinklySettingsMode
@@ -337,9 +339,11 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         IScannerSettingsStore? scannerSettingsStore = null,
         bool autoSaveSettings = false,
         Func<TimeSpan, CancellationToken, Task>? autoSaveDelay = null,
-        ZellerSettingsCoordinator? zellerSettingsCoordinator = null)
+        ZellerSettingsCoordinator? zellerSettingsCoordinator = null,
+        IPosSettingsService? posSettingsService = null)
     {
         _setupService = setupService;
+        _posSettingsService = posSettingsService;
         _zellerCoordinator = zellerSettingsCoordinator;
         _systemRestartSettingsStore = systemRestartSettingsStore;
         _restartCoordinatorProvider = restartCoordinatorProvider;
@@ -428,6 +432,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
         InitializeCatalogSyncStatus();
         InitializeReceiptProfileSync();
+        InitializePosSettings();
 
         SelectDataMaintenanceCommand = new RelayCommand(() => SelectedCategory = SettingsCategory.DataMaintenance);
         SelectPaymentTerminalCommand = new AsyncRelayCommand(() => SelectCategoryAsync(SettingsCategory.PaymentTerminal, Permissions.PosTerminal.Settings.PaymentTerminal));
@@ -501,6 +506,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 
         ReleaseCatalogSyncStatus();
         ReleaseReceiptProfileSync();
+        ReleasePosSettings();
         ReleaseAutoSave();
     }
 
@@ -644,6 +650,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         SettingsCategory.DeviceRegistration => T("settings.subtitle.deviceRegistration"),
         SettingsCategory.RemoteMaintenance => RemoteMaintenanceTitleText,
         SettingsCategory.MobileAppDownload => T("settings.subtitle.mobileAppDownload"),
+        SettingsCategory.PosSettings => T("settings.subtitle.posSettings"),
         _ => T("settings.title")
     };
 
@@ -883,6 +890,8 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         _autoSave.ResetAll();
         RefreshServerAddressDraftState();
         ResetCategoryAfterLoad();
+        // 进入设置页：让总部设置服务从各开关真正的存储重建状态，并套用到「业务开关」页与旧页面的锁定。
+        await ReloadPosSettingsAsync(refreshService: true);
     }
 
     private async Task LoadCoreAsync()
@@ -2739,6 +2748,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ZellerTitleText));
         OnPropertyChanged(nameof(ZellerStatusText));
         OnPropertyChanged(nameof(ZellerActiveText));
+        RaisePosSettingsLocalizedProperties();
         MobileAppDownload.RaiseLocalizedProperties();
         OnPropertyChanged(nameof(RemoteMaintenanceProgressText));
         OnPropertyChanged(nameof(LinklyTitleText));
@@ -2793,6 +2803,7 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(IsDeviceRegistrationSelected));
         OnPropertyChanged(nameof(IsRemoteMaintenanceSelected));
         OnPropertyChanged(nameof(IsMobileAppDownloadSelected));
+        OnPropertyChanged(nameof(IsPosSettingsSelected));
         ResetSubTabsForCategory();
         RaisePageHeaderProperties();
         RaiseAutoSaveProperties();
@@ -2833,14 +2844,15 @@ public sealed partial class SettingsViewModel : ObservableObject, IDisposable
             ReceiptAbnText,
             ReceiptReturnPolicyText,
             ReceiptPrinterSettings.Default.CutDistance,
-            ReceiptPrintBankReceiptText,
+            // 总部锁定的开关一律取服务里的值，不让界面上的旧草稿把同步写穿的总部值覆盖回去。
+            EffectivePosSettingValue(PosSettingKeys.BankReceipt, ReceiptPrintBankReceiptText),
             // 版本只由同步写入；存储层保存时也不会读取它，这里带上仅为让保存后回显与界面状态一致。
             ReceiptProfileVersion,
             ReceiptVoucherTermsText,
             ReceiptInstallmentTermsText,
             // 两个「再次扫码」开关都必须显式传入：不传会落回默认值 false，保存时把已开启的开关静默关掉。
-            ReceiptNoSaleCashDrawerRequiresRescan,
-            ReceiptReturnsRequireRescan);
+            EffectivePosSettingValue(PosSettingKeys.NoSaleRescan, ReceiptNoSaleCashDrawerRequiresRescan),
+            EffectivePosSettingValue(PosSettingKeys.ReturnsRescan, ReceiptReturnsRequireRescan));
     }
 
     partial void OnIsSquareSandboxChanged(bool value)

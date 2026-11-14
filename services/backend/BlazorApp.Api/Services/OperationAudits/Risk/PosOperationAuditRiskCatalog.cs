@@ -35,6 +35,8 @@ public static class PosOperationAuditRiskCatalog
     /// <summary>
     /// 危险操作：直接改变应收金额、现金或收银环境。重打印、自动开钱箱不在其中（日常动作，会淹没真正的危险操作）；
     /// 手动开钱箱单独判断（<see cref="IsDanger"/>）。
+    /// POS_SETTING_OFFLINE_OVERRIDE（离线时在本机改了总部下发的业务开关）属于收银环境被改动，同 API_SERVER_CHANGE 一并核查。
+    /// 注意：Web / 移动端契约测试按逗号切分解析本列表，列表体内不要写带逗号的注释。
     /// </summary>
     public static readonly IReadOnlyList<string> DangerOperations =
     [
@@ -53,6 +55,7 @@ public static class PosOperationAuditRiskCatalog
         "REMOTE_MAINTENANCE_INSTALL",
         "CATALOG_RESET",
         "TEST_SALES_DATA_RESET",
+        "POS_SETTING_OFFLINE_OVERRIDE",
     ];
 
     /// <summary>应收减少 = 操作前后实收差额的操作；退款另按退款金额计。</summary>

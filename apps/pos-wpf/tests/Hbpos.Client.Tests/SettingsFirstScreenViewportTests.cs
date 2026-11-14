@@ -35,8 +35,8 @@ public sealed class SettingsFirstScreenViewportTests(PaymentViewRuntimeStaTestHo
     private const double NavButtonHeight = 48;
     private const double Tolerance = 1;
 
-    // 六个分类页面在 XAML 里的并列顺序与 SettingsCategory 枚举顺序一致。
-    private const int PageCount = 6;
+    // 七个分类页面（含总部下发的「业务开关」页，枚举值 6，XAML 里放在最后）在 XAML 里的并列顺序与 SettingsCategory 枚举顺序一致。
+    private const int PageCount = 7;
 
     [Fact]
     public Task Data_maintenance_first_screen_skeleton() =>
@@ -81,7 +81,7 @@ public sealed class SettingsFirstScreenViewportTests(PaymentViewRuntimeStaTestHo
                     Assert.Equal(PageCount, pages.Count);
                     for (var index = 0; index < pages.Count; index++)
                     {
-                        // 六个页面并列放在同一个单元格里，只有当前分类的页面可见。
+                        // 七个页面并列放在同一个单元格里，只有当前分类的页面可见。
                         var expected = index == (int)category ? Visibility.Visible : Visibility.Collapsed;
                         Assert.Equal(expected, pages[index].Visibility);
                     }

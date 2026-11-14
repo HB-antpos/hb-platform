@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
+using BlazorApp.Shared.Constants;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Hbpos.Client.Wpf.Services;
@@ -235,9 +236,15 @@ public sealed partial class SettingsViewModel
     /// <summary>加载 / 回显存储内容期间的赋值不是用户修改，不能触发保存或草稿。</summary>
     private AutoSaveSuppression SuppressAutoSave() => new(this);
 
-    private void MarkAutoSaveChanged(string key, TimeSpan delay)
+    /// <param name="posSettingKey">该字段对应的总部可下发开关键；被总部锁定时字段变化不触发保存（锁定值只能由同步写入）。</param>
+    private void MarkAutoSaveChanged(string key, TimeSpan delay, string? posSettingKey = null)
     {
         if (!_autoSaveEnabled || IsAutoSaveSuppressed)
+        {
+            return;
+        }
+
+        if (posSettingKey is not null && IsPosSettingLocked(posSettingKey))
         {
             return;
         }
@@ -245,19 +252,19 @@ public sealed partial class SettingsViewModel
         _autoSave.MarkChanged(key, delay);
     }
 
-    partial void OnUseManualCardChanged(bool value) => MarkAutoSaveChanged(PaymentMethodsSaveKey, TimeSpan.Zero);
+    partial void OnUseManualCardChanged(bool value) => MarkAutoSaveChanged(PaymentMethodsSaveKey, TimeSpan.Zero, PosSettingKeys.ManualCard);
 
-    partial void OnVoucherEnabledChanged(bool value) => MarkAutoSaveChanged(PaymentMethodsSaveKey, TimeSpan.Zero);
+    partial void OnVoucherEnabledChanged(bool value) => MarkAutoSaveChanged(PaymentMethodsSaveKey, TimeSpan.Zero, PosSettingKeys.Voucher);
 
-    partial void OnShowOrderListChanged(bool value) => MarkAutoSaveChanged(PaymentMethodsSaveKey, TimeSpan.Zero);
+    partial void OnShowOrderListChanged(bool value) => MarkAutoSaveChanged(PaymentMethodsSaveKey, TimeSpan.Zero, PosSettingKeys.OrderList);
 
     partial void OnReceiptPrinterPortTextChanged(string value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TextAutoSaveDelay);
 
-    partial void OnReceiptPrintBankReceiptTextChanged(bool value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TimeSpan.Zero);
+    partial void OnReceiptPrintBankReceiptTextChanged(bool value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TimeSpan.Zero, PosSettingKeys.BankReceipt);
 
-    partial void OnReceiptNoSaleCashDrawerRequiresRescanChanged(bool value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TimeSpan.Zero);
+    partial void OnReceiptNoSaleCashDrawerRequiresRescanChanged(bool value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TimeSpan.Zero, PosSettingKeys.NoSaleRescan);
 
-    partial void OnReceiptReturnsRequireRescanChanged(bool value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TimeSpan.Zero);
+    partial void OnReceiptReturnsRequireRescanChanged(bool value) => MarkAutoSaveChanged(ReceiptHardwareSaveKey, TimeSpan.Zero, PosSettingKeys.ReturnsRescan);
 
     partial void OnReceiptBrandNameTextChanged(string value) => MarkAutoSaveChanged(ReceiptStoreSaveKey, TextAutoSaveDelay);
 
@@ -426,7 +433,8 @@ public sealed partial class SettingsViewModel
             return SettingsSaveResult.Success;
         }
 
-        var enabled = IsRestartPromptEnabled;
+        // 总部锁定时取服务里的值，不让界面上的旧值覆盖同步写穿的总部值。
+        var enabled = EffectivePosSettingValue(PosSettingKeys.AutoRestart, IsRestartPromptEnabled);
         try
         {
             await _systemRestartSettingsStore.SetPromptEnabledAsync(enabled, cancellationToken);
@@ -448,7 +456,11 @@ public sealed partial class SettingsViewModel
         }
 
         // 三个开关作为同一份本机配置写入；进入「支付终端」分类时已授权。
-        var settings = new PaymentMethodSettings(UseManualCard, VoucherEnabled, ShowOrderList);
+        // 被总部锁定的项取服务里的值（整份写回时不覆盖同步写穿的总部值）。
+        var settings = new PaymentMethodSettings(
+            EffectivePosSettingValue(PosSettingKeys.ManualCard, UseManualCard),
+            EffectivePosSettingValue(PosSettingKeys.Voucher, VoucherEnabled),
+            EffectivePosSettingValue(PosSettingKeys.OrderList, ShowOrderList));
         try
         {
             await _paymentMethodSettingsService.SaveAsync(settings);
@@ -501,7 +513,7 @@ public sealed partial class SettingsViewModel
     private void ResetCategoryAfterLoad()
     {
         if (_autoSaveEnabled &&
-            SelectedCategory is SettingsCategory.PaymentTerminal or SettingsCategory.ReceiptPrinter or SettingsCategory.DeviceRegistration)
+            SelectedCategory is SettingsCategory.PaymentTerminal or SettingsCategory.ReceiptPrinter or SettingsCategory.DeviceRegistration or SettingsCategory.PosSettings)
         {
             SelectedCategory = SettingsCategory.DataMaintenance;
         }
@@ -635,6 +647,7 @@ public sealed partial class SettingsViewModel
         SettingsCategory.PaymentTerminal => T("settings.category.paymentTerminal"),
         SettingsCategory.ReceiptPrinter => T("settings.category.receiptPrinter"),
         SettingsCategory.DeviceRegistration => T("settings.category.deviceRegistrationNav"),
+        SettingsCategory.PosSettings => T("settings.category.posSettings"),
         // 远程维护 / App 下载没有可保存的设置，不会出现在离开提示里。
         _ => T("settings.category.mobileAppDownload")
     };

@@ -330,6 +330,8 @@ public sealed class OperationAuditIngestServiceTests
     [InlineData("SYSTEM_RESTART", "Failed", "COMMAND_FAILED")]
     [InlineData("SYSTEM_RESTART", "Skipped", "BLOCKED_PAYMENT")]
     [InlineData("SYSTEM_RESTART", "Skipped", "PROMPT_LATER")]
+    [InlineData("POS_SETTING_OFFLINE_OVERRIDE", "Succeeded", "OFFLINE")]
+    [InlineData("POS_SETTING_OFFLINE_OVERRIDE", "Succeeded", "DETECTED")]
     public async Task IngestAsync_accepts_system_operation_types(
         string operationType,
         string outcome,
@@ -351,6 +353,32 @@ public sealed class OperationAuditIngestServiceTests
         Assert.Equal(operationType, persisted.OperationType);
         Assert.Equal(outcome, persisted.Outcome);
         Assert.Equal(reasonCode, persisted.ReasonCode);
+    }
+
+    [Fact]
+    public async Task IngestAsync_keeps_pos_setting_offline_override_message_and_empty_actor()
+    {
+        // 离线改设置的 SafeMessage 形如「键: 旧值 -> 新值 (headquarters store=总部值)」，不能被脱敏规则改写；
+        // 操作人可为空（收银员未登录时在设置页修改）。
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = "POS_SETTING_OFFLINE_OVERRIDE";
+        request.Events[0].Outcome = "Succeeded";
+        request.Events[0].ReasonCode = "OFFLINE";
+        request.Events[0].SafeMessage = "payment.manualCard: false -> true (headquarters store=false)";
+        request.Events[0].CashierId = null;
+        request.Events[0].UserGuid = null;
+        request.Events[0].CashierName = null;
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.AcceptedCount);
+        var persisted = Assert.Single(await fixture.PosmDb.Queryable<PosOperationAudit>().ToListAsync());
+        Assert.Equal("payment.manualCard: false -> true (headquarters store=false)", persisted.SafeMessage);
+        Assert.Null(persisted.CashierId);
+        Assert.Null(persisted.CashierName);
     }
 
     [Fact]
@@ -377,6 +405,7 @@ public sealed class OperationAuditIngestServiceTests
     [Theory]
     [InlineData("PAYMENT_CANCEL")]
     [InlineData("API_SERVER_CHANGE")]
+    [InlineData("POS_SETTING_OFFLINE_OVERRIDE")]
     public async Task IngestAsync_rejects_skipped_outcome_for_other_operation_types(string operationType)
     {
         // Skipped 只对 SYSTEM_RESTART 开放，其他类型仍按三态校验。

@@ -48,9 +48,10 @@ public sealed class SqlSugarOperationAuditIngestService(
         "DAILY_CLOSE_SAVE", "DAILY_CLOSE_REPRINT",
         "LINKLY_SETTLEMENT", "LINKLY_SETTLEMENT_REPRINT", "PERMISSION_OVERRIDE",
         "INSTALLMENT_PICKUP_CONFIRM", "INSTALLMENT_LINES_AMEND", "SPECIAL_PRODUCT_PRICE_CHANGE",
-        // 收银端系统级操作：重置商品目录、重置测试销售数据、设备换绑、切换服务器地址、安装远程维护、收银机重启。
+        // 收银端系统级操作：重置商品目录、重置测试销售数据、设备换绑、切换服务器地址、安装远程维护、收银机重启、
+        // 离线时在本机临时修改总部下发的业务开关（POS_SETTING_OFFLINE_OVERRIDE，ReasonCode 为 OFFLINE / DETECTED）。
         "CATALOG_RESET", "TEST_SALES_DATA_RESET", "DEVICE_REREGISTER", "API_SERVER_CHANGE",
-        "REMOTE_MAINTENANCE_INSTALL", "SYSTEM_RESTART"
+        "REMOTE_MAINTENANCE_INSTALL", "SYSTEM_RESTART", "POS_SETTING_OFFLINE_OVERRIDE"
     };
 
     // 仅个别操作类型才允许的额外 Outcome：收银机重启可能被购物车/付款/更新等条件拦下，记为 Skipped。

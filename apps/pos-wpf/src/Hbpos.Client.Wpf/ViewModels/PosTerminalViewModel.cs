@@ -70,6 +70,8 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     private readonly TimeProvider _timeProvider;
     private bool _isOpeningPayment;
     private bool _disposed;
+    private readonly IPosSettingsService? _posSettingsService;
+    private readonly System.Windows.Threading.Dispatcher? _posSettingsDispatcher;
 
     [ObservableProperty]
     private PosSessionState _session;
@@ -153,9 +155,19 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         IHeldOrderTodayCountService? heldOrderTodayCountService = null,
         ICashMovementService? cashMovementService = null,
         ICashMovementPrintService? cashMovementPrintService = null,
-        Func<CancellationToken, Task<decimal?>>? loadExpectedCashAsync = null)
+        Func<CancellationToken, Task<decimal?>>? loadExpectedCashAsync = null,
+        IPosSettingsService? posSettingsService = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
+        // 总部下发的「现金存入 / 取出」开关；为 null（测试 / 预览）时只要注入了现金进出服务就显示钱箱面板，保持原行为。
+        _posSettingsService = posSettingsService;
+        if (_posSettingsService is not null)
+        {
+            _posSettingsDispatcher = SynchronizationContext.Current is System.Windows.Threading.DispatcherSynchronizationContext
+                ? System.Windows.Threading.Dispatcher.CurrentDispatcher
+                : null;
+            _posSettingsService.Changed += OnPosSettingsChanged;
+        }
         // 「取单」按钮角标的统计服务；为 null（测试 / 预览）时不显示角标、不起定时器。
         _heldOrderTodayCountService = heldOrderTodayCountService;
         _heldOrderCountScope = (session.StoreCode, session.DeviceCode, session.IsOnline, session.CashierSession is not null);
@@ -397,13 +409,49 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     /// <summary>收银端现金存入 / 取出；为 null 时侧栏按钮保持原来的「开钱箱」。</summary>
     public CashMovementViewModel? CashMovement { get; }
 
-    public bool IsCashMovementEnabled => CashMovement is not null;
+    /// <summary>
+    /// 钱箱面板是否启用：既要有现金进出服务，也要总部（全局 / 门店 / 设备）开了「现金存入 / 取出」。
+    /// 没开（含总部从未设置、缺省为关）时侧栏仍是原来的「开钱箱」，面板整块不显示。
+    /// </summary>
+    public bool IsCashMovementEnabled =>
+        CashMovement is not null && (_posSettingsService?.IsCashMovementEnabled ?? true);
 
-    /// <summary>侧栏「钱箱」格：有现金进出功能时打开小面板，否则直接开钱箱（No Sale）。</summary>
+    /// <summary>侧栏「钱箱」格：启用现金进出时打开小面板，否则直接开钱箱（No Sale）。</summary>
     public System.Windows.Input.ICommand CashDrawerTileCommand =>
-        CashMovement?.OpenPanelCommand ?? (System.Windows.Input.ICommand)OpenCashDrawerCommand;
+        IsCashMovementEnabled
+            ? CashMovement!.OpenPanelCommand
+            : OpenCashDrawerCommand;
 
-    public string CashDrawerTileText => CashMovement is null ? OpenCashDrawerText : T("cashMovement.tile");
+    public string CashDrawerTileText => IsCashMovementEnabled ? T("cashMovement.tile") : OpenCashDrawerText;
+
+    /// <summary>总部下发的设置变化（或联网状态切换）后，刷新「钱箱」面板与侧栏按钮的显示。</summary>
+    private void OnPosSettingsChanged(object? sender, EventArgs e)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_posSettingsDispatcher is { } dispatcher && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(new Action(RaiseCashMovementEnabledChanged));
+            return;
+        }
+
+        RaiseCashMovementEnabledChanged();
+    }
+
+    private void RaiseCashMovementEnabledChanged()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        OnPropertyChanged(nameof(IsCashMovementEnabled));
+        OnPropertyChanged(nameof(CashDrawerTileCommand));
+        OnPropertyChanged(nameof(CashDrawerTileText));
+    }
 
     public string LockCashierText => T("pos.terminal.actions.lock");
 
@@ -451,6 +499,11 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         _disposed = true;
+        if (_posSettingsService is not null)
+        {
+            _posSettingsService.Changed -= OnPosSettingsChanged;
+        }
+
         // 页面销毁后（重新登录、锁定重建等）旧页面里仍在途的补查结果不得再改动共享购物车。
         _workflowService.AdvanceCartGeneration("view-model-disposed");
         // 页面销毁（重新登录 / 重建页面）：待选随页面丢弃，留一条日志说明丢了几个。

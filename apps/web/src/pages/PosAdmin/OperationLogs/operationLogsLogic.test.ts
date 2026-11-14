@@ -244,6 +244,7 @@ assertDeepEqual(
     'API_SERVER_CHANGE',
     'REMOTE_MAINTENANCE_INSTALL',
     'SYSTEM_RESTART',
+    'POS_SETTING_OFFLINE_OVERRIDE',
   ],
   '固定事件代码应完整覆盖核心收银链路',
 )
@@ -296,6 +297,11 @@ assertEqual(
   zhLocale.operationLogs.operations.apiServerChange,
   '切换服务器地址',
   '切换服务器地址应提供中文文案',
+)
+assertEqual(
+  zhLocale.operationLogs.operations.posSettingOfflineOverride,
+  '收银端设置离线修改',
+  '离线修改总部下发设置应提供中文文案',
 )
 assertEqual(
   zhLocale.operationLogs.operations.systemRestart,

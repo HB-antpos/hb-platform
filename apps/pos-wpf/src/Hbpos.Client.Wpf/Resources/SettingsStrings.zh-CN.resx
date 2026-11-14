@@ -666,4 +666,46 @@
   <data name="settings.zeller.unmatchedRefund.status.enabled" xml:space="preserve"><value>已开启无关联退款：退款可以退到顾客刷的任意一张卡。</value></data>
   <data name="settings.zeller.unmatchedRefund.status.disabled" xml:space="preserve"><value>已关闭无关联退款。</value></data>
   <data name="settings.zeller.unmatchedRefund.status.saveFailed" xml:space="preserve"><value>无法保存无关联退款设置，请重试。</value></data>
+  <data name="settings.category.posSettings" xml:space="preserve"><value>业务开关</value></data>
+  <data name="settings.subtitle.posSettings" xml:space="preserve"><value>业务开关</value></data>
+  <data name="settings.page.posSettings.description" xml:space="preserve"><value>总部设置了的开关在本机锁定，右侧显示来源层级</value></data>
+  <data name="settings.posSettings.syncedAt" xml:space="preserve"><value>总部设置 · 最近同步 {0}</value></data>
+  <data name="settings.posSettings.neverSynced" xml:space="preserve"><value>总部设置 · 尚未同步</value></data>
+  <data name="settings.posSettings.syncNow" xml:space="preserve"><value>立即同步</value></data>
+  <data name="settings.posSettings.syncing" xml:space="preserve"><value>同步中…</value></data>
+  <data name="settings.posSettings.offline.title" xml:space="preserve"><value>离线中：总部设置暂时可以在本机修改</value></data>
+  <data name="settings.posSettings.offline.detail" xml:space="preserve"><value>临时修改只在本机生效；恢复联网同步后会被总部设置覆盖，并上报修改记录。</value></data>
+  <data name="settings.posSettings.status.locked" xml:space="preserve"><value>总部设置 · {0}</value></data>
+  <data name="settings.posSettings.status.lockedDefault" xml:space="preserve"><value>总部默认</value></data>
+  <data name="settings.posSettings.status.offlineEditable" xml:space="preserve"><value>离线可改</value></data>
+  <data name="settings.posSettings.status.offlineOverride" xml:space="preserve"><value>离线临时修改</value></data>
+  <data name="settings.posSettings.scope.global" xml:space="preserve"><value>全局</value></data>
+  <data name="settings.posSettings.scope.store" xml:space="preserve"><value>门店</value></data>
+  <data name="settings.posSettings.scope.device" xml:space="preserve"><value>设备</value></data>
+  <data name="settings.posSettings.toggle.locked" xml:space="preserve"><value>该项由总部设置，暂不能修改</value></data>
+  <data name="settings.posSettings.toggle.failed" xml:space="preserve"><value>保存失败，该项未修改</value></data>
+  <data name="settings.posSettings.sync.applied" xml:space="preserve"><value>已更新总部设置</value></data>
+  <data name="settings.posSettings.sync.upToDate" xml:space="preserve"><value>总部设置已是最新</value></data>
+  <data name="settings.posSettings.sync.discarded" xml:space="preserve"><value>总部设置响应无效，已忽略</value></data>
+  <data name="settings.posSettings.sync.failed" xml:space="preserve"><value>同步总部设置失败，稍后会自动重试</value></data>
+  <data name="settings.posSettings.sync.serverUnsupported" xml:space="preserve"><value>服务器暂不支持总部设置，本机沿用各自的值</value></data>
+  <data name="settings.posSettings.sync.notReady" xml:space="preserve"><value>本机尚未完成设备注册，暂无总部设置可同步</value></data>
+  <data name="settings.posSettings.item.cashMovement.title" xml:space="preserve"><value>现金存入 / 取出</value></data>
+  <data name="settings.posSettings.item.cashMovement.description" xml:space="preserve"><value>侧栏「钱箱」面板的存入、取出与今日记录</value></data>
+  <data name="settings.posSettings.item.noSaleRescan.title" xml:space="preserve"><value>只开钱箱需再扫员工码</value></data>
+  <data name="settings.posSettings.item.noSaleRescan.description" xml:space="preserve"><value>No Sale 时即使本人有权限也要扫码</value></data>
+  <data name="settings.posSettings.item.returnsRescan.title" xml:space="preserve"><value>退货需再扫员工码</value></data>
+  <data name="settings.posSettings.item.returnsRescan.description" xml:space="preserve"><value>点「退货」时再扫一次员工码</value></data>
+  <data name="settings.posSettings.item.bankReceipt.title" xml:space="preserve"><value>客人小票附银行收据</value></data>
+  <data name="settings.posSettings.item.bankReceipt.description" xml:space="preserve"><value>刷卡小票后面附银行交易凭条</value></data>
+  <data name="settings.posSettings.item.manualCard.title" xml:space="preserve"><value>手动刷卡</value></data>
+  <data name="settings.posSettings.item.manualCard.description" xml:space="preserve"><value>付款页显示「手动刷卡」（不连刷卡机）</value></data>
+  <data name="settings.posSettings.item.voucher.title" xml:space="preserve"><value>代金券 / 购物券</value></data>
+  <data name="settings.posSettings.item.voucher.description" xml:space="preserve"><value>付款页可以收代金券</value></data>
+  <data name="settings.posSettings.item.orderList.title" xml:space="preserve"><value>付款页显示订单列表</value></data>
+  <data name="settings.posSettings.item.orderList.description" xml:space="preserve"><value>付款页左侧显示商品列表</value></data>
+  <data name="settings.posSettings.item.autoRestart.title" xml:space="preserve"><value>日结后凌晨自动重启</value></data>
+  <data name="settings.posSettings.item.autoRestart.description" xml:space="preserve"><value>日结后提示并在凌晨重启收银机</value></data>
+  <data name="settings.posSettings.item.zellerUnmatchedRefund.title" xml:space="preserve"><value>Zeller 无关联退款</value></data>
+  <data name="settings.posSettings.item.zellerUnmatchedRefund.description" xml:space="preserve"><value>允许不关联原交易直接退款</value></data>
 </root>
