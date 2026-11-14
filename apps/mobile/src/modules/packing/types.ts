@@ -195,6 +195,19 @@ export interface PackIncomingItem {
   dispatchedByName: string | null;
   receivedAtUtc: string | null;
   receivedByName: string | null;
+  /** 散箱关联的订货单；没有订货单为 null。 */
+  orderGuid: string | null;
+  orderNo: string | null;
+  /**
+   * 托盘上箱关联的订货单（去重、按订单号排序、最多 20 个）：待签收取仍在路上的箱，最近签收取已签收的箱；
+   * 没有订单关联时后端不输出该字段，这里为空数组。散箱用 orderGuid / orderNo。
+   */
+  orders: PackIncomingOrder[];
+}
+
+export interface PackIncomingOrder {
+  orderGuid: string;
+  orderNo: string | null;
 }
 
 export interface PackIncoming {

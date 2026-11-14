@@ -1,6 +1,7 @@
 import type { Href } from "expo-router";
 import {
   CARTON_STATUS,
+  type PackIncomingItem,
   type PackOrderReceive,
   type PackOrderReceiveCarton,
   type PackOrderReceiveProduct,
@@ -8,6 +9,26 @@ import {
 } from "./types";
 
 // 分店「按订单签收」的纯逻辑：箱分组、箱数核对、订货 / 配货 / 已发对照，以及从签收扫码结果找出可按订单签收的订单。
+
+/** 按订单签收详情的查询键：页面和扫订单条码时预热缓存共用（引用统一用后端返回的 orderGuid）。 */
+export const orderReceiveKey = (orderGuid: string) => ["packing", "orderReceive", orderGuid] as const;
+
+/** 配货单订单条码前缀（与拣货的订单二维码同一个：HBSO:订单号）。 */
+export const ORDER_BARCODE_PREFIX = "HBSO:";
+
+/**
+ * 从订单条码 HBSO:订单号 里取订单号：前缀不分大小写，扫码枪带的回车 / 制表符 / 首尾空格都去掉；
+ * 订单号保持原样（不转大小写）。不是订单条码、或前缀后面是空的返回 null。
+ * 后端 receive/orders/{orderRef} 不认 HBSO: 前缀，必须先在客户端解析出订单号再传。
+ */
+export function parseOrderBarcode(raw: string | null | undefined): string | null {
+  const text = (raw ?? "").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  if (text.length <= ORDER_BARCODE_PREFIX.length || text.slice(0, ORDER_BARCODE_PREFIX.length).toUpperCase() !== ORDER_BARCODE_PREFIX) {
+    return null;
+  }
+  const orderNo = text.slice(ORDER_BARCODE_PREFIX.length).trim();
+  return orderNo || null;
+}
 
 /** 按订单签收页路由。 */
 export function receiveOrderRoute(orderGuid: string) {
@@ -104,4 +125,24 @@ export function orderEntriesOf(lookup: Pick<PackReceiveLookup, "canReceive" | "c
     entries.push({ orderGuid: guid, orderNo: carton.orderNo });
   }
   return entries;
+}
+
+/**
+ * 待签收 / 最近签收清单里一行可以「按订单签收」的订单：散箱取它自己的订单，托盘取后端给的 orders；
+ * 没有订单关联返回空数组（不显示入口）。托盘 orders 里重复的订单只留一个。
+ */
+export function incomingOrderEntries(item: Pick<PackIncomingItem, "kind" | "orderGuid" | "orderNo" | "orders">): OrderReceiveEntry[] {
+  const raw: OrderReceiveEntry[] =
+    item.kind === "carton"
+      ? item.orderGuid
+        ? [{ orderGuid: item.orderGuid, orderNo: item.orderNo }]
+        : []
+      : item.orders.map((order) => ({ orderGuid: order.orderGuid, orderNo: order.orderNo }));
+  const seen = new Set<string>();
+  return raw.filter((entry) => {
+    const key = entry.orderGuid.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

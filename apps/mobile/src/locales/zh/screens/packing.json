@@ -400,7 +400,10 @@
     "mismatchCaption": "实到箱数和系统记录的 {{count}} 箱不一致时，改为逐箱扫码核对",
     "byOrder": "按订单签收",
     "byOrderWithNo": "按订单签收 · {{orderNo}}",
-    "byOrderHint": "这批货属于订货单，可以按订单一次签收发给本店的全部在途箱，不用逐托盘、逐箱扫。"
+    "byOrderHint": "这批货属于订货单，可以按订单一次签收发给本店的全部在途箱，不用逐托盘、逐箱扫。",
+    "byOrderMany": "按订单签收（{{count}} 张订单）",
+    "chooseOrderTitle": "选择订单",
+    "chooseOrderSubtitle": "这批货关联多张订单，选一张按订单签收"
   },
   "locate": {
     "title": "商品位置",
@@ -490,6 +493,7 @@
     "mismatchCaption": "实到箱数和系统记录的 {{count}} 箱不一致时，一只都不会签收，需要改为逐箱扫码核对",
     "countMismatch": "实到 {{entered}} 箱，系统记录 {{actual}} 箱，对不上，这次一只都没签收。请回「签收到货」逐箱扫箱标签核对。",
     "doneTitle": "已按订单签收 {{orderNo}}",
-    "doneDetail": "{{cartons}} 箱已归本店"
+    "doneDetail": "{{cartons}} 箱已归本店",
+    "notFound": "找不到该订单，或它不属于本店"
   }
 }

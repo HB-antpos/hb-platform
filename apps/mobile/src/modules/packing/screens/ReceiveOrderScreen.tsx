@@ -17,6 +17,7 @@ import {
   canReceiveOrder,
   countMismatchCounts,
   orderProductsByVariance,
+  orderReceiveKey,
   productShipDiff,
   productShipStatus,
   splitOrderCartons,
@@ -25,8 +26,6 @@ import { packingErrorMessage } from "../packing-errors";
 import { PACKING_HOME } from "../pack-print";
 import { OrderReceiveSheet } from "../components/OrderReceiveSheet";
 import { PACK_COLORS, SectionTitle, Tag, UnitRow, packStyles } from "../components/pack-ui";
-
-const orderReceiveKey = (orderGuid: string) => ["packing", "orderReceive", orderGuid] as const;
 
 /**
  * 分店按订单签收：把一张订单发给本店、还在路上的全部箱（含托盘上的）一次签收。
@@ -86,7 +85,7 @@ export function ReceiveOrderScreen({ orderGuid }: { orderGuid: string }) {
         void query.refetch();
         return;
       }
-      const message = packingErrorMessage(error, t, language);
+      const message = info.code === "ORDER_NOT_FOUND" ? t("orderReceive.notFound") : packingErrorMessage(error, t, language);
       setSheetError(message);
       setSnackbar(message);
       // 别人刚签收完 / 订单不在本店范围：刷新这一屏的状态。
@@ -122,7 +121,7 @@ export function ReceiveOrderScreen({ orderGuid }: { orderGuid: string }) {
       {!detail ? (
         query.isError ? (
           <EmptyState
-            title={packingErrorMessage(query.error, t, language)}
+            title={readPackingError(query.error).code === "ORDER_NOT_FOUND" ? t("orderReceive.notFound") : packingErrorMessage(query.error, t, language)}
             actionLabel={t("actions.retry")}
             onAction={() => void query.refetch()}
           />

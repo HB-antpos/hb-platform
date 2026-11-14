@@ -38,23 +38,49 @@ export function cartonFromDetail(detail: PackCartonDetail): CurrentCarton {
   };
 }
 
-/** 接着用 pack-progress 里自己以前建的箱：只有汇总，空箱（0 件）时各商品都是 0，算「已知」。 */
+/**
+ * 用 pack-progress 里的一只装箱中的箱作当前箱。
+ * - 后端带了 items：各商品件数都已知（含空箱 []），不用再读箱详情，PDA 设备会话也能接着装；
+ * - 旧后端没有 items：只有汇总，空箱（0 件）算已知，有商品的箱各商品件数未知（调用方再想办法读基线）。
+ */
 export function cartonFromProgress(carton: PackProgressCarton): CurrentCarton {
+  const items: Record<string, number> = {};
+  for (const item of carton.items ?? []) items[productKey(item.productCode)] = item.quantity;
   return {
     cartonGuid: carton.cartonGuid,
     cartonNo: carton.cartonNo,
     skuCount: carton.skuCount,
     pieceCount: carton.pieceCount,
-    items: {},
-    itemsComplete: carton.pieceCount === 0,
+    items,
+    itemsComplete: carton.items !== null || carton.pieceCount === 0,
     base: null,
   };
 }
 
-/** 进入页面时自动接着用的箱：自己建的、装箱中的；有多只取最后一只（编号最大 = 最新）。 */
+/**
+ * 进入页面时自动接着用的箱：自己建的、装箱中的里建箱时间最晚的一只；
+ * 时间相同或缺失（旧后端）时取列表里靠后的（后端按建箱时间、箱号升序）。
+ */
 export function resumableCarton(progress: Pick<PackProgress, "cartons">): PackProgressCarton | null {
-  const mine = progress.cartons.filter((carton) => carton.isMine && carton.status === PACK_CARTON_STATUS.packing);
-  return mine.length > 0 ? mine[mine.length - 1] : null;
+  let best: PackProgressCarton | null = null;
+  let bestTime = Number.NEGATIVE_INFINITY;
+  for (const carton of progress.cartons) {
+    if (!carton.isMine || carton.status !== PACK_CARTON_STATUS.packing) continue;
+    const time = parseUtcTime(carton.createdAtUtc);
+    // >=：同样晚（或都没有时间）时后面的覆盖前面的。
+    if (best === null || time >= bestTime) {
+      best = carton;
+      bestTime = time;
+    }
+  }
+  return best;
+}
+
+/** 后端的 UTC 时间可能不带 Z，统一按 UTC 解析；解析不了返回负无穷（排在最早）。 */
+function parseUtcTime(iso: string | null): number {
+  if (!iso) return Number.NEGATIVE_INFINITY;
+  const parsed = Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 }
 
 /**

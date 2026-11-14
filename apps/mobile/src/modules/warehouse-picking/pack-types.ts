@@ -18,6 +18,12 @@ export interface PackProgressLine {
   packedPieces: number;
 }
 
+/** 装箱中的箱里一个商品的件数（pack-progress 里 status = 1 的箱才带）。 */
+export interface PackProgressCartonItem {
+  productCode: string;
+  quantity: number;
+}
+
 export interface PackProgressCarton {
   cartonGuid: string;
   cartonNo: string;
@@ -26,8 +32,15 @@ export interface PackProgressCarton {
   pieceCount: number;
   palletNo: string | null;
   createdByName: string;
+  /** 建箱时间（ISO，UTC）；旧后端没有。 */
+  createdAtUtc: string | null;
   /** 箱是当前拣货人建的；认不出拣货人时全为 false。 */
   isMine: boolean;
+  /**
+   * 装箱中的箱的全部商品件数（不论谁建的，空箱为 []）；已封 / 在途的箱、以及旧后端没有该字段时为 null。
+   * 有它才能知道接着用的旧箱里各商品现有多少件。
+   */
+  items: PackProgressCartonItem[] | null;
 }
 
 export interface PackProgress {

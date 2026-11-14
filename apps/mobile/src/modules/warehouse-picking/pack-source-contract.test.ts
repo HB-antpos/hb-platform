@@ -77,6 +77,14 @@ test("核对页「按装箱数改拣货数」不带 cartonGuid", async () => {
   assert.equal(/withCartonGuid/.test(screen), false);
 });
 
+test("签收页扫到订单条码先解析订单号再请求，列表入口用 incoming 的订单信息", async () => {
+  const receive = await read("src/modules/packing/screens/ReceiveScreen.tsx");
+  assert.match(receive, /parseOrderBarcode\(/, "HBSO: 前缀要先在客户端去掉，后端不剥");
+  assert.match(receive, /fetchOrderReceive\(orderNo\)/);
+  assert.match(receive, /incomingOrderEntries\(/);
+  assert.match(receive, /orderReceive\.notFound/, "404 提示找不到该订单或不属于本店");
+});
+
 type Json = { [key: string]: Json | string };
 
 function lookup(tree: Json, path: string): Json | string | undefined {

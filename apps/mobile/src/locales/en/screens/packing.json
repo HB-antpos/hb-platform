@@ -400,7 +400,10 @@
     "mismatchCaption": "If your count differs from the {{count}} cartons on record, check carton by carton instead",
     "byOrder": "Receive by order",
     "byOrderWithNo": "Receive by order · {{orderNo}}",
-    "byOrderHint": "This shipment belongs to a store order. You can receive every in-transit carton of that order at once, without scanning each pallet or carton."
+    "byOrderHint": "This shipment belongs to a store order. You can receive every in-transit carton of that order at once, without scanning each pallet or carton.",
+    "byOrderMany": "Receive by order ({{count}} orders)",
+    "chooseOrderTitle": "Choose an order",
+    "chooseOrderSubtitle": "This shipment covers several orders — pick one to receive by order"
   },
   "locate": {
     "title": "Product location",
@@ -490,6 +493,7 @@
     "mismatchCaption": "If your count differs from the {{count}} cartons on record, nothing is received — check the cartons one by one instead",
     "countMismatch": "You counted {{entered}} cartons but the system has {{actual}}, so nothing was received. Go back to Receive and scan each carton label to check.",
     "doneTitle": "Order {{orderNo}} received",
-    "doneDetail": "{{cartons}} cartons now belong to your store"
+    "doneDetail": "{{cartons}} cartons now belong to your store",
+    "notFound": "Order not found, or it doesn't belong to your store"
   }
 }

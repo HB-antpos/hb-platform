@@ -190,6 +190,13 @@ const incomingItemSchema = z.object({
   dispatchedByName: nullableText,
   receivedAtUtc: nullableText,
   receivedByName: nullableText,
+  // 订单关联：旧后端没有这些字段，按「没有」处理。
+  orderGuid: nullableText,
+  orderNo: nullableText,
+  orders: z
+    .array(z.object({ orderGuid: text.min(1), orderNo: nullableText }))
+    .nullish()
+    .transform((value) => value ?? []),
 });
 
 const incomingSchema = z.object({

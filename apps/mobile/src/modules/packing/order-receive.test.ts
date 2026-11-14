@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeOrderReceive, readPackingError } from "./api-normalization";
+import { normalizeIncoming, normalizeOrderReceive, readPackingError } from "./api-normalization";
 import {
   canReceiveOrder,
   clampCartonCount,
   countMismatchCounts,
+  incomingOrderEntries,
   orderEntriesOf,
+  orderReceiveKey,
+  parseOrderBarcode,
   orderProductsByVariance,
   productShipDiff,
   productShipStatus,
@@ -141,4 +144,56 @@ test("按订单签收响应：null 字段省略时补默认值，缺必填按接
   assert.equal(detail.products[0].productName, null);
   assert.equal(detail.actualInTransitCartonCount, null);
   assert.throws(() => normalizeOrderReceive({ success: true, data: { storeCode: "SUNNY" } }), /Invalid warehouse packing response/);
+});
+
+test("订单条码 HBSO:订单号：前缀不分大小写，去掉空格与扫码枪控制符，订单号保持原样", () => {
+  assert.equal(parseOrderBarcode("HBSO:2026-0418"), "2026-0418");
+  assert.equal(parseOrderBarcode("hbso:2026-0418"), "2026-0418", "前缀小写也认");
+  assert.equal(parseOrderBarcode("HbSo:SO-abc"), "SO-abc", "订单号不转大小写");
+  assert.equal(parseOrderBarcode("  HBSO:2026-0418 \r\n"), "2026-0418", "首尾空格与回车去掉");
+  assert.equal(parseOrderBarcode("HBSO: 2026-0418"), "2026-0418", "冒号后的空格去掉");
+  assert.equal(parseOrderBarcode("\u0002HBSO:2026-0418\t"), "2026-0418", "扫码枪的控制字符去掉");
+  assert.equal(parseOrderBarcode("HBSO:"), null, "前缀后面没有订单号");
+  assert.equal(parseOrderBarcode("HBSO:   "), null);
+  assert.equal(parseOrderBarcode("HBSO"), null);
+  assert.equal(parseOrderBarcode("BX2611140003"), null, "箱标签不是订单条码");
+  assert.equal(parseOrderBarcode("PL261114001"), null);
+  assert.equal(parseOrderBarcode("HBSP:2026-0418/1/A"), null, "分单条码不是订单条码");
+  assert.equal(parseOrderBarcode("2026-0418"), null, "没有前缀的订单号不当订单条码");
+  assert.equal(parseOrderBarcode("XHBSO:2026-0418"), null, "前缀必须在开头");
+  assert.equal(parseOrderBarcode(""), null);
+  assert.equal(parseOrderBarcode(null), null);
+  assert.equal(parseOrderBarcode(undefined), null);
+});
+
+test("订单号要先从条码里解析出来再传：路由里用后端返回的 orderGuid，缓存键也用它", () => {
+  assert.deepEqual(orderReceiveKey("o-1"), ["packing", "orderReceive", "o-1"]);
+  // 请求路径里的订单号要 URL 编码（订单号可能带 / 或空格）。
+  assert.equal(encodeURIComponent(parseOrderBarcode("HBSO:SO 1/2") ?? ""), "SO%201%2F2");
+});
+
+test("待签收清单的订单入口：散箱取自己的订单，托盘取 orders（去重），没有订单不给入口", () => {
+  const incoming = normalizeIncoming({
+    pending: [
+      { kind: "carton", guid: "c-1", no: "BX1", orderGuid: "o-1", orderNo: "2026-0412", cartonCount: 1, pieceCount: 5 },
+      { kind: "carton", guid: "c-2", no: "BX2", cartonCount: 1, pieceCount: 5 },
+      { kind: "pallet", guid: "p-1", no: "PL1", cartonCount: 3, pieceCount: 30, orders: [{ orderGuid: "o-1", orderNo: "2026-0412" }] },
+      { kind: "pallet", guid: "p-2", no: "PL2", cartonCount: 3, pieceCount: 30, orders: [{ orderGuid: "o-1", orderNo: "2026-0412" }, { orderGuid: "O-1", orderNo: "2026-0412" }, { orderGuid: "o-2" }] },
+      { kind: "pallet", guid: "p-3", no: "PL3", cartonCount: 3, pieceCount: 30 },
+    ],
+    recent: [{ kind: "pallet", guid: "p-9", no: "PL9", cartonCount: 2, receivedCartonCount: 2, pieceCount: 8, orders: [{ orderGuid: "o-7", orderNo: "2026-0300" }] }],
+  });
+  const [carton, looseNoOrder, onePallet, twoPallet, noOrderPallet] = incoming.pending;
+  assert.deepEqual(incomingOrderEntries(carton), [{ orderGuid: "o-1", orderNo: "2026-0412" }]);
+  assert.deepEqual(incomingOrderEntries(looseNoOrder), [], "没有订货单的散箱不显示入口");
+  assert.deepEqual(incomingOrderEntries(onePallet), [{ orderGuid: "o-1", orderNo: "2026-0412" }], "只有一张订单：直接进入");
+  assert.deepEqual(incomingOrderEntries(twoPallet), [
+    { orderGuid: "o-1", orderNo: "2026-0412" },
+    { orderGuid: "o-2", orderNo: null },
+  ], "多张订单：先选；重复的订单只留一个");
+  assert.deepEqual(incomingOrderEntries(noOrderPallet), []);
+  assert.equal(noOrderPallet.orders.length, 0, "旧后端 / 没有订单关联：orders 缺失补成空数组");
+  assert.equal(carton.orderGuid, "o-1");
+  assert.equal(looseNoOrder.orderGuid, null);
+  assert.deepEqual(incoming.recent[0].orders, [{ orderGuid: "o-7", orderNo: "2026-0300" }]);
 });

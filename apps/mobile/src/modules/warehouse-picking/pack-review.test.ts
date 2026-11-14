@@ -18,7 +18,7 @@ function progressLine(productCode: string, picked: number, packed: number, extra
 }
 
 function carton(cartonGuid: string, pieceCount: number, status: number = PACK_CARTON_STATUS.packing): PackProgressCarton {
-  return { cartonGuid, cartonNo: cartonGuid.toUpperCase(), status, skuCount: pieceCount > 0 ? 1 : 0, pieceCount, palletNo: null, createdByName: "Lily", isMine: true };
+  return { cartonGuid, cartonNo: cartonGuid.toUpperCase(), status, skuCount: pieceCount > 0 ? 1 : 0, pieceCount, palletNo: null, createdByName: "Lily", createdAtUtc: null, isMine: true, items: null };
 }
 
 test("提交前核对：已拣 / 已装箱 / 箱数三格汇总", () => {

@@ -65,7 +65,9 @@ function progressCarton(overrides: Partial<PackProgressCarton> & Pick<PackProgre
     pieceCount: 0,
     palletNo: null,
     createdByName: "Lily",
+    createdAtUtc: null,
     isMine: false,
+    items: null,
     ...overrides,
   };
 }
@@ -114,6 +116,76 @@ test("进入页面自动接着用的箱：自己建的、装箱中的，多只�
   assert.equal(resumableCarton({ cartons })?.cartonGuid, "c-new");
   assert.equal(resumableCarton({ cartons: cartons.filter((carton) => !carton.isMine) }), null, "同事的箱不接着用");
   assert.equal(resumableCarton({ cartons: [] }), null);
+});
+
+test("接着用旧箱：后端带 items 时各商品件数已知（含空箱），旧后端没有 items 退回只有汇总", () => {
+  const withItems = cartonFromProgress(
+    progressCarton({
+      cartonGuid: "c-5",
+      skuCount: 2,
+      pieceCount: 28,
+      items: [
+        { productCode: "HB-1", quantity: 12 },
+        { productCode: "HB-2", quantity: 16 },
+      ],
+    }),
+  );
+  assert.equal(withItems.itemsComplete, true, "有 items：不用再读箱详情");
+  assert.equal(cartonPiecesOf(withItems, "hb-1"), 12, "商品编码不分大小写");
+  assert.equal(cartonPiecesOf(withItems, "HB-9"), 0, "箱里没有的商品是 0 件，不是未知");
+
+  const emptyWithItems = cartonFromProgress(progressCarton({ cartonGuid: "c-6", items: [] }));
+  assert.equal(emptyWithItems.itemsComplete, true);
+  assert.equal(cartonPiecesOf(emptyWithItems, "HB-1"), 0);
+
+  // 旧后端：没有 items 字段，有商品的箱件数未知。
+  const legacy = cartonFromProgress(progressCarton({ cartonGuid: "c-7", skuCount: 1, pieceCount: 9, items: null }));
+  assert.equal(legacy.itemsComplete, false);
+  assert.equal(cartonPiecesOf(legacy, "HB-1"), null);
+});
+
+test("自动接着用的箱：自己建的、装箱中的里建箱时间最晚的；时间缺失时取列表靠后的", () => {
+  const cartons = [
+    progressCarton({ cartonGuid: "c-newest", isMine: true, createdAtUtc: "2026-11-14T05:00:00Z" }),
+    progressCarton({ cartonGuid: "c-older", isMine: true, createdAtUtc: "2026-11-14T03:00:00Z" }),
+    progressCarton({ cartonGuid: "c-later-other", isMine: false, createdAtUtc: "2026-11-14T09:00:00Z" }),
+    progressCarton({ cartonGuid: "c-sealed", isMine: true, status: PACK_CARTON_STATUS.sealed, createdAtUtc: "2026-11-14T08:00:00Z" }),
+  ];
+  assert.equal(resumableCarton({ cartons })?.cartonGuid, "c-newest", "按建箱时间，不按列表位置");
+  // 不带 Z 的时间也按 UTC 解析，和带 Z 的可以比较。
+  assert.equal(
+    resumableCarton({
+      cartons: [
+        progressCarton({ cartonGuid: "c-a", isMine: true, createdAtUtc: "2026-11-14T05:00:00" }),
+        progressCarton({ cartonGuid: "c-b", isMine: true, createdAtUtc: "2026-11-14T04:00:00Z" }),
+      ],
+    })?.cartonGuid,
+    "c-a",
+  );
+  // 同一时间：后面的（箱号更大）胜出；没有时间的旧后端：取最后一只。
+  assert.equal(
+    resumableCarton({
+      cartons: [
+        progressCarton({ cartonGuid: "c-1", isMine: true, createdAtUtc: "2026-11-14T05:00:00Z" }),
+        progressCarton({ cartonGuid: "c-2", isMine: true, createdAtUtc: "2026-11-14T05:00:00Z" }),
+      ],
+    })?.cartonGuid,
+    "c-2",
+  );
+  assert.equal(
+    resumableCarton({ cartons: [progressCarton({ cartonGuid: "c-x", isMine: true }), progressCarton({ cartonGuid: "c-y", isMine: true })] })?.cartonGuid,
+    "c-y",
+  );
+  // 有时间的比没时间的新。
+  assert.equal(
+    resumableCarton({
+      cartons: [
+        progressCarton({ cartonGuid: "c-timed", isMine: true, createdAtUtc: "2026-11-14T01:00:00Z" }),
+        progressCarton({ cartonGuid: "c-untimed", isMine: true }),
+      ],
+    })?.cartonGuid,
+    "c-timed",
+  );
 });
 
 test("写入成功后按响应更新当前箱：汇总与该商品件数，别的商品不动；对应的不是当前箱则忽略", () => {
@@ -278,7 +350,34 @@ test("装箱进度：null 字段省略时补默认值，必填结构缺失按接
   assert.equal(progress.lines[0].productName, null);
   assert.equal(progress.cartons[0].palletNo, null);
   assert.equal(progress.cartons[0].isMine, true);
+  assert.equal(progress.cartons[0].createdAtUtc, null, "旧后端没有建箱时间");
+  assert.equal(progress.cartons[0].items, null, "缺失的 items 保持 null，不能补成空箱 []");
   assert.throws(() => normalizePackProgress({ success: true, data: { flowStatus: 3 } }), /Invalid warehouse picking pack progress/);
+});
+
+test("装箱进度的箱：带 createdAtUtc 与 items（空箱是 []，已封的箱没有 items）", () => {
+  const progress = normalizePackProgress({
+    success: true,
+    data: {
+      orderGuid: "o-1",
+      flowStatus: 3,
+      lines: [{ productCode: "ONLY-IN-BOX", orderedPieces: 0, pickedPieces: 0, packedPieces: 4 }],
+      cartons: [
+        { cartonGuid: "c-1", cartonNo: "BX1", status: 1, skuCount: 1, pieceCount: 4, createdByName: "Lily", createdAtUtc: "2026-11-14T05:00:00Z", isMine: true, items: [{ productCode: "ONLY-IN-BOX", quantity: 4 }] },
+        { cartonGuid: "c-2", cartonNo: "BX2", status: 1, createdAtUtc: "2026-11-14T05:10:00Z", items: [] },
+        { cartonGuid: "c-3", cartonNo: "BX3", status: 2, skuCount: 1, pieceCount: 9, createdAtUtc: "2026-11-14T04:00:00Z" },
+      ],
+      openCartonCount: 2,
+      emptyCartonCount: 1,
+      sealedCartonCount: 1,
+      reconciled: false,
+    },
+  });
+  assert.equal(progress.cartons[0].createdAtUtc, "2026-11-14T05:00:00Z");
+  assert.deepEqual(progress.cartons[0].items, [{ productCode: "ONLY-IN-BOX", quantity: 4 }]);
+  assert.deepEqual(progress.cartons[1].items, [], "空箱的 items 是 []，与缺失不同");
+  assert.equal(progress.cartons[2].items, null, "已封的箱不带 items");
+  assert.equal(progress.lines[0].orderedPieces, 0, "只在箱里、订单上没有的商品也在 lines 里");
 });
 
 test("先拣后装的设置数量结果：箱详情 + 超装提示", () => {

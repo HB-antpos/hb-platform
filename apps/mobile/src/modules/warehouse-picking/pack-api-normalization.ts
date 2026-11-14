@@ -51,7 +51,13 @@ const progressSchema = z.object({
         pieceCount: count,
         palletNo: nullableText,
         createdByName: emptyText,
+        createdAtUtc: nullableText,
         isMine: flag,
+        // 只有装箱中的箱带；[]（空箱）与缺失（null）要区分开，所以不能把缺失补成 []。
+        items: z
+          .array(z.object({ productCode: text.min(1), quantity: count }))
+          .nullish()
+          .transform((value) => value ?? null),
       }),
     )
     .nullish()
