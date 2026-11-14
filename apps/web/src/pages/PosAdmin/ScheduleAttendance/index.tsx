@@ -5,6 +5,7 @@ import {
   CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   EnvironmentOutlined,
   FullscreenOutlined,
@@ -16,6 +17,7 @@ import {
   RightOutlined,
   SaveOutlined,
   SearchOutlined,
+  ShopOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
 import {
@@ -51,7 +53,7 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
-import { cloneElement, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { cloneElement, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, DragEvent, ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useSearchParams } from 'react-router-dom'
@@ -146,6 +148,21 @@ import {
 import type { DragSource, DropVerdict } from './scheduleDragLogic'
 import LandscapeShell, { releaseLandscape, tryLockLandscape, usePhoneEnvironment } from './LandscapeShell'
 import { getShellMode, nextAutoDismissed } from './phoneShellLogic'
+import StorePicker from './StorePicker'
+import {
+  ALL_STORES_TOKEN,
+  STORAGE_KEYS,
+  getBrowserStorage,
+  getRelativeWeekOffset,
+  parseRecentStores,
+  parseSidebarPreference,
+  pushRecentStore,
+  resolveInitialStore,
+  safeStorageGet,
+  safeStorageSet,
+  shouldDockSidebar,
+} from './storePickerLogic'
+import type { SidebarPreference } from './storePickerLogic'
 import { FALLBACK_STAFF_COLOR, assignStaffColors } from './staffColorLogic'
 import type { StaffColor } from './staffColorLogic'
 import WeekBoard from './WeekBoard'
@@ -382,6 +399,14 @@ export default function ScheduleAttendancePage() {
   ))
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [storeCode, setStoreCode] = useState<string | undefined>()
+  // 分店侧栏：最近使用、展开偏好按浏览器记住（只是便利功能，存储不可用时照常工作）
+  const storage = useMemo(() => getBrowserStorage(), [])
+  const [recentStores, setRecentStores] = useState<string[]>(() => parseRecentStores(safeStorageGet(getBrowserStorage(), STORAGE_KEYS.recentStores)))
+  const [sidebarPreference, setSidebarPreference] = useState<SidebarPreference>(() => parseSidebarPreference(safeStorageGet(getBrowserStorage(), STORAGE_KEYS.sidebarDock)))
+  const [storePopoverOpen, setStorePopoverOpen] = useState(false)
+  const [cardWidth, setCardWidth] = useState(0)
+  const cardRef = useRef<HTMLDivElement>(null)
+  const storeRestoredRef = useRef(false)
   const [userGuid, setUserGuid] = useState<string | undefined>()
   // 周排班页的员工搜索：员工已一次性加载，姓名只在本地过滤，不再带进接口查询
   const [staffKeyword, setStaffKeyword] = useState('')
@@ -559,6 +584,16 @@ export default function ScheduleAttendancePage() {
     })
   }, [t])
   const selectedWeekLabel = useMemo(() => formatWeekLabel(weekStart), [formatWeekLabel, weekStart])
+  // 周范围：「2026 第 47 周 · 11/16 – 11/22」，给周选择器当显示格式
+  const formatWeekRange = useCallback((value: Dayjs) => {
+    const start = getIsoWeekStart(value)
+    return t('posAdmin.scheduleAttendance.weekNav.range', {
+      year: start.isoWeekYear(),
+      week: start.isoWeek(),
+      start: start.format('MM/DD'),
+      end: start.add(6, 'day').format('MM/DD'),
+    })
+  }, [t])
 
   const queryParams = useCallback((page: number, pageSize: number) => ({
     page,
@@ -813,6 +848,54 @@ export default function ScheduleAttendancePage() {
       message.error(t('posAdmin.scheduleAttendance.messages.loadStoresFailed'))
     })
   }, [currentUser?.stores, storeCode, t, visibleStoreCodeKey])
+
+  // 分店列表第一次到手时恢复上次选的分店；只有 1 家可选时直接选中它
+  useEffect(() => {
+    if (storeRestoredRef.current || !storeOptions.length) return
+    storeRestoredRef.current = true
+    if (storeCode) return
+    const initial = resolveInitialStore(storeOptions, safeStorageGet(storage, STORAGE_KEYS.lastStore))
+    if (initial) setStoreCode(initial)
+  }, [storage, storeCode, storeOptions])
+
+  const selectStore = useCallback((code: string | undefined) => {
+    setStoreCode(code)
+    setStorePopoverOpen(false)
+    safeStorageSet(storage, STORAGE_KEYS.lastStore, code ?? ALL_STORES_TOKEN)
+    if (!code) return
+    setRecentStores((prev) => {
+      const next = pushRecentStore(prev, code)
+      safeStorageSet(storage, STORAGE_KEYS.recentStores, JSON.stringify(next))
+      return next
+    })
+  }, [storage])
+
+  const setSidebarDock = useCallback((next: Exclude<SidebarPreference, null>) => {
+    setSidebarPreference(next)
+    setStorePopoverOpen(false)
+    safeStorageSet(storage, STORAGE_KEYS.sidebarDock, next)
+  }, [storage])
+
+  // 卡片宽度决定侧栏默认展开还是收起（7 天要一屏放下）；先同步量一次，避免首屏先收起再展开的闪动
+  useLayoutEffect(() => {
+    const node = cardRef.current
+    if (!node) return
+    setCardWidth(node.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => setCardWidth(Math.round(entry.contentRect.width)))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+
+  // 考勤审核页签自带分店筛选，不显示分店侧栏 / 按钮
+  const storeSidebarDocked = activeTab !== 'review' && shouldDockSidebar({
+    phone: phoneEnv.phone,
+    storeCount: storeOptions.length,
+    containerWidth: cardWidth,
+    preference: sidebarPreference,
+  })
+  const currentWeekStart = getIsoWeekStart(dayjs()).format('YYYY-MM-DD')
+  const relativeWeek = getRelativeWeekOffset(weekStart.format('YYYY-MM-DD'), currentWeekStart)
 
   useEffect(() => {
     loadActiveTab(1)
@@ -2421,24 +2504,44 @@ export default function ScheduleAttendancePage() {
     onChange: loader,
   })
 
+  // 侧栏收起时（13 寸屏、手机）：分店按钮放在卡片标题位置，点开是同一份列表；只有 1 家分店时只显示店名
+  const storeSwitcher = !storeSidebarDocked && storeOptions.length > 1 && activeTab !== 'review' ? (
+    <Popover
+      trigger="click"
+      placement="bottomLeft"
+      arrow={false}
+      destroyOnHidden
+      open={storePopoverOpen}
+      onOpenChange={setStorePopoverOpen}
+      styles={{ body: { padding: 0 } }}
+      content={(
+        <StorePicker
+          variant="floating"
+          autoFocus
+          options={storeOptions}
+          value={storeCode}
+          recent={recentStores}
+          allowAll
+          onSelect={selectStore}
+          onToggleDock={() => setSidebarDock('docked')}
+        />
+      )}
+    >
+      <Button className="sce-store-button" icon={<ShopOutlined />}>
+        <span className="sce-store-button-name">{storeCode ? storeNameMap.get(storeCode) ?? storeCode : t('posAdmin.scheduleAttendance.storePicker.allStores')}</span>
+        <DownOutlined className="sce-store-button-caret" />
+      </Button>
+    </Popover>
+  ) : null
+
   const filterBar = (
     <Space wrap>
-      <Select
-        allowClear
-        showSearch
-        optionFilterProp="label"
-        placeholder={t('posAdmin.scheduleAttendance.filters.store')}
-        style={{ width: 180 }}
-        value={storeCode}
-        options={storeOptions}
-        onChange={setStoreCode}
-      />
       {activeTab === 'schedules' ? (
         <Input
           allowClear
           prefix={<SearchOutlined />}
           placeholder={t('posAdmin.scheduleAttendance.board.searchPlaceholder')}
-          style={{ width: 220 }}
+          style={{ width: 170 }}
           value={staffKeyword}
           onChange={(event) => setStaffKeyword(event.target.value)}
         />
@@ -2453,15 +2556,36 @@ export default function ScheduleAttendancePage() {
       )}
       {activeTab === 'schedules' ? (
         <>
-          <DatePicker
-            picker="week"
-            locale={enGB}
-            allowClear={false}
-            placeholder={t('posAdmin.scheduleAttendance.weekTable.selectWeek')}
-            value={selectedWeek}
-            onChange={(value) => setSelectedWeek(value ?? dayjs())}
-          />
-          <Tag color="blue" style={{ lineHeight: '30px', paddingInline: 12 }}>{selectedWeekLabel}</Tag>
+          {/* 周切换：‹ 本周 › + 周范围（点开是原来的周选择器）；不在本周时标出「下 1 周 / 上 2 周」 */}
+          <span className="sce-week-nav">
+            <Space.Compact>
+              <Button icon={<LeftOutlined />} aria-label={t('posAdmin.scheduleAttendance.board.prevWeek')} onClick={() => setSelectedWeek((prev) => prev.subtract(1, 'week'))} />
+              <Button
+                className={`sce-week-now${relativeWeek === 0 ? ' is-current' : ''}`}
+                aria-pressed={relativeWeek === 0}
+                onClick={() => setSelectedWeek(dayjs())}
+              >
+                {t('posAdmin.scheduleAttendance.weekNav.thisWeek')}
+              </Button>
+              <Button icon={<RightOutlined />} aria-label={t('posAdmin.scheduleAttendance.board.nextWeek')} onClick={() => setSelectedWeek((prev) => prev.add(1, 'week'))} />
+            </Space.Compact>
+            <DatePicker
+              picker="week"
+              locale={enGB}
+              allowClear={false}
+              variant="borderless"
+              className="sce-week-range"
+              placeholder={t('posAdmin.scheduleAttendance.weekTable.selectWeek')}
+              value={selectedWeek}
+              format={(value) => formatWeekRange(value)}
+              onChange={(value) => setSelectedWeek(value ?? dayjs())}
+            />
+            {relativeWeek !== 0 ? (
+              <Tag color="orange" className="sce-week-rel">
+                {t(relativeWeek > 0 ? 'posAdmin.scheduleAttendance.weekNav.later' : 'posAdmin.scheduleAttendance.weekNav.earlier', { count: Math.abs(relativeWeek) })}
+              </Tag>
+            ) : null}
+          </span>
         </>
       ) : (
         <DatePicker.RangePicker
@@ -2469,7 +2593,9 @@ export default function ScheduleAttendancePage() {
           onChange={(value) => setDateRange(value as [Dayjs, Dayjs] | null)}
         />
       )}
-      <Button icon={<ReloadOutlined />} onClick={() => loadActiveTab(1)}>{t('common.search')}</Button>
+      <Tooltip title={t('common.search')}>
+        <Button icon={<ReloadOutlined />} aria-label={t('common.search')} onClick={() => loadActiveTab(1)} />
+      </Tooltip>
     </Space>
   )
 
@@ -2702,7 +2828,15 @@ export default function ScheduleAttendancePage() {
 
   return (
     <Card
-      title={<Space><CalendarOutlined />{t('posAdmin.scheduleAttendance.title')}</Space>}
+      ref={cardRef}
+      className={`sce-page-card${storeSwitcher ? ' has-store-title' : ''}`}
+      title={storeSwitcher ?? (
+        <Space>
+          <CalendarOutlined />
+          {t('posAdmin.scheduleAttendance.title')}
+          {storeOptions.length === 1 ? <Tag className="sce-store-single" icon={<ShopOutlined />}>{storeOptions[0].label}</Tag> : null}
+        </Space>
+      )}
       // 考勤审核标签自带门店 / 日期 / 搜索筛选，这里的周排班筛选与操作按钮不适用，整块隐藏。
       extra={activeTab === 'review' ? undefined : (
         <Space wrap>
@@ -2719,9 +2853,17 @@ export default function ScheduleAttendancePage() {
                   {t('posAdmin.scheduleAttendance.actions.publishWeek')}
                 </Button>
               </Tooltip>
-              <Button icon={<DeleteOutlined />} disabled={!storeCode} onClick={() => setDeletedSchedulesOpen(true)}>
-                {t('posAdmin.scheduleAttendance.deletedSchedules.button')}
-              </Button>
+              {/* 侧栏收起（窄屏）时只留图标，省出工具栏一行的宽度 */}
+              <Tooltip title={storeSidebarDocked ? undefined : t('posAdmin.scheduleAttendance.deletedSchedules.button')}>
+                <Button
+                  icon={<DeleteOutlined />}
+                  aria-label={t('posAdmin.scheduleAttendance.deletedSchedules.button')}
+                  disabled={!storeCode}
+                  onClick={() => setDeletedSchedulesOpen(true)}
+                >
+                  {storeSidebarDocked ? t('posAdmin.scheduleAttendance.deletedSchedules.button') : null}
+                </Button>
+              </Tooltip>
               <Button type="primary" icon={<PlusOutlined />} disabled={!canEditSelectedStore} onClick={() => openBatchModal()}>{t('posAdmin.scheduleAttendance.batch.openButton')}</Button>
             </>
           ) : null}
@@ -2752,7 +2894,25 @@ export default function ScheduleAttendancePage() {
         </Space>
       )}
     >
-      <Tabs activeKey={activeTab} onChange={handleTabChange} items={tabItems} />
+      {/* 宽屏：分店列表常驻左侧，作用于所有页签；« 收起后改由工具栏按钮弹出 */}
+      <div className={`sce-layout${storeSidebarDocked ? ' has-sidebar' : ''}`}>
+        {storeSidebarDocked ? (
+          <aside className="sce-store-aside">
+            <StorePicker
+              variant="docked"
+              options={storeOptions}
+              value={storeCode}
+              recent={recentStores}
+              allowAll
+              onSelect={selectStore}
+              onToggleDock={() => setSidebarDock('floating')}
+            />
+          </aside>
+        ) : null}
+        <div className="sce-layout-main">
+          <Tabs activeKey={activeTab} onChange={handleTabChange} items={tabItems} />
+        </div>
+      </div>
 
       <DeletedSchedulesDrawer
         open={deletedSchedulesOpen}

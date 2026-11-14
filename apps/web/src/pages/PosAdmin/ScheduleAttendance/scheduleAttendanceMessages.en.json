@@ -232,6 +232,23 @@
         "done": "Done",
         "publishHint": "Not visible to staff yet — publish the week to make it live",
         "resultRefreshed": "The board has refreshed: new shifts appear in their day columns, sorted by time then name."
+      },
+      "storePicker": {
+        "title": "Stores",
+        "searchPlaceholder": "Search store name / code",
+        "recent": "Recent",
+        "all": "All stores",
+        "allStores": "All stores (no filter)",
+        "collapse": "Collapse to toolbar",
+        "pin": "Pin to left",
+        "footHint": "↑↓ to move · Enter to switch · last store remembered",
+        "empty": "No matching store"
+      },
+      "weekNav": {
+        "thisWeek": "This week",
+        "range": "Week {{week}}, {{year}} · {{start}} – {{end}}",
+        "later": "{{count}} wk ahead",
+        "earlier": "{{count}} wk ago"
       }
     }
   }

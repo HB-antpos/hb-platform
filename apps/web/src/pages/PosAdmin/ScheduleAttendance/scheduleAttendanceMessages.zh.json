@@ -232,6 +232,23 @@
         "done": "完成",
         "publishHint": "还不是员工可见：点「发布本周」后生效",
         "resultRefreshed": "周视图已刷新：新班次出现在对应日期的列里（按时间、姓名排好）。"
+      },
+      "storePicker": {
+        "title": "分店",
+        "searchPlaceholder": "搜索分店名 / 编码",
+        "recent": "最近使用",
+        "all": "全部分店",
+        "allStores": "全部分店（不限）",
+        "collapse": "收起到工具栏",
+        "pin": "固定在左侧",
+        "footHint": "↑↓ 选择 · 回车切换 · 记住上次分店",
+        "empty": "没有匹配的分店"
+      },
+      "weekNav": {
+        "thisWeek": "本周",
+        "range": "{{year}} 第 {{week}} 周 · {{start}} – {{end}}",
+        "later": "下 {{count}} 周",
+        "earlier": "上 {{count}} 周"
       }
     }
   }
