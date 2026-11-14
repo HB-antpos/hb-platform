@@ -100,6 +100,10 @@ import type {
   SqlValue,
 } from "@hb/pos-db/core/db/types";
 import type { ReceiptProfileSyncLogEvent } from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
+import type {
+  PosSettingsLocalState,
+  PosSettingsLogEvent,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
 import type { SqliteInstallmentSnapshotRepository } from "../db/sqlite-installment-snapshot-repository";
 import type { SensitivePayloadEncryptor } from "../db/sqlite-repositories";
 import {
@@ -2940,6 +2944,263 @@ function receiptProfileRepository(
   );
 }
 
+/** 按脚本应答 pos-settings sync / ack，并记录请求；其余 URL 一律报错。 */
+function posSettingsTransport(script: Readonly<{
+  sync(knownHash: string): unknown;
+}>): Readonly<{ transport: HbposTransport; requests: HbposTransportRequest[] }> {
+  const requests: HbposTransportRequest[] = [];
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      requests.push(request);
+      if (request.url === "/api/v1/stores/current/pos-settings/sync") {
+        const data = script.sync(String((request.params as { knownHash: string }).knownHash));
+        if (data instanceof Error) throw data;
+        return { status: 200, data: { success: true, data } as T };
+      }
+      if (request.url === "/api/v1/stores/current/pos-settings/ack") {
+        return { status: 200, data: { success: true, data: {} } as T };
+      }
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+  return { transport, requests };
+}
+
+/** 模拟 expo-pos-runtime 的付款方式存取：save 落盘后同步刷新「内存快照」（支付 bootstrap 读的那份）。 */
+function posSettingsPaymentMethods(initial = false) {
+  const state = { stored: initial, memorySnapshot: initial, saves: [] as boolean[] };
+  return {
+    state,
+    port: {
+      load: async () => ({ useManualCard: state.stored }),
+      save: async (settings: { useManualCard: boolean }) => {
+        state.saves.push(settings.useManualCard);
+        state.stored = settings.useManualCard;
+        state.memorySnapshot = settings.useManualCard;
+      },
+    },
+  };
+}
+
+test("总部设置下发：拉取后写穿到 cashMovement 本机键与付款方式（并刷新内存快照），回执带实际值，日志不含收银信息", async () => {
+  const store = new InMemoryPosSettingsStore();
+  const payments = posSettingsPaymentMethods(false);
+  const { transport, requests } = posSettingsTransport({
+    sync: (knownHash) =>
+      knownHash === "hash-1"
+        ? { changed: false, hash: "hash-1" }
+        : {
+            changed: true,
+            hash: "hash-1",
+            settings: {
+              "cashMovement.enabled": { value: true, source: "global" },
+              "payment.manualCard": { value: true, source: "store" },
+              // 手持不认识的键（礼券）被忽略，且不会出现在回执里。
+              "payment.voucher": { value: true, source: "global" },
+            },
+          },
+  });
+  const logs: PosSettingsLogEvent[] = [];
+  const services = createTestComposition(
+    databaseFor([], { posSettingsStore: store }),
+    {
+      transport,
+      settings: { ...settingsRuntimeConfiguration(), paymentMethods: payments.port },
+      reportPosSettingsSync: (event) => logs.push(event),
+    },
+  );
+  await services.initialize();
+
+  const result = await services.posSettingsSync.requestSync("startup");
+
+  assert.equal(result.status, "updated");
+  assert.equal(store.cashMovementEnabled, true);
+  assert.equal(payments.state.stored, true);
+  // 写穿必须走原始 save，使支付 bootstrap 读到的内存快照同步刷新。
+  assert.equal(payments.state.memorySnapshot, true);
+  assert.equal(store.state?.hash, "hash-1");
+  assert.deepEqual(
+    requests.map(({ method, url, params, data }) => ({ method, url, params, data })),
+    [
+      { method: "GET", url: "/api/v1/stores/current/pos-settings/sync", params: { knownHash: "" }, data: undefined },
+      {
+        method: "POST",
+        url: "/api/v1/stores/current/pos-settings/ack",
+        params: undefined,
+        data: {
+          hash: "hash-1",
+          applied: { "cashMovement.enabled": true, "payment.manualCard": true },
+          appVersion: "0.1.0-test",
+          offlineOverrideCount: 0,
+        },
+      },
+    ],
+  );
+  assert.match(JSON.stringify(logs), /"managedKeys":2/);
+  assert.equal(JSON.stringify(logs).includes("cashier"), false);
+
+  // 下一轮以已应用指纹轮询，不重复回执。
+  requests.length = 0;
+  assert.equal((await services.posSettingsSync.requestSync("timer")).status, "up-to-date");
+  assert.deepEqual(requests.map(({ url, params }) => ({ url, params })), [
+    { url: "/api/v1/stores/current/pos-settings/sync", params: { knownHash: "hash-1" } },
+  ]);
+  await services.shutdownBackgroundWork();
+});
+
+test("总部设置下发：没有付款方式存取时只同步 cashMovement，回执只含 cashMovement", async () => {
+  const store = new InMemoryPosSettingsStore();
+  const { transport, requests } = posSettingsTransport({
+    sync: () => ({
+      changed: true,
+      hash: "hash-2",
+      settings: {
+        "cashMovement.enabled": { value: true, source: "device" },
+        "payment.manualCard": { value: true, source: "store" },
+      },
+    }),
+  });
+  const services = createTestComposition(databaseFor([], { posSettingsStore: store }), { transport });
+  await services.initialize();
+
+  await services.posSettingsSync.requestSync("startup");
+
+  assert.equal(store.cashMovementEnabled, true);
+  const ack = requests.find((request) => request.method === "POST");
+  assert.deepEqual((ack?.data as { applied: unknown }).applied, { "cashMovement.enabled": true });
+  await services.shutdownBackgroundWork();
+});
+
+test("总部设置下发：服务端 404（未部署）时不锁任何项、不写本机设置，并退避", async () => {
+  const store = new InMemoryPosSettingsStore();
+  const payments = posSettingsPaymentMethods(false);
+  const notFound = Object.assign(new Error("not found"), { kind: "http", status: 404 });
+  const { transport, requests } = posSettingsTransport({ sync: () => notFound });
+  const services = createTestComposition(databaseFor([], { posSettingsStore: store }), {
+    transport,
+    settings: { ...settingsRuntimeConfiguration(), paymentMethods: payments.port },
+  });
+  await services.initialize();
+
+  assert.deepEqual(await services.posSettingsSync.requestSync("startup"), { status: "failed", reason: "unsupported" });
+  assert.deepEqual(await services.posSettingsSync.requestSync("timer"), { status: "skipped", reason: "backoff" });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(payments.state.saves, []);
+  assert.equal(store.state, null);
+  await services.shutdownBackgroundWork();
+});
+
+test("总部设置下发：设备未注册（storeCode=unregistered）不发任何请求", async () => {
+  const { transport, requests } = posSettingsTransport({ sync: () => ({ changed: false, hash: "h" }) });
+  const services = createTestComposition(databaseFor([]), { transport, unregistered: true });
+  await services.initialize();
+
+  assert.deepEqual(await services.posSettingsSync.requestSync("startup"), { status: "skipped", reason: "not-ready" });
+  assert.equal(requests.length, 0);
+  await services.shutdownBackgroundWork();
+});
+
+async function createPosSettingsSettingsHarness(online: boolean) {
+  const store = new InMemoryPosSettingsStore();
+  const payments = posSettingsPaymentMethods(false);
+  const audit: AuditEventDraft[] = [];
+  const { transport } = posSettingsTransport({
+    sync: () => ({
+      changed: true,
+      hash: "hash-1",
+      settings: { "payment.manualCard": { value: true, source: "store" } },
+    }),
+  });
+  const services = createTestComposition(
+    databaseFor([], { posSettingsStore: store, auditEvents: audit }),
+    {
+      transport,
+      appUpdateTransition: new UpdateTransitionLeaseCoordinator(),
+      cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_PAYMENT_TERMINAL_PERMISSION],
+      supervisorPermissions: [],
+      settings: { ...settingsRuntimeConfiguration(), paymentMethods: payments.port },
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+  await services.posSettingsSync.requestSync("startup");
+  services.posSettingsSync.reportConnectivity(online);
+  assert.equal("createPresenter" in services.settings, true);
+  if (!("createPresenter" in services.settings)) throw new Error("settings unavailable");
+  const presenter = services.settings.createPresenter();
+  await presenter.load();
+  return { services, presenter, payments, store, audit };
+}
+
+test("设置页保存付款方式经总部策略守卫：在线受管 → 拒绝（POS_SETTING_MANAGED）、不写任何内容、视图显示锁定", async () => {
+  const { services, presenter, payments } = await createPosSettingsSettingsHarness(true);
+  assert.equal(presenter.getState().posSettings?.items.find((item) => item.key === "payment.manualCard")?.isLocked, true);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  payments.state.saves.length = 0;
+
+  // 界面灰显只是体验层，守卫才是权威：离线时改好草稿并点保存，保存在途中恢复联网、总部项重新锁定，
+  // 守卫在写入点复核策略，必须拒绝而不是把离线时的草稿写进去。
+  services.posSettingsSync.reportConnectivity(false);
+  presenter.setUseManualCard(false);
+  const saving = presenter.saveManualCardSettings();
+  services.posSettingsSync.reportConnectivity(true);
+  await saving;
+
+  assert.equal(presenter.getState().statusCode, "pos-settings-managed");
+  assert.deepEqual(payments.state.saves, []);
+  assert.equal(payments.state.stored, true);
+  assert.equal(payments.state.memorySnapshot, true);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  presenter.destroy();
+  await services.shutdownBackgroundWork();
+});
+
+test("设置页保存付款方式：离线受管 → 放行并写离线覆盖审计（带收银员 actor），内存快照随之刷新", async () => {
+  const { services, presenter, payments, audit } = await createPosSettingsSettingsHarness(false);
+  payments.state.saves.length = 0;
+
+  presenter.setUseManualCard(false);
+  await presenter.saveManualCardSettings();
+
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+  assert.deepEqual(payments.state.saves, [false]);
+  assert.equal(payments.state.memorySnapshot, false);
+  const event = audit.find((entry) => entry.eventType === "POS_SETTING_OFFLINE_OVERRIDE");
+  assert.ok(event);
+  assert.deepEqual(event.payload, {
+    source: "pos-settings",
+    action: "payment.manualCard",
+    status: "off",
+    reason: "OFFLINE",
+    requestingCashierId: "cashier-1",
+    requestingCashierName: "Cashier",
+    requestingUserGuid: "user-1",
+  });
+  assert.equal(
+    presenter.getState().posSettings?.items.find((item) => item.key === "payment.manualCard")?.isOfflineOverride,
+    true,
+  );
+  presenter.destroy();
+  await services.shutdownBackgroundWork();
+});
+
+test("设置页立即同步走总部设置服务，并把联网后的总部值覆盖离线临时修改", async () => {
+  const { services, presenter, payments } = await createPosSettingsSettingsHarness(false);
+  presenter.setUseManualCard(false);
+  await presenter.saveManualCardSettings();
+  assert.equal(payments.state.stored, false);
+
+  services.posSettingsSync.reportConnectivity(true);
+  await presenter.syncPosSettings();
+
+  assert.equal(presenter.getState().statusCode, "pos-settings-synced");
+  assert.equal(payments.state.stored, true);
+  assert.equal(payments.state.memorySnapshot, true);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  presenter.destroy();
+  await services.shutdownBackgroundWork();
+});
+
 function hqProfile(version: number, overrides: Record<string, unknown> = {}) {
   return {
     storeCode: "S001",
@@ -5077,6 +5338,9 @@ function createTestComposition(
     settings?: ProductionSettingsRuntimeConfiguration;
     appUpdateTransition?: UpdateTransitionLeaseCoordinator;
     reportReceiptProfileSync?(event: ReceiptProfileSyncLogEvent): void;
+    reportPosSettingsSync?(event: PosSettingsLogEvent): void;
+    /** 模拟未注册设备：组合根以 "unregistered" 占位门店代码。 */
+    unregistered?: boolean;
     applyApiEntryMode?(raw: unknown): void;
   }> = {},
 ) {
@@ -5088,7 +5352,7 @@ function createTestComposition(
     encryptor: encryptor(),
     syncSecurity: { async lockDevice() {} },
     auditMetadata: {
-      storeCode: "S001",
+      storeCode: options.unregistered ? "unregistered" : "S001",
       deviceCode: "IPAD-1",
       appVersion: "0.1.0-test",
       instanceId: "test-instance",
@@ -5217,7 +5481,28 @@ function createTestComposition(
     ...(options.reportReceiptProfileSync
       ? { reportReceiptProfileSync: options.reportReceiptProfileSync }
       : {}),
+    ...(options.reportPosSettingsSync
+      ? { reportPosSettingsSync: options.reportPosSettingsSync }
+      : {}),
   });
+}
+
+/** 总部设置下发本机存储的内存替身（与 PosSettingsSyncRepository 同形）。 */
+class InMemoryPosSettingsStore {
+  public state: PosSettingsLocalState | null = null;
+  public cashMovementEnabled = false;
+  public async load(): Promise<PosSettingsLocalState | null> {
+    return this.state;
+  }
+  public async save(state: PosSettingsLocalState): Promise<void> {
+    this.state = state;
+  }
+  public async readCashMovementEnabled(): Promise<boolean> {
+    return this.cashMovementEnabled;
+  }
+  public async writeCashMovementEnabled(enabled: boolean): Promise<void> {
+    this.cashMovementEnabled = enabled;
+  }
 }
 
 function settingsRuntimeConfiguration(): ProductionSettingsRuntimeConfiguration {
@@ -5470,6 +5755,8 @@ function databaseFor(
     pendingOrderSyncCount?: number;
     /** 提供时用真实设置仓库（内存连接）代替简易替身，验证下发资料的原子合并语义。 */
     receiptSettingsRepository?: PosSettingsRepository;
+    /** 总部设置下发的本机存储替身；缺省为全新的内存实现。 */
+    posSettingsStore?: InMemoryPosSettingsStore;
   }> = {},
 ): PosDatabase {
   let activeCatalogMetadata = options.activeCatalogMetadata ?? null;
@@ -5761,6 +6048,7 @@ function databaseFor(
     dailyCloseUploads: () =>
       options.dailyCloseUploads ?? new IdleDailyCloseUploadRepository(),
     settings: () => settings,
+    posSettingsSync: () => options.posSettingsStore ?? new InMemoryPosSettingsStore(),
     settingsSafety: () => ({
       async read() {
         return {

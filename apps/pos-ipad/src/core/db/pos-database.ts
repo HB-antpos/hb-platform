@@ -43,6 +43,7 @@ import { SqliteCatalogSnapshotRepository } from "./catalog-repository";
 import { applyMigrations } from "./migrations";
 import { PosIpadOtaUpdatePolicyRepository } from "./pos-ipad-ota-update-policy-repository";
 import { PosIpadUpdatePolicyRepository } from "./pos-ipad-update-policy-repository";
+import { PosSettingsSyncRepository } from "./pos-settings-sync-repository";
 import { PosSettingsRepository } from "./pos-settings-repository";
 import { PaymentMethodSettingsRepository } from "@/features/settings/payment-method-settings";
 import { ReceiptCompletionSettlementRepository } from "./receipt-completion-settlement-repository";
@@ -402,6 +403,11 @@ export class PosDatabase implements DatabasePort {
 
   public paymentMethodSettings(): PaymentMethodSettingsRepository {
     return new PaymentMethodSettingsRepository(this.connection, this.nowIso);
+  }
+
+  /** 总部设置下发的本机快照与现金进出开关只经此窄 facade 读写（app_settings 固定键，不加迁移）。 */
+  public posSettingsSync(): PosSettingsSyncRepository {
+    return new PosSettingsSyncRepository(this.connection, this.nowIso);
   }
 
   /** Settings 危险动作只读取一致风险计数，不取得订单、支付、队列或裸连接。 */

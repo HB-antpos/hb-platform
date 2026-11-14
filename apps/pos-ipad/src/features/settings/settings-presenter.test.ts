@@ -51,6 +51,10 @@ import {
   type SettingsSquareTokenStatus,
 } from "@hb/pos-domain/features/settings/settings-square-setup";
 import { derivePendingWorkBlockers } from "@hb/pos-domain";
+import type {
+  PosSettingsSyncResult,
+  PosSettingsView,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
 
 const allPermissions = [
   SETTINGS_VIEW_PERMISSION,
@@ -3115,6 +3119,195 @@ test("已保存的通道是 Zeller 时：加载后仍是 Zeller，不受 Square 
   assert.equal(presenter.getState().confirmation, null);
   assert.equal(presenter.getState().statusCode, "payment-settings-saved");
   assert.deepEqual(port.savedPayments, []);
+});
+
+// ───────────── 总部「收银端设置下发」（posSettings 端口） ─────────────
+
+type FakePosItem = {
+  key: string;
+  value: boolean;
+  source: string | null;
+  isManaged: boolean;
+  isLocked: boolean;
+  isOfflineOverride: boolean;
+};
+
+function posItem(key: string, value: boolean, extra: Partial<FakePosItem> = {}): FakePosItem {
+  return { key, value, source: "store", isManaged: true, isLocked: true, isOfflineOverride: false, ...extra };
+}
+
+/** 可控的总部设置端口：视图可随时替换并通知订阅者。 */
+class FakePosSettingsPort {
+  public view: PosSettingsView = posView([]);
+  public loadCalls = 0;
+  public failLoad = false;
+  public syncResult: PosSettingsSyncResult | "reject" = { status: "up-to-date", hash: "h", ackPending: false };
+  public syncCalls = 0;
+  public readonly listeners = new Set<() => void>();
+  public getView = (): PosSettingsView => this.view;
+  public subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  };
+  public load = async (): Promise<PosSettingsView> => {
+    this.loadCalls++;
+    if (this.failLoad) throw new Error("load boom");
+    return this.view;
+  };
+  public syncNow = async (): Promise<PosSettingsSyncResult> => {
+    this.syncCalls++;
+    if (this.syncResult === "reject") throw new Error("sync boom");
+    return this.syncResult;
+  };
+  public setView(next: PosSettingsView): void {
+    this.view = next;
+    for (const listener of [...this.listeners]) listener();
+  }
+}
+
+function posView(items: readonly FakePosItem[], extra: Partial<PosSettingsView> = {}): PosSettingsView {
+  return {
+    items,
+    isOnline: true,
+    lastSyncedAtIso: null,
+    showsOfflineBanner: false,
+    hasLockedItems: items.some((item) => item.isLocked),
+    ...extra,
+  };
+}
+
+function presenterWithPosSettings(fake: FakePosSettingsPort | null = new FakePosSettingsPort()) {
+  const port = new FakeSettingsPort();
+  const saved: unknown[] = [];
+  Object.assign(port, {
+    savePaymentMethods: async (input: unknown) => { saved.push(input); },
+    ...(fake ? { posSettings: fake } : {}),
+  });
+  return { port, saved, fake, presenter: createPresenter(port) };
+}
+
+const CARD_KEY = "payment.manualCard";
+const VOUCHER_KEY = "payment.voucher";
+
+test("总部设置：没有端口时 posSettings 为 null，立即同步按暂未支持处理", async () => {
+  const { presenter } = presenterWithPosSettings(null);
+  await presenter.load();
+  assert.equal(presenter.getState().posSettings, null);
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-sync-unsupported");
+  presenter.destroy();
+});
+
+test("总部设置：load 读取视图并只订阅一次，destroy 取消订阅；视图读取失败不拖垮设置页", async () => {
+  const { presenter, fake } = presenterWithPosSettings();
+  fake!.view = posView([posItem(CARD_KEY, true)]);
+  await presenter.load();
+  await presenter.load();
+  assert.equal(presenter.getState().kind, "ready");
+  assert.equal(fake!.loadCalls, 2);
+  assert.equal(fake!.listeners.size, 1);
+  assert.equal(presenter.getState().posSettings?.items[0]?.key, CARD_KEY);
+  presenter.destroy();
+  assert.equal(fake!.listeners.size, 0);
+
+  const failing = presenterWithPosSettings();
+  failing.fake!.failLoad = true;
+  await failing.presenter.load();
+  assert.equal(failing.presenter.getState().kind, "ready");
+  failing.presenter.destroy();
+});
+
+test("总部设置：锁定项的草稿在加载时取生效值，setUseManualCard / setGiftCardEnabled 被忽略", async () => {
+  const { presenter, fake } = presenterWithPosSettings();
+  // 本机快照里付款方式全关，但视图说手动刷卡被总部锁成开。
+  fake!.view = posView([posItem(CARD_KEY, true), posItem(VOUCHER_KEY, false)]);
+  await presenter.load();
+  assert.equal(presenter.getState().paymentMethodsDraft.useManualCard, true);
+  presenter.setUseManualCard(false);
+  presenter.setGiftCardEnabled(true);
+  assert.equal(presenter.getState().paymentMethodsDraft.useManualCard, true);
+  assert.equal(presenter.getState().paymentMethodsDraft.giftCardEnabled, false);
+  presenter.destroy();
+});
+
+test("总部设置：离线（受管但未锁定）与没被总部管理的项仍可修改草稿", async () => {
+  const { presenter, fake } = presenterWithPosSettings();
+  fake!.view = posView([
+    posItem(CARD_KEY, false, { isLocked: false }),
+    { key: VOUCHER_KEY, value: false, source: null, isManaged: false, isLocked: false, isOfflineOverride: false },
+  ]);
+  await presenter.load();
+  presenter.setUseManualCard(true);
+  presenter.setGiftCardEnabled(true);
+  assert.deepEqual(presenter.getState().paymentMethodsDraft, { useManualCard: true, giftCardEnabled: true });
+  presenter.destroy();
+});
+
+test("总部设置：保存遇到 POS_SETTING_MANAGED → 草稿恢复为生效值、提示由总部管理、生效值不变", async () => {
+  const { port, presenter, fake } = presenterWithPosSettings();
+  // 加载时尚未锁定，保存瞬间才被总部锁定（例如刚联网同步到策略）。
+  fake!.view = posView([posItem(CARD_KEY, false, { isLocked: false })]);
+  await presenter.load();
+  presenter.setUseManualCard(true);
+  fake!.view = posView([posItem(CARD_KEY, false)]);
+  Object.assign(port, {
+    savePaymentMethods: async () => {
+      throw Object.assign(new Error("POS_SETTING_MANAGED"), { code: "POS_SETTING_MANAGED" });
+    },
+  });
+  await presenter.savePaymentMethods();
+  assert.equal(presenter.getState().statusCode, "pos-settings-managed");
+  assert.equal(presenter.getState().paymentMethods.useManualCard, false);
+  assert.equal(presenter.getState().paymentMethodsDraft.useManualCard, false);
+  presenter.destroy();
+});
+
+test("总部设置：视图变化（同步写穿）时生效值与草稿跟随，未改动的其他项草稿不被冲掉", async () => {
+  const { presenter, fake } = presenterWithPosSettings();
+  fake!.view = posView([
+    posItem(CARD_KEY, false, { isLocked: false }),
+    { key: VOUCHER_KEY, value: false, source: null, isManaged: false, isLocked: false, isOfflineOverride: false },
+  ]);
+  await presenter.load();
+  presenter.setGiftCardEnabled(true); // 收银员正在编辑券草稿
+  // 联网后总部把手动刷卡写穿成开并锁定。
+  fake!.setView(posView([
+    posItem(CARD_KEY, true),
+    { key: VOUCHER_KEY, value: false, source: null, isManaged: false, isLocked: false, isOfflineOverride: false },
+  ]));
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  assert.deepEqual(presenter.getState().paymentMethodsDraft, { useManualCard: true, giftCardEnabled: true });
+  // 仍锁定的项：即使草稿被别处改过，视图再通知时也拉回生效值。
+  fake!.setView(posView([posItem(CARD_KEY, true, { source: "global" })]));
+  assert.equal(presenter.getState().paymentMethodsDraft.useManualCard, true);
+  presenter.destroy();
+});
+
+test("总部设置：立即同步结果映射为状态；更新 / 已最新 = 成功，不支持 / 失败 / 抛错 = 失败，无权限不调用", async () => {
+  const cases: readonly [PosSettingsSyncResult | "reject", string][] = [
+    [{ status: "updated", hash: "h", ackPending: false }, "pos-settings-synced"],
+    [{ status: "up-to-date", hash: "h", ackPending: true }, "pos-settings-synced"],
+    [{ status: "failed", reason: "unsupported" }, "pos-settings-sync-unsupported"],
+    [{ status: "failed", reason: "offline" }, "pos-settings-sync-failed"],
+    [{ status: "skipped", reason: "not-ready" }, "pos-settings-sync-failed"],
+    ["reject", "pos-settings-sync-failed"],
+  ];
+  for (const [result, expected] of cases) {
+    const { presenter, fake } = presenterWithPosSettings();
+    fake!.syncResult = result;
+    await presenter.load();
+    await presenter.syncPosSettings();
+    assert.equal(presenter.getState().statusCode, expected, JSON.stringify(result));
+    assert.equal(fake!.syncCalls, 1);
+    presenter.destroy();
+  }
+  const { port, fake } = presenterWithPosSettings();
+  const restricted = new SettingsPresenter({ permissions: [SETTINGS_VIEW_PERMISSION], port });
+  await restricted.load();
+  await restricted.syncPosSettings();
+  assert.equal(fake!.syncCalls, 0);
+  assert.equal(restricted.getState().statusCode, "permission-required");
+  restricted.destroy();
 });
 
 function createPresenter(port: FakeSettingsPort): SettingsPresenter {

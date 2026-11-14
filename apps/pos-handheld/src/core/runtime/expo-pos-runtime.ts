@@ -1020,6 +1020,15 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
           properties: event.properties,
         });
       },
+      // 总部设置下发同步日志：只含键名、布尔值、指纹前缀与状态码，不含收银员或顾客信息。
+      reportPosSettingsSync(event) {
+        applicationLog?.record({
+          level: event.level,
+          message: event.message,
+          category: "settings.pos-settings",
+          properties: event.properties,
+        });
+      },
       reportPaymentRecoveryFallback(fallback) {
         // 设备仍可启动，但说明耐久草稿已无法被当前代码重算；须人工在支付页完成恢复或安全取消。
         applicationLog?.record({

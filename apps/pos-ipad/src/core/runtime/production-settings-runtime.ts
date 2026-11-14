@@ -166,8 +166,28 @@ function securedSettingsPort(
 
   const squareSetup = input.control.squareSetup;
   const linklySetup = input.control.linklySetup;
+  const posSettings = input.control.posSettings;
 
   const secured: SettingsControlPort = {
+    // 总部下发设置：读视图与订阅不改任何状态；换班后旧 presenter 不再收到通知，读取 / 同步照常过 lease 复核。
+    ...(posSettings
+      ? {
+          posSettings: Object.freeze({
+            getView: () => posSettings.getView(),
+            subscribe: (listener: () => void) =>
+              posSettings.subscribe(() => {
+                try {
+                  assertSameSession(lease.get(), identity);
+                } catch {
+                  return;
+                }
+                listener();
+              }),
+            load: () => run(() => posSettings.load()),
+            syncNow: () => run(() => posSettings.syncNow()),
+          }),
+        }
+      : {}),
     ...(squareSetup
       ? {
           squareSetup: Object.freeze({

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { RuntimeWorkController } from "./runtime-work-controller";
+import { RuntimeWorkController, type RuntimeBackgroundWorkPort } from "./runtime-work-controller";
 
 test("启动和前台同时触发时外设 drain 单飞，同步各走对应耐久入口", async () => {
   const calls: string[] = [];
@@ -201,4 +201,100 @@ test("未提供下发资料同步入口（设备未就绪或旧组合）时全�
   assert.deepEqual(calls, [
     "sync-start", "hardware", "sync-foreground", "hardware", "sync-network:true",
   ]);
+});
+
+test("总部设置同步：启动、回前台、联网恢复、定时各带对应触发源；断网不发请求", async () => {
+  const calls: string[] = [];
+  const triggers: string[] = [];
+  const controller = new RuntimeWorkController({
+    ...basePort(calls),
+    posSettingsSync: {
+      async requestSync(trigger) {
+        triggers.push(trigger);
+      },
+      reportConnectivity() {},
+    },
+  });
+
+  await controller.onApplicationStarted();
+  await controller.onForeground();
+  await controller.onNetworkChanged(false);
+  await controller.onNetworkChanged(true);
+  controller.onReceiptProfileTimer();
+
+  assert.deepEqual(triggers, ["startup", "foreground", "network", "timer"]);
+});
+
+test("总部设置同步：联网状态先于同步触发上报，离线也上报", async () => {
+  const events: string[] = [];
+  const controller = new RuntimeWorkController({
+    ...basePort([]),
+    posSettingsSync: {
+      async requestSync(trigger) {
+        events.push(`sync:${trigger}`);
+      },
+      reportConnectivity(isOnline) {
+        events.push(`online:${isOnline}`);
+      },
+    },
+  });
+
+  await controller.onNetworkChanged(false);
+  await controller.onNetworkChanged(true);
+
+  // 恢复联网时必须先告知在线，再发起同步，否则第一次同步仍按离线处理。
+  assert.deepEqual(events, ["online:false", "online:true", "sync:network"]);
+});
+
+test("总部设置同步挂起、抛错、reject 或上报联网时抛错，都不影响订单同步与更新检查", async () => {
+  const calls: string[] = [];
+  const makeController = (posSettingsSync: RuntimeBackgroundWorkPort["posSettingsSync"]) =>
+    new RuntimeWorkController({
+      ...basePort(calls),
+      appUpdates: {
+        async refreshOnStartup() {
+          calls.push("updates-start");
+        },
+        async refreshOnForeground() {},
+        async refreshOnNetworkAvailable() {
+          calls.push("updates-network");
+        },
+      },
+      posSettingsSync,
+    });
+
+  await makeController({
+    requestSync: () => new Promise(() => undefined),
+    reportConnectivity() {},
+  }).onApplicationStarted();
+  await makeController({
+    requestSync() {
+      throw new Error("sync entry crashed");
+    },
+    reportConnectivity() {
+      throw new Error("report crashed");
+    },
+  }).onNetworkChanged(true);
+  await makeController({
+    requestSync: async () => {
+      throw new Error("rejected");
+    },
+    reportConnectivity() {},
+  }).onForeground();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [
+    "sync-start", "hardware", "updates-start",
+    "sync-network:true", "updates-network",
+    "sync-foreground", "hardware",
+  ]);
+});
+
+test("未提供总部设置同步入口时静默跳过", async () => {
+  const controller = new RuntimeWorkController(basePort([]));
+  await controller.onApplicationStarted();
+  await controller.onForeground();
+  await controller.onNetworkChanged(true);
+  await controller.onNetworkChanged(false);
+  controller.onReceiptProfileTimer();
 });

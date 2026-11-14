@@ -32,11 +32,11 @@ function isDeviceAuthorized(
   );
 }
 
-/** 设备未认证（待注册/待审批/已锁定）时不暴露下发资料同步，避免无凭据请求。 */
+/** 设备未认证（待注册/待审批/已锁定）时不暴露下发资料与总部设置同步，避免无凭据请求。 */
 function toWorkPort(services: ExpoPosRuntimeServices): RuntimeBackgroundWorkPort {
   return isDeviceAuthorized(services)
     ? services
-    : { ...services, receiptProfileSync: undefined };
+    : { ...services, receiptProfileSync: undefined, posSettingsSync: undefined };
 }
 
 export function RuntimeWorkBridge() {

@@ -23,6 +23,18 @@ export type RuntimeBackgroundWorkPort = Readonly<{
         ): Promise<unknown>;
       }>
     | undefined;
+  /**
+   * 总部「收银端设置下发」后台同步与联网状态通知。缺省（设备未就绪、旧组合）时整条链路静默跳过；
+   * requestSync 保证永不 reject，单飞与 404 退避在服务内部处理；reportConnectivity 决定受管开关在线锁定、离线可临时修改。
+   */
+  posSettingsSync?:
+    | Readonly<{
+        requestSync(
+          trigger: "startup" | "foreground" | "network" | "timer",
+        ): Promise<unknown>;
+        reportConnectivity(isOnline: boolean): void;
+      }>
+    | undefined;
 }>;
 
 /**
@@ -39,6 +51,7 @@ export class RuntimeWorkController {
 
   public onApplicationStarted(): Promise<void> {
     this.requestReceiptProfileSync("startup");
+    this.requestPosSettingsSync("startup");
     return this.runWithHardware(
       () => this.services.sync.onApplicationStarted(),
       () => this.services.appUpdates?.refreshOnStartup(),
@@ -47,6 +60,7 @@ export class RuntimeWorkController {
 
   public onForeground(): Promise<void> {
     this.requestReceiptProfileSync("foreground");
+    this.requestPosSettingsSync("foreground");
     return this.runWithHardware(
       () => this.services.sync.onForeground(),
       () => this.services.appUpdates?.refreshOnForeground(),
@@ -54,17 +68,46 @@ export class RuntimeWorkController {
   }
 
   public async onNetworkChanged(isOnline: boolean): Promise<void> {
+    // 先告知总部设置服务联网状态（必须在触发同步之前：恢复联网的第一次同步要按在线处理）。
+    this.reportPosSettingsConnectivity(isOnline);
     // 联网（含离线恢复）才去检查总部下发资料；断网不发请求，继续用本机资料。
-    if (isOnline) this.requestReceiptProfileSync("network");
+    if (isOnline) {
+      this.requestReceiptProfileSync("network");
+      this.requestPosSettingsSync("network");
+    }
     await this.services.sync.onNetworkChanged(isOnline);
     if (isOnline) {
       await this.services.appUpdates?.refreshOnNetworkAvailable();
     }
   }
 
-  /** 前台常驻时每 60 秒由壳层定时器调用一次，让总部下发在一分钟内生效。 */
+  /** 前台常驻时每 60 秒由壳层定时器调用一次，让总部下发（小票资料与收银端设置）在一分钟内生效。 */
   public onReceiptProfileTimer(): void {
     this.requestReceiptProfileSync("timer");
+    this.requestPosSettingsSync("timer");
+  }
+
+  /** 与小票资料同步同一节奏；同样不等待、不让异常影响其他触发器。 */
+  private requestPosSettingsSync(
+    trigger: "startup" | "foreground" | "network" | "timer",
+  ): void {
+    const port = this.services.posSettingsSync;
+    if (!port) return;
+    try {
+      void Promise.resolve(port.requestSync(trigger)).catch(() => {
+        // 服务内部已记录失败，这里不再上抛。
+      });
+    } catch {
+      // 同步入口抛出同步异常时同样不能影响启动、前台与联网流程。
+    }
+  }
+
+  private reportPosSettingsConnectivity(isOnline: boolean): void {
+    try {
+      this.services.posSettingsSync?.reportConnectivity(isOnline);
+    } catch {
+      // 联网状态通知失败不能影响订单同步与更新检查。
+    }
   }
 
   /**

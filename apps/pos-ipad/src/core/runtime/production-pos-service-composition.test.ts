@@ -70,6 +70,7 @@ import type {
 } from "../api/hbpos-api";
 import { HbposApiError } from "../api/hbpos-api";
 import type {
+  AuditEventDraft,
   CustomerDisplaySnapshot,
   DailyCloseArchiveCommit,
   DailyCloseRepositoryPort,
@@ -3537,6 +3538,148 @@ function receiptProfileTransport(script: Readonly<{
   return { transport, requests };
 }
 
+test("收银端设置下发：总部值写穿本机存储并回执；在线锁定、未受管项可改；离线临时修改写审计，恢复联网后被总部值覆盖", async () => {
+  const requests: HbposTransportRequest[] = [];
+  let syncData: unknown = {
+    changed: true,
+    hash: "h1",
+    settings: {
+      "payment.manualCard": { value: true, source: "store" },
+      "cashMovement.enabled": { value: true, source: "global" },
+    },
+  };
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      if (request.url === BACKGROUND_PROMOTIONS_URL) {
+        throw new Error("promotions are not part of this scenario");
+      }
+      requests.push(request);
+      if (request.url === "/api/v1/stores/current/pos-settings/sync") {
+        return { status: 200, data: { success: true, data: syncData } as T };
+      }
+      if (request.url === "/api/v1/stores/current/pos-settings/ack") {
+        return { status: 200, data: { success: true, data: {} } as T };
+      }
+      throw new Error(`Unexpected URL: ${request.url}`);
+    },
+  };
+  const payment = {
+    persisted: { useManualCard: false, giftCardEnabled: false },
+    saves: [] as { useManualCard: boolean; giftCardEnabled: boolean }[],
+  };
+  const localStore = new MemoryPosSettingsSync();
+  const auditEvents: AuditEventDraft[] = [];
+  const services = createTestComposition(
+    databaseFor([], { posSettingsSync: localStore, auditEvents }),
+    {
+      transport,
+      appUpdateTransition: new UpdateTransitionLeaseCoordinator(),
+      cashierPermissions: [SETTINGS_VIEW_PERMISSION, SETTINGS_PAYMENT_TERMINAL_PERMISSION],
+      settings: {
+        ...settingsRuntimeConfiguration(),
+        paymentMethods: {
+          load: async () => payment.persisted,
+          save: async (next) => {
+            payment.saves.push(next);
+            payment.persisted = next;
+          },
+        },
+      },
+    },
+  );
+  await services.initialize();
+  await services.cashierSession.signIn("cashier");
+
+  // 1) 启动同步：总部值写穿（付款方式读后合并、现金进出本机键），并带实际值回执。
+  const first = await services.posSettingsSync.requestSync("startup");
+  assert.equal(first.status, "updated");
+  assert.deepEqual(payment.persisted, { useManualCard: true, giftCardEnabled: false });
+  assert.equal(localStore.cashMovementEnabled, true);
+  assert.equal(localStore.state?.hash, "h1");
+  const ack = requests.find((request) => request.url.endsWith("/pos-settings/ack"));
+  assert.deepEqual(ack?.data, {
+    hash: "h1",
+    applied: {
+      "cashMovement.enabled": true,
+      "payment.manualCard": true,
+      "payment.voucher": false,
+    },
+    appVersion: "0.1.0-test",
+    offlineOverrideCount: 0,
+  });
+
+  // 2) 设置页：手动刷卡被总部锁定（草稿忽略修改），券未受管可改，保存只落券。
+  assert.equal("createPresenter" in services.settings, true);
+  if (!("createPresenter" in services.settings)) return;
+  const presenter = services.settings.createPresenter();
+  await presenter.load();
+  const manualItem = () =>
+    presenter.getState().posSettings?.items.find((item) => item.key === "payment.manualCard");
+  assert.equal(manualItem()?.isLocked, true);
+  presenter.setUseManualCard(false);
+  assert.equal(presenter.getState().paymentMethodsDraft.useManualCard, true);
+  presenter.setGiftCardEnabled(true);
+  await presenter.savePaymentMethods();
+  assert.equal(presenter.getState().statusCode, "payment-settings-saved");
+  assert.deepEqual(payment.persisted, { useManualCard: true, giftCardEnabled: true });
+
+  // 3) 离线：手动刷卡可临时修改，写本机存储并登记审计。
+  services.posSettingsSync.reportConnectivity(false);
+  assert.equal(manualItem()?.isLocked, false);
+  presenter.setUseManualCard(false);
+  await presenter.savePaymentMethods();
+  assert.deepEqual(payment.persisted, { useManualCard: false, giftCardEnabled: true });
+  assert.equal(manualItem()?.isOfflineOverride, true);
+  const overrideAudits = auditEvents.filter((event) => event.eventType === "POS_SETTING_OFFLINE_OVERRIDE");
+  assert.equal(overrideAudits.length, 1);
+  assert.deepEqual(overrideAudits[0]?.payload, {
+    source: "pos-settings",
+    action: "payment.manualCard",
+    status: "off",
+    reason: "OFFLINE",
+    requestingCashierId: "cashier-1",
+    requestingCashierName: "Cashier",
+    requestingUserGuid: "user-1",
+  });
+
+  // 4) 恢复联网：指纹没变也会把总部值核对写回，并带累计离线修改次数回执。
+  syncData = { changed: false, hash: "h1", settings: null };
+  services.posSettingsSync.reportConnectivity(true);
+  const second = await services.posSettingsSync.requestSync("network");
+  assert.equal(second.status, "up-to-date");
+  assert.deepEqual(payment.persisted, { useManualCard: true, giftCardEnabled: true });
+  assert.equal(manualItem()?.isLocked, true);
+  assert.equal(manualItem()?.isOfflineOverride, false);
+  assert.equal(presenter.getState().paymentMethods.useManualCard, true);
+  const lastAck = requests.filter((request) => request.url.endsWith("/pos-settings/ack")).at(-1);
+  assert.equal((lastAck?.data as { offlineOverrideCount: number }).offlineOverrideCount, 1);
+  presenter.destroy();
+});
+
+test("收银端设置下发：服务端未部署接口（404）时不锁任何项，也不改本机设置", async () => {
+  const transport: HbposTransport = {
+    async request<T>(request: HbposTransportRequest) {
+      if (request.url === BACKGROUND_PROMOTIONS_URL) throw new Error("not in scenario");
+      throw new HbposApiError("not found", { kind: "http", status: 404 });
+    },
+  };
+  const payment = { persisted: { useManualCard: false, giftCardEnabled: true }, saves: 0 };
+  const services = createTestComposition(databaseFor([]), {
+    transport,
+    settings: {
+      ...settingsRuntimeConfiguration(),
+      paymentMethods: {
+        load: async () => payment.persisted,
+        save: async () => { payment.saves += 1; },
+      },
+    },
+  });
+  await services.initialize();
+  const result = await services.posSettingsSync.requestSync("startup");
+  assert.deepEqual(result, { status: "failed", reason: "unsupported" });
+  assert.equal(payment.saves, 0);
+});
+
 test("下发资料后台同步（无需收银员登录）：拉取→原子写入→回执→记录已回执版本；下一轮以新版本号轮询且不重复回执", async () => {
   const repository = receiptProfileRepository();
   const { transport, requests } = receiptProfileTransport({
@@ -6710,6 +6853,16 @@ function unavailableHeldOrderRecords(): HeldOrderRecordRepositoryPort {
   };
 }
 
+/** 总部设置下发本机存储的内存替身（与真实 PosSettingsSyncRepository 同接口）。 */
+class MemoryPosSettingsSync {
+  public state: import("@hb/pos-sync/features/pos-settings/pos-settings-service").PosSettingsLocalState | null = null;
+  public cashMovementEnabled = false;
+  public async load() { return this.state; }
+  public async save(state: NonNullable<MemoryPosSettingsSync["state"]>) { this.state = state; }
+  public async loadCashMovementEnabled() { return this.cashMovementEnabled; }
+  public async saveCashMovementEnabled(enabled: boolean) { this.cashMovementEnabled = enabled; }
+}
+
 function databaseFor(
   durableCommits: DurableCashOrderCommit[],
   options: Readonly<{
@@ -6762,9 +6915,14 @@ function databaseFor(
     receiptSettingsRepository?: PosSettingsRepository;
     /** 基础目录商品（930000000001）的图片地址；缺省为无图。 */
     baseProductImage?: string | null;
+    /** 提供时员工审计 append 记录到这里（用于验证离线临时修改审计）。 */
+    auditEvents?: AuditEventDraft[];
+    /** 总部设置下发的本机存储替身（快照 + 现金进出开关）；缺省为内存实现。 */
+    posSettingsSync?: MemoryPosSettingsSync;
   }> = {},
 ): PosDatabase {
   let activeCatalogMetadata = options.activeCatalogMetadata ?? null;
+  const posSettingsSyncStore = options.posSettingsSync ?? new MemoryPosSettingsSync();
   const lookupOverlays = new Map<string, LocalCatalogMatch | null>();
   const codeConflicts = new Map<string, readonly LocalCatalogMatch[]>();
   let stagingCatalog: Readonly<{
@@ -6856,7 +7014,15 @@ function databaseFor(
           async markRejected() {},
         }
       : {},
-    audit: options.dailyCloseUploads
+    audit: options.auditEvents
+      ? {
+          async append(events: readonly AuditEventDraft[]) {
+            options.auditEvents!.push(...events);
+          },
+          async listPending() { return []; },
+          async markUploaded() {},
+        }
+      : options.dailyCloseUploads
       ? {
           async append() {},
           async listPending() { return []; },
@@ -7083,6 +7249,7 @@ function databaseFor(
     dailyCloseUploads: () =>
       options.dailyCloseUploads ?? new IdleDailyCloseUploadRepository(),
     settings: () => settings,
+    posSettingsSync: () => posSettingsSyncStore,
     settingsSafety: () => ({
       async read() {
         return {

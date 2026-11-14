@@ -27,6 +27,23 @@ import {
 import type { CatalogRefreshState } from "@/features/catalog/catalog-refresh-coordinator";
 import { parseDeviceActivationCode } from "@/core/security/device-activation-code";
 import type { PaymentMethodSettings } from "./payment-method-settings";
+import type {
+  PosSettingsSyncResult,
+  PosSettingsView,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
+
+/** 总部下发的「手动刷卡」开关键（与服务端 PosSettingKeys 同一份字符串）。 */
+export const POS_SETTING_MANUAL_CARD_KEY = "payment.manualCard";
+/** 付款方式保存回调遇到「总部管理且在线锁定」的开关时抛出的错误码。 */
+export const POS_SETTING_MANAGED_ERROR_CODE = "POS_SETTING_MANAGED";
+
+/** 设置页消费的总部设置端口：视图只读 + 变化订阅 + 「立即同步」。缺省 = 该运行时不支持总部设置。 */
+export interface SettingsPosSettingsPort {
+  getView(): PosSettingsView;
+  subscribe(listener: () => void): () => void;
+  load(): Promise<PosSettingsView>;
+  syncNow(): Promise<PosSettingsSyncResult>;
+}
 
 export type SettingsPane =
   "general" | "payments" | "peripherals" | "device" | "hardware";
@@ -418,6 +435,8 @@ export type SettingsDangerousActionResult =
     }>;
 
 export interface SettingsControlPort {
+  /** 总部「收银端设置下发」；缺省时设置页不显示总部设置状态条，也不锁任何开关。 */
+  posSettings?: SettingsPosSettingsPort | undefined;
   squareSetup?: SettingsSquareSetupControlPort | undefined;
   /** 只允许读取 health；配对必须经过 executeDangerousAction。 */
   linklySetup?: SettingsLinklySetupReadPort | undefined;
@@ -535,6 +554,10 @@ export type SettingsStatusCode =
   | "payment-test-passed"
   | "pending-local-data"
   | "permission-required"
+  | "pos-settings-managed"
+  | "pos-settings-sync-failed"
+  | "pos-settings-sync-unsupported"
+  | "pos-settings-synced"
   | "printer-connect-failed"
   | "printer-pairing-required"
   | "printer-connected"
@@ -591,6 +614,8 @@ export type SettingsState = Readonly<{
   paymentProvider: SettingsPaymentProvider | null;
   paymentProviderDraft: SettingsPaymentProvider | null;
   paymentMethods: PaymentMethodSettings;
+  /** 总部设置视图；null = 运行时不支持总部设置（旧组合 / 读取失败），界面按没有总部设置处理。 */
+  posSettings: PosSettingsView | null;
   printer: ReceiptPrinterSettings;
   printerDevices: readonly SettingsPrinterDevice[];
   square: SettingsSquareSnapshot;
@@ -617,6 +642,7 @@ export class SettingsPresenter {
   private catalogRefreshUnsubscribe: () => void = () => undefined;
   private deviceReregistrationCommittedUnsubscribe: () => void =
     () => undefined;
+  private posSettingsUnsubscribe: () => void = () => undefined;
   private state: SettingsState;
   private destroyed = false;
   private loadGeneration = 0;
@@ -677,6 +703,8 @@ export class SettingsPresenter {
     this.catalogRefreshUnsubscribe = () => undefined;
     this.deviceReregistrationCommittedUnsubscribe();
     this.deviceReregistrationCommittedUnsubscribe = () => undefined;
+    this.posSettingsUnsubscribe();
+    this.posSettingsUnsubscribe = () => undefined;
     this.lifetime.abort();
     this.listeners.clear();
   }
@@ -701,6 +729,8 @@ export class SettingsPresenter {
         snapshot.paymentMethods ?? { useManualCard: false },
       );
       this.lastSavedPaymentMethods = paymentMethods;
+      const posSettings = await this.loadPosSettingsView();
+      if (!this.isCurrentLoad(generation)) return;
       this.patch({
         apiBaseUrl: snapshot.apiBaseUrl,
         apiAddressDraft: snapshot.apiBaseUrl,
@@ -725,6 +755,7 @@ export class SettingsPresenter {
         paymentProvider: snapshot.paymentProvider,
         paymentProviderDraft: snapshot.paymentProvider,
         paymentMethods,
+        posSettings,
         printer: snapshot.printer,
         square: snapshot.square,
         squareDraft: {
@@ -1696,6 +1727,8 @@ export class SettingsPresenter {
 
   public setUseManualCard(value: boolean): void {
     if (!this.canEditPayments()) return;
+    // 防御：总部管理且在线锁定时忽略草稿修改（界面已灰显，这里兜底防止其他入口绕过）。
+    if (this.isManualCardLocked()) return;
     this.patch({ paymentMethods: Object.freeze({ useManualCard: value }), statusCode: null });
   }
 
@@ -1724,13 +1757,127 @@ export class SettingsPresenter {
         }
         this.lastSavedPaymentMethods = this.state.paymentMethods;
         this.patch({ statusCode: "payment-settings-saved" });
-      } catch {
+      } catch (error) {
+        if (errorCodeOf(error) === POS_SETTING_MANAGED_ERROR_CODE) {
+          // 总部管理且在线锁定：没有写入任何内容；草稿恢复为当前生效值。
+          const effective = this.manualCardEffectiveValue();
+          if (effective !== null) {
+            this.lastSavedPaymentMethods = Object.freeze({
+              useManualCard: effective,
+            });
+          }
+          this.patch({
+            paymentMethods: this.lastSavedPaymentMethods,
+            statusCode: "pos-settings-managed",
+          });
+          return;
+        }
         this.patch({
           paymentMethods: this.lastSavedPaymentMethods,
           statusCode: "payment-settings-save-failed",
         });
       }
     });
+  }
+
+  /**
+   * 「立即同步」总部设置：等在途后台同步结束后再跑一轮。结果只用状态码表达，
+   * 最新视图由订阅回调更新（同步成功后这里再取一次，防止订阅期间错过）。
+   */
+  public syncPosSettings(): Promise<void> {
+    if (!this.requirePermission(this.state.access.canConfigurePayments)) {
+      return Promise.resolve();
+    }
+    const port = this.options.port.posSettings;
+    if (!port) {
+      this.patch({ statusCode: "pos-settings-sync-failed" });
+      return Promise.resolve();
+    }
+    return this.runAction(async () => {
+      let result: PosSettingsSyncResult;
+      try {
+        result = await port.syncNow();
+      } catch {
+        this.patch({ statusCode: "pos-settings-sync-failed" });
+        return;
+      }
+      this.applyPosSettingsView(port.getView());
+      if (result.status === "updated" || result.status === "up-to-date") {
+        this.patch({ statusCode: "pos-settings-synced" });
+        return;
+      }
+      this.patch({
+        statusCode:
+          result.status === "failed" && result.reason === "unsupported"
+            ? "pos-settings-sync-unsupported"
+            : "pos-settings-sync-failed",
+      });
+    });
+  }
+
+  /** 读取总部设置视图并订阅变化（只订阅一次，destroy 时取消）；读取失败按「没有总部设置」处理。 */
+  private async loadPosSettingsView(): Promise<PosSettingsView | null> {
+    const port = this.options.port.posSettings;
+    if (!port) return null;
+    try {
+      if (!this.destroyed) {
+        this.posSettingsUnsubscribe();
+        this.posSettingsUnsubscribe = port.subscribe(
+          this.handlePosSettingsChanged,
+        );
+      }
+      return normalizePosSettingsView(await port.load());
+    } catch {
+      return null;
+    }
+  }
+
+  private readonly handlePosSettingsChanged = (): void => {
+    const port = this.options.port.posSettings;
+    if (this.destroyed || !port) return;
+    this.applyPosSettingsView(port.getView());
+  };
+
+  /**
+   * 写入新的总部设置视图，并让手动刷卡草稿跟随生效值：
+   * 草稿没改过，或该项此刻已被锁定时，草稿与「最近保存值」都以生效值为准
+   * （同步把总部值写穿后，设置页不能还显示旧值）；用户正在改且未锁定时不动草稿。
+   */
+  private applyPosSettingsView(raw: PosSettingsView): void {
+    const view = normalizePosSettingsView(raw);
+    const item = view?.items.find(
+      (entry) => entry.key === POS_SETTING_MANUAL_CARD_KEY,
+    );
+    let paymentMethods: PaymentMethodSettings | null = null;
+    if (item) {
+      const dirty =
+        this.state.paymentMethods.useManualCard !==
+        this.lastSavedPaymentMethods.useManualCard;
+      if (!dirty || item.isLocked) {
+        paymentMethods = Object.freeze({ useManualCard: item.value });
+        this.lastSavedPaymentMethods = paymentMethods;
+      }
+    }
+    this.patch({
+      posSettings: view,
+      ...(paymentMethods ? { paymentMethods } : {}),
+    });
+  }
+
+  private manualCardItem(): PosSettingsView["items"][number] | null {
+    return (
+      this.state.posSettings?.items.find(
+        (entry) => entry.key === POS_SETTING_MANUAL_CARD_KEY,
+      ) ?? null
+    );
+  }
+
+  private isManualCardLocked(): boolean {
+    return this.manualCardItem()?.isLocked === true;
+  }
+
+  private manualCardEffectiveValue(): boolean | null {
+    return this.manualCardItem()?.value ?? null;
   }
 
   public requestLinklyPair(pairCode: string): boolean;
@@ -3121,6 +3268,7 @@ function initialState(
     paymentProvider: null,
     paymentProviderDraft: null,
     paymentMethods: Object.freeze({ useManualCard: false }),
+    posSettings: null,
     printer,
     printerDevices: Object.freeze([]),
     square,
@@ -3345,6 +3493,14 @@ function normalizeSnapshot(snapshot: SettingsSnapshot): SettingsSnapshot {
     }),
     linkly,
     paymentProvider,
+    // 手动刷卡开关必须随快照带入：此前这里漏掉了它，设置页每次打开都把已开启的开关显示为关闭。
+    ...(snapshot.paymentMethods
+      ? {
+          paymentMethods: Object.freeze({
+            useManualCard: snapshot.paymentMethods.useManualCard === true,
+          }),
+        }
+      : {}),
     printer: normalizePrinterSettings(snapshot.printer),
     square,
   });
@@ -3422,6 +3578,47 @@ function publicVersion(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : 0;
+}
+
+/** 总部设置视图的形状校验：不合格返回 null（按没有总部设置处理），合格则冻结成新对象。 */
+function normalizePosSettingsView(value: unknown): PosSettingsView | null {
+  if (!value || typeof value !== "object") return null;
+  const view = value as Partial<PosSettingsView>;
+  if (
+    !Array.isArray(view.items) ||
+    typeof view.isOnline !== "boolean" ||
+    !(view.lastSyncedAtIso === null || typeof view.lastSyncedAtIso === "string")
+  ) {
+    return null;
+  }
+  const items: PosSettingsView["items"][number][] = [];
+  for (const item of view.items) {
+    if (
+      !item ||
+      typeof item.key !== "string" ||
+      typeof item.value !== "boolean" ||
+      !(item.source === null || typeof item.source === "string")
+    ) {
+      return null;
+    }
+    items.push(
+      Object.freeze({
+        key: item.key,
+        value: item.value,
+        source: item.source,
+        isManaged: item.isManaged === true,
+        isLocked: item.isLocked === true,
+        isOfflineOverride: item.isOfflineOverride === true,
+      }),
+    );
+  }
+  return Object.freeze({
+    items: Object.freeze(items),
+    isOnline: view.isOnline,
+    lastSyncedAtIso: view.lastSyncedAtIso,
+    showsOfflineBanner: view.showsOfflineBanner === true,
+    hasLockedItems: view.hasLockedItems === true,
+  });
 }
 
 function receiptProfileSyncFailureStatus(

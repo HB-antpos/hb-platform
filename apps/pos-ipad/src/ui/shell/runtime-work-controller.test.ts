@@ -270,3 +270,89 @@ test("未提供促销刷新入口（设备未就绪或旧组合）时全部触�
     "sync-foreground", "hardware", "sync-network:true",
   ]);
 });
+
+test("收银端设置同步：启动、回前台、联网恢复、定时各带对应触发源（与小票资料同节奏）；断网不触发同步", async () => {
+  const calls: string[] = [];
+  const triggers: string[] = [];
+  const controller = new RuntimeWorkController({
+    ...basePort(calls),
+    posSettingsSync: {
+      async requestSync(trigger) {
+        triggers.push(trigger);
+      },
+    },
+  });
+
+  await controller.onApplicationStarted();
+  await controller.onForeground();
+  await controller.onNetworkChanged(false);
+  await controller.onNetworkChanged(true);
+  controller.onReceiptProfileTimer();
+
+  assert.deepEqual(triggers, ["startup", "foreground", "network", "timer"]);
+});
+
+test("收银端设置同步：联网变化先报告 online / offline，再触发同步（恢复联网时先报在线）", async () => {
+  const events: string[] = [];
+  const controller = new RuntimeWorkController({
+    ...basePort([]),
+    posSettingsSync: {
+      async requestSync(trigger) {
+        events.push(`sync:${trigger}`);
+      },
+      reportConnectivity(isOnline) {
+        events.push(`connectivity:${isOnline}`);
+      },
+    },
+  });
+
+  await controller.onNetworkChanged(false);
+  await controller.onNetworkChanged(true);
+
+  assert.deepEqual(events, ["connectivity:false", "connectivity:true", "sync:network"]);
+});
+
+test("收银端设置同步挂起、同步抛错或 reject，都不影响订单同步与外设队列；联网报告抛错同样被隔离", async () => {
+  const calls: string[] = [];
+  const hanging = new RuntimeWorkController({
+    ...basePort(calls),
+    posSettingsSync: { requestSync: () => new Promise(() => undefined) },
+  });
+  await hanging.onApplicationStarted();
+  assert.deepEqual(calls, ["sync-start", "hardware"]);
+
+  const crashing = new RuntimeWorkController({
+    ...basePort(calls),
+    posSettingsSync: {
+      requestSync() {
+        throw new Error("entry crashed");
+      },
+      reportConnectivity() {
+        throw new Error("report crashed");
+      },
+    },
+  });
+  await crashing.onApplicationStarted();
+  await crashing.onForeground();
+  await crashing.onNetworkChanged(true);
+  crashing.onReceiptProfileTimer();
+
+  const rejecting = new RuntimeWorkController({
+    ...basePort(calls),
+    posSettingsSync: { requestSync: async () => { throw new Error("rejected"); } },
+  });
+  await rejecting.onApplicationStarted();
+  await rejecting.onNetworkChanged(true);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(calls.filter((call) => call === "sync-network:true").length, 2);
+});
+
+test("未提供收银端设置同步入口（设备未就绪或旧组合）时全部静默跳过", async () => {
+  const calls: string[] = [];
+  const controller = new RuntimeWorkController(basePort(calls));
+  await controller.onApplicationStarted();
+  await controller.onNetworkChanged(false);
+  controller.onReceiptProfileTimer();
+  assert.deepEqual(calls, ["sync-start", "hardware", "sync-network:false"]);
+});

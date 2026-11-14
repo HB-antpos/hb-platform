@@ -1132,6 +1132,50 @@ test("硬件失败审计保留 Failed outcome，非法 outcome 在请求前失�
   assert.equal(transport.calls.length, 1);
 });
 
+test("总部设置离线临时修改审计（无订单）可上传，且只带安全属性", async () => {
+  const transport = new FakeTransport({ status: 200, data: { results: [{ eventId: eventGuid, status: "accepted" }] } });
+  const adapter = new HbposAuditBatchAdapter(transport, new FakeOrders(order()), {
+    storeCode: "1003",
+    deviceCode: "HANDHELD_1",
+    appVersion: "1.0.0",
+    instanceId: "handheld-install",
+  });
+  const event = {
+    eventId: eventGuid,
+    eventType: "POS_SETTING_OFFLINE_OVERRIDE",
+    occurredAtIso: "2026-11-14T00:00:00.000Z",
+    orderGuid: null,
+    correlationId: eventGuid,
+    payload: {
+      source: "pos-settings",
+      action: "payment.manualCard",
+      status: "on",
+      reason: "OFFLINE",
+      // 不在安全属性白名单里的键不能被带上去。
+      headquartersValue: "off",
+    },
+  } as const;
+
+  assert.deepEqual(await adapter.upload(persistedAudits([event])), { kind: "uploaded" });
+  const body = transport.calls[0]?.data as {
+    events: {
+      operationType: string;
+      orderGuid: string | null;
+      items: unknown[];
+      properties: Record<string, string> | null;
+    }[];
+  };
+  assert.equal(body.events[0]?.operationType, "POS_SETTING_OFFLINE_OVERRIDE");
+  assert.equal(body.events[0]?.orderGuid, null);
+  assert.deepEqual(body.events[0]?.items, []);
+  assert.deepEqual(body.events[0]?.properties, {
+    source: "pos-settings",
+    action: "payment.manualCard",
+    status: "on",
+    reason: "OFFLINE",
+  });
+});
+
 test("M16 礼券撤销的本地终态事实映射为后端审计枚举，避免堵塞上传队列", async () => {
   const blockedEventGuid = "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9d05";
   const transport = new FakeTransport({

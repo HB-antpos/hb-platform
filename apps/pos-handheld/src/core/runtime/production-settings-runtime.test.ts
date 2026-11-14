@@ -143,6 +143,77 @@ test("生产 settings wrapper 透传手动刷卡保存且不触发 reload", asyn
   assert.equal(reloadCalls, 0);
 });
 
+test("生产 settings wrapper 透传总部设置端口：load / 立即同步复核 session，视图读取与订阅直通；缺省时不暴露", async () => {
+  let active = true;
+  const calls: string[] = [];
+  const view = {
+    items: [],
+    isOnline: true,
+    lastSyncedAtIso: null,
+    showsOfflineBanner: false,
+    hasLockedItems: false,
+  } as const;
+  const permissions = [
+    "Permissions.PosTerminal.Settings.View",
+    "Permissions.PosTerminal.Settings.PaymentTerminal",
+  ];
+  const lease = {
+    get: () => {
+      if (!active) throw new Error("SESSION_REPLACED");
+      return { storeCode: "S1", deviceCode: "IPAD-1", permissionCodes: permissions };
+    },
+  };
+  const runtime = createProductionSettingsRuntime({
+    createSessionLease: () => lease,
+    control: fakeControl({
+      loadSnapshot: async () => SNAPSHOT,
+      posSettings: {
+        getView: () => view,
+        subscribe: () => {
+          calls.push("subscribe");
+          return () => calls.push("unsubscribe");
+        },
+        load: async () => {
+          calls.push("load");
+          return view;
+        },
+        syncNow: async () => {
+          calls.push("sync");
+          return { status: "up-to-date", hash: "h", ackPending: false };
+        },
+      },
+    }),
+    runDangerousExclusive: (operation) => operation(),
+  });
+  const presenter = runtime.createPresenter();
+  await presenter.load();
+  assert.deepEqual(calls, ["subscribe", "load"]);
+  assert.notEqual(presenter.getState().posSettings, null);
+  await presenter.syncPosSettings();
+  assert.equal(presenter.getState().statusCode, "pos-settings-synced");
+  presenter.destroy();
+  assert.equal(calls.at(-1), "unsubscribe");
+
+  // session 被替换后，立即同步在提交后复核失败，按失败处理而不是报成功。
+  const second = runtime.createPresenter();
+  await second.load();
+  active = false;
+  await second.syncPosSettings();
+  assert.equal(second.getState().statusCode, "pos-settings-sync-failed");
+  second.destroy();
+
+  // 控制面没有 posSettings 时，presenter 视为不支持。
+  active = true;
+  const plain = createProductionSettingsRuntime({
+    createSessionLease: () => lease,
+    control: fakeControl({ loadSnapshot: async () => SNAPSHOT }),
+    runDangerousExclusive: (operation) => operation(),
+  }).createPresenter();
+  await plain.load();
+  assert.equal(plain.getState().posSettings, null);
+  plain.destroy();
+});
+
 test("生产 settings wrapper 在保存提交点前复核 session", async () => {
   let active = true;
   let assertActive: (() => void) | undefined;

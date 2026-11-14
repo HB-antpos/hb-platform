@@ -165,7 +165,19 @@ function securedSettingsPort(
   const squareSetup = input.control.squareSetup;
   const linklySetup = input.control.linklySetup;
 
+  const posSettings = input.control.posSettings;
   const secured: SettingsControlPort = {
+    // 总部设置：载入与立即同步沿用租约复核；视图读取与订阅是只读通知，不做 scope 断言。
+    ...(posSettings
+      ? {
+          posSettings: Object.freeze({
+            getView: () => posSettings.getView(),
+            subscribe: (listener: () => void) => posSettings.subscribe(listener),
+            load: () => run(() => posSettings.load()),
+            syncNow: () => run(() => posSettings.syncNow()),
+          }),
+        }
+      : {}),
     ...(squareSetup
       ? {
           squareSetup: Object.freeze({

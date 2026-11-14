@@ -186,6 +186,12 @@ import {
   type ReceiptProfileSyncResult,
   type ReceiptProfileSyncTrigger,
 } from "@hb/pos-sync/features/receipt-profile/receipt-profile-sync-controller";
+import {
+  PosSettingsService,
+  type PosSettingsLogEvent,
+  type PosSettingsSyncResult,
+  type PosSettingsSyncTrigger,
+} from "@hb/pos-sync/features/pos-settings/pos-settings-service";
 import { HbposStoreApi, type HbposTransport } from "../api/hbpos-api";
 import { createAud, type CartSnapshot } from "../contracts";
 import type { NewTransactionGate } from "../contracts/app-updates";
@@ -273,6 +279,11 @@ import {
   renderRefundReceiptWithVouchers,
   ReturnFulfilmentRuntime,
 } from "./return-fulfilment-runtime";
+import {
+  createGuardedPaymentMethodsSave,
+  createPosSettingsAuditPort,
+  createPosSettingsBindings,
+} from "./production-pos-settings";
 import { resolveTrustedReceiptPrinterSettings } from "./trusted-receipt-settings";
 
 export type { PosCashierSummary } from "./current-cashier-session";
@@ -484,6 +495,16 @@ export type ProductionPosRuntimeServices = Readonly<{
     ): Promise<ReceiptProfileSyncResult>;
   }>;
   /**
+   * 总部「收银端设置下发」的后台同步入口（节奏与 receiptProfileSync 一致）：壳层在设备就绪、回前台、网络恢复、
+   * 每 60 秒调用 requestSync；联网探测结果经 reportConnectivity 告知（总部管理项在线锁定、离线可临时修改）。永不 reject。
+   */
+  posSettingsSync: Readonly<{
+    requestSync(
+      trigger: Exclude<PosSettingsSyncTrigger, "manual">,
+    ): Promise<PosSettingsSyncResult>;
+    reportConnectivity(isOnline: boolean): void;
+  }>;
+  /**
    * 促销规则的后台刷新入口：登录后、回前台、网络恢复、前台定时器调用。只拉促销、不碰商品目录；
    * 与目录刷新互斥，购物车忙（付款中）时延后装入，永不 reject（对齐 WPF 的定时促销刷新）。
    */
@@ -609,6 +630,10 @@ export type ProductionPosRuntimeCompositionDependencies = Readonly<{
   /** 总部下发小票资料同步的日志旁路（只含版本号、原因等非敏感标量）；缺省时静默。 */
   reportReceiptProfileSync?:
     | ((event: ReceiptProfileSyncLogEvent) => void)
+    | undefined;
+  /** 收银端设置下发同步的日志旁路（只含键名、布尔值、指纹前缀、状态码）；缺省时静默。 */
+  reportPosSettingsSync?:
+    | ((event: PosSettingsLogEvent) => void)
     | undefined;
   /** 促销后台刷新的日志旁路（只含触发源、规则数、异常类型等非敏感标量）；缺省时静默。 */
   reportPromotionRefresh?:
@@ -1071,6 +1096,50 @@ export function createProductionPosRuntimeServices(
     ...(input.reportReceiptProfileSync
       ? { log: input.reportReceiptProfileSync }
       : {}),
+  });
+  // 总部「收银端设置下发」：共享同步服务 + 本机存储 / 审计适配。总部值写穿回各开关原来的存储，消费方不改。
+  const posSettingsSyncStore = input.database.posSettingsSync();
+  const posSettingsPaymentMethods = input.settings?.paymentMethods;
+  const posSettingsService = new PosSettingsService({
+    api: {
+      sync: (knownHash, signal) => receiptProfileApi.syncPosSettings(knownHash, signal),
+      ack: (payload, signal) => receiptProfileApi.ackPosSettings(payload, signal),
+    },
+    store: posSettingsSyncStore,
+    // 付款方式的写入必须走原始保存回调（会刷新支付页内存快照），不能是下面的守卫包装。
+    bindings: createPosSettingsBindings({
+      cashMovement: {
+        load: () => posSettingsSyncStore.loadCashMovementEnabled(),
+        save: (enabled) => posSettingsSyncStore.saveCashMovementEnabled(enabled),
+      },
+      paymentMethods: posSettingsPaymentMethods,
+    }),
+    boundStoreCode: () => {
+      // 与小票资料同口径：未注册设备没有可信门店，不发同步请求。
+      const storeCode = input.auditMetadata.storeCode.trim();
+      return storeCode === "" || storeCode === "unregistered" ? null : storeCode;
+    },
+    appVersion: () => input.auditMetadata.appVersion || null,
+    now: () => input.clock.now().getTime(),
+    audit: createPosSettingsAuditPort({
+      audit: repositories.audit,
+      nowIso: input.clock.nowIso,
+      createId: createOperationAuditId,
+      actor: () => {
+        // 设置页要求已登录收银员；锁屏后取不到时审计不带身份。
+        try {
+          const session = currentCashier.require();
+          return {
+            cashierId: session.cashierId,
+            cashierName: session.cashierName,
+            userGuid: session.userGuid,
+          };
+        } catch {
+          return null;
+        }
+      },
+    }),
+    ...(input.reportPosSettingsSync ? { log: input.reportPosSettingsSync } : {}),
   });
   const createCashCheckout = (cashierLease: TrustedCashierLease) =>
     createSessionCashCheckout(
@@ -2012,6 +2081,26 @@ export function createProductionPosRuntimeServices(
   const settings: PosSettingsRuntimeService = input.settings
     ? createProductionSettingsComposition({
         ...input.settings,
+        // 用户保存付款方式先过总部策略（锁定项抛 POS_SETTING_MANAGED，不写任何内容）；
+        // 守卫通过后由同步服务经 binding 调用原始保存。
+        ...(input.settings.paymentMethods
+          ? {
+              paymentMethods: {
+                load: input.settings.paymentMethods.load,
+                save: createGuardedPaymentMethodsSave({
+                  load: input.settings.paymentMethods.load,
+                  save: input.settings.paymentMethods.save,
+                  trySet: (changes) => posSettingsService.trySet(changes),
+                }),
+              },
+            }
+          : {}),
+        posSettings: {
+          getView: () => posSettingsService.getView(),
+          subscribe: (listener) => posSettingsService.subscribe(listener),
+          load: () => posSettingsService.load(),
+          syncNow: () => posSettingsService.syncNow(),
+        },
         currentCashier,
         terminal: input.auditMetadata,
         activeCart: activePricingCart,
@@ -2397,6 +2486,7 @@ export function createProductionPosRuntimeServices(
         disposeDeviceScopeListener();
         // 中止在途的下发资料同步请求，之后的触发一律跳过。
         receiptProfileSync.dispose();
+        posSettingsService.dispose();
         if (refundSettlementTimer !== null) clearInterval(refundSettlementTimer);
         // 停止商品缩略图的排队与完成回调，退出后不再触发客显刷新。
         customerDisplayProductImageResolver?.dispose();
@@ -2489,6 +2579,11 @@ export function createProductionPosRuntimeServices(
     receiptSettings,
     receiptProfileSync: {
       requestSync: (trigger) => receiptProfileSync.requestSync(trigger),
+    },
+    posSettingsSync: {
+      requestSync: (trigger) => posSettingsService.requestSync(trigger),
+      reportConnectivity: (isOnline) =>
+        posSettingsService.reportConnectivity(isOnline),
     },
     promotionSync: {
       requestSync: (trigger) => requestPromotionRefresh(trigger),
