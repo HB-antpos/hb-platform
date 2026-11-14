@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Hbpos.Client.Wpf.Services.Zeller;
 using Microsoft.Extensions.Time.Testing;
@@ -252,8 +253,7 @@ public sealed class ZellerTerminalGatewayTests
         await WaitUntilAsync(() => operation.CancelCount == 1);
         await harness.AdvanceAsync(TimeSpan.FromSeconds(2));
         Assert.False(purchase.IsCompleted);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
-        var result = await purchase.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await harness.AdvanceUntilCompletedAsync(purchase);
 
         Assert.Equal(ZellerCallOutcome.Abandoned, result.Outcome);
         Assert.True(harness.Sdk.Terminals[0].Disposed);
@@ -271,12 +271,10 @@ public sealed class ZellerTerminalGatewayTests
 
         await harness.AdvanceAsync(TimeSpan.FromSeconds(145), TimeSpan.FromSeconds(5));
         Assert.Equal(0, operation.CancelCount);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
-        await WaitUntilAsync(() => operation.CancelCount == 1);
+        await harness.AdvanceUntilAsync(() => operation.CancelCount == 1);
         await harness.AdvanceAsync(TimeSpan.FromSeconds(2));
         Assert.False(purchase.IsCompleted);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(1));
-        var result = await purchase.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await harness.AdvanceUntilCompletedAsync(purchase);
 
         Assert.Equal(ZellerCallOutcome.Abandoned, result.Outcome);
         Assert.True(result.ReachedTerminal);
@@ -292,9 +290,8 @@ public sealed class ZellerTerminalGatewayTests
         using var harness = new Harness();
         var purchase = harness.Gateway.PurchaseAsync(Request);
         await harness.NextPurchaseAsync();
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(150), TimeSpan.FromSeconds(5));
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(3));
-        Assert.Equal(ZellerCallOutcome.Abandoned, (await purchase.WaitAsync(TimeSpan.FromSeconds(5))).Outcome);
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(145), TimeSpan.FromSeconds(5));
+        Assert.Equal(ZellerCallOutcome.Abandoned, (await harness.AdvanceUntilCompletedAsync(purchase)).Outcome);
 
         var query = harness.Gateway.GetTransactionsAsync(Reference);
         await WaitUntilAsync(() => harness.Sdk.Terminals.Count == 2 && harness.Sdk.Current.Queries.Count == 1);
@@ -315,8 +312,8 @@ public sealed class ZellerTerminalGatewayTests
         var operation = await harness.NextPurchaseAsync();
         operation.OnCancel = () => operation.Complete(ZellerCallResult.FromError(ZellerErrorType.Cancelled));
 
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(150), TimeSpan.FromSeconds(5));
-        var result = await purchase.WaitAsync(TimeSpan.FromSeconds(5));
+        await harness.AdvanceAsync(TimeSpan.FromSeconds(145), TimeSpan.FromSeconds(5));
+        var result = await harness.AdvanceUntilCompletedAsync(purchase);
 
         Assert.Equal(ZellerCallOutcome.Error, result.Outcome);
         Assert.Equal(ZellerErrorType.Cancelled, result.ErrorType);
@@ -335,10 +332,8 @@ public sealed class ZellerTerminalGatewayTests
         operation.Emit(ZellerTerminalEventKind.Processing);
         await harness.AdvanceAsync(TimeSpan.FromSeconds(40), TimeSpan.FromSeconds(5));
         Assert.Equal(0, operation.CancelCount);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
-        await WaitUntilAsync(() => operation.CancelCount == 1);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(3));
-        var result = await purchase.WaitAsync(TimeSpan.FromSeconds(5));
+        await harness.AdvanceUntilAsync(() => operation.CancelCount == 1);
+        var result = await harness.AdvanceUntilCompletedAsync(purchase);
 
         Assert.Equal(ZellerCallOutcome.Abandoned, result.Outcome);
         Assert.True(result.ProcessingStarted);
@@ -351,10 +346,8 @@ public sealed class ZellerTerminalGatewayTests
         var query = harness.Gateway.GetTransactionsAsync(Reference);
         var operation = await harness.NextQueryAsync();
 
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(5));
-        await WaitUntilAsync(() => operation.CancelCount == 1);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(3));
-        var result = await query.WaitAsync(TimeSpan.FromSeconds(5));
+        await harness.AdvanceUntilAsync(() => operation.CancelCount == 1);
+        var result = await harness.AdvanceUntilCompletedAsync(query);
 
         Assert.False(result.Succeeded);
         Assert.Equal(ZellerErrorType.OperationFailure, result.ErrorType);
@@ -376,8 +369,7 @@ public sealed class ZellerTerminalGatewayTests
 
         cancellation.Cancel();
         await WaitUntilAsync(() => operation.CancelCount == 1);
-        await harness.AdvanceAsync(TimeSpan.FromSeconds(3));
-        var result = await setup.WaitAsync(TimeSpan.FromSeconds(5));
+        var result = await harness.AdvanceUntilCompletedAsync(setup);
 
         Assert.False(result.IsPaired);
         Assert.Equal(ZellerErrorType.OperationFailure, result.ErrorType);
@@ -778,6 +770,37 @@ public sealed class ZellerTerminalGatewayTests
                 remaining -= next;
                 await Task.Delay(10);
             }
+        }
+
+        /// <summary>
+        /// 分步推进假时钟，直到 <paramref name="condition"/> 成立。
+        /// 网关登记计时器分两步：先读「现在」算出剩余时间，再用它创建计时器，两步之间不是原子的。
+        /// 测试线程若恰好在这个间隙里拨了假时钟，计时器的到期点就落在假时钟的「未来」，
+        /// 而只推进固定时长的测试之后不再拨时钟，等待就会按真实时间超时（机器忙时间隙变大，所以只在 CI 偶发）。
+        /// 所以凡是「等计时器触发」的地方，都要一边等一边继续推进，而不是推进固定时长后干等。
+        /// 步长默认 1 秒，保证条件成立后最多多推进 1 秒，不会越过 3 秒的取消宽限期。
+        /// </summary>
+        public async Task AdvanceUntilAsync(Func<bool> condition, TimeSpan? step = null, TimeSpan? maxVirtual = null)
+        {
+            var increment = step ?? TimeSpan.FromSeconds(1);
+            var remaining = maxVirtual ?? TimeSpan.FromMinutes(10);
+            var startedAt = Stopwatch.GetTimestamp();
+            while (!condition())
+            {
+                Assert.True(remaining > TimeSpan.Zero, "假时钟推进到上限，条件仍未成立。");
+                Assert.True(Stopwatch.GetElapsedTime(startedAt) < TimeSpan.FromSeconds(30), "等待超过 30 秒（真实时间），条件仍未成立。");
+                var next = remaining < increment ? remaining : increment;
+                Time.Advance(next);
+                remaining -= next;
+                await Task.Delay(10);
+            }
+        }
+
+        /// <summary>一边推进假时钟，一边等 <paramref name="task"/> 完成，返回它的结果。见 <see cref="AdvanceUntilAsync"/>。</summary>
+        public async Task<T> AdvanceUntilCompletedAsync<T>(Task<T> task, TimeSpan? step = null, TimeSpan? maxVirtual = null)
+        {
+            await AdvanceUntilAsync(() => task.IsCompleted, step, maxVirtual);
+            return await task;
         }
 
         public void Dispose() => Gateway.Dispose();
