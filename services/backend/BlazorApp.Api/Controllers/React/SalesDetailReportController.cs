@@ -56,6 +56,8 @@ public sealed class SalesDetailReportController : ControllerBase
         [FromQuery] int pageIndex = 1,
         [FromQuery] int pageSize = 20,
         [FromQuery] List<SalesDetailSection>? sections = null,
+        [FromQuery] SalesDetailProductSortField productSortField = SalesDetailProductSortField.Quantity,
+        [FromQuery] string? productSortOrder = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -63,6 +65,11 @@ public sealed class SalesDetailReportController : ControllerBase
             cancellationToken.ThrowIfCancellationRequested();
             if (!Enum.IsDefined(kind) || !Enum.IsDefined(compareMode))
                 return BadRequest(new { success = false, message = "kind 或 compareMode 无效" });
+            // 商品栏排序：只认 asc / desc，缺省为降序；字段缺省为数量（旧前端不传时行为不变）。
+            if (!Enum.IsDefined(productSortField)
+                || (productSortOrder != null && !productSortOrder.Equals("asc", StringComparison.OrdinalIgnoreCase)
+                    && !productSortOrder.Equals("desc", StringComparison.OrdinalIgnoreCase)))
+                return BadRequest(new { success = false, message = "productSortField 或 productSortOrder 无效" });
             if (pageIndex < 1 || pageSize < 1 || pageSize > 500)
                 return BadRequest(new { success = false, message = "分页参数无效" });
             ValidateMultiSelectLimit(selectedSupplierCodes, MaxSelectedSupplierCodes, "供应商");
@@ -104,7 +111,9 @@ public sealed class SalesDetailReportController : ControllerBase
                 cancellationToken,
                 selectedSupplierCodes,
                 supplierCategoryGuids,
-                warehouseCategoryGuids);
+                warehouseCategoryGuids,
+                productSortField,
+                string.Equals(productSortOrder, "asc", StringComparison.OrdinalIgnoreCase));
             cancellationToken.ThrowIfCancellationRequested();
             // 国内供应商栏：没有「查看国内供应商名称」权限时只留代码。行 DTO 与澳洲范围共用，挂不了属性遮罩；
             // 结果对象来自缓存、被多个账号共用，只能换成副本，不能改原对象。
