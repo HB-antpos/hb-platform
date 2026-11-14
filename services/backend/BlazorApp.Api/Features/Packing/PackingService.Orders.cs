@@ -422,11 +422,12 @@ internal sealed partial class PackingService
         }
 
         // SQL Server 默认排序规则不区分大小写，等值查询即可命中（并用上 OrderNo 的唯一索引）；
-        // 区分大小写的库（如测试用 SQLite）等值查不到时，再按大写比较补一次。
+        // 区分大小写的库（如测试用 SQLite）等值查不到时，再按大写比较补一次；
+        // SQL Server 上不补：UPPER(列) 用不上索引，店员扫到不存在的订单号会触发整表扫描，而它本来就不区分大小写，没命中就是真没有。
         var candidates = await _db.Queryable<WareHouseOrder>()
             .Where(order => !order.IsDeleted && order.OrderNo == reference)
             .ToListAsync();
-        if (candidates.Count == 0)
+        if (candidates.Count == 0 && !IsSqlServer)
         {
             var upper = reference.ToUpperInvariant();
             candidates = await _db.Queryable<WareHouseOrder>()
