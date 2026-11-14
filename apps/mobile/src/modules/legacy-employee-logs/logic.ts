@@ -73,7 +73,7 @@ export const POS_DANGER_GROUPS: { key: string; operations: string[] }[] = [
   { key: "discount", operations: ["CART_LINE_DISCOUNT_CHANGE", "CART_ORDER_DISCOUNT_CHANGE"] },
   { key: "refund", operations: ["RETURN_REFUND_COMPLETE", "SALE_VOID", "ORDER_CANCEL"] },
   { key: "override", operations: ["CARD_PAYMENT_SUPERVISOR_RESOLUTION", "PERMISSION_OVERRIDE"] },
-  { key: "system", operations: ["API_SERVER_CHANGE", "DEVICE_REREGISTER", "REMOTE_MAINTENANCE_INSTALL", "CATALOG_RESET", "TEST_SALES_DATA_RESET"] },
+  { key: "system", operations: ["API_SERVER_CHANGE", "DEVICE_REREGISTER", "REMOTE_MAINTENANCE_INSTALL", "CATALOG_RESET", "TEST_SALES_DATA_RESET", "POS_SETTING_OFFLINE_OVERRIDE"] },
 ];
 
 export function ruleCodesFor(source: LogSource) {

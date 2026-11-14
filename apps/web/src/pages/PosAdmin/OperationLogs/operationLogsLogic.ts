@@ -155,6 +155,7 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   API_SERVER_CHANGE: 'operationLogs.operations.apiServerChange',
   REMOTE_MAINTENANCE_INSTALL: 'operationLogs.operations.remoteMaintenanceInstall',
   SYSTEM_RESTART: 'operationLogs.operations.systemRestart',
+  POS_SETTING_OFFLINE_OVERRIDE: 'operationLogs.operations.posSettingOfflineOverride',
 }
 
 export function normalizeOperationAuditPage<T>(payload: {

@@ -391,6 +391,14 @@ public static class ServiceRegistration
         })
         .AddRuntimeApiEndpoint()
         .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
+        // 收银端设置下发（业务开关）：与小票资料同步同一套认证与入口切换。
+        services.AddHttpClient<IPosSettingsApiClient, PosSettingsApiClient>(client =>
+        {
+            client.BaseAddress = GetApiBaseAddress();
+            client.Timeout = TimeSpan.FromSeconds(15);
+        })
+        .AddRuntimeApiEndpoint()
+        .AddHttpMessageHandler<DeviceAuthorizationMessageHandler>();
         services.AddHttpClient<IOrderSyncApiClient, OrderSyncApiClient>(client =>
         {
             client.BaseAddress = initialApiAddress;
@@ -533,6 +541,20 @@ public static class ServiceRegistration
             sp.GetRequiredService<IStoreReceiptProfileApiClient>(),
             sp.GetRequiredService<DeviceAuthorizationState>(),
             entryPreference: sp.GetRequiredService<IApiEntryPreferenceService>()));
+        // 收银端设置下发：本机状态 + 9 个开关与各自原有存储的适配；总部值写穿到原存储，消费方不用改。
+        services.AddSingleton<IPosSettingsLocalStore, PosSettingsLocalStore>();
+        services.AddSingleton<IPosSettingsService>(sp => new PosSettingsService(
+            sp.GetRequiredService<IPosSettingsApiClient>(),
+            sp.GetRequiredService<IPosSettingsLocalStore>(),
+            PosSettingBindings.Create(
+                sp.GetRequiredService<ILocalAppSettingsRepository>(),
+                sp.GetRequiredService<IReceiptPrinterSettingsStore>(),
+                sp.GetRequiredService<IPaymentMethodSettingsService>(),
+                sp.GetRequiredService<ICardTerminalSettingsStore>(),
+                sp.GetRequiredService<ISystemRestartSettingsStore>()),
+            sp.GetRequiredService<DeviceAuthorizationState>(),
+            sp.GetRequiredService<IOperationAuditLogger>(),
+            sp.GetRequiredService<IAppVersionProvider>()));
         services.AddSingleton<IReceiptTextFormatter, ReceiptTextFormatter>();
         // 中文注释：位图条码输出口暂为「不可用」默认实现（SDK 位图函数签名未验证），原生条码失败时降级为文字单号。
         services.AddSingleton<IReceiptBitmapSink>(UnavailableReceiptBitmapSink.Instance);
@@ -866,6 +888,7 @@ public static class ServiceRegistration
                 sp.GetRequiredService<ISystemRestartSettingsStore>());
             viewModel.ConfigureScannerSettings(sp.GetRequiredService<IScannerSettingsStore>());
             viewModel.ConfigureZellerSettings(sp.GetRequiredService<ZellerSettingsCoordinator>());
+            viewModel.ConfigurePosSettings(sp.GetRequiredService<IPosSettingsService>());
             viewModel.ConfigureCashierColorTheme(sp.GetRequiredService<ColorThemeOnboardingViewModel>().HandleCashierLoginAsync);
             viewModel.ConfigureCatalogAutoSync(sp.GetRequiredService<CatalogAutoSyncOptions>());
             viewModel.ConfigureAuditSyncCenter(

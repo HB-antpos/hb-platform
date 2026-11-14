@@ -6,6 +6,9 @@ namespace Hbpos.Client.Wpf.ViewModels;
 
 public sealed partial class SettingsViewModel
 {
+    /// <summary>总部下发的收银端设置；为 null（测试 / 预览）时没有「业务开关」分类，各开关保持原来的纯本机行为。</summary>
+    private readonly IPosSettingsService? _posSettingsService;
+
     private delegate void SetLocalizedStatus(string key, params object[] args);
 
     private sealed record DataMaintenanceContext(

@@ -19,6 +19,44 @@
         <converters:InverseBooleanConverter x:Key="InverseBool" />
         <converters:ReceiptQrCodeImageSourceConverter x:Key="QrCodeImage" />
 
+        <!-- 总部下发开关的状态标签（「业务开关」页与旧页面同名开关共用，数据源是 PosSettingRowViewModel）：
+             锁定 = 锁图标 +「总部设置 · 全局 / 门店 / 设备」；离线可改 = 开锁图标；离线临时修改 = 黄色底 + 铅笔图标。 -->
+        <DataTemplate x:Key="PosSettingStatusBadgeTemplate">
+            <Border x:Name="BadgeBorder"
+                    CornerRadius="12"
+                    Padding="10,4"
+                    Margin="0,0,14,0"
+                    VerticalAlignment="Center"
+                    Background="{DynamicResource PosSurfaceAltBrush}">
+                <StackPanel Orientation="Horizontal">
+                    <materialDesign:PackIcon x:Name="BadgeIcon"
+                                             Kind="LockOutline"
+                                             Width="14"
+                                             Height="14"
+                                             Margin="0,0,5,0"
+                                             VerticalAlignment="Center"
+                                             Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                    <TextBlock x:Name="BadgeText"
+                               Text="{Binding StatusText}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource PosTextSecondaryBrush}" />
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding StatusKind}" Value="OfflineEditable">
+                    <Setter TargetName="BadgeIcon" Property="Kind" Value="LockOpenVariantOutline" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="OfflineOverride">
+                    <Setter TargetName="BadgeBorder" Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                    <Setter TargetName="BadgeIcon" Property="Kind" Value="PencilOutline" />
+                    <Setter TargetName="BadgeIcon" Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                    <Setter TargetName="BadgeText" Property="Foreground" Value="{DynamicResource PosWarningTextBrush}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <Style x:Key="SettingsLabelStyle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="FontWeight" Value="Bold" />
@@ -560,6 +598,33 @@
                     </Grid>
                 </Button>
 
+                <!-- 业务开关：总部下发的开关。没有总部设置服务（测试 / 预览）时整项折叠，导航保持原样。 -->
+                <Button Command="{Binding SelectPosSettingsCommand}"
+                        Tag="{Binding IsPosSettingsSelected}"
+                        Visibility="{Binding IsPosSettingsAvailable, Converter={StaticResource BoolToVis}}"
+                        Style="{StaticResource SettingsCategoryButtonStyle}">
+                    <Grid Width="152">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <materialDesign:PackIcon Grid.Column="0"
+                                                 Kind="TuneVertical"
+                                                 Width="20"
+                                                 Height="20"
+                                                 Margin="0,0,10,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                        <TextBlock Grid.Column="1"
+                                   Text="{Binding PosSettingsTitleText}"
+                                   TextWrapping="Wrap"
+                                   LineHeight="17"
+                                   LineStackingStrategy="BlockLineHeight"
+                                   VerticalAlignment="Center"
+                                   Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                    </Grid>
+                </Button>
+
                 <Button Command="{Binding SelectReceiptPrinterCommand}"
                         Tag="{Binding IsReceiptPrinterSelected}"
                         Style="{StaticResource SettingsCategoryButtonStyle}">
@@ -1092,11 +1157,18 @@
                                                    Tag="{Binding RestartPromptSaveState}"
                                                    Style="{StaticResource SettingsSectionStateTextStyle}"
                                                    Margin="0,0,12,0" />
-                                        <ToggleButton x:Name="RestartPromptSettingToggle"
-                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                      IsChecked="{Binding IsRestartPromptEnabled, Mode=TwoWay}"
-                                                      AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
-                                                      MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
+                                        <ContentControl Content="{Binding AutoRestartSettingRow}"
+                                                        ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                        Visibility="{Binding AutoRestartSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                        VerticalAlignment="Center"
+                                                        Focusable="False" />
+                                        <StackPanel IsEnabled="{Binding AutoRestartSettingRow.IsUnlocked}">
+                                            <ToggleButton x:Name="RestartPromptSettingToggle"
+                                                          Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                          IsChecked="{Binding IsRestartPromptEnabled, Mode=TwoWay}"
+                                                          AutomationProperties.Name="{loc:Loc settings.restartPrompt.toggle}"
+                                                          MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
+                                        </StackPanel>
                                     </StackPanel>
                                 </Grid>
                             </Border>
@@ -1718,13 +1790,23 @@
                                                    TextWrapping="Wrap" FontSize="12.5"
                                                    Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                     </StackPanel>
-                                    <ToggleButton Grid.Column="2" x:Name="ManualCardSettingToggle"
-                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                  IsChecked="{Binding UseManualCard, Mode=TwoWay}"
-                                                  IsEnabled="{Binding CanChangeEnvironment}"
-                                                  AutomationProperties.Name="{loc:Loc settings.payment.methods.manualCard}"
-                                                  MinHeight="48" MinWidth="56" VerticalAlignment="Center">
-                                    </ToggleButton>
+                                    <!-- 总部锁定时开关置灰并显示来源标签（离线时不锁，照常可改）。 -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <ContentControl Content="{Binding ManualCardSettingRow}"
+                                                        ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                        Visibility="{Binding ManualCardSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                        VerticalAlignment="Center"
+                                                        Focusable="False" />
+                                        <StackPanel IsEnabled="{Binding ManualCardSettingRow.IsUnlocked}">
+                                            <ToggleButton x:Name="ManualCardSettingToggle"
+                                                          Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                          IsChecked="{Binding UseManualCard, Mode=TwoWay}"
+                                                          IsEnabled="{Binding CanChangeEnvironment}"
+                                                          AutomationProperties.Name="{loc:Loc settings.payment.methods.manualCard}"
+                                                          MinHeight="48" MinWidth="56" VerticalAlignment="Center">
+                                            </ToggleButton>
+                                        </StackPanel>
+                                    </StackPanel>
                                 </Grid>
                             </Border>
 
@@ -1747,13 +1829,23 @@
                                                    TextWrapping="Wrap" FontSize="12.5"
                                                    Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                     </StackPanel>
-                                    <ToggleButton Grid.Column="2" x:Name="VoucherSettingToggle"
-                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                  IsChecked="{Binding VoucherEnabled, Mode=TwoWay}"
-                                                  IsEnabled="{Binding CanChangeEnvironment}"
-                                                  AutomationProperties.Name="{loc:Loc settings.payment.methods.voucher}"
-                                                  MinHeight="48" MinWidth="56" VerticalAlignment="Center">
-                                    </ToggleButton>
+                                    <!-- 总部锁定时开关置灰并显示来源标签（离线时不锁，照常可改）。 -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <ContentControl Content="{Binding VoucherSettingRow}"
+                                                        ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                        Visibility="{Binding VoucherSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                        VerticalAlignment="Center"
+                                                        Focusable="False" />
+                                        <StackPanel IsEnabled="{Binding VoucherSettingRow.IsUnlocked}">
+                                            <ToggleButton x:Name="VoucherSettingToggle"
+                                                          Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                          IsChecked="{Binding VoucherEnabled, Mode=TwoWay}"
+                                                          IsEnabled="{Binding CanChangeEnvironment}"
+                                                          AutomationProperties.Name="{loc:Loc settings.payment.methods.voucher}"
+                                                          MinHeight="48" MinWidth="56" VerticalAlignment="Center">
+                                            </ToggleButton>
+                                        </StackPanel>
+                                    </StackPanel>
                                 </Grid>
                             </Border>
 
@@ -1777,12 +1869,22 @@
                                                    TextWrapping="Wrap" FontSize="12.5"
                                                    Foreground="{DynamicResource PosMutedForegroundBrush}" Margin="0,2,0,0" />
                                     </StackPanel>
-                                    <ToggleButton Grid.Column="2" x:Name="OrderListSettingToggle"
-                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                  IsChecked="{Binding ShowOrderList, Mode=TwoWay}"
-                                                  AutomationProperties.Name="{loc:Loc settings.payment.methods.orderList}"
-                                                  MinHeight="48" MinWidth="56" VerticalAlignment="Center">
-                                    </ToggleButton>
+                                    <!-- 总部锁定时开关置灰并显示来源标签（离线时不锁，照常可改）。 -->
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <ContentControl Content="{Binding OrderListSettingRow}"
+                                                        ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                        Visibility="{Binding OrderListSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                        VerticalAlignment="Center"
+                                                        Focusable="False" />
+                                        <StackPanel IsEnabled="{Binding OrderListSettingRow.IsUnlocked}">
+                                            <ToggleButton x:Name="OrderListSettingToggle"
+                                                          Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                          IsChecked="{Binding ShowOrderList, Mode=TwoWay}"
+                                                          AutomationProperties.Name="{loc:Loc settings.payment.methods.orderList}"
+                                                          MinHeight="48" MinWidth="56" VerticalAlignment="Center">
+                                            </ToggleButton>
+                                        </StackPanel>
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                         </StackPanel>
@@ -3510,6 +3612,11 @@
                                                        Margin="0,2,0,0" />
                                         </StackPanel>
                                         <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                            <ContentControl Margin="0,0,-14,4" Content="{Binding ZellerUnmatchedRefundSettingRow}"
+                                                            ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                            Visibility="{Binding ZellerUnmatchedRefundSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                            HorizontalAlignment="Center"
+                                                            Focusable="False" />
                                             <ToggleButton x:Name="ZellerUnmatchedRefundToggle"
                                                           Style="{StaticResource MaterialDesignSwitchToggleButton}"
                                                           IsChecked="{Binding ZellerAllowUnmatchedRefund, Mode=TwoWay}"
@@ -3877,15 +3984,24 @@
                                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt}" Style="{StaticResource ReceiptSwitchTitleStyle}" />
                                                         <TextBlock Text="{loc:Loc settings.receiptPrinter.printBankReceipt.help}" Style="{StaticResource ReceiptHintTextStyle}" />
                                                     </StackPanel>
-                                                    <ToggleButton Grid.Column="2"
-                                                                  x:Name="PrintBankReceiptTextToggle"
-                                                                  Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                                  IsChecked="{Binding ReceiptPrintBankReceiptText, Mode=TwoWay}"
-                                                                  AutomationProperties.Name="{loc:Loc settings.receiptPrinter.printBankReceipt}"
-                                                                  MinHeight="48"
-                                                                  MinWidth="56"
-                                                                  VerticalAlignment="Center">
-                                                    </ToggleButton>
+                                                    <!-- 总部锁定时开关置灰并显示来源标签（离线时不锁，照常可改）。 -->
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                        <ContentControl Content="{Binding BankReceiptSettingRow}"
+                                                                        ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                                        Visibility="{Binding BankReceiptSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                                        VerticalAlignment="Center"
+                                                                        Focusable="False" />
+                                                        <StackPanel IsEnabled="{Binding BankReceiptSettingRow.IsUnlocked}">
+                                                            <ToggleButton x:Name="PrintBankReceiptTextToggle"
+                                                                          Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                                          IsChecked="{Binding ReceiptPrintBankReceiptText, Mode=TwoWay}"
+                                                                          AutomationProperties.Name="{loc:Loc settings.receiptPrinter.printBankReceipt}"
+                                                                          MinHeight="48"
+                                                                          MinWidth="56"
+                                                                          VerticalAlignment="Center">
+                                                            </ToggleButton>
+                                                        </StackPanel>
+                                                    </StackPanel>
                                                 </Grid>
                                             </Border>
                                         </StackPanel>
@@ -3918,15 +4034,24 @@
                                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}" Style="{StaticResource ReceiptSwitchTitleStyle}" />
                                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan.help}" Style="{StaticResource ReceiptHintTextStyle}" />
                                                 </StackPanel>
-                                                <ToggleButton Grid.Column="2"
-                                                              x:Name="NoSaleCashDrawerRescanToggle"
-                                                              Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                              IsChecked="{Binding ReceiptNoSaleCashDrawerRequiresRescan, Mode=TwoWay}"
-                                                              AutomationProperties.Name="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}"
-                                                              MinHeight="48"
-                                                              MinWidth="56"
-                                                              VerticalAlignment="Center">
-                                                </ToggleButton>
+                                                <!-- 总部锁定时开关置灰并显示来源标签（离线时不锁，照常可改）。 -->
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <ContentControl Content="{Binding NoSaleRescanSettingRow}"
+                                                                    ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                                    Visibility="{Binding NoSaleRescanSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                                    VerticalAlignment="Center"
+                                                                    Focusable="False" />
+                                                    <StackPanel IsEnabled="{Binding NoSaleRescanSettingRow.IsUnlocked}">
+                                                        <ToggleButton x:Name="NoSaleCashDrawerRescanToggle"
+                                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                                      IsChecked="{Binding ReceiptNoSaleCashDrawerRequiresRescan, Mode=TwoWay}"
+                                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.noSaleDrawerRescan}"
+                                                                      MinHeight="48"
+                                                                      MinWidth="56"
+                                                                      VerticalAlignment="Center">
+                                                        </ToggleButton>
+                                                    </StackPanel>
+                                                </StackPanel>
                                             </Grid>
                                         </Border>
 
@@ -3949,15 +4074,24 @@
                                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan}" Style="{StaticResource ReceiptSwitchTitleStyle}" />
                                                     <TextBlock Text="{loc:Loc settings.receiptPrinter.returnsRescan.help}" Style="{StaticResource ReceiptHintTextStyle}" />
                                                 </StackPanel>
-                                                <ToggleButton Grid.Column="2"
-                                                              x:Name="ReturnsRescanToggle"
-                                                              Style="{StaticResource MaterialDesignSwitchToggleButton}"
-                                                              IsChecked="{Binding ReceiptReturnsRequireRescan, Mode=TwoWay}"
-                                                              AutomationProperties.Name="{loc:Loc settings.receiptPrinter.returnsRescan}"
-                                                              MinHeight="48"
-                                                              MinWidth="56"
-                                                              VerticalAlignment="Center">
-                                                </ToggleButton>
+                                                <!-- 总部锁定时开关置灰并显示来源标签（离线时不锁，照常可改）。 -->
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <ContentControl Content="{Binding ReturnsRescanSettingRow}"
+                                                                    ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                                    Visibility="{Binding ReturnsRescanSettingRow.IsLocked, Converter={StaticResource BoolToVis}}"
+                                                                    VerticalAlignment="Center"
+                                                                    Focusable="False" />
+                                                    <StackPanel IsEnabled="{Binding ReturnsRescanSettingRow.IsUnlocked}">
+                                                        <ToggleButton x:Name="ReturnsRescanToggle"
+                                                                      Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                                      IsChecked="{Binding ReceiptReturnsRequireRescan, Mode=TwoWay}"
+                                                                      AutomationProperties.Name="{loc:Loc settings.receiptPrinter.returnsRescan}"
+                                                                      MinHeight="48"
+                                                                      MinWidth="56"
+                                                                      VerticalAlignment="Center">
+                                                        </ToggleButton>
+                                                    </StackPanel>
+                                                </StackPanel>
                                             </Grid>
                                         </Border>
                                     </StackPanel>
@@ -4983,6 +5117,109 @@
                     </Grid>
                 </controls:SettingsPageHost>
                 <!-- ===== PAGE: MobileAppDownload END ===== -->
+
+                <!-- ===== PAGE: PosSettings BEGIN ===== -->
+                <!-- 业务开关：顶部 = 标题 + 「总部设置 · 最近同步 HH:mm」+ 立即同步；离线时一条黄色说明条；其下 9 行开关卡。
+                     开关由服务落盘，不走自动保存（页面顶栏没有保存状态芯片）；锁定的行开关置灰。正文放不下时由页面容器兜底滚动。 -->
+                <controls:SettingsPageHost Style="{StaticResource SettingsPageHostStyle}"
+                                           Visibility="{Binding IsPosSettingsSelected, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Text="{Binding PosSettingsTitleText}"
+                                       Style="{StaticResource SettingsPageTitleStyle}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Text="{Binding PosSettingsLastSyncedText}"
+                                       FontSize="13"
+                                       Margin="0,0,14,0"
+                                       VerticalAlignment="Center"
+                                       Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                            <Button Grid.Column="2"
+                                    x:Name="SyncPosSettingsNowButton"
+                                    Command="{Binding SyncPosSettingsNowCommand}"
+                                    Style="{StaticResource PosSecondaryButtonStyle}"
+                                    Height="44"
+                                    MinWidth="120"
+                                    Padding="16,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <materialDesign:PackIcon Kind="Sync" Width="18" Height="18" Margin="0,0,8,0"
+                                                             Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                    <TextBlock Text="{Binding PosSettingsSyncButtonText}"
+                                               Foreground="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}" />
+                                </StackPanel>
+                            </Button>
+                        </Grid>
+
+                        <!-- 离线黄条：连不上服务器时总部设置临时解锁，改动只在本机生效，联网同步后被覆盖并上报。 -->
+                        <Border x:Name="PosSettingsOfflineBanner"
+                                Visibility="{Binding IsPosSettingsOfflineBannerVisible, Converter={StaticResource BoolToVis}}"
+                                Background="{DynamicResource PosWarningSoftBrush}"
+                                BorderBrush="{DynamicResource PosWarningBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="14,10"
+                                Margin="0,0,0,12">
+                            <StackPanel Orientation="Horizontal">
+                                <materialDesign:PackIcon Kind="WifiOff" Width="22" Height="22" Margin="0,0,12,0"
+                                                         VerticalAlignment="Center"
+                                                         Foreground="{DynamicResource PosWarningTextBrush}" />
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding PosSettingsOfflineTitleText}"
+                                               FontSize="14" FontWeight="Bold"
+                                               Foreground="{DynamicResource PosWarningTextBrush}" />
+                                    <TextBlock Text="{Binding PosSettingsOfflineDetailText}"
+                                               FontSize="12.5" TextWrapping="Wrap" Margin="0,2,0,0"
+                                               Foreground="{DynamicResource PosWarningTextBrush}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsActionCardStyle}" Padding="0">
+                            <ItemsControl x:Name="PosSettingRowsList" ItemsSource="{Binding PosSettingRows}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{DynamicResource PosDividerBrush}"
+                                                BorderThickness="0,0,0,1"
+                                                Padding="20,8"
+                                                MinHeight="60">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0" Margin="0,0,16,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding TitleText}" FontSize="15" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding DescriptionText}"
+                                                               FontSize="12.5" TextWrapping="Wrap" Margin="0,2,0,0"
+                                                               Foreground="{DynamicResource PosMutedForegroundBrush}" />
+                                                </StackPanel>
+                                                <ContentControl Grid.Column="1"
+                                                                Content="{Binding}"
+                                                                ContentTemplate="{StaticResource PosSettingStatusBadgeTemplate}"
+                                                                Visibility="{Binding HasStatus, Converter={StaticResource BoolToVis}}"
+                                                                VerticalAlignment="Center"
+                                                                Focusable="False" />
+                                                <ToggleButton Grid.Column="2"
+                                                              Style="{StaticResource MaterialDesignSwitchToggleButton}"
+                                                              IsChecked="{Binding IsOn, Mode=TwoWay}"
+                                                              IsEnabled="{Binding IsUnlocked}"
+                                                              AutomationProperties.Name="{Binding TitleText}"
+                                                              MinHeight="48" MinWidth="56" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                    </StackPanel>
+                </controls:SettingsPageHost>
             </Grid>
         </Grid>
 

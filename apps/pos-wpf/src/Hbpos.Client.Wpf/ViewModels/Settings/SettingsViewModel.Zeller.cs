@@ -110,7 +110,9 @@ public sealed partial class SettingsViewModel
     }
 
     public bool CanChangeZellerUnmatchedRefund =>
-        IsZellerAvailable && !IsBusy && !IsZellerPairingInProgress && !IsZellerChecking;
+        IsZellerAvailable && !IsBusy && !IsZellerPairingInProgress && !IsZellerChecking
+        // 总部锁定时置灰；离线（未锁定）时仍可改。
+        && !IsPosSettingLocked(PosSettingKeys.ZellerUnmatchedRefund);
 
     public string ZellerUnmatchedRefundStateText => T(_zellerAllowUnmatchedRefund
         ? "settings.zeller.unmatchedRefund.state.on"

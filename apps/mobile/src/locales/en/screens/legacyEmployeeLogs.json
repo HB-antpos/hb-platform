@@ -256,7 +256,8 @@
     "testSalesDataReset": "Test sales data reset",
     "deviceReregister": "Device moved to another store",
     "apiServerChange": "Server address changed",
-    "remoteMaintenanceInstall": "Remote maintenance install"
+    "remoteMaintenanceInstall": "Remote maintenance install",
+    "posSettingOfflineOverride": "POS setting changed offline"
   },
   "outcomes": {
     "Succeeded": "Succeeded",

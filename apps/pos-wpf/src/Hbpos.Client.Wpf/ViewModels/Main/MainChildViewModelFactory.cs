@@ -343,6 +343,8 @@ internal sealed class MainChildViewModelFactory
                 ? null
                 : async cancellationToken =>
                     (await _dailyCloseService.LoadReportAsync(session, _cashMovementService.Today, cancellationToken)).ExpectedCashAmount,
+            // 总部（全局 / 门店 / 设备）是否开了「现金存入 / 取出」；没开时侧栏仍是原来的「开钱箱」。
+            posSettingsService: PosSettingsService,
             // 设置页「无交易开钱箱需要再次扫码」：每次点开钱箱都现读小票设置仓储，改设置后立即生效。
             isNoSaleCashDrawerRescanRequiredAsync: _receiptPrinterSettingsStore is null
                 ? null
@@ -441,6 +443,12 @@ internal sealed class MainChildViewModelFactory
     /// <summary>日结保存成功后请主界面自动登出收银员（参数为排定的凌晨重启时间），返回登出前的等待时间；由 MainViewModel 配置。</summary>
     public Func<DateTimeOffset?, TimeSpan?>? RequestAutoLogoutAfterDailyClose { get; set; }
 
+    /// <summary>
+    /// 总部下发的收银端设置（业务开关）：设置页「业务开关」分类与各处同名开关的锁定、收银页「钱箱」面板的开关都靠它；
+    /// 同样在 MainViewModel 构造完成后配置，没有时（测试 / 预览）各开关保持原来的纯本机行为。
+    /// </summary>
+    public IPosSettingsService? PosSettingsService { get; set; }
+
     /// <summary>设置页「日结后凌晨自动重启」开关的存储；同样在 MainViewModel 构造完成后配置。</summary>
     public ISystemRestartSettingsStore? SystemRestartSettingsStore { get; set; }
 
@@ -514,7 +522,8 @@ internal sealed class MainChildViewModelFactory
             scannerSettingsStore: ScannerSettingsStore,
             // 设置页改了直接保存；离开时有保存失败 / 未生效的修改会提示。
             autoSaveSettings: true,
-            zellerSettingsCoordinator: ZellerSettingsCoordinator);
+            zellerSettingsCoordinator: ZellerSettingsCoordinator,
+            posSettingsService: PosSettingsService);
     }
 
     public CustomerDisplayViewModel CreateCustomerDisplayViewModel()

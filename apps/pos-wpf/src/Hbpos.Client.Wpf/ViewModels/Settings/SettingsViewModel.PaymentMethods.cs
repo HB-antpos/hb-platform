@@ -42,7 +42,11 @@ public sealed partial class SettingsViewModel
         if (permissionGrant is null || !CanSavePaymentMethods()) return;
         using var authorizationActivation = permissionGrant.Activate();
         // 三个开关作为同一份本机配置一起保存（与「保存付款方式」按钮一一对应）。
-        var settings = new PaymentMethodSettings(UseManualCard, VoucherEnabled, ShowOrderList);
+        // 被总部锁定的项取服务里的值，不用界面上的旧草稿。
+        var settings = new PaymentMethodSettings(
+            EffectivePosSettingValue(PosSettingKeys.ManualCard, UseManualCard),
+            EffectivePosSettingValue(PosSettingKeys.Voucher, VoucherEnabled),
+            EffectivePosSettingValue(PosSettingKeys.OrderList, ShowOrderList));
         await RunBusyAsync(async () =>
         {
             await _paymentMethodSettingsService!.SaveAsync(settings);

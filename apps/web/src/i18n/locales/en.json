@@ -4085,7 +4085,8 @@
       "deviceReregister": "Device Reregistered",
       "apiServerChange": "API Server Changed",
       "remoteMaintenanceInstall": "Remote Maintenance Install",
-      "systemRestart": "POS restart"
+      "systemRestart": "POS restart",
+      "posSettingOfflineOverride": "POS setting changed offline"
     }
   },
   "performanceBaseline": {

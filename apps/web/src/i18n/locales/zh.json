@@ -4085,7 +4085,8 @@
       "deviceReregister": "设备换绑门店",
       "apiServerChange": "切换服务器地址",
       "remoteMaintenanceInstall": "安装远程维护",
-      "systemRestart": "收银机重启"
+      "systemRestart": "收银机重启",
+      "posSettingOfflineOverride": "收银端设置离线修改"
     }
   },
   "performanceBaseline": {
