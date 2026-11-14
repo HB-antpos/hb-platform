@@ -19,11 +19,14 @@ public sealed class DailyCloseUploadRegistrationTests
         Assert.Same(repository, provider.GetRequiredService<ILocalDailyCloseRepository>());
         Assert.Same(repository, provider.GetRequiredService<ILocalDailyCloseUploadRepository>());
 
-        // Worker 同时是唤醒入口；上传服务只有一个实例。
+        // Worker 同时是唤醒入口；日结上传服务只有一个实例。
         var worker = provider.GetRequiredService<DailyCloseUploadWorker>();
         Assert.Same(worker, provider.GetRequiredService<IDailyCloseUploadScheduler>());
         Assert.Same(
             provider.GetRequiredService<DailyCloseUploadService>(),
+            provider.GetRequiredService<DailyCloseUploadService>());
+        // Worker 每轮执行的是「先传现金进出、再传日结」的包装服务，不是裸的日结上传服务。
+        Assert.IsType<CashMovementFirstUploadExecutionService>(
             provider.GetRequiredService<IDailyCloseUploadExecutionService>());
 
         // 带设备授权 handler 的 API 客户端与日结服务都能解析（保存日结后唤醒用的就是上面那个 Worker）。

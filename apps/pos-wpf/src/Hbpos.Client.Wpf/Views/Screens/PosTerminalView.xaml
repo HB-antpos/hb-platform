@@ -2910,7 +2910,7 @@
                             <TextBlock DockPanel.Dock="Bottom" Text="{Binding ErrorText}" Margin="0,8,0,0" FontWeight="SemiBold" Foreground="{DynamicResource PosDangerBrush}"
                                        Visibility="{Binding ErrorText, Converter={StaticResource StringHasValueToVis}, FallbackValue=Collapsed}" />
                             <Border BorderBrush="{DynamicResource PosBorderBrush}" BorderThickness="1" CornerRadius="8">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Style="{StaticResource PosVerticalTouchScrollViewerStyle}">
                                     <ItemsControl ItemsSource="{Binding Rows}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
