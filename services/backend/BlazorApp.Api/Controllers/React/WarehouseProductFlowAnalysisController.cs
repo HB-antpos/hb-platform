@@ -158,9 +158,7 @@ namespace BlazorApp.Api.Controllers.React
             catch (WarehouseProductFlowAnalysisValidationException ex)
             {
                 return BadRequest(
-                    ApiResponse<
-                        WarehouseProductFlowAnalysisPagedDto<WarehouseProductFlowCandidateDto>
-                    >.Error(ex.Message)
+                    ApiResponse<WarehouseProductFlowCandidatePageDto>.Error(ex.Message)
                 );
             }
             catch (Exception ex)
@@ -168,9 +166,7 @@ namespace BlazorApp.Api.Controllers.React
                 _logger.LogError(ex, "GetCandidates failed");
                 return StatusCode(
                     500,
-                    ApiResponse<
-                        WarehouseProductFlowAnalysisPagedDto<WarehouseProductFlowCandidateDto>
-                    >.Error("服务器内部错误")
+                    ApiResponse<WarehouseProductFlowCandidatePageDto>.Error("服务器内部错误")
                 );
             }
         }

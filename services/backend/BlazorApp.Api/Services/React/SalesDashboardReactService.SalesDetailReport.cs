@@ -76,6 +76,35 @@ public partial class SalesDashboardReactService
         public int Total { get; init; }
     }
 
+    /// <summary>商品栏排序：字段 + 方向。default 即数量降序，与改版前的固定顺序一致。</summary>
+    internal readonly record struct SalesDetailProductOrder(SalesDetailProductSortField Field = SalesDetailProductSortField.Quantity, bool Ascending = false);
+
+    // 商品聚合子查询里的本期营业额 / 数量表达式；各 SQL 路径的商品聚合都按这个写法求和。
+    private const string SalesDetailCurrentRevenueSum = "SUM(CASE WHEN [Period]=0 THEN [Revenue] ELSE 0 END)";
+    private const string SalesDetailCurrentQuantitySum = "SUM(CASE WHEN [Period]=0 THEN [Quantity] ELSE 0 END)";
+
+    /// <summary>
+    /// 生成商品栏 ORDER BY。数量 / 营业额直接按输出列排序，同值再按同期列、商品代码保证分页稳定；
+    /// 均价在 GROUP BY 查询里不能引用输出列别名参与运算，所以由调用方传入聚合表达式（外层派生表传 a.[列]），
+    /// 没有均价（数量 ≤ 0）的商品无论升降序都排最后。默认参数生成的文本与改版前逐字相同。
+    /// </summary>
+    internal static string SalesDetailProductOrderBy(SalesDetailProductOrder order, string prefix = "", string code = "[ProductCode]",
+        string? revenueExpression = null, string? quantityExpression = null)
+    {
+        var direction = order.Ascending ? "ASC" : "DESC";
+        var revenue = revenueExpression ?? $"{prefix}[Revenue]";
+        var quantity = quantityExpression ?? $"{prefix}[Quantity]";
+        return order.Field switch
+        {
+            SalesDetailProductSortField.Revenue =>
+                $"ORDER BY {prefix}[Revenue] {direction}, {prefix}[CompareRevenue] {direction}, {prefix}{code} ASC",
+            // 乘 1.0 避免 SQLite 整数除法；SQL Server 中 decimal × 1.0 ÷ int 仍是 decimal。
+            SalesDetailProductSortField.AverageUnitPrice =>
+                $"ORDER BY CASE WHEN {quantity}>0 THEN 0 ELSE 1 END ASC, CASE WHEN {quantity}>0 THEN {revenue}*1.0/{quantity} END {direction}, {prefix}[Revenue] DESC, {prefix}{code} ASC",
+            _ => $"ORDER BY {prefix}[Quantity] {direction}, {prefix}[CompareQuantity] {direction}, {prefix}{code} ASC",
+        };
+    }
+
     public Task<ProductReportResponseDto<SalesDetailReportDto>> GetSalesDetailReportAsync(
         DateRangeDto dateRange, SalesDetailKind kind, List<string>? branchCodes = null,
         string? selectedBranchCode = null, string? selectedSupplierCode = null, string? selectedProductCode = null,
@@ -98,9 +127,13 @@ public partial class SalesDashboardReactService
         CancellationToken cancellationToken = default,
         List<string>? selectedSupplierCodes = null,
         List<string>? supplierCategoryGuids = null,
-        List<string>? warehouseCategoryGuids = null)
+        List<string>? warehouseCategoryGuids = null,
+        SalesDetailProductSortField productSortField = SalesDetailProductSortField.Quantity,
+        bool productSortAscending = false)
     {
         ValidateDateRange(dateRange);
+        if (!Enum.IsDefined(productSortField)) throw new ArgumentException("productSortField 无效", nameof(productSortField));
+        var productOrder = new SalesDetailProductOrder(productSortField, productSortAscending);
         if (!Enum.IsDefined(kind)) throw new ArgumentException("kind 无效", nameof(kind));
         if (pageIndex < 1) throw new ArgumentException("pageIndex 必须大于 0", nameof(pageIndex));
         pageSize = Math.Clamp(pageSize, 1, 500);
@@ -150,7 +183,7 @@ public partial class SalesDashboardReactService
         var read = await ReadSalesDetailReportSqlAsync(
             dateRange, kind, branches, selectedBranchCode, suppliers.FirstOrDefault(), suppliers,
             effectiveSupplierCategories, effectiveWarehouseCategories, selectedProductCode,
-            search, pageIndex, pageSize, wanted, cancellationToken);
+            search, pageIndex, pageSize, wanted, cancellationToken, productOrder);
         // 四栏全部来自同一份商品日统计，不依赖供应商汇总的完成时间或另一次发布的归属映射。
         var status = BuildSalesDetailReportStatus(read.Status, dateRange, false, skipFailedDates: true, projectionSkippedDates: read.SkippedDates);
         var response = new ProductReportResponseDto<SalesDetailReportDto>
@@ -207,7 +240,8 @@ public partial class SalesDashboardReactService
         string? selectedSupplierCode, IReadOnlyCollection<string> selectedSupplierCodes,
         IReadOnlyCollection<string> supplierCategoryGuids, IReadOnlyCollection<string> warehouseCategoryGuids,
         string? selectedProductCode, string? search,
-        int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted, CancellationToken cancellationToken)
+        int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted, CancellationToken cancellationToken,
+        SalesDetailProductOrder productOrder = default)
     {
         var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
         // 分类筛选收窄全部栏位，走完整查询并先按商品索引预取分类商品的事实；其余筛选（分店范围、选中分店、多选供应商）都能走预聚合。
@@ -219,7 +253,7 @@ public partial class SalesDashboardReactService
             {
                 return await ReadSalesDetailReportSqlCoreAsync(
                     range, kind, branches, selectedBranchCode, selectedSupplierCode, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids, selectedProductCode, search,
-                    pageIndex, pageSize, wanted, cancellationToken, useMonthly: true);
+                    pageIndex, pageSize, wanted, cancellationToken, useMonthly: true, productOrder: productOrder);
             }
             catch (SqlException ex) when (ex.Number == SalesDetailQueryMonthlyProjection.MissingSchemaErrorNumber)
             {
@@ -236,7 +270,7 @@ public partial class SalesDashboardReactService
             {
                 return await ReadSalesDetailReportSqlCoreAsync(
                     range, kind, branches, selectedBranchCode, selectedSupplierCode, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids, selectedProductCode, search,
-                    pageIndex, pageSize, wanted, cancellationToken, useProjection: true);
+                    pageIndex, pageSize, wanted, cancellationToken, useProjection: true, productOrder: productOrder);
             }
             catch (SqlException ex) when (ex.Number == 51012
                 || (ex.Number == 208 && ex.Message.Contains("SalesDetailQuery", StringComparison.Ordinal)))
@@ -249,10 +283,10 @@ public partial class SalesDashboardReactService
         return sqlServer
             ? await ReadSalesDetailReportSqlCoreAsync(
                 range, kind, branches, selectedBranchCode, selectedSupplierCode, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids, selectedProductCode, search,
-                pageIndex, pageSize, wanted, cancellationToken)
+                pageIndex, pageSize, wanted, cancellationToken, productOrder: productOrder)
             : await ReadReportSnapshotAsync(() => ReadSalesDetailReportSqlCoreAsync(
                 range, kind, branches, selectedBranchCode, selectedSupplierCode, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids, selectedProductCode, search,
-                pageIndex, pageSize, wanted, cancellationToken));
+                pageIndex, pageSize, wanted, cancellationToken, productOrder: productOrder));
     }
 
     private async Task<SalesDetailReportRead> ReadSalesDetailReportSqlCoreAsync(
@@ -261,7 +295,7 @@ public partial class SalesDashboardReactService
         IReadOnlyCollection<string> supplierCategoryGuids, IReadOnlyCollection<string> warehouseCategoryGuids,
         string? selectedProductCode, string? search,
         int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted, CancellationToken cancellationToken,
-        bool useProjection = false, bool useMonthly = false)
+        bool useProjection = false, bool useMonthly = false, SalesDetailProductOrder productOrder = default)
     {
         var sqlServer = _context.Db.CurrentConnectionConfig.DbType == SqlSugar.DbType.SqlServer;
         var direct = TryGetSameServerPosmDatabase(out var posmDatabase);
@@ -293,15 +327,15 @@ public partial class SalesDashboardReactService
             command.CommandText = useMonthly
                 ? BuildSalesDetailReportSqlMonthly(
                     posmDatabase, range, kind, selectedSupplierCode, selectedProductCode, pageIndex, pageSize, wanted,
-                    selectedSupplierCodes, branches, selectedBranchCode)
+                    selectedSupplierCodes, branches, selectedBranchCode, productOrder: productOrder)
                 : useProjection
                 ? BuildSalesDetailReportSqlServerCoreWithFilters(
                     posmDatabase, range, kind, branches, selectedBranchCode, selectedSupplierCode,
                     selectedProductCode, search, pageIndex, pageSize, wanted, fallbackMap, useProjection: true, compressOutput: true,
-                    selectedSuppliers: selectedSupplierCodes)
+                    selectedSuppliers: selectedSupplierCodes, productOrder: productOrder)
                 : BuildSalesDetailReportSqlWithFilters(
                     sqlServer, direct ? posmDatabase : null, range, kind, branches, selectedBranchCode,
-                    selectedSupplierCode, selectedProductCode, search, pageIndex, pageSize, wanted, fallbackMap, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids);
+                    selectedSupplierCode, selectedProductCode, search, pageIndex, pageSize, wanted, fallbackMap, selectedSupplierCodes, supplierCategoryGuids, warehouseCategoryGuids, productOrder);
             if (ownsTransaction)
             {
                 // 能力检查、事务和全部栏位共用一次往返；不修改数据库的快照配置。
@@ -512,14 +546,14 @@ public partial class SalesDashboardReactService
         IReadOnlyCollection<string>? branches, string? selectedBranch, string? selectedSupplier, string? selectedProduct,
         string? search, int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted, IReadOnlyDictionary<string, string>? fallbackMap,
         IReadOnlyCollection<string>? selectedSuppliers = null, IReadOnlyCollection<string>? supplierCategoryGuids = null,
-        IReadOnlyCollection<string>? warehouseCategoryGuids = null)
+        IReadOnlyCollection<string>? warehouseCategoryGuids = null, SalesDetailProductOrder productOrder = default)
         => sqlServer
             ? BuildSalesDetailReportSqlServerWithFilters(
                 posmDatabase, range, kind, branches, selectedBranch, selectedSupplier, selectedProduct,
-                search, pageIndex, pageSize, wanted, fallbackMap, selectedSuppliers, supplierCategoryGuids, warehouseCategoryGuids)
+                search, pageIndex, pageSize, wanted, fallbackMap, selectedSuppliers, supplierCategoryGuids, warehouseCategoryGuids, productOrder)
             : BuildSalesDetailReportSqlLegacyWithFilters(
                 false, posmDatabase, range, kind, branches, selectedBranch, selectedSupplier, selectedProduct,
-                search, pageIndex, pageSize, wanted, fallbackMap, selectedSuppliers, supplierCategoryGuids, warehouseCategoryGuids);
+                search, pageIndex, pageSize, wanted, fallbackMap, selectedSuppliers, supplierCategoryGuids, warehouseCategoryGuids, productOrder);
 
     private static string BuildSalesDetailReportSqlServer(
         string? posmDatabase, DateRangeDto range, SalesDetailKind kind,
@@ -534,10 +568,12 @@ public partial class SalesDashboardReactService
         IReadOnlyCollection<string>? branches, string? selectedBranch, string? selectedSupplier, string? selectedProduct,
         string? search, int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted,
         IReadOnlyDictionary<string, string>? fallbackMap, IReadOnlyCollection<string>? selectedSuppliers,
-        IReadOnlyCollection<string>? supplierCategoryGuids, IReadOnlyCollection<string>? warehouseCategoryGuids)
+        IReadOnlyCollection<string>? supplierCategoryGuids, IReadOnlyCollection<string>? warehouseCategoryGuids,
+        SalesDetailProductOrder productOrder = default)
         => BuildSalesDetailReportSqlServerCoreWithFilters(posmDatabase, range, kind, branches, selectedBranch,
             selectedSupplier, selectedProduct, search, pageIndex, pageSize, wanted, fallbackMap, useProjection: false,
-            selectedSuppliers: selectedSuppliers, supplierCategoryGuids: supplierCategoryGuids, warehouseCategoryGuids: warehouseCategoryGuids);
+            selectedSuppliers: selectedSuppliers, supplierCategoryGuids: supplierCategoryGuids, warehouseCategoryGuids: warehouseCategoryGuids,
+            productOrder: productOrder);
 
     private static string BuildSalesDetailReportSqlServerCore(
         string? posmDatabase, DateRangeDto range, SalesDetailKind kind,
@@ -554,7 +590,8 @@ public partial class SalesDashboardReactService
         string? search, int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted,
         IReadOnlyDictionary<string, string>? fallbackMap, bool useProjection, bool compressOutput = false,
         IReadOnlyCollection<string>? selectedSuppliers = null, IReadOnlyCollection<string>? supplierCategoryGuids = null,
-        IReadOnlyCollection<string>? warehouseCategoryGuids = null, bool prefetchCategorySource = true)
+        IReadOnlyCollection<string>? warehouseCategoryGuids = null, bool prefetchCategorySource = true,
+        SalesDetailProductOrder productOrder = default)
     {
         var hasCompare = HasCompare(range);
         var categorySourceFilter = BuildSalesDetailCategoryFilter(kind, supplierCategoryGuids, warehouseCategoryGuids, "s.[ProductCode]");
@@ -822,6 +859,9 @@ FROM ({source}) f {whereClause}
         var suppliers = rowSelect(columnFacts, baseSupplier, "[SupplierCode]", "[SupplierCode]", supplierName, "ORDER BY [Revenue] DESC, [CompareRevenue] DESC, [Code] ASC", projected: useProjectedColumns);
         var branchesSql = rowSelect(columnFacts, baseBranch, "[BranchCode]", "[BranchCode]", branchName, "ORDER BY [Revenue] DESC, [CompareRevenue] DESC, [Code] ASC", projected: useProjectedColumns);
         var offset = ((long)pageIndex - 1L) * pageSize;
+        // 内层先全量排序再取当前页，外层连接商品资料后按同一顺序输出。
+        var innerProductOrder = SalesDetailProductOrderBy(productOrder, revenueExpression: SalesDetailCurrentRevenueSum, quantityExpression: SalesDetailCurrentQuantitySum);
+        var outerProductOrder = SalesDetailProductOrderBy(productOrder, "a.");
         var productAggregate = $"""
 SELECT [ProductCode], MAX([StatisticProductName]) [StatisticProductName],
        SUM(CASE WHEN [Period]=0 THEN [Revenue] ELSE 0 END) [Revenue], {(hasCompare ? "SUM(CASE WHEN [Period]=1 THEN [Revenue] ELSE 0 END)" : "0")} [CompareRevenue],
@@ -856,9 +896,9 @@ SELECT a.[ProductCode] [Code], COALESCE(NULLIF(LTRIM(RTRIM(p.[ProductName])), ''
        a.[Revenue], a.[CompareRevenue], a.[Quantity], a.[CompareQuantity], a.[OrderCount], a.[CompareOrderCount],
        a.[GrossProfit], a.[CompareGrossProfit], a.[StatisticRowCount], a.[CostedRowCount], a.[GrossProfitRowCount],
        a.[CompareStatisticRowCount], a.[CompareCostedRowCount], a.[CompareGrossProfitRowCount], a.[CurrentProductCount], a.[CompareProductCount]
-FROM ({productAggregate} ORDER BY [Quantity] DESC, [CompareQuantity] DESC, [ProductCode] ASC OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY) a
+FROM ({productAggregate} {innerProductOrder} OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY) a
 {productMetadata}
-ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC;
+{outerProductOrder};
 """;
         var useGroupingSets = tokens.Length == 0
             && string.IsNullOrWhiteSpace(selectedBranch)
@@ -930,9 +970,9 @@ SELECT a.[ProductCode] [Code], COALESCE(NULLIF(LTRIM(RTRIM(p.[ProductName])), ''
        a.[Revenue], a.[CompareRevenue], a.[Quantity], a.[CompareQuantity], a.[OrderCount], a.[CompareOrderCount],
        a.[GrossProfit], a.[CompareGrossProfit], a.[StatisticRowCount], a.[CostedRowCount], a.[GrossProfitRowCount],
        a.[CompareStatisticRowCount], a.[CompareCostedRowCount], a.[CompareGrossProfitRowCount], a.[CurrentProductCount], a.[CompareProductCount]
-FROM ({groupingProductAggregate} ORDER BY [Quantity] DESC, [CompareQuantity] DESC, [ProductCode] ASC OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY) a
+FROM ({groupingProductAggregate} {innerProductOrder} OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY) a
 {productMetadata}
-ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC;
+{outerProductOrder};
 """;
         // 每个商品在本期/同期各有一行；total 必须按商品代码去重，避免跨期把同一商品算两次。
         var groupingProductCount = "SELECT COUNT(DISTINCT [ProductCode]) FROM #SalesDetailAggregates WHERE [GroupType]=3;";
@@ -1001,7 +1041,7 @@ ORDER BY a.[Quantity] DESC, a.[CompareQuantity] DESC, a.[ProductCode] ASC;
         IReadOnlyCollection<string>? branches, string? selectedBranch, string? selectedSupplier, string? selectedProduct,
         string? search, int pageIndex, int pageSize, IReadOnlySet<SalesDetailSection> wanted, IReadOnlyDictionary<string, string>? fallbackMap,
         IReadOnlyCollection<string>? selectedSuppliers, IReadOnlyCollection<string>? supplierCategoryGuids,
-        IReadOnlyCollection<string>? warehouseCategoryGuids)
+        IReadOnlyCollection<string>? warehouseCategoryGuids, SalesDetailProductOrder productOrder = default)
     {
         var hasCompare = HasCompare(range);
         var categorySourceFilter = BuildSalesDetailCategoryFilter(kind, supplierCategoryGuids, warehouseCategoryGuids, "s.[ProductCode]");
@@ -1097,7 +1137,7 @@ FROM (SELECT {factProjection} FROM {table}) f {whereClause}
         var branchesSql = rowSelect(baseBranch, "[BranchCode]", "[BranchCode]", "MAX([BranchName])", "ORDER BY [Revenue] DESC, [CompareRevenue] DESC, [Code] ASC");
         var offset = ((long)pageIndex - 1L) * pageSize;
         var paging = sqlServer ? $"OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY" : $"LIMIT {pageSize} OFFSET {offset}";
-        var products = rowSelect(baseProduct, "[ProductCode]", "[ProductCode]", "MAX([ProductName])", $"ORDER BY [Quantity] DESC, [CompareQuantity] DESC, [Code] ASC", paging);
+        var products = rowSelect(baseProduct, "[ProductCode]", "[ProductCode]", "MAX([ProductName])", SalesDetailProductOrderBy(productOrder, code: "[Code]", revenueExpression: SalesDetailCurrentRevenueSum, quantityExpression: SalesDetailCurrentQuantitySum), paging);
         var emptyRows = $"SELECT [ProductCode] [Code], [ProductName] [Name], [ItemNumber], [ProductImage], [Revenue], [Revenue] [CompareRevenue], [Quantity], [Quantity] [CompareQuantity], [OrderCount], [OrderCount] [CompareOrderCount], [GrossProfit], [GrossProfit] [CompareGrossProfit], [StatisticRowCount], [CostedRowCount], [GrossProfitRowCount], [StatisticRowCount] [CompareStatisticRowCount], [CostedRowCount] [CompareCostedRowCount], [GrossProfitRowCount] [CompareGrossProfitRowCount], 0 [CurrentProductCount], 0 [CompareProductCount] FROM {table} WHERE 1=0;";
         var emptyCount = "SELECT 0;";
         var emptyDenominator = "SELECT 0,0,0,0;";

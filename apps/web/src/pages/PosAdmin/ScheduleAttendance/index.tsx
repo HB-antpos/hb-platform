@@ -7,10 +7,13 @@ import {
   DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
+  FullscreenOutlined,
+  LeftOutlined,
   LoadingOutlined,
   LockOutlined,
   PlusOutlined,
   ReloadOutlined,
+  RightOutlined,
   SaveOutlined,
   SearchOutlined,
   WarningOutlined,
@@ -48,8 +51,8 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent, ReactElement } from 'react'
+import { cloneElement, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, DragEvent, ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { useAttendancePendingCount } from '../../../layout/attendancePendingBadge'
@@ -93,7 +96,6 @@ import type {
   AttendanceStoreHolidayDto,
   BatchUpsertAttendanceHolidayPayload,
   SaveAttendanceHolidayPayload,
-  SaveAttendanceSchedulePayload,
   SaveAttendanceSettingsPayload,
   SaveAttendancePunchAdjustmentPayload,
   AttendancePunchAdjustmentPreviewDto,
@@ -118,15 +120,15 @@ import {
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
 import AttendancePayrollSettingsFields from './AttendancePayrollSettingsFields'
+import BatchScheduleModal from './BatchScheduleModal'
+import type { BatchModalDay, BatchModalInitial, BatchModalUser } from './BatchScheduleModal'
 import DeletedSchedulesDrawer from './DeletedSchedulesDrawer'
 import ScheduleCellEditor from './ScheduleCellEditor'
 import type { CellEditorValues } from './ScheduleCellEditor'
 import {
   SHIFT_PRESETS,
   buildScheduleSavePayloads,
-  filterRowsByKeyword,
   getMealSummary,
-  getNextEmptyDateKey,
   getOccupiedDateKeys,
   normalizeHm,
   toMealChoice,
@@ -135,21 +137,27 @@ import type { ShiftPreset } from './scheduleCellEditorLogic'
 import {
   buildCopyPayload,
   buildMoveUpdatePayload,
-  buildPresetPayload,
   buildTransferCreatePayload,
   collectPunchScheduleGuids,
   getDropVerdict,
   getMealBadge,
   isScheduleLocked,
 } from './scheduleDragLogic'
-import type { DragSource } from './scheduleDragLogic'
+import type { DragSource, DropVerdict } from './scheduleDragLogic'
+import LandscapeShell, { releaseLandscape, tryLockLandscape, usePhoneEnvironment } from './LandscapeShell'
+import { getShellMode, nextAutoDismissed } from './phoneShellLogic'
+import { FALLBACK_STAFF_COLOR, assignStaffColors } from './staffColorLogic'
+import type { StaffColor } from './staffColorLogic'
+import WeekBoard from './WeekBoard'
+import type { WeekBoardDay, WeekBoardDayDrop, WeekBoardLegendItem } from './WeekBoard'
+import { buildStaffLegend, findAvailableUnscheduled, groupSchedulesByDay, matchStaffKeyword, summarizeDayList } from './weekBoardLogic'
+import { formatHours, getScheduleHours, summarizeSchedules } from './weekSummaryLogic'
 import './scheduleCellEditor.css'
 import {
   buildAvailabilityIndex,
   getDayAvailability,
   getScheduleAvailabilityConflict,
 } from './availabilityLogic'
-import type { AvailabilitySegment, DayAvailability } from './availabilityLogic'
 import {
   buildAttendanceLocationTrajectory,
   normalizeAttendanceUtcText,
@@ -197,22 +205,16 @@ interface ScheduleRow {
   schedulesByDate: Record<string, AttendanceScheduleDto[]>
 }
 
+/** 把员工颜色挂成 CSS 变量，卡片、图例、弹窗里的色块共用同一套样式。 */
+const staffColorVars = (color: StaffColor): CSSProperties => (
+  { '--sce-bg': color.bg, '--sce-bar': color.bar, '--sce-ink': color.ink } as CSSProperties
+)
+
 /** 周排班表中正在就地编辑的单元格；scheduleGuid 为空表示在该日新建班次。 */
 interface EditingCell {
   userGuid: string
   dateKey: string
   scheduleGuid?: string
-}
-
-const SCHEDULE_STATUS_ORDER: AttendanceScheduleStatus[] = ['Draft', 'Active', 'Cancelled']
-
-interface ScheduleFormValues {
-  storeCode: string
-  userGuid: string
-  workDate: Dayjs
-  timeRange: [Dayjs, Dayjs]
-  status?: AttendanceScheduleStatus
-  remark?: string
 }
 
 interface HolidayFormValues {
@@ -383,6 +385,14 @@ export default function ScheduleAttendancePage() {
   const [userGuid, setUserGuid] = useState<string | undefined>()
   // 周排班页的员工搜索：员工已一次性加载，姓名只在本地过滤，不再带进接口查询
   const [staffKeyword, setStaffKeyword] = useState('')
+  // 点图例选中要高亮的员工（可多选）；搜索框命中的人同样高亮
+  const [legendSelected, setLegendSelected] = useState<ReadonlySet<string>>(() => new Set())
+  // 手机横屏看板：手机横过来自动进入；竖着拿时点「横屏查看整周」进入
+  const phoneEnv = usePhoneEnvironment()
+  const [shellRequested, setShellRequested] = useState(false)
+  const [shellDismissed, setShellDismissed] = useState(false)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [batchInitial, setBatchInitial] = useState<BatchModalInitial | null>(null)
   const [editingCell, setEditingCell] = useState<EditingCell | null>(null)
   const [cellSaving, setCellSaving] = useState(false)
   const [selectedWeek, setSelectedWeek] = useState<Dayjs>(dayjs())
@@ -411,8 +421,6 @@ export default function ScheduleAttendancePage() {
   const [holidays, setHolidays] = useState<ListState<AttendanceStoreHolidayDto>>(initialListState)
   const [settings, setSettings] = useState<AttendanceSettingsDto | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(false)
-  const [scheduleDrawerOpen, setScheduleDrawerOpen] = useState(false)
-  const [editingSchedule, setEditingSchedule] = useState<AttendanceScheduleDto | null>(null)
   const [holidayDrawerOpen, setHolidayDrawerOpen] = useState(false)
   const [editingHoliday, setEditingHoliday] = useState<AttendanceStoreHolidayDto | null>(null)
   const [batchHolidayDrawerOpen, setBatchHolidayDrawerOpen] = useState(false)
@@ -433,7 +441,6 @@ export default function ScheduleAttendancePage() {
   const [publishing, setPublishing] = useState(false)
   const [syncingHolidays, setSyncingHolidays] = useState(false)
   const [deletedSchedulesOpen, setDeletedSchedulesOpen] = useState(false)
-  const [scheduleForm] = Form.useForm<ScheduleFormValues>()
   const [holidayForm] = Form.useForm<HolidayFormValues>()
   const [batchHolidayForm] = Form.useForm<BatchHolidayFormValues>()
   const [adjustmentForm] = Form.useForm<PunchAdjustmentFormValues>()
@@ -867,71 +874,6 @@ export default function ScheduleAttendancePage() {
     return <Tag color={color}>{t(`posAdmin.scheduleAttendance.status.holiday.${value}`, value)}</Tag>
   }
 
-  const openScheduleDrawer = (record?: AttendanceScheduleDto, defaults?: Partial<ScheduleFormValues>) => {
-    const targetStoreCode = record?.storeCode ?? defaults?.storeCode ?? storeCode
-    if (!access.canEditAttendanceSchedule || !canEditStoreCode(targetStoreCode)) {
-      message.error(t('message.noPermission', '无权操作该数据'))
-      return
-    }
-
-    setEditingSchedule(record ?? null)
-    scheduleForm.resetFields()
-    if (record) {
-      scheduleForm.setFieldsValue({
-        storeCode: record.storeCode,
-        userGuid: record.userGuid,
-        workDate: dayjs(record.workDate),
-        timeRange: [toDayjsTime(record.startTime), toDayjsTime(record.endTime)].filter(Boolean) as [Dayjs, Dayjs],
-        status: record.status,
-        remark: record.remark,
-      })
-    } else {
-      scheduleForm.setFieldsValue({
-        storeCode,
-        status: 'Draft',
-        timeRange: [dayjs('09:00', 'HH:mm'), dayjs('17:00', 'HH:mm')],
-        ...defaults,
-      })
-    }
-    setScheduleDrawerOpen(true)
-  }
-
-  const saveSchedule = async () => {
-    try {
-      const values = await scheduleForm.validateFields()
-      if (!access.canEditAttendanceSchedule || !canEditStoreCode(values.storeCode)) {
-        message.error(t('message.noPermission', '无权操作该数据'))
-        return
-      }
-
-      const payload: SaveAttendanceSchedulePayload = {
-        storeCode: values.storeCode,
-        userGuid: values.userGuid.trim(),
-        workDate: values.workDate.format('YYYY-MM-DD'),
-        startTime: values.timeRange[0].format('HH:mm'),
-        endTime: values.timeRange[1].format('HH:mm'),
-        status: editingSchedule ? values.status : 'Draft',
-        remark: values.remark?.trim() || undefined,
-      }
-      setSaving(true)
-      if (editingSchedule) {
-        await updateAttendanceSchedule(editingSchedule.scheduleGuid, payload)
-        message.success(t('message.updateSuccess'))
-      } else {
-        await createAttendanceSchedule(payload)
-        message.success(t('message.createSuccess'))
-      }
-      setScheduleDrawerOpen(false)
-      void loadSchedules()
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'errorFields' in error) return
-      console.error(error)
-      message.error(t('posAdmin.scheduleAttendance.messages.saveScheduleFailed'))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const confirmDeleteSchedule = (record: AttendanceScheduleDto) => {
     if (!access.canEditAttendanceSchedule || !canEditStoreCode(record.storeCode)) {
       message.error(t('message.noPermission', '无权操作该数据'))
@@ -946,7 +888,6 @@ export default function ScheduleAttendancePage() {
       onOk: async () => {
         await deleteAttendanceSchedule(record.scheduleGuid)
         message.success(t('message.deleteSuccess'))
-        setScheduleDrawerOpen(false)
         setEditingCell(null)
         void loadSchedules()
       },
@@ -1370,11 +1311,115 @@ export default function ScheduleAttendancePage() {
       rows.set(schedule.userGuid, existing)
     })
 
-    // 员工与班次都已整周加载完，姓名搜索只做本地过滤
-    return filterRowsByKeyword(Array.from(rows.values()), staffKeyword)
-  }, [employeeAges, schedules.items, staffKeyword, storeCode, storeNameMap, storeUsers])
+    // 全部员工 + 本周班次的汇总（按员工查班次、拖拽落点判定用）；搜索框只做高亮，不再过滤
+    return Array.from(rows.values())
+  }, [employeeAges, schedules.items, storeCode, storeNameMap, storeUsers])
 
   const weekDateKeys = useMemo(() => weekDays.map((day) => day.format('YYYY-MM-DD')), [weekDays])
+
+  // ===== 按天分列的周视图数据 =====
+  // 本周班次（已按分店过滤）；员工姓名 / 颜色统一从这里取
+  const weekSchedules = useMemo(
+    () => schedules.items.filter((schedule) => !storeCode || schedule.storeCode === storeCode),
+    [schedules.items, storeCode],
+  )
+  const userNameMap = useMemo(() => {
+    const map = new Map<string, string>()
+    storeUsers.forEach((user) => map.set(user.userGuid, displayStoreUserName(user)))
+    weekSchedules.forEach((schedule) => {
+      if (!map.has(schedule.userGuid)) map.set(schedule.userGuid, schedule.userName || schedule.userGuid)
+    })
+    return map
+  }, [storeUsers, weekSchedules])
+  const nameOf = useCallback((userGuid: string) => userNameMap.get(userGuid) ?? userGuid, [userNameMap])
+  // 颜色按「全部在职员工 + 本周有班次的人」一起分配：排班前后颜色不变，同一批人不撞色
+  const staffColors = useMemo(
+    () => assignStaffColors(Array.from(userNameMap, ([userGuid, name]) => ({ userGuid, name }))),
+    [userNameMap],
+  )
+  const rowByGuid = useMemo(() => new Map(scheduleRows.map((row) => [row.userGuid, row])), [scheduleRows])
+  // 每天的班次：按「开始时间 → 员工名」排好
+  const daySchedules = useMemo(() => groupSchedulesByDay(weekSchedules, weekDateKeys, nameOf), [nameOf, weekDateKeys, weekSchedules])
+  const schedulesByUserDate = useMemo(() => {
+    const map = new Map<string, AttendanceScheduleDto[]>()
+    weekSchedules.forEach((schedule) => {
+      const key = `${schedule.userGuid}|${schedule.workDate.slice(0, 10)}`
+      map.set(key, [...(map.get(key) ?? []), schedule])
+    })
+    return map
+  }, [weekSchedules])
+  const staffLegend = useMemo(() => buildStaffLegend(weekSchedules, nameOf), [nameOf, weekSchedules])
+  const existingOf = useCallback(
+    (userGuid: string, dateKey: string) => schedulesByUserDate.get(`${userGuid}|${dateKey}`) ?? [],
+    [schedulesByUserDate],
+  )
+  const availabilityOf = useCallback(
+    (userGuid: string, dateKey: string) => getDayAvailability(availabilityIndex, userGuid, dateKey),
+    [availabilityIndex],
+  )
+  // 每天「上报了可上班、但当天没排」的员工
+  const availableUnscheduledByDay = useMemo(() => new Map(weekDateKeys.map((dateKey) => [
+    dateKey,
+    findAvailableUnscheduled(dateKey, storeUsers.map((user) => user.userGuid), daySchedules.get(dateKey) ?? [], availabilityOf),
+  ])), [availabilityOf, daySchedules, storeUsers, weekDateKeys])
+  // 高亮：点图例选中的人 + 搜索框命中的人；有高亮对象时其余卡片变淡（搜索无命中则全部变淡，提示没找到）
+  const keywordMatches = useMemo(
+    () => matchStaffKeyword(Array.from(userNameMap, ([userGuid, name]) => ({ userGuid, name })), staffKeyword),
+    [staffKeyword, userNameMap],
+  )
+  const highlighting = legendSelected.size > 0 || staffKeyword.trim() !== ''
+  const isHighlighted = (userGuid: string) => legendSelected.has(userGuid) || keywordMatches.has(userGuid)
+
+  // ===== 手机横屏看板 =====
+  const shellMode = activeTab === 'schedules' && storeCode
+    ? getShellMode({ phone: phoneEnv.phone, landscape: phoneEnv.landscape, requested: shellRequested, autoDismissed: shellDismissed })
+    : 'none'
+  // 旋转兜底模式下编辑浮层、弹窗不会跟着旋转，所以只读；把手机转过来（landscape）才可编辑
+  const shellReadOnly = shellMode === 'rotated'
+  // 回到竖屏后，之前点的「退出」不再生效
+  useEffect(() => {
+    setShellDismissed((prev) => nextAutoDismissed(phoneEnv.landscape, prev))
+  }, [phoneEnv.landscape])
+  // 点「横屏查看整周」：尽力锁定横屏（Android），锁不了就由 rotated 模式兜底（iPhone）
+  const enterShell = () => {
+    setEditingCell(null)
+    setShellRequested(true)
+    void tryLockLandscape()
+  }
+  const exitShell = () => {
+    setShellRequested(false)
+    if (phoneEnv.landscape) setShellDismissed(true)
+    releaseLandscape()
+  }
+
+  // 批量排班弹窗的数据
+  const batchDays = useMemo<BatchModalDay[]>(() => weekDays.map((day, index) => {
+    const dateKey = day.format('YYYY-MM-DD')
+    return {
+      dateKey,
+      dateLabel: day.format('MM-DD'),
+      weekdayLabel: t(`posAdmin.scheduleAttendance.weekdays.${index}`),
+      isoIndex: index,
+      holiday: holidaysByDate.get(dateKey)?.map((item) => item.holidayName).join(' · '),
+      scheduledCount: summarizeDayList(daySchedules.get(dateKey) ?? []).people,
+    }
+  }), [daySchedules, holidaysByDate, t, weekDays])
+  const batchUsers = useMemo<BatchModalUser[]>(() => storeUsers.map((user) => {
+    const total = summarizeSchedules(weekSchedules.filter((schedule) => schedule.userGuid === user.userGuid))
+    const daysWith = (kind: 'available' | 'unavailable') => batchDays
+      .filter((day) => (availabilityOf(user.userGuid, day.dateKey)?.[kind].length ?? 0) > 0)
+      .map((day) => day.weekdayLabel)
+    return {
+      userGuid: user.userGuid,
+      name: displayStoreUserName(user),
+      age: employeeAges.get(user.userGuid),
+      color: staffColors.get(user.userGuid) ?? FALLBACK_STAFF_COLOR,
+      weekShifts: total.shifts,
+      weekHours: total.hours,
+      availableDays: daysWith('available'),
+      unavailableDays: daysWith('unavailable'),
+    }
+  }), [availabilityOf, batchDays, employeeAges, staffColors, storeUsers, weekSchedules])
 
   const isSameEditingCell = (left: EditingCell | null, right: EditingCell) => (
     left?.userGuid === right.userGuid && left.dateKey === right.dateKey && left.scheduleGuid === right.scheduleGuid
@@ -1386,7 +1431,6 @@ export default function ScheduleAttendancePage() {
     dateKey: string,
     schedule: AttendanceScheduleDto | undefined,
     values: CellEditorValues,
-    advance: boolean,
   ) => {
     const targetStoreCode = schedule?.storeCode ?? (row.storeCode || storeCode)
     if (!targetStoreCode || !access.canEditAttendanceSchedule || !canEditStoreCode(targetStoreCode)) {
@@ -1439,11 +1483,8 @@ export default function ScheduleAttendancePage() {
         }
       }
 
-      // Enter 保存时顺势打开右侧下一个空白格，连续排一整行；没有空白格就关闭
-      const nextDateKey = advance
-        ? getNextEmptyDateKey(dateKey, weekDateKeys, getOccupiedDateKeys(row.schedulesByDate), savedDateKeys)
-        : undefined
-      setEditingCell(nextDateKey ? { userGuid: row.userGuid, dateKey: nextDateKey } : null)
+      // 按天分列的视图里没有「右侧下一个空白格」，保存后直接关闭浮层
+      setEditingCell(null)
       void loadSchedules()
     } catch (error) {
       console.error(error)
@@ -1543,12 +1584,7 @@ export default function ScheduleAttendancePage() {
     const originDateKey = origin ? dayjs(origin.workDate).format('YYYY-MM-DD') : undefined
     const isMove = source.kind === 'move'
     try {
-      if (source.kind === 'preset') {
-        const created = await createAttendanceSchedule(buildPresetPayload(targetStoreCode, row.userGuid, dateKey, source.start, source.end))
-        showUndoToast(t('posAdmin.scheduleAttendance.drag.added', params), async () => {
-          await deleteAttendanceSchedule(created.scheduleGuid)
-        })
-      } else if (origin && source.kind === 'copy') {
+      if (origin && source.kind === 'copy') {
         const created = await createAttendanceSchedule(buildCopyPayload(origin, row.userGuid, dateKey))
         showUndoToast(t('posAdmin.scheduleAttendance.drag.copied', params), async () => {
           await deleteAttendanceSchedule(created.scheduleGuid)
@@ -1602,6 +1638,16 @@ export default function ScheduleAttendancePage() {
     }
   }
 
+  // 编辑浮层里「改给其他员工」：日期、时间不变，直接复用拖拽换人的落地逻辑（新建给对方 + 删除原班次，5 秒内可撤销）
+  const transferSchedule = async (schedule: AttendanceScheduleDto, targetUserGuid: string) => {
+    setEditingCell(null)
+    await runDrop(
+      { kind: 'move', schedule, start: normalizeHm(schedule.startTime), end: normalizeHm(schedule.endTime) },
+      rowFor(targetUserGuid),
+      schedule.workDate.slice(0, 10),
+    )
+  }
+
   // 班次右上角「×」：现有删除接口（软删除，可在「已删除排班」找回）
   const deleteScheduleViaX = async (schedule: AttendanceScheduleDto) => {
     try {
@@ -1621,27 +1667,47 @@ export default function ScheduleAttendancePage() {
     ? { ...dragSource, kind: altCopy ? 'copy' : 'move' }
     : dragSource
 
-  const getCellDrop = (row: ScheduleRow, dateKey: string, availability: DayAvailability | undefined) => {
-    const cellKey = `${row.userGuid}|${dateKey}`
-    const editable = access.canEditAttendanceSchedule && canEditStoreCode(row.storeCode || storeCode)
+  // 为员工找一个可用于落地 / 编辑的「行」：优先用已加载的，没有（例如已离职员工的历史班次）就按班次现拼一个
+  const rowFor = (userGuid: string, schedule?: AttendanceScheduleDto): ScheduleRow => (
+    rowByGuid.get(userGuid) ?? {
+      rowKey: `${schedule?.storeCode ?? storeCode ?? ''}-${userGuid}`,
+      storeCode: schedule?.storeCode ?? storeCode ?? '',
+      storeName: schedule?.storeName,
+      userGuid,
+      userName: schedule?.userName ?? nameOf(userGuid),
+      schedulesByDate: {},
+    }
+  )
+
+  // 某一天（整列）对当前拖拽内容的落点：类名（可放 / 提醒 / 不能放 / 当前悬停）、事件、角标与「放到这里」占位。
+  // 落点只决定「哪一天」：员工取自被拖的卡片本身；托盘里的常用班次放下后打开排班弹窗（预选这一天和这个时段）。
+  const getDayDrop = (dateKey: string): WeekBoardDayDrop => {
     const source = effectiveDragSource
-    const sourceCell = source?.schedule
-      ? { userGuid: source.schedule.userGuid, dateKey: dayjs(source.schedule.workDate).format('YYYY-MM-DD') }
-      : undefined
-    const verdict = source && editable
-      ? getDropVerdict(source, { userGuid: row.userGuid, dateKey, schedules: row.schedulesByDate[dateKey] ?? [], availability }, sourceCell)
-      : undefined
+    if (!source) return {}
+    const editable = access.canEditAttendanceSchedule && canEditStoreCode(storeCode)
+    const origin = source.schedule
+    const originUser = origin?.userGuid
+    let verdict: DropVerdict | undefined
+    if (editable) {
+      if (source.kind === 'preset') {
+        verdict = { state: 'ok' }
+      } else if (origin && originUser) {
+        verdict = getDropVerdict(
+          source,
+          { userGuid: originUser, dateKey, schedules: existingOf(originUser, dateKey), availability: availabilityOf(originUser, dateKey) },
+          { userGuid: originUser, dateKey: origin.workDate.slice(0, 10) },
+        )
+      }
+    }
     const droppable = verdict?.state === 'ok' || verdict?.state === 'warn'
-    const hovered = droppable && hoverDropKey === cellKey
+    const hovered = droppable && hoverDropKey === dateKey
 
     const className = [
-      'sce-cell',
-      verdict && verdict.state !== 'noop' ? `sce-cell--drop-${verdict.state}` : '',
-      hovered ? 'sce-cell--drop-target' : '',
+      verdict && verdict.state !== 'noop' ? `sce-col--drop-${verdict.state}` : '',
+      hovered ? 'sce-col--drop-target' : '',
     ].filter(Boolean).join(' ')
 
-    const props = {
-      className,
+    const props: WeekBoardDayDrop['props'] = {
       onDragOver: (event: DragEvent<HTMLDivElement>) => {
         if (!source) return
         if (source.kind !== 'preset' && event.altKey !== altCopy) setAltCopy(event.altKey)
@@ -1652,18 +1718,22 @@ export default function ScheduleAttendancePage() {
         // 必须 preventDefault 浏览器才允许在这里放下
         event.preventDefault()
         event.dataTransfer.dropEffect = source.kind === 'move' ? 'move' : 'copy'
-        if (hoverDropKey !== cellKey) setHoverDropKey(cellKey)
+        if (hoverDropKey !== dateKey) setHoverDropKey(dateKey)
       },
       onDragLeave: (event: DragEvent<HTMLDivElement>) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-          setHoverDropKey((prev) => (prev === cellKey ? null : prev))
+          setHoverDropKey((prev) => (prev === dateKey ? null : prev))
         }
       },
       onDrop: (event: DragEvent<HTMLDivElement>) => {
-        if (!source || !droppable) return
+        if (!droppable) return
         event.preventDefault()
         endDrag()
-        void runDrop(source, row, dateKey)
+        if (source.kind === 'preset') {
+          openBatchModal({ dateKeys: [dateKey], start: source.start, end: source.end })
+        } else if (origin) {
+          void runDrop(source, rowFor(origin.userGuid, origin), dateKey)
+        }
       },
     }
 
@@ -1677,18 +1747,13 @@ export default function ScheduleAttendancePage() {
           : t(verdict.reason === 'unavailable' ? 'posAdmin.scheduleAttendance.drag.flagUnavailable' : 'posAdmin.scheduleAttendance.drag.flagOutside')
       if (flagKind) flag = <span className={`sce-drop-flag sce-drop-flag--${flagKind}`}>{flagText}</span>
     }
-    const noteKey = source?.kind === 'preset' ? 'dropAdd' : source?.kind === 'copy' ? 'dropCopy' : 'dropMove'
-    const decor = (
-      <>
-        {flag}
-        {hovered ? (
-          <div className="sce-drop-note">
-            {t(`posAdmin.scheduleAttendance.drag.${noteKey}`, { name: row.userName || '--', date: dateKey.slice(5) })}
-          </div>
-        ) : null}
-      </>
-    )
-    return { props, decor }
+    const noteKey = source.kind === 'preset' ? 'dropPreset' : source.kind === 'copy' ? 'dropCopy' : 'dropMove'
+    const slot = hovered ? (
+      <div className="sce-slot">
+        {t(`posAdmin.scheduleAttendance.drag.${noteKey}`, { name: origin ? nameOf(origin.userGuid) : '', date: dateKey.slice(5) })}
+      </div>
+    ) : null
+    return { className, props, flag, slot }
   }
 
   // 把就地编辑浮层锚定在被点的单元格 / 班次块上；内容在打开时才渲染，关闭即销毁以重置表单
@@ -1701,17 +1766,8 @@ export default function ScheduleAttendancePage() {
   ) => {
     const dateKey = date.format('YYYY-MM-DD')
     const occupied = getOccupiedDateKeys(row.schedulesByDate)
-    return (
-      <Popover
-        open={isSameEditingCell(editingCell, cell)}
-        trigger="click"
-        placement="bottom"
-        destroyOnHidden
-        onOpenChange={(open) => {
-          // 点别处关闭时只清掉自己，避免把刚点开的另一个格子也一起关掉
-          setEditingCell((prev) => (open ? cell : isSameEditingCell(prev, cell) ? null : prev))
-        }}
-        content={(
+    const editorOpen = isSameEditingCell(editingCell, cell)
+    const editor = () => (
           <ScheduleCellEditor
             employeeName={row.userName || '--'}
             dateLabel={`${date.format('MM-DD')} ${t(`posAdmin.scheduleAttendance.weekdays.${date.isoWeekday() - 1}`)}`}
@@ -1727,199 +1783,213 @@ export default function ScheduleAttendancePage() {
               }
             })}
             saving={cellSaving}
-            onSave={(values, options) => void saveCellSchedule(row, dateKey, schedule, values, options.advance)}
+            onSave={(values) => void saveCellSchedule(row, dateKey, schedule, values)}
+            transfer={schedule && schedule.status !== 'Cancelled' && access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode) ? {
+              options: storeUsers
+                .filter((user) => user.userGuid !== schedule.userGuid)
+                .map((user) => ({ value: user.userGuid, label: displayStoreUserName(user) })),
+              // 已有打卡记录的班次不能换人：打卡、审批都挂在原员工身上
+              disabledReason: isScheduleLocked({
+                scheduleGuid: schedule.scheduleGuid,
+                workDateKey: dateKey,
+                todayKey,
+                punchScheduleGuids: weekPunches.guids,
+                canViewPunches: weekPunches.known,
+              }) ? t('posAdmin.scheduleAttendance.cellEditor.transfer.locked') : undefined,
+              onTransfer: (targetUserGuid: string) => void transferSchedule(schedule, targetUserGuid),
+            } : undefined}
             onDelete={() => schedule && confirmDeleteSchedule(schedule)}
             onClose={() => setEditingCell(null)}
           />
-        )}
+    )
+    if (phoneEnv.phone) {
+      return (
+        <>
+          {cloneElement(trigger, { onClick: () => setEditingCell(cell) })}
+          <Modal
+            open={editorOpen}
+            centered
+            destroyOnHidden
+            footer={null}
+            closable={false}
+            width={420}
+            className="sce-editor-modal"
+            onCancel={() => setEditingCell(null)}
+          >
+            {editor()}
+          </Modal>
+        </>
+      )
+    }
+    return (
+      <Popover
+        open={editorOpen}
+        trigger="click"
+        placement="bottom"
+        destroyOnHidden
+        onOpenChange={(open) => {
+          // 点别处关闭时只清掉自己，避免把刚点开的另一个格子也一起关掉
+          setEditingCell((prev) => (open ? cell : isSameEditingCell(prev, cell) ? null : prev))
+        }}
+        content={editor()}
       >
         {trigger}
       </Popover>
     )
   }
 
-  // 格内状态行：绿=员工可上班、红=不能上班，同类多段用「·」连在一行；没上报则整块不渲染。
-  const renderAvailabilityLines = (day?: DayAvailability) => {
-    if (!day) return null
-    const segmentText = (segment: AvailabilitySegment) => (
-      segment.allDay
-        ? t('posAdmin.scheduleAttendance.weekAvailability.allDay')
-        : `${segment.startLabel}-${segment.endLabel}`
-    )
-    const renderLine = (kind: 'available' | 'unavailable', segments: AvailabilitySegment[]) => {
-      if (!segments.length) return null
-      const remarks = segments.map((segment) => segment.remark).filter(Boolean).join(' / ')
-      return (
-        <div key={kind} className={`sce-avail sce-avail--${kind}`} title={remarks || undefined}>
-          <i aria-hidden />
-          <span>
-            {t(`posAdmin.scheduleAttendance.weekAvailability.${kind}`)} {segments.map(segmentText).join(' · ')}
-          </span>
-        </div>
-      )
+  // 打开批量排班弹窗：可预填日期 / 员工 / 时段（点某天的「添加班次」「可上班未排」，或把常用班次拖到某天）
+  const openBatchModal = (initial?: BatchModalInitial) => {
+    if (!storeCode || !access.canEditAttendanceSchedule || !canEditStoreCode(storeCode)) {
+      message.error(t('message.noPermission', '无权操作该数据'))
+      return
     }
+    setEditingCell(null)
+    setBatchInitial(initial ?? null)
+    setBatchOpen(true)
+  }
+
+  // 一张班次卡片：第一行员工名（21 岁以下带年龄），第二行时间 + 工时；
+  // 底色 = 员工，虚线斜纹 = 草稿，灰底划线 = 已取消。点开是原来的编辑浮层，可拖到别的天（⌥ 复制）。
+  const renderCard = (schedule: AttendanceScheduleDto) => {
+    const dateKey = schedule.workDate.slice(0, 10)
+    const color = staffColors.get(schedule.userGuid) ?? FALLBACK_STAFF_COLOR
+    const name = nameOf(schedule.userGuid)
+    const age = employeeAges.get(schedule.userGuid)
+    const canEditSchedule = !shellReadOnly && access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode)
+    const cardCell: EditingCell = { userGuid: schedule.userGuid, dateKey, scheduleGuid: schedule.scheduleGuid }
+    // 班次与员工上报的时间冲突：卡片上加 ⚠，悬停说明原因（不阻止保存，仅提醒排班的人）
+    const conflict = getScheduleAvailabilityConflict(schedule, availabilityOf(schedule.userGuid, dateKey))
+    // 已有打卡记录（或无法确认且已到班）的班次锁定：不能拖动，「×」仍可用
+    const locked = canEditSchedule && schedule.status !== 'Cancelled' && isScheduleLocked({
+      scheduleGuid: schedule.scheduleGuid,
+      workDateKey: dateKey,
+      todayKey,
+      punchScheduleGuids: weekPunches.guids,
+      canViewPunches: weekPunches.known,
+    })
+    const canDrag = canEditSchedule && schedule.status !== 'Cancelled' && !locked
+    const dragging = dragSource?.schedule?.scheduleGuid === schedule.scheduleGuid && !altCopy
+    const mealBadge = getMealBadge(schedule.mealBreakCount)
+    const mealPaid = mealBadge
+      ? getMealSummary(normalizeHm(schedule.startTime), normalizeHm(schedule.endTime), toMealChoice(schedule.mealBreakCount))?.paidHours
+      : undefined
+    const shiftHours = getScheduleHours(schedule).hours
+    const timeText = `${formatTime(schedule.startTime)}–${formatTime(schedule.endTime)}`
+    const dim = highlighting && !isHighlighted(schedule.userGuid)
+    const hi = highlighting && isHighlighted(schedule.userGuid)
+    // 悬停提示：姓名、状态、冲突原因、手动用餐的计薪、备注、锁定原因
+    const title = [
+      name,
+      statusLabel('schedule', schedule.status),
+      conflict ? t(`posAdmin.scheduleAttendance.weekAvailability.${conflict === 'unavailable' ? 'conflictUnavailable' : 'conflictOutside'}`) : '',
+      mealBadge && mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : '',
+      schedule.remark ?? '',
+      locked ? t(weekPunches.known ? 'posAdmin.scheduleAttendance.drag.locked' : 'posAdmin.scheduleAttendance.drag.lockedUnknown') : '',
+    ].filter(Boolean).join(' · ')
+    // 用 div 而不是 button：部分浏览器（Firefox）里 button 不能被拖动
+    const card = (
+      <div
+        role="button"
+        tabIndex={canEditSchedule ? 0 : -1}
+        aria-disabled={!canEditSchedule}
+        draggable={canDrag}
+        title={title}
+        style={staffColorVars(color)}
+        onDragStart={(event) => handleChipDragStart(event, schedule)}
+        onDragEnd={endDrag}
+        onKeyDown={(event) => {
+          // 键盘 Enter / 空格等同点击（div 没有 button 的原生行为）
+          if (canEditSchedule && (event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+            event.preventDefault()
+            event.currentTarget.click()
+          }
+        }}
+        className={[
+          'sce-card',
+          `sce-card--${schedule.status}`,
+          canEditSchedule ? 'sce-card--editable' : '',
+          canDrag ? 'sce-card--draggable' : '',
+          locked ? 'sce-card--locked' : '',
+          dragging ? 'sce-card--drag-src' : '',
+          isSameEditingCell(editingCell, cardCell) ? 'sce-card--active' : '',
+          conflict ? 'sce-card--conflict' : '',
+          dim ? 'sce-card--dim' : '',
+          hi ? 'sce-card--hi' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        <div className="sce-card-line1">
+          <b>{name}</b>
+          {age !== undefined ? <span className="sce-card-age">{age}</span> : null}
+          {schedule.status === 'Cancelled' ? <span className="sce-card-tag">{statusLabel('schedule', 'Cancelled')}</span> : null}
+        </div>
+        <div className="sce-card-line2">
+          <span className="sce-card-time">{timeText}</span>
+          {conflict ? <WarningOutlined className="sce-card-warn" /> : null}
+          {locked ? <LockOutlined className="sce-card-lock" /> : null}
+          {/* 手动指定过用餐次数的班次：工时加点状下划线，具体扣餐说明在悬停提示里 */}
+          {shiftHours > 0 ? <span className={`sce-card-hours${mealBadge ? ' sce-card-hours--meal' : ''}`}>{formatHours(shiftHours)}</span> : null}
+        </div>
+        {/* 手机上不放「×」：误触风险大，删除走编辑弹窗里的删除按钮 */}
+        {canEditSchedule && !phoneEnv.phone ? (
+          // 点「×」只弹删除确认，不能触发外层「点班次打开编辑浮层」
+          <span className="sce-chip-x-wrap" onClick={(event) => event.stopPropagation()}>
+            <Popconfirm
+              title={t('posAdmin.scheduleAttendance.drag.deleteTitle', { time: timeText })}
+              description={t('posAdmin.scheduleAttendance.drag.deleteDesc')}
+              okText={t('common.delete')}
+              cancelText={t('common.cancel')}
+              okButtonProps={{ danger: true }}
+              onConfirm={() => deleteScheduleViaX(schedule)}
+            >
+              <span
+                role="button"
+                tabIndex={0}
+                className="sce-card-x"
+                aria-label={t('posAdmin.scheduleAttendance.drag.deleteAria')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    event.currentTarget.click()
+                  }
+                }}
+              >
+                <CloseOutlined />
+              </span>
+            </Popconfirm>
+          </span>
+        ) : null}
+      </div>
+    )
     return (
-      <div className="sce-avail-list">
-        {renderLine('available', day.available)}
-        {renderLine('unavailable', day.unavailable)}
+      <div key={schedule.scheduleGuid}>
+        {canEditSchedule ? withCellEditor(rowFor(schedule.userGuid, schedule), dayjs(dateKey), cardCell, schedule, card) : card}
       </div>
     )
   }
 
-  const renderScheduleCell = (row: ScheduleRow, date: Dayjs) => {
-    const dateKey = date.format('YYYY-MM-DD')
-    const dayAvailability = getDayAvailability(availabilityIndex, row.userGuid, dateKey)
-    const daySchedules = [...(row.schedulesByDate[dateKey] ?? [])].sort((left, right) => left.startTime.localeCompare(right.startTime))
-    const canEditRowStore = access.canEditAttendanceSchedule && canEditStoreCode(row.storeCode || storeCode)
-    const newCell: EditingCell = { userGuid: row.userGuid, dateKey }
-    const newCellActive = isSameEditingCell(editingCell, newCell)
-    const cellDrop = getCellDrop(row, dateKey, dayAvailability)
-
-    if (!daySchedules.length) {
-      if (!canEditRowStore) {
-        // 无权限：整格只读，不响应点击
-        return (
-          <div className="sce-cell">
-            <button type="button" disabled className="sce-empty sce-empty--readonly">{t('posAdmin.scheduleAttendance.emptyShift')}</button>
-            {renderAvailabilityLines(dayAvailability)}
-          </div>
-        )
-      }
-      return (
-        <div {...cellDrop.props}>
-          {cellDrop.decor}
-          {withCellEditor(row, date, newCell, undefined, (
-            <button
-              type="button"
-              className={`sce-empty sce-empty--editable${newCellActive ? ' sce-empty--active' : ''}`}
-            >
-              <PlusOutlined /> {t('posAdmin.scheduleAttendance.actions.addShift')}
-            </button>
-          ))}
-          {renderAvailabilityLines(dayAvailability)}
-        </div>
-      )
-    }
-
+  // 每天一列的底部：「可上班未排 N 人」（点开是预选了这一天和这些人的排班弹窗）+ 悬停才出现的「＋ 添加班次」
+  const renderDayFooter = (day: WeekBoardDay) => {
+    const canAdd = !shellReadOnly && access.canEditAttendanceSchedule && canEditStoreCode(storeCode)
+    const free = availableUnscheduledByDay.get(day.dateKey) ?? []
     return (
-      <div {...cellDrop.props}>
-        {cellDrop.decor}
-        {daySchedules.map((schedule) => {
-          const canEditSchedule = access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode)
-          const chipCell: EditingCell = { userGuid: row.userGuid, dateKey, scheduleGuid: schedule.scheduleGuid }
-          // 班次与员工上报的时间冲突：块上加橙色角标，悬停说明原因（不阻止保存，仅提醒排班的人）
-          const conflict = getScheduleAvailabilityConflict(schedule, dayAvailability)
-          // 已有打卡记录（或无法确认且已到班）的班次锁定：不能拖动，「×」仍可用
-          const locked = canEditSchedule && schedule.status !== 'Cancelled' && isScheduleLocked({
-            scheduleGuid: schedule.scheduleGuid,
-            workDateKey: dateKey,
-            todayKey,
-            punchScheduleGuids: weekPunches.guids,
-            canViewPunches: weekPunches.known,
-          })
-          const canDrag = canEditSchedule && schedule.status !== 'Cancelled' && !locked
-          const dragging = dragSource?.schedule?.scheduleGuid === schedule.scheduleGuid && !altCopy
-          const mealBadge = getMealBadge(schedule.mealBreakCount)
-          const mealPaid = mealBadge
-            ? getMealSummary(normalizeHm(schedule.startTime), normalizeHm(schedule.endTime), toMealChoice(schedule.mealBreakCount))?.paidHours
-            : undefined
-          const timeText = `${formatTime(schedule.startTime)}–${formatTime(schedule.endTime)}`
-          // 用 div 而不是 button：部分浏览器（Firefox）里 button 不能被拖动
-          const chip = (
-            <div
-              key={schedule.scheduleGuid}
-              role="button"
-              tabIndex={canEditSchedule ? 0 : -1}
-              aria-disabled={!canEditSchedule}
-              draggable={canDrag}
-              title={locked ? t(weekPunches.known ? 'posAdmin.scheduleAttendance.drag.locked' : 'posAdmin.scheduleAttendance.drag.lockedUnknown') : undefined}
-              onDragStart={(event) => handleChipDragStart(event, schedule)}
-              onDragEnd={endDrag}
-              onKeyDown={(event) => {
-                // 键盘 Enter / 空格等同点击（div 没有 button 的原生行为）
-                if (canEditSchedule && (event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
-                  event.preventDefault()
-                  event.currentTarget.click()
-                }
-              }}
-              className={[
-                'sce-chip',
-                `sce-chip--${schedule.status}`,
-                canEditSchedule ? 'sce-chip--editable' : '',
-                canDrag ? 'sce-chip--draggable' : '',
-                locked ? 'sce-chip--locked' : '',
-                dragging ? 'sce-chip--drag-src' : '',
-                isSameEditingCell(editingCell, chipCell) ? 'sce-chip--active' : '',
-                conflict ? 'sce-chip--conflict' : '',
-              ].filter(Boolean).join(' ')}
-            >
-              {canDrag ? <span className="sce-chip-grip" aria-hidden>⋮⋮</span> : null}
-              <span className="sce-chip-time">
-                {formatTime(schedule.startTime)} - {formatTime(schedule.endTime)}
-                {conflict ? (
-                  <Tooltip title={t(`posAdmin.scheduleAttendance.weekAvailability.${conflict === 'unavailable' ? 'conflictUnavailable' : 'conflictOutside'}`)}>
-                    <WarningOutlined className="sce-chip-warn" />
-                  </Tooltip>
-                ) : null}
-                {locked ? <LockOutlined className="sce-chip-lock" /> : null}
-              </span>
-              <span className="sce-chip-meta">
-                <span>{statusLabel('schedule', schedule.status)}</span>
-                {mealBadge ? (
-                  <span
-                    className="sce-chip-meal"
-                    title={mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : undefined}
-                  >
-                    {mealBadge.count === 0
-                      ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeNone')
-                      : t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTimes', { count: mealBadge.count })}
-                  </span>
-                ) : null}
-                {schedule.remark ? <span className="sce-chip-remark" title={schedule.remark}>{schedule.remark}</span> : null}
-              </span>
-              {canEditSchedule ? (
-                // 点「×」只弹删除确认，不能触发外层「点班次打开编辑浮层」
-                <span className="sce-chip-x-wrap" onClick={(event) => event.stopPropagation()}>
-                  <Popconfirm
-                    title={t('posAdmin.scheduleAttendance.drag.deleteTitle', { time: timeText })}
-                    description={t('posAdmin.scheduleAttendance.drag.deleteDesc')}
-                    okText={t('common.delete')}
-                    cancelText={t('common.cancel')}
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => deleteScheduleViaX(schedule)}
-                  >
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      className="sce-chip-x"
-                      aria-label={t('posAdmin.scheduleAttendance.drag.deleteAria')}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          event.currentTarget.click()
-                        }
-                      }}
-                    >
-                      <CloseOutlined />
-                    </span>
-                  </Popconfirm>
-                </span>
-              ) : null}
-            </div>
+      <>
+        {free.length ? (
+          canAdd ? (
+            <button type="button" className="sce-free-note" onClick={() => openBatchModal({ dateKeys: [day.dateKey], userGuids: free })}>
+              {t('posAdmin.scheduleAttendance.board.availableUnscheduled', { count: free.length })}
+            </button>
+          ) : (
+            <span className="sce-free-note is-static">{t('posAdmin.scheduleAttendance.board.availableUnscheduled', { count: free.length })}</span>
           )
-          return canEditSchedule
-            ? <div key={schedule.scheduleGuid}>{withCellEditor(row, date, chipCell, schedule, chip)}</div>
-            : chip
-        })}
-        {renderAvailabilityLines(dayAvailability)}
-        {/* 同一天再加一个班次：悬停该格才出现，不打扰已排满的日常视图 */}
-        {canEditRowStore ? withCellEditor(row, date, newCell, undefined, (
-          <button type="button" className={`sce-add-more${newCellActive ? ' sce-add-more--active' : ''}`}>
+        ) : null}
+        {canAdd ? (
+          <button type="button" className="sce-col-add" onClick={() => openBatchModal({ dateKeys: [day.dateKey] })}>
             <PlusOutlined /> {t('posAdmin.scheduleAttendance.actions.addShift')}
           </button>
-        )) : null}
-      </div>
+        ) : null}
+      </>
     )
   }
 
@@ -1938,47 +2008,42 @@ export default function ScheduleAttendancePage() {
     )
   }
 
-  const renderWeekDayHeader = (day: Dayjs, index: number) => {
+  // 每天一列的表头数据：日期 + 星期、当天「人数 · 工时」、节假日标签
+  const boardDays: WeekBoardDay[] = weekDays.map((day, index) => {
     const dateKey = day.format('YYYY-MM-DD')
+    const list = daySchedules.get(dateKey) ?? []
+    const stat = summarizeDayList(list)
     const dayHolidays = holidaysByDate.get(dateKey) ?? []
-    return (
-      <Space direction="vertical" size={2} style={{ width: '100%' }}>
-        <Typography.Text strong>{day.format('MM-DD')}</Typography.Text>
-        <Typography.Text type="secondary">{t(`posAdmin.scheduleAttendance.weekdays.${index}`)}</Typography.Text>
-        {dayHolidays.length ? (
-          <Space size={[4, 2]} wrap>
-            {dayHolidays.map(renderHolidayHeaderTag)}
-          </Space>
-        ) : null}
-      </Space>
-    )
-  }
+    const params = { people: stat.people, hours: formatHours(stat.hours) }
+    return {
+      dateKey,
+      dateLabel: day.format('MM-DD'),
+      weekdayLabel: t(`posAdmin.scheduleAttendance.weekdays.${index}`),
+      weekend: index >= 5,
+      statText: t('posAdmin.scheduleAttendance.board.dayStat', params),
+      statTip: t('posAdmin.scheduleAttendance.board.dayStatTip', params),
+      holidays: dayHolidays.length ? <Space size={[4, 2]} wrap>{dayHolidays.map(renderHolidayHeaderTag)}</Space> : null,
+      schedules: list,
+    }
+  })
 
-  const scheduleColumns: ColumnsType<ScheduleRow> = [
-    {
-      title: t('posAdmin.scheduleAttendance.fields.employee'),
-      key: 'employee',
-      fixed: 'left',
-      width: 240,
-      render: (_, record) => (
-        <Space direction="vertical" size={0} style={{ width: '100%' }}>
-          <Space size={4} wrap>
-            <Typography.Text strong>{record.userName || '--'}</Typography.Text>
-            {/* 21 岁以下显示周岁，金色与工时页的年龄标签同色 */}
-            {record.age != null ? (
-              <Tag color="gold" style={{ marginInlineEnd: 0 }}>{t('posAdmin.scheduleAttendance.fields.ageBadge', { age: record.age })}</Tag>
-            ) : null}
-          </Space>
-        </Space>
-      ),
-    },
-    ...weekDays.map((day, index): ColumnsType<ScheduleRow>[number] => ({
-      title: renderWeekDayHeader(day, index),
-      key: day.format('YYYY-MM-DD'),
-      width: 170,
-      render: (_, record) => renderScheduleCell(record, day),
-    })),
-  ]
+  // 顶部员工图例：颜色对照 + 本周合计；点一下只高亮他的班次，再点取消
+  const legendItems: WeekBoardLegendItem[] = staffLegend.map((entry) => ({
+    userGuid: entry.userGuid,
+    name: entry.name,
+    color: staffColors.get(entry.userGuid) ?? FALLBACK_STAFF_COLOR,
+    summary: t('posAdmin.scheduleAttendance.board.legendSummary', { hours: formatHours(entry.hours), shifts: entry.shifts }),
+    active: legendSelected.has(entry.userGuid),
+    dimmed: highlighting && !isHighlighted(entry.userGuid),
+  }))
+  const toggleLegend = (userGuid: string) => {
+    setLegendSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(userGuid)) next.delete(userGuid)
+      else next.add(userGuid)
+      return next
+    })
+  }
 
   const recordColumns: ColumnsType<AttendanceScheduleDto> = [
     {
@@ -2372,7 +2437,7 @@ export default function ScheduleAttendancePage() {
         <Input
           allowClear
           prefix={<SearchOutlined />}
-          placeholder={t('posAdmin.scheduleAttendance.cellEditor.searchPlaceholder')}
+          placeholder={t('posAdmin.scheduleAttendance.board.searchPlaceholder')}
           style={{ width: 220 }}
           value={staffKeyword}
           onChange={(event) => setStaffKeyword(event.target.value)}
@@ -2425,6 +2490,41 @@ export default function ScheduleAttendancePage() {
     ),
   } : null
 
+  // 周视图看板：普通页面和手机横屏看板共用一份（横屏看板里不放状态图例，省高度）
+  const renderWeekBoard = (inShell: boolean) => (
+    <WeekBoard
+      days={boardDays}
+      legend={legendItems}
+      legendCaption={t('posAdmin.scheduleAttendance.board.legendCaption', { count: staffLegend.length })}
+      statusLegend={inShell ? null : (
+        <span className="sce-status-legend">
+          <span><i className="is-Active" />{statusLabel('schedule', 'Active')}</span>
+          <span><i className="is-Draft" />{statusLabel('schedule', 'Draft')}</span>
+          <span><i className="is-Cancelled" />{statusLabel('schedule', 'Cancelled')}</span>
+        </span>
+      )}
+      loading={schedules.loading || storeUsersLoading || scheduleHolidaysLoading}
+      empty={!storeCode ? (
+        <Empty description={t('posAdmin.scheduleAttendance.selectStoreToSchedule')} />
+      ) : !weekSchedules.length && !schedules.loading ? (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={t('posAdmin.scheduleAttendance.board.emptyWeek')}
+        >
+          {!shellReadOnly && access.canEditAttendanceSchedule && canEditSelectedStore ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openBatchModal()}>
+              {t('posAdmin.scheduleAttendance.batch.openButton')}
+            </Button>
+          ) : null}
+        </Empty>
+      ) : undefined}
+      onLegendClick={toggleLegend}
+      renderCard={renderCard}
+      getDayDrop={getDayDrop}
+      renderDayFooter={renderDayFooter}
+    />
+  )
+
   const scheduleTabItems = [
     {
       key: 'schedules',
@@ -2439,33 +2539,25 @@ export default function ScheduleAttendancePage() {
                 </Tag>
               ) : (
                 <Tag color="success" icon={<CheckCircleOutlined />} style={{ marginInlineEnd: 0 }}>
-                  {t('posAdmin.scheduleAttendance.cellEditor.loadedStaff', { count: storeUsers.length })}
+                  {t('posAdmin.scheduleAttendance.board.summary', { scheduled: staffLegend.length, total: storeUsers.length })}
                 </Tag>
               )}
               {staffKeyword.trim() ? (
                 <Typography.Text type="secondary">
-                  {t('posAdmin.scheduleAttendance.cellEditor.filteredStaff', { count: scheduleRows.length })}
+                  {t('posAdmin.scheduleAttendance.board.keywordMatches', { count: keywordMatches.size })}
                 </Typography.Text>
               ) : null}
-              <span style={{ flex: 1 }} />
-              {access.canViewAttendanceAvailability ? (
-                <Tooltip title={t('posAdmin.scheduleAttendance.weekAvailability.legendTip')}>
-                  <span style={{ display: 'inline-flex', gap: 12 }}>
-                    <span className="sce-legend"><i className="is-available" />{t('posAdmin.scheduleAttendance.weekAvailability.legendAvailable')}</span>
-                    <span className="sce-legend"><i className="is-unavailable" />{t('posAdmin.scheduleAttendance.weekAvailability.legendUnavailable')}</span>
-                  </span>
-                </Tooltip>
+              {/* 手机上没在看板里（竖着拿，或横屏时点过「退出」）：点一下进入横屏看板（Android 会锁定横屏，iPhone 用旋转兜底） */}
+              {phoneEnv.phone && shellMode === 'none' ? (
+                <Button size="small" type="primary" ghost icon={<FullscreenOutlined />} onClick={enterShell}>
+                  {t('posAdmin.scheduleAttendance.board.landscapeEnter')}
+                </Button>
               ) : null}
-              {SCHEDULE_STATUS_ORDER.map((status) => (
-                <span key={status} className="sce-legend">
-                  <i className={`is-${status}`} />
-                  {statusLabel('schedule', status)}
-                </span>
-              ))}
             </div>
           ) : null}
-          {/* 拖拽托盘：5 个固定常用班次，拖到任意格新建草稿班次 */}
-          {storeCode && access.canEditAttendanceSchedule && canEditSelectedStore ? (
+          {/* 拖拽托盘：5 个固定常用班次，拖到某一天会打开排班弹窗（已预选这一天和这个时段） */}
+          {/* 手机触屏不能拖拽，托盘在手机上没用还会撑宽页面，不显示 */}
+          {storeCode && access.canEditAttendanceSchedule && canEditSelectedStore && !phoneEnv.phone ? (
             <div className="sce-tray">
               <span className="sce-tray-label">{t('posAdmin.scheduleAttendance.drag.trayLabel')}</span>
               {SHIFT_PRESETS.map((preset) => (
@@ -2483,15 +2575,7 @@ export default function ScheduleAttendancePage() {
               <span className="sce-tray-hint">{t('posAdmin.scheduleAttendance.drag.trayHint')}</span>
             </div>
           ) : null}
-          <MeasuredTable metricId="pos-admin.schedule-attendance.table-2"
-            rowKey="rowKey"
-            loading={schedules.loading || storeUsersLoading || scheduleHolidaysLoading}
-            columns={scheduleColumns}
-            dataSource={storeCode ? scheduleRows : []}
-            pagination={false}
-            locale={{ emptyText: storeCode ? t('posAdmin.scheduleAttendance.emptyEmployees') : t('posAdmin.scheduleAttendance.selectStoreToSchedule') }}
-            scroll={{ x: 1430 }}
-          />
+          {renderWeekBoard(false)}
         </>
       ),
     },
@@ -2638,7 +2722,7 @@ export default function ScheduleAttendancePage() {
               <Button icon={<DeleteOutlined />} disabled={!storeCode} onClick={() => setDeletedSchedulesOpen(true)}>
                 {t('posAdmin.scheduleAttendance.deletedSchedules.button')}
               </Button>
-              <Button type="primary" icon={<PlusOutlined />} disabled={!canEditSelectedStore} onClick={() => openScheduleDrawer()}>{t('posAdmin.scheduleAttendance.actions.createSchedule')}</Button>
+              <Button type="primary" icon={<PlusOutlined />} disabled={!canEditSelectedStore} onClick={() => openBatchModal()}>{t('posAdmin.scheduleAttendance.batch.openButton')}</Button>
             </>
           ) : null}
           {activeTab === 'holidays' && access.canEditAttendanceHoliday ? (
@@ -2680,56 +2764,41 @@ export default function ScheduleAttendancePage() {
         onRestored={() => loadActiveTab(1)}
       />
 
-      <Drawer
-        title={editingSchedule ? t('posAdmin.scheduleAttendance.drawer.editSchedule') : t('posAdmin.scheduleAttendance.drawer.createSchedule')}
-        width={520}
-        open={scheduleDrawerOpen}
-        onClose={() => setScheduleDrawerOpen(false)}
-        extra={(
-          <Space>
-            {editingSchedule ? (
-              <Button danger icon={<DeleteOutlined />} onClick={() => confirmDeleteSchedule(editingSchedule)}>{t('common.delete')}</Button>
+      {/* 手机横屏看板：铺满屏幕，顶部一条细栏（周切换、分店、排班、退出），其余全给周视图 */}
+      {shellMode !== 'none' ? (
+        <LandscapeShell mode={shellMode}>
+          <div className="sce-shell-bar">
+            <Button size="small" icon={<LeftOutlined />} aria-label={t('posAdmin.scheduleAttendance.board.prevWeek')} onClick={() => setSelectedWeek((prev) => prev.subtract(1, 'week'))} />
+            <span className="sce-shell-week">{selectedWeekLabel}</span>
+            <Button size="small" icon={<RightOutlined />} aria-label={t('posAdmin.scheduleAttendance.board.nextWeek')} onClick={() => setSelectedWeek((prev) => prev.add(1, 'week'))} />
+            <span className="sce-shell-store">{storeCode ? storeNameMap.get(storeCode) : ''}</span>
+            {shellReadOnly ? <span className="sce-shell-hint">{t('posAdmin.scheduleAttendance.board.rotatedHint')}</span> : null}
+            <span style={{ flex: 1 }} />
+            {!shellReadOnly && access.canEditAttendanceSchedule && canEditSelectedStore ? (
+              <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openBatchModal()}>
+                {t('posAdmin.scheduleAttendance.batch.openButton')}
+              </Button>
             ) : null}
-            <Button type="primary" loading={saving} onClick={() => void saveSchedule()}>{t('common.save')}</Button>
-          </Space>
-        )}
-      >
-        <Form form={scheduleForm} layout="vertical">
-          {/* 后端改排班不改员工和分店（打卡、审批都挂在原员工原分店上）；编辑时锁定，避免看似改了实际没生效。 */}
-          <Form.Item name="storeCode" label={t('posAdmin.scheduleAttendance.fields.store')} rules={[{ required: true, message: t('form.pleaseSelectStore') }]}>
-            <Select showSearch optionFilterProp="label" options={editableStoreOptions} disabled={Boolean(editingSchedule)} />
-          </Form.Item>
-          <Form.Item name="userGuid" label={t('posAdmin.scheduleAttendance.fields.employeeGuid')} rules={[{ required: true, message: t('posAdmin.scheduleAttendance.validation.userGuidRequired') }]}>
-            <Select
-              disabled={Boolean(editingSchedule)}
-              showSearch
-              optionFilterProp="label"
-              options={storeUsers.map((user) => ({
-                value: user.userGuid,
-                label: `${displayStoreUserName(user)} / ${user.userGuid}`,
-              }))}
-            />
-          </Form.Item>
-          <Form.Item name="workDate" label={t('posAdmin.scheduleAttendance.fields.workDate')} rules={[{ required: true }]}>
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="timeRange" label={t('posAdmin.scheduleAttendance.fields.shift')} rules={[{ required: true }]}>
-            <TimePicker.RangePicker format="HH:mm" style={{ width: '100%' }} />
-          </Form.Item>
-          {editingSchedule ? (
-            <Form.Item name="status" label={t('common.status')} rules={[{ required: true }]}>
-              <Select options={[
-                { value: 'Draft', label: statusLabel('schedule', 'Draft') },
-                { value: 'Active', label: statusLabel('schedule', 'Active') },
-                { value: 'Cancelled', label: statusLabel('schedule', 'Cancelled') },
-              ]} />
-            </Form.Item>
-          ) : null}
-          <Form.Item name="remark" label={t('column.remarks')}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
-        </Form>
-      </Drawer>
+            <Button size="small" icon={<CloseOutlined />} onClick={exitShell}>{t('posAdmin.scheduleAttendance.board.shellExit')}</Button>
+          </div>
+          <div className="sce-shell-body">{renderWeekBoard(true)}</div>
+        </LandscapeShell>
+      ) : null}
+
+      {/* 批量排班：选员工 × 选日期 × 统一班次；创建成功后刷新周视图 */}
+      <BatchScheduleModal
+        open={batchOpen}
+        storeCode={storeCode ?? ''}
+        storeName={storeCode ? storeNameMap.get(storeCode) : undefined}
+        weekLabel={selectedWeekLabel}
+        days={batchDays}
+        users={batchUsers}
+        initial={batchInitial}
+        existingOf={existingOf}
+        availabilityOf={availabilityOf}
+        onClose={() => setBatchOpen(false)}
+        onChanged={() => void loadSchedulesRef.current()}
+      />
 
       <Drawer
         title={editingHoliday ? t('posAdmin.scheduleAttendance.drawer.editHoliday') : t('posAdmin.scheduleAttendance.drawer.createHoliday')}

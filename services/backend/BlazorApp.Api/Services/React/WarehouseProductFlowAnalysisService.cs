@@ -156,10 +156,17 @@ namespace BlazorApp.Api.Services.React
             return await GetOrCreateAsync(cacheKey, forceRefresh, () => QueryOptionsAsync());
         }
 
-        public async Task<
-            ApiResponse<WarehouseProductFlowAnalysisPagedDto<WarehouseProductFlowCandidateDto>>
-        > GetCandidatesAsync(WarehouseProductFlowCandidateRequest request)
+        public async Task<ApiResponse<WarehouseProductFlowCandidatePageDto>> GetCandidatesAsync(
+            WarehouseProductFlowCandidateRequest request
+        )
         {
+            var requestedItemNumbers = NormalizeItemNumbers(request.Filter?.ItemNumbers);
+            if (requestedItemNumbers.Count > MaxItemNumberFilterCount)
+            {
+                throw new WarehouseProductFlowAnalysisValidationException(
+                    $"批量货号最多 {MaxItemNumberFilterCount} 个，请分批查询"
+                );
+            }
             var cacheKey = BuildCandidateCacheKey(request);
             return await GetOrCreateAsync(cacheKey, request.ForceRefresh, async () =>
             {
@@ -184,6 +191,7 @@ namespace BlazorApp.Api.Services.React
                 var keyword = filter.Keyword?.Trim();
                 var documentKeyword = filter.DocumentKeyword?.Trim();
                 var hasActiveProductCodeDuplicates = false;
+                WarehouseProductFlowItemNumberResolution? itemNumberResolution = null;
 
                 try
                 {
@@ -192,6 +200,30 @@ namespace BlazorApp.Api.Services.React
                         .Where(w => !w.IsDeleted);
                     hasActiveProductCodeDuplicates =
                         await HasActiveProductCodeDuplicatesAsync();
+
+                    if (requestedItemNumbers.Count > 0)
+                    {
+                        // 批量货号先解析成商品编码，再收敛仓库主档；一个都没命中时直接返回空页和未找到清单。
+                        itemNumberResolution = await ResolveItemNumberFilterAsync(
+                            requestedItemNumbers,
+                            IsAnyItemNumberMatchMode(filter.ItemNumberMatchMode),
+                            hasActiveProductCodeDuplicates
+                        );
+                        if (itemNumberResolution.RankByCode.Count == 0)
+                        {
+                            return new WarehouseProductFlowCandidatePageDto
+                            {
+                                Total = 0,
+                                PageNumber = pageNumber,
+                                PageSize = pageSize,
+                                ItemNumberMatch = itemNumberResolution.BuildMatch(Array.Empty<string>()),
+                            };
+                        }
+                        var itemNumberCodes = itemNumberResolution.RankByCode.Keys.ToList();
+                        warehouseProductQuery = warehouseProductQuery.Where(warehouseProduct =>
+                            itemNumberCodes.Contains(warehouseProduct.ProductCode)
+                        );
+                    }
 
                     if (!string.IsNullOrWhiteSpace(documentKeyword))
                     {
@@ -339,7 +371,32 @@ namespace BlazorApp.Api.Services.React
                     // count 只统计已过滤的仓库主档；不为计数承担 Product canonical 聚合和排序。
                     currentStage = "count";
                     var countStopwatch = Stopwatch.StartNew();
-                    var total = await warehouseProductQuery.Clone().CountAsync();
+                    int total;
+                    List<string>? itemNumberPageCodes = null;
+                    WarehouseProductFlowItemNumberMatchDto? itemNumberMatch = null;
+                    if (itemNumberResolution != null)
+                    {
+                        // 批量货号的结果集有上限（受粘贴个数约束），在内存中按粘贴顺序分页，
+                        // 并据最终筛选结果统计已匹配 / 未找到的货号。
+                        var resolution = itemNumberResolution;
+                        var filteredCodes = NormalizeCodes(
+                            await warehouseProductQuery.Clone()
+                                .Select(warehouseProduct => warehouseProduct.ProductCode)
+                                .ToListAsync()
+                        );
+                        total = filteredCodes.Count;
+                        itemNumberMatch = resolution.BuildMatch(filteredCodes);
+                        itemNumberPageCodes = filteredCodes
+                            .OrderBy(code => resolution.RankByCode.TryGetValue(code, out var rank) ? rank : int.MaxValue)
+                            .ThenBy(code => code, StringComparer.OrdinalIgnoreCase)
+                            .Skip((pageNumber - 1) * pageSize)
+                            .Take(pageSize)
+                            .ToList();
+                    }
+                    else
+                    {
+                        total = await warehouseProductQuery.Clone().CountAsync();
+                    }
                     countStopwatch.Stop();
                     countMilliseconds = countStopwatch.ElapsedMilliseconds;
 
@@ -442,8 +499,15 @@ namespace BlazorApp.Api.Services.React
 
                     currentStage = "page";
                     var pageStopwatch = Stopwatch.StartNew();
-                    var items = await query
-                        .Clone()
+                    var pageQuery = query.Clone();
+                    if (itemNumberPageCodes != null)
+                    {
+                        var pageCodes = itemNumberPageCodes;
+                        pageQuery = pageQuery.Where((warehouseProduct, product, domesticProduct) =>
+                            pageCodes.Contains(warehouseProduct.ProductCode)
+                        );
+                    }
+                    var selectedQuery = pageQuery
                         .Select((warehouseProduct, product, domesticProduct) =>
                             new WarehouseProductFlowCandidateDto
                             {
@@ -470,10 +534,28 @@ namespace BlazorApp.Api.Services.React
                                     .OrderBy(supplier => supplier.Guid)
                                     .Select(supplier => supplier.SupplierName),
                             }
-                        )
-                        .Skip((pageNumber - 1) * pageSize)
-                        .Take(pageSize)
-                        .ToListAsync();
+                        );
+                    List<WarehouseProductFlowCandidateDto> items;
+                    if (itemNumberPageCodes != null)
+                    {
+                        // 当前页编码已在内存中按粘贴顺序确定，这里只取明细并按同一顺序排列（同编码只保留一行）。
+                        var orderByCode = itemNumberPageCodes
+                            .Select((code, index) => (code, index))
+                            .ToDictionary(pair => pair.code, pair => pair.index, StringComparer.OrdinalIgnoreCase);
+                        items = (await selectedQuery.ToListAsync())
+                            .Where(item => orderByCode.ContainsKey(item.ProductCode.Trim()))
+                            .GroupBy(item => item.ProductCode.Trim(), StringComparer.OrdinalIgnoreCase)
+                            .Select(group => group.First())
+                            .OrderBy(item => orderByCode[item.ProductCode.Trim()])
+                            .ToList();
+                    }
+                    else
+                    {
+                        items = await selectedQuery
+                            .Skip((pageNumber - 1) * pageSize)
+                            .Take(pageSize)
+                            .ToListAsync();
+                    }
                     pageStopwatch.Stop();
                     pageMilliseconds = pageStopwatch.ElapsedMilliseconds;
 
@@ -567,12 +649,13 @@ namespace BlazorApp.Api.Services.React
                         items.Count
                     );
 
-                    return new WarehouseProductFlowAnalysisPagedDto<WarehouseProductFlowCandidateDto>
+                    return new WarehouseProductFlowCandidatePageDto
                     {
                         Items = items,
                         Total = total,
                         PageNumber = pageNumber,
                         PageSize = pageSize,
+                        ItemNumberMatch = itemNumberMatch,
                     };
                 }
                 catch (Exception ex)
@@ -1012,6 +1095,10 @@ namespace BlazorApp.Api.Services.React
                 : null;
             var keyword = filter.Keyword?.Trim() ?? string.Empty;
             var documentKeyword = filter.DocumentKeyword?.Trim() ?? string.Empty;
+            // 批量货号与候选列表同一口径：精确匹配货号（any 模式加条码、商品编码）。
+            var itemNumbers = NormalizeItemNumbers(filter.ItemNumbers);
+            var itemNumberRanks = itemNumbers.Count > 0 ? BuildItemNumberRankMap(itemNumbers) : null;
+            var matchAnyItemNumber = IsAnyItemNumberMatchMode(filter.ItemNumberMatchMode);
             var documentProductCodes = string.IsNullOrWhiteSpace(documentKeyword)
                 ? null
                 : await QueryContainerProductCodesAsync(documentKeyword);
@@ -1027,7 +1114,8 @@ namespace BlazorApp.Api.Services.React
                             && domestic.SupplierCode != null
                             && supplierSet.Contains(domestic.SupplierCode)))
                     && (documentProductCodes == null || documentProductCodes.Contains(code))
-                    && (string.IsNullOrWhiteSpace(keyword) || MatchesKeyword(context, code, keyword)))
+                    && (string.IsNullOrWhiteSpace(keyword) || MatchesKeyword(context, code, keyword))
+                    && (itemNumberRanks == null || MatchesItemNumbers(context, code, itemNumberRanks, matchAnyItemNumber)))
                 .ToList();
 
             return context;
@@ -2203,6 +2291,17 @@ namespace BlazorApp.Api.Services.React
             return false;
         }
 
+        private static bool MatchesItemNumbers(
+            WarehouseProductFlowAnalysisQueryContext context,
+            string code,
+            Dictionary<string, int> itemNumberRanks,
+            bool matchAny
+        )
+        {
+            context.ProductByCode.TryGetValue(code, out var product);
+            return FindItemNumberRank(code, product?.ItemNumber, product?.Barcode, itemNumberRanks, matchAny) != null;
+        }
+
         private static bool ContainsIgnoreCase(string? value, string keyword)
         {
             return !string.IsNullOrWhiteSpace(value)
@@ -2293,6 +2392,8 @@ namespace BlazorApp.Api.Services.React
                 NormalizeCodes(filter.WarehouseCategoryGuids).OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray(),
                 NormalizeCodes(filter.SupplierCodes).OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray(),
                 filter.DocumentKeyword?.Trim() ?? string.Empty,
+                NormalizeItemNumbers(filter.ItemNumbers).ToArray(),
+                IsAnyItemNumberMatchMode(filter.ItemNumberMatchMode) ? "any" : "itemNumber",
                 selection.Mode?.Trim() ?? string.Empty,
                 NormalizeCodes(selection.IncludedProductCodes).OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray(),
                 NormalizeCodes(selection.ExcludedProductCodes).OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray(),
@@ -2328,6 +2429,8 @@ namespace BlazorApp.Api.Services.React
                 NormalizeCodes(filter.WarehouseCategoryGuids).OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray(),
                 NormalizeCodes(filter.SupplierCodes).OrderBy(code => code, StringComparer.OrdinalIgnoreCase).ToArray(),
                 filter.DocumentKeyword?.Trim() ?? string.Empty,
+                NormalizeItemNumbers(filter.ItemNumbers).ToArray(),
+                IsAnyItemNumberMatchMode(filter.ItemNumberMatchMode) ? "any" : "itemNumber",
                 pageNumber.ToString(),
                 pageSize.ToString(),
                 sortField,

@@ -1374,10 +1374,11 @@ assertEqual(
   'Warehouse.Manage role preview should show the warehouse products Web menu with both accepted permissions',
 )
 
+// 扫码打包（分店 + 总仓共用）放在「收银管理」组下，Warehouse.Manage 按别名具备打包权限：该组里只会出现扫码打包，没有别的收银页面。
 assertEqual(
-  Boolean(warehouseLegacyPosAdminMenu),
-  false,
-  'Warehouse.Manage role preview should not show POS admin parent menu without visible POS children',
+  warehouseLegacyPosAdminMenu?.children?.map((node) => node.path).join(','),
+  '/packing',
+  'Warehouse.Manage role preview should only show scan packing under the POS admin parent menu',
 )
 
 assertEqual(
@@ -1401,8 +1402,15 @@ const warehouseStaffMenu = warehouseStaffWebPreview.find((node) => node.path ===
 
 assertEqual(
   warehouseStaffWebPreview.map((node) => node.path).join(','),
-  '/warehouse',
-  'WarehouseStaff desktop preview should only show the warehouse parent menu',
+  '/warehouse,/pos-admin',
+  'WarehouseStaff desktop preview should only show the warehouse parent menu plus the POS admin group that holds scan packing',
+)
+
+// 扫码打包（总仓装箱）对仓库员工单独放出：收银管理组里只有这一项（持有 Warehouse.Manage 即按别名具备打包权限）。
+assertEqual(
+  warehouseStaffWebPreview.find((node) => node.path === '/pos-admin')?.children?.map((node) => node.path).join(','),
+  '/packing',
+  'WarehouseStaff desktop preview should only show scan packing under the POS admin parent menu',
 )
 
 assertEqual(

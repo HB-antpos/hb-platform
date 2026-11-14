@@ -47,6 +47,9 @@ export interface SalesDetailQuery extends ReportPeriod {
   search?: string
   pageIndex: number
   pageSize: number
+  /** 商品栏服务端排序；不传即数量降序（改版前的固定顺序）。 */
+  productSortField?: 'Quantity' | 'Revenue' | 'AverageUnitPrice'
+  productSortOrder?: 'asc' | 'desc'
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -80,7 +83,7 @@ export function sectionQuery(section: ReportSection, query: SalesDetailQuery) {
   if (section === 'branches') delete params.selectedBranchCode
   if (section === 'products') delete params.selectedProductCode
   if (section !== 'products' && section !== 'summary') delete params.search
-  if (section !== 'products') { delete params.pageIndex; delete params.pageSize }
+  if (section !== 'products') { delete params.pageIndex; delete params.pageSize; delete params.productSortField; delete params.productSortOrder }
   return params
 }
 

@@ -17,6 +17,7 @@ export function CurrentLineCard({
   line,
   myUserGuid,
   scannedChildCode,
+  cartonQty,
   readonly,
   busy,
   onPlus,
@@ -29,6 +30,8 @@ export function CurrentLineCard({
   line: PickSheetLine;
   myUserGuid: string | null;
   scannedChildCode: string | null;
+  /** 边拣边装时这个商品在当前箱里的件数（null = 还不知道）；不传 = 没有当前箱，不显示「本箱」。 */
+  cartonQty?: number | null;
   readonly: boolean;
   busy: boolean;
   onPlus: () => void;
@@ -151,6 +154,13 @@ export function CurrentLineCard({
               tone={{ bg: PICK_COLORS.warningBg, border: PICK_COLORS.warningBorder, label: PICK_COLORS.warningText, value: PICK_COLORS.warning }}
             />
           )}
+          {cartonQty !== undefined ? (
+            <Cell
+              label={t("carton.cell")}
+              value={cartonQty === null ? "—" : String(cartonQty)}
+              tone={{ bg: PICK_COLORS.infoBg, border: PICK_COLORS.infoBorder, label: PICK_COLORS.infoText, value: PICK_COLORS.action }}
+            />
+          ) : null}
         </View>
 
         <View style={styles.pickedBy}>

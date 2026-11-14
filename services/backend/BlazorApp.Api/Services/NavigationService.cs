@@ -54,6 +54,15 @@ namespace BlazorApp.Api.Services
             Permissions.Attendance.Admin.View,
         };
 
+        /// <summary>扫码打包入口的可见权限：分店 StorePacking.Use，总仓 Warehouse.Packing（含管理仓库 / 管理仓库订货别名），任一即可。</summary>
+        private static readonly List<string> PackingMenuPermissions = new()
+        {
+            Permissions.StorePacking.Use,
+            Permissions.Warehouse.Packing,
+            Permissions.Warehouse.Manage,
+            Permissions.Warehouse.ManageOrders,
+        };
+
         /// <summary>
         /// 完整导航树（与前端 routes.tsx 结构一致）
         /// Permission 字段为空表示所有人可见
@@ -186,6 +195,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind, Permissions.Myob.Payslip.ViewManagedStore, Permissions.Myob.Payslip.ViewAllStores } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
+                    // 扫码打包（分店 + 总仓共用）：分店用 StorePacking.Use，总仓用 Warehouse.Packing（管理仓库 / 管理仓库订货按别名自动具备），任一即可见。
+                    new() { Path = "/packing", TitleKey = "menu.packing", Icon = "InboxOutlined", AnyPermissions = PackingMenuPermissions },
                 },
             },
         };
@@ -272,6 +283,23 @@ namespace BlazorApp.Api.Services
                     Permissions.Warehouse.ManageOrders,
                 },
                 Order = 42,
+            },
+            new()
+            {
+                RouteName = "packing",
+                TitleKey = "tabs.packing",
+                Icon = "package-variant",
+                // 分店与总仓共用：分店打包专用权限，或总仓打包权限（管理仓库 / 管理仓库订货按别名自动具备）任一即可见；
+                // 具体能操作哪些分店 / 总仓由 /packing/scope 按账号算出。打包接口只接受登录账号（要记操作人），所以不进仓库设备菜单。
+                Permission = Permissions.StorePacking.Use,
+                AnyPermissions = new[]
+                {
+                    Permissions.StorePacking.Use,
+                    Permissions.Warehouse.Packing,
+                    Permissions.Warehouse.Manage,
+                    Permissions.Warehouse.ManageOrders,
+                },
+                Order = 43,
             },
             new()
             {
@@ -769,6 +797,29 @@ namespace BlazorApp.Api.Services
                 );
             }
 
+            // 扫码打包：仓库员工在总仓装箱要用；入口在「收银管理」组下，组里其他页面仍不对仓库员工开放。
+            if (HasAnyPermission(context, PackingMenuPermissions.ToArray()))
+            {
+                result.Add(
+                    new NavigationMenuDto
+                    {
+                        Path = "/pos-admin",
+                        TitleKey = "menu.posAdmin",
+                        Icon = "WalletOutlined",
+                        Children = new List<NavigationMenuDto>
+                        {
+                            new()
+                            {
+                                Path = "/packing",
+                                TitleKey = "menu.packing",
+                                Icon = "InboxOutlined",
+                                AnyPermissions = PackingMenuPermissions,
+                            },
+                        },
+                    }
+                );
+            }
+
             // 新销售页只认各自显式权限；WarehouseStaff 的其他后台限制保持不变。
             var salesDefinition = FullMenu.First(node =>
                 node.Path == "/executive-sales-intelligence"
@@ -900,6 +951,9 @@ namespace BlazorApp.Api.Services
                 Permissions.Dashboard.View,
                 Permissions.Warehouse.ManageOrders,
                 Permissions.Warehouse.Manage,
+                // 扫码打包：只有分店打包 / 总仓打包权限的账号也要能拿到后台菜单。
+                Permissions.StorePacking.Use,
+                Permissions.Warehouse.Packing,
                 Permissions.Container.View,
                 Permissions.LocalPurchase.View,
                 Permissions.SalesDashboard.SalesDataView,
