@@ -13,7 +13,7 @@ import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner"
 import { playScanFeedbackSound, preloadScanFeedbackSounds } from "@/modules/scanner/scan-sound";
 import { useAuthStore } from "@/store/auth-store";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
-import { fetchIncoming, lookupForReceive, receiveCarton, receivePallet } from "../api";
+import { fetchIncoming, fetchOrderReceive, lookupForReceive, receiveCarton, receivePallet } from "../api";
 import { readPackingError } from "../api-normalization";
 import { packingErrorMessage } from "../packing-errors";
 import {
@@ -26,9 +26,18 @@ import {
   validCheckedGuids,
 } from "../packing-logic";
 import { PACKING_HOME, cartonRoute, palletRoute } from "../pack-print";
+import {
+  incomingOrderEntries,
+  orderEntriesOf,
+  orderReceiveKey,
+  parseOrderBarcode,
+  receiveOrderRoute,
+  type OrderReceiveEntry,
+} from "../order-receive-logic";
 import { usePackScope } from "../use-pack-scope";
 import { CARTON_STATUS, type PackIncomingItem, type PackReceiveLookup } from "../types";
 import { LocationPickerSheet } from "../components/LocationPickerSheet";
+import { OrderChooserSheet, OrderReceiveEntries } from "../components/OrderReceiveEntry";
 import { OwnerBar } from "../components/OwnerBar";
 import { ReceiveSheet } from "../components/ReceiveSheet";
 import { KeyValueRow, PACK_COLORS, ScanBar, SectionTitle, Tag, UnitRow, packStyles } from "../components/pack-ui";
@@ -71,6 +80,8 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
   const [saving, setSaving] = useState(false);
   const [sheetError, setSheetError] = useState("");
   const [done, setDone] = useState<ReceiveDone | null>(null);
+  // 待签收托盘关联多张订单时，先选订单再进入按订单签收。
+  const [orderChooser, setOrderChooser] = useState<readonly OrderReceiveEntry[] | null>(null);
   const [snackbar, setSnackbar] = useState("");
   const busyRef = useRef(false);
   const initialDone = useRef(false);
@@ -130,12 +141,47 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
     [language, t],
   );
 
+  /**
+   * 扫到订单条码 HBSO:订单号：先按订单号取这张订单发给本店的箱（接口认订单号，但不认 HBSO: 前缀），
+   * 拿到后用响应里的 orderGuid 进入按订单签收页；找不到（不存在 / 不属于本店）就在这一屏提示。
+   */
+  const openOrderByNo = useCallback(
+    async (orderNo: string) => {
+      setLoading(true);
+      setLookupError("");
+      setDone(null);
+      try {
+        const detail = await fetchOrderReceive(orderNo);
+        playScanFeedbackSound("found");
+        // 预热缓存：进入页面直接用这份数据，不闪一下加载。
+        queryClient.setQueryData(orderReceiveKey(detail.orderGuid), detail);
+        router.push(receiveOrderRoute(detail.orderGuid));
+      } catch (error) {
+        playScanFeedbackSound("not_found");
+        setCurrent(null);
+        setLookupError(readPackingError(error).code === "ORDER_NOT_FOUND" ? t("orderReceive.notFound") : packingErrorMessage(error, t, language));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [language, queryClient, router, t],
+  );
+
+  /** 扫码 / 点列表进来的码：订单条码走按订单签收，其余按托盘 / 箱标签查找。 */
+  const handleCode = useCallback(
+    (code: string) => {
+      const orderNo = parseOrderBarcode(code);
+      return orderNo ? openOrderByNo(orderNo) : lookup(code);
+    },
+    [lookup, openOrderByNo],
+  );
+
   // 首页扫到发给本店的箱 / 托盘进来时，带着码直接查找。
   useEffect(() => {
     if (initialDone.current || !initialCode || !allowed || !owner) return;
     initialDone.current = true;
-    void lookup(initialCode);
-  }, [allowed, initialCode, lookup, owner]);
+    void handleCode(initialCode);
+  }, [allowed, handleCode, initialCode, owner]);
 
   const handleScan = useCallback(
     (raw: string) => {
@@ -158,11 +204,11 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
         }
       }
       busyRef.current = true;
-      void lookup(code).finally(() => {
+      void handleCode(code).finally(() => {
         busyRef.current = false;
       });
     },
-    [current, lookup, sheet, t],
+    [current, handleCode, sheet, t],
   );
 
   const hid = useHidBarcodeScanner({
@@ -491,6 +537,9 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
           </>
         ) : null}
 
+        {/* 这批货属于订货单：可以改成按订单一次签收发给本店的全部在途箱。 */}
+        {current ? <OrderReceiveEntries entries={orderEntriesOf(current)} onOpen={(orderGuid) => router.push(receiveOrderRoute(orderGuid))} /> : null}
+
         {!current && !loading ? (
           <>
             <SectionTitle title={t("receive.pending")} right={pending.length ? String(pending.length) : null} />
@@ -507,7 +556,17 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
             ) : (
               <View style={packStyles.cardList}>
                 {pending.map((item, index) => (
-                  <IncomingRow key={`${item.kind}:${item.guid}`} item={item} divider={index > 0} onPress={() => void lookup(item.no)} />
+                  <IncomingRow
+                    key={`${item.kind}:${item.guid}`}
+                    item={item}
+                    divider={index > 0}
+                    onPress={() => void lookup(item.no)}
+                    onOpenOrder={(entries) => {
+                      // 只有一张订单直接进入；多张先选订单。
+                      if (entries.length === 1) router.push(receiveOrderRoute(entries[0].orderGuid));
+                      else setOrderChooser(entries);
+                    }}
+                  />
                 ))}
               </View>
             )}
@@ -601,6 +660,15 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
           closeLocation();
         }}
       />
+      <OrderChooserSheet
+        visible={orderChooser !== null}
+        entries={orderChooser ?? []}
+        onDismiss={() => setOrderChooser(null)}
+        onSelect={(orderGuid) => {
+          setOrderChooser(null);
+          router.push(receiveOrderRoute(orderGuid));
+        }}
+      />
       <PickCameraSheet
         visible={cameraVisible}
         title={t("receive.cameraTitle")}
@@ -648,13 +716,17 @@ function IncomingRow({
   divider,
   received = false,
   onPress,
+  onOpenOrder,
 }: {
   item: PackIncomingItem;
   divider: boolean;
   received?: boolean;
   onPress?: () => void;
+  /** 待签收行：这批货关联的订单（可以按订单一次签收）；已签收行不传。 */
+  onOpenOrder?: (entries: readonly OrderReceiveEntry[]) => void;
 }) {
   const { t } = useAppTranslation("packing");
+  const orderEntries = !received && onOpenOrder ? incomingOrderEntries(item) : [];
   const isPallet = item.kind === "pallet";
   const partial = isPallet && !received && item.receivedCartonCount > 0;
   const detail = [
@@ -669,9 +741,9 @@ function IncomingRow({
   ]
     .filter(Boolean)
     .join(" · ");
-  return (
+  const row = (
     <UnitRow
-      divider={divider}
+      divider={divider && orderEntries.length === 0}
       icon={isPallet ? "layers-triple-outline" : "package-variant-closed"}
       tone={received ? "green" : "blue"}
       title={item.no}
@@ -687,9 +759,26 @@ function IncomingRow({
       onPress={onPress}
     />
   );
+  if (orderEntries.length === 0) return row;
+  return (
+    <View style={divider ? styles.incomingDivider : null}>
+      {row}
+      <View style={styles.incomingOrder}>
+        <Button compact mode="text" icon="clipboard-check-outline" onPress={() => onOpenOrder?.(orderEntries)}>
+          {orderEntries.length === 1
+            ? orderEntries[0].orderNo
+              ? t("receive.byOrderWithNo", { orderNo: orderEntries[0].orderNo })
+              : t("receive.byOrder")
+            : t("receive.byOrderMany", { count: orderEntries.length })}
+        </Button>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  incomingDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: PACK_COLORS.outlineMuted },
+  incomingOrder: { alignItems: "flex-end", paddingBottom: 4 },
   palletCard: { backgroundColor: PACK_COLORS.infoBg, borderColor: PACK_COLORS.infoBorder },
   palletMeta: {
     flexDirection: "row",

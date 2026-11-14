@@ -45,6 +45,7 @@ export function UpNextList({
   route,
   scope,
   teammateByLine,
+  cartonQty,
   onSelect,
   onRoutePress,
 }: {
@@ -53,6 +54,8 @@ export function UpNextList({
   route: PickRoute;
   scope: PickScope;
   teammateByLine: Map<string, string>;
+  /** 边拣边装：某行商品在当前箱里的件数（null = 还不知道）；不传 = 没有当前箱，不显示「本箱」。 */
+  cartonQty?: (line: PickSheetLine) => number | null;
   onSelect: (detailGuid: string) => void;
   onRoutePress: () => void;
 }) {
@@ -78,6 +81,7 @@ export function UpNextList({
             : line.isSet
               ? { text: t("picking.noteSet", { count: line.minOrderQuantity }), color: PICK_COLORS.textSecondary }
               : { text: t("picking.noteMinOrder", { count: line.minOrderQuantity }), color: PICK_COLORS.textSecondary };
+        const inCarton = cartonQty ? cartonQty(line) : null;
         const turn = turnLabel(index === 0 ? current : lines[index - 1]!, line);
         return (
           <Fragment key={line.detailGuid}>
@@ -98,6 +102,7 @@ export function UpNextList({
                 </Text>
                 <Text numberOfLines={1} style={[styles.note, { color: note.color }]}>
                   {note.text}
+                  {inCarton ? ` · ${t("carton.rowInCarton", { count: inCarton })}` : ""}
                 </Text>
               </View>
               <Text style={styles.qty}>

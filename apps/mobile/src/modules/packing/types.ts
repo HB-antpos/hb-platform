@@ -195,6 +195,19 @@ export interface PackIncomingItem {
   dispatchedByName: string | null;
   receivedAtUtc: string | null;
   receivedByName: string | null;
+  /** 散箱关联的订货单；没有订货单为 null。 */
+  orderGuid: string | null;
+  orderNo: string | null;
+  /**
+   * 托盘上箱关联的订货单（去重、按订单号排序、最多 20 个）：待签收取仍在路上的箱，最近签收取已签收的箱；
+   * 没有订单关联时后端不输出该字段，这里为空数组。散箱用 orderGuid / orderNo。
+   */
+  orders: PackIncomingOrder[];
+}
+
+export interface PackIncomingOrder {
+  orderGuid: string;
+  orderNo: string | null;
 }
 
 export interface PackIncoming {
@@ -259,4 +272,39 @@ export interface DestinationFormValue {
   carrierName: string | null;
   consignmentNo: string;
   remark: string;
+}
+
+/** 分店按订单签收：发给本店的一只箱（在途的，或已签收归本店的）。 */
+export interface PackOrderReceiveCarton {
+  cartonGuid: string;
+  cartonNo: string;
+  status: number;
+  palletNo: string | null;
+  skuCount: number;
+  pieceCount: number;
+}
+
+/** 按商品的订货 / 配货 / 已发出对照。 */
+export interface PackOrderReceiveProduct {
+  productCode: string;
+  productName: string | null;
+  itemNumber: string | null;
+  orderedPieces: number;
+  /** 配货数；所有订单行都没有配货数时为 null。 */
+  allocPieces: number | null;
+  /** 已发出件数：该订单在途（发给本店）加已签收的箱内件数合计。 */
+  shippedPieces: number;
+}
+
+/** GET / POST receive/orders/{orderGuid} 的同一结构。 */
+export interface PackOrderReceive {
+  orderGuid: string;
+  orderNo: string | null;
+  storeCode: string;
+  cartons: PackOrderReceiveCarton[];
+  inTransitCount: number;
+  receivedCount: number;
+  products: PackOrderReceiveProduct[];
+  /** 仅 409 COUNT_MISMATCH：系统记录里该订单发给本店、还在路上的箱数。 */
+  actualInTransitCartonCount: number | null;
 }

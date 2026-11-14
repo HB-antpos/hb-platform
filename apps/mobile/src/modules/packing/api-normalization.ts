@@ -8,6 +8,7 @@ import type {
   PackIncoming,
   PackLocateResult,
   PackLocation,
+  PackOrderReceive,
   PackOwner,
   PackPalletDetail,
   PackPalletList,
@@ -189,6 +190,13 @@ const incomingItemSchema = z.object({
   dispatchedByName: nullableText,
   receivedAtUtc: nullableText,
   receivedByName: nullableText,
+  // 订单关联：旧后端没有这些字段，按「没有」处理。
+  orderGuid: nullableText,
+  orderNo: nullableText,
+  orders: z
+    .array(z.object({ orderGuid: text.min(1), orderNo: nullableText }))
+    .nullish()
+    .transform((value) => value ?? []),
 });
 
 const incomingSchema = z.object({
@@ -249,6 +257,41 @@ const locateSchema = z.object({
     .transform((value) => value ?? []),
 });
 
+const orderReceiveSchema = z.object({
+  orderGuid: text.min(1),
+  orderNo: nullableText,
+  storeCode: emptyText,
+  cartons: z
+    .array(
+      z.object({
+        cartonGuid: text.min(1),
+        cartonNo: text.min(1),
+        status: z.number().int(),
+        palletNo: nullableText,
+        skuCount: count,
+        pieceCount: count,
+      }),
+    )
+    .nullish()
+    .transform((value) => value ?? []),
+  inTransitCount: count,
+  receivedCount: count,
+  products: z
+    .array(
+      z.object({
+        productCode: text.min(1),
+        productName: nullableText,
+        itemNumber: nullableText,
+        orderedPieces: count,
+        allocPieces: nullableNumber,
+        shippedPieces: count,
+      }),
+    )
+    .nullish()
+    .transform((value) => value ?? []),
+  actualInTransitCartonCount: nullableNumber,
+});
+
 function parse<T>(schema: z.ZodType<T>, payload: unknown): T {
   const result = schema.safeParse(unwrapApiEnvelope(payload));
   if (!result.success) {
@@ -271,6 +314,7 @@ export const normalizeLocation = (payload: unknown): PackLocation => parse(locat
 export const normalizeIncoming = (payload: unknown): PackIncoming => parse(incomingSchema, payload);
 export const normalizeReceiveLookup = (payload: unknown): PackReceiveLookup => parse(receiveLookupSchema, payload);
 export const normalizeLocate = (payload: unknown): PackLocateResult => parse(locateSchema, payload);
+export const normalizeOrderReceive = (payload: unknown): PackOrderReceive => parse(orderReceiveSchema, payload);
 
 export interface PackingErrorInfo {
   code: string | null;

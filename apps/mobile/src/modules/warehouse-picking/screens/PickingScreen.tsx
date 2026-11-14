@@ -54,6 +54,8 @@ import {
 } from "../pick-view-model";
 import { usePickerStore } from "../picker-store";
 import { PICKER_RECONFIRM_CODES, pickingErrorMessage } from "../picking-errors";
+import { withCartonGuid } from "../pack-carton-logic";
+import { useOrderCarton } from "../use-order-carton";
 import { PICK_MATCH, PICK_SESSION_STATUS, PICK_SOURCE } from "../types";
 import type { PickLineMutationResult, PickParticipant, PickProgressLine, PickScope, PickSessionInfo, PickSheet, PickSheetLine } from "../types";
 import { AllLinesSheet } from "../components/AllLinesSheet";
@@ -62,6 +64,8 @@ import { LineChooserSheet } from "../components/LineChooserSheet";
 import { ManualQtySheet } from "../components/ManualQtySheet";
 import { MinOrderQtySheet } from "../components/MinOrderQtySheet";
 import { PickCameraSheet } from "../components/PickCameraSheet";
+import { PickCartonBar } from "../components/PickCartonBar";
+import { PickSealSheet } from "../components/PickSealSheet";
 import { PickHeader, PickerChip } from "../components/PickHeader";
 import { HelpOthersCard } from "../components/IncompleteSegments";
 import {
@@ -206,6 +210,15 @@ export function PickingScreen({
   }, [focusDetailGuid]);
 
   const readonly = session?.status === PICK_SESSION_STATUS.submitted;
+  // 边拣边装：用户点了「开始装箱」（或自己有没封的箱）才有当前箱；没有当前箱时下面所有写入与旧版完全一致。
+  const pack = useOrderCarton({
+    orderGuid,
+    enabled: Boolean(sheet) && !readonly,
+    productOf: (detailGuid) => linesRef.current.find((line) => line.detailGuid === detailGuid)?.productCode ?? null,
+    onAuthError: handleAuthError,
+    notify: setSnackbar,
+  });
+  const { applyWrite: packApplyWrite, handleWriteError: packHandleWriteError, getCartonGuid: packGetCartonGuid } = pack;
 
   const refreshProgress = useCallback(async () => {
     const startedAt = Date.now();
@@ -254,6 +267,7 @@ export function PickingScreen({
         try {
           const result = await withNetworkRetry(task);
           applyLine(result.line);
+          packApplyWrite(result.carton, linesRef.current.find((line) => line.detailGuid === result.line.detailGuid)?.productCode ?? null);
           return result;
         } catch (error) {
           writeFailuresRef.current += 1;
@@ -262,7 +276,7 @@ export function PickingScreen({
             const conflictLine = (info.data as { line?: PickProgressLine } | null)?.line;
             if (conflictLine?.detailGuid) applyLine(conflictLine);
             playScanFeedbackSound("error");
-            setSnackbar(info.status ? pickingErrorMessage(error, t, language) : t("picking.syncFailed"));
+            setSnackbar(packHandleWriteError(error) ?? (info.status ? pickingErrorMessage(error, t, language) : t("picking.syncFailed")));
           }
           // 失败后以服务端为准重新同步、撤销乐观加上的数量；放到本次写入收尾之后再发，避免被判为过期结果丢弃。
           setTimeout(() => void refreshProgress(), 0);
@@ -277,26 +291,34 @@ export function PickingScreen({
       writeChainRef.current = next.catch(() => undefined);
       return next;
     },
-    [applyLine, handleAuthError, language, refreshProgress, t],
+    [applyLine, handleAuthError, language, packApplyWrite, packHandleWriteError, refreshProgress, t],
   );
 
   const recordScan = useCallback(
     (line: PickSheetLine, scan: PendingScan, pieces: number, explicitPieces: boolean) => {
       const clientRequestId = newClientRequestId();
+      // 当前箱在入队时取：之后换箱不会让已入队的扫码落到别的箱上。
+      const cartonGuid = packGetCartonGuid();
       return runWrite(
         () =>
-          postPickRecord(orderGuid, {
-            detailGuid: line.detailGuid,
-            source: PICK_SOURCE.scan,
-            scannedCode: scan.code,
-            matchedBy: scan.matchedBy,
-            pieces: explicitPieces ? pieces : null,
-            clientRequestId,
-          }),
+          postPickRecord(
+            orderGuid,
+            withCartonGuid(
+              {
+                detailGuid: line.detailGuid,
+                source: PICK_SOURCE.scan,
+                scannedCode: scan.code,
+                matchedBy: scan.matchedBy,
+                pieces: explicitPieces ? pieces : null,
+                clientRequestId,
+              },
+              cartonGuid,
+            ),
+          ),
         { detailGuid: line.detailGuid, delta: pieces },
       );
     },
-    [orderGuid, runWrite],
+    [orderGuid, packGetCartonGuid, runWrite],
   );
 
   const scanLine = useCallback(
@@ -509,7 +531,7 @@ export function PickingScreen({
     [applyClaim, codeIndex, currentGuid, handleAuthError, language, orderGuid, readonly, refreshProgress, router, scanLine, session?.submittedByName, sheet, t],
   );
 
-  const sheetsOpen = Boolean(minOrderSheet || manualGuid || chooser || allLinesVisible || cameraVisible || routeVisible || stockoutGuid);
+  const sheetsOpen = Boolean(minOrderSheet || manualGuid || chooser || allLinesVisible || cameraVisible || routeVisible || stockoutGuid || pack.sealVisible);
   const hid = useHidBarcodeScanner({ enabled: focused && Boolean(sheet) && !sheetsOpen, onScan: handleScan });
 
   const currentLine = lines.find((line) => line.detailGuid === currentGuid) ?? null;
@@ -591,19 +613,21 @@ export function PickingScreen({
     if (delta === 0) return;
     const clientRequestId = newClientRequestId();
     const detailGuid = currentLine.detailGuid;
+    const cartonGuid = packGetCartonGuid();
     setBanner({ kind: "ready" });
-    void runWrite(() => postPickRecord(orderGuid, { detailGuid, source, clientRequestId }), { detailGuid, delta });
+    void runWrite(() => postPickRecord(orderGuid, withCartonGuid({ detailGuid, source, clientRequestId }, cartonGuid)), { detailGuid, delta });
   };
 
   const confirmManual = async (total: number) => {
     const detailGuid = manualGuid;
     if (!detailGuid) return;
     const clientRequestId = newClientRequestId();
+    const cartonGuid = packGetCartonGuid();
     setSaving(true);
     // 期望合计在真正发送时读取：前面排队的写入完成后本地合计已校正为服务端值。
     const result = await runWrite(() => {
       const expectedTotal = linesRef.current.find((line) => line.detailGuid === detailGuid)?.pickedTotal ?? 0;
-      return putPickLineTotal(orderGuid, detailGuid, { total, expectedTotal, clientRequestId });
+      return putPickLineTotal(orderGuid, detailGuid, withCartonGuid({ total, expectedTotal, clientRequestId }, cartonGuid));
     });
     setSaving(false);
     if (result) {
@@ -771,8 +795,12 @@ export function PickingScreen({
             <View style={[styles.fill, { width: `${Math.round(progressRatio * 100)}%` }]} />
             {stockoutRatio > 0 ? <View style={[styles.fillStockout, { width: `${Math.max(1, Math.round(stockoutRatio * 100))}%` }]} /> : null}
           </View>
+          {pack.summary.cartonCount > 0 ? (
+            <Text style={styles.progressText}>{t("carton.packedSummary", { cartons: pack.summary.cartonCount, pieces: pack.summary.pieceCount })}</Text>
+          ) : null}
         </View>
       </PickHeader>
+      {!readonly ? <PickCartonBar pack={pack} writing={pendingWrites > 0} /> : null}
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {readonly ? (
@@ -800,6 +828,7 @@ export function PickingScreen({
             line={currentLine}
             myUserGuid={myGuid}
             scannedChildCode={scannedChildCode}
+            cartonQty={pack.carton ? pack.cartonPieces(currentLine.productCode) : undefined}
             readonly={readonly}
             busy={saving}
             onPlus={() => changeButton(PICK_SOURCE.increment)}
@@ -821,6 +850,7 @@ export function PickingScreen({
           route={route}
           scope={scope}
           teammateByLine={teammateMap}
+          cartonQty={pack.carton ? (line) => pack.cartonPieces(line.productCode) : undefined}
           onRoutePress={() => setRouteVisible(true)}
           onSelect={(detailGuid) => {
             setCurrentGuid(detailGuid);
@@ -902,6 +932,7 @@ export function PickingScreen({
           onConfirm={(reason) => void confirmStockout(reason)}
         />
       ) : null}
+      <PickSealSheet pack={pack} />
       <RouteSheet visible={routeVisible} value={route} onChange={setRoute} onDismiss={() => setRouteVisible(false)} />
       <AllLinesSheet
         visible={allLinesVisible}
