@@ -1,7 +1,7 @@
 namespace BlazorApp.Api.Data.SchemaMigrations;
 
 /// <summary>
-/// 收银端设置下发（迁移 20261114.002-pos-settings）：
+/// 收银端设置下发（迁移 20261114.003-pos-settings）：
 /// - PosSettingValue：每层每项已设置的值（全局 / 门店 / 设备），主键 (Scope, ScopeKey, SettingKey)；
 /// - PosSettingChange：只追加的修改记录；
 /// - PosSettingAck：每台设备一行的回执（已应用指纹、实际生效值、离线临时修改次数），由 Hbpos.Api upsert。

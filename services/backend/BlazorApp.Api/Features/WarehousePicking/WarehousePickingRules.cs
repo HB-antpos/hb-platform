@@ -27,6 +27,12 @@ public static class WarehousePickingErrorCodes
     public const string AssignLinesInvalid = "ASSIGN_LINES_INVALID";
     public const string SlipStale = "SLIP_STALE";
     public const string SegmentsIncomplete = "SEGMENTS_INCOMPLETE";
+
+    /// <summary>提交时订单还有装箱中、没封的箱（空箱除外，空箱提交时自动作废）。</summary>
+    public const string PackingOpenCartons = "PACKING_OPEN_CARTONS";
+
+    /// <summary>提交时有商品的拣货数与装箱数对不上。</summary>
+    public const string PackingNotReconciled = "PACKING_NOT_RECONCILED";
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string CodeNotFound = "CODE_NOT_FOUND";
 }

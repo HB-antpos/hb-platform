@@ -381,6 +381,9 @@ internal sealed partial class PackingService
             DispatchedByName = carton.DispatchedByName,
             ReceivedAtUtc = carton.ReceivedAtUtc,
             ReceivedByName = carton.ReceivedByName,
+            // 订单号来自 BuildCartonSummariesAsync 已经批量查好的结果，不另查。
+            OrderGuid = carton.OrderGUID,
+            OrderNo = cartonSummaries[carton.CartonGUID].OrderNo,
         };
 
         return PackingResult<PackingIncomingDto>.Ok(new PackingIncomingDto
@@ -493,9 +496,22 @@ internal sealed partial class PackingService
         var guids = pallets.Select(pallet => pallet.PalletGUID).Distinct().ToList();
         var cartons = await _db.Queryable<PackCarton>()
             .Where(carton => carton.PalletGUID != null && guids.Contains(carton.PalletGUID))
-            .Select(carton => new { carton.CartonGUID, carton.PalletGUID, carton.Status })
+            .Select(carton => new { carton.CartonGUID, carton.PalletGUID, carton.Status, carton.OrderGUID })
             .ToListAsync();
         var cartonGuids = cartons.Select(carton => carton.CartonGUID).ToList();
+        // 托盘上各箱所属的订货单：一次批量查出订单号，不按托盘 / 按箱逐个查。
+        var orderGuids = cartons
+            .Where(carton => carton.OrderGUID != null && carton.Status != PackCartonStatuses.Voided)
+            .Select(carton => carton.OrderGUID!)
+            .Distinct()
+            .ToList();
+        var orderNos = orderGuids.Count == 0
+            ? new Dictionary<string, string?>()
+            : (await _db.Queryable<WareHouseOrder>()
+                    .Where(order => orderGuids.Contains(order.OrderGUID))
+                    .Select(order => new { order.OrderGUID, order.OrderNo })
+                    .ToListAsync())
+                .ToDictionary(order => order.OrderGUID, order => order.OrderNo);
         var pieces = cartonGuids.Count == 0
             ? new Dictionary<string, int>()
             : (await _db.Queryable<PackCartonItem>().Where(item => cartonGuids.Contains(item.CartonGUID)).Select(item => new { item.CartonGUID, item.Quantity }).ToListAsync())
@@ -505,6 +521,19 @@ internal sealed partial class PackingService
         foreach (var pallet in pallets)
         {
             var own = cartons.Where(carton => carton.PalletGUID == pallet.PalletGUID).ToList();
+            // 待签收的托盘取仍在路上的箱的订单；已签收完的托盘取托盘上（已签收）的箱的订单。没有订单关联的箱不计，最多 20 个。
+            var palletOrders = own
+                .Where(carton => carton.OrderGUID != null
+                    && (pallet.Status == PackPalletStatuses.InTransit
+                        ? carton.Status == PackCartonStatuses.InTransit
+                        : carton.Status != PackCartonStatuses.Voided))
+                .Select(carton => carton.OrderGUID!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Select(orderGuid => new PackingIncomingOrderDto { OrderGuid = orderGuid, OrderNo = orderNos.GetValueOrDefault(orderGuid) })
+                .OrderBy(order => order.OrderNo ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(order => order.OrderGuid, StringComparer.Ordinal)
+                .Take(MaxIncomingPalletOrders)
+                .ToList();
             result[pallet.PalletGUID] = new PackingIncomingItemDto
             {
                 Kind = "pallet",
@@ -521,6 +550,7 @@ internal sealed partial class PackingService
                 DispatchedByName = pallet.DispatchedByName,
                 ReceivedAtUtc = pallet.ReceivedAtUtc,
                 ReceivedByName = pallet.ReceivedByName,
+                Orders = palletOrders.Count == 0 ? null : palletOrders,
             };
         }
 

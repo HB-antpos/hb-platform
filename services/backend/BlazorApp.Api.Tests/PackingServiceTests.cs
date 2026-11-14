@@ -1041,7 +1041,413 @@ public sealed class PackingServiceTests : IDisposable
         Assert.Equal(PackingErrorCodes.OwnerRequired, adminMissing.ErrorCode);
     }
 
+    // ---- 事务可重入（二期：拣货事务里同步装箱） ----
+
+    [Fact]
+    public async Task 事务可重入_外层事务内的打包写入随外层回滚_箱明细发号操作记录都被撤销()
+    {
+        var service = CreateService();
+
+        await _db.Ado.BeginTranAsync();
+        var carton = (await service.CreateCartonAsync(Lily, new PackingCreateCartonRequestDto())).Data!;
+        var scan = await service.ScanIntoCartonAsync(Lily, carton.CartonGuid, Scan("HB23817", 5));
+        // 加入外层事务：打包服务自己不提交也不回滚，失败结果由外层调用方据此回滚。
+        var failed = await service.SetCartonItemQuantityAsync(Lily, carton.CartonGuid, "P-CANDLE", 3);
+        var stillInTransaction = _db.Ado.IsAnyTran();
+        var visibleInside = await _db.Queryable<PackCartonItem>().CountAsync();
+        await _db.Ado.RollbackTranAsync();
+
+        Assert.True(scan.Success, scan.Message);
+        Assert.False(failed.Success);
+        Assert.True(stillInTransaction);
+        Assert.Equal(1, visibleInside);
+        Assert.False(_db.Ado.IsAnyTran());
+        Assert.Equal(0, await _db.Queryable<PackCarton>().CountAsync());
+        Assert.Equal(0, await _db.Queryable<PackCartonItem>().CountAsync());
+        Assert.Equal(0, await _db.Queryable<PackEvent>().CountAsync());
+        Assert.Equal(0, await _db.Queryable<PackSequence>().CountAsync());
+    }
+
+    [Fact]
+    public async Task 事务可重入_外层提交后才落库_没有外层事务时仍自己开事务_失败自己回滚()
+    {
+        var service = CreateService();
+
+        await _db.Ado.BeginTranAsync();
+        var carton = (await service.CreateCartonAsync(Lily, new PackingCreateCartonRequestDto())).Data!;
+        Assert.True((await service.ScanIntoCartonAsync(Lily, carton.CartonGuid, Scan("HB23817", 5))).Success);
+        await _db.Ado.CommitTranAsync();
+
+        Assert.False(_db.Ado.IsAnyTran());
+        Assert.Equal(5, (await _db.Queryable<PackCartonItem>().SingleAsync()).Quantity);
+
+        // 没有外层事务：行为和以前一样，失败的调用什么都不留下。
+        var voided = (await service.VoidCartonAsync(Lily, carton.CartonGuid)).Data!;
+        var edit = await service.SetCartonItemQuantityAsync(Lily, voided.CartonGuid, "P-MUG", 9);
+        Assert.False(edit.Success);
+        Assert.False(_db.Ado.IsAnyTran());
+        Assert.Equal(5, (await _db.Queryable<PackCartonItem>().SingleAsync()).Quantity);
+    }
+
+    // ---- 分店按订单签收（二期） ----
+
+    [Fact]
+    public async Task 按订单签收_订单的分店不在账号范围内_查询和签收都按找不到处理_不暴露订单()
+    {
+        var service = CreateService();
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+
+        foreach (var outsider in new[] { Ian, Pete, Wendy })
+        {
+            var get = await service.GetOrderReceiveAsync(outsider, "order-1");
+            var receive = await service.ReceiveOrderAsync(outsider, "order-1", 1);
+            Assert.Equal(404, get.StatusCode);
+            Assert.Equal(PackingErrorCodes.OrderNotFound, get.ErrorCode);
+            Assert.Equal(404, receive.StatusCode);
+            Assert.Equal(PackingErrorCodes.OrderNotFound, receive.ErrorCode);
+        }
+
+        var missing = await service.GetOrderReceiveAsync(Lily, "no-such-order");
+        var admin = await service.GetOrderReceiveAsync(Admin, "order-1");
+
+        Assert.Equal(PackingErrorCodes.OrderNotFound, missing.ErrorCode);
+        Assert.True(admin.Success, admin.Message);
+        // 范围外的签收没有改动任何箱。
+        Assert.Equal(PackCartonStatuses.InTransit, (await _db.Queryable<PackCarton>().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task 按订单签收_查询返回在途的箱与按商品的订货配货已发对照_还没发出的箱不算()
+    {
+        var service = CreateService();
+        var first = await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 30), ("HB24102", 10));
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 6));
+        // 仓库里还没发出的箱：对分店来说还没有发货，不出现。
+        await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 4));
+
+        var result = await service.GetOrderReceiveAsync(Lily, "order-1");
+
+        Assert.True(result.Success, result.Message);
+        var data = result.Data!;
+        Assert.Equal("order-1", data.OrderGuid);
+        Assert.Equal("2026-0412", data.OrderNo);
+        Assert.Equal("1013", data.StoreCode);
+        Assert.Equal(2, data.Cartons.Count);
+        Assert.Equal(2, data.InTransitCount);
+        Assert.Equal(0, data.ReceivedCount);
+        var firstRow = data.Cartons.Single(carton => carton.CartonGuid == first.CartonGuid);
+        Assert.Equal(PackCartonStatuses.InTransit, firstRow.Status);
+        Assert.Equal((2, 40), (firstRow.SkuCount, firstRow.PieceCount));
+        Assert.Null(firstRow.PalletNo);
+        var mug = data.Products.Single(product => product.ProductCode == "P-MUG");
+        Assert.Equal(48m, mug.OrderedPieces);
+        Assert.Equal(36m, mug.AllocPieces);
+        Assert.Equal(36, mug.ShippedPieces);
+        Assert.Equal("Ceramic Mug 350ml", mug.ProductName);
+        Assert.Equal("HB23817", mug.ItemNumber);
+        var candle = data.Products.Single(product => product.ProductCode == "P-CANDLE");
+        Assert.Equal(24m, candle.OrderedPieces);
+        // 还没有配货数（订单行 AllocQuantity 为空）时配货数为空，不是 0。
+        Assert.Null(candle.AllocPieces);
+        Assert.Equal(10, candle.ShippedPieces);
+    }
+
+    [Fact]
+    public async Task 按订单签收_实到箱数对不上_409_COUNT_MISMATCH_什么都不签()
+    {
+        var service = CreateService();
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB24102", 6));
+
+        var fewer = await service.ReceiveOrderAsync(Lily, "order-1", 1);
+        var more = await service.ReceiveOrderAsync(Lily, "order-1", 3);
+        var notCounted = await service.ReceiveOrderAsync(Lily, "order-1", null);
+
+        foreach (var result in new[] { fewer, more, notCounted })
+        {
+            Assert.False(result.Success);
+            Assert.Equal(409, result.StatusCode);
+            Assert.Equal(PackingErrorCodes.CountMismatch, result.ErrorCode);
+            Assert.Equal(2, result.Data!.ActualInTransitCartonCount);
+            Assert.Equal(2, result.Data.InTransitCount);
+        }
+
+        var cartons = await _db.Queryable<PackCarton>().ToListAsync();
+        Assert.All(cartons, carton =>
+        {
+            Assert.Equal(PackCartonStatuses.InTransit, carton.Status);
+            Assert.Equal(PackOwners.Warehouse, carton.OwnerCode);
+            Assert.Null(carton.ReceivedAtUtc);
+        });
+        Assert.Equal(0, await _db.Queryable<PackEvent>().CountAsync(item => item.Action == PackEventActions.Received));
+    }
+
+    [Fact]
+    public async Task 按订单签收_数量对得上一次签完_所属地点换成本店_不回写订货单()
+    {
+        var service = CreateService();
+        var orderBefore = await _db.Queryable<WareHouseOrder>().SingleAsync(item => item.OrderGUID == "order-1");
+        var a = await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+        var b = await DispatchedOrderCartonAsync(service, "order-1", ("HB24102", 6));
+
+        var result = await service.ReceiveOrderAsync(Lily, "order-1", 2);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(0, result.Data!.InTransitCount);
+        Assert.Equal(2, result.Data.ReceivedCount);
+        Assert.All(result.Data.Cartons, carton => Assert.Equal(PackCartonStatuses.Sealed, carton.Status));
+        foreach (var guid in new[] { a.CartonGuid, b.CartonGuid })
+        {
+            var carton = await _db.Queryable<PackCarton>().SingleAsync(item => item.CartonGUID == guid);
+            Assert.Equal("1013", carton.OwnerCode);
+            Assert.Equal(PackCartonStatuses.Sealed, carton.Status);
+            Assert.Equal(PackDestinationTypes.Local, carton.DestinationType);
+            Assert.Equal("Lily", carton.ReceivedByName);
+            Assert.NotNull(carton.ReceivedAtUtc);
+            var received = await _db.Queryable<PackEvent>().SingleAsync(item => item.TargetGUID == guid && item.Action == PackEventActions.Received);
+            Assert.Contains("按订单 2026-0412 签收", received.Detail);
+            Assert.Equal("Lily", received.OperatorName);
+        }
+
+        // 订货单一个字段都没改。
+        var orderAfter = await _db.Queryable<WareHouseOrder>().SingleAsync(item => item.OrderGUID == "order-1");
+        Assert.Equal(orderBefore.FlowStatus, orderAfter.FlowStatus);
+        Assert.Equal(orderBefore.UpdatedAt, orderAfter.UpdatedAt);
+        Assert.Equal(orderBefore.OutboundDate, orderAfter.OutboundDate);
+
+        // 已经签完：再签数 0 箱是「没有待签收的箱」，数不对仍是数量不符。
+        var nothing = await service.ReceiveOrderAsync(Lily, "order-1", 0);
+        var stale = await service.ReceiveOrderAsync(Lily, "order-1", 2);
+        Assert.Equal(PackingErrorCodes.NotInTransit, nothing.ErrorCode);
+        Assert.Equal(PackingErrorCodes.CountMismatch, stale.ErrorCode);
+        Assert.Equal(0, stale.Data!.ActualInTransitCartonCount);
+    }
+
+    [Fact]
+    public async Task 按订单签收_托盘上的箱按订单签_托盘上还有别的订单的箱时保持在路上_全部签完托盘才换所属地点()
+    {
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-2", OrderNo = "2026-0413", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var service = CreateService();
+        var cartonA = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 10));
+        var cartonB = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 5));
+        var cartonC = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-2" }, ("HB24102", 4));
+        var pallet = (await service.CreatePalletAsync(Wendy, PalletDest(PackDestinationTypes.Store, "1013"))).Data!;
+        foreach (var carton in new[] { cartonA, cartonB, cartonC })
+        {
+            Assert.True((await service.AddCartonToPalletAsync(Wendy, pallet.PalletGuid, new PackingAddCartonRequestDto { Code = carton.CartonNo })).Success);
+        }
+
+        Assert.True((await service.SealPalletAsync(Wendy, pallet.PalletGuid, new PackingSealRequestDto())).Success);
+        Assert.True((await service.DispatchPalletAsync(Wendy, pallet.PalletGuid)).Success);
+
+        var before = await service.GetOrderReceiveAsync(Lily, "order-1");
+        Assert.Equal(2, before.Data!.Cartons.Count);
+        Assert.All(before.Data.Cartons, carton => Assert.Equal(pallet.PalletNo, carton.PalletNo));
+
+        var first = await service.ReceiveOrderAsync(Lily, "order-1", 2);
+
+        Assert.True(first.Success, first.Message);
+        Assert.Equal(2, first.Data!.ReceivedCount);
+        var partial = await _db.Queryable<PackPallet>().SingleAsync(item => item.PalletGUID == pallet.PalletGuid);
+        Assert.Equal(PackPalletStatuses.InTransit, partial.Status);
+        Assert.Equal(PackOwners.Warehouse, partial.OwnerCode);
+        var partialEvent = await _db.Queryable<PackEvent>().FirstAsync(item => item.TargetGUID == pallet.PalletGuid && item.Action == PackEventActions.Received);
+        Assert.Contains("部分签收 2 箱，还有 1 箱在路上", partialEvent.Detail);
+        Assert.Equal(PackCartonStatuses.InTransit, (await _db.Queryable<PackCarton>().SingleAsync(item => item.CartonGUID == cartonC.CartonGuid)).Status);
+
+        var second = await service.ReceiveOrderAsync(Lily, "order-2", 1);
+
+        Assert.True(second.Success, second.Message);
+        var finished = await _db.Queryable<PackPallet>().SingleAsync(item => item.PalletGUID == pallet.PalletGuid);
+        Assert.Equal(PackPalletStatuses.Sealed, finished.Status);
+        Assert.Equal("1013", finished.OwnerCode);
+        Assert.NotNull(finished.ReceivedAtUtc);
+        Assert.Equal("Lily", finished.ReceivedByName);
+        Assert.Equal(3, await _db.Queryable<PackCarton>().CountAsync(item => item.OwnerCode == "1013" && item.Status == PackCartonStatuses.Sealed));
+    }
+
+    [Fact]
+    public async Task 按订单签收_订单引用可以是订单号_先按OrderGUID再按订单号_订单号去首尾空格且忽略大小写()
+    {
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-ci", OrderNo = "so-Abc-9", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var service = CreateService();
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+
+        var byNumber = await service.GetOrderReceiveAsync(Lily, " 2026-0412 ");
+        var byGuid = await service.GetOrderReceiveAsync(Lily, "order-1");
+        var byOtherCase = await service.GetOrderReceiveAsync(Lily, "SO-ABC-9");
+
+        Assert.True(byNumber.Success, byNumber.Message);
+        Assert.Equal("order-1", byNumber.Data!.OrderGuid);
+        Assert.Equal("2026-0412", byNumber.Data.OrderNo);
+        Assert.Equal(1, byNumber.Data.InTransitCount);
+        Assert.Equal("order-1", byGuid.Data!.OrderGuid);
+        Assert.Equal("order-ci", byOtherCase.Data!.OrderGuid);
+
+        // 先按 OrderGUID：别的订单的订单号恰好等于这个 guid 时，仍然命中 guid 对应的订单。
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-trap", OrderNo = "order-1", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var guidFirst = await service.GetOrderReceiveAsync(Lily, "order-1");
+        Assert.Equal("order-1", guidFirst.Data!.OrderGuid);
+
+        // 按订单号一次签收，响应仍带解析出的 orderGuid。
+        var received = await service.ReceiveOrderAsync(Lily, "2026-0412", 1);
+        Assert.True(received.Success, received.Message);
+        Assert.Equal("order-1", received.Data!.OrderGuid);
+        Assert.Equal(1, received.Data.ReceivedCount);
+        Assert.Equal("1013", (await _db.Queryable<PackCarton>().SingleAsync()).OwnerCode);
+    }
+
+    [Fact]
+    public async Task 按订单签收_订单号对应的订单在账号范围外_和不存在的订单一样404_不泄露存在与否()
+    {
+        var service = CreateService();
+        await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+
+        foreach (var outsider in new[] { Ian, Pete, Wendy })
+        {
+            var get = await service.GetOrderReceiveAsync(outsider, "2026-0412");
+            var receive = await service.ReceiveOrderAsync(outsider, "2026-0412", 1);
+            Assert.Equal(404, get.StatusCode);
+            Assert.Equal(PackingErrorCodes.OrderNotFound, get.ErrorCode);
+            Assert.Equal(404, receive.StatusCode);
+            Assert.Equal(PackingErrorCodes.OrderNotFound, receive.ErrorCode);
+            Assert.Equal(get.Message, (await service.GetOrderReceiveAsync(outsider, "NO-SUCH-NO")).Message);
+        }
+
+        foreach (var blank in new[] { "NO-SUCH-NO", " ", "" })
+        {
+            Assert.Equal(PackingErrorCodes.OrderNotFound, (await service.GetOrderReceiveAsync(Lily, blank)).ErrorCode);
+        }
+
+        Assert.Equal(PackCartonStatuses.InTransit, (await _db.Queryable<PackCarton>().SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task 按订单签收_订单号重复时只在账号分店范围内取_范围内有多张优先有装箱的再取下单最新的()
+    {
+        await _db.Insertable(new List<WareHouseOrder>
+        {
+            new() { OrderGUID = "dup-a", OrderNo = "DUP-1", StoreCode = "1013", FlowStatus = 3, OrderDate = new DateTime(2026, 11, 1) },
+            new() { OrderGUID = "dup-b", OrderNo = "DUP-1", StoreCode = "1013", FlowStatus = 3, OrderDate = new DateTime(2026, 11, 5) },
+            new() { OrderGUID = "dup-c", OrderNo = "DUP-1", StoreCode = "1020", FlowStatus = 3, OrderDate = new DateTime(2026, 11, 9) },
+        }).ExecuteCommandAsync();
+        var service = CreateService();
+
+        // 范围只含 1013 的账号只看得到 dup-a / dup-b，其中没有装箱关联时取下单时间最新的；dup-c 在范围外，不参与。
+        Assert.Equal("dup-b", (await service.GetOrderReceiveAsync(Lily, "DUP-1")).Data!.OrderGuid);
+        Assert.Equal("dup-c", (await service.GetOrderReceiveAsync(Ian, "DUP-1")).Data!.OrderGuid);
+        Assert.Equal(PackingErrorCodes.OrderNotFound, (await service.GetOrderReceiveAsync(Pete, "DUP-1")).ErrorCode);
+        Assert.Equal(PackingErrorCodes.OrderNotFound, (await service.GetOrderReceiveAsync(Wendy, "DUP-1")).ErrorCode);
+
+        // dup-a 有了装箱关联：优先取它。
+        await DispatchedOrderCartonAsync(service, "dup-a", ("HB23817", 12));
+        var lily = await service.GetOrderReceiveAsync(Lily, "DUP-1");
+        Assert.Equal("dup-a", lily.Data!.OrderGuid);
+        Assert.Equal(1, lily.Data.InTransitCount);
+        // 管理员范围含全部分店：三张都在范围内，同样优先有装箱的。
+        Assert.Equal("dup-a", (await service.GetOrderReceiveAsync(Admin, "DUP-1")).Data!.OrderGuid);
+
+        var received = await service.ReceiveOrderAsync(Lily, "DUP-1", 1);
+        Assert.True(received.Success, received.Message);
+        Assert.Equal("dup-a", received.Data!.OrderGuid);
+    }
+
+    // ---- 待签收清单带订单信息（二期） ----
+
+    [Fact]
+    public async Task 待签收清单_散箱带订单信息_托盘带在途箱的去重订单_没有订单的箱不计_已签收的托盘按托盘上的箱取()
+    {
+        await _db.Insertable(new WareHouseOrder { OrderGUID = "order-2", OrderNo = "2026-0413", StoreCode = "1013", FlowStatus = 3 }).ExecuteCommandAsync();
+        var service = CreateService();
+        var loose = await DispatchedOrderCartonAsync(service, "order-1", ("HB23817", 12));
+        var noOrder = await SealedCartonAsync(service, Wendy, Dest(PackDestinationTypes.Store, "1013"), ("HB24102", 3));
+        Assert.True((await service.DispatchCartonAsync(Wendy, noOrder.CartonGuid)).Success);
+        var cartonA = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 10));
+        var cartonB = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-1" }, ("HB23817", 5));
+        var cartonC = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = "order-2" }, ("HB24102", 4));
+        var cartonD = await SealedCartonAsync(service, Wendy, Dest(PackDestinationTypes.Store, "1013"), ("HB24102", 2));
+        var pallet = (await service.CreatePalletAsync(Wendy, PalletDest(PackDestinationTypes.Store, "1013"))).Data!;
+        foreach (var carton in new[] { cartonA, cartonB, cartonC, cartonD })
+        {
+            Assert.True((await service.AddCartonToPalletAsync(Wendy, pallet.PalletGuid, new PackingAddCartonRequestDto { Code = carton.CartonNo })).Success);
+        }
+
+        Assert.True((await service.SealPalletAsync(Wendy, pallet.PalletGuid, new PackingSealRequestDto())).Success);
+        Assert.True((await service.DispatchPalletAsync(Wendy, pallet.PalletGuid)).Success);
+
+        var pending = (await service.ListIncomingAsync(Lily, null)).Data!.Pending;
+        var looseRow = pending.Single(item => item.Guid == loose.CartonGuid);
+        Assert.Equal("order-1", looseRow.OrderGuid);
+        Assert.Equal("2026-0412", looseRow.OrderNo);
+        Assert.Null(looseRow.Orders);
+        var noOrderRow = pending.Single(item => item.Guid == noOrder.CartonGuid);
+        Assert.Null(noOrderRow.OrderGuid);
+        Assert.Null(noOrderRow.OrderNo);
+        var palletRow = pending.Single(item => item.Kind == "pallet");
+        // 去重（order-1 有两只箱只算一个），按订单号排序，没有订单的箱 D 不计。
+        Assert.Equal(new[] { "order-1", "order-2" }, palletRow.Orders!.Select(order => order.OrderGuid));
+        Assert.Equal(new[] { "2026-0412", "2026-0413" }, palletRow.Orders!.Select(order => order.OrderNo));
+        Assert.Null(palletRow.OrderGuid);
+        // 别的分店看不到这批货，也就看不到订单信息。
+        Assert.Empty((await service.ListIncomingAsync(Ian, null)).Data!.Pending);
+
+        // order-1 的两只箱逐箱签收后，待签收的托盘只剩仍在路上的箱的订单。
+        foreach (var carton in new[] { cartonA, cartonB })
+        {
+            Assert.True((await service.ReceiveCartonAsync(Lily, carton.CartonGuid, new PackingReceiveCartonRequestDto())).Success);
+        }
+
+        var partial = (await service.ListIncomingAsync(Lily, null)).Data!.Pending.Single(item => item.Kind == "pallet");
+        Assert.Equal(new[] { "order-2" }, partial.Orders!.Select(order => order.OrderGuid));
+
+        // 托盘整个签完，进「最近签收」：按托盘上（已签收）的箱取订单。
+        var finished = await service.ReceivePalletAsync(Lily, pallet.PalletGuid, new PackingReceivePalletRequestDto { ExpectedCartonCount = 2 });
+        Assert.True(finished.Success, finished.Message);
+        var recent = (await service.ListIncomingAsync(Lily, null)).Data!.Recent.Single(item => item.Kind == "pallet");
+        Assert.Equal(new[] { "order-1", "order-2" }, recent.Orders!.Select(order => order.OrderGuid));
+        Assert.DoesNotContain(
+            (await service.ListIncomingAsync(Lily, null)).Data!.Pending,
+            item => item.Kind == "pallet"
+        );
+    }
+
+    [Fact]
+    public async Task 待签收清单_托盘最多带20个订单_按订单号排序_散箱与托盘的订单号批量查询()
+    {
+        var orders = Enumerable.Range(1, 22)
+            .Select(index => new WareHouseOrder { OrderGUID = $"bulk-{index:D2}", OrderNo = $"2026-{1000 + index}", StoreCode = "1013", FlowStatus = 3 })
+            .ToList();
+        await _db.Insertable(orders).ExecuteCommandAsync();
+        var service = CreateService();
+        var pallet = (await service.CreatePalletAsync(Wendy, PalletDest(PackDestinationTypes.Store, "1013"))).Data!;
+        foreach (var order in orders)
+        {
+            var carton = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = order.OrderGUID }, ("HB23817", 1));
+            Assert.True((await service.AddCartonToPalletAsync(Wendy, pallet.PalletGuid, new PackingAddCartonRequestDto { Code = carton.CartonNo })).Success);
+        }
+
+        Assert.True((await service.SealPalletAsync(Wendy, pallet.PalletGuid, new PackingSealRequestDto())).Success);
+        Assert.True((await service.DispatchPalletAsync(Wendy, pallet.PalletGuid)).Success);
+
+        var row = (await service.ListIncomingAsync(Lily, null)).Data!.Pending.Single();
+
+        Assert.Equal(22, row.CartonCount);
+        Assert.Equal(20, row.Orders!.Count);
+        Assert.Equal("2026-1001", row.Orders.First().OrderNo);
+        Assert.Equal("2026-1020", row.Orders.Last().OrderNo);
+        Assert.Equal(row.Orders.Select(order => order.OrderNo).OrderBy(no => no, StringComparer.Ordinal), row.Orders.Select(order => order.OrderNo));
+    }
+
     // ---- 测试辅助 ----
+
+    /// <summary>总仓按订货单装箱 → 封箱 → 发出：箱默认发往订货单的分店，对方可按订单签收。</summary>
+    private async Task<PackingCartonDetailDto> DispatchedOrderCartonAsync(IPackingService service, string orderGuid, params (string Code, int Quantity)[] items)
+    {
+        var carton = await SealedCartonAsync(service, Wendy, new PackingCreateCartonRequestDto { OrderGuid = orderGuid }, items);
+        var dispatched = await service.DispatchCartonAsync(Wendy, carton.CartonGuid);
+        Assert.True(dispatched.Success, dispatched.Message);
+        return dispatched.Data!;
+    }
 
     private static PackingCreateCartonRequestDto Dest(int type, string? code, string? carrierGuid = null) => new()
     {

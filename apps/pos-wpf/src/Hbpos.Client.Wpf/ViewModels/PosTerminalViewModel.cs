@@ -150,7 +150,10 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         TimeProvider? timeProvider = null,
         Func<CancellationToken, Task<bool>>? isNoSaleCashDrawerRescanRequiredAsync = null,
         Func<CancellationToken, Task<bool>>? isReturnsRescanRequiredAsync = null,
-        IHeldOrderTodayCountService? heldOrderTodayCountService = null)
+        IHeldOrderTodayCountService? heldOrderTodayCountService = null,
+        ICashMovementService? cashMovementService = null,
+        ICashMovementPrintService? cashMovementPrintService = null,
+        Func<CancellationToken, Task<decimal?>>? loadExpectedCashAsync = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
         // 「取单」按钮角标的统计服务；为 null（测试 / 预览）时不显示角标、不起定时器。
@@ -184,6 +187,24 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
             onLockCashierAsync,
             onOpenCardRecoveryCenterAsync);
         _scanController = new PosTerminalScanController(cart);
+        // 「钱箱」面板（现金存入 / 取出）：没有注入服务（测试、预览）时侧栏仍是原来的「开钱箱」。
+        if (cashMovementService is not null)
+        {
+            CashMovement = new CashMovementViewModel(
+                cashMovementService,
+                cashMovementPrintService,
+                () => Session,
+                (permissionCode, action) => AuthorizeAsync(permissionCode, action),
+                _actions.OpenCashDrawerAsync,
+                loadExpectedCashAsync,
+                operationAuditLogger,
+                T,
+                (message, succeeded) => SetStatusText(
+                    message,
+                    succeeded ? StatusFeedbackKind.Success : StatusFeedbackKind.Error,
+                    succeeded ? null : UserFeedbackCue.OperationError));
+        }
+
         // 待选条：只做界面投影，加购 / 放弃都回到本页的方法（授权、审计、状态栏都在这里统一处理）。
         PendingChoices = new PendingScanChoicePanelViewModel(
             _workflowService.PendingChoices,
@@ -372,6 +393,17 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     public string PrintLastReceiptText => T("pos.terminal.actions.printLastReceipt");
 
     public string OpenCashDrawerText => T("pos.terminal.actions.openCashDrawer");
+
+    /// <summary>收银端现金存入 / 取出；为 null 时侧栏按钮保持原来的「开钱箱」。</summary>
+    public CashMovementViewModel? CashMovement { get; }
+
+    public bool IsCashMovementEnabled => CashMovement is not null;
+
+    /// <summary>侧栏「钱箱」格：有现金进出功能时打开小面板，否则直接开钱箱（No Sale）。</summary>
+    public System.Windows.Input.ICommand CashDrawerTileCommand =>
+        CashMovement?.OpenPanelCommand ?? (System.Windows.Input.ICommand)OpenCashDrawerCommand;
+
+    public string CashDrawerTileText => CashMovement is null ? OpenCashDrawerText : T("cashMovement.tile");
 
     public string LockCashierText => T("pos.terminal.actions.lock");
 
@@ -2713,6 +2745,7 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         OnPropertyChanged(nameof(CustomerDisplayText));
         OnPropertyChanged(nameof(PrintLastReceiptText));
         OnPropertyChanged(nameof(OpenCashDrawerText));
+        OnPropertyChanged(nameof(CashDrawerTileText));
         OnPropertyChanged(nameof(LockCashierText));
         OnPropertyChanged(nameof(ExitApplicationText));
         OnPropertyChanged(nameof(MemberText));

@@ -63,6 +63,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
     private readonly IMobileAppDownloadService? _mobileAppDownloadService;
     private readonly IHeldOrderTodayCountService? _heldOrderTodayCountService;
+    private readonly ICashMovementService? _cashMovementService;
+    private readonly ICashMovementPrintService? _cashMovementPrintService;
     private readonly ILinklyBankReceiptPrinter? _linklyBankReceiptPrinter;
     private readonly IInstallmentOrderService _installmentOrderService;
     private readonly ISuspendedOrderService? _suspendedOrderService;
@@ -479,7 +481,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ICatalogSyncStatusService? catalogSyncStatusService = null,
         IReceiptProfileSyncService? receiptProfileSyncService = null,
         IMobileAppDownloadService? mobileAppDownloadService = null,
-        IHeldOrderTodayCountService? heldOrderTodayCountService = null)
+        IHeldOrderTodayCountService? heldOrderTodayCountService = null,
+        ICashMovementService? cashMovementService = null,
+        ICashMovementPrintService? cashMovementPrintService = null)
     {
         _core = core;
         _infra = infra;
@@ -511,6 +515,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _receiptProfileSyncService = receiptProfileSyncService;
         _mobileAppDownloadService = mobileAppDownloadService;
         _heldOrderTodayCountService = heldOrderTodayCountService;
+        _cashMovementService = cashMovementService;
+        _cashMovementPrintService = cashMovementPrintService;
         _linklyBankReceiptPrinter = print.LinklyBankReceiptPrinter;
         _installmentOrderService = installmentOrderService ?? NoopInstallmentOrderService.Instance;
         _suspendedOrderService = suspendedOrderService;
@@ -729,7 +735,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
              catalogSyncStatusService: _catalogSyncStatusService,
              receiptProfileSyncService: _receiptProfileSyncService,
              mobileAppDownloadService: _mobileAppDownloadService,
-             heldOrderTodayCountService: _heldOrderTodayCountService);
+             heldOrderTodayCountService: _heldOrderTodayCountService,
+             cashMovementService: _cashMovementService,
+             cashMovementPrintService: _cashMovementPrintService);
 
     private CardRecoveryPresenter CreateCardRecoveryPresenter() =>
         new(

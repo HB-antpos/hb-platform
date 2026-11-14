@@ -16,6 +16,7 @@ public sealed class TestSalesDataResetService(LocalSqliteStore store) : ITestSal
         "LocalOrderLines",
         "LocalOrders",
         "LocalOrderInstallments",
+        "LocalCashMovements",
         "LocalDailyCloseCashCounts",
         "LocalDailyCloses",
         "SuspendedOrderReturnPaymentCapacities",

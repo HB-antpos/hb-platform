@@ -1,3 +1,5 @@
+import type { CartonSync } from "./pack-types";
+
 /** 拣货会话状态，与后端 WarehouseOrderPickSessionStatuses 一致。 */
 export const PICK_SESSION_STATUS = { picking: 1, submitted: 2 } as const;
 
@@ -141,6 +143,8 @@ export interface PickLineMutationResult {
   line: PickProgressLine;
   appliedDelta: number;
   duplicate: boolean;
+  /** 请求带了 cartonGuid（边拣边装）时回显的箱汇总；不装箱的请求为 null。 */
+  carton: CartonSync | null;
 }
 
 export interface PickOrderListItem {
@@ -199,6 +203,9 @@ export interface PickSubmitResult {
   lineCount: number;
   shortLineCount: number;
   overLineCount: number;
+  /** 订单装过箱时：提交后的非作废箱数与各箱合计件数；没装过箱为 null。 */
+  cartonCount: number | null;
+  packedPieces: number | null;
 }
 
 export interface PickCodeLookupResult {

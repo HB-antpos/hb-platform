@@ -63,6 +63,13 @@ public sealed class WarehouseOrderPickRecord
     [SugarColumn(IsNullable = false)]
     public Guid ClientRequestId { get; set; }
 
+    /// <summary>
+    /// 边拣边装时这次拣货同步装进的箱（PackCarton.CartonGUID）；不装箱的拣货为空。
+    /// 同一 ClientRequestId 重放时靠它回显上次装的箱，不会再装一次。迁移 20261114.002-pick-record-carton 新增（可空列）。
+    /// </summary>
+    [SugarColumn(IsNullable = true, Length = 50)]
+    public string? CartonGUID { get; set; }
+
     [SugarColumn(IsNullable = false)]
     public DateTime CreatedAtUtc { get; set; }
 }
