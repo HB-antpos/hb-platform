@@ -97,6 +97,8 @@ export interface AccessControl {
   canOrderSupplierPreorders: boolean
   canManageWarehouseCategories: boolean
   canManageWarehouseLocations: boolean
+  /** 扫码打包（分店 + 总仓）：StorePacking.Use（分店）或 Warehouse.Packing（总仓，管理仓库 / 管理仓库订货按后端别名自动具备）。 */
+  canUsePacking: boolean
   canViewContainers: boolean
   canCreateContainer: boolean
   canEditContainer: boolean

@@ -65,6 +65,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/myob", "MYOB integration", "MYOB 对接", ["Myob.Connection.Manage", "Myob.Employee.Bind", "Myob.Payslip.ViewManagedStore", "Myob.Payslip.ViewAllStores", "Attendance.Payroll.Edit"]],
   ["/pos-admin/sales-orders", "Sales orders", "销售订单", ["Orders.View"]],
   ["/pos-admin/local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.View"]],
+  // 扫码打包（分店 + 总仓共用，在 Web「收银管理」组下）：分店 StorePacking.Use，总仓 Warehouse.Packing；管理仓库 / 管理仓库订货按后端别名自动具备。
+  ["/packing", "Scan packing", "扫码打包", ["StorePacking.Use", "Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
 ] as MenuRow[]).map(toSource("web"));
 
 const MOBILE_MENU: MenuSource[] = ([
