@@ -4427,6 +4427,74 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 空箱标批次表与箱新增五列_可重复执行_不动既有箱_请求编号唯一_识别缺表缺列漂移和缺索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 扫码打包六张表先建好，此时还没有批次表 → 54484。
+        await ExecuteNonQueryAsync(main, PackingSchema.ApplySql);
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql));
+        Assert.Equal(54484, missing.Number);
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PackCarton
+                (CartonGUID, CartonNo, Status, OwnerCode, OriginCode, OriginName, DestinationType, CreatedAtUtc, CreatedByUserGuid, CreatedByName, UpdatedAtUtc)
+            VALUES (N'c-old', N'BX2611140001', 1, N'1013', N'1013', N'Sunnybank', 0, SYSUTCDATETIME(), N'u-1', N'Lily', SYSUTCDATETIME());
+            """);
+
+        // 新建、可重复执行；旧箱的新列全部为 NULL，数据不丢。
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.PackCarton WHERE CartonGUID = N'c-old' AND BatchGUID IS NULL AND BatchSeq IS NULL AND ActivatedAtUtc IS NULL AND LabelPrintCount IS NULL AND LabelPrintedAtUtc IS NULL"));
+        // 扫码打包迁移的校验不受新增列影响。
+        await ExecuteNonQueryAsync(main, PackingSchema.VerifySql);
+
+        // 批次可写；同一请求编号只能有一个批次（幂等重放靠它）。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.PackCartonBatch
+                (BatchGUID, OwnerCode, [Count], FirstCartonNo, LastCartonNo, DestinationType, ClientRequestId, CreatedAtUtc, CreatedByUserGuid, CreatedByName)
+            VALUES (N'b-1', N'WAREHOUSE', 2, N'BX2611150001', N'BX2611150002', 0, '5f0f5f0f-0000-4000-8000-000000000001', SYSUTCDATETIME(), N'u-1', N'Lily');
+            INSERT dbo.PackCarton
+                (CartonGUID, CartonNo, Status, OwnerCode, OriginCode, OriginName, DestinationType, CreatedAtUtc, CreatedByUserGuid, CreatedByName, UpdatedAtUtc, BatchGUID, BatchSeq)
+            VALUES (N'c-b1', N'BX2611150001', 1, N'WAREHOUSE', N'WAREHOUSE', N'HB WAREHOUSE', 0, SYSUTCDATETIME(), N'u-1', N'Lily', SYSUTCDATETIME(), N'b-1', 1);
+            """);
+        var duplicateRequest = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.PackCartonBatch
+                (BatchGUID, OwnerCode, [Count], FirstCartonNo, LastCartonNo, DestinationType, ClientRequestId, CreatedAtUtc, CreatedByUserGuid, CreatedByName)
+            VALUES (N'b-2', N'WAREHOUSE', 1, N'BX2611150003', N'BX2611150003', 0, '5f0f5f0f-0000-4000-8000-000000000001', SYSUTCDATETIME(), N'u-1', N'Lily');
+            """));
+        Assert.Equal(2601, duplicateRequest.Number);
+
+        // 列类型漂移 → 54485；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PackCarton ALTER COLUMN LabelPrintCount bigint NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql));
+        Assert.Equal(54485, drift.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PackCarton ALTER COLUMN LabelPrintCount int NULL;");
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql);
+
+        // 缺过滤索引 → 54486；重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_PackCarton_Batch ON dbo.PackCarton;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql));
+        Assert.Equal(54486, noIndex.Number);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql);
+
+        // 缺列 → 54485；重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.PackCarton DROP COLUMN LabelPrintedAtUtc;");
+        var dropped = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql));
+        Assert.Equal(54485, dropped.Number);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 分店特殊商品分类两张表_新表_同店名称唯一_归属主键_可重复执行_识别漂移和缺失索引()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

@@ -120,6 +120,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string ScanPackingMigrationId = "20261114.001-scan-packing";
     internal const string PickRecordCartonMigrationId = "20261114.002-pick-record-carton";
     internal const string PosSettingsMigrationId = "20261114.003-pos-settings";
+    internal const string PackBlankCartonsMigrationId = "20261115.001-pack-blank-cartons";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -506,6 +507,11 @@ internal sealed class SchemaMigrationCoordinator
             PosSettingsMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyPosSettingsAsync(cancellationToken)
+        ),
+        new(
+            PackBlankCartonsMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyPackBlankCartonsAsync(cancellationToken)
         ),
     ];
 

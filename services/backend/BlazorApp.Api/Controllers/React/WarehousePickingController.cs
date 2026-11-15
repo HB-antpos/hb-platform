@@ -172,6 +172,18 @@ public sealed class WarehousePickingController(
         RunWithPickerAsync(nameof(CreateCarton), recheckEligibility: false, picker =>
             pickingService.CreateCartonAsync(orderGuid.Trim(), request ?? new WarehousePickingCreateCartonRequestDto(), picker));
 
+    /// <summary>
+    /// 扫到预先打印的空箱标：把总仓持有、未启用的空箱标关联到本订单并启用；不存在 / 别的地点 / 已作废 404 CARTON_NOT_FOUND，
+    /// 已启用 / 有商品 / 已关联别的订单 / 已封 409 CARTON_NOT_BLANK。
+    /// </summary>
+    [HttpPost("orders/{orderGuid}/cartons/attach")]
+    public Task<IActionResult> AttachBlankCarton(
+        string orderGuid,
+        [FromBody] WarehousePickingAttachCartonRequestDto? request
+    ) =>
+        RunWithPickerAsync(nameof(AttachBlankCarton), recheckEligibility: false, picker =>
+            pickingService.AttachBlankCartonAsync(orderGuid.Trim(), request ?? new WarehousePickingAttachCartonRequestDto(), picker));
+
     /// <summary>封箱（可同时放上托盘）；返回箱详情，客户端据此打印箱标签。</summary>
     [HttpPost("orders/{orderGuid}/cartons/{cartonGuid}/seal")]
     public Task<IActionResult> SealCarton(

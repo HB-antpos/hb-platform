@@ -31,7 +31,10 @@ public sealed class PackingController(
 
     // ---- 箱 ----
 
-    /// <summary>箱列表；filter：all / packing / stored / outgoing，mine=true 只看自己建的。</summary>
+    /// <summary>
+    /// 箱列表；filter：all / packing / stored / outgoing / blank，mine=true 只看自己建的。
+    /// 未启用的空箱标只在 filter=blank 里出现（计数在 blankCount），其它筛选与装箱中计数都不含它们。
+    /// </summary>
     [HttpGet("cartons")]
     public Task<IActionResult> ListCartons([FromQuery] string? ownerCode, [FromQuery] string? filter, [FromQuery] string? keyword, [FromQuery] bool mine = false) =>
         RunAsync(nameof(ListCartons), op => packingService.ListCartonsAsync(op, ownerCode, filter, keyword, mine));
@@ -39,6 +42,37 @@ public sealed class PackingController(
     [HttpPost("cartons")]
     public Task<IActionResult> CreateCarton([FromBody] PackingCreateCartonRequestDto request) =>
         RunAsync(nameof(CreateCarton), op => packingService.CreateCartonAsync(op, request ?? new PackingCreateCartonRequestDto()));
+
+    // ---- 空箱标（批量预打印） ----
+
+    /// <summary>批量创建 1–100 张空箱标（箱号连续、不带订货单）；同一个 clientRequestId 重放返回已有批次（duplicate=true）。</summary>
+    [HttpPost("cartons/batch")]
+    public Task<IActionResult> CreateCartonBatch([FromBody] PackingCreateBatchRequestDto? request) =>
+        RunAsync(nameof(CreateCartonBatch), op => packingService.CreateCartonBatchAsync(op, request ?? new PackingCreateBatchRequestDto()));
+
+    /// <summary>批次列表（按创建时间倒序，limit 默认 20、最大 50）。</summary>
+    [HttpGet("batches")]
+    public Task<IActionResult> ListBatches([FromQuery] string? ownerCode, [FromQuery] int? limit) =>
+        RunAsync(nameof(ListBatches), op => packingService.ListBatchesAsync(op, ownerCode, limit));
+
+    [HttpGet("batches/{batchGuid}")]
+    public Task<IActionResult> GetBatch(string batchGuid) =>
+        RunAsync(nameof(GetBatch), op => packingService.GetBatchAsync(op, batchGuid.Trim()));
+
+    /// <summary>客户端打印标签后回报：这些箱的打印次数 +1，范围外 / 已作废的箱放进 skipped。</summary>
+    [HttpPost("cartons/labels-printed")]
+    public Task<IActionResult> MarkLabelsPrinted([FromBody] PackingCartonGuidsRequestDto? request) =>
+        RunAsync(nameof(MarkLabelsPrinted), op => packingService.MarkLabelsPrintedAsync(op, request?.CartonGuids));
+
+    /// <summary>只作废「未启用的空箱标」（没商品、没启用、装箱中）；其它箱放进 skipped（NOT_FOUND / NOT_BLANK）。</summary>
+    [HttpPost("cartons/void-blank")]
+    public Task<IActionResult> VoidBlankCartons([FromBody] PackingCartonGuidsRequestDto? request) =>
+        RunAsync(nameof(VoidBlankCartons), op => packingService.VoidBlankCartonsAsync(op, request?.CartonGuids));
+
+    /// <summary>启用空箱标（客户端扫到空箱标时调）；幂等，普通箱直接返回详情。</summary>
+    [HttpPost("cartons/{cartonGuid}/activate")]
+    public Task<IActionResult> ActivateCarton(string cartonGuid) =>
+        RunAsync(nameof(ActivateCarton), op => packingService.ActivateCartonAsync(op, cartonGuid.Trim()));
 
     [HttpGet("cartons/{cartonGuid}")]
     public Task<IActionResult> GetCarton(string cartonGuid) =>

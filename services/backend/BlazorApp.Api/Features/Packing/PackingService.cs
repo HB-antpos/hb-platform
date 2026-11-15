@@ -27,6 +27,19 @@ public interface IPackingService
 
     Task<PackingResult<PackingCartonDetailDto>> SetCartonLocationAsync(PackingOperator op, string cartonGuid, string? locationCode);
 
+    // 空箱标（批量预打印，见 PackingService.BlankCartons.cs）
+    Task<PackingResult<PackingBatchCreateDto>> CreateCartonBatchAsync(PackingOperator op, PackingCreateBatchRequestDto request);
+
+    Task<PackingResult<PackingBatchListDto>> ListBatchesAsync(PackingOperator op, string? ownerCode, int? limit);
+
+    Task<PackingResult<PackingBatchDetailDto>> GetBatchAsync(PackingOperator op, string batchGuid);
+
+    Task<PackingResult<PackingLabelsPrintedDto>> MarkLabelsPrintedAsync(PackingOperator op, IReadOnlyList<string>? cartonGuids);
+
+    Task<PackingResult<PackingCartonDetailDto>> ActivateCartonAsync(PackingOperator op, string cartonGuid);
+
+    Task<PackingResult<PackingVoidBlankDto>> VoidBlankCartonsAsync(PackingOperator op, IReadOnlyList<string>? cartonGuids);
+
     Task<PackingResult<PackingCartonDetailDto>> DispatchCartonAsync(PackingOperator op, string cartonGuid);
 
     Task<PackingResult<PackingCartonDetailDto>> ReceiveCartonAsync(PackingOperator op, string cartonGuid, PackingReceiveCartonRequestDto request);
@@ -84,6 +97,12 @@ public interface IPackingService
     // 在调用方已开的事务里执行时加入该事务（见 PackingService.ExecuteInTransactionAsync）。
     /// <summary>该商品在箱里加 / 减 delta 件（可为负）；减到负数返回 409 CARTON_QTY_INSUFFICIENT，什么都不改。</summary>
     Task<PackingResult<PackingCartonDetailDto>> AdjustOrderCartonItemAsync(PackingOperator op, string orderGuid, string cartonGuid, string productCode, int delta);
+
+    /// <summary>
+    /// 拣货端扫到空箱标：把「总仓持有、未启用、没商品、没关联订单」的空箱标关联到订货单并启用（去向未指定时默认订货单的分店）。
+    /// cartonRef 是箱号或箱 GUID（忽略大小写）。订货单的存在 / 可拣校验由调用方（拣货服务）负责。
+    /// </summary>
+    Task<PackingResult<PackingCartonDetailDto>> AttachBlankCartonToOrderAsync(PackingOperator op, string orderGuid, string? cartonRef);
 
     /// <summary>把该商品在箱里的件数设为绝对值（0 = 移除；箱里原本没有也可以直接设），同一请求重复提交结果相同。</summary>
     Task<PackingResult<PackingCartonDetailDto>> SetOrderCartonItemQuantityAsync(PackingOperator op, string orderGuid, string cartonGuid, string productCode, int quantity);
@@ -151,9 +170,15 @@ internal sealed partial class PackingService(
         var normalizedKeyword = keyword?.Trim();
 
         // 本地点能看到的箱：自己持有的，加上自己发出、已经不在手上（在路上或对方已签收）的。
+        // 「装箱中」不含未启用的空箱标（BatchGUID 不为空且 ActivatedAtUtc 为空），它们单独计 blankCount。
         var packingCount = await _db.Queryable<PackCarton>()
-            .Where(carton => carton.OwnerCode == code && carton.Status == PackCartonStatuses.Packing)
+            .Where(carton =>
+                carton.OwnerCode == code
+                && carton.Status == PackCartonStatuses.Packing
+                && (carton.BatchGUID == null || carton.ActivatedAtUtc != null)
+            )
             .CountAsync();
+        var blankCount = await CountUnactivatedBlankAsync(code);
         var storedCount = await _db.Queryable<PackCarton>()
             .Where(carton => carton.OwnerCode == code && carton.Status == PackCartonStatuses.Sealed)
             .CountAsync();
@@ -172,6 +197,22 @@ internal sealed partial class PackingService(
                     || (carton.OriginCode == code
                         && (carton.Status == PackCartonStatuses.InTransit || carton.OwnerCode != code)))
             );
+        var isBlankFilter = normalizedFilter == "blank";
+        if (isBlankFilter)
+        {
+            // 空箱标单独成类；其它筛选（含「全部」）都排除未启用的空箱标，免得列表被批量建的箱撑满。
+            query = query.Where(carton =>
+                carton.OwnerCode == code
+                && carton.Status == PackCartonStatuses.Packing
+                && carton.BatchGUID != null
+                && carton.ActivatedAtUtc == null
+            );
+        }
+        else
+        {
+            query = query.Where(carton => carton.BatchGUID == null || carton.ActivatedAtUtc != null);
+        }
+
         if (normalizedFilter == "packing")
         {
             query = query.Where(carton => carton.OwnerCode == code && carton.Status == PackCartonStatuses.Packing);
@@ -213,10 +254,14 @@ internal sealed partial class PackingService(
             }
         }
 
-        var cartons = await query.OrderBy(carton => carton.UpdatedAtUtc, OrderByType.Desc).Take(MaxListItems).ToListAsync();
+        // 空箱标按箱号升序（同批连续、好对照打印的标签），一次最多 BlankLimit 只；其它筛选仍是最近更新的 MaxListItems 只。
+        var cartons = isBlankFilter
+            ? await query.OrderBy(carton => carton.CartonNo, OrderByType.Asc).Take(BlankLimit).ToListAsync()
+            : await query.OrderBy(carton => carton.UpdatedAtUtc, OrderByType.Desc).Take(MaxListItems).ToListAsync();
         return PackingResult<PackingCartonListDto>.Ok(new PackingCartonListDto
         {
             Items = await BuildCartonSummariesAsync(cartons),
+            BlankCount = blankCount,
             PackingCount = packingCount,
             StoredCount = storedCount,
             OutgoingCount = outgoingCount,
@@ -500,6 +545,12 @@ internal sealed partial class PackingService(
             }
 
             var now = UtcNow();
+            if (orderGuid != null && IsUnactivatedBlank(carton))
+            {
+                // 关联了订货单就是用上了：未启用的空箱标不能带订货单（拣货对账只看关联订货单的箱）。
+                carton.ActivatedAtUtc = now;
+            }
+
             carton.DestinationType = destination.Type;
             carton.DestinationCode = destination.Code;
             carton.CarrierGUID = destination.CarrierGuid;
@@ -700,6 +751,17 @@ internal sealed partial class PackingService(
         }
 
         await TouchCartonAsync(carton, now);
+
+        // 空箱标第一次装进商品：同一事务内启用（之后它就算「装箱中」）。
+        // 所有「某商品件数从 0 变正」的写入（扫码、改数量、边拣边装、先拣后装）最终都走到这里。
+        if (IsUnactivatedBlank(carton))
+        {
+            carton.ActivatedAtUtc = now;
+            await _db.Updateable<PackCarton>()
+                .SetColumns(item => item.ActivatedAtUtc == now)
+                .Where(item => item.CartonGUID == carton.CartonGUID && item.ActivatedAtUtc == null)
+                .ExecuteCommandAsync();
+        }
     }
 
     private async Task TouchCartonAsync(PackCarton carton, DateTime now)

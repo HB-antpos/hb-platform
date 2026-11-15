@@ -79,6 +79,13 @@ public interface IWarehousePickingService
         WarehousePickerContext picker
     );
 
+    /// <summary>扫到预先打印的空箱标：把总仓持有、未启用的空箱标关联到本订单并启用（去向未指定时默认订货单的分店）。</summary>
+    Task<WarehousePickingResult<PackingCartonDetailDto>> AttachBlankCartonAsync(
+        string orderGuid,
+        WarehousePickingAttachCartonRequestDto request,
+        WarehousePickerContext picker
+    );
+
     /// <summary>封箱；带托盘时同一事务里放上托盘。</summary>
     Task<WarehousePickingResult<PackingCartonDetailDto>> SealCartonAsync(
         string orderGuid,
