@@ -363,6 +363,12 @@ public sealed class WarehousePickingCreateCartonRequestDto : BlazorApp.Api.Featu
 {
 }
 
+/// <summary>拣货端扫到空箱标：箱号（BX + 年月日 + 流水）或箱 GUID，忽略大小写与首尾空格。</summary>
+public sealed class WarehousePickingAttachCartonRequestDto
+{
+    public string? CartonRef { get; set; }
+}
+
 public sealed class WarehousePickingSealCartonRequestDto
 {
     public decimal? WeightKg { get; set; }

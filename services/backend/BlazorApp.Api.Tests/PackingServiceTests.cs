@@ -60,6 +60,7 @@ public sealed class PackingServiceTests : IDisposable
             typeof(Location),
             typeof(Store),
             typeof(PackCarton),
+            typeof(PackCartonBatch),
             typeof(PackCartonItem),
             typeof(PackPallet),
             typeof(PackCarrier),

@@ -380,6 +380,16 @@ internal sealed partial class PackingService
         );
         var ownerNames = await LoadOwnerNamesAsync(cartons.Select(carton => carton.OwnerCode));
 
+        // 空箱标批次的总张数：只查这一页箱涉及的批次，没有批内箱时不碰批次表。
+        var batchGuids = cartons.Where(carton => carton.BatchGUID != null).Select(carton => carton.BatchGUID!).Distinct().ToList();
+        var batchCounts = batchGuids.Count == 0
+            ? new Dictionary<string, int>()
+            : (await _db.Queryable<PackCartonBatch>()
+                    .Where(batch => batchGuids.Contains(batch.BatchGUID))
+                    .Select(batch => new { batch.BatchGUID, batch.Count })
+                    .ToListAsync())
+                .ToDictionary(batch => batch.BatchGUID, batch => batch.Count);
+
         return cartons.Select(carton =>
         {
             var totals = itemTotals.GetValueOrDefault(carton.CartonGUID);
@@ -410,6 +420,13 @@ internal sealed partial class PackingService
                 ReceivedByName = carton.ReceivedByName,
                 ReceivedAtUtc = carton.ReceivedAtUtc,
                 UpdatedAtUtc = carton.UpdatedAtUtc,
+                IsBlank = IsUnactivatedBlank(carton),
+                BatchGuid = carton.BatchGUID,
+                BatchSeq = carton.BatchSeq,
+                BatchCount = carton.BatchGUID == null ? null : batchCounts.TryGetValue(carton.BatchGUID, out var batchCount) ? batchCount : null,
+                ActivatedAtUtc = carton.ActivatedAtUtc,
+                LabelPrintCount = carton.LabelPrintCount ?? 0,
+                LabelPrintedAtUtc = carton.LabelPrintedAtUtc,
             };
         }).ToList();
     }
@@ -487,6 +504,13 @@ internal sealed partial class PackingService
             ReceivedByName = summary.ReceivedByName,
             ReceivedAtUtc = summary.ReceivedAtUtc,
             UpdatedAtUtc = summary.UpdatedAtUtc,
+            IsBlank = summary.IsBlank,
+            BatchGuid = summary.BatchGuid,
+            BatchSeq = summary.BatchSeq,
+            BatchCount = summary.BatchCount,
+            ActivatedAtUtc = summary.ActivatedAtUtc,
+            LabelPrintCount = summary.LabelPrintCount,
+            LabelPrintedAtUtc = summary.LabelPrintedAtUtc,
             Remark = carton.Remark,
             ChangedProductCode = changedProductCode,
             Items = items
@@ -738,25 +762,32 @@ internal sealed partial class PackingService
     /// 发号：前缀 + 所属地点当地年月日 + 当日流水（位置标签不带日期，一直累加）。必须在事务里调用——
     /// 行不存在时 UPDLOCK+HOLDLOCK 锁住键范围，两台设备同时新建当天第一只箱也不会重号。
     /// </summary>
-    private async Task<string> NextNumberAsync(string prefix, int digits, string ownerCode, bool includeDate = true)
+    private async Task<string> NextNumberAsync(string prefix, int digits, string ownerCode, bool includeDate = true) =>
+        (await NextNumberRangeAsync(prefix, digits, ownerCode, 1, includeDate))[0];
+
+    /// <summary>
+    /// 一次连续取 count 个号（批量建空箱标用）：同一次读锁、同一次写回，期间别人取不到中间的号，所以这一批箱号连续。
+    /// 同样必须在事务里调用。
+    /// </summary>
+    private async Task<List<string>> NextNumberRangeAsync(string prefix, int digits, string ownerCode, int count, bool includeDate = true)
     {
         var key = includeDate ? prefix + (await LocalNowAsync(ownerCode)).ToString("yyMMdd") : prefix;
         var query = _db.Queryable<PackSequence>().Where(sequence => sequence.SequenceKey == key);
         var row = await (IsSqlServer ? query.With("WITH(UPDLOCK,HOLDLOCK)") : query).FirstAsync();
-        int next;
+        int first;
         if (row == null)
         {
-            next = 1;
-            await _db.Insertable(new PackSequence { SequenceKey = key, LastValue = next }).ExecuteCommandAsync();
+            first = 1;
+            await _db.Insertable(new PackSequence { SequenceKey = key, LastValue = first + count - 1 }).ExecuteCommandAsync();
         }
         else
         {
-            next = row.LastValue + 1;
-            row.LastValue = next;
+            first = row.LastValue + 1;
+            row.LastValue = first + count - 1;
             await _db.Updateable(row).ExecuteCommandAsync();
         }
 
-        return key + next.ToString("D" + digits);
+        return Enumerable.Range(first, count).Select(number => key + number.ToString("D" + digits)).ToList();
     }
 
     private async Task AddEventAsync(int targetType, string targetGuid, int action, string? detail, PackingOperator op, DateTime now)

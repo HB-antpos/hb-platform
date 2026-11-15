@@ -78,6 +78,21 @@ public static class PackingErrorCodes
 
     /// <summary>边拣边装减件时，箱里该商品现有件数不够减。</summary>
     public const string CartonQtyInsufficient = "CARTON_QTY_INSUFFICIENT";
+
+    // ---- 空箱标（批量预打印） ----
+
+    /// <summary>该地点「未启用的空箱标」已达上限，不能再批量创建。</summary>
+    public const string BlankLimitExceeded = "BLANK_LIMIT_EXCEEDED";
+
+    public const string BatchNotFound = "BATCH_NOT_FOUND";
+
+    /// <summary>拣货端关联空箱标时，这只箱不是「总仓持有、未启用、没商品、没关联订单」的空箱标。</summary>
+    public const string CartonNotBlank = "CARTON_NOT_BLANK";
+
+    // 批量接口 skipped[].reason 用的固定字符串（不是 HTTP 错误码）。
+    public const string SkipNotFound = "NOT_FOUND";
+    public const string SkipVoided = "VOIDED";
+    public const string SkipNotBlank = "NOT_BLANK";
 }
 
 // ---- 请求 ----
@@ -100,6 +115,23 @@ public sealed class PackingCreateCartonRequestDto : PackingDestinationRequestDto
 
     /// <summary>可选关联的分店订货单（仓库按订货单装箱用）；分店一期不用。</summary>
     public string? OrderGuid { get; set; }
+}
+
+/// <summary>批量创建空箱标：去向字段同建箱（不传 = 未指定）；ClientRequestId 必填，重放不会重复建箱。</summary>
+public sealed class PackingCreateBatchRequestDto : PackingDestinationRequestDto
+{
+    public string? OwnerCode { get; set; }
+
+    /// <summary>1–100。</summary>
+    public int Count { get; set; }
+
+    public Guid ClientRequestId { get; set; }
+}
+
+/// <summary>批量回报「标签已打印」/ 批量作废未用空箱标：一次最多 100 只箱。</summary>
+public sealed class PackingCartonGuidsRequestDto
+{
+    public List<string>? CartonGuids { get; set; }
 }
 
 public sealed class PackingCreatePalletRequestDto : PackingDestinationRequestDto
@@ -256,6 +288,24 @@ public class PackingCartonSummaryDto
     public string? ReceivedByName { get; set; }
     public DateTime? ReceivedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
+
+    // ---- 空箱标（批量预打印）；普通箱 isBlank=false、batch* / activatedAtUtc 为空、labelPrintCount=0 ----
+
+    /// <summary>未启用的空箱标：属于某批次且还没启用（没装过商品、没关联订单）。</summary>
+    public bool IsBlank { get; set; }
+
+    public string? BatchGuid { get; set; }
+    public int? BatchSeq { get; set; }
+
+    /// <summary>批内总张数（标签上可印「3 / 50」）。</summary>
+    public int? BatchCount { get; set; }
+
+    public DateTime? ActivatedAtUtc { get; set; }
+
+    /// <summary>箱标签已打印次数；从未打印为 0。</summary>
+    public int LabelPrintCount { get; set; }
+
+    public DateTime? LabelPrintedAtUtc { get; set; }
 }
 
 public sealed class PackingCartonItemDto
@@ -307,6 +357,84 @@ public sealed class PackingCartonListDto
 
     /// <summary>待签收：发给本地点、还没签收的托盘和散箱批数。</summary>
     public int IncomingCount { get; set; }
+
+    /// <summary>未启用的空箱标数（本地点）；不计入 PackingCount，也不出现在除 filter=blank 以外的列表里。</summary>
+    public int BlankCount { get; set; }
+}
+
+/// <summary>
+/// 批量创建空箱标的结果。成功时 batchGuid / duplicate / count / firstCartonNo / lastCartonNo / createdAtUtc / cartons 都有值；
+/// 409 BLANK_LIMIT_EXCEEDED 时只有 existing / limit（其余为空，不输出）。
+/// </summary>
+public sealed class PackingBatchCreateDto
+{
+    public string? BatchGuid { get; set; }
+
+    /// <summary>true = 同一个 clientRequestId 的重放，返回的是已有批次，没有再建箱。</summary>
+    public bool? Duplicate { get; set; }
+
+    public int? Count { get; set; }
+    public string? FirstCartonNo { get; set; }
+    public string? LastCartonNo { get; set; }
+    public DateTime? CreatedAtUtc { get; set; }
+    public List<PackingCartonSummaryDto>? Cartons { get; set; }
+
+    /// <summary>仅 BLANK_LIMIT_EXCEEDED：该地点现有未启用空箱标数。</summary>
+    public int? Existing { get; set; }
+
+    /// <summary>仅 BLANK_LIMIT_EXCEEDED：上限（300）。</summary>
+    public int? Limit { get; set; }
+}
+
+public sealed class PackingBatchSummaryDto
+{
+    public string BatchGuid { get; set; } = string.Empty;
+    public int Count { get; set; }
+    public string FirstCartonNo { get; set; } = string.Empty;
+    public string LastCartonNo { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; }
+    public string CreatedByName { get; set; } = string.Empty;
+
+    /// <summary>批内标签已打印（LabelPrintCount &gt; 0）的非作废箱数。</summary>
+    public int PrintedCount { get; set; }
+
+    /// <summary>批内还没启用的非作废箱数。</summary>
+    public int UnactivatedCount { get; set; }
+
+    public int VoidedCount { get; set; }
+}
+
+public sealed class PackingBatchListDto
+{
+    public List<PackingBatchSummaryDto> Batches { get; set; } = new();
+}
+
+public sealed class PackingBatchDetailDto
+{
+    public PackingBatchSummaryDto Batch { get; set; } = new();
+
+    /// <summary>按批内序号升序，不含已作废的箱。</summary>
+    public List<PackingCartonSummaryDto> Cartons { get; set; } = new();
+}
+
+public sealed class PackingSkippedCartonDto
+{
+    public string CartonGuid { get; set; } = string.Empty;
+
+    /// <summary>NOT_FOUND / VOIDED / NOT_BLANK。</summary>
+    public string Reason { get; set; } = string.Empty;
+}
+
+public sealed class PackingLabelsPrintedDto
+{
+    public int Updated { get; set; }
+    public List<PackingSkippedCartonDto> Skipped { get; set; } = new();
+}
+
+public sealed class PackingVoidBlankDto
+{
+    public List<string> Voided { get; set; } = new();
+    public List<PackingSkippedCartonDto> Skipped { get; set; } = new();
 }
 
 public class PackingPalletSummaryDto

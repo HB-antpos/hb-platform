@@ -23,6 +23,7 @@ internal static class PickingPackingTestSupport
     public static readonly Type[] PackTables =
     {
         typeof(PackCarton),
+        typeof(PackCartonBatch),
         typeof(PackCartonItem),
         typeof(PackPallet),
         typeof(PackCarrier),

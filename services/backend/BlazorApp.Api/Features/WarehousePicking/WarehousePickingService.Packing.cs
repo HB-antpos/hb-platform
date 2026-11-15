@@ -382,6 +382,29 @@ internal sealed partial class WarehousePickingService
         return ToPickingResult(created);
     }
 
+    public async Task<WarehousePickingResult<PackingCartonDetailDto>> AttachBlankCartonAsync(
+        string orderGuid,
+        WarehousePickingAttachCartonRequestDto request,
+        WarehousePickerContext picker
+    )
+    {
+        // 订单校验与新建箱完全一致：找不到 404，购物车（未提交）的订货单 409 不可拣。
+        var order = await WarehousePickingQueries.LoadOrderAsync(_db, orderGuid);
+        if (order == null)
+        {
+            return WarehousePickingResult<PackingCartonDetailDto>.Fail(404, WarehousePickingErrorCodes.OrderNotFound, "找不到该订单");
+        }
+
+        if ((order.FlowStatus ?? 0) == 0)
+        {
+            return WarehousePickingResult<PackingCartonDetailDto>.Fail(409, WarehousePickingErrorCodes.OrderNotPickable, "该订单还没有提交，不能装箱");
+        }
+
+        // 只写箱（箱行锁在打包服务的事务里），不碰拣货会话行，与新建箱 / 封箱同一做法，不引入新的锁序。
+        var attached = await packingService.AttachBlankCartonToOrderAsync(PackingOperatorOf(picker), order.OrderGUID, request.CartonRef);
+        return ToPickingResult(attached);
+    }
+
     public async Task<WarehousePickingResult<PackingCartonDetailDto>> SealCartonAsync(
         string orderGuid,
         string cartonGuid,

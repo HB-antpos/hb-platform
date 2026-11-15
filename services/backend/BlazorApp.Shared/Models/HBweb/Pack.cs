@@ -94,6 +94,74 @@ public sealed class PackCarton
 
     [SugarColumn(IsNullable = false)]
     public DateTime UpdatedAtUtc { get; set; }
+
+    // ---- 空箱标（批量预打印）：迁移 20261115.001-pack-blank-cartons 新增的可空列，旧箱全部为空 ----
+
+    /// <summary>所属空箱标批次（<see cref="PackCartonBatch.BatchGUID"/>）；普通箱为空。</summary>
+    [SugarColumn(IsNullable = true, Length = 50)]
+    public string? BatchGUID { get; set; }
+
+    /// <summary>批内第几张，从 1 起；普通箱为空。</summary>
+    [SugarColumn(IsNullable = true)]
+    public int? BatchSeq { get; set; }
+
+    /// <summary>
+    /// 空箱标的启用时间：第一次装入商品、关联订货单或显式 activate 时写入。
+    /// BatchGUID 不为空且本列为空 = 「未启用的空箱标」，不算装箱中，列表里单独成类。
+    /// </summary>
+    [SugarColumn(IsNullable = true)]
+    public DateTime? ActivatedAtUtc { get; set; }
+
+    /// <summary>箱标签已打印次数（客户端打印后回报）；从未打印为空。</summary>
+    [SugarColumn(IsNullable = true)]
+    public int? LabelPrintCount { get; set; }
+
+    [SugarColumn(IsNullable = true)]
+    public DateTime? LabelPrintedAtUtc { get; set; }
+}
+
+/// <summary>
+/// 空箱标批次：一次批量预先创建、预先打印标签的一组箱（箱号连续）。ClientRequestId 唯一，客户端重试不会重复建箱。
+/// 迁移 20261115.001-pack-blank-cartons 新建；实体不进 SqlSugarContext 的自动建表清单。
+/// </summary>
+[SugarTable("PackCartonBatch")]
+public sealed class PackCartonBatch
+{
+    [SugarColumn(IsPrimaryKey = true, IsNullable = false, Length = 50)]
+    public string BatchGUID { get; set; } = string.Empty;
+
+    [SugarColumn(IsNullable = false, Length = 50)]
+    public string OwnerCode { get; set; } = string.Empty;
+
+    [SugarColumn(IsNullable = false)]
+    public int Count { get; set; }
+
+    [SugarColumn(IsNullable = false, Length = 20)]
+    public string FirstCartonNo { get; set; } = string.Empty;
+
+    [SugarColumn(IsNullable = false, Length = 20)]
+    public string LastCartonNo { get; set; } = string.Empty;
+
+    [SugarColumn(IsNullable = false)]
+    public int DestinationType { get; set; }
+
+    [SugarColumn(IsNullable = true, Length = 50)]
+    public string? DestinationCode { get; set; }
+
+    [SugarColumn(IsNullable = true, Length = 32)]
+    public string? CarrierGUID { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public Guid ClientRequestId { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public DateTime CreatedAtUtc { get; set; }
+
+    [SugarColumn(IsNullable = false, Length = 50)]
+    public string CreatedByUserGuid { get; set; } = string.Empty;
+
+    [SugarColumn(IsNullable = false, Length = 100)]
+    public string CreatedByName { get; set; } = string.Empty;
 }
 
 /// <summary>箱内商品：同一箱同一商品只有一行，数量为件数。</summary>

@@ -40,6 +40,7 @@
     <Compile Include="WarehouseMinOrderQuantitySyncGuardTests.cs" />
     <Compile Include="WarehousePickingServiceTests.cs" />
     <Compile Include="PackingServiceTests.cs" />
+    <Compile Include="PackBlankCartonTests.cs" />
     <Compile Include="PackingAccessServiceTests.cs" />
     <Compile Include="PickingPackingTestSupport.cs" />
     <Compile Include="WarehousePickingPackingTests.cs" />

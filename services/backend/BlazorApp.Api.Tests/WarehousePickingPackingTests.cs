@@ -800,6 +800,211 @@ public sealed class WarehousePickingPackingTests : IDisposable
         Assert.False(op.Has(StoreCode));
     }
 
+    // ---- 空箱标：拣货端关联（attach）与提交对账 ----
+
+    private static readonly PackingOperator WarehouseStaff = new(
+        "u-wh", "Warehouse Staff", false, false, new[] { new PackingOwner(PackOwners.Warehouse, "HB TEST WAREHOUSE", true) });
+
+    private static readonly PackingOperator StoreStaff = new(
+        "u-store", "Store Staff", false, false, new[] { new PackingOwner(StoreCode, "Morayfield", false) });
+
+    private async Task<List<PackingCartonSummaryDto>> NewBlankBatchAsync(PackingOperator op, int count, int destinationType = PackDestinationTypes.Unassigned)
+    {
+        var created = await PickingPackingTestSupport.PackingService(_db).CreateCartonBatchAsync(
+            op,
+            new PackingCreateBatchRequestDto { Count = count, ClientRequestId = Guid.NewGuid(), DestinationType = destinationType }
+        );
+        Assert.True(created.Success, created.Message);
+        return created.Data!.Cartons!;
+    }
+
+    private static WarehousePickingAttachCartonRequestDto Attach(string? cartonRef) => new() { CartonRef = cartonRef };
+
+    [Fact]
+    public async Task 关联空箱标_按箱号_忽略大小写和空格_关联订单并启用_去向默认订货单的分店()
+    {
+        var service = await JoinedServiceAsync();
+        var blank = (await NewBlankBatchAsync(WarehouseStaff, 2))[0];
+
+        var result = await service.AttachBlankCartonAsync(OrderGuid, Attach($"  {blank.CartonNo.ToLowerInvariant()} "), Alex);
+
+        Assert.True(result.Success, result.Message);
+        var data = result.Data!;
+        Assert.Equal(blank.CartonGuid, data.CartonGuid);
+        Assert.Equal(OrderGuid, data.OrderGuid);
+        Assert.Equal("2026-0412", data.OrderNo);
+        Assert.False(data.IsBlank);
+        Assert.NotNull(data.ActivatedAtUtc);
+        Assert.Equal(PackDestinationTypes.Store, data.Destination.DestinationType);
+        Assert.Equal(StoreCode, data.Destination.Code);
+        Assert.Equal(blank.BatchGuid, data.BatchGuid);
+        Assert.Equal(PackOwners.Warehouse, data.OwnerCode);
+        var row = await _db.Queryable<PackCarton>().SingleAsync(item => item.CartonGUID == blank.CartonGuid);
+        Assert.Equal(OrderGuid, row.OrderGUID);
+        Assert.Equal(PackCartonStatuses.Packing, row.Status);
+        var attachEvent = await _db.Queryable<PackEvent>()
+            .SingleAsync(item => item.TargetGUID == blank.CartonGuid && item.Action == PackEventActions.HeaderChanged);
+        Assert.Equal("Alex Chen", attachEvent.OperatorName);
+        Assert.Contains("2026-0412", attachEvent.Detail);
+        // 出现在装箱进度里，批内另一张仍是未启用的空箱标。
+        var progress = await service.GetPackProgressAsync(OrderGuid, Alex);
+        Assert.Equal(blank.CartonGuid, Assert.Single(progress.Data!.Cartons).CartonGuid);
+    }
+
+    [Fact]
+    public async Task 关联空箱标_按箱GUID_大写也认_PDA设备会话的拣货人同样可用_已指定的去向保留()
+    {
+        var service = await JoinedServiceAsync();
+        var blank = (await NewBlankBatchAsync(WarehouseStaff, 1, PackDestinationTypes.Local))[0];
+
+        var result = await service.AttachBlankCartonAsync(OrderGuid, Attach(blank.CartonGuid.ToUpperInvariant()), Mia);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(PackDestinationTypes.Local, result.Data!.Destination.DestinationType);
+        Assert.Null(result.Data.Destination.Code);
+        Assert.Equal(OrderGuid, result.Data.OrderGuid);
+    }
+
+    [Fact]
+    public async Task 关联空箱标_箱不存在_别的地点持有_已作废_统一404_CARTON_NOT_FOUND_同一句话()
+    {
+        var service = await JoinedServiceAsync();
+        var storeBlank = (await NewBlankBatchAsync(StoreStaff, 1))[0];
+        var voided = (await NewBlankBatchAsync(WarehouseStaff, 1))[0];
+        await PickingPackingTestSupport.PackingService(_db).VoidBlankCartonsAsync(WarehouseStaff, new[] { voided.CartonGuid });
+
+        var results = new[]
+        {
+            await service.AttachBlankCartonAsync(OrderGuid, Attach("BX0000000000"), Alex),
+            await service.AttachBlankCartonAsync(OrderGuid, Attach(storeBlank.CartonNo), Alex),
+            await service.AttachBlankCartonAsync(OrderGuid, Attach(voided.CartonNo), Alex),
+        };
+
+        Assert.All(results, result =>
+        {
+            Assert.False(result.Success);
+            Assert.Equal(404, result.StatusCode);
+            Assert.Equal(PackingErrorCodes.CartonNotFound, result.ErrorCode);
+        });
+        Assert.Single(results.Select(result => result.Message).Distinct());
+        // 别的地点的空箱标没被动。
+        var untouched = await _db.Queryable<PackCarton>().SingleAsync(item => item.CartonGUID == storeBlank.CartonGuid);
+        Assert.Null(untouched.OrderGUID);
+        Assert.Null(untouched.ActivatedAtUtc);
+    }
+
+    [Fact]
+    public async Task 关联空箱标_已启用_有商品_已关联别的订单_已封_普通箱_都是409_CARTON_NOT_BLANK()
+    {
+        var service = await JoinedServiceAsync();
+        var packing = PickingPackingTestSupport.PackingService(_db);
+        var blanks = await NewBlankBatchAsync(WarehouseStaff, 4);
+        // [0] 显式启用；[1] 已关联别的订单；[2] 装了商品后封箱；[3] 保持空箱标。
+        Assert.True((await packing.ActivateCartonAsync(WarehouseStaff, blanks[0].CartonGuid)).Success);
+        Assert.True((await service.AttachBlankCartonAsync(OtherOrderGuid, Attach(blanks[1].CartonNo), Alex)).Success);
+        Assert.True((await packing.ScanIntoCartonAsync(WarehouseStaff, blanks[2].CartonGuid, new PackingScanRequestDto { Code = "9312345678905" })).Success);
+        Assert.True((await packing.SealCartonAsync(WarehouseStaff, blanks[2].CartonGuid, new PackingSealRequestDto())).Success);
+        var normal = (await packing.CreateCartonAsync(WarehouseStaff, new PackingCreateCartonRequestDto())).Data!;
+
+        foreach (var reference in new[] { blanks[0].CartonNo, blanks[1].CartonNo, blanks[2].CartonNo, normal.CartonNo })
+        {
+            var result = await service.AttachBlankCartonAsync(OrderGuid, Attach(reference), Alex);
+            Assert.False(result.Success);
+            Assert.Equal(409, result.StatusCode);
+            Assert.Equal(PackingErrorCodes.CartonNotBlank, result.ErrorCode);
+        }
+
+        // 没有一只被关联到本订单；第四只仍是未启用的空箱标，可以正常关联。
+        Assert.Equal(0, await _db.Queryable<PackCarton>().CountAsync(item => item.OrderGUID == OrderGuid));
+        var ok = await service.AttachBlankCartonAsync(OrderGuid, Attach(blanks[3].CartonNo), Alex);
+        Assert.True(ok.Success, ok.Message);
+    }
+
+    [Fact]
+    public async Task 关联空箱标_订单找不到404_订单未提交409_箱号为空400_都不改箱()
+    {
+        var service = await JoinedServiceAsync();
+        var blank = (await NewBlankBatchAsync(WarehouseStaff, 1))[0];
+
+        var noOrder = await service.AttachBlankCartonAsync("no-such-order", Attach(blank.CartonNo), Alex);
+        var draft = await service.AttachBlankCartonAsync(DraftOrderGuid, Attach(blank.CartonNo), Alex);
+        var empty = await service.AttachBlankCartonAsync(OrderGuid, Attach("  "), Alex);
+        var none = await service.AttachBlankCartonAsync(OrderGuid, new WarehousePickingAttachCartonRequestDto(), Alex);
+
+        Assert.Equal(404, noOrder.StatusCode);
+        Assert.Equal(WarehousePickingErrorCodes.OrderNotFound, noOrder.ErrorCode);
+        Assert.Equal(409, draft.StatusCode);
+        Assert.Equal(WarehousePickingErrorCodes.OrderNotPickable, draft.ErrorCode);
+        Assert.Equal(400, empty.StatusCode);
+        Assert.Equal(400, none.StatusCode);
+        var untouched = await _db.Queryable<PackCarton>().SingleAsync(item => item.CartonGUID == blank.CartonGuid);
+        Assert.Null(untouched.OrderGUID);
+        Assert.Null(untouched.ActivatedAtUtc);
+    }
+
+    [Fact]
+    public async Task 关联空箱标后接着边拣边装_封箱_提交对账照常通过()
+    {
+        var service = await JoinedServiceAsync();
+        var blank = (await NewBlankBatchAsync(WarehouseStaff, 1))[0];
+        var attached = await service.AttachBlankCartonAsync(OrderGuid, Attach(blank.CartonNo), Alex);
+        Assert.True(attached.Success, attached.Message);
+
+        await service.AppendRecordAsync(OrderGuid, Scan("d-cup", blank.CartonGuid), Alex);
+        Assert.True((await service.SealCartonAsync(OrderGuid, blank.CartonGuid, new WarehousePickingSealCartonRequestDto(), Alex)).Success);
+        var result = await service.SubmitAsync(OrderGuid, Alex);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, result.Data!.CartonCount);
+        Assert.Equal(12, result.Data.PackedPieces);
+    }
+
+    [Fact]
+    public async Task 提交对账_只看关联了本订单的箱_未启用的空箱标不参与也不被自动作废()
+    {
+        var service = await JoinedServiceAsync();
+        var blanks = await NewBlankBatchAsync(WarehouseStaff, 3);
+        var carton = await NewCartonAsync(service);
+        await service.AppendRecordAsync(OrderGuid, Scan("d-cup", carton), Alex);
+        Assert.True((await service.SealCartonAsync(OrderGuid, carton, new WarehousePickingSealCartonRequestDto(), Alex)).Success);
+
+        var result = await service.SubmitAsync(OrderGuid, Alex);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(1, result.Data!.CartonCount);
+        Assert.Equal(12, result.Data.PackedPieces);
+        Assert.Null(result.Data.OpenCartons);
+        var rows = await _db.Queryable<PackCarton>().Where(item => item.BatchGUID != null).ToListAsync();
+        Assert.Equal(3, rows.Count);
+        Assert.All(rows, row =>
+        {
+            Assert.Equal(PackCartonStatuses.Packing, row.Status);
+            Assert.Null(row.ActivatedAtUtc);
+            Assert.Null(row.OrderGUID);
+        });
+        Assert.Equal(
+            blanks.Select(item => item.CartonGuid).OrderBy(guid => guid, StringComparer.Ordinal),
+            rows.Select(row => row.CartonGUID).OrderBy(guid => guid, StringComparer.Ordinal)
+        );
+    }
+
+    [Fact]
+    public async Task 提交对账_订单没有任何关联箱只有空箱标时_行为与旧版一致_响应里没有箱数()
+    {
+        var service = await JoinedServiceAsync();
+        await NewBlankBatchAsync(WarehouseStaff, 5);
+        await service.AppendRecordAsync(OrderGuid, Scan("d-cup", null), Alex);
+
+        var snapshot = await PickingPackingTestSupport.PackingService(_db).GetOrderSnapshotAsync(OrderGuid);
+        var result = await service.SubmitAsync(OrderGuid, Alex);
+
+        Assert.Empty(snapshot.Cartons);
+        Assert.True(result.Success, result.Message);
+        Assert.Null(result.Data!.CartonCount);
+        Assert.Null(result.Data.PackedPieces);
+        Assert.Equal(5, await _db.Queryable<PackCarton>().CountAsync(item => item.Status == PackCartonStatuses.Packing && item.ActivatedAtUtc == null));
+    }
+
     // ---- 夹具 ----
 
     private async Task<WarehousePickingService> JoinedServiceAsync()

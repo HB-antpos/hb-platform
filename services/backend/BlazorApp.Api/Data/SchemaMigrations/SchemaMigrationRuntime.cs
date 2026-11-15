@@ -312,6 +312,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyPosSettingsAsync(CancellationToken cancellationToken);
 
+    Task ApplyPackBlankCartonsAsync(CancellationToken cancellationToken);
+
+    Task VerifyPackBlankCartonsAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -1992,6 +1996,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             PosSettingsSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyPackBlankCartonsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            PackBlankCartonsSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 批次表、五个新增列与索引的签名通过后协调器才登记账本。
+        await VerifyPackBlankCartonsAsync(cancellationToken);
+    }
+
+    public async Task VerifyPackBlankCartonsAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            PackBlankCartonsSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );
