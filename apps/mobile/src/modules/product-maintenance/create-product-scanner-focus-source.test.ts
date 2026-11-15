@@ -33,6 +33,16 @@ for (const state of CREATE_FLOW_STATES) {
   );
 }
 
+// 新增 / 编辑多码、套装条码弹层同样要计入：它们的条码输入框一旦被隐藏框抢走焦点，
+// 手输内容会被当成扫码清空，「添加到列表」永远是灰的。
+for (const expression of ["Boolean(codeAddModal)", "Boolean(barcodeEditModal)"]) {
+  assert.ok(busySource.includes(expression), `${expression} 必须计入 isProductQueryBusy 的判断`);
+}
+for (const state of ["codeAddModal", "barcodeEditModal"]) {
+  const occurrences = busySource.match(new RegExp(`\\b${state}\\b`, "g")) ?? [];
+  assert.ok(occurrences.length >= 2, `${state} 必须同时出现在判断和依赖数组中`);
+}
+
 // 扫码器启用条件必须由 isProductQueryBusy 驱动，否则上面的屏蔽不生效。
 assert.match(
   productQuerySource,
