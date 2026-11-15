@@ -212,6 +212,35 @@ export function periodEnd(periodStart: string, weeks: 1 | 2): string {
   return dayjs(periodStart).add(weeks * 7 - 1, 'day').format('YYYY-MM-DD')
 }
 
+/** 快捷定位：上期 / 本期 / 下期（相对「今天所在期」）；1 周统计期即 上周 / 本周 / 下周。 */
+export type PeriodPreset = 'previous' | 'current' | 'next'
+
+/** 快捷定位按钮的展示顺序（时间从早到晚）。 */
+export const PERIOD_PRESETS: readonly PeriodPreset[] = ['previous', 'current', 'next']
+
+/**
+ * 求某个快捷定位对应的统计期起点。
+ * 统计期是以 weeks × 7 天为步长的等差序列（2 周的对齐基准由后端按「双周起始日」设置决定），
+ * 所以只要拿到后端返回的任意一期起点，就能推出整条序列：
+ * 前端不必再读一遍双周设置，也不用为了「上周」多发一次请求。
+ * knownPeriodStart 可以在今天之前或之后；today 用 YYYY-MM-DD，由调用方传入以便测试。
+ */
+export function presetPeriodStart(
+  knownPeriodStart: string,
+  weeks: 1 | 2,
+  today: string,
+  preset: PeriodPreset,
+): string {
+  const stepDays = weeks * 7
+  const known = dayjs(knownPeriodStart).startOf('day')
+  // 已知起点到今天的天数（dayjs 会处理夏令时）；向下取整后落在「今天所在期」的起点，
+  // 今天早于已知起点时 diff 为负，Math.floor 仍然向更早的一期取整，不会差一期。
+  const elapsedDays = dayjs(today).startOf('day').diff(known, 'day')
+  const currentOffset = Math.floor(elapsedDays / stepDays) * stepDays
+  const presetOffset = preset === 'previous' ? -stepDays : preset === 'next' ? stepDays : 0
+  return known.add(currentOffset + presetOffset, 'day').format('YYYY-MM-DD')
+}
+
 /** ISO 周号（第 41–42 周）。 */
 export function isoWeekNumber(date: string): number {
   const target = dayjs(date)

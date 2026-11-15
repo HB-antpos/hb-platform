@@ -22,7 +22,13 @@
       "week": "Week {{week}}",
       "weeksRange": "Weeks {{from}}–{{to}}",
       "previous": "Previous period",
-      "next": "Next period"
+      "next": "Next period",
+      "lastWeek": "Last week",
+      "thisWeek": "This week",
+      "nextWeek": "Next week",
+      "lastPeriod": "Last period",
+      "thisPeriod": "This period",
+      "nextPeriod": "Next period"
     },
     "employmentType": {
       "FullTime": "Full-time",

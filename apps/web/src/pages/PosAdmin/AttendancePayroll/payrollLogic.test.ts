@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   EMPLOYMENT_TYPE_TAG_COLORS,
   MANAGER_TAG_COLOR,
+  PERIOD_PRESETS,
   calculatePay,
   cellHoursText,
   countPublicHolidayRateMismatch,
@@ -14,6 +15,7 @@ import {
   minutesToHours,
   multiplyToCents,
   periodEnd,
+  presetPeriodStart,
   resolvePeriodStart,
   shiftPeriod,
   summarizeEmployeeHours,
@@ -94,6 +96,25 @@ assert.equal(resolvePeriodStart('2026-10-19', 2, '2026-10-05'), '2026-10-19')
 assert.equal(resolvePeriodStart('2026-10-04', 2, '2026-10-05'), '2026-09-21')
 assert.equal(shiftPeriod('2026-10-05', 2, 1), '2026-10-19')
 assert.equal(periodEnd('2026-10-05', 2), '2026-10-18')
+// 快捷定位（上周 / 本周 / 下周）：1 周，今天 11-16（周一）所在期 11-16
+assert.equal(presetPeriodStart('2026-11-16', 1, '2026-11-16', 'current'), '2026-11-16')
+assert.equal(presetPeriodStart('2026-11-16', 1, '2026-11-16', 'previous'), '2026-11-09')
+assert.equal(presetPeriodStart('2026-11-16', 1, '2026-11-16', 'next'), '2026-11-23')
+// 正在看的期与今天不在同一期：今天落在周日 11-22，已知起点在更早（10-26）或更晚（12-14）都应推出同一个「本周」
+assert.equal(presetPeriodStart('2026-10-26', 1, '2026-11-22', 'current'), '2026-11-16')
+assert.equal(presetPeriodStart('2026-12-14', 1, '2026-11-22', 'current'), '2026-11-16')
+assert.equal(presetPeriodStart('2026-12-14', 1, '2026-11-22', 'previous'), '2026-11-09')
+// 跨夏令时（悉尼 2026-10-04 切换）不能差一天：9-28 起每 7 天，10-12 仍是整周边界
+assert.equal(presetPeriodStart('2026-09-28', 1, '2026-10-12', 'current'), '2026-10-12')
+// 2 周：以后端对齐的 10-05 为基准，每 14 天一期；今天 11-16 / 11-29 都在 11-16 这一期，11-30 进入下一期
+assert.equal(presetPeriodStart('2026-10-05', 2, '2026-11-16', 'current'), '2026-11-16')
+assert.equal(presetPeriodStart('2026-10-05', 2, '2026-11-29', 'current'), '2026-11-16')
+assert.equal(presetPeriodStart('2026-10-05', 2, '2026-11-30', 'current'), '2026-11-30')
+assert.equal(presetPeriodStart('2026-10-05', 2, '2026-11-20', 'previous'), '2026-11-02')
+assert.equal(presetPeriodStart('2026-10-05', 2, '2026-11-20', 'next'), '2026-11-30')
+// 已知起点在今天之后、且今天早于基准的 2 周序列：2026-11-16 为已知起点，今天 10-04 → 本期 09-21
+assert.equal(presetPeriodStart('2026-11-16', 2, '2026-10-04', 'current'), '2026-09-21')
+assert.deepEqual([...PERIOD_PRESETS], ['previous', 'current', 'next'])
 assert.equal(isoWeekNumber('2026-10-05'), 41)
 assert.equal(isoWeekNumber('2026-10-18'), 42)
 
