@@ -209,3 +209,18 @@ export function parsePackedParam(value: string | string[] | null | undefined): {
   const match = /^(\d{1,6}):(\d{1,9})$/.exec(text ?? "");
   return match ? { cartons: Number(match[1]), pieces: Number(match[2]) } : null;
 }
+
+/** 扫到的空箱标内容：去掉首尾空白（扫码枪可能带换行），空串当没扫。 */
+export function normalizeCartonRef(text: string | null | undefined): string | null {
+  const value = (text ?? "").trim();
+  return value ? value : null;
+}
+
+export type AttachBlankFailure = "notFound" | "notBlank" | null;
+
+/** 扫空箱标关联失败的分类：404 CARTON_NOT_FOUND = 找不到 / 不属于总仓；409 CARTON_NOT_BLANK = 这张箱已经用过；其余走通用提示。 */
+export function classifyAttachBlankError(code: string | null): AttachBlankFailure {
+  if (code === "CARTON_NOT_FOUND") return "notFound";
+  if (code === "CARTON_NOT_BLANK") return "notBlank";
+  return null;
+}

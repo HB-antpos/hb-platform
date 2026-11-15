@@ -7,11 +7,11 @@ import { LabelPreview } from "../../packing/components/LabelPreview";
 import { KeyValueRow, PACK_COLORS, Segmented, packStyles } from "../../packing/components/pack-ui";
 import { usePackPreferences } from "../../packing/pack-preferences";
 import { buildCartonLabelPayload, cartonLabelPreview, parseWeightInput } from "../../packing/packing-logic";
-import { previewCartonOf } from "../pack-carton-logic";
+import { normalizeCartonRef, previewCartonOf } from "../pack-carton-logic";
 import { usePickerStore } from "../picker-store";
 import type { OrderCartonController } from "../use-order-carton";
 
-type NextChoice = "new" | "none";
+type NextChoice = "new" | "none" | "scan";
 
 /**
  * 封箱，换下一只：标签预览、可选重量、下一只箱怎么开（新建一只 / 先不开箱），
@@ -34,6 +34,8 @@ export function PickSealSheet({
   const toggleSmallLabel = usePackPreferences((state) => state.toggleSmallLabel);
   const [weightText, setWeightText] = useState("");
   const [next, setNext] = useState<NextChoice>("new");
+  // 「扫空箱标」：扫到（或手输）的箱号；封箱成功后关联到本订单并设为当前箱。
+  const [blankText, setBlankText] = useState("");
   const [error, setError] = useState("");
   // 标签预览的时间用打开弹层那一刻的本机时间，不随每次重绘跳动。
   const [previewAt, setPreviewAt] = useState(() => new Date());
@@ -43,6 +45,7 @@ export function PickSealSheet({
     if (!sealVisible) return;
     setWeightText("");
     setNext(defaultNext);
+    setBlankText("");
     setError("");
     setPreviewAt(new Date());
     // 只在打开时同步初值。
@@ -58,11 +61,19 @@ export function PickSealSheet({
   const weight = parseWeightInput(weightText);
   const weightInvalid = weight === "invalid";
   const empty = carton.pieceCount === 0;
+  // 选了「扫空箱标」但还没扫：不能封箱（封箱不可撤销，要先确定下一只箱）。
+  const blankRef = normalizeCartonRef(blankText);
+  const blankMissing = next === "scan" && !blankRef;
 
   const submit = async (print: boolean) => {
-    if (weight === "invalid" || sealing || empty) return;
+    if (weight === "invalid" || sealing || empty || blankMissing) return;
     setError("");
-    const outcome = await pack.sealCurrent({ weightKg: weight, print, createNext: next === "new" });
+    const outcome = await pack.sealCurrent({
+      weightKg: weight,
+      print,
+      createNext: next === "new",
+      attachBlankRef: next === "scan" ? blankRef : null,
+    });
     if (outcome.ok) {
       pack.setSealVisible(false);
       onSealed?.();
@@ -82,7 +93,7 @@ export function PickSealSheet({
         <View style={packStyles.buttons}>
           <Button
             mode="outlined"
-            disabled={sealing || weightInvalid || empty}
+            disabled={sealing || weightInvalid || empty || blankMissing}
             onPress={() => void submit(false)}
             style={[packStyles.button, packStyles.flexSmall]}
             contentStyle={packStyles.buttonContent}
@@ -93,7 +104,7 @@ export function PickSealSheet({
             mode="contained"
             icon="printer"
             loading={sealing}
-            disabled={sealing || weightInvalid || empty}
+            disabled={sealing || weightInvalid || empty || blankMissing}
             onPress={() => void submit(true)}
             style={[packStyles.button, packStyles.flex]}
             contentStyle={packStyles.buttonContent}
@@ -131,10 +142,29 @@ export function PickSealSheet({
             onChange={setNext}
             options={[
               { key: "new", label: t("carton.nextNew") },
+              { key: "scan", label: t("carton.nextScan") },
               { key: "none", label: t("carton.nextNone") },
             ]}
           />
           {next === "none" ? <Text style={packStyles.muted}>{t("carton.nextNoneHint")}</Text> : null}
+          {next === "scan" ? (
+            <>
+              {/* 弹层是独立窗口：扫码枪按键盘输入落在这个可见输入框里。 */}
+              <TextInput
+                accessibilityLabel={t("carton.scanBlankLabel")}
+                placeholder={t("carton.scanBlankPlaceholder")}
+                placeholderTextColor={PACK_COLORS.inkMuted}
+                value={blankText}
+                onChangeText={(value) => setBlankText(value.slice(0, 64))}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                autoFocus
+                returnKeyType="done"
+                style={packStyles.textInput}
+              />
+              <Text style={packStyles.muted}>{t("carton.nextScanHint")}</Text>
+            </>
+          ) : null}
         </View>
         {empty ? <Text style={packStyles.errorText}>{t("carton.errors.sealEmpty")}</Text> : null}
         {weightInvalid ? <Text style={packStyles.errorText}>{t("carton.weightInvalid")}</Text> : null}

@@ -47,6 +47,13 @@ function summary(overrides: Partial<PackCartonSummary> & Pick<PackCartonSummary,
     receivedByName: null,
     receivedAtUtc: null,
     updatedAtUtc: "x",
+    isBlank: false,
+    batchGuid: null,
+    batchSeq: null,
+    batchCount: null,
+    activatedAtUtc: null,
+    labelPrintCount: 0,
+    labelPrintedAtUtc: null,
     ...overrides,
   };
 }

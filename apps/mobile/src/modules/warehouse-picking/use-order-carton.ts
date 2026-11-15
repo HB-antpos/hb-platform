@@ -6,15 +6,17 @@ import { usePackPreferences } from "../packing/pack-preferences";
 import { printCartonLabel } from "../packing/pack-print";
 import type { PackCartonDetail } from "../packing/types";
 import { readPickingError } from "./api-normalization";
-import { createOrderCarton, fetchPackProgress, sealOrderCarton } from "./pack-api";
+import { attachBlankCarton, createOrderCarton, fetchPackProgress, sealOrderCarton } from "./pack-api";
 import {
   applyCartonDetail,
   applyCartonSync,
   cartonFromDetail,
   cartonFromProgress,
   cartonPiecesOf,
+  classifyAttachBlankError,
   classifyCartonWriteError,
   isPackApiMissing,
+  normalizeCartonRef,
   resumableCarton,
   summarizeCartons,
 } from "./pack-carton-logic";
@@ -29,6 +31,11 @@ export interface SealInput {
   print: boolean;
   /** 封箱成功后立即新建下一只箱并设为当前箱；false = 先不开箱（回到不装箱拣货）。 */
   createNext: boolean;
+  /**
+   * 封箱成功后把这张扫到的空箱标（箱号或 GUID）关联到本订单并设为当前箱；与 createNext 二选一。
+   * 关联失败（找不到 / 已经用过等）不回滚封箱，只在提示里说清楚，当前箱为空。
+   */
+  attachBlankRef?: string | null;
 }
 
 export type SealOutcome = { ok: true } | { ok: false; message: string };
@@ -198,6 +205,26 @@ export function useOrderCarton({
           }
         } else {
           messages.push(latestRef.current.t("carton.sealedOnly", { cartonNo: sealed.cartonNo }));
+        }
+        const blankRef = normalizeCartonRef(input.attachBlankRef);
+        if (blankRef && !input.createNext) {
+          try {
+            const attached = await attachBlankCarton(orderGuid, blankRef);
+            setCarton(cartonFromDetail(attached));
+            messages.push(latestRef.current.t("carton.blankAttached", { cartonNo: attached.cartonNo }));
+          } catch (error) {
+            if (!latestRef.current.onAuthError(error)) {
+              const failure = classifyAttachBlankError(readPickingError(error).code);
+              const { t: translate } = latestRef.current;
+              messages.push(
+                failure === "notFound"
+                  ? translate("carton.blankNotFound")
+                  : failure === "notBlank"
+                    ? translate("carton.blankUsed")
+                    : translate("carton.blankFailed", { detail: errorText(error) }),
+              );
+            }
+          }
         }
         if (input.createNext) {
           try {

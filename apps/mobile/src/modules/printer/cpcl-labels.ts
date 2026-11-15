@@ -574,6 +574,8 @@ export interface PackLabelSpec {
   sheetText: string;
   /** 托盘标签加整圈粗黑框。 */
   framed: boolean;
+  /** 空箱标没有去向时，TO 后面画一条横线留给手写（此时 destinationName 为空）。 */
+  toRule: boolean;
 }
 
 // CPCL 固定字体：font 0 为 8×9 点，font 7 为 12×24 点，SETMAG 按倍数放大；非 ASCII 保守按双宽。
@@ -653,6 +655,10 @@ function buildPackLabelCommand(spec: PackLabelSpec, printType?: string | null) {
     destinationScaleX,
     2
   );
+  if (spec.toRule) {
+    // LINE x0 y0 x1 y1 宽度：画在 TO 同一行的底部，不压到二维码（右端留 12 点）。
+    lines.push(`LINE ${destinationX} ${toY + 40} ${qrX - 12} ${toY + 40} 2`);
+  }
 
   // 第三行：编号前 8 位小字 + 流水尾号大字 + 数量。
   const codeY = 86;
@@ -744,6 +750,32 @@ export function buildPackCartonLabelSpec(payload: PackCartonLabelPrintPayload): 
     operatorName: packUpper(payload.operatorName, 20),
     sheetText: "",
     framed: false,
+    toRule: false,
+  };
+}
+
+/** 「LABEL 01 / 20」：序号按总张数的位数补零（至少两位），贴标签时一眼看出缺了哪张。 */
+export function packBlankSheetText(index: number, total: number) {
+  const safeTotal = Math.max(1, Math.trunc(total));
+  const width = Math.max(2, String(safeTotal).length);
+  const pad = (value: number) => String(Math.max(0, Math.trunc(value))).padStart(width, "0");
+  return `LABEL ${pad(index)} / ${pad(safeTotal)}`;
+}
+
+/**
+ * 空箱标（批量预打印）的版面内容：条码 / 二维码仍是箱号；不印 SKU / PCS；没有去向时 TO 后留横线；
+ * 右下第一行印 LABEL i / n，第二行是日期时间与操作人；有去向则照印去向（FROM 行的 VIA / DIRECT 规则不变）。
+ */
+export function buildPackBlankCartonLabelSpec(payload: PackCartonLabelPrintPayload): PackLabelSpec {
+  const base = buildPackCartonLabelSpec(payload);
+  const blank = payload.blankLabel;
+  const unassigned = !PACK_DESTINATION_SHIPPABLE.includes(payload.destinationType) && payload.destinationType !== PACK_DESTINATION_LOCAL;
+  return {
+    ...base,
+    destinationName: unassigned ? "" : base.destinationName,
+    statLine: "",
+    referenceLine: blank && blank.index >= 1 && blank.total >= 1 ? packBlankSheetText(blank.index, blank.total) : "",
+    toRule: unassigned,
   };
 }
 
@@ -765,12 +797,14 @@ export function buildPackPalletLabelSpec(payload: PackPalletLabelPrintPayload): 
     operatorName: packUpper(payload.operatorName, 20),
     sheetText: sheetTotal >= 1 && sheetIndex >= 1 && sheetIndex <= sheetTotal ? `${sheetIndex}/${sheetTotal}` : "",
     framed: true,
+    toRule: false,
   };
 }
 
 /** 箱标签：左侧 BOX 黑条，FROM / TO / 编号 + N SKU - M PCS，右上二维码、底部 Code128（内容都是完整箱号）。 */
 export function buildPackCartonLabelCommand(payload: PackCartonLabelPrintPayload, printType?: string | null) {
-  return buildPackLabelCommand(buildPackCartonLabelSpec(payload), printType);
+  // 带 blankLabel 的是预打印空箱标，其余照旧（内容标）。
+  return buildPackLabelCommand(payload.blankLabel ? buildPackBlankCartonLabelSpec(payload) : buildPackCartonLabelSpec(payload), printType);
 }
 
 /** 托盘标签：PLT 黑条加整圈粗黑框；FROM 行按去向带 VIA / DIRECT，右下运单号（CN）；带 1/2 张数。 */

@@ -20,6 +20,15 @@ export async function createOrderCarton(orderGuid: string) {
   return normalizeCartonDetail(response.data);
 }
 
+/**
+ * 扫空箱标换下一只箱：把总仓里还没启用的空箱标（预打印的箱号标签）关联到本订单并启用，去向默认订货单的分店。
+ * cartonRef 是扫到的箱号或箱 GUID；404 CARTON_NOT_FOUND（找不到 / 不属于总仓）、409 CARTON_NOT_BLANK（已经用过）。
+ */
+export async function attachBlankCarton(orderGuid: string, cartonRef: string) {
+  const response = await apiClient.post(`${order(orderGuid)}/cartons/attach`, { cartonRef }, pickerConfig());
+  return normalizeCartonDetail(response.data);
+}
+
 /** 封箱；返回箱详情，客户端据此打印标签。重复封箱是幂等的。这一版不传托盘，箱封好后在「扫码打包」里组托盘。 */
 export async function sealOrderCarton(orderGuid: string, cartonGuid: string, weightKg: number | null) {
   const response = await apiClient.post(

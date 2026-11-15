@@ -1,11 +1,15 @@
 import { z } from "zod";
 import { unwrapApiEnvelope } from "../../shared/api/api-envelope";
 import type {
+  PackBatchCreateResult,
+  PackBatchDetail,
   PackCarrier,
+  PackCartonBatch,
   PackCartonDetail,
   PackCartonList,
   PackCartonSummary,
   PackIncoming,
+  PackLabelsPrintedResult,
   PackLocateResult,
   PackLocation,
   PackOrderReceive,
@@ -16,6 +20,7 @@ import type {
   PackReceiveLookup,
   PackResolveResult,
   PackScope,
+  PackVoidBlankResult,
 } from "./types";
 
 const number = z.number().finite();
@@ -64,6 +69,14 @@ const cartonSummaryShape = {
   receivedByName: nullableText,
   receivedAtUtc: nullableText,
   updatedAtUtc: text,
+  // 批量箱标字段：旧后端没有，按「不是空箱标、没打印过」处理。
+  isBlank: z.boolean().nullish().transform((value) => value ?? false),
+  batchGuid: nullableText,
+  batchSeq: nullableNumber,
+  batchCount: nullableNumber,
+  activatedAtUtc: nullableText,
+  labelPrintCount: count,
+  labelPrintedAtUtc: nullableText,
 };
 const cartonSummarySchema = z.object(cartonSummaryShape);
 
@@ -102,6 +115,8 @@ const cartonListSchema = z.object({
   storedCount: count,
   outgoingCount: count,
   incomingCount: count,
+  // 缺失（旧后端）与 0 要区分：缺失时批量箱标入口隐藏。
+  blankCount: nullableNumber,
 });
 
 const palletSummaryShape = {
@@ -292,6 +307,41 @@ const orderReceiveSchema = z.object({
   actualInTransitCartonCount: nullableNumber,
 });
 
+const batchSchema = z.object({
+  batchGuid: text.min(1),
+  count,
+  firstCartonNo: emptyText,
+  lastCartonNo: emptyText,
+  createdAtUtc: emptyText,
+  createdByName: emptyText,
+  printedCount: count,
+  unactivatedCount: count,
+  voidedCount: count,
+});
+const cartonSummaries = z.array(cartonSummarySchema).nullish().transform((value) => value ?? []);
+const batchCreateSchema = z.object({
+  batchGuid: text.min(1),
+  duplicate: z.boolean().nullish().transform((value) => value ?? false),
+  count,
+  firstCartonNo: emptyText,
+  lastCartonNo: emptyText,
+  createdAtUtc: emptyText,
+  cartons: cartonSummaries,
+});
+const batchListSchema = z.object({
+  batches: z.array(batchSchema).nullish().transform((value) => value ?? []),
+});
+const batchDetailSchema = z.object({ batch: batchSchema, cartons: cartonSummaries });
+const skippedSchema = z
+  .array(z.object({ cartonGuid: text, reason: emptyText }))
+  .nullish()
+  .transform((value) => value ?? []);
+const labelsPrintedSchema = z.object({ updated: count, skipped: skippedSchema });
+const voidBlankSchema = z.object({
+  voided: z.array(text).nullish().transform((value) => value ?? []),
+  skipped: skippedSchema,
+});
+
 function parse<T>(schema: z.ZodType<T>, payload: unknown): T {
   const result = schema.safeParse(unwrapApiEnvelope(payload));
   if (!result.success) {
@@ -314,6 +364,11 @@ export const normalizeLocation = (payload: unknown): PackLocation => parse(locat
 export const normalizeIncoming = (payload: unknown): PackIncoming => parse(incomingSchema, payload);
 export const normalizeReceiveLookup = (payload: unknown): PackReceiveLookup => parse(receiveLookupSchema, payload);
 export const normalizeLocate = (payload: unknown): PackLocateResult => parse(locateSchema, payload);
+export const normalizeBatchCreate = (payload: unknown): PackBatchCreateResult => parse(batchCreateSchema, payload);
+export const normalizeBatchList = (payload: unknown): PackCartonBatch[] => parse(batchListSchema, payload).batches;
+export const normalizeBatchDetail = (payload: unknown): PackBatchDetail => parse(batchDetailSchema, payload);
+export const normalizeLabelsPrinted = (payload: unknown): PackLabelsPrintedResult => parse(labelsPrintedSchema, payload);
+export const normalizeVoidBlank = (payload: unknown): PackVoidBlankResult => parse(voidBlankSchema, payload);
 export const normalizeOrderReceive = (payload: unknown): PackOrderReceive => parse(orderReceiveSchema, payload);
 
 export interface PackingErrorInfo {
@@ -326,6 +381,8 @@ export interface PackingErrorInfo {
   blockedCarton: PackCartonSummary | null;
   /** 整托签收数量对不上（COUNT_MISMATCH）时，托盘上实际还在路上的箱数。 */
   actualInTransitCartonCount: number | null;
+  /** 409 BLANK_LIMIT_EXCEEDED：本地点已有的未启用空箱标张数与上限。 */
+  blankLimit: { existing: number; limit: number } | null;
 }
 
 /** 从 axios 错误里取后端 errorCode，以及冲突时附带的候选商品 / 被拦下的箱。 */
@@ -338,6 +395,8 @@ export function readPackingError(error: unknown): PackingErrorInfo {
     candidates?: unknown;
     blockedCarton?: unknown;
     actualInTransitCartonCount?: unknown;
+    existing?: unknown;
+    limit?: unknown;
   } | null;
   const candidates = z.array(candidateSchema).safeParse(data?.candidates);
   const blocked = cartonSummarySchema.safeParse(data?.blockedCarton);
@@ -349,5 +408,9 @@ export function readPackingError(error: unknown): PackingErrorInfo {
     blockedCarton: blocked.success ? blocked.data : null,
     actualInTransitCartonCount:
       typeof data?.actualInTransitCartonCount === "number" ? data.actualInTransitCartonCount : null,
+    blankLimit:
+      bodyCode === "BLANK_LIMIT_EXCEEDED" && typeof data?.existing === "number" && typeof data?.limit === "number"
+        ? { existing: data.existing, limit: data.limit }
+        : null,
   };
 }

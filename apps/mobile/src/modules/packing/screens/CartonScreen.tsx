@@ -65,7 +65,7 @@ const cartonKey = (cartonGuid: string) => ["packing", "carton", cartonGuid] as c
  * 箱页：装箱中显示扫码装箱，已封箱显示封箱完成与下一步（放位置 / 放上托盘 / 发出）；
  * 已发出、发给本店在路上、对方已签收的箱只读。箱号不变，各状态共用一个路由。
  */
-export function CartonScreen({ cartonGuid }: { cartonGuid: string }) {
+export function CartonScreen({ cartonGuid, justActivated = false }: { cartonGuid: string; justActivated?: boolean }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
   const focused = useIsFocused();
@@ -183,6 +183,7 @@ export function CartonScreen({ cartonGuid }: { cartonGuid: string }) {
       ) : packing ? (
         <CartonPackingView
           carton={carton}
+          justActivated={justActivated}
           focused={focused && !destinationVisible}
           sealVisible={sealVisible}
           onSealVisibleChange={setSealVisible}
@@ -255,6 +256,7 @@ interface AmbiguousScan {
  */
 function CartonPackingView({
   carton,
+  justActivated,
   focused,
   sealVisible,
   onSealVisibleChange,
@@ -265,6 +267,8 @@ function CartonPackingView({
   onLeave,
 }: {
   carton: PackCartonDetail;
+  /** 刚扫空箱标启用后进入：顶部提示「已启用这张空箱标」。 */
+  justActivated: boolean;
   focused: boolean;
   sealVisible: boolean;
   onSealVisibleChange: (visible: boolean) => void;
@@ -433,7 +437,7 @@ function CartonPackingView({
     setSealError("");
     try {
       const sealedCarton = await sealCarton(carton.cartonGuid, input.weightKg);
-      let notice: string | null = t("seal.notPrinted");
+      let notice: string | null = carton.isBlank ? t("seal.blank.done") : t("seal.notPrinted");
       if (input.print) {
         try {
           await printCartonLabel(sealedCarton, input.copies, smallLabel);
@@ -469,6 +473,12 @@ function CartonPackingView({
 
   return (
     <>
+      {justActivated && carton.isBlank ? (
+        <View accessibilityLiveRegion="polite" style={styles.activated}>
+          <MaterialCommunityIcons name="check-circle" size={18} color={PACK_COLORS.success} />
+          <Text style={styles.activatedText}>{t("blank.activatedNotice")}</Text>
+        </View>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`${t("fields.destination")} ${scopeText}`}
@@ -547,6 +557,13 @@ function CartonPackingView({
             ))}
           </View>
         ) : null}
+        {carton.isBlank ? (
+          // 预打印的箱：提醒箱上已经有标签，封箱默认不再打印。
+          <View style={styles.preprinted}>
+            <MaterialCommunityIcons name="tag-outline" size={18} color={PACK_COLORS.action} />
+            <Text style={styles.preprintedText}>{t("blank.preprintedHint")}</Text>
+          </View>
+        ) : null}
         <Pressable accessibilityRole="button" onPress={confirmVoid} style={styles.voidLink}>
           <Text style={styles.voidText}>{t("pack.void")}</Text>
         </Pressable>
@@ -563,22 +580,48 @@ function CartonPackingView({
           <Button mode="outlined" onPress={onLeave} style={[packStyles.button, packStyles.flexSmall]} contentStyle={packStyles.buttonContent}>
             {t("pack.leave")}
           </Button>
-          <Button
-            mode="contained"
-            icon="printer"
-            disabled={carton.items.length === 0 || pending > 0}
-            onPress={() => onSealVisibleChange(true)}
-            style={[packStyles.button, packStyles.flex]}
-            contentStyle={packStyles.buttonContent}
-          >
-            {t("pack.seal")}
-          </Button>
+          {carton.isBlank ? (
+            <>
+              <Button
+                mode="outlined"
+                icon="printer"
+                disabled={carton.items.length === 0 || pending > 0}
+                onPress={() => onSealVisibleChange(true)}
+                style={[packStyles.button, packStyles.flex]}
+                contentStyle={packStyles.buttonContent}
+              >
+                {t("blank.sealAndReprint")}
+              </Button>
+              <Button
+                mode="contained"
+                icon="lock-outline"
+                disabled={carton.items.length === 0 || pending > 0}
+                onPress={() => onSealVisibleChange(true)}
+                style={[packStyles.button, packStyles.flex]}
+                contentStyle={packStyles.buttonContent}
+              >
+                {t("blank.seal")}
+              </Button>
+            </>
+          ) : (
+            <Button
+              mode="contained"
+              icon="printer"
+              disabled={carton.items.length === 0 || pending > 0}
+              onPress={() => onSealVisibleChange(true)}
+              style={[packStyles.button, packStyles.flex]}
+              contentStyle={packStyles.buttonContent}
+            >
+              {t("pack.seal")}
+            </Button>
+          )}
         </View>
       </View>
 
       <SealSheet
         visible={sealVisible}
         kind="carton"
+        preprinted={carton.isBlank}
         preview={() => cartonLabelPreview(buildCartonLabelPayload(carton, new Date()))}
         destinationText={destinationText(carton.destination, t, carton.ownerCode)}
         initialWeightKg={carton.weightKg}
@@ -770,6 +813,21 @@ function ItemRow({
 }
 
 const styles = StyleSheet.create({
+  activated: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 12,
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: PACK_COLORS.successBorder,
+    backgroundColor: PACK_COLORS.successBg,
+  },
+  activatedText: { flex: 1, fontSize: 14, lineHeight: 20, fontWeight: "600", color: PACK_COLORS.success },
+  preprinted: { flexDirection: "row", alignItems: "flex-start", gap: 8, paddingVertical: 4 },
+  preprintedText: { flex: 1, fontSize: 13, lineHeight: 19, color: PACK_COLORS.textSecondary },
   scope: {
     minHeight: 44,
     flexDirection: "row",

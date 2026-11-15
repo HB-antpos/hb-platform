@@ -111,6 +111,11 @@ export interface PackCartonLabelPrintPayload {
   orderNo?: string | null;
   printedAt: string;
   operatorName?: string | null;
+  /**
+   * 预打印的空箱标：带这个字段就按空箱标版式——不印 SKU / PCS，没有去向时 TO 后画一条横线，
+   * 右下印 LABEL i / n；条码和二维码内容仍是完整箱号，与内容标完全一致。
+   */
+  blankLabel?: { index: number; total: number } | null;
 }
 
 /** 打包托盘标签；同一托盘打多张时带 sheetIndex / sheetTotal（1/2）。 */

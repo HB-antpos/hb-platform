@@ -28,16 +28,23 @@ export function LabelPreview({ content, accessibilityLabel }: { content: LabelPr
             </Text>
             <View style={styles.toRow}>
               <Text style={styles.toCaption}>TO</Text>
-              <Text numberOfLines={1} style={[styles.to, longDestination ? styles.toLong : null]}>
-                {content.destinationName}
-              </Text>
+              {content.toRule ? (
+                // 空箱标没有去向：TO 后面留一条横线，贴标签后手写。
+                <View style={styles.toRule} />
+              ) : (
+                <Text numberOfLines={1} style={[styles.to, longDestination ? styles.toLong : null]}>
+                  {content.destinationName}
+                </Text>
+              )}
             </View>
             <View style={styles.codeRow}>
               {prefix ? <Text style={styles.codePrefix}>{prefix}</Text> : null}
               <Text style={styles.codeTail}>{tail}</Text>
-              <Text numberOfLines={1} style={styles.stat}>
-                {content.statLine}
-              </Text>
+              {content.statLine ? (
+                <Text numberOfLines={1} style={styles.stat}>
+                  {content.statLine}
+                </Text>
+              ) : null}
             </View>
           </View>
           <QRCode value={content.number || "-"} size={Math.round(105 * SCALE)} backgroundColor="#FFFFFF" color="#000000" />
@@ -89,6 +96,7 @@ const styles = StyleSheet.create({
   toCaption: { fontSize: 7, fontWeight: "800", color: "#000000" },
   to: { flexShrink: 1, fontSize: 20, lineHeight: 24, fontWeight: "900", color: "#000000" },
   toLong: { fontSize: 14 },
+  toRule: { flex: 1, height: 1, backgroundColor: "#000000", alignSelf: "flex-end", marginBottom: 4 },
   codeRow: { flexDirection: "row", alignItems: "baseline", gap: 3 },
   codePrefix: { fontFamily: MONO_FONT, fontSize: 10, fontWeight: "700", color: "#000000" },
   codeTail: { fontFamily: MONO_FONT, fontSize: 20, lineHeight: 24, fontWeight: "800", color: "#000000" },

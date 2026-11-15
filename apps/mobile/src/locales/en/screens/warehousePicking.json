@@ -351,7 +351,15 @@
       "unavailable": "This carton is sealed, shipped or gone, so nothing more can be packed. Tap Start carton for a new one.",
       "qtyInsufficient": "This carton only has {{count}} of that product. Switch to the carton that holds it, then reduce.",
       "sealEmpty": "An empty carton can't be sealed — pack something first"
-    }
+    },
+    "nextScan": "Scan blank label",
+    "nextScanHint": "Scan a pre-printed blank label from the warehouse. After sealing, that carton is linked to this order and becomes the current carton.",
+    "scanBlankLabel": "Blank label carton number",
+    "scanBlankPlaceholder": "Scan blank label / enter carton number",
+    "blankAttached": "Blank label {{cartonNo}} is now the current carton",
+    "blankNotFound": "That blank label was not found or does not belong to the warehouse. Scan again, or tap Start carton for a new one.",
+    "blankUsed": "That carton has already been used, so it is not a blank label. Try another, or tap Start carton for a new one.",
+    "blankFailed": "Could not link the blank label: {{detail}}. Tap Start carton for a new one."
   },
   "review": {
     "title": "Check before submitting",
