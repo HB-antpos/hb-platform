@@ -35,4 +35,16 @@ assert.match(createScanner, /scanBarcodeFromImage\(picked\.uri, localImageScanne
 assert.match(createScanner, /if \(pickingImageRef\.current\) return;/, "选图期间必须拦住实时相机帧");
 assert.match(createScanner, /consumed\.current = true;\s*onScan\(barcode\);/, "相册结果必须与相机共用 consumed 锁");
 
+// 新增多码弹层：扫码页必须嵌在同一个 Modal 里切换，不能再另开一个原生 Modal。
+// iOS 在一个原生 Modal 还在收起时再弹另一个会被丢弃：相册选图返回后新增弹层看不见，
+// 页面却因 codeAddModal 仍为真被锁住、搜索按钮一直转圈（真机上出现过）。
+const codeAddSheet = read("src/components/product-maintenance/CodeAddSheet.tsx");
+assert.match(createScanner, /export function BarcodeScanPanel\(/, "扫码内容必须是可嵌入的面板");
+assert.match(codeAddSheet, /scanning \? <BarcodeScanPanel onScan=\{onScanned\} \/>/, "新增弹层必须把扫码面板嵌在自己的 Modal 里");
+assert.match(codeAddSheet, /onBack=\{scanning \? onScanBack : undefined\}/, "扫码页必须有返回键回到表单");
+const productQuery = read("app/(shell)/product-query.tsx");
+assert.match(productQuery, /<CodeAddSheet\s+visible=\{Boolean\(codeAddModal\)\}/, "新增弹层的可见性只由 codeAddModal 决定，不能因扫码页被卸载");
+assert.doesNotMatch(productQuery, /codeAddModal && codeAddScannerVisible \?/, "不能再为新增多码另挂一个独立的扫码 Modal");
+assert.match(productQuery, /if \(!codeAddModal\) \{\s*setCodeAddScannerVisible\(false\);/, "新增弹层关闭时必须复位扫码页状态");
+
 console.log("camera-scan-library-source.test.ts: ok");
