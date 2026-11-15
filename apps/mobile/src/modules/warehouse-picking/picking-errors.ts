@@ -33,6 +33,7 @@ const KNOWN_ERROR_CODES = new Set([
   "DESTINATION_INVALID",
   "PACKING_OPEN_CARTONS",
   "PACKING_NOT_RECONCILED",
+  "CARTON_NOT_BLANK",
 ]);
 
 /** 拣货人需要重新确认的错误：凭证失效或员工已不能拣货。 */

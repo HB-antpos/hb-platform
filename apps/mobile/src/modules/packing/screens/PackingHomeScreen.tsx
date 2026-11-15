@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 import { ActivityIndicator, Button, Snackbar, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { PickCameraSheet } from "@/modules/warehouse-picking/components/PickCameraSheet";
@@ -13,31 +13,46 @@ import { usePrinterStore } from "@/modules/printer/state";
 import { useHidBarcodeScanner } from "@/modules/scanner/use-hid-barcode-scanner";
 import { playScanFeedbackSound, preloadScanFeedbackSounds } from "@/modules/scanner/scan-sound";
 import { useAuthStore } from "@/store/auth-store";
+import { clauseSeparator } from "@/shared/i18n/punctuation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import {
+  activateCarton,
   createCarton,
   createPallet,
+  fetchCarton,
   fetchCartons,
   fetchIncoming,
   fetchPallets,
   lookupForReceive,
+  reportLabelsPrinted,
   resolvePackCode,
   updatePalletHeader,
+  voidBlankCartons,
 } from "../api";
 import { readPackingError } from "../api-normalization";
-import { packingErrorMessage } from "../packing-errors";
+import {
+  runLabelQueue,
+  selectedCartons,
+  splitSelection,
+  summarizeVoidResult,
+  toggleSelectAll,
+  toggleSelected,
+} from "../batch-logic";
+import { packingErrorMessage, printErrorDetail } from "../packing-errors";
 import {
   cartonDisplayState,
   destinationLabel,
   emptyDestinationForm,
   formatLocalTime,
+  isUnusedBlank,
   palletDisplayState,
   sameCode,
   toDestinationRequest,
   type CartonDisplayState,
   type PalletDisplayState,
 } from "../packing-logic";
-import { PACKING_LOCATE, cartonRoute, palletRoute, receiveRoute } from "../pack-print";
+import { usePackPreferences } from "../pack-preferences";
+import { PACKING_BATCH_LIST, PACKING_LOCATE, cartonRoute, palletRoute, printCartonLabel, receiveRoute } from "../pack-print";
 import { usePackScope } from "../use-pack-scope";
 import {
   WAREHOUSE_OWNER_CODE,
@@ -62,11 +77,13 @@ type HomeTab = "cartons" | "pallets" | "incoming";
 export function PackingHomeScreen() {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  const queryClient = useQueryClient();
   const focused = useIsFocused();
   const user = useAuthStore((state) => state.user);
   const sessionKind = useAuthStore((state) => state.sessionKind);
   const review = useAuthStore((state) => state.iosReviewOfflineGuardActive);
   const printerStatus = usePrinterStore((state) => state.status);
+  const smallLabel = usePackPreferences((state) => state.smallLabel);
   const [tab, setTab] = useState<HomeTab>("cartons");
   const [cartonFilter, setCartonFilter] = useState<CartonFilter>("all");
   const [palletFilter, setPalletFilter] = useState<PalletFilter>("all");
@@ -80,6 +97,11 @@ export function PackingHomeScreen() {
   const [saving, setSaving] = useState(false);
   const [sheetError, setSheetError] = useState("");
   const [snackbar, setSnackbar] = useState("");
+  // 多选（长按进入）：补打标签、作废空箱标。
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [printProgress, setPrintProgress] = useState<{ done: number; total: number } | null>(null);
+  const [voiding, setVoiding] = useState(false);
   const resolvingRef = useRef(false);
 
   const allowed = !(review || sessionKind === "iosReview") && Boolean(user?.userGUID || user?.userGuid);
@@ -131,13 +153,37 @@ export function PackingHomeScreen() {
         const resolved = await resolvePackCode(code);
         // 发给本店、还在路上的托盘 / 箱（含托盘上的箱，托盘标签丢了的场景）直接进签收页；其余打开详情。
         const lookup = await lookupForReceive(code).catch(() => null);
-        playScanFeedbackSound("found");
         setKeyword("");
         if (lookup?.canReceive) {
+          playScanFeedbackSound("found");
           router.push(receiveRoute(code));
-        } else {
-          router.push(resolved.kind === "carton" ? cartonRoute(resolved.guid) : palletRoute(resolved.guid));
+          return;
         }
+        if (resolved.kind === "carton") {
+          // 扫到还没启用的空箱标：先启用，再进入装箱页（顶部提示「已启用」）。
+          const detail =
+            lookup?.carton && lookup.carton.cartonGuid.toLowerCase() === resolved.guid.toLowerCase()
+              ? lookup.carton
+              : await fetchCarton(resolved.guid).catch(() => null);
+          if (detail && isUnusedBlank(detail)) {
+            try {
+              await activateCarton(resolved.guid);
+              playScanFeedbackSound("found");
+              void queryClient.invalidateQueries({ queryKey: ["packing", "cartons"] });
+              router.push(cartonRoute(resolved.guid, { activated: true }));
+              return;
+            } catch (error) {
+              // 已经被别人封箱 / 启用不了：照常打开这只箱，由箱页给出状态；其他错误提示后留在首页。
+              if (readPackingError(error).code !== "CARTON_NOT_PACKING") {
+                playScanFeedbackSound("error");
+                setSnackbar(packingErrorMessage(error, t, language));
+                return;
+              }
+            }
+          }
+        }
+        playScanFeedbackSound("found");
+        router.push(resolved.kind === "carton" ? cartonRoute(resolved.guid) : palletRoute(resolved.guid));
       } catch (error) {
         playScanFeedbackSound("not_found");
         // 404：不是箱号也不是托盘号（多半是扫到了商品码）。
@@ -151,11 +197,11 @@ export function PackingHomeScreen() {
         setResolving(false);
       }
     },
-    [language, router, t],
+    [language, queryClient, router, t],
   );
 
   const hid = useHidBarcodeScanner({
-    enabled: focused && ready && !inputFocused && !cameraVisible && !resolving && !creating,
+    enabled: focused && ready && !inputFocused && !cameraVisible && !resolving && !creating && !selectMode,
     onScan: handleScan,
   });
 
@@ -195,6 +241,89 @@ export function PackingHomeScreen() {
     }
   };
 
+  // ---- 多选：补打标签 / 作废空箱标 ----
+  const listItems = cartonsQuery.data?.items;
+  const chosen = selectedCartons(listItems ?? [], selected);
+  const operatorName = user?.fullName?.trim() || user?.username || null;
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelected(new Set());
+  };
+  const startSelect = (carton: PackCartonSummary) => {
+    if (printProgress || voiding) return;
+    setSelectMode(true);
+    setSelected((current) => new Set(current).add(carton.cartonGuid));
+  };
+  const refreshCartonLists = () => void queryClient.invalidateQueries({ queryKey: ["packing", "cartons"] });
+
+  /** 对选中的箱逐张打印（空箱标用空箱标样式，其余用内容标），每成功一张就上报并从选中里去掉。 */
+  const printSelected = async () => {
+    if (chosen.length === 0 || printProgress || printerStatus !== "connected") return;
+    setPrintProgress({ done: 0, total: chosen.length });
+    let done = 0;
+    const result = await runLabelQueue(chosen, {
+      print: (carton) => printCartonLabel(carton, 1, smallLabel, operatorName),
+      report: (guids) => reportLabelsPrinted(guids),
+      onPrinted: (carton) => {
+        done += 1;
+        setPrintProgress({ done, total: chosen.length });
+        // 打好的从选中里去掉：失败后再点打印只补剩下的。
+        setSelected((current) => {
+          const next = new Set(current);
+          next.delete(carton.cartonGuid);
+          return next;
+        });
+      },
+    });
+    setPrintProgress(null);
+    refreshCartonLists();
+    const parts: string[] = [];
+    if (result.failed) {
+      parts.push(
+        t("select.printStopped", {
+          done: result.printed.length,
+          left: chosen.length - result.printed.length,
+          detail: printErrorDetail(result.failed.error),
+        }),
+      );
+    } else {
+      parts.push(t("select.printDone", { count: result.printed.length }));
+    }
+    if (result.unreported.length > 0) parts.push(t("select.unreported", { count: result.unreported.length }));
+    setSnackbar(parts.join(clauseSeparator(language)));
+    if (!result.failed && result.unreported.length === 0) exitSelect();
+  };
+
+  const confirmVoid = () => {
+    if (voiding || printProgress) return;
+    const { blanks } = splitSelection(chosen);
+    if (blanks.length === 0) {
+      setSnackbar(t("select.voidNone"));
+      return;
+    }
+    Alert.alert(t("select.voidTitle", { count: blanks.length }), t("select.voidBody"), [
+      { text: t("actions.cancel"), style: "cancel" },
+      { text: t("select.void"), style: "destructive", onPress: () => void voidSelected(chosen.length, blanks) },
+    ]);
+  };
+  const voidSelected = async (selectedCount: number, blanks: PackCartonSummary[]) => {
+    setVoiding(true);
+    try {
+      const result = await voidBlankCartons(blanks.map((carton) => carton.cartonGuid));
+      const summary = summarizeVoidResult(selectedCount, blanks.length, result);
+      const parts = [t("select.voided", { count: summary.voided })];
+      if (summary.notBlank > 0) parts.push(t("select.voidSkippedNotBlank", { count: summary.notBlank }));
+      if (summary.otherSkipped > 0) parts.push(t("select.voidSkippedOther", { count: summary.otherSkipped }));
+      setSnackbar(parts.join(clauseSeparator(language)));
+      refreshCartonLists();
+      exitSelect();
+    } catch (error) {
+      setSnackbar(t("select.voidFailed", { detail: packingErrorMessage(error, t, language) }));
+    } finally {
+      setVoiding(false);
+    }
+  };
+
   if (!allowed || (!scope.isLoading && !owner)) {
     const message = review || sessionKind === "iosReview"
       ? t("messages.reviewUnavailable")
@@ -230,6 +359,8 @@ export function PackingHomeScreen() {
   const printerConnected = printerStatus === "connected";
   const activeQuery = tab === "cartons" ? cartonsQuery : tab === "pallets" ? palletsQuery : incomingQuery;
   const isWarehouse = owner.isWarehouse || sameCode(owner.code, WAREHOUSE_OWNER_CODE);
+  const blankSupported = cartonCounts?.blankCount != null;
+  const blankCount = cartonCounts?.blankCount ?? 0;
 
   const header = (
     <View style={styles.headerBlock}>
@@ -291,21 +422,53 @@ export function PackingHomeScreen() {
           {t("home.locate")}
         </Button>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={t("home.receive")}
-        onPress={() => router.push(receiveRoute())}
-        style={styles.receiveRow}
-      >
-        <MaterialCommunityIcons name="package-down" size={20} color={PACK_COLORS.action} />
-        <Text style={styles.receiveText}>{t("home.receive")}</Text>
-        {incomingCount > 0 ? <Tag tone="blue" label={t("home.incomingBadge", { count: incomingCount })} /> : null}
-        <MaterialCommunityIcons name="chevron-right" size={20} color={PACK_COLORS.action} />
-      </Pressable>
+      <View style={styles.entryRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("home.receive")}
+          onPress={() => router.push(receiveRoute())}
+          style={styles.receiveRow}
+        >
+          <MaterialCommunityIcons name="package-down" size={20} color={PACK_COLORS.action} />
+          <View style={styles.entryTextWrap}>
+            <Text numberOfLines={1} style={styles.receiveText}>
+              {t("home.receive")}
+            </Text>
+            {incomingCount > 0 ? (
+              <Text numberOfLines={1} style={styles.entryHint}>
+                {t("home.incomingBadge", { count: incomingCount })}
+              </Text>
+            ) : null}
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={20} color={PACK_COLORS.action} />
+        </Pressable>
+        {blankSupported ? (
+          // 批量箱标入口：后端没有 blankCount（旧版本）时整个隐藏。
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("home.batch")}
+            onPress={() => router.push(PACKING_BATCH_LIST)}
+            style={[styles.receiveRow, styles.batchRow]}
+          >
+            <MaterialCommunityIcons name="tag-multiple-outline" size={20} color={PACK_COLORS.action} />
+            <View style={styles.entryTextWrap}>
+              <Text numberOfLines={1} style={styles.receiveText}>
+                {t("home.batch")}
+              </Text>
+              <Text numberOfLines={1} style={styles.entryHint}>
+                {blankCount > 0 ? t("home.batchHint", { count: blankCount }) : t("home.batchHintEmpty")}
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
+      </View>
       <Segmented
         label={t("home.tabLabel")}
         value={tab}
-        onChange={setTab}
+        onChange={(next) => {
+          exitSelect();
+          setTab(next);
+        }}
         options={[
           { key: "cartons", label: t("home.tabCartons", { count: (cartonCounts?.packingCount ?? 0) + (cartonCounts?.storedCount ?? 0) + (cartonCounts?.outgoingCount ?? 0) }) },
           { key: "pallets", label: t("home.tabPallets", { count: (palletCounts?.buildingCount ?? 0) + (palletCounts?.storedCount ?? 0) }) },
@@ -321,6 +484,7 @@ export function PackingHomeScreen() {
             options={[
               { key: "all", label: t("home.filterAll") },
               { key: "packing", label: t("home.filterPacking", { count: cartonCounts?.packingCount ?? 0 }) },
+              ...(blankSupported ? [{ key: "blank" as const, label: t("home.filterBlank", { count: blankCount }) }] : []),
               { key: "stored", label: t("home.filterStored", { count: cartonCounts?.storedCount ?? 0 }) },
               { key: "outgoing", label: t("home.filterOutgoing", { count: cartonCounts?.outgoingCount ?? 0 }) },
             ]}
@@ -378,7 +542,26 @@ export function PackingHomeScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-      <PickHeader title={t("home.title")} onBack={goBack} backLabel={t("actions.back")}>
+      <PickHeader
+        title={selectMode ? t("select.title", { count: chosen.length }) : t("home.title")}
+        onBack={selectMode ? exitSelect : goBack}
+        backLabel={selectMode ? t("select.exit") : t("actions.back")}
+        right={
+          selectMode ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setSelected(toggleSelectAll(listItems ?? [], selected))}
+              style={styles.selectAll}
+            >
+              <Text style={styles.selectAllText}>
+                {listItems && listItems.length > 0 && listItems.every((item) => selected.has(item.cartonGuid))
+                  ? t("select.clearAll")
+                  : t("select.selectAll")}
+              </Text>
+            </Pressable>
+          ) : undefined
+        }
+      >
         <OwnerBar
           owners={scope.owners}
           owner={owner}
@@ -404,8 +587,19 @@ export function PackingHomeScreen() {
           {...listProps}
           data={cartonsQuery.data?.items ?? []}
           keyExtractor={(item) => item.cartonGuid}
+          extraData={selectMode ? selected : null}
           renderItem={({ item }) => (
-            <CartonCard carton={item} ownerCode={owner.code} isWarehouse={isWarehouse} onPress={() => router.push(cartonRoute(item.cartonGuid))} />
+            <CartonCard
+              carton={item}
+              ownerCode={owner.code}
+              isWarehouse={isWarehouse}
+              selecting={selectMode}
+              selected={selected.has(item.cartonGuid)}
+              onPress={() =>
+                selectMode ? setSelected((current) => toggleSelected(current, item.cartonGuid)) : router.push(cartonRoute(item.cartonGuid))
+              }
+              onLongPress={() => startSelect(item)}
+            />
           )}
         />
       ) : tab === "pallets" ? (
@@ -425,6 +619,38 @@ export function PackingHomeScreen() {
           renderItem={({ item }) => <IncomingCard item={item} onPress={() => router.push(receiveRoute(item.no))} />}
         />
       )}
+
+      {selectMode ? (
+        <View style={packStyles.bar}>
+          {printerConnected ? null : <Text style={packStyles.muted}>{t("select.printerOffline")}</Text>}
+          <View style={packStyles.buttons}>
+            <Button
+              mode="outlined"
+              textColor={PACK_COLORS.danger}
+              disabled={chosen.length === 0 || voiding || Boolean(printProgress)}
+              loading={voiding}
+              onPress={confirmVoid}
+              style={[packStyles.button, packStyles.flexSmall, styles.voidButton]}
+              contentStyle={packStyles.buttonContent}
+            >
+              {t("select.void")}
+            </Button>
+            <Button
+              mode="contained"
+              icon="printer"
+              disabled={chosen.length === 0 || !printerConnected || voiding || Boolean(printProgress)}
+              loading={Boolean(printProgress)}
+              onPress={() => void printSelected()}
+              style={[packStyles.button, packStyles.flex]}
+              contentStyle={packStyles.buttonContent}
+            >
+              {printProgress
+                ? t("select.printing", { done: printProgress.done, total: printProgress.total })
+                : t("select.print", { count: chosen.length })}
+            </Button>
+          </View>
+        </View>
+      ) : null}
 
       <DestinationSheet
         visible={creating !== null}
@@ -501,15 +727,23 @@ function CartonCard({
   carton,
   ownerCode,
   isWarehouse,
+  selecting,
+  selected,
   onPress,
+  onLongPress,
 }: {
   carton: PackCartonSummary;
   ownerCode: string;
   isWarehouse: boolean;
+  selecting: boolean;
+  selected: boolean;
   onPress: () => void;
+  onLongPress: () => void;
 }) {
   const { t } = useAppTranslation("packing");
   const state = cartonDisplayState(carton, ownerCode);
+  // 还没启用的空箱标：没有商品，副标题显示打印情况，右侧灰色「未启用」。
+  const unusedBlank = isUnusedBlank(carton);
   const where =
     state === "onPallet"
       ? t("cartonList.onPallet", { palletNo: carton.palletNo ?? "" })
@@ -520,21 +754,52 @@ function CartonCard({
           : state === "outgoing" || state === "toDispatch"
             ? t("cartonList.sendTo", { target: destinationText(carton.destination, t, carton.ownerCode) })
             : destinationText(carton.destination, t, carton.ownerCode);
-  const label = state === "stored" && isWarehouse ? t("cartonState.storedWarehouse") : t(`cartonState.${state}`);
-  const icon =
-    state === "outgoing" ? "truck-delivery-outline" : state === "received" ? "truck-check-outline" : state === "onPallet" ? "layers-triple-outline" : state === "stored" ? "archive-outline" : "package-variant-closed";
+  const label = unusedBlank
+    ? t("cartonList.blankUnused")
+    : state === "stored" && isWarehouse
+      ? t("cartonState.storedWarehouse")
+      : t(`cartonState.${state}`);
+  const icon = unusedBlank
+    ? "tag-outline"
+    : state === "outgoing" ? "truck-delivery-outline" : state === "received" ? "truck-check-outline" : state === "onPallet" ? "layers-triple-outline" : state === "stored" ? "archive-outline" : "package-variant-closed";
+  const printedAt = formatLocalTime(carton.labelPrintedAtUtc);
+  const subtitle = unusedBlank
+    ? carton.labelPrintCount > 0
+      ? printedAt
+        ? t("cartonList.blankPrinted", { count: carton.labelPrintCount, time: printedAt })
+        : t("cartonList.blankPrintedNoTime", { count: carton.labelPrintCount })
+      : t("cartonList.blankNotPrinted")
+    : `${t("counts.skuPieces", { sku: carton.skuCount, pieces: carton.pieceCount })} · ${where}`;
+  const tone: Tone = unusedBlank ? "gray" : CARTON_TONE[state];
   return (
-    <View style={packStyles.cardList}>
-      <UnitRow
-        icon={icon}
-        tone={CARTON_TONE[state]}
-        title={carton.cartonNo}
-        monoTitle
-        subtitle={`${t("counts.skuPieces", { sku: carton.skuCount, pieces: carton.pieceCount })} · ${where}`}
-        right={<Tag tone={CARTON_TONE[state]} label={label} />}
+    <View style={[packStyles.cardList, selecting && selected ? styles.cardSelected : null]}>
+      <Pressable
+        accessibilityRole={selecting ? "checkbox" : "button"}
+        accessibilityState={selecting ? { checked: selected } : undefined}
+        accessibilityLabel={selecting ? t("cartonList.selectCarton", { cartonNo: carton.cartonNo }) : `${carton.cartonNo} ${label}`}
         onPress={onPress}
-        accessibilityLabel={`${carton.cartonNo} ${label}`}
-      />
+        onLongPress={onLongPress}
+        delayLongPress={350}
+        style={styles.cardPress}
+      >
+        {selecting ? (
+          <MaterialCommunityIcons
+            name={selected ? "checkbox-marked" : "checkbox-blank-outline"}
+            size={24}
+            color={selected ? PACK_COLORS.action : PACK_COLORS.inkMuted}
+          />
+        ) : null}
+        <View style={styles.cardRow}>
+          <UnitRow
+            icon={icon}
+            tone={tone}
+            title={carton.cartonNo}
+            monoTitle
+            subtitle={subtitle}
+            right={<Tag tone={tone} label={label} />}
+          />
+        </View>
+      </Pressable>
     </View>
   );
 }
@@ -633,16 +898,27 @@ const styles = StyleSheet.create({
   statLabelHighlight: { color: PACK_COLORS.action },
   statValue: { fontSize: 22, lineHeight: 28, fontWeight: "700", color: PACK_COLORS.ink, fontVariant: ["tabular-nums"] },
   statUnit: { fontSize: 12, fontWeight: "500", color: PACK_COLORS.textSecondary },
+  entryRow: { flexDirection: "row", gap: 8 },
   receiveRow: {
-    minHeight: 48,
+    flex: 1,
+    minHeight: 52,
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     borderRadius: 8,
     backgroundColor: PACK_COLORS.infoBg,
   },
-  receiveText: { flex: 1, fontSize: 15, fontWeight: "700", color: PACK_COLORS.action },
+  batchRow: { backgroundColor: PACK_COLORS.white, borderWidth: 1, borderColor: PACK_COLORS.infoBorder },
+  entryTextWrap: { flex: 1, minWidth: 0 },
+  receiveText: { fontSize: 15, fontWeight: "700", color: PACK_COLORS.action },
+  entryHint: { fontSize: 12, lineHeight: 16, color: PACK_COLORS.textSecondary },
+  cardSelected: { borderColor: PACK_COLORS.infoBorder, backgroundColor: PACK_COLORS.infoBg },
+  cardPress: { flexDirection: "row", alignItems: "center", gap: 10 },
+  cardRow: { flex: 1, minWidth: 0 },
+  selectAll: { minHeight: 44, justifyContent: "center", paddingHorizontal: 8 },
+  selectAllText: { fontSize: 15, fontWeight: "700", color: PACK_COLORS.action },
+  voidButton: { borderColor: PACK_COLORS.danger },
   filterRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   printerTag: { minHeight: 44, justifyContent: "center" },
   message: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12, padding: 24, backgroundColor: PACK_COLORS.background },

@@ -33,13 +33,21 @@ const KNOWN_ERROR_CODES = new Set([
   "NOT_IN_TRANSIT",
   "NOT_FOR_YOU",
   "COUNT_MISMATCH",
+  "BATCH_NOT_FOUND",
+  "CARTON_NOT_BLANK",
 ]);
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 /** 业务错误码优先映射本地文案（中英一致），其余交给通用错误本地化。 */
 export function packingErrorMessage(error: unknown, t: Translate, language: string) {
-  const { code } = readPackingError(error);
+  const { code, blankLimit } = readPackingError(error);
+  if (code === "BLANK_LIMIT_EXCEEDED") {
+    // 带着已有张数 / 上限时说清楚还能建几张；没带就用不含数字的通用说法。
+    return blankLimit
+      ? t("errors.BLANK_LIMIT_EXCEEDED", { existing: blankLimit.existing, limit: blankLimit.limit, remaining: Math.max(0, blankLimit.limit - blankLimit.existing) })
+      : t("errors.BLANK_LIMIT_EXCEEDED_PLAIN");
+  }
   if (code && KNOWN_ERROR_CODES.has(code)) {
     return t(`errors.${code}`);
   }

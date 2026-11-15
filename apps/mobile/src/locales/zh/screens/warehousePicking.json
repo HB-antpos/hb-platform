@@ -351,7 +351,15 @@
       "unavailable": "这只箱已经封箱、发出或不存在，不能再装。请点「开始装箱」新建一只箱。",
       "qtyInsufficient": "这只箱里该商品只有 {{count}} 件，请换到装它的那只箱再减",
       "sealEmpty": "空箱不能封箱，先装入商品"
-    }
+    },
+    "nextScan": "扫空箱标",
+    "nextScanHint": "扫一张总仓预打印的空箱标：封箱后这只箱自动关联本订单并作当前箱。",
+    "scanBlankLabel": "空箱标箱号",
+    "scanBlankPlaceholder": "扫空箱标 / 输入箱号",
+    "blankAttached": "已启用空箱标 {{cartonNo}} 作当前箱",
+    "blankNotFound": "找不到这张空箱标，或不属于总仓。请重新扫，或点「开始装箱」新建一只箱",
+    "blankUsed": "这张箱已经用过，不是空箱标。请换一张，或点「开始装箱」新建一只箱",
+    "blankFailed": "关联空箱标失败：{{detail}}。可点「开始装箱」新建一只箱"
   },
   "review": {
     "title": "提交拣货前核对",

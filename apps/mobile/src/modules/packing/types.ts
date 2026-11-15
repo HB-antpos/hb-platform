@@ -10,7 +10,7 @@ export const DESTINATION_TYPE = { unassigned: 0, local: 1, store: 2, warehouse: 
 /** 总仓作为所属地点 / 去向的固定编码。 */
 export const WAREHOUSE_OWNER_CODE = "WAREHOUSE";
 
-export type CartonFilter = "all" | "packing" | "stored" | "outgoing";
+export type CartonFilter = "all" | "packing" | "blank" | "stored" | "outgoing";
 export type PalletFilter = "all" | "building" | "stored" | "outgoing";
 /** 装箱计数方式：每扫 +1、按中包、扫后输数量。 */
 export type ScanCountMode = "each" | "pack" | "ask";
@@ -71,6 +71,18 @@ export interface PackCartonSummary {
   receivedByName: string | null;
   receivedAtUtc: string | null;
   updatedAtUtc: string;
+  // ---- 批量箱标（预打印空箱标）；旧后端没有这些字段，归一化时补成 isBlank=false、labelPrintCount=0 ----
+  /** 预先批量创建、预先打印标签的箱；状态仍是装箱中（status=1）。 */
+  isBlank: boolean;
+  batchGuid: string | null;
+  /** 在批内的序号（从 1 起）与该批总张数，标签上的 LABEL i / n。 */
+  batchSeq: number | null;
+  batchCount: number | null;
+  /** 第一次装入商品或扫码启用的时间；空箱标没有它就是「未启用」。 */
+  activatedAtUtc: string | null;
+  /** 标签已成功打印的次数；0 = 还没打印。 */
+  labelPrintCount: number;
+  labelPrintedAtUtc: string | null;
 }
 
 export interface PackCartonItem {
@@ -112,6 +124,8 @@ export interface PackCartonList {
   outgoingCount: number;
   /** 待签收：发给本地点、还没签收的托盘和散箱批数。 */
   incomingCount: number;
+  /** 还没启用的空箱标张数（packingCount 已不含它们）；旧后端没有该字段为 null，据此隐藏批量箱标入口。 */
+  blankCount: number | null;
 }
 
 export interface PackPalletSummary {
@@ -307,4 +321,56 @@ export interface PackOrderReceive {
   products: PackOrderReceiveProduct[];
   /** 仅 409 COUNT_MISMATCH：系统记录里该订单发给本店、还在路上的箱数。 */
   actualInTransitCartonCount: number | null;
+}
+
+// ---- 批量箱标 ----
+
+/** 一批空箱标的汇总（GET packing/batches 的一项）。 */
+export interface PackCartonBatch {
+  batchGuid: string;
+  count: number;
+  firstCartonNo: string;
+  lastCartonNo: string;
+  createdAtUtc: string;
+  createdByName: string;
+  /** 已打印（labelPrintCount > 0）的张数。 */
+  printedCount: number;
+  unactivatedCount: number;
+  voidedCount: number;
+}
+
+/** POST packing/cartons/batch 的结果；duplicate=true 表示同一个 clientRequestId 重放返回了已建好的那一批。 */
+export interface PackBatchCreateResult {
+  batchGuid: string;
+  duplicate: boolean;
+  count: number;
+  firstCartonNo: string;
+  lastCartonNo: string;
+  createdAtUtc: string;
+  cartons: PackCartonSummary[];
+}
+
+export interface PackBatchDetail {
+  batch: PackCartonBatch;
+  cartons: PackCartonSummary[];
+}
+
+export interface PackLabelsPrintedResult {
+  updated: number;
+  skipped: { cartonGuid: string; reason: string }[];
+}
+
+export interface PackVoidBlankResult {
+  voided: string[];
+  skipped: { cartonGuid: string; reason: string }[];
+}
+
+/** 一次创建空箱标的请求体（与后端对应）。 */
+export interface PackBatchCreateRequest {
+  ownerCode: string;
+  count: number;
+  clientRequestId: string;
+  destinationType?: number;
+  destinationCode?: string | null;
+  carrierGuid?: string | null;
 }

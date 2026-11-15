@@ -1,4 +1,5 @@
 import {
+  buildPackBlankCartonLabelSpec,
   buildPackCartonLabelSpec,
   buildPackPalletLabelSpec,
   type PackLabelSpec,
@@ -520,10 +521,13 @@ export interface LabelPreviewContent {
   referenceLine: string;
   timeLine: string;
   sheetText?: string;
+  /** 空箱标没有去向：TO 后画一条横线。 */
+  toRule?: boolean;
 }
 
 function previewOf(spec: PackLabelSpec): LabelPreviewContent {
   return {
+    toRule: spec.toRule || undefined,
     kind: spec.kind,
     number: spec.number.trim().toUpperCase(),
     fromLine: spec.fromLine,
@@ -537,6 +541,44 @@ function previewOf(spec: PackLabelSpec): LabelPreviewContent {
 
 export function cartonLabelPreview(payload: PackCartonLabelPrintPayload): LabelPreviewContent {
   return previewOf(buildPackCartonLabelSpec(payload));
+}
+
+// ---- 空箱标（批量预打印） ----
+
+/** 还没启用的空箱标：isBlank 且没有 activatedAtUtc、仍是装箱中。它没有商品，也不计入「装箱中」数量。 */
+export function isUnusedBlank(carton: Pick<PackCartonSummary, "isBlank" | "activatedAtUtc" | "status">) {
+  return carton.isBlank && !carton.activatedAtUtc && carton.status === CARTON_STATUS.packing;
+}
+
+/**
+ * 空箱标的标签内容：序号 / 总张数取批内信息；没有批信息（理论上不会）时右下不印 LABEL。
+ * 操作人是打印的这个人（预打印时箱还没封，没有封箱人）。
+ */
+export function buildBlankCartonLabelPayload(
+  carton: Pick<PackCartonSummary, "cartonNo" | "originName" | "destination" | "orderNo" | "createdByName" | "batchSeq" | "batchCount">,
+  now: Date,
+  operatorName?: string | null,
+): PackCartonLabelPrintPayload {
+  return {
+    cartonNo: carton.cartonNo,
+    originName: carton.originName,
+    destinationType: carton.destination.destinationType,
+    destinationName: destinationLabel(carton.destination),
+    carrierName: carton.destination.carrierName,
+    skuCount: 0,
+    pieceCount: 0,
+    orderNo: carton.orderNo,
+    printedAt: formatLabelTime(now),
+    operatorName: operatorName?.trim() || carton.createdByName || null,
+    blankLabel:
+      carton.batchSeq != null && carton.batchCount != null && carton.batchSeq >= 1 && carton.batchCount >= 1
+        ? { index: carton.batchSeq, total: carton.batchCount }
+        : { index: 0, total: 0 },
+  };
+}
+
+export function blankCartonLabelPreview(payload: PackCartonLabelPrintPayload): LabelPreviewContent {
+  return previewOf(buildPackBlankCartonLabelSpec(payload));
 }
 
 export function palletLabelPreview(payload: PackPalletLabelPrintPayload, copies: number): LabelPreviewContent {

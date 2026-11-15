@@ -14,6 +14,7 @@ import { KeyValueRow, PACK_COLORS, Stepper, packStyles } from "./pack-ui";
 export function SealSheet({
   visible,
   kind,
+  preprinted = false,
   preview,
   destinationText,
   initialWeightKg,
@@ -29,6 +30,8 @@ export function SealSheet({
 }: {
   visible: boolean;
   kind: "carton" | "pallet";
+  /** 预打印的空箱标：箱上已经贴着标签，默认「封箱」不再打印，另给「封箱并补打」。 */
+  preprinted?: boolean;
   /** 按当前份数生成预览内容（托盘的 1/N 随份数变化）。 */
   preview: (copies: number) => LabelPreviewContent;
   destinationText: string;
@@ -45,6 +48,7 @@ export function SealSheet({
   onConfirm: (input: { weightKg: number | null; copies: number; print: boolean }) => void;
 }) {
   const { t } = useAppTranslation("packing");
+  const textKey = preprinted && kind === "carton" ? "blank" : kind;
   const [weightText, setWeightText] = useState("");
   const [copies, setCopies] = useState(defaultCopies);
 
@@ -71,32 +75,59 @@ export function SealSheet({
   return (
     <BusinessSheet
       visible={visible}
-      title={t(`seal.${kind}.title`)}
-      subtitle={t(`seal.${kind}.subtitle`)}
+      title={t(`seal.${textKey}.title`)}
+      subtitle={t(`seal.${textKey}.subtitle`)}
       onDismiss={onDismiss}
       dismissable={!saving}
       footer={
         <View style={packStyles.buttons}>
-          <Button
-            mode="outlined"
-            disabled={saving || weightInvalid}
-            onPress={() => submit(false)}
-            style={[packStyles.button, packStyles.flexSmall]}
-            contentStyle={packStyles.buttonContent}
-          >
-            {t(`seal.${kind}.sealOnly`)}
-          </Button>
-          <Button
-            mode="contained"
-            icon="printer"
-            loading={saving}
-            disabled={saving || weightInvalid}
-            onPress={() => submit(true)}
-            style={[packStyles.button, packStyles.flex]}
-            contentStyle={packStyles.buttonContent}
-          >
-            {t(`seal.${kind}.sealAndPrint`)}
-          </Button>
+          {preprinted ? (
+            <>
+              <Button
+                mode="outlined"
+                icon="printer"
+                disabled={saving || weightInvalid}
+                onPress={() => submit(true)}
+                style={[packStyles.button, packStyles.flex]}
+                contentStyle={packStyles.buttonContent}
+              >
+                {t(`seal.${textKey}.sealAndPrint`)}
+              </Button>
+              <Button
+                mode="contained"
+                loading={saving}
+                disabled={saving || weightInvalid}
+                onPress={() => submit(false)}
+                style={[packStyles.button, packStyles.flex]}
+                contentStyle={packStyles.buttonContent}
+              >
+                {t(`seal.${textKey}.sealOnly`)}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                mode="outlined"
+                disabled={saving || weightInvalid}
+                onPress={() => submit(false)}
+                style={[packStyles.button, packStyles.flexSmall]}
+                contentStyle={packStyles.buttonContent}
+              >
+                {t(`seal.${textKey}.sealOnly`)}
+              </Button>
+              <Button
+                mode="contained"
+                icon="printer"
+                loading={saving}
+                disabled={saving || weightInvalid}
+                onPress={() => submit(true)}
+                style={[packStyles.button, packStyles.flex]}
+                contentStyle={packStyles.buttonContent}
+              >
+                {t(`seal.${textKey}.sealAndPrint`)}
+              </Button>
+            </>
+          )}
         </View>
       }
     >

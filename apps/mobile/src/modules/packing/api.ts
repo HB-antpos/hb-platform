@@ -1,11 +1,15 @@
 import { apiClient } from "@/shared/api/client";
 import {
+  normalizeBatchCreate,
+  normalizeBatchDetail,
+  normalizeBatchList,
   normalizeCarrier,
   normalizeCarriers,
   normalizeCartonDetail,
   normalizeCartonList,
   normalizeDestinations,
   normalizeIncoming,
+  normalizeLabelsPrinted,
   normalizeLocate,
   normalizeLocation,
   normalizeLocations,
@@ -15,8 +19,9 @@ import {
   normalizeReceiveLookup,
   normalizeResolve,
   normalizeScope,
+  normalizeVoidBlank,
 } from "./api-normalization";
-import type { CartonFilter, PackDestinationRequest, PalletFilter } from "./types";
+import type { CartonFilter, PackBatchCreateRequest, PackDestinationRequest, PalletFilter } from "./types";
 
 const BASE = "/react/v1/packing";
 const carton = (cartonGuid: string, suffix = "") => `${BASE}/cartons/${encodeURIComponent(cartonGuid)}${suffix}`;
@@ -121,6 +126,44 @@ export async function dispatchCarton(cartonGuid: string) {
 export async function receiveCarton(cartonGuid: string, locationCode: string | null) {
   const response = await apiClient.post(carton(cartonGuid, "/receive"), { locationCode });
   return normalizeCartonDetail(response.data);
+}
+
+// ---- 批量箱标（预打印空箱标） ----
+
+/** 一次创建 1..100 张空箱标；同一个 clientRequestId 重放返回同一批（duplicate=true）。 */
+export async function createBlankCartonBatch(input: PackBatchCreateRequest) {
+  const response = await apiClient.post(`${BASE}/cartons/batch`, input);
+  return normalizeBatchCreate(response.data);
+}
+
+/** 最近的批次列表；后端没有这个接口时 404（调用方据此隐藏入口）。 */
+export async function fetchCartonBatches(ownerCode: string, limit = 30, signal?: AbortSignal) {
+  const response = await apiClient.get(`${BASE}/batches`, { params: { ownerCode, limit }, signal });
+  return normalizeBatchList(response.data);
+}
+
+/** 一批的汇总与每张箱（按批内序号升序）；404 BATCH_NOT_FOUND。 */
+export async function fetchCartonBatch(batchGuid: string, signal?: AbortSignal) {
+  const response = await apiClient.get(`${BASE}/batches/${encodeURIComponent(batchGuid)}`, { signal });
+  return normalizeBatchDetail(response.data);
+}
+
+/** 上报标签已打印：每打印成功一张记一张（可攒几张一起报，最多 100 个）。 */
+export async function reportLabelsPrinted(cartonGuids: string[]) {
+  const response = await apiClient.post(`${BASE}/cartons/labels-printed`, { cartonGuids });
+  return normalizeLabelsPrinted(response.data);
+}
+
+/** 扫到空箱标时启用它（幂等）；之后进入装箱页。 */
+export async function activateCarton(cartonGuid: string) {
+  const response = await apiClient.post(carton(cartonGuid, "/activate"), {});
+  return normalizeCartonDetail(response.data);
+}
+
+/** 批量作废空箱标；不是空箱标或找不到的在 skipped 里。 */
+export async function voidBlankCartons(cartonGuids: string[]) {
+  const response = await apiClient.post(`${BASE}/cartons/void-blank`, { cartonGuids });
+  return normalizeVoidBlank(response.data);
 }
 
 // ---- 托盘 ----
