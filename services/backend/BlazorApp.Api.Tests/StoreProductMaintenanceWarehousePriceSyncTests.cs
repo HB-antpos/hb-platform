@@ -485,6 +485,81 @@ public sealed class StoreProductMaintenanceWarehousePriceSyncTests : IDisposable
     }
 
     [Fact]
+    public async Task CreateSetCodeAsync_新增多码时清掉同条码孤儿分店行并成功()
+    {
+        // 生产事故形态：商品没有任何多码主记录，却残留一条同条码、只存在于某个分店的投影行（历史数据）。
+        // 此前新增会因「门店子项不完整：期望 1 条，实际 2 条」整体回滚；现在应先清掉孤儿行再正常新增。
+        const string productCode = "P-CREATE-MULTI-ORPHAN";
+        await SeedMultiCodeParentAsync(productCode, 20m, 20m);
+        await EnsureActiveStoreAsync();
+        var orphan = BuildMultiCodeStoreRow(productCode, "ORPHAN", 5.99m, 2.36m);
+        orphan.MultiBarcode = "BAR-ORPHAN-785";
+        orphan.MultiCodeProductCode = "LEGACY-ITEM-NUMBER";
+        await _db.Insertable(orphan).ExecuteCommandAsync();
+        var calls = new List<(ISqlSugarClient Db, ProductMaintenanceHqMutationRequest Request)>();
+        var (writer, _) = CreateCapturingProjectionWriter(calls);
+
+        var result = await CreateService(hqProjectionWriter: writer.Object)
+            .CreateSetCodeAsync(
+                new CreateStoreProductSetCodeDto
+                {
+                    ProductCode = productCode,
+                    StoreCode = StoreCode,
+                    ProductType = 2,
+                    Barcode = "BAR-ORPHAN-785",
+                    IsActive = true,
+                },
+                "device:test-device",
+                new List<string> { StoreCode }
+            );
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(0, await _db.Queryable<StoreMultiCodeProduct>()
+            .Where(x => x.UUID == orphan.UUID && !x.IsDeleted)
+            .CountAsync());
+        var master = await _db.Queryable<ProductSetCode>()
+            .SingleAsync(x => x.ProductCode == productCode && !x.IsDeleted && x.SetBarcode == "BAR-ORPHAN-785");
+        Assert.Equal(2, master.SetType);
+        // 每个分店恰好一条该条码的有效投影行，且都挂在新主记录上。
+        var live = await _db.Queryable<StoreMultiCodeProduct>()
+            .Where(x => x.ProductCode == productCode && x.MultiBarcode == "BAR-ORPHAN-785" && !x.IsDeleted)
+            .ToListAsync();
+        Assert.NotEmpty(live);
+        Assert.All(live, row => Assert.Equal(master.SetProductCode, row.MultiCodeProductCode));
+        Assert.Equal(live.Count, live.Select(row => row.StoreCode).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task CreateSetCodeAsync_本商品已有同条码多码时拒绝重复添加()
+    {
+        const string productCode = "P-CREATE-MULTI-DUP";
+        await SeedMultiCodeParentAsync(productCode, 20m, 20m);
+        await EnsureActiveStoreAsync();
+        var existing = BuildMultiCodeSetCode(productCode, "A", 20m, setType: 2);
+        await _db.Insertable(existing).ExecuteCommandAsync();
+        await _db.Insertable(BuildMultiCodeStoreRow(productCode, "A", 20m, 20m)).ExecuteCommandAsync();
+
+        var result = await CreateService().CreateSetCodeAsync(
+            new CreateStoreProductSetCodeDto
+            {
+                ProductCode = productCode,
+                StoreCode = StoreCode,
+                ProductType = 2,
+                Barcode = existing.SetBarcode!,
+                IsActive = true,
+            },
+            "device:test-device",
+            new List<string> { StoreCode }
+        );
+
+        Assert.False(result.Success);
+        Assert.Contains("已是本商品的多码", result.Message);
+        Assert.Equal(1, await _db.Queryable<ProductSetCode>()
+            .Where(x => x.ProductCode == productCode && !x.IsDeleted)
+            .CountAsync());
+    }
+
+    [Fact]
     public async Task UpdateSetCodeAsync_成功提交时按实际投影店入队全局与门店多码事件()
     {
         const string productCode = "P-UPDATE-SET-HQ-EVENT";
