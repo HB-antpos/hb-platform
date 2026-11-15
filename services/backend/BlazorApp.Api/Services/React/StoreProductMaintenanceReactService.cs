@@ -2362,6 +2362,13 @@ namespace BlazorApp.Api.Services.React
                         return ApiResponse<StoreProductSetCodeDto>.Error("商品不存在");
                     }
 
+                    if (request.ProductType == 2)
+                    {
+                        // 新增多码前先在业务锁内做本商品内的查重，并清掉「只有分店行、没有主记录」的同条码孤儿行，
+                        // 否则后面的子项成本重算会因为多出一条孤儿行而整体回滚（见 PrepareMultiCodeBarcodeForCreateAsync）。
+                        await PrepareMultiCodeBarcodeForCreateAsync(normalizedProductCode, request.Barcode.Trim());
+                    }
+
                     var existingSetNumbers = await _db.Queryable<ProductSetCode>()
                         .Where(x => x.ProductCode == normalizedProductCode && !x.IsDeleted)
                         .Select(x => x.SetItemNumber)
@@ -4613,6 +4620,47 @@ namespace BlazorApp.Api.Services.React
                 "套装商品正在被其他操作修改，请稍后重试",
                 SetChildPurchasePriceMutationLock.BusyErrorCode
             );
+        }
+
+        /// <summary>
+        /// 新增一品多码（SetType=2）前的本商品内检查，必须在已持有商品业务锁的事务内调用：
+        /// 1) 本商品已有同条码的有效多码主记录 → 直接拒绝，避免同一条码重复挂两次；
+        /// 2) 本商品存在同条码、却没有任何有效主记录（<see cref="ProductSetCode"/>）对应的分店多码行（孤儿行）→ 删除，
+        ///    由随后新建的主记录重新投影到所有分店。孤儿行多来自历史数据，留着会让成本重算报「门店子项不完整」并回滚整个新增。
+        /// 只处理「同商品 + 同条码」的孤儿行：别的条码的孤儿行可能仍在收银端使用，不能顺手清掉。
+        /// </summary>
+        private async Task PrepareMultiCodeBarcodeForCreateAsync(string productCode, string barcode)
+        {
+            var masters = await _db.Queryable<ProductSetCode>()
+                .Where(x => x.ProductCode == productCode && !x.IsDeleted)
+                .ToListAsync();
+            if (masters.Any(x =>
+                    x.SetType == 2
+                    && string.Equals(x.SetBarcode?.Trim(), barcode, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new StoreProductMaintenanceBusinessException("该条码已是本商品的多码，无需重复添加");
+            }
+
+            var liveCodes = masters
+                .Select(x => ResolveSetProductCode(x.SetProductCode, x.SetCodeId))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var projections = await _db.Queryable<StoreMultiCodeProduct>()
+                .Where(x => x.ProductCode == productCode && x.MultiBarcode == barcode && !x.IsDeleted)
+                .ToListAsync();
+            var orphanIds = projections
+                .Where(x => string.IsNullOrWhiteSpace(x.MultiCodeProductCode)
+                    || !liveCodes.Contains(x.MultiCodeProductCode.Trim()))
+                .Select(x => x.UUID)
+                .ToList();
+            if (orphanIds.Count == 0)
+            {
+                return;
+            }
+
+            // 与删除多码保持同一种删法（Deleteable），不自己拼软删除字段。
+            await _db.Deleteable<StoreMultiCodeProduct>()
+                .Where(x => orphanIds.Contains(x.UUID))
+                .ExecuteCommandAsync();
         }
 
         private static string ResolveSafeMutationFailureMessage(
