@@ -768,7 +768,8 @@
     "publishWithDrafts": "Publish week · {{count}} drafts",
     "view": {
       "week": "Week",
-      "day": "Day"
+      "day": "Day",
+      "staff": "Staff"
     },
     "weekSummary": "{{people}} rostered · {{hours}} total ({{weekend}} weekend)",
     "dayView": {
@@ -781,7 +782,65 @@
       "rest": "Off",
       "tapHint": "Tap a row to add or edit; use Week view to drag shifts"
     },
-    "weekBoxLabel": "Week {{week}} · {{start}} – {{end}}"
+    "weekBoxLabel": "Week {{week}} · {{start}} – {{end}}",
+    "thisWeek": "This week",
+    "weekLater": "{{count}} wk ahead",
+    "weekEarlier": "{{count}} wk ago",
+    "board": {
+      "legendA11y": "Highlight shifts of {{name}}",
+      "legendMeta": "{{hours}}h · {{count}}",
+      "dayStat": "{{people}} on · {{hours}}h",
+      "dayEmpty": "No shifts",
+      "today": "Today",
+      "drop": {
+        "ok": "Place here",
+        "warn": "Place here (confirm)",
+        "bad": "Overlaps, can’t place",
+        "noop": "Current day"
+      },
+      "add": "+ Roster",
+      "availableUnscheduled": "{{count}} available, not rostered",
+      "schedule": "Roster ›"
+    },
+    "matrix": {
+      "open": "Roster",
+      "title": "Batch roster",
+      "employees": "Staff · {{count}} selected",
+      "filter": {
+        "all": "All",
+        "available": "Available",
+        "unscheduled": "Not rostered"
+      },
+      "noEmployees": "No matching staff",
+      "dates": "Days · {{count}} selected",
+      "weekdays": "Weekdays",
+      "weekend": "Weekend",
+      "allDays": "All",
+      "dayPeople": "{{count}} on",
+      "total": "{{count}} cells",
+      "create": "New {{count}}",
+      "warn": "Check {{count}}",
+      "skip": "Skip {{count}}",
+      "excluded": "Excluded {{count}}",
+      "reason": {
+        "existing": "Has shift",
+        "leave": "Leave",
+        "unavailable": "Unavail."
+      },
+      "cell": {
+        "new": "New",
+        "warn": "Outside"
+      },
+      "cellExcluded": "Excluded",
+      "previewHint": "Tap a cell to exclude it. Skip = already rostered / on leave / unavailable. Check = outside the hours they said they can work; still created.",
+      "pickHint": "Pick staff and days to preview the shifts to be created"
+    },
+    "transfer": {
+      "title": "Give to another staff member",
+      "pick": "Pick a staff member",
+      "action": "Give to {{name}}",
+      "hint": "Creates it for them and removes the original (undo available). Overlaps are blocked; unavailability asks to confirm."
+    }
   },
   "adjustment": {
     "title": "Punch correction",

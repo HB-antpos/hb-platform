@@ -768,7 +768,8 @@
     "publishWithDrafts": "发布本周 · {{count}} 个草稿",
     "view": {
       "week": "周",
-      "day": "日"
+      "day": "日",
+      "staff": "按人"
     },
     "weekSummary": "本周 {{people}} 人排班 · 共 {{hours}}（周末 {{weekend}}）",
     "dayView": {
@@ -781,7 +782,65 @@
       "rest": "休息",
       "tapHint": "点一行排班或修改；长按拖动挪班次请用周表"
     },
-    "weekBoxLabel": "第 {{week}} 周 · {{start}} ~ {{end}}"
+    "weekBoxLabel": "第 {{week}} 周 · {{start}} ~ {{end}}",
+    "thisWeek": "本周",
+    "weekLater": "下 {{count}} 周",
+    "weekEarlier": "上 {{count}} 周",
+    "board": {
+      "legendA11y": "高亮 {{name}} 的班次",
+      "legendMeta": "{{hours}}h · {{count}} 班",
+      "dayStat": "{{people}} 人 · {{hours}}h",
+      "dayEmpty": "未排班",
+      "today": "今天",
+      "drop": {
+        "ok": "放到这天",
+        "warn": "放到这天（需确认）",
+        "bad": "时间冲突，不能放",
+        "noop": "原来的日期"
+      },
+      "add": "＋ 排班",
+      "availableUnscheduled": "可上班未排 {{count}} 人",
+      "schedule": "排班 ›"
+    },
+    "matrix": {
+      "open": "排班",
+      "title": "批量排班",
+      "employees": "员工 · 已选 {{count}}",
+      "filter": {
+        "all": "全部",
+        "available": "可上班",
+        "unscheduled": "本周未排"
+      },
+      "noEmployees": "没有符合条件的员工",
+      "dates": "日期 · 已选 {{count}}",
+      "weekdays": "工作日",
+      "weekend": "周末",
+      "allDays": "全选",
+      "dayPeople": "{{count}} 人",
+      "total": "共 {{count}} 格",
+      "create": "新建 {{count}}",
+      "warn": "提醒 {{count}}",
+      "skip": "跳过 {{count}}",
+      "excluded": "已排除 {{count}}",
+      "reason": {
+        "existing": "已有",
+        "leave": "休假",
+        "unavailable": "不可"
+      },
+      "cell": {
+        "new": "新建",
+        "warn": "超时段"
+      },
+      "cellExcluded": "排除",
+      "previewHint": "点格子可单独排除；跳过＝当天已有班次 / 休假 / 不能上班；提醒＝超出员工上报的可上班时段，仍会创建",
+      "pickHint": "先选员工和日期，这里会预览要建哪些班次"
+    },
+    "transfer": {
+      "title": "改给其他员工",
+      "pick": "先选一位员工",
+      "action": "转给 {{name}}",
+      "hint": "新建给对方并删除原班次，可撤销；对方当天时间冲突会拦下，不能上班会再确认"
+    }
   },
   "adjustment": {
     "title": "补卡与修改",
