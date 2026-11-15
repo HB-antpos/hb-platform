@@ -756,6 +756,12 @@ function ProductQueryContent() {
   );
   // 新增编码面板里的相机扫码：打开时临时隐藏面板，避免两个原生 Modal 叠加。
   const [codeAddScannerVisible, setCodeAddScannerVisible] = useState(false);
+  // 新增弹层无论怎样关闭（取消 / 提交 / 切店），都要复位扫码页状态，否则下次打开会直接落在扫码页。
+  useEffect(() => {
+    if (!codeAddModal) {
+      setCodeAddScannerVisible(false);
+    }
+  }, [codeAddModal]);
   const getErrorMessage = useCallback(
     (error: unknown, fallbackKey: string) =>
       resolveLocalizedErrorMessage(error, {
@@ -5672,7 +5678,7 @@ function ProductQueryContent() {
             </Modal>
 
             <CodeAddSheet
-              visible={Boolean(codeAddModal) && !codeAddScannerVisible}
+              visible={Boolean(codeAddModal)}
               codeType={codeAddModal?.codeType ?? "set"}
               barcode={codeAddModal?.value ?? ""}
               retailPrice={codeAddModal?.retailPrice ?? ""}
@@ -5688,21 +5694,20 @@ function ProductQueryContent() {
                 )
               }
               onScan={() => setCodeAddScannerVisible(true)}
+              // 扫码页和表单在同一个弹层里切换（不再另开原生 Modal）：iOS 上一个原生 Modal 还在收起时
+              // 再弹另一个会被丢弃，相册选图返回后新增弹层看不见，页面却被「弹层已打开」锁住一直转圈。
+              scanning={codeAddScannerVisible}
+              onScanned={(barcode) => {
+                // 只回填条码，不触发查询或保存；提交仍由面板按钮走原新增流程。
+                setCodeAddModal((current) =>
+                  current ? { ...current, value: barcode } : current,
+                );
+                setCodeAddScannerVisible(false);
+              }}
+              onScanBack={() => setCodeAddScannerVisible(false)}
               onDismiss={() => setCodeAddModal(null)}
               onSubmit={() => void handleConfirmCodeAdd()}
             />
-            {codeAddModal && codeAddScannerVisible ? (
-              <CreateBarcodeScanner
-                onDismiss={() => setCodeAddScannerVisible(false)}
-                onScan={(barcode) => {
-                  // 只回填条码，不触发查询或保存；提交仍由面板按钮走原新增流程。
-                  setCodeAddModal((current) =>
-                    current ? { ...current, value: barcode } : current,
-                  );
-                  setCodeAddScannerVisible(false);
-                }}
-              />
-            ) : null}
 
             <ProductNameEditSheet
               visible={nameEditVisible}

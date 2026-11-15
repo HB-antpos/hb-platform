@@ -15,13 +15,12 @@ import {
 } from "@/modules/scanner/local-image-barcode-runtime";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 
-export function CreateBarcodeScanner({
-  onScan,
-  onDismiss,
-}: {
-  onScan: (barcode: string) => void;
-  onDismiss: () => void;
-}) {
+/**
+ * 扫码内容面板（相机取景 / 权限提示 + 从相册选择），不自带 Modal，可嵌进任何已打开的弹层。
+ * 新增多码弹层把它直接放进自己的 Modal 里，避免「收起一个原生 Modal 的同时弹另一个」——
+ * iOS 会把后者丢弃，弹层看不见但页面状态仍是「弹层已打开」，整页被锁住并一直转圈。
+ */
+export function BarcodeScanPanel({ onScan }: { onScan: (barcode: string) => void }) {
   const { t } = useAppTranslation(["productQuery", "common"]);
   const [permission, requestPermission] = useCameraPermissions();
   const [failed, setFailed] = useState(false);
@@ -60,13 +59,7 @@ export function CreateBarcodeScanner({
   }, [onScan, t]);
 
   return (
-    <BusinessSheet
-      visible
-      title={t("createProduct.scanTitle")}
-      subtitle={t("createProduct.scanHint")}
-      onDismiss={onDismiss}
-      footer={<Button onPress={onDismiss}>{t("common:actions.cancel")}</Button>}
-    >
+    <>
       {permission?.granted && !failed ? (
         <View style={styles.preview}>
           <CameraView
@@ -138,6 +131,28 @@ export function CreateBarcodeScanner({
           {t("common:scanner.pickFromLibrary")}
         </Button>
       ) : null}
+    </>
+  );
+}
+
+/** 创建商品流程使用的独立扫码弹层：内容同 BarcodeScanPanel，自带 Modal 与取消按钮。 */
+export function CreateBarcodeScanner({
+  onScan,
+  onDismiss,
+}: {
+  onScan: (barcode: string) => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useAppTranslation(["productQuery", "common"]);
+  return (
+    <BusinessSheet
+      visible
+      title={t("createProduct.scanTitle")}
+      subtitle={t("createProduct.scanHint")}
+      onDismiss={onDismiss}
+      footer={<Button onPress={onDismiss}>{t("common:actions.cancel")}</Button>}
+    >
+      <BarcodeScanPanel onScan={onScan} />
     </BusinessSheet>
   );
 }

@@ -1,5 +1,6 @@
 import { StyleSheet, TextInput, View } from "react-native";
 import { Button, IconButton, Text } from "react-native-paper";
+import { BarcodeScanPanel } from "@/components/product-maintenance/CreateBarcodeScanner";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import {
   getSetUnitEquivalent,
@@ -18,7 +19,14 @@ interface CodeAddSheetProps {
   unitRetailPrice?: number | null;
   onChangeBarcode: (value: string) => void;
   onChangeRetailPrice: (value: string) => void;
+  /** 点输入框旁的扫码按钮：进入扫码页。 */
   onScan: () => void;
+  /** 是否正显示扫码页。扫码页与表单在同一个弹层里切换，不再另开一个原生 Modal。 */
+  scanning: boolean;
+  /** 扫码页识别到条码（相机或相册）。 */
+  onScanned: (barcode: string) => void;
+  /** 扫码页返回 / 取消，回到表单。 */
+  onScanBack: () => void;
   onDismiss: () => void;
   onSubmit: () => void;
 }
@@ -33,6 +41,9 @@ export function CodeAddSheet({
   onChangeBarcode,
   onChangeRetailPrice,
   onScan,
+  scanning,
+  onScanned,
+  onScanBack,
   onDismiss,
   onSubmit,
 }: CodeAddSheetProps) {
@@ -45,9 +56,14 @@ export function CodeAddSheet({
   return (
     <BusinessSheet
       visible={visible}
-      title={isSet ? t("setCode.addTitle") : t("multiCode.addTitle")}
-      onDismiss={onDismiss}
-      footer={(
+      title={scanning ? t("createProduct.scanTitle") : isSet ? t("setCode.addTitle") : t("multiCode.addTitle")}
+      subtitle={scanning ? t("createProduct.scanHint") : undefined}
+      // 扫码页里点返回 / 遮罩 / 关闭都只回到表单，不关掉整个新增弹层。
+      onBack={scanning ? onScanBack : undefined}
+      onDismiss={scanning ? onScanBack : onDismiss}
+      footer={scanning ? (
+        <Button onPress={onScanBack}>{t("common:actions.cancel")}</Button>
+      ) : (
         <View style={styles.footer}>
           <Button mode="outlined" onPress={onDismiss} style={styles.footerButton} contentStyle={styles.buttonContent}>
             {t("common:actions.cancel")}
@@ -64,6 +80,8 @@ export function CodeAddSheet({
         </View>
       )}
     >
+      {scanning ? <BarcodeScanPanel onScan={onScanned} /> : (
+      <>
       <View style={styles.field}>
         <Text style={styles.label}>{isSet ? t("setCode.title") : t("multiCode.title")}</Text>
         <View style={styles.inputRow}>
@@ -119,6 +137,8 @@ export function CodeAddSheet({
         </View>
       ) : (
         <Text style={styles.hint}>{t("multiCode.followMain")}</Text>
+      )}
+      </>
       )}
     </BusinessSheet>
   );
