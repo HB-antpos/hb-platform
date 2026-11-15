@@ -21,6 +21,13 @@
   cursor: default;
 }
 
+/* 上周 / 本周 / 下周 快捷定位：当前正在看的那一期高亮，配色与排班页「本周」按钮一致 */
+.atp-period-preset.is-active {
+  background: #e6f4ff;
+  color: #1677ff;
+  font-weight: 500;
+}
+
 .atp-loading {
   padding: 64px 0;
   text-align: center;

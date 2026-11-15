@@ -22,7 +22,13 @@
       "week": "第 {{week}} 周",
       "weeksRange": "第 {{from}}–{{to}} 周",
       "previous": "上一期",
-      "next": "下一期"
+      "next": "下一期",
+      "lastWeek": "上周",
+      "thisWeek": "本周",
+      "nextWeek": "下周",
+      "lastPeriod": "上期",
+      "thisPeriod": "本期",
+      "nextPeriod": "下期"
     },
     "employmentType": {
       "FullTime": "全职",

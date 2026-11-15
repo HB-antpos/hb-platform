@@ -30,13 +30,28 @@ import HoursTab from './HoursTab'
 import PayTab from './PayTab'
 import RatesTab from './RatesTab'
 import { exportPayrollWorkbook } from './payrollExport'
-import { isoWeekNumber, periodEnd, shiftPeriod } from './payrollLogic'
+import { PERIOD_PRESETS, isoWeekNumber, periodEnd, presetPeriodStart, shiftPeriod, type PeriodPreset } from './payrollLogic'
 import { useAttendanceStores } from './useAttendanceStores'
 import './attendancePayroll.css'
 
 registerPageMessages({ zh: messagesZh, en: messagesEn })
 
 type PayrollTabKey = 'hours' | 'pay' | 'rates'
+
+// 快捷定位按钮文案：1 周统计期叫 上周 / 本周 / 下周；2 周统计期里「上周」会误导（实际是上一个两周期），改叫 上期 / 本期 / 下期。
+// 键名写成完整字面量，页面文案契约测试（pageMessagesContract）靠它静态核对键是否存在。
+const PRESET_LABEL_KEYS: Record<1 | 2, Record<PeriodPreset, string>> = {
+  1: {
+    previous: 'attendancePayroll.period.lastWeek',
+    current: 'attendancePayroll.period.thisWeek',
+    next: 'attendancePayroll.period.nextWeek',
+  },
+  2: {
+    previous: 'attendancePayroll.period.lastPeriod',
+    current: 'attendancePayroll.period.thisPeriod',
+    next: 'attendancePayroll.period.nextPeriod',
+  },
+}
 
 export default function AttendancePayrollPage() {
   const { t } = useTranslation()
@@ -132,6 +147,16 @@ export default function AttendancePayrollPage() {
   const shiftRequested = (direction: -1 | 1) => {
     if (periodStart) setRequested({ periodStart: shiftPeriod(periodStart, weeks, direction), weeks })
   }
+  // 快捷定位 上周 / 本周 / 下周：相对「今天所在期」，和 ‹ › 相对当前所看期逐期翻页互补。
+  // 以后端返回的当前期起点为基准推算（2 周的对齐由后端决定），因此要等首次加载出期起点后才可点。
+  const presetStartOf = (preset: PeriodPreset) =>
+    periodStart ? presetPeriodStart(periodStart, weeks, dayjs().format('YYYY-MM-DD'), preset) : undefined
+  // 期起点还没加载出来（或加载失败）时 presetStartOf 也是 undefined，直接比较会让第一个按钮被误判为命中，所以先判空。
+  const activePreset = periodStart ? PERIOD_PRESETS.find((preset) => presetStartOf(preset) === periodStart) : undefined
+  const jumpToPreset = (preset: PeriodPreset) => {
+    const target = presetStartOf(preset)
+    if (target) setRequested({ periodStart: target, weeks })
+  }
 
   const status = (activeTab === 'hours' ? hours : pay) ?? hours ?? pay
   const pendingCount = status?.pendingCount ?? 0
@@ -215,6 +240,19 @@ export default function AttendancePayrollPage() {
         <Button icon={<LeftOutlined />} aria-label={t('attendancePayroll.period.previous')} disabled={!periodStart} onClick={() => shiftRequested(-1)} />
         <Button className="atp-period-label">{periodLabel}</Button>
         <Button icon={<RightOutlined />} aria-label={t('attendancePayroll.period.next')} disabled={!periodStart} onClick={() => shiftRequested(1)} />
+      </Space.Compact>
+      <Space.Compact>
+        {PERIOD_PRESETS.map((preset) => (
+          <Button
+            key={preset}
+            className={`atp-period-preset${activePreset === preset ? ' is-active' : ''}`}
+            aria-pressed={activePreset === preset}
+            disabled={!periodStart}
+            onClick={() => jumpToPreset(preset)}
+          >
+            {t(PRESET_LABEL_KEYS[weeks][preset])}
+          </Button>
+        ))}
       </Space.Compact>
     </>
   ) : null
