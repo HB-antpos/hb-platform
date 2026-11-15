@@ -107,6 +107,35 @@ for (const key of Object.keys(flatZh).filter((name) => name.startsWith('orderRec
   assert(placeholders(String(flatZh[key])) === placeholders(String(flatEn[key])), `按订单签收文案中英文插值变量不一致: ${key}`)
 }
 
+// 4c) 批量箱标（空箱标）：动态拼接的键（作废结果提示）与关键文案必须齐全，且中英文插值变量一致。
+for (const key of [
+  'entry',
+  'tag',
+  'unactivated',
+  'notPrinted',
+  'printedTimes',
+  'batchPosition',
+  'create.limitExceeded',
+  'create.createAndPrint',
+  'create.created',
+  'create.duplicate',
+  'print.summary',
+  'print.sent',
+  'print.markFailed',
+  'select.print',
+  'void.confirmBody',
+  'void.voided',
+  'void.skippedNotBlank',
+  'void.skippedNotFound',
+  'void.separator',
+]) {
+  assert(`blank.${key}` in flatZh && `blank.${key}` in flatEn, `缺少批量箱标文案: blank.${key}`)
+}
+assert('filter.blank' in flatZh && 'filter.blank' in flatEn, '缺少筛选文案: filter.blank')
+for (const key of Object.keys(flatZh).filter((name) => name.startsWith('blank.') || name === 'filter.blank')) {
+  assert(placeholders(String(flatZh[key])) === placeholders(String(flatEn[key])), `批量箱标文案中英文插值变量不一致: ${key}`)
+}
+
 // 5) 不再有旧命名空间的残留引用。
 for (const name of sources) {
   assert(!readFileSync(join(ROOT, name), 'utf8').includes('warehouseUi.packing'), `${name} 仍引用旧文案命名空间 warehouseUi.packing`)

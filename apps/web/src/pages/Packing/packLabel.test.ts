@@ -2,7 +2,9 @@ import type { PackCartonSummary, PackPalletDetail } from '../../types/packing'
 
 import {
   PACK_LABEL_PRINT_SCALE,
+  buildBlankCartonLabelFields,
   buildCartonLabelFields,
+  buildCartonPrintLabels,
   buildLabelBarcodeSvg,
   buildLabelQrSvg,
   buildLocationLabelDocument,
@@ -287,5 +289,65 @@ assertEqual(resolveLocationNameFontSize('后仓货架上层') < resolveLocationN
 const locationDocument = buildLocationLabelDocument([locationFields, locationFields])
 assertIncludes(locationDocument, '@page{size:70mm 26mm;margin:0}', '位置标签同样是 70×26 mm')
 assertEqual(locationDocument.split('<div class="pkl-page">').length - 1, 2, '一个位置一页')
+
+// ---- 空箱标（批量预打印）：字段取舍 ----
+const blankCarton = (overrides: Partial<PackCartonSummary> = {}) =>
+  carton({
+    status: 1,
+    isBlank: true,
+    skuCount: 0,
+    pieceCount: 0,
+    sealedAtUtc: null,
+    sealedByName: null,
+    destination: { destinationType: 0 },
+    batchGuid: 'abcd1234',
+    batchSeq: 2,
+    batchCount: 20,
+    ...overrides,
+  })
+const blankFields = buildBlankCartonLabelFields(blankCarton(), null, NOW)
+assertEqual(blankFields.blank, true, '空箱标标记')
+assertEqual(blankFields.code, 'BX2611130042', '条码内容与内容标一致：箱号')
+assertEqual(blankFields.stat, '', '空箱标不印 SKU / PCS')
+assertEqual(blankFields.reference, null, '空箱标没有订货单号')
+assertEqual(blankFields.to, '', '没有去向时 TO 留空（画横线）')
+assertEqual(blankFields.labelSeq, 'LABEL 02 / 20', 'LABEL i / n 取批内序号 / 总数')
+assertEqual(blankFields.stamp, `${formatLabelTime(SEALED_AT, NOW)} TOM`, '时间取创建时间、操作人取建箱人')
+assertEqual(buildBlankCartonLabelFields(blankCarton({ batchSeq: null, batchCount: null }), { index: 3, total: 7 }, NOW).labelSeq, 'LABEL 03 / 7', '没有批内信息时用本次打印里的位置')
+assertEqual(buildBlankCartonLabelFields(blankCarton({ batchSeq: null, batchCount: null }), null, NOW).labelSeq, null, '都没有时不印')
+assertEqual(buildBlankCartonLabelFields(blankCarton({ destination: { destinationType: 1 } }), null, NOW).to, 'STORAGE', '指定了本地存放就印 STORAGE')
+const blankToStore = buildBlankCartonLabelFields(blankCarton({ destination: { destinationType: 2, code: '1011', name: 'Inala', carrierName: 'Border Express' } }), null, NOW)
+assertEqual(blankToStore.to, 'INALA', '指定了分店就印分店名')
+assertEqual(blankToStore.via, 'BORDER EXPRESS', '指定了运输公司印 VIA')
+
+const blankHtml = buildPackLabelHtml(blankFields)
+assertIncludes(blankHtml, 'class="pkl pkl-carton pkl-blank"', '空箱标样式类')
+assertIncludes(blankHtml, '<em>TO</em><i class="pkl-toline"></i>', '没有去向时 TO 后画横线')
+assertIncludes(blankHtml, 'LABEL 02 / 20<br>', '右下角 LABEL i / n 在时间上一行')
+assertIncludes(blankHtml, 'class="pkl-qr"', '二维码')
+assertIncludes(blankHtml, 'class="pkl-bc"', '条码')
+assertEqual(blankHtml.includes('pkl-stat'), false, '不印 SKU / PCS')
+assertEqual(blankHtml.includes('ORDER'), false, '不印订货单号')
+const blankToStoreHtml = buildPackLabelHtml(blankToStore)
+assertEqual(blankToStoreHtml.includes('pkl-toline'), false, '有去向时不画横线')
+assertIncludes(blankToStoreHtml, '<em>TO</em>INALA</div>', '有去向时印去向')
+assertEqual(buildPackLabelHtml(buildCartonLabelFields(carton(), NOW)).includes('pkl-blank'), false, '内容标不带空箱标样式')
+
+// ---- 一次打印的标签列表：空箱标印空箱标，其他印内容标；每只箱 copies 份相邻 ----
+const mixed = [blankCarton({ cartonNo: 'BX2611130001', cartonGuid: 'b1', batchSeq: 1 }), carton({ cartonNo: 'BX2611130002', cartonGuid: 'n1' })]
+const printLabels = buildCartonPrintLabels(mixed, 2, NOW)
+assertEqual(printLabels.length, 4, '2 只箱 × 2 份 = 4 页')
+assertEqual(printLabels.map((item) => item.code).join(), 'BX2611130001,BX2611130001,BX2611130002,BX2611130002', '同一只箱的份数相邻')
+assertEqual(printLabels.map((item) => Boolean(item.blank)).join(), 'true,true,false,false', '未启用空箱标印空箱标，普通箱印内容标')
+assertEqual(buildCartonPrintLabels(mixed, 0, NOW).length, 2, '份数最少 1')
+assertEqual(
+  buildCartonPrintLabels([blankCarton({ activatedAtUtc: SEALED_AT })], 1, NOW)[0].blank,
+  undefined,
+  '已启用的箱按内容标打印',
+)
+const blankDocument = buildPackLabelDocument(printLabels)
+assertIncludes(blankDocument, '@page{size:70mm 26mm;margin:0}', '空箱标同样 70×26 mm')
+assertEqual(blankDocument.split('<div class="pkl-page">').length - 1, 4, '一张箱标一页')
+assertIncludes(blankDocument, '.pkl-toline{', '横线样式在打印样式里')
 
 console.log('packLabel.test: ok')

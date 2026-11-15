@@ -92,6 +92,7 @@
     "filter": {
       "all": "全部",
       "packing": "装箱中 {{count}}",
+      "blank": "空箱标 {{count}}",
       "building": "组托中 {{count}}",
       "mine": "只看我的",
       "cartonKeyword": "箱号 / 货号 / 条码",
@@ -361,6 +362,100 @@
       "countMismatchBody": "你填的是 {{entered}} 箱，系统记录这个订单实际在途 {{actual}} 箱。一只都没有签收，请重新数一遍。",
       "countMismatchOk": "重新数一数",
       "notInTransit": "这个订单已经没有在路上的箱了（可能刚被签收），已刷新。"
+    },
+    "blank": {
+      "entry": "批量箱标",
+      "title": "批量箱标",
+      "tag": "空箱标",
+      "unactivated": "未启用",
+      "activated": "已启用",
+      "voided": "已作废",
+      "notPrinted": "还没打印",
+      "printedTimes": "已打印 {{count}} 次",
+      "batchPosition": "批 {{batch}} · 第 {{seq}} / {{count}} 张",
+      "columns": {
+        "label": "标签",
+        "batch": "批次"
+      },
+      "view": {
+        "create": "新建",
+        "batches": "最近批次"
+      },
+      "create": {
+        "count": "要几张",
+        "countHint": "一次最多 {{max}} 张。",
+        "quota": "本店未启用的空箱标已有 {{count}} 张，上限 {{limit}} 张。",
+        "destination": "去向",
+        "destinationHint": "不指定去向时，标签上 TO 后留一条横线，装箱或发出时再选。",
+        "copies": "每个箱号打印份数",
+        "copiesUnit": "份",
+        "preview": "标签预览",
+        "previewHint": "箱号连续 {{count}} 个，以创建结果为准；预览里的箱号只是样式示例。",
+        "paperHint": "70×26 mm，一张箱标一页。打印时在浏览器打印对话框里选标签打印机，页边距选「无」。",
+        "createOnly": "只创建",
+        "createAndPrint": "创建并打印 {{count}} 张",
+        "created": "已创建 {{count}} 张空箱标：{{first}} ～ {{last}}",
+        "duplicate": "这一批之前已经创建过（{{count}} 张），没有重复创建。",
+        "printBatch": "打印这批",
+        "viewBatch": "查看批次",
+        "limitExceeded": "本店未启用的空箱标已有 {{existing}} 张，上限 {{limit}} 张，请先用掉或作废一部分再创建。"
+      },
+      "batches": {
+        "empty": "还没有批次",
+        "createdAt": "创建时间",
+        "count": "张数",
+        "range": "箱号范围",
+        "creator": "创建人",
+        "printed": "已打印",
+        "unactivated": "未启用",
+        "voided": "作废",
+        "open": "查看"
+      },
+      "batch": {
+        "back": "返回批次列表",
+        "summary": "{{count}} 张 · {{first}} ～ {{last}} · {{creator}}",
+        "printUnprinted": "补打未打印的（{{count}}）",
+        "reprintAll": "全部重打（{{count}}）",
+        "nothingToPrint": "这一批没有需要打印的标签",
+        "rowPrint": "打印",
+        "seq": "序号",
+        "state": "状态"
+      },
+      "print": {
+        "title": "打印标签",
+        "summary": "{{cartons}} 张 × 每个箱号 {{copies}} 份 = {{pages}} 页（一页一张，70×26 mm）",
+        "copies": "每个箱号份数",
+        "start": "开始打印",
+        "continue": "继续打印（剩 {{count}} 张）",
+        "reprint": "重新打印这几张",
+        "printing": "正在打开打印对话框，请在对话框里确认打印…",
+        "progress": "已发送打印 {{done}} / {{total}} 张",
+        "sent": "已发送打印：共 {{count}} 张。浏览器无法确认纸是否真的打出来，漏打的可以在批次里补打。",
+        "markFailed": "已发送打印，但没能记录「已打印」：{{reason}}",
+        "retryMark": "重新标记",
+        "unconfirmed": "没有收到打印完成的回执（可能取消了打印）。确认已经打印的话，可以手动标记。",
+        "markPrinted": "标记为已打印",
+        "failed": "打印窗口没能打开，请检查浏览器是否拦截了弹窗 / 打印。",
+        "skipped": "{{count}} 张没能记录为已打印",
+        "noReport": "这几张不是空箱标，不记录打印次数。",
+        "close": "关闭"
+      },
+      "select": {
+        "selected": "已选 {{count}} 只",
+        "print": "打印标签（{{count}}）",
+        "void": "作废空箱标",
+        "clear": "清除选择"
+      },
+      "void": {
+        "confirmTitle": "作废选中的空箱标？",
+        "confirmBody": "选中 {{count}} 只，其中 {{blank}} 张是未启用的空箱标，会被作废，作废后不能恢复；其余 {{other}} 只不是空箱标，不会受影响。",
+        "ok": "作废",
+        "noneBlank": "选中的箱里没有未启用的空箱标，没有可作废的。",
+        "voided": "已作废 {{count}} 张空箱标",
+        "skippedNotBlank": "{{count}} 只不是空箱标，已跳过",
+        "skippedNotFound": "{{count}} 只找不到，已跳过",
+        "separator": "；"
+      }
     }
   }
 }
