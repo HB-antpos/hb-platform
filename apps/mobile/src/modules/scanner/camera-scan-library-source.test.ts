@@ -28,4 +28,11 @@ for (const file of [
   assert.match(read(file), /libraryPicker=\{\w+\.libraryPicker\}/, `${file} 缺少相册入口接线`);
 }
 
+// 创建商品 / 新增多码条码用的独立扫码弹层也要有相册入口，且与相机共用同一把「只回填一次」的锁。
+const createScanner = read("src/components/product-maintenance/CreateBarcodeScanner.tsx");
+assert.match(createScanner, /canScanLocalImage\(\) \?/, "不支持的平台 / 原生包必须隐藏相册入口");
+assert.match(createScanner, /scanBarcodeFromImage\(picked\.uri, localImageScanner\)/, "必须复用相册识别核心逻辑");
+assert.match(createScanner, /if \(pickingImageRef\.current\) return;/, "选图期间必须拦住实时相机帧");
+assert.match(createScanner, /consumed\.current = true;\s*onScan\(barcode\);/, "相册结果必须与相机共用 consumed 锁");
+
 console.log("camera-scan-library-source.test.ts: ok");

@@ -1,9 +1,18 @@
-import { useRef, useState } from "react";
-import { Linking, StyleSheet, View } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { Alert, Linking, StyleSheet, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Button, Text } from "react-native-paper";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { restoreCameraBarcodeData } from "@/modules/scanner/camera-barcode-data";
+import {
+  LOCAL_IMAGE_FAILURE_MESSAGE_KEYS,
+  scanBarcodeFromImage,
+} from "@/modules/scanner/local-image-barcode";
+import {
+  canScanLocalImage,
+  localImageScanner,
+  pickLocalImage,
+} from "@/modules/scanner/local-image-barcode-runtime";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 
 export function CreateBarcodeScanner({
@@ -16,7 +25,40 @@ export function CreateBarcodeScanner({
   const { t } = useAppTranslation(["productQuery", "common"]);
   const [permission, requestPermission] = useCameraPermissions();
   const [failed, setFailed] = useState(false);
+  const [pickingImage, setPickingImage] = useState(false);
   const consumed = useRef(false);
+  // 选图 / 识别期间拦住实时相机帧，避免相册结果与相机结果同时回填。
+  const pickingImageRef = useRef(false);
+
+  /** 从相册选一张图识别条码；与相机共用 consumed 锁，一次会话只回填一次，不进入查询或保存流程。 */
+  const pickFromLibrary = useCallback(async () => {
+    if (pickingImageRef.current || consumed.current) return;
+    pickingImageRef.current = true;
+    setPickingImage(true);
+    try {
+      const picked = await pickLocalImage();
+      if (picked.status !== "picked") return;
+      const outcome = await scanBarcodeFromImage(picked.uri, localImageScanner);
+      if (!outcome.ok) {
+        // 没识别到 / 识别到多个：弹提示让用户换图，面板与相机保持打开。
+        Alert.alert(
+          t("common:scanner.imageScanTitle"),
+          t(`common:${LOCAL_IMAGE_FAILURE_MESSAGE_KEYS[outcome.reason]}`),
+        );
+        return;
+      }
+      const barcode = restoreCameraBarcodeData(outcome.hit.type, outcome.hit.data.trim());
+      if (!barcode || consumed.current) return;
+      consumed.current = true;
+      onScan(barcode);
+    } catch {
+      Alert.alert(t("common:scanner.imageScanTitle"), t("common:scanner.imageReadFailed"));
+    } finally {
+      pickingImageRef.current = false;
+      setPickingImage(false);
+    }
+  }, [onScan, t]);
+
   return (
     <BusinessSheet
       visible
@@ -45,6 +87,7 @@ export function CreateBarcodeScanner({
             }}
             onMountError={() => setFailed(true)}
             onBarcodeScanned={({ data, type }) => {
+              if (pickingImageRef.current) return;
               const barcode = restoreCameraBarcodeData(type, data.trim());
               // 原生相机会连续回调；同步锁保证一次会话只回填一次，不进入查询或保存流程。
               if (!barcode || consumed.current) return;
@@ -81,6 +124,20 @@ export function CreateBarcodeScanner({
           ) : null}
         </View>
       )}
+      {/* 相册入口独立于相机权限：没开相机权限 / 相机不可用时，仍可选图识别。 */}
+      {canScanLocalImage() ? (
+        <Button
+          mode="outlined"
+          icon="image-outline"
+          onPress={() => void pickFromLibrary()}
+          loading={pickingImage}
+          disabled={pickingImage}
+          contentStyle={styles.libraryButtonContent}
+          style={styles.libraryButton}
+        >
+          {t("common:scanner.pickFromLibrary")}
+        </Button>
+      ) : null}
     </BusinessSheet>
   );
 }
@@ -101,4 +158,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   permission: { minHeight: 180, justifyContent: "center", gap: 16 },
+  libraryButton: { marginTop: 12 },
+  libraryButtonContent: { minHeight: 48 },
 });

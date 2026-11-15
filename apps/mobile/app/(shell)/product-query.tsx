@@ -1072,11 +1072,17 @@ function ProductQueryContent() {
       createProductVisible ||
       createBarcodeScannerVisible ||
       createSupplierPickerVisible ||
+      // 新增 / 编辑多码、套装条码的弹层同理：焦点被隐藏框抢走后，手输的条码会被当成扫码清空，
+      // 可见输入框始终为空，「添加到列表」按钮也就一直是灰的。
+      Boolean(codeAddModal) ||
+      Boolean(barcodeEditModal) ||
       hqSyncRetrying ||
       promotionSheetOpen,
     [
       autoPricingDialog,
       autoPricingDialogSaving,
+      barcodeEditModal,
+      codeAddModal,
       loading,
       lookupVisible,
       createProductBusy,
