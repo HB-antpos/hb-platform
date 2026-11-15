@@ -299,6 +299,13 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
         CancellationToken cancellationToken) =>
         await GetAllPagesAsync<JsonElement>(businessId, accessToken, "Contact/EmployeePayrollDetails", cancellationToken);
 
+    // 临时探针专用：原样返回工资类别 JSON，核对「倍数」字段真实名称（PayRate / RegularRateMultiplier 等）。
+    public async Task<IReadOnlyList<JsonElement>> GetWageCategoriesRawAsync(
+        string businessId,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        await GetAllPagesAsync<JsonElement>(businessId, accessToken, "Payroll/PayrollCategory/Wage", cancellationToken);
+
     public async Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(
         string businessId,
         string accessToken,
