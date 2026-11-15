@@ -39,5 +39,26 @@ namespace BlazorApp.Api.Controllers.React
                 ? NotFound(result)
                 : BadRequest(result);
         }
+
+        /// <summary>
+        /// 工资类别（Payroll/PayrollCategory/Wage）只读探测：字段路径 + 各类别标量值（类别名、倍数等公司级设置），
+        /// 不含 UID / URI / 个人数据。用来确认周末「倍数」的真实字段名。
+        /// </summary>
+        [HttpGet("categories")]
+        public async Task<IActionResult> RunCategories(
+            [FromQuery] string connectionGuid,
+            CancellationToken cancellationToken)
+        {
+            Response.Headers.CacheControl = "no-store";
+            var result = await _service.RunCategoriesAsync(connectionGuid ?? string.Empty, cancellationToken);
+            if (result.Success)
+            {
+                return Ok(result);
+            }
+
+            return result.ErrorCode is MyobErrorCodes.ConnectionNotFound or MyobErrorCodes.ConnectionNotActive
+                ? NotFound(result)
+                : BadRequest(result);
+        }
     }
 }

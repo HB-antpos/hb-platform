@@ -171,6 +171,75 @@ public sealed class MyobWageProbeServiceTests : IDisposable
         Assert.Equal(MyobErrorCodes.ConnectionNotActive, (await service.RunAsync(Conn, null, CancellationToken.None)).ErrorCode);
     }
 
+    // 一个按倍数（RegularRate）的周六类别、一个固定时薪（FixedHourly）类别；UID / URI / RowVersion 用来断言「不回显」。
+    private const string Categories = """
+        [
+          {"UID":"cat-sat","Name":"SATURDAY (x1.25)","Type":"Hourly","PayRate":"RegularRate","RegularRateMultiplier":1.25,
+           "RowVersion":"-123456","URI":"https://api.example/cat-sat","ExpenseAccount":{"UID":"acc-1","DisplayID":"6-1100","Name":"Wages"}},
+          {"UID":"cat-fix","Name":"Fixed Rate","Type":"Hourly","PayRate":"FixedHourly","FixedHourlyRate":30,"RegularRateMultiplier":null}
+        ]
+        """;
+
+    [Fact]
+    public void AnalyzeCategories_ListsFieldPathsAndScalarValuesButNeverIdentifiers()
+    {
+        var dto = MyobWageProbeAnalyzer.AnalyzeCategories(JsonSerializer.Deserialize<List<JsonElement>>(Categories)!);
+
+        Assert.Equal(2, dto.CategoryCount);
+
+        // 倍数字段：一个是数字、一个是 null，类型两种都见到，非空只算一个类别。
+        var multiplier = Assert.Single(dto.Fields, item => item.Path == "RegularRateMultiplier");
+        Assert.Equal(2, multiplier.Present);
+        Assert.Equal(1, multiplier.NonNull);
+        Assert.Equal(["Null", "Number"], multiplier.Kinds);
+
+        var saturday = Assert.Single(dto.Categories, item => item.Name == "SATURDAY (x1.25)");
+        Assert.Equal("RegularRate", saturday.Values["PayRate"]);
+        Assert.Equal("1.25", saturday.Values["RegularRateMultiplier"]);
+        Assert.Equal("6-1100", saturday.Values["ExpenseAccount.DisplayID"]);
+
+        var fixedRate = Assert.Single(dto.Categories, item => item.Name == "Fixed Rate");
+        Assert.Equal("FixedHourly", fixedRate.Values["PayRate"]);
+        Assert.Equal("null", fixedRate.Values["RegularRateMultiplier"]);
+
+        // 标识类字段：字段路径可以列出来（用于核对结构），但值一律不回显。
+        var json = JsonSerializer.Serialize(dto);
+        Assert.DoesNotContain("cat-sat", json);
+        Assert.DoesNotContain("acc-1", json);
+        Assert.DoesNotContain("-123456", json);
+        Assert.DoesNotContain("https://api.example", json);
+        Assert.All(dto.Categories, item =>
+        {
+            Assert.DoesNotContain("UID", item.Values.Keys);
+            Assert.DoesNotContain("URI", item.Values.Keys);
+            Assert.DoesNotContain("RowVersion", item.Values.Keys);
+        });
+    }
+
+    [Fact]
+    public async Task RunCategories_ReturnsStructureForActiveConnection()
+    {
+        var result = await Create(Categories).RunCategoriesAsync(Conn, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("Investment", result.Data!.ConnectionName);
+        Assert.Equal(2, result.Data.CategoryCount);
+    }
+
+    [Fact]
+    public async Task RunCategories_RejectsMissingAndInactiveConnections()
+    {
+        var service = Create(Categories);
+        Assert.Equal(MyobWageProbeErrorCodes.InvalidRequest, (await service.RunCategoriesAsync(" ", CancellationToken.None)).ErrorCode);
+        Assert.Equal(MyobErrorCodes.ConnectionNotFound, (await service.RunCategoriesAsync("nope", CancellationToken.None)).ErrorCode);
+
+        _db.Updateable<MyobConnection>()
+            .SetColumns(item => item.Status == MyobConnectionStatuses.NeedsReauth)
+            .Where(item => item.ConnectionGuid == Conn)
+            .ExecuteCommand();
+        Assert.Equal(MyobErrorCodes.ConnectionNotActive, (await service.RunCategoriesAsync(Conn, CancellationToken.None)).ErrorCode);
+    }
+
     [Fact]
     public void Controller_RequiresConnectionManagePermission()
     {
@@ -179,7 +248,7 @@ public sealed class MyobWageProbeServiceTests : IDisposable
         Assert.Equal(Permissions.Myob.Connection.Manage, attribute?.Policy);
     }
 
-    private MyobWageProbeService Create()
+    private MyobWageProbeService Create(string categoriesJson = "[]")
     {
         var directory = new MyobEmployeeDirectoryData(Conn, "Investment", DateTime.UtcNow,
         [
@@ -187,14 +256,18 @@ public sealed class MyobWageProbeServiceTests : IDisposable
                 new MyobMatchCard("uid-aidan", "Aidan", "Secret", null, true, [], [], null, true),
                 new MyobEmployeeCardDto { Uid = "uid-aidan", DisplayId = "E001", Name = "Aidan Secret" }),
         ]);
-        return new MyobWageProbeService(_db, new RawClient(Cards), new FakeTokens(), new FakeDirectory(directory));
+        return new MyobWageProbeService(_db, new RawClient(Cards, categoriesJson), new FakeTokens(), new FakeDirectory(directory));
     }
 
-    private sealed class RawClient(string json) : IMyobRawReadClient
+    private sealed class RawClient(string json, string categoriesJson = "[]") : IMyobRawReadClient
     {
         public Task<IReadOnlyList<JsonElement>> GetEmployeePayrollDetailsRawAsync(
             string businessId, string accessToken, CancellationToken cancellationToken) =>
             Task.FromResult<IReadOnlyList<JsonElement>>(JsonSerializer.Deserialize<List<JsonElement>>(json)!);
+
+        public Task<IReadOnlyList<JsonElement>> GetWageCategoriesRawAsync(
+            string businessId, string accessToken, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<JsonElement>>(JsonSerializer.Deserialize<List<JsonElement>>(categoriesJson)!);
     }
 
     private sealed class FakeTokens : IMyobTokenProvider

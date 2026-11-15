@@ -31,6 +31,10 @@ public interface IMyobRawReadClient
     /// <summary>GET /{cf_uri}/Contact/EmployeePayrollDetails 全量翻页，原样返回每条 JSON。</summary>
     Task<IReadOnlyList<JsonElement>> GetEmployeePayrollDetailsRawAsync(
         string businessId, string accessToken, CancellationToken cancellationToken);
+
+    /// <summary>GET /{cf_uri}/Payroll/PayrollCategory/Wage 全量翻页，原样返回每条 JSON（核对类别倍数字段用）。</summary>
+    Task<IReadOnlyList<JsonElement>> GetWageCategoriesRawAsync(
+        string businessId, string accessToken, CancellationToken cancellationToken);
 }
 
 /// <summary>一个字段路径的统计：数组元素用 [] 表示，如 Wage.WageCategories[].Name。</summary>
@@ -93,10 +97,37 @@ public sealed class MyobWageProbeDto
         "只读探针：只含字段路径、类型与计数、时薪汇总统计；不含姓名、UID、年薪。字段核对完后整个接口删除。";
 }
 
+/// <summary>一个工资类别的标量字段值（路径 → 值）。类别名与倍数等是公司级设置，不是个人数据；UID / URI / RowVersion 不回显。</summary>
+public sealed class MyobWageCategoryProbeItemDto
+{
+    public string Name { get; set; } = string.Empty;
+    public Dictionary<string, string> Values { get; set; } = [];
+}
+
+/// <summary>
+/// 工资类别（Payroll/PayrollCategory/Wage）探测结果：字段路径统计 + 每个类别的标量值，
+/// 用来确认「倍数」到底放在哪个字段（PayRate / RegularRateMultiplier / HourlyDetails 等），供周末建议值解析用。
+/// </summary>
+public sealed class MyobWageCategoryProbeDto
+{
+    public string ConnectionGuid { get; set; } = string.Empty;
+    public string ConnectionName { get; set; } = string.Empty;
+    public int CategoryCount { get; set; }
+    public List<MyobWageProbeFieldDto> Fields { get; set; } = [];
+    public List<MyobWageCategoryProbeItemDto> Categories { get; set; } = [];
+
+    public string Note { get; set; } =
+        "只读探针：只含字段路径、类型与计数，以及各工资类别的标量值（类别名、倍数等公司级设置）；不含 UID / URI / 个人数据。字段核对完后整个接口删除。";
+}
+
 public interface IMyobWageProbeService
 {
     Task<ApiResponse<MyobWageProbeDto>> RunAsync(
         string connectionGuid, string? employeeDisplayId, CancellationToken cancellationToken);
+
+    /// <summary>读该公司文件的工资类别原始 JSON，汇总字段结构与各类别的标量值。</summary>
+    Task<ApiResponse<MyobWageCategoryProbeDto>> RunCategoriesAsync(
+        string connectionGuid, CancellationToken cancellationToken);
 }
 
 internal sealed class MyobWageProbeService : IMyobWageProbeService
@@ -181,6 +212,43 @@ internal sealed class MyobWageProbeService : IMyobWageProbeService
 
         return ApiResponse<MyobWageProbeDto>.OK(result);
     }
+
+    public async Task<ApiResponse<MyobWageCategoryProbeDto>> RunCategoriesAsync(
+        string connectionGuid, CancellationToken cancellationToken)
+    {
+        var guid = connectionGuid?.Trim() ?? string.Empty;
+        if (guid.Length == 0)
+        {
+            return ApiResponse<MyobWageCategoryProbeDto>.Error("缺少 connectionGuid", MyobWageProbeErrorCodes.InvalidRequest);
+        }
+
+        var connection = await _db.Queryable<MyobConnection>().FirstAsync(item => item.ConnectionGuid == guid);
+        if (connection is null)
+        {
+            return ApiResponse<MyobWageCategoryProbeDto>.Error("MYOB 连接不存在", MyobErrorCodes.ConnectionNotFound);
+        }
+
+        if (connection.Status != MyobConnectionStatuses.Active)
+        {
+            return ApiResponse<MyobWageCategoryProbeDto>.Error("MYOB 连接未启用", MyobErrorCodes.ConnectionNotActive);
+        }
+
+        IReadOnlyList<JsonElement> categories;
+        try
+        {
+            var token = await _tokens.GetAccessTokenAsync(guid, cancellationToken);
+            categories = await _client.GetWageCategoriesRawAsync(connection.BusinessId, token, cancellationToken);
+        }
+        catch (MyobApiException ex)
+        {
+            return ApiResponse<MyobWageCategoryProbeDto>.Error(ex.Message, ex.Code);
+        }
+
+        var result = MyobWageProbeAnalyzer.AnalyzeCategories(categories);
+        result.ConnectionGuid = connection.ConnectionGuid;
+        result.ConnectionName = connection.BusinessName;
+        return ApiResponse<MyobWageCategoryProbeDto>.OK(result);
+    }
 }
 
 /// <summary>把一批 EmployeePayrollDetails 原始 JSON 汇总成「字段结构 + 时薪统计」（纯函数，无 IO）。</summary>
@@ -189,6 +257,8 @@ internal static class MyobWageProbeAnalyzer
     private const int MaxDepth = 6;
     private const int MaxPaths = 300;
     private const int MaxEnumValues = 12;
+    private const int MaxCategories = 100;
+    private const int MaxCategoryValues = 40;
 
     internal static MyobWageProbeDto Analyze(IReadOnlyList<JsonElement> cards)
     {
@@ -292,6 +362,97 @@ internal static class MyobWageProbeAnalyzer
                 .ToList(),
         };
         return dto;
+    }
+
+    /// <summary>
+    /// 汇总工资类别原始 JSON：字段路径 / 类型 / 出现次数，以及每个类别的标量值。
+    /// UID / URI / RowVersion 一律不回显；每个类别最多 <see cref="MaxCategoryValues"/> 个值、最多 <see cref="MaxCategories"/> 个类别，防止响应过大。
+    /// </summary>
+    internal static MyobWageCategoryProbeDto AnalyzeCategories(IReadOnlyList<JsonElement> categories)
+    {
+        var present = new Dictionary<string, int>(StringComparer.Ordinal);
+        var nonNull = new Dictionary<string, int>(StringComparer.Ordinal);
+        var kinds = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        var items = new List<MyobWageCategoryProbeItemDto>();
+
+        foreach (var category in categories)
+        {
+            if (category.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var seenNonNull = new HashSet<string>(StringComparer.Ordinal);
+            var values = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            var name = string.Empty;
+            Walk(category, string.Empty, 0, (path, value) =>
+            {
+                if (!kinds.ContainsKey(path) && kinds.Count >= MaxPaths)
+                {
+                    return;
+                }
+
+                if (!kinds.TryGetValue(path, out var set))
+                {
+                    kinds[path] = set = [];
+                }
+
+                set.Add(value.ValueKind.ToString());
+                seen.Add(path);
+                if (value.ValueKind != JsonValueKind.Null)
+                {
+                    seenNonNull.Add(path);
+                }
+
+                if (value.ValueKind is JsonValueKind.Object or JsonValueKind.Array || IsHiddenLeaf(Leaf(path)))
+                {
+                    return;
+                }
+
+                var text = Clip(ScalarText(value));
+                if (path == "Name")
+                {
+                    name = text;
+                }
+
+                if (values.Count < MaxCategoryValues)
+                {
+                    values[path] = text;
+                }
+            });
+
+            foreach (var path in seen)
+            {
+                present[path] = present.GetValueOrDefault(path) + 1;
+            }
+
+            foreach (var path in seenNonNull)
+            {
+                nonNull[path] = nonNull.GetValueOrDefault(path) + 1;
+            }
+
+            if (items.Count < MaxCategories)
+            {
+                items.Add(new MyobWageCategoryProbeItemDto { Name = name, Values = new Dictionary<string, string>(values) });
+            }
+        }
+
+        return new MyobWageCategoryProbeDto
+        {
+            CategoryCount = categories.Count,
+            Fields = kinds
+                .OrderBy(item => item.Key, StringComparer.Ordinal)
+                .Select(item => new MyobWageProbeFieldDto
+                {
+                    Path = item.Key,
+                    Kinds = item.Value.ToList(),
+                    Present = present.GetValueOrDefault(item.Key),
+                    NonNull = nonNull.GetValueOrDefault(item.Key),
+                })
+                .ToList(),
+            Categories = items.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToList(),
+        };
     }
 
     /// <summary>按员工 UID 取那一张卡的 Wage.PayBasis / PayFrequency / HourlyRate；找不到返回 Found=false。</summary>
@@ -418,6 +579,21 @@ internal static class MyobWageProbeAnalyzer
         || leaf.Equals("PayFrequency", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsRateLeaf(string leaf) => leaf.Equals("HourlyRate", StringComparison.OrdinalIgnoreCase);
+
+    // 标识类字段不回显：探测只关心「设置值」，不需要能反查到 MYOB 记录的 UID / URI。
+    private static bool IsHiddenLeaf(string leaf) =>
+        leaf.Equals("UID", StringComparison.OrdinalIgnoreCase)
+        || leaf.Equals("URI", StringComparison.OrdinalIgnoreCase)
+        || leaf.Equals("RowVersion", StringComparison.OrdinalIgnoreCase);
+
+    private static string ScalarText(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.String => value.GetString() ?? string.Empty,
+        JsonValueKind.Number => value.GetRawText(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => "null",
+    };
 
     private static string Clip(string? value)
     {
