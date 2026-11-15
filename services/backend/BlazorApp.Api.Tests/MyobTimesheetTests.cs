@@ -1076,6 +1076,12 @@ public sealed class MyobTimesheetTests : IDisposable
         Assert.Equal("1042", RowOf(dto, "u-liam").Blockers[0].Ref);
         Assert.Contains(RowOf(dto, "u-ned").Blockers, item => item.Code == MyobBlockerCodes.NoRate);
         Assert.Equal(MyobPreviewStatuses.Blocked, RowOf(dto, "u-ned").Status);
+        // 无时薪但有工时：详情里不能说「没有工时」，也不能标成校验通过
+        var ned = RowOf(dto, "u-ned");
+        Assert.True(ned.ActualHours > 0m);
+        Assert.False(ned.Detail.CheckOk);
+        Assert.Contains("时薪", ned.Detail.CheckMessage);
+        Assert.DoesNotContain("没有工时", ned.Detail.CheckMessage);
         Assert.Contains(RowOf(dto, "u-uma").Blockers, item => item.Code == MyobBlockerCodes.StoreNotMapped && item.Ref == "1099");
         var mei = RowOf(dto, "u-mei");
         Assert.Contains(mei.Blockers, item => item.Code == MyobBlockerCodes.CategoryNotMapped && item.Ref == MyobPayCategoryKeys.Saturday);
