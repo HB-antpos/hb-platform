@@ -26,6 +26,7 @@ import {
 import { ScheduleExportSheet } from "./ScheduleExportSheet";
 import { PatternFill } from "./approvals/approval-ui";
 import { ScheduleDayView } from "./schedule/ScheduleDayView";
+import { ScheduleBoard } from "./schedule/ScheduleBoard";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { useAuthStore } from "@/store/auth-store";
 import {
@@ -78,6 +79,17 @@ import {
   type DragGridGeometry,
 } from "@/modules/attendance/schedule-drag";
 import type { PlacementTargetCell } from "@/modules/attendance/schedule-placement-actions";
+import {
+  assignStaffColors,
+  batchCellKey,
+  batchMatrixTargets,
+  buildBatchMatrix,
+  buildStaffLegend,
+  findAvailableUnscheduled,
+  getRelativeWeekOffset,
+  groupScheduleBoardDays,
+  summarizeBatchMatrix,
+} from "@/modules/attendance/schedule-board";
 import type {
   AttendanceAvailability,
   AttendanceSchedule,
@@ -129,7 +141,10 @@ type ScheduleDraft = typeof EMPTY_FORM;
 /** 批量排班入口：点员工选多天，或点日期选多位员工。 */
 type BatchTarget =
   | { mode: "employee"; userGuid: string; employeeName?: string }
-  | { mode: "date"; workDate: string; weekdayIndex: number };
+  | { mode: "date"; workDate: string; weekdayIndex: number }
+  /** 员工 × 日期：多选员工、多选日期，统一一个班次（与 Web「排班」弹窗一致）。 */
+  | { mode: "matrix" };
+type MatrixFilter = "all" | "available" | "unscheduled";
 type GridVariant = "card" | "fullscreen";
 
 /** 一次长按拖动的运行时状态：手指位置、格子几何都变得很快，放 ref 里不触发渲染。 */
@@ -387,6 +402,8 @@ export function ScheduleManagementCard({
   isCopying,
   onPreviousWeek,
   onNextWeek,
+  onThisWeek,
+  currentWeekStartDate,
   onCreate,
   onCreateBatch,
   onUpdate,
@@ -410,6 +427,10 @@ export function ScheduleManagementCard({
   isCopying: boolean;
   onPreviousWeek: () => void;
   onNextWeek: () => void;
+  /** 回到本周（「本周」按钮）。 */
+  onThisWeek?: () => void;
+  /** 本周周一（YYYY-MM-DD），用来标「下 1 周 / 上 2 周」。 */
+  currentWeekStartDate?: string;
   onCreate: (payload: AttendanceSchedulePayload) => void;
   /** 批量新建（依次提交、统一汇总提示）。 */
   onCreateBatch: (payloads: AttendanceSchedulePayload[]) => void;
@@ -440,7 +461,17 @@ export function ScheduleManagementCard({
   const [batchSelection, setBatchSelection] = useState<ReadonlySet<string>>(() => new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
   // 周表 / 日视图；日视图默认选今天（不在本周时选周一）。
-  const [viewMode, setViewMode] = useState<"week" | "day">("week");
+  // 周＝按天分组看板（与 Web 一致）；按人＝原来的员工行表格（保留长按拖动与常用班次托盘）；日＝按小时看人手
+  const [viewMode, setViewMode] = useState<"week" | "staff" | "day">("week");
+  // 看板图例点选的员工：其他人的卡片变淡
+  const [highlighted, setHighlighted] = useState<string | undefined>();
+  // 员工 × 日期批量排班
+  const [matrixUsers, setMatrixUsers] = useState<ReadonlySet<string>>(() => new Set());
+  const [matrixDates, setMatrixDates] = useState<ReadonlySet<string>>(() => new Set());
+  const [matrixExcluded, setMatrixExcluded] = useState<ReadonlySet<string>>(() => new Set());
+  const [matrixFilter, setMatrixFilter] = useState<MatrixFilter>("all");
+  // 编辑面板「改给其他员工」选中的对象
+  const [transferTo, setTransferTo] = useState<string | undefined>();
   // 新建班次时「同时排到」本周其他几天（只能选空格或仅有可上班的格子）。
   const [extraDays, setExtraDays] = useState<ReadonlySet<string>>(() => new Set());
   const [dayIndex, setDayIndex] = useState(0);
@@ -595,6 +626,27 @@ export function ScheduleManagementCard({
   const peopleByDay = useMemo(() => countScheduledPeopleByDay(days, schedules), [days, schedules]);
   const draftCount = useMemo(() => countDraftShifts(schedules), [schedules]);
 
+  // ---------- 按天分组看板（与 Web 同一套规则：一人一色、开始时间 → 员工名排序） ----------
+  const nameOfUser = useMemo(() => {
+    const names = new Map(rows.map((row) => [row.userGuid, row.employeeName || row.userGuid]));
+    return (userGuid: string) => names.get(userGuid) ?? userGuid;
+  }, [rows]);
+  const staffColors = useMemo(
+    () => assignStaffColors(rows.map((row) => ({ userGuid: row.userGuid, name: row.employeeName }))),
+    [rows],
+  );
+  const boardDays = useMemo(() => groupScheduleBoardDays(days, schedules, nameOfUser), [days, nameOfUser, schedules]);
+  const staffLegend = useMemo(() => buildStaffLegend(schedules, nameOfUser), [nameOfUser, schedules]);
+  const freeByDay = useMemo(
+    () => days.map((day) => findAvailableUnscheduled(day, rows.map((row) => row.userGuid), schedules, availabilityMap)),
+    [availabilityMap, days, rows, schedules],
+  );
+  const relativeWeek = currentWeekStartDate ? getRelativeWeekOffset(weekStartDate, currentWeekStartDate) : 0;
+  // 换周 / 换店后高亮没有意义，清掉
+  useEffect(() => {
+    setHighlighted(undefined);
+  }, [storeCode, weekStartDate]);
+
   const weekEndDate = days[6] || "";
   const weekRangeLabel = formatWeekRange(weekStartDate, weekEndDate);
   const storeLabel = storeName || storeCode || t("scheduleManagement.noStore");
@@ -700,6 +752,7 @@ export function ScheduleManagementCard({
   };
 
   const closeEditor = () => {
+    setTransferTo(undefined);
     setExtraDays(new Set());
     setEditingTarget(null);
     setBatchTarget(null);
@@ -1022,6 +1075,60 @@ export function ScheduleManagementCard({
     setForm(EMPTY_FORM);
   };
 
+  // 「＋ 排班」/ 空白日 /「可上班未排」：打开员工 × 日期批量排班，可预选日期与员工
+  const openMatrixBatch = (preset: { dates?: string[]; userGuids?: string[] } = {}) => {
+    if (!storeCode) {
+      return;
+    }
+    setEditingTarget(null);
+    setPlacement(null);
+    setBatchTarget({ mode: "matrix" });
+    setMatrixDates(new Set(preset.dates ?? []));
+    setMatrixUsers(new Set(preset.userGuids ?? []));
+    setMatrixExcluded(new Set());
+    setMatrixFilter("all");
+    setForm(EMPTY_FORM);
+  };
+
+  const rowOfUser = (userGuid: string): ScheduleRow =>
+    rows.find((item) => item.userGuid === userGuid) ?? { userGuid, employeeName: nameOfUser(userGuid), schedules: [] };
+
+  // 看板点卡片：沿用原来的编辑面板（与表格点格子同一个入口）
+  const openBoardCard = (schedule: AttendanceSchedule, dayIndex: number) => {
+    if (placement) {
+      return;
+    }
+    const row = rowOfUser(schedule.userGuid);
+    const day = schedule.workDate.slice(0, 10);
+    const daySchedules = row.schedules.filter(
+      (item) => item.workDate.slice(0, 10) === day && item.status.toLowerCase() !== "cancelled",
+    );
+    openEdit(schedule, row, dayIndex, daySchedules);
+  };
+
+  // 编辑面板「改给其他员工」：与 Web 一样走「移动到另一员工」（新建给对方 + 删除原班次，可撤销），
+  // 能否放下沿用放置规则：时间重叠直接拦下，对方当天不能上班 / 超出可上班时段要二次确认。
+  const transferEditing = () => {
+    const origin = editingTarget?.schedule;
+    if (!origin || !transferTo || !storeCode) {
+      return;
+    }
+    const source = {
+      kind: "move" as const,
+      schedule: origin,
+      startTime: normalizeClockTime(origin.startTime),
+      endTime: normalizeClockTime(origin.endTime),
+    };
+    const target = rowOfUser(transferTo);
+    const day = origin.workDate.slice(0, 10);
+    if (verdictFor(source, target, day).state === "bad") {
+      Alert.alert(t("scheduleManagement.placement.badOverlap"));
+      return;
+    }
+    closeEditor();
+    commitPlacement(source, target, day);
+  };
+
   const cellOf = (row: ScheduleRow, day: string) =>
     classifyScheduleGridCell(
       row.schedules.filter((item) => item.workDate.slice(0, 10) === day),
@@ -1030,7 +1137,7 @@ export function ScheduleManagementCard({
 
   // 批量候选：员工模式列本周 7 天，日期模式列表内员工；已有班次或请假的格子置灰不可选。
   const getBatchOptions = () => {
-    if (!batchTarget) {
+    if (!batchTarget || batchTarget.mode === "matrix") {
       return [];
     }
     if (batchTarget.mode === "employee") {
@@ -1051,6 +1158,24 @@ export function ScheduleManagementCard({
   const batchEnabledKeys = batchOptions.filter((item) => item.enabled).map((item) => item.key);
   const batchSelectedKeys = batchEnabledKeys.filter((key) => batchSelection.has(key));
 
+  // 员工 × 日期：按当前选的员工、日期、班次算出每一格「新建 / 提醒 / 跳过」，点格子可单独排除
+  const isMatrix = batchTarget?.mode === "matrix";
+  const matrixUserList = rows.filter((row) => matrixUsers.has(row.userGuid)).map((row) => row.userGuid);
+  const matrixDateList = days.filter((day) => matrixDates.has(day));
+  const matrixCells = isMatrix
+    ? buildBatchMatrix({
+        userGuids: matrixUserList,
+        dates: matrixDateList,
+        startTime: normalizeClockTime(form.startTime),
+        endTime: normalizeClockTime(form.endTime),
+        schedules,
+        availabilityMap,
+        excludedKeys: matrixExcluded,
+      })
+    : [];
+  const matrixSummary = summarizeBatchMatrix(matrixCells);
+  const batchSubmitCount = isMatrix ? matrixSummary.create : batchSelectedKeys.length;
+
   const toggleBatchKey = (key: string) =>
     setBatchSelection((current) => {
       const next = new Set(current);
@@ -1064,7 +1189,7 @@ export function ScheduleManagementCard({
 
   // 批量新建一律为草稿，与单个新建一致；只提交可排的选中项。
   const submitBatch = () => {
-    if (!batchTarget || !storeCode || !batchSelectedKeys.length) {
+    if (!batchTarget || !storeCode || !batchSubmitCount) {
       return;
     }
     const shift = {
@@ -1075,6 +1200,11 @@ export function ScheduleManagementCard({
       mealBreakCount: form.mealBreakCount,
       storeCode,
     };
+    if (batchTarget.mode === "matrix") {
+      onCreateBatch(batchMatrixTargets(matrixCells).map((cell) => ({ ...shift, userGuid: cell.userGuid, workDate: cell.date })));
+      closeEditor();
+      return;
+    }
     onCreateBatch(
       batchTarget.mode === "employee"
         ? batchSelectedKeys.map((workDate) => ({ ...shift, userGuid: batchTarget.userGuid, workDate }))
@@ -1174,14 +1304,18 @@ export function ScheduleManagementCard({
     ?? defaultMealBreakCount(shiftEditorMinutes(form.startTime, form.endTime, 0));
   const canOperateWeek = Boolean(storeCode) && !isBusy;
   const editorTitle = batchTarget
-    ? batchTarget.mode === "employee"
+    ? batchTarget.mode === "matrix"
+      ? t("scheduleManagement.matrix.title")
+      : batchTarget.mode === "employee"
       ? batchTarget.employeeName || batchTarget.userGuid
       : `${t(`weekdays.${batchTarget.weekdayIndex}`)} ${shortDate(batchTarget.workDate)}`
     : editingTarget
       ? `${editingTarget.employeeName || editingTarget.userGuid} · ${t(`weekdays.${editingTarget.weekdayIndex}`)} ${shortDate(editingTarget.workDate)}`
       : "";
   const editorSubtitle = batchTarget
-    ? t(batchTarget.mode === "employee"
+    ? batchTarget.mode === "matrix"
+      ? `${storeLabel} · ${weekNumberLabel}`
+      : t(batchTarget.mode === "employee"
       ? "scheduleManagement.batch.employeeSubtitle"
       : "scheduleManagement.batch.dateSubtitle")
     : editingTarget?.schedule
@@ -1646,6 +1780,66 @@ export function ScheduleManagementCard({
     );
   };
 
+  // 按天分组看板：竖屏 list、横屏全屏 columns；放置模式（编辑面板里点了移到 / 复制）时每天头部变成目标按钮
+  const renderBoardArea = (layout: "list" | "columns") => {
+    if (!storeCode) {
+      return (
+        <Text variant="bodyMedium" style={styles.muted}>
+          {t("scheduleManagement.noStore")}
+        </Text>
+      );
+    }
+    if (isLoading) {
+      return (
+        <Text variant="bodyMedium" style={styles.muted}>
+          {t("common:loading")}
+        </Text>
+      );
+    }
+    if (!rows.length) {
+      return (
+        <Text variant="bodyMedium" style={styles.muted}>
+          {t("scheduleManagement.noEmployees")}
+        </Text>
+      );
+    }
+    const placingSchedule = placement?.schedule;
+    return (
+      <>
+        {placement ? renderPlacementBar("card") : null}
+        <ScheduleBoard
+          layout={layout}
+          days={boardDays}
+          today={today}
+          colors={staffColors}
+          nameOf={nameOfUser}
+          ageOf={(userGuid) => rows.find((row) => row.userGuid === userGuid)?.age}
+          flagsOf={(schedule) => ({
+            warn: Boolean(
+              getAvailabilityConflict(
+                schedule,
+                availabilityMap.get(availabilityKey(schedule.userGuid, schedule.workDate.slice(0, 10))) ?? [],
+              ) || schedule.minorCompliance?.hasFindings,
+            ),
+            locked: isLocked(schedule),
+          })}
+          legend={staffLegend}
+          highlighted={highlighted}
+          onToggleHighlight={(userGuid) => setHighlighted((current) => (current === userGuid ? undefined : userGuid))}
+          freeByDay={freeByDay}
+          onPressFree={(dayIndex) => openMatrixBatch({ dates: [days[dayIndex]], userGuids: freeByDay[dayIndex] })}
+          onPressCard={openBoardCard}
+          onPressAdd={(dayIndex) => openMatrixBatch({ dates: [days[dayIndex]] })}
+          placement={placement && placingSchedule ? {
+            verdictOf: (dayIndex) => verdictFor(placement, rowOfUser(placingSchedule.userGuid), days[dayIndex]),
+            onDrop: (dayIndex) => commitPlacement(placement, rowOfUser(placingSchedule.userGuid), days[dayIndex]),
+          } : undefined}
+          disabled={isBusy}
+        />
+      </>
+    );
+  };
+
   const renderScheduleArea = (variant: GridVariant) => {
     if (!storeCode) {
       return (
@@ -1676,6 +1870,18 @@ export function ScheduleManagementCard({
 
   const renderWeekActions = (compact = false) => (
     <>
+      {/* Paper 的 Button 只把 flex / margin 转给外层，flexBasis 不生效，所以外面包一层 View 让它独占一行 */}
+      <View style={compact ? null : styles.matrixAction}>
+        <Button
+          compact={compact}
+          mode="contained-tonal"
+          icon="calendar-plus"
+          onPress={() => openMatrixBatch()}
+          disabled={!canOperateWeek || !rows.length}
+        >
+          {t("scheduleManagement.matrix.open")}
+        </Button>
+      </View>
       <Button
         compact={compact}
         mode="outlined"
@@ -1791,9 +1997,205 @@ export function ScheduleManagementCard({
     </>
   );
 
+  const toggleIn = (setter: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void, key: string) =>
+    setter((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  // 员工 × 日期批量排班面板：① 员工（可筛选）② 日期 ③ 班次 ④ 预览（点格子排除）
+  const renderMatrixBody = () => {
+    const weekWorkingUsers = new Set(
+      schedules
+        .filter((item) => item.status.toLowerCase() !== "cancelled" && !item.leaveType)
+        .map((item) => item.userGuid),
+    );
+    const scopeDates = matrixDateList.length ? matrixDateList : days;
+    const isAvailableIn = (userGuid: string) =>
+      scopeDates.some((day) =>
+        (availabilityMap.get(availabilityKey(userGuid, day)) ?? []).some((item) => !item.isUnavailable),
+      );
+    const visibleRows = rows.filter((row) =>
+      matrixFilter === "available"
+        ? isAvailableIn(row.userGuid)
+        : matrixFilter === "unscheduled"
+          ? !weekWorkingUsers.has(row.userGuid)
+          : true,
+    );
+    const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => matrixUsers.has(row.userGuid));
+    const weekdayDates = days.slice(0, 5);
+    const weekendDates = days.slice(5);
+    const cellOfKey = new Map(matrixCells.map((cell) => [cell.key, cell]));
+    return (
+      <>
+        <View style={styles.editorSection}>
+          <View style={styles.mealLabelRow}>
+            <Text variant="labelMedium" style={styles.muted}>
+              {t("scheduleManagement.matrix.employees", { count: matrixUsers.size })}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() =>
+                setMatrixUsers((current) => {
+                  const next = new Set(current);
+                  visibleRows.forEach((row) => (allVisibleSelected ? next.delete(row.userGuid) : next.add(row.userGuid)));
+                  return next;
+                })
+              }
+            >
+              <Text variant="labelMedium" style={styles.stepButtonText}>
+                {t(allVisibleSelected ? "scheduleManagement.batch.clearAll" : "scheduleManagement.batch.selectAll")}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.chipRow}>
+            {(["all", "available", "unscheduled"] as const).map((filter) => (
+              <Chip key={filter} compact selected={matrixFilter === filter} onPress={() => setMatrixFilter(filter)}>
+                {t(`scheduleManagement.matrix.filter.${filter}`)}
+              </Chip>
+            ))}
+          </View>
+          <View style={styles.chipRow}>
+            {visibleRows.map((row) => {
+              const color = staffColors.get(row.userGuid);
+              return (
+                // 选中只改边框 / 底色，不换成勾：勾比色点宽，选一个就让后面的标签整体换行移位、连点会点错人
+                <Chip
+                  key={row.userGuid}
+                  compact
+                  showSelectedCheck={false}
+                  selected={matrixUsers.has(row.userGuid)}
+                  onPress={() => toggleIn(setMatrixUsers, row.userGuid)}
+                  style={matrixUsers.has(row.userGuid) ? styles.pickChipOn : styles.pickChip}
+                  textStyle={matrixUsers.has(row.userGuid) ? styles.pickChipTextOn : null}
+                  icon={() => (
+                    <View style={[styles.matrixDot, { backgroundColor: color?.bar ?? HB_COLORS.outline }]} />
+                  )}
+                >
+                  {row.employeeName || row.userGuid}
+                  {row.age !== undefined ? ` · ${row.age}` : ""}
+                </Chip>
+              );
+            })}
+            {!visibleRows.length ? (
+              <Text variant="labelSmall" style={styles.muted}>{t("scheduleManagement.matrix.noEmployees")}</Text>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.editorSection}>
+          <View style={styles.mealLabelRow}>
+            <Text variant="labelMedium" style={styles.muted}>
+              {t("scheduleManagement.matrix.dates", { count: matrixDates.size })}
+            </Text>
+            <View style={styles.matrixQuick}>
+              {([
+                ["weekdays", weekdayDates],
+                ["weekend", weekendDates],
+                ["allDays", days],
+              ] as const).map(([key, list]) => (
+                <Pressable key={key} accessibilityRole="button" hitSlop={6} onPress={() => setMatrixDates(new Set(list))}>
+                  <Text variant="labelMedium" style={styles.stepButtonText}>{t(`scheduleManagement.matrix.${key}`)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.matrixDays}>
+            {days.map((day, index) => {
+              const on = matrixDates.has(day);
+              return (
+                <Pressable
+                  key={day}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: on }}
+                  onPress={() => toggleIn(setMatrixDates, day)}
+                  style={[styles.matrixDay, on ? styles.matrixDayOn : null]}
+                >
+                  <Text style={[styles.matrixDayWeek, on ? styles.matrixDayTextOn : null]}>{t(`weekdays.${index}`)}</Text>
+                  <Text style={[styles.matrixDayDate, on ? styles.matrixDayTextOn : null]}>{day.slice(8)}</Text>
+                  <Text style={[styles.matrixDayPeople, on ? styles.matrixDayTextOn : null]}>
+                    {t("scheduleManagement.matrix.dayPeople", { count: peopleByDay[index] ?? 0 })}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {renderShiftFields()}
+
+        {matrixCells.length ? (
+          <View style={styles.matrixPreview}>
+            <View style={styles.matrixSummary}>
+              <Text style={styles.matrixSummaryTotal}>{t("scheduleManagement.matrix.total", { count: matrixSummary.total })}</Text>
+              <Text style={styles.matrixNew}>{t("scheduleManagement.matrix.create", { count: matrixSummary.create - matrixSummary.warn })}</Text>
+              {matrixSummary.warn ? <Text style={styles.matrixWarn}>{t("scheduleManagement.matrix.warn", { count: matrixSummary.warn })}</Text> : null}
+              {matrixSummary.skip ? <Text style={styles.matrixSkip}>{t("scheduleManagement.matrix.skip", { count: matrixSummary.skip })}</Text> : null}
+              {matrixSummary.excluded ? <Text style={styles.matrixSkip}>{t("scheduleManagement.matrix.excluded", { count: matrixSummary.excluded })}</Text> : null}
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View>
+                <View style={styles.matrixRow}>
+                  <View style={styles.matrixName} />
+                  {matrixDateList.map((day) => (
+                    <Text key={day} style={styles.matrixHead}>{`${t(`weekdays.${days.indexOf(day)}`)} ${day.slice(8)}`}</Text>
+                  ))}
+                </View>
+                {matrixUserList.map((userGuid) => (
+                  <View key={userGuid} style={styles.matrixRow}>
+                    <Text style={styles.matrixName} numberOfLines={1}>{nameOfUser(userGuid)}</Text>
+                    {matrixDateList.map((day) => {
+                      const cell = cellOfKey.get(batchCellKey(userGuid, day));
+                      if (!cell) return <View key={day} style={styles.matrixCell} />;
+                      const label = cell.state === "skip"
+                        ? t(`scheduleManagement.matrix.reason.${cell.reason ?? "existing"}`)
+                        : cell.excluded
+                          ? t("scheduleManagement.matrix.cellExcluded")
+                          : t(`scheduleManagement.matrix.cell.${cell.state}`);
+                      return (
+                        <Pressable
+                          key={day}
+                          accessibilityRole="button"
+                          disabled={cell.state === "skip"}
+                          onPress={() => toggleIn(setMatrixExcluded, cell.key)}
+                          style={[
+                            styles.matrixCell,
+                            cell.state === "skip" || cell.excluded
+                              ? styles.matrixCellSkip
+                              : cell.state === "warn" ? styles.matrixCellWarn : styles.matrixCellNew,
+                          ]}
+                        >
+                          <Text
+                            style={[styles.matrixCellText, cell.state === "skip" || cell.excluded ? styles.matrixCellTextSkip : null]}
+                            numberOfLines={1}
+                          >
+                            {label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+            <Text variant="labelSmall" style={styles.muted}>{t("scheduleManagement.matrix.previewHint")}</Text>
+          </View>
+        ) : (
+          <Text variant="labelSmall" style={styles.muted}>{t("scheduleManagement.matrix.pickHint")}</Text>
+        )}
+      </>
+    );
+  };
+
   const renderBatchBody = () => {
     if (!batchTarget) {
       return null;
+    }
+    if (batchTarget.mode === "matrix") {
+      return renderMatrixBody();
     }
     const allSelected =
       batchEnabledKeys.length > 0 && batchSelectedKeys.length === batchEnabledKeys.length;
@@ -1973,6 +2375,51 @@ export function ScheduleManagementCard({
             </Button>
           </View>
         ) : null}
+
+        {/* 改给其他员工（与 Web 编辑浮层一致）：新建给对方 + 删除原班次，可撤销；有打卡的班次不能改派 */}
+        {editingTarget.schedule && !editingTarget.schedule.leaveType && !editingLocked ? (
+          <View style={styles.editorSection}>
+            <Text variant="labelMedium" style={styles.muted}>
+              {t("scheduleManagement.transfer.title")}
+            </Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.transferChips}>
+              {rows
+                .filter((item) => item.userGuid !== editingTarget.userGuid)
+                .map((item) => {
+                  const color = staffColors.get(item.userGuid);
+                  return (
+                    <Chip
+                      key={item.userGuid}
+                      compact
+                      selected={transferTo === item.userGuid}
+                      showSelectedCheck={false}
+                      onPress={() => setTransferTo((current) => (current === item.userGuid ? undefined : item.userGuid))}
+                      style={transferTo === item.userGuid ? styles.pickChipOn : styles.pickChip}
+                      textStyle={transferTo === item.userGuid ? styles.pickChipTextOn : null}
+                      icon={() => (
+                        <View style={[styles.matrixDot, { backgroundColor: color?.bar ?? HB_COLORS.outline }]} />
+                      )}
+                    >
+                      {item.employeeName || item.userGuid}
+                    </Chip>
+                  );
+                })}
+            </ScrollView>
+            <Button
+              mode="outlined"
+              icon="account-switch-outline"
+              compact
+              disabled={!transferTo || isBusy}
+              onPress={transferEditing}
+              style={styles.transferButton}
+            >
+              {transferTo
+                ? t("scheduleManagement.transfer.action", { name: nameOfUser(transferTo) })
+                : t("scheduleManagement.transfer.pick")}
+            </Button>
+            <Text variant="labelSmall" style={styles.muted}>{t("scheduleManagement.transfer.hint")}</Text>
+          </View>
+        ) : null}
         {editingLocked ? (
           <Text variant="labelMedium" style={styles.muted}>
             {t(punchesKnown
@@ -2026,14 +2473,14 @@ export function ScheduleManagementCard({
       <Button
         mode="contained"
         onPress={submitBatch}
-        disabled={!canSubmit || !batchSelectedKeys.length || isBusy}
+        disabled={!canSubmit || !batchSubmitCount || isBusy}
         loading={isBusy}
         buttonColor={HB_COLORS.action}
         textColor={HB_COLORS.white}
         style={styles.primaryAction}
       >
         {t("scheduleManagement.batch.save", {
-          count: batchSelectedKeys.length,
+          count: batchSubmitCount,
           hours: formatScheduleHours(
             shiftEditorMinutes(form.startTime, form.endTime, form.mealBreakCount),
           ),
@@ -2099,6 +2546,12 @@ export function ScheduleManagementCard({
                 {weekInfo
                   ? t("scheduleManagement.weekBoxLabel", { week: weekInfo.week, start: shortDate(weekStartDate), end: shortDate(weekEndDate) })
                   : weekRangeLabel}
+                {/* 不在本周时标出「下 1 周 / 上 2 周」，一眼知道看的不是本周 */}
+                {relativeWeek !== 0 ? (
+                  <Text style={styles.relativeWeek}>
+                    {` · ${t(relativeWeek > 0 ? "scheduleManagement.weekLater" : "scheduleManagement.weekEarlier", { count: Math.abs(relativeWeek) })}`}
+                  </Text>
+                ) : null}
               </Text>
               <IconButton
                 icon="chevron-right"
@@ -2109,22 +2562,19 @@ export function ScheduleManagementCard({
                 disabled={isBusy}
               />
             </View>
-            {/* 周表 / 日视图（日视图看某天每小时几个人，找人手缺口） */}
-            <View style={styles.viewSwitch} accessibilityRole="tablist">
-              {(["week", "day"] as const).map((mode) => (
-                <Pressable
-                  key={mode}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: viewMode === mode }}
-                  onPress={() => setViewMode(mode)}
-                  style={[styles.viewSwitchItem, viewMode === mode ? styles.viewSwitchItemOn : null]}
-                >
-                  <Text style={[styles.viewSwitchText, viewMode === mode ? styles.viewSwitchTextOn : null]}>
-                    {t(`scheduleManagement.view.${mode}`)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            {onThisWeek ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: relativeWeek === 0 }}
+                onPress={onThisWeek}
+                disabled={isBusy || relativeWeek === 0}
+                style={[styles.thisWeek, relativeWeek === 0 ? styles.thisWeekOn : null]}
+              >
+                <Text style={[styles.thisWeekText, relativeWeek === 0 ? styles.thisWeekTextOn : null]}>
+                  {t("scheduleManagement.thisWeek")}
+                </Text>
+              </Pressable>
+            ) : null}
             <IconButton
               icon="fullscreen"
               mode="outlined"
@@ -2133,6 +2583,24 @@ export function ScheduleManagementCard({
               accessibilityLabel={t("scheduleManagement.fullscreen")}
               onPress={() => setIsFullscreen(true)}
             />
+          </View>
+          <View style={styles.viewSwitchRow}>
+            {/* 周＝按天看板；按人＝员工行表格（可长按拖动）；日＝按小时看人手缺口 */}
+            <View style={[styles.viewSwitch, styles.viewSwitchWide]} accessibilityRole="tablist">
+              {(["week", "staff", "day"] as const).map((mode) => (
+                <Pressable
+                  key={mode}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: viewMode === mode }}
+                  onPress={() => setViewMode(mode)}
+                  style={[styles.viewSwitchItem, styles.viewSwitchItemWide, viewMode === mode ? styles.viewSwitchItemOn : null]}
+                >
+                  <Text style={[styles.viewSwitchText, viewMode === mode ? styles.viewSwitchTextOn : null]}>
+                    {t(`scheduleManagement.view.${mode}`)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
 
           {renderStatusLine()}
@@ -2155,10 +2623,12 @@ export function ScheduleManagementCard({
               disabled={!storeCode || isBusy || Boolean(placement)}
               onOpenCell={(row, day, index, cell) => openCell(row, day, index, cell)}
             />
-          ) : (
+          ) : viewMode === "staff" ? (
             renderScheduleArea("card")
+          ) : (
+            renderBoardArea("list")
           )}
-          {viewMode === "week" && storeCode && rows.length ? (
+          {viewMode === "staff" && storeCode && rows.length ? (
             <View style={styles.gridFooter}>
               {renderLegend()}
               <Text variant="labelSmall" style={styles.hint}>
@@ -2240,6 +2710,11 @@ export function ScheduleManagementCard({
                 onPress={onNextWeek}
                 disabled={isBusy}
               />
+              {onThisWeek && relativeWeek !== 0 ? (
+                <Button compact mode="text" onPress={onThisWeek} disabled={isBusy}>
+                  {t("scheduleManagement.thisWeek")}
+                </Button>
+              ) : null}
               {renderWeekActions(true)}
             </View>
           </View>
@@ -2252,7 +2727,7 @@ export function ScheduleManagementCard({
           >
             {renderStats(true)}
             {renderStatusLine(true)}
-            {renderScheduleArea("fullscreen")}
+            {viewMode === "staff" ? renderScheduleArea("fullscreen") : renderBoardArea("columns")}
           </ScrollView>
 
           {/* 横屏全屏内用右侧面板编辑：不在全屏 Modal 上再叠原生 Modal（方向与层级都会冲突）。 */}
@@ -2823,10 +3298,74 @@ const styles = StyleSheet.create({
   },
   weekActions: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: HB_SPACING.xs,
   },
+  // 竖屏「＋ 排班」独占一行，下面一行是复制上周 / 发布本周（三个挤一行时发布按钮文字会被截断）
+  matrixAction: { flexBasis: "100%" },
   weekTitle: {
     alignItems: "center",
     flex: 1,
   },
+  relativeWeek: { color: HB_COLORS.warning, fontWeight: "700" },
+  thisWeek: {
+    borderColor: HB_COLORS.outline,
+    borderRadius: HB_RADIUS.control,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: "center",
+    paddingHorizontal: 12,
+    backgroundColor: HB_COLORS.white,
+  },
+  thisWeekOn: { backgroundColor: "#E6F4FF", borderColor: "#91CAFF" },
+  thisWeekText: { color: HB_COLORS.textPrimary, fontSize: 13.5, fontWeight: "600" },
+  thisWeekTextOn: { color: HB_COLORS.brand },
+  viewSwitchRow: { flexDirection: "row" },
+  viewSwitchWide: { flex: 1 },
+  viewSwitchItemWide: { flex: 1, alignItems: "center" },
+  matrixDot: { width: 8, height: 8, borderRadius: 4, marginTop: 4 },
+  matrixQuick: { flexDirection: "row", gap: HB_SPACING.sm },
+  matrixDays: { flexDirection: "row", gap: 4 },
+  matrixDay: {
+    flex: 1,
+    alignItems: "center",
+    borderColor: HB_COLORS.outline,
+    borderRadius: 9,
+    borderWidth: 1,
+    paddingVertical: 5,
+    backgroundColor: HB_COLORS.white,
+  },
+  matrixDayOn: { backgroundColor: "#E6F4FF", borderColor: HB_COLORS.brand },
+  matrixDayWeek: { fontSize: 11, color: HB_COLORS.textSecondary },
+  matrixDayDate: { fontSize: 14, fontWeight: "700", color: HB_COLORS.textPrimary },
+  matrixDayPeople: { fontSize: 10, color: HB_COLORS.textSecondary },
+  matrixDayTextOn: { color: HB_COLORS.brand },
+  matrixPreview: {
+    gap: 6,
+    borderColor: HB_COLORS.outlineMuted,
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 10,
+    backgroundColor: HB_COLORS.surface,
+  },
+  matrixSummary: { flexDirection: "row", flexWrap: "wrap", gap: 10, alignItems: "center" },
+  matrixSummaryTotal: { fontSize: 12.5, fontWeight: "700", color: HB_COLORS.textPrimary },
+  matrixNew: { fontSize: 12, color: HB_COLORS.success },
+  matrixWarn: { fontSize: 12, color: HB_COLORS.warning },
+  matrixSkip: { fontSize: 12, color: HB_COLORS.textSecondary },
+  matrixRow: { flexDirection: "row", alignItems: "center", gap: 3, marginTop: 3 },
+  matrixName: { width: 78, fontSize: 11.5, fontWeight: "600", color: HB_COLORS.textPrimary },
+  matrixHead: { width: 54, textAlign: "center", fontSize: 10.5, color: HB_COLORS.textSecondary },
+  matrixCell: { width: 54, height: 22, borderRadius: 5, alignItems: "center", justifyContent: "center" },
+  matrixCellNew: { backgroundColor: "#D1FADF" },
+  matrixCellWarn: { backgroundColor: "#FEF0C7" },
+  matrixCellSkip: { backgroundColor: HB_COLORS.surfaceMuted },
+  matrixCellText: { fontSize: 10.5, fontWeight: "600", color: HB_COLORS.textPrimary },
+  matrixCellTextSkip: { color: HB_COLORS.textSecondary, textDecorationLine: "line-through", fontWeight: "400" },
+  transferChips: { gap: 6, paddingVertical: 2 },
+  pickChip: { borderWidth: 1.5, borderColor: "transparent" },
+  pickChipOn: { borderWidth: 1.5, borderColor: HB_COLORS.brand, backgroundColor: "#E6F4FF" },
+  // 不加粗：加粗会让文字变宽，同样引起换行移位
+  pickChipTextOn: { color: HB_COLORS.brand },
+  transferButton: { alignSelf: "flex-start" },
 });

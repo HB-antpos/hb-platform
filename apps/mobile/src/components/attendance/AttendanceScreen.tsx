@@ -1951,6 +1951,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 onNextWeek={() =>
                   setManagerWeekStartDate((current) => addWeeks(current, 1))
                 }
+                onThisWeek={() => setManagerWeekStartDate(getWeekStartDate())}
+                currentWeekStartDate={getWeekStartDate()}
                 onCreate={handleCreateSchedule}
                 onCreateBatch={(payloads) => createScheduleBatchMutation.mutate(payloads)}
                 onUpdate={(scheduleGuid, payload) =>
