@@ -543,6 +543,13 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
             row.Pushed.HolidayLeave = MyobTimesheetPlanner.Hours(SumMinutes(mine, MyobPayCategoryKeys.HolidayLeave));
             row.PushedTotal = MyobTimesheetPlanner.Hours(pushedMinutes);
         }
+        else if (blockers.Any(item => item.Code == MyobBlockerCodes.NoRate))
+        {
+            // 有工时但没有时薪：规划方案没法生成（mine 为空），并不是「没有工时」。
+            // 这里必须如实说明原因，并且不能标成校验通过，否则会和上面的实际工时、下面的拦截项互相矛盾。
+            row.Detail.CheckOk = false;
+            row.Detail.CheckMessage = "本期没有生效的时薪记录，暂时无法拆分转账 / 现金，所以没有推送明细。";
+        }
         else
         {
             row.Detail.CheckOk = true;
