@@ -5,6 +5,7 @@ import type { PackCartonSummary, PackDestination, PackLocation, PackPalletDetail
 import { PACK_DESTINATION_TYPE } from '../../types/packing'
 import { buildBarcodeSvgPath, encodeBarcodeModules } from '../../utils/barcode'
 
+import { formatLabelSeq, isUnactivatedBlank, clampCopies } from './blankCartons'
 import { parsePackUtc } from './packingLogic'
 
 // 箱 / 托盘 / 存放位置标签：英文版 70×26 mm（与移动端同一设计，设计稿 l4.html）。
@@ -45,6 +46,10 @@ export interface PackLabelFields {
   stamp: string
   /** 托盘第几张：1/2、2/2；箱标签为空。 */
   copy: string | null
+  /** 空箱标（批量预打印）：不印 SKU / PCS，没有去向时 TO 后画横线，右下角印 LABEL i / n。 */
+  blank?: boolean
+  /** 空箱标右下角第一行：`LABEL 01 / 20`；没有批内序号时为空。 */
+  labelSeq?: string | null
 }
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
@@ -121,6 +126,49 @@ export function buildCartonLabelFields(carton: PackCartonSummary, now: Date = ne
     stamp: buildStamp(carton.sealedAtUtc, carton.sealedByName || carton.createdByName, now),
     copy: null,
   }
+}
+
+/**
+ * 空箱标 DTO → 标签字段：和内容标同一个箱号（条码 / 二维码内容一致），但不印 SKU / PCS。
+ * 去向还没指定时 to 为空串（标签上 TO 后画横线，装箱 / 发出时再选）；右下角 LABEL i / n 取批内序号 / 批内总数，
+ * 没有批内信息（旧数据）时用 fallbackSeq（本次打印里的位置）。时间取创建时间、操作人取建箱人，补打时不变。
+ */
+export function buildBlankCartonLabelFields(
+  carton: PackCartonSummary,
+  fallbackSeq?: { index: number; total: number } | null,
+  now: Date = new Date(),
+): PackLabelFields {
+  const seq = carton.batchSeq && carton.batchCount ? { index: carton.batchSeq, total: carton.batchCount } : fallbackSeq
+  const unassigned = carton.destination.destinationType === PACK_DESTINATION_TYPE.Unassigned
+  return {
+    kind: 'carton',
+    kindText: 'BOX',
+    kindCaption: 'CARTON',
+    origin: resolveOrigin(carton.originName, carton.originCode),
+    ...resolveRoute(carton.destination),
+    to: unassigned ? '' : resolveTo(carton.destination),
+    code: carton.cartonNo,
+    ...splitCode(carton.cartonNo),
+    stat: '',
+    reference: null,
+    stamp: buildStamp(carton.createdAtUtc, carton.createdByName, now),
+    copy: null,
+    blank: true,
+    labelSeq: seq ? formatLabelSeq(seq.index, seq.total) : null,
+  }
+}
+
+/**
+ * 一次打印的标签列表：未启用的空箱标印空箱标，其他箱（已启用 / 已封箱等）印内容标；每只箱重复 copies 份（同一只箱的几份相邻）。
+ */
+export function buildCartonPrintLabels(cartons: PackCartonSummary[], copies = 1, now: Date = new Date()): PackLabelFields[] {
+  const copyCount = clampCopies(copies)
+  return cartons.flatMap((carton, index) => {
+    const fields = isUnactivatedBlank(carton)
+      ? buildBlankCartonLabelFields(carton, { index: index + 1, total: cartons.length }, now)
+      : buildCartonLabelFields(carton, now)
+    return Array.from({ length: copyCount }, () => fields)
+  })
 }
 
 /**
@@ -241,16 +289,20 @@ export function buildPackLabelHtml(fields: PackLabelFields): string {
     : fields.direct
       ? ' · DIRECT'
       : ''
-  const metaLines = [fields.reference, fields.stamp].filter((line): line is string => Boolean(line)).map(escapeHtml)
+  const metaLines = [fields.blank ? fields.labelSeq : fields.reference, fields.stamp].filter((line): line is string => Boolean(line)).map(escapeHtml)
   const copy = fields.copy ? `<b class="pkl-copy">${escapeHtml(fields.copy)}</b>` : ''
   return (
-    `<div class="pkl pkl-${fields.kind}">` +
+    `<div class="pkl pkl-${fields.kind}${fields.blank ? ' pkl-blank' : ''}">` +
     `<div class="pkl-kind"><b>${fields.kindText}</b><i>${fields.kindCaption}</i></div>` +
     '<div class="pkl-main"><div class="pkl-top"><div class="pkl-txt">' +
     `<div class="pkl-from">FROM <b>${escapeHtml(fields.origin)}</b>${fromSuffix}</div>` +
-    `<div class="pkl-to" style="font-size:${resolveToFontSize(fields.to)}px"><em>TO</em>${escapeHtml(fields.to)}</div>` +
+    // 空箱标还没有去向：TO 后画一条横线，装箱 / 发出时再选。
+    (fields.blank && !fields.to
+      ? '<div class="pkl-to"><em>TO</em><i class="pkl-toline"></i></div>'
+      : `<div class="pkl-to" style="font-size:${resolveToFontSize(fields.to)}px"><em>TO</em>${escapeHtml(fields.to)}</div>`) +
     `<div class="pkl-code"><span>${escapeHtml(fields.codePrefix)}</span><b>${escapeHtml(fields.codeTail)}</b>` +
-    `<span class="pkl-stat">${escapeHtml(fields.stat)}</span></div>` +
+    (fields.stat ? `<span class="pkl-stat">${escapeHtml(fields.stat)}</span>` : '') +
+    '</div>' +
     `</div>${buildLabelQrSvg(fields.code)}</div>` +
     `<div class="pkl-bot">${buildLabelBarcodeSvg(fields.code)}<div class="pkl-meta">${metaLines.join('<br>')}${copy}</div></div>` +
     '</div></div>'
@@ -288,6 +340,7 @@ export const PACK_LABEL_CSS = `
 .pkl-from b{font-weight:900}
 .pkl-to{font-weight:900;line-height:42px;letter-spacing:.3px}
 .pkl-to em{font-style:normal;font-size:13px;font-weight:800;letter-spacing:1px;margin-right:6px}
+.pkl-toline{display:inline-block;width:290px;height:0;border-bottom:3px solid #000;vertical-align:middle}
 .pkl-code{display:flex;align-items:baseline;gap:6px;font-family:Menlo,Consolas,"Courier New",monospace;font-weight:800;line-height:40px}
 .pkl-code span{font-size:19px}
 .pkl-code b{font-size:40px;font-weight:800}
@@ -336,13 +389,20 @@ function waitForAnimationFrame() {
  * 用隐藏 iframe 打印（沿用仓库里 iframe 打印的时序：等两帧布局完成再 focus + print）。
  * 不 import StoreOrders/printUtils：它与发票 / 拣货单共用 print.css 分块，多一个引用方会破坏包体门禁。
  */
-function printDocument(documentHtml: string) {
+function printDocument(documentHtml: string, onSettled?: (outcome: PrintOutcome) => void) {
   const frame = document.createElement('iframe')
   let cleaned = false
+  let settled = false
   const cleanup = () => {
     if (!cleaned) {
       cleaned = true
       frame.remove()
+    }
+  }
+  const settle = (outcome: PrintOutcome) => {
+    if (!settled) {
+      settled = true
+      onSettled?.(outcome)
     }
   }
   frame.setAttribute('aria-hidden', 'true')
@@ -351,20 +411,49 @@ function printDocument(documentHtml: string) {
     const printWindow = frame.contentWindow
     if (!printWindow) {
       cleanup()
+      settle('failed')
       return
     }
-    printWindow.addEventListener('afterprint', cleanup, { once: true })
+    // afterprint 在打印对话框关闭后触发（打印和取消都会触发，浏览器无法区分纸是否真的打出来）。
+    printWindow.addEventListener(
+      'afterprint',
+      () => {
+        cleanup()
+        settle('afterprint')
+      },
+      { once: true },
+    )
     void waitForAnimationFrame()
       .then(waitForAnimationFrame)
       .then(() => {
         printWindow.focus()
         printWindow.print()
-        // afterprint 在部分 Chromium 版本不触发：打印触发后兜底回收。
-        window.setTimeout(cleanup, 60_000)
+        // afterprint 在部分 Chromium 版本不触发：打印触发后兜底回收，并按「没有收到回执」结算。
+        window.setTimeout(() => {
+          cleanup()
+          settle('unconfirmed')
+        }, 60_000)
+      })
+      .catch(() => {
+        cleanup()
+        settle('failed')
       })
   }
   frame.srcdoc = documentHtml
   document.body.appendChild(frame)
+}
+
+/** 打印结果：afterprint = 打印对话框已关闭；unconfirmed = 没收到关闭回执；failed = 打印窗口没能打开。 */
+export type PrintOutcome = 'afterprint' | 'unconfirmed' | 'failed'
+
+/** 打印箱 / 托盘标签并等对话框关闭（批量箱标用来在关闭后上报「已打印」）。 */
+export function printPackLabelsAndWait(labels: PackLabelFields[]): Promise<PrintOutcome> {
+  if (!labels.length) {
+    return Promise.resolve('failed')
+  }
+  return new Promise((resolve) => {
+    printDocument(buildPackLabelDocument(labels), resolve)
+  })
 }
 
 /** 打印箱 / 托盘标签。 */

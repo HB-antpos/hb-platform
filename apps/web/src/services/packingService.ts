@@ -1,6 +1,10 @@
 import type { ApiResponse } from '../types/api'
 import type {
   PackCarrier,
+  PackBlankBatch,
+  PackBlankBatchDetail,
+  PackBlankBatchRequest,
+  PackBlankBatchResult,
   PackCarrierSaveRequest,
   PackCartonDetail,
   PackCartonFilter,
@@ -9,6 +13,7 @@ import type {
   PackDestinationRequest,
   PackEvent,
   PackIncoming,
+  PackLabelsPrintedResult,
   PackLocateResult,
   PackLocation,
   PackLocationSaveRequest,
@@ -22,6 +27,7 @@ import type {
   PackReceivePalletRequest,
   PackResolveResult,
   PackScope,
+  PackVoidBlankResult,
 } from '../types/packing'
 import request, { RequestError, unwrapApiData } from '../utils/request'
 
@@ -151,6 +157,39 @@ export async function receivePackCarton(cartonGuid: string, locationCode?: strin
 
 export async function listPackCartonEvents(cartonGuid: string) {
   return unwrapApiData(await request.get<ApiResponse<PackEvent[]>>(cartonUrl(cartonGuid, '/events'))) ?? []
+}
+
+// ---- 批量箱标（空箱标） ----
+
+/** 批量创建空箱标（1～100 张）：同一个 clientRequestId 重放返回同一批（duplicate=true）。 */
+export async function createPackBlankBatch(payload: PackBlankBatchRequest) {
+  return unwrapApiData(await request.post<ApiResponse<PackBlankBatchResult>>(`${API_BASE}/cartons/batch`, payload))
+}
+
+/** 最近的批次（新的在前）。 */
+export async function listPackBatches(params: { ownerCode?: string; limit?: number }) {
+  const response = await request.get<ApiResponse<{ batches?: PackBlankBatch[] }>>(`${API_BASE}/batches`, { params })
+  return unwrapApiData(response)?.batches ?? []
+}
+
+/** 某批的每张箱标；不存在 / 范围外为 404 BATCH_NOT_FOUND。 */
+export async function getPackBatch(batchGuid: string) {
+  return unwrapApiData(await request.get<ApiResponse<PackBlankBatchDetail>>(`${API_BASE}/batches/${segment(batchGuid)}`))
+}
+
+/** 上报这些箱的标签已发送打印（每次 ≤100 张）。 */
+export async function markPackLabelsPrinted(cartonGuids: string[]) {
+  return unwrapApiData(await request.post<ApiResponse<PackLabelsPrintedResult>>(`${API_BASE}/cartons/labels-printed`, { cartonGuids }))
+}
+
+/** 启用空箱标（第一次装入商品或扫到标签时后端也会自动启用；Web 暂不主动调用）。 */
+export async function activatePackCarton(cartonGuid: string) {
+  return unwrapApiData(await request.post<ApiResponse<PackCartonDetail>>(cartonUrl(cartonGuid, '/activate')))
+}
+
+/** 作废未启用的空箱标（每次 ≤100 张）；不是空箱标的在 skipped 里（NOT_BLANK）。 */
+export async function voidPackBlankCartons(cartonGuids: string[]) {
+  return unwrapApiData(await request.post<ApiResponse<PackVoidBlankResult>>(`${API_BASE}/cartons/void-blank`, { cartonGuids }))
 }
 
 // ---- 托盘 ----

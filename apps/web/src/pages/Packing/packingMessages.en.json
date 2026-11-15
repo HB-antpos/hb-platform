@@ -92,6 +92,7 @@
     "filter": {
       "all": "All",
       "packing": "Packing {{count}}",
+      "blank": "Blank labels {{count}}",
       "building": "Building {{count}}",
       "mine": "Mine only",
       "cartonKeyword": "Carton no. / item no. / barcode",
@@ -361,6 +362,100 @@
       "countMismatchBody": "You entered {{entered}} but the system shows {{actual}} of this order in transit. No carton was received. Please count again.",
       "countMismatchOk": "Count again",
       "notInTransit": "This order has no cartons in transit any more (they may have just been received). Refreshed."
+    },
+    "blank": {
+      "entry": "Batch labels",
+      "title": "Batch carton labels",
+      "tag": "Blank label",
+      "unactivated": "Unused",
+      "activated": "In use",
+      "voided": "Voided",
+      "notPrinted": "Not printed",
+      "printedTimes": "Printed {{count}}x",
+      "batchPosition": "Batch {{batch}} · {{seq}} / {{count}}",
+      "columns": {
+        "label": "Label",
+        "batch": "Batch"
+      },
+      "view": {
+        "create": "New",
+        "batches": "Recent batches"
+      },
+      "create": {
+        "count": "How many",
+        "countHint": "Up to {{max}} at a time.",
+        "quota": "This location already has {{count}} unused blank labels; the limit is {{limit}}.",
+        "destination": "Destination",
+        "destinationHint": "With no destination, the label leaves a line after TO; choose it when packing or dispatching.",
+        "copies": "Copies per carton no.",
+        "copiesUnit": "copies",
+        "preview": "Label preview",
+        "previewHint": "{{count}} consecutive carton numbers; final numbers come from the result. The number in the preview is only a sample.",
+        "paperHint": "70×26 mm, one label per page. In the browser print dialog pick the label printer and set margins to None.",
+        "createOnly": "Create only",
+        "createAndPrint": "Create and print {{count}}",
+        "created": "Created {{count}} blank labels: {{first}} ~ {{last}}",
+        "duplicate": "This batch was already created earlier ({{count}} labels); nothing was created twice.",
+        "printBatch": "Print this batch",
+        "viewBatch": "View batch",
+        "limitExceeded": "This location already has {{existing}} unused blank labels; the limit is {{limit}}. Use or void some first."
+      },
+      "batches": {
+        "empty": "No batches yet",
+        "createdAt": "Created",
+        "count": "Count",
+        "range": "Carton nos.",
+        "creator": "Created by",
+        "printed": "Printed",
+        "unactivated": "Unused",
+        "voided": "Voided",
+        "open": "View"
+      },
+      "batch": {
+        "back": "Back to batches",
+        "summary": "{{count}} labels · {{first}} ~ {{last}} · {{creator}}",
+        "printUnprinted": "Print unprinted ({{count}})",
+        "reprintAll": "Reprint all ({{count}})",
+        "nothingToPrint": "No labels to print in this batch",
+        "rowPrint": "Print",
+        "seq": "No.",
+        "state": "Status"
+      },
+      "print": {
+        "title": "Print labels",
+        "summary": "{{cartons}} labels × {{copies}} per carton no. = {{pages}} pages (one per page, 70×26 mm)",
+        "copies": "Copies per carton no.",
+        "start": "Start printing",
+        "continue": "Continue ({{count}} left)",
+        "reprint": "Print these again",
+        "printing": "Opening the print dialog; confirm printing there…",
+        "progress": "Sent to print {{done}} / {{total}}",
+        "sent": "Sent to print: {{count}} labels. The browser cannot confirm paper actually came out; reprint any missing ones from the batch.",
+        "markFailed": "Sent to print, but could not record it as printed: {{reason}}",
+        "retryMark": "Mark again",
+        "unconfirmed": "No print-finished signal received (printing may have been cancelled). If you did print, mark them manually.",
+        "markPrinted": "Mark as printed",
+        "failed": "The print window could not open; check that the browser is not blocking pop-ups or printing.",
+        "skipped": "{{count}} could not be recorded as printed",
+        "noReport": "These are not blank labels, so print counts are not recorded.",
+        "close": "Close"
+      },
+      "select": {
+        "selected": "{{count}} selected",
+        "print": "Print labels ({{count}})",
+        "void": "Void blank labels",
+        "clear": "Clear selection"
+      },
+      "void": {
+        "confirmTitle": "Void the selected blank labels?",
+        "confirmBody": "{{count}} selected; {{blank}} unused blank labels will be voided and cannot be restored. The other {{other}} are not blank labels and stay untouched.",
+        "ok": "Void",
+        "noneBlank": "No unused blank labels in the selection; nothing to void.",
+        "voided": "Voided {{count}} blank labels",
+        "skippedNotBlank": "{{count}} are not blank labels; skipped",
+        "skippedNotFound": "{{count}} not found; skipped",
+        "separator": "; "
+      }
     }
   }
 }

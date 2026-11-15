@@ -1,29 +1,51 @@
-import { ReloadOutlined } from '@ant-design/icons'
-import { Button, Checkbox, Input, Segmented, Typography } from 'antd'
+import { PrinterOutlined, ReloadOutlined, TagsOutlined } from '@ant-design/icons'
+import { Button, Checkbox, Input, Popconfirm, Segmented, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { MeasuredTable } from '../../components/MeasuredTable'
-import { listPackCartons } from '../../services/packingService'
-import type { PackCartonFilter, PackCartonList, PackCartonSummary } from '../../types/packing'
+import { listPackCartons, voidPackBlankCartons } from '../../services/packingService'
+import type { PackCartonFilter, PackCartonList, PackCartonSummary, PackVoidBlankResult } from '../../types/packing'
 
+import BlankCartonDrawer from './BlankCartonDrawer'
+import { BlankPrintText } from './BlankBatchViews'
+import BlankLabelPrintModal from './BlankLabelPrintModal'
+import {
+  BLANK_GUID_BATCH_SIZE,
+  blankBatchPosition,
+  chunkArray,
+  isUnactivatedBlank,
+  summarizeSelection,
+  summarizeVoidResult,
+  voidResultParts,
+} from './blankCartons'
 import { cartonStateKind, formatPackTime } from './packingLogic'
 import { DestinationText, ReceivedPlace, StateTag, showPackingError, usePackingPage } from './packingShared'
 import { buildCartonLabelFields, printPackLabels } from './packLabel'
 
-const EMPTY_LIST: PackCartonList = { items: [], packingCount: 0, storedCount: 0, outgoingCount: 0, incomingCount: 0 }
+const EMPTY_LIST: PackCartonList = { items: [], packingCount: 0, storedCount: 0, outgoingCount: 0, incomingCount: 0, blankCount: 0 }
+
+interface PrintTarget {
+  key: number
+  cartons: PackCartonSummary[]
+}
 
 /** 箱列表：全部 / 装箱中 / 本地存放 / 已发出，关键字与只看我的筛选；点开详情抽屉。 */
 export default function CartonsTab({ active }: { active: boolean }) {
   const { t } = useTranslation()
-  const { ownerCode, openCarton, dataVersion } = usePackingPage()
+  const { ownerCode, openCarton, dataVersion, notifyChanged } = usePackingPage()
   const [filter, setFilter] = useState<PackCartonFilter>('all')
   const [keyword, setKeyword] = useState('')
   const [mine, setMine] = useState(false)
   const [list, setList] = useState<PackCartonList>(EMPTY_LIST)
   const [loading, setLoading] = useState(false)
   const requestSeqRef = useRef(0)
+  const [batchOpen, setBatchOpen] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  const [printTarget, setPrintTarget] = useState<PrintTarget | null>(null)
+  const [voiding, setVoiding] = useState(false)
+  const printKeyRef = useRef(0)
 
   const load = useCallback(() => {
     const sequence = ++requestSeqRef.current
@@ -54,19 +76,92 @@ export default function CartonsTab({ active }: { active: boolean }) {
     }
   }, [active, load, dataVersion])
 
+  // 列表刷新 / 换筛选后，选中的箱不在当前结果里就移出选择，避免对看不见的行做操作。
+  useEffect(() => {
+    setSelectedKeys((previous) => {
+      const present = new Set(list.items.map((item) => item.cartonGuid))
+      const next = previous.filter((key) => present.has(key))
+      return next.length === previous.length ? previous : next
+    })
+  }, [list.items])
+
+  const selectedCartons = useMemo(() => {
+    const keys = new Set(selectedKeys)
+    return list.items.filter((item) => keys.has(item.cartonGuid))
+  }, [list.items, selectedKeys])
+  const selection = useMemo(() => summarizeSelection(selectedCartons), [selectedCartons])
+
+  const openPrint = useCallback((cartons: PackCartonSummary[]) => {
+    printKeyRef.current += 1
+    setPrintTarget({ key: printKeyRef.current, cartons })
+  }, [])
+
+  // 作废选中的空箱标：只送未启用的空箱标（其余不碰），结果里提示被跳过的数量；每次最多 100 张。
+  const voidSelected = async () => {
+    setVoiding(true)
+    const responses: PackVoidBlankResult[] = []
+    try {
+      for (const chunk of chunkArray(selection.blankGuids, BLANK_GUID_BATCH_SIZE)) {
+        responses.push(await voidPackBlankCartons(chunk))
+      }
+    } catch (error) {
+      showPackingError(error)
+    }
+    setVoiding(false)
+    if (responses.length > 0) {
+      const parts = voidResultParts(summarizeVoidResult(selection.otherCount, responses))
+      const text = parts.map((part) => t(`packingUi.blank.void.${part.key}`, { count: part.count })).join(t('packingUi.blank.void.separator'))
+      void message.success(text)
+      setSelectedKeys([])
+      notifyChanged()
+    }
+  }
+
   const columns = useMemo<ColumnsType<PackCartonSummary>>(
     () => [
       {
         title: t('packingUi.columns.cartonNo'),
         dataIndex: 'cartonNo',
         width: 150,
-        render: (value: string) => <b className="wh-packing-mono">{value}</b>,
+        render: (value: string, record) => (
+          <span>
+            <b className="wh-packing-mono">{value}</b>
+            {isUnactivatedBlank(record) ? (
+              <Tag color="geekblue" icon={<TagsOutlined />} className="wh-packing-inline-tag">
+                {t('packingUi.blank.tag')}
+              </Tag>
+            ) : null}
+          </span>
+        ),
       },
       {
         title: t('common.status'),
         dataIndex: 'status',
         width: 110,
-        render: (_value: number, record) => <StateTag kind={cartonStateKind(record, ownerCode)} t={t} />,
+        render: (_value: number, record) =>
+          isUnactivatedBlank(record) ? <Tag>{t('packingUi.blank.unactivated')}</Tag> : <StateTag kind={cartonStateKind(record, ownerCode)} t={t} />,
+      },
+      {
+        title: t('packingUi.blank.columns.label'),
+        key: 'blankLabel',
+        width: 190,
+        render: (_value, record) => {
+          // 空箱标：打印次数 + 批次与批内序号；普通箱不显示。
+          if (record.isBlank !== true) {
+            return null
+          }
+          const position = blankBatchPosition(record)
+          return (
+            <div className="wh-packing-blank-cell">
+              <BlankPrintText carton={record} />
+              {position ? (
+                <Typography.Text type="secondary" className="wh-packing-blank-batchline">
+                  {t('packingUi.blank.batchPosition', { batch: position.batch, seq: position.seq, count: position.count })}
+                </Typography.Text>
+              ) : null}
+            </div>
+          )
+        },
       },
       {
         title: t('packingUi.columns.destination'),
@@ -128,14 +223,18 @@ export default function CartonsTab({ active }: { active: boolean }) {
             <Button type="link" size="small" onClick={() => openCarton(record.cartonGuid)}>
               {t('common.detail')}
             </Button>
-            <Button type="link" size="small" onClick={() => printPackLabels([buildCartonLabelFields(record)])}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => (record.isBlank === true ? openPrint([record]) : printPackLabels([buildCartonLabelFields(record)]))}
+            >
               {t('common.print')}
             </Button>
           </>
         ),
       },
     ],
-    [openCarton, ownerCode, t],
+    [openCarton, openPrint, ownerCode, t],
   )
 
   return (
@@ -147,6 +246,7 @@ export default function CartonsTab({ active }: { active: boolean }) {
           options={[
             { value: 'all', label: t('packingUi.filter.all') },
             { value: 'packing', label: t('packingUi.filter.packing', { count: list.packingCount }) },
+            { value: 'blank', label: t('packingUi.filter.blank', { count: list.blankCount ?? 0 }) },
             { value: 'stored', label: t('packingUi.filter.stored', { count: list.storedCount }) },
             { value: 'outgoing', label: t('packingUi.filter.outgoing', { count: list.outgoingCount }) },
           ]}
@@ -163,18 +263,72 @@ export default function CartonsTab({ active }: { active: boolean }) {
         <span className="wh-packing-filters-spacer" />
         <Typography.Text type="secondary">{t('packingUi.filter.cartonTotal', { count: list.items.length })}</Typography.Text>
         <Button icon={<ReloadOutlined />} onClick={load} aria-label={t('common.refresh')} />
+        <Button type="primary" icon={<TagsOutlined />} onClick={() => setBatchOpen(true)}>
+          {t('packingUi.blank.entry')}
+        </Button>
       </div>
+      {selectedCartons.length > 0 ? (
+        <div className="wh-packing-selection-bar">
+          <Typography.Text strong>{t('packingUi.blank.select.selected', { count: selectedCartons.length })}</Typography.Text>
+          <Button size="small" type="primary" icon={<PrinterOutlined />} onClick={() => openPrint(selectedCartons)}>
+            {t('packingUi.blank.select.print', { count: selectedCartons.length })}
+          </Button>
+          <Popconfirm
+            title={t('packingUi.blank.void.confirmTitle')}
+            description={t('packingUi.blank.void.confirmBody', {
+              count: selectedCartons.length,
+              blank: selection.blankGuids.length,
+              other: selection.otherCount,
+            })}
+            okText={t('packingUi.blank.void.ok')}
+            okButtonProps={{ danger: true }}
+            cancelText={t('common.cancel')}
+            disabled={selection.blankGuids.length === 0}
+            onConfirm={() => void voidSelected()}
+          >
+            <Button
+              size="small"
+              danger
+              loading={voiding}
+              onClick={() => {
+                if (selection.blankGuids.length === 0) {
+                  void message.info(t('packingUi.blank.void.noneBlank'))
+                }
+              }}
+            >
+              {t('packingUi.blank.select.void')}
+            </Button>
+          </Popconfirm>
+          <Button size="small" type="link" onClick={() => setSelectedKeys([])}>
+            {t('packingUi.blank.select.clear')}
+          </Button>
+        </div>
+      ) : null}
       <MeasuredTable<PackCartonSummary>
         metricId="packing.cartons"
         size="middle"
         rowKey="cartonGuid"
+        rowSelection={{
+          selectedRowKeys: selectedKeys,
+          onChange: (keys) => setSelectedKeys(keys.map(String)),
+          preserveSelectedRowKeys: true,
+        }}
         loading={loading}
         columns={columns}
         dataSource={list.items}
         pagination={{ defaultPageSize: 20, showSizeChanger: true, hideOnSinglePage: true }}
-        scroll={{ x: 1250 }}
+        scroll={{ x: 1450 }}
         onRow={(record) => ({ onDoubleClick: () => openCarton(record.cartonGuid) })}
       />
+      <BlankCartonDrawer open={batchOpen} blankCount={list.blankCount ?? 0} onClose={() => setBatchOpen(false)} />
+      {printTarget ? (
+        <BlankLabelPrintModal
+          key={printTarget.key}
+          cartons={printTarget.cartons}
+          onClose={() => setPrintTarget(null)}
+          onPrinted={notifyChanged}
+        />
+      ) : null}
     </div>
   )
 }

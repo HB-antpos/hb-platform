@@ -26,6 +26,11 @@ export const PACK_ERROR_CODE = {
   NotForYou: 'NOT_FOR_YOU',
   CountMismatch: 'COUNT_MISMATCH',
   OrderNotFound: 'ORDER_NOT_FOUND',
+  /** 批量箱标：本地点未启用的空箱标已满上限（409，data = { existing, limit }）。 */
+  BlankLimitExceeded: 'BLANK_LIMIT_EXCEEDED',
+  QuantityOutOfRange: 'QUANTITY_OUT_OF_RANGE',
+  DestinationInvalid: 'DESTINATION_INVALID',
+  BatchNotFound: 'BATCH_NOT_FOUND',
 } as const
 
 /** 去向请求体：destinationCode 是其他分店的编码（总仓不用传）；carrierGuid 为空 = 自己送 / 对方来取。 */
@@ -83,6 +88,17 @@ export interface PackCartonSummary {
   receivedByName?: string | null
   receivedAtUtc?: string | null
   updatedAtUtc: string
+  // ---- 批量箱标（空箱标）：后端 null 字段不输出，旧后端没有这些字段时按「不是空箱标、没打印过」处理 ----
+  /** 批量预先创建、预先打印标签的箱；status 仍是 1（装箱中），未启用时没有商品。 */
+  isBlank?: boolean
+  batchGuid?: string | null
+  /** 批内序号（从 1 起）与批内总张数。 */
+  batchSeq?: number | null
+  batchCount?: number | null
+  /** 启用时间：第一次装入商品或扫到标签；未启用为空。 */
+  activatedAtUtc?: string | null
+  labelPrintCount?: number
+  labelPrintedAtUtc?: string | null
 }
 
 export interface PackCartonItem {
@@ -123,6 +139,8 @@ export interface PackCartonList {
   storedCount: number
   outgoingCount: number
   incomingCount: number
+  /** 未启用的空箱标张数；不计入 packingCount。旧后端缺失按 0。 */
+  blankCount?: number
 }
 
 export interface PackPalletSummary {
@@ -290,7 +308,7 @@ export interface PackLocateResult {
   rows: PackLocateRow[]
 }
 
-export type PackCartonFilter = 'all' | 'packing' | 'stored' | 'outgoing'
+export type PackCartonFilter = 'all' | 'packing' | 'blank' | 'stored' | 'outgoing'
 export type PackPalletFilter = 'all' | 'building' | 'stored' | 'outgoing'
 
 export interface PackCartonHeaderRequest extends PackDestinationRequest {
@@ -415,4 +433,58 @@ export interface PackOrderReceive {
   products: PackOrderReceiveProduct[]
   /** 仅 409 COUNT_MISMATCH 时带回：系统记录里该订单发给本店、还在路上的箱数。 */
   actualInTransitCartonCount?: number | null
+}
+
+// ---- 批量箱标（预打印空箱标签） ----
+
+/** 批量创建空箱标：count 1～100；clientRequestId 同一次点击（含失败重试）固定，后端据此防重复创建。 */
+export interface PackBlankBatchRequest extends Partial<PackDestinationRequest> {
+  ownerCode?: string | null
+  count: number
+  clientRequestId: string
+}
+
+export interface PackBlankBatchResult {
+  batchGuid: string
+  /** 同一个 clientRequestId 重放时为 true：返回的是之前已创建的那一批。 */
+  duplicate: boolean
+  count: number
+  firstCartonNo: string
+  lastCartonNo: string
+  createdAtUtc: string
+  cartons: PackCartonSummary[]
+}
+
+/** 409 BLANK_LIMIT_EXCEEDED 随错误带回的数据。 */
+export interface PackBlankLimitData {
+  existing?: number
+  limit?: number
+}
+
+export interface PackBlankBatch {
+  batchGuid: string
+  count: number
+  firstCartonNo: string
+  lastCartonNo: string
+  createdAtUtc: string
+  createdByName: string
+  printedCount: number
+  unactivatedCount: number
+  voidedCount: number
+}
+
+export interface PackBlankBatchDetail {
+  batch: PackBlankBatch
+  cartons: PackCartonSummary[]
+}
+
+export interface PackLabelsPrintedResult {
+  updated: number
+  skipped: { cartonGuid: string; reason: string }[]
+}
+
+export interface PackVoidBlankResult {
+  voided: string[]
+  /** reason：NOT_FOUND / NOT_BLANK。 */
+  skipped: { cartonGuid: string; reason: string }[]
 }

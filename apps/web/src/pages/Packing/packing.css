@@ -886,3 +886,64 @@
     width: 100%;
   }
 }
+
+/* ---------- 批量箱标（空箱标） ---------- */
+
+.wh-packing-blank-views {
+  margin-bottom: 16px;
+}
+
+.wh-packing-blank-form,
+.wh-packing-blank-batches,
+.wh-packing-blank-batch-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.wh-packing-blank-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wh-packing-blank-batches-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.wh-packing-blank-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.wh-packing-blank-batchline {
+  font-size: 12px;
+}
+
+.wh-packing-selection-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 16px;
+  border-block: 1px solid #d6e4ff;
+  background: #f0f5ff;
+}
+
+.wh-packing-print-run {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wh-packing-print-copies {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
