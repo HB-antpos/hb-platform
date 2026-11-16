@@ -779,7 +779,11 @@ public sealed class DeviceService : IDeviceService
         }
 
         var requiresExactHardwareId = DeviceSystems.RequiresExactHardwareId(submittedDeviceSystem);
-        if (requiresExactHardwareId && string.IsNullOrWhiteSpace(hardwareId))
+        // 关键逻辑（安全）：verify 是匿名端点，设备处于启用状态时会直接返回授权码，而设备号只有
+        // 「POS_门店_时分」每店约 1440 种、门店列表又可匿名获取，只凭设备号 + 门店码就能枚举出授权码。
+        // 因此所有平台（含 Windows）都必须提交硬件码并与登记值一致；不带硬件码时一律不返回授权码，
+        // 也不透露该设备号是否存在。WPF 自 verify 首个版本起每次都会带硬件码，这里没有兼容缺口。
+        if (string.IsNullOrWhiteSpace(hardwareId))
         {
             return CreateVerifyResponse(
                 deviceCode,
@@ -790,7 +794,8 @@ public sealed class DeviceService : IDeviceService
         }
 
         // iPadOS 等跨端设备必须按门店、设备码、硬件码取最新记录，避免复用设备码命中其他硬件。
-        // Windows 兼容旧客户端可不带硬件码；带了硬件码时优先命中同硬件的行，避免历史撞号随机命中他人记录被持久化为拒绝。
+        // Windows 仍按「设备码 + 门店」取行（历史上存在撞号），但优先命中同硬件的行，避免随机命中他人记录被持久化为拒绝；
+        // 随后由 IsHardwareIdAccepted 与登记的硬件码做一致性校验，不一致不会返回授权码。
         var device = requiresExactHardwareId
             ? await deviceRegistrationRepository.FindLatestByDeviceCodeAndHardwareIdAsync(
                 deviceCode, storeCode, hardwareId, cancellationToken)

@@ -644,6 +644,10 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
   });
   const now = () => new Date();
   const createId = () => Crypto.randomUUID();
+  // 安全：日志与操作审计会连同门店码、设备码一起上传，其中的实例标识不能是设备认证用的安装 UUID
+  // （它就是 hardwareId，配合门店码 + 设备码可向 verify 换出设备授权码）。
+  // 与 WPF 一致，每次组合启动随机生成一个，只用于区分同一设备的不同进程。
+  const processInstanceId = createId();
   const appVersion =
     Constants.nativeAppVersion ??
     Constants.expoConfig?.version ??
@@ -672,7 +676,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
             userId: actor?.userId ?? null,
             userName: actor?.userName ?? null,
             appVersion,
-            instanceId: installationId,
+            instanceId: processInstanceId,
           };
         },
         createId,
@@ -1005,7 +1009,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         storeCode: runtimeCredentials?.storeCode ?? "unregistered",
         deviceCode: runtimeCredentials?.deviceCode ?? "unregistered",
         appVersion,
-        instanceId: installationId,
+        instanceId: processInstanceId,
       },
       supportAppId: POS_APP_ID,
       // 总部下发小票资料同步只上报版本号、触发源与失败原因，绝不带地址/电话/ABN 等资料内容。
