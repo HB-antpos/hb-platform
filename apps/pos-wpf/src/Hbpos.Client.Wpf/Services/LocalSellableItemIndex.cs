@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime;
 using Hbpos.Contracts.Catalog;
 
 namespace Hbpos.Client.Wpf.Services;
@@ -121,6 +123,64 @@ public sealed class LocalSellableItemIndex
         {
             ReplaceLocked(snapshotItems, exactLookupIndex, metadataLookupIndex);
         }
+
+        ScheduleReclaimAfterReplace();
+    }
+
+    // 整表替换时新旧两份索引（各约 500MB）同时存在，旧的随即成为垃圾；
+    // 但第 2 代 / 大对象堆很少触发回收，且普通回收不压缩大对象堆，实测刚启动时托管堆约 1.1GB、
+    // 稳定后才降到约 0.5GB（工作集峰值 1.6GB）。替换完成后补一次压缩式回收把空洞还给系统。
+    // 延迟并合并：启动时可能连续替换几次，只在静默 3 秒后回收一次；回收会短暂停住所有托管线程，所以不放在替换过程中。
+    private static readonly TimeSpan DefaultReclaimDelay = TimeSpan.FromSeconds(3);
+    private const long ReclaimMinHeapBytes = 128L * 1024 * 1024;
+    private int _reclaimScheduled;
+
+    internal TimeSpan ReclaimDelay { get; set; } = DefaultReclaimDelay;
+
+    /// <summary>实际执行回收的动作；测试里替换成计数器，避免真的触发全堆回收。</summary>
+    internal Action ReclaimMemory { get; set; } = ReclaimManagedMemory;
+
+    private void ScheduleReclaimAfterReplace()
+    {
+        if (Interlocked.CompareExchange(ref _reclaimScheduled, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(ReclaimDelay);
+                // 先清标志再回收：回收期间又发生的替换会重新排一次，不会漏掉。
+                Volatile.Write(ref _reclaimScheduled, 0);
+                ReclaimMemory();
+            }
+            catch (Exception ex)
+            {
+                Volatile.Write(ref _reclaimScheduled, 0);
+                ConsoleLog.WriteWarning("CatalogIndex", $"reclaim after replace failed error={ex.GetType().Name}");
+            }
+        });
+    }
+
+    private static void ReclaimManagedMemory()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var before = GC.GetTotalMemory(forceFullCollection: false);
+        if (before < ReclaimMinHeapBytes)
+        {
+            // 堆本来就小（小目录、测试进程）：全堆压缩回收的停顿不值得。
+            return;
+        }
+
+        // CompactOnce 只对紧随其后的这一次阻塞式回收生效，之后自动恢复默认（不压缩大对象堆）。
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+        var after = GC.GetTotalMemory(forceFullCollection: false);
+        ConsoleLog.Write(
+            "CatalogIndex",
+            $"reclaim after replace heapBeforeMB={before / (1024 * 1024)} heapAfterMB={after / (1024 * 1024)} elapsedMs={stopwatch.ElapsedMilliseconds}");
     }
 
     // 桶内顺序必须与"全局稳定排序"一致：OrderBy 是稳定排序，桶按到达顺序建好后稳定排序即等价。
@@ -247,8 +307,11 @@ public sealed class LocalSellableItemIndex
         Dictionary<ExactLookupKey, List<SellableItemDto>> MetadataLookupIndex) BuildIndexes(
         IReadOnlyList<SellableItemDto> arrivalItems)
     {
-        var exactLookupIndex = new Dictionary<ExactLookupKey, List<SellableItemDto>>();
-        var metadataLookupIndex = new Dictionary<ExactLookupKey, List<SellableItemDto>>();
+        // 按商品数预分配：每个商品最多贡献一个 exact 键，metadata 键（条码 / 货号 / 商品码）约为商品数的 1.5 倍；
+        // 不预分配时字典逐级扩容，每一级都会在大对象堆里留下一个用完即弃的大数组。
+        var exactLookupIndex = new Dictionary<ExactLookupKey, List<SellableItemDto>>(arrivalItems.Count);
+        var metadataLookupIndex = new Dictionary<ExactLookupKey, List<SellableItemDto>>(
+            arrivalItems.Count + (arrivalItems.Count / 2));
 
         foreach (var item in arrivalItems)
         {
@@ -501,7 +564,8 @@ public sealed class LocalSellableItemIndex
         var key = new ExactLookupKey(Normalize(item.StoreCode), normalizedLookupCode);
         if (!index.TryGetValue(key, out var matches))
         {
-            matches = [];
+            // 绝大多数码只对应一个商品：容量 1 即可（默认首次 Add 会分配 4 个槽位，近 90 万个桶白占约 20MB）。
+            matches = new List<SellableItemDto>(1);
             index[key] = matches;
         }
 
@@ -582,5 +646,7 @@ public sealed class LocalSellableItemIndex
         return (value ?? string.Empty).Trim().ToUpperInvariant();
     }
 
-    private sealed record ExactLookupKey(string StoreCode, string LookupCode);
+    // 结构体键：35 万商品对应近 90 万个查询键，类键每个多一个 32 字节的堆对象；改成内联到字典条目里。
+    // 相等和哈希仍按两个字符串的序号相等，与原来的 record 语义一致。
+    private readonly record struct ExactLookupKey(string StoreCode, string LookupCode);
 }
