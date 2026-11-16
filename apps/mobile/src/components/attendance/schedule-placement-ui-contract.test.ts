@@ -24,7 +24,10 @@ assert.ok(card.includes("styles.conflictMark") && card.includes("styles.mealBadg
 assert.ok(card.includes("getCellMealBadge(cell.schedules)") && card.includes("styles.mealBadgeAuto"), "格内用餐标记含自动扣餐，自动的弱化显示");
 
 // 班次块「×」：每个班次块可删除（先确认），确认文案告知会取消待审批考勤并可找回
-assert.ok(card.includes("onClose={() => confirmDelete(item)}"), "编辑器里每个班次块要有「×」");
+assert.ok(card.includes("onClose={item.isPublishedWeekLocked ? undefined : () => confirmDelete(item)}"), "编辑器里每个班次块要有「×」，已发布周锁定的班次除外");
+// 已发布且过了周一的班次只有管理员能改：保存、删除都要禁用并提示
+assert.ok(card.includes("disabled={isBusy || editingPublishedLocked}") && card.includes("disabled={!canSubmit || isBusy || editingPublishedLocked}"), "已发布周锁定的班次不能删除或保存");
+assert.ok(card.includes("scheduleManagement.editor.publishedWeekLockedNotice"), "已发布周锁定要提示联系管理员");
 assert.ok(card.includes("onPress={() => confirmDelete()}"), "底部删除按钮不能把点击事件当成班次传入");
 
 // 点选目标格：移到 / 复制到、托盘添加；放置模式下点格子放下，提醒要二次确认，重叠直接拒绝

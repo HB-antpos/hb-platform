@@ -81,6 +81,8 @@ export interface AttendanceSchedule {
   startTime: string;
   endTime: string;
   status: AttendanceScheduleStatus;
+  /** 已发布且已过所在周周一（分店当地时间），当前用户不能再改或删；后端算好下发，管理员恒为 false，旧后端不返回。 */
+  isPublishedWeekLocked?: boolean;
   remark?: string;
   /** 店长指定的用餐次数（每次 30 分钟，0 = 不扣用餐）；为空表示按班次时长默认。 */
   mealBreakCount?: number | null;

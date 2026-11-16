@@ -95,6 +95,7 @@ namespace BlazorApp.Api.Services.React
             var result = rows.Select(item => ToDto(item)).ToList();
             await PopulateScheduleDisplayFieldsAsync(result);
             await PopulateMinorEmploymentComplianceAsync(result);
+            await PopulatePublishedWeekLockAsync(result);
             return ApiResponse<List<AttendanceScheduleDto>>.OK(result);
         }
 
@@ -408,6 +409,15 @@ namespace BlazorApp.Api.Services.React
                     await _db.Ado.RollbackTranAsync();
                     return ApiResponse<AttendanceScheduleDto>.Error("排班不存在", "NOT_FOUND");
                 }
+                // 已发布周锁定：在锁内重读后判断，防止并发下按旧状态放行。
+                // 原日期和目标日期都要查，避免把已发布的班挪进 / 挪出已锁定的周；改状态（撤回发布、取消）同样拦截。
+                var targetWorkDate = request.WorkDate == default ? model.WorkDate : request.WorkDate;
+                if (await IsBlockedByPublishedWeekLockAsync(model.StoreCode, model.WorkDate, model.Status)
+                    || await IsBlockedByPublishedWeekLockAsync(model.StoreCode, targetWorkDate, model.Status))
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    return PublishedWeekLocked<AttendanceScheduleDto>();
+                }
                 if (await HasOverlappingScheduleAsync(
                         model.ScheduleGuid,
                         model.StoreCode,
@@ -568,6 +578,12 @@ namespace BlazorApp.Api.Services.React
                 {
                     await _db.Ado.RollbackTranAsync();
                     return ApiResponse<bool>.Error("排班不存在", "NOT_FOUND");
+                }
+                // 已发布周锁定：已发布且过了周一的排班只有管理员能删。
+                if (await IsBlockedByPublishedWeekLockAsync(model.StoreCode, model.WorkDate, model.Status))
+                {
+                    await _db.Ado.RollbackTranAsync();
+                    return PublishedWeekLocked<bool>();
                 }
 
                 // 只做软删除并留痕：有打卡的排班也允许删除，之后可在「已删除排班」里找回。

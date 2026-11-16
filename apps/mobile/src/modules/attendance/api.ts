@@ -194,6 +194,7 @@ function normalizeSchedule(raw: ApiRecord): AttendanceSchedule {
     startTime: asString(pick(raw, "startTime", "StartTime")),
     endTime: asString(pick(raw, "endTime", "EndTime")),
     status: asString(pick(raw, "status", "Status"), "Scheduled"),
+    isPublishedWeekLocked: asBoolean(pick(raw, "isPublishedWeekLocked", "IsPublishedWeekLocked")),
     remark: asOptionalString(pick(raw, "remark", "Remark", "note", "Note")),
     mealBreakCount: asOptionalNumber(pick(raw, "mealBreakCount", "MealBreakCount")) ?? null,
     effectiveMealBreakCount: asOptionalNumber(pick(raw, "effectiveMealBreakCount", "EffectiveMealBreakCount")),

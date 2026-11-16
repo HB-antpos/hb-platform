@@ -77,6 +77,8 @@ namespace BlazorApp.Shared.DTOs
         public TimeSpan StartTime { get; set; }
         public TimeSpan EndTime { get; set; }
         public string Status { get; set; } = string.Empty;
+        /// <summary>已发布且已过所在周周一 00:00（分店当地时间），当前用户（非管理员）不能再修改或删除。</summary>
+        public bool IsPublishedWeekLocked { get; set; }
         public string? Remark { get; set; }
         /// <summary>软删除时间（UTC），仅「已删除排班」列表返回。</summary>
         public DateTime? DeletedAt { get; set; }

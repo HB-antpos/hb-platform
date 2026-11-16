@@ -435,7 +435,7 @@ namespace BlazorApp.Api.Tests
             Assert.True(adjustment.Success, $"{adjustment.ErrorCode}: {adjustment.Message}");
             Assert.Equal("Pending", adjustment.Data!.Status);
 
-            var manager = CreateService("manager-user", "manager", "StoreManager");
+            var manager = CreateService("admin-user", "admin", "Admin");
             if (delete)
             {
                 Assert.True((await manager.DeleteScheduleAsync("schedule-1")).Success);
@@ -590,7 +590,7 @@ namespace BlazorApp.Api.Tests
                 .ExecuteCommandAsync();
             _timeProvider.SetUtcNow(new DateTime(2026, 5, 18, 9, 0, 0, DateTimeKind.Utc));
             Assert.True((await CreateService("staff-user", "staff", "StoreStaff").GetMyTodayAsync(ReviewRoundWorkDate, "BRI")).Success);
-            var manager = CreateService("manager-user", "manager", "StoreManager");
+            var manager = CreateService("admin-user", "admin", "Admin");
 
             Assert.True((await manager.DeleteScheduleAsync("schedule-1")).Success);
             var afterDelete = await _db.Queryable<AttendanceApproval>()
@@ -602,7 +602,8 @@ namespace BlazorApp.Api.Tests
             var deletedItem = Assert.Single(deleted.Data!);
             Assert.Equal("schedule-1", deletedItem.ScheduleGuid);
             Assert.NotNull(deletedItem.DeletedAt);
-            Assert.Equal("manager", deletedItem.DeletedBy);
+            // 已发布且过了周一的排班只有管理员能删 / 恢复，所以这里由管理员操作。
+            Assert.Equal("admin", deletedItem.DeletedBy);
             Assert.Empty((await manager.GetSchedulesAsync(new AttendanceScheduleQueryDto { StoreCode = "BRI" })).Data!);
 
             var restored = await manager.RestoreScheduleAsync("schedule-1");
@@ -625,7 +626,7 @@ namespace BlazorApp.Api.Tests
         {
             await SeedStoreScopeAsync();
             await SeedScheduleAsync();
-            var manager = CreateService("manager-user", "manager", "StoreManager");
+            var manager = CreateService("admin-user", "admin", "Admin");
             Assert.True((await manager.DeleteScheduleAsync("schedule-1")).Success);
 
             var restored = await manager.RestoreScheduleAsync("schedule-1");
@@ -639,7 +640,7 @@ namespace BlazorApp.Api.Tests
         {
             await SeedStoreScopeAsync();
             await SeedScheduleAsync();
-            var manager = CreateService("manager-user", "manager", "StoreManager");
+            var manager = CreateService("admin-user", "admin", "Admin");
             Assert.True((await manager.DeleteScheduleAsync("schedule-1")).Success);
             Assert.True((await manager.CreateScheduleAsync(new CreateAttendanceScheduleDto
             {

@@ -60,6 +60,8 @@ export interface AttendanceScheduleDto {
   startTime: string
   endTime: string
   status: AttendanceScheduleStatus
+  /** 已发布且已过所在周周一（分店当地时间），当前用户不能再改或删；后端算好下发，管理员恒为 false。 */
+  isPublishedWeekLocked?: boolean
   remark?: string
   createdAt?: string
   updatedAt?: string
