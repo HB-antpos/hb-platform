@@ -441,7 +441,18 @@ namespace BlazorApp.Api.Services.React
                 await _db.Updateable(model).ExecuteCommandAsync();
                 if (model.Status == "Active")
                 {
+                    // 排班晚建 / 晚发布：把该员工当天此前未挂排班的打卡挂回来，再统一对账派生审批。
+                    var adoptedScheduleGuids = await AdoptUnscheduledPunchesAsync(
+                        model.StoreCode,
+                        model.UserGuid,
+                        model.WorkDate,
+                        await GetOrCreateSettingsModelAsync());
                     await ReconcileDerivedApprovalsForScheduleAsync(model.ScheduleGuid);
+                    foreach (var adoptedScheduleGuid in adoptedScheduleGuids.Where(item =>
+                                 !string.Equals(item, model.ScheduleGuid, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        await ReconcileDerivedApprovalsForScheduleAsync(adoptedScheduleGuid);
+                    }
                 }
                 else
                 {
@@ -504,6 +515,7 @@ namespace BlazorApp.Api.Services.React
                 .Where(item => !item.IsDeleted && item.StoreCode == storeCode && item.Status == "Active"
                     && item.WorkDate >= weekStart && item.WorkDate <= weekEnd)
                 .ToListAsync();
+            await AdoptUnscheduledPunchesAfterPublishAsync(storeCode, publishedSchedules);
             var findings = new List<MinorEmploymentComplianceFindingDto>();
             foreach (var schedule in publishedSchedules)
             {
@@ -1060,6 +1072,13 @@ namespace BlazorApp.Api.Services.React
                         "打卡已保存");
                 }
             var scheduleSegmentLimit = await ResolveSegmentLimitAsync(userGuid, storeCode);
+            // 排班可能在今天更早的打卡之后才建 / 才发布：先把那些未挂排班的卡挂回去，
+            // 否则已发布排班名下看不到那张上班卡，这次扫码会被记成第二张上班卡而不是下班。
+            var adoptedScheduleGuids = await AdoptUnscheduledPunchesAsync(
+                storeCode,
+                userGuid,
+                workDate,
+                settings);
             var schedule = await FindScheduleForPunchAsync(
                 storeCode,
                 userGuid,
@@ -1235,6 +1254,12 @@ namespace BlazorApp.Api.Services.React
                 await ReconcileOvertimeApprovalAsync(schedule, updatedSession);
                 await ReconcileFinalPunchApprovalsAsync(schedule, updatedSession, settings);
                 await ReconcileMissingClockOutApprovalAsync(schedule, updatedSession);
+            }
+            // 刚挂回了打卡、但这次扫码没落在其上的排班：同样要在本次员工锁内对账（取消已过时的「未排班」待审等）。
+            foreach (var adoptedScheduleGuid in adoptedScheduleGuids.Where(item =>
+                         !string.Equals(item, schedule?.ScheduleGuid, StringComparison.OrdinalIgnoreCase)))
+            {
+                await ReconcileDerivedApprovalsForScheduleAsync(adoptedScheduleGuid);
             }
             AttendanceMealClaim? mealClaim = null;
             if (punchType == "ClockOut" && schedule != null)
@@ -2810,6 +2835,26 @@ namespace BlazorApp.Api.Services.React
                         && await _db.Queryable<AttendancePunch>().AnyAsync(item =>
                             !item.IsDeleted && item.SupersedesPunchGuid == sourcePunch.PunchGuid);
                     var settings = await GetOrCreateSettingsModelAsync();
+                    if (sourcePunch != null && !sourceWasSuperseded
+                        && string.IsNullOrWhiteSpace(sourcePunch.ScheduleGuid))
+                    {
+                        // 这张卡打的时候还没有已发布排班：先尝试挂回（排班晚建 / 晚发布），
+                        // 挂上了就改按排班口径判断是否仍需审核，而不是一律判成「状态已变化」。
+                        var adoptedScheduleGuids = await AdoptUnscheduledPunchesAsync(
+                            sourcePunch.StoreCode,
+                            sourcePunch.UserGuid,
+                            sourcePunch.WorkDate,
+                            settings);
+                        if (adoptedScheduleGuids.Count > 0)
+                        {
+                            foreach (var adoptedScheduleGuid in adoptedScheduleGuids)
+                            {
+                                await ReconcileDerivedApprovalsForScheduleAsync(adoptedScheduleGuid);
+                            }
+                            sourcePunch = await _db.Queryable<AttendancePunch>().FirstAsync(item =>
+                                !item.IsDeleted && item.PunchGuid == model.SourceGuid);
+                        }
+                    }
                     var stillRequiresApproval = false;
                     if (sourcePunch != null && !sourceWasSuperseded
                         && !string.IsNullOrWhiteSpace(sourcePunch.ScheduleGuid))
@@ -2831,15 +2876,10 @@ namespace BlazorApp.Api.Services.React
                     }
                     else if (sourcePunch != null && !sourceWasSuperseded)
                     {
-                        var hasActiveSchedule = await _db.Queryable<AttendanceSchedule>().AnyAsync(item =>
-                            !item.IsDeleted
-                            && item.Status == "Active"
-                            && item.StoreCode == sourcePunch.StoreCode
-                            && item.UserGuid == sourcePunch.UserGuid
-                            && item.WorkDate >= sourcePunch.WorkDate.Date
-                            && item.WorkDate < sourcePunch.WorkDate.Date.AddDays(1));
-                        stillRequiresApproval = !hasActiveSchedule
-                            && RequiresApproval(sourcePunch.Status, settings);
+                        // 上面已尝试挂回：到这里仍没挂上排班，就是确实不属于任何排班的打卡
+                        // （例如下班时间过后才第一次扫码），即使当天有已发布排班也照常审核。
+                        // 以前这里只要当天有已发布排班就取消待审，这类卡会永远审不了。
+                        stillRequiresApproval = RequiresApproval(sourcePunch.Status, settings);
                     }
                     if (!stillRequiresApproval)
                     {
@@ -4293,41 +4333,8 @@ namespace BlazorApp.Api.Services.React
                     && item.ScheduleGuid != null
                     && scheduleGuids.Contains(item.ScheduleGuid))
                 .ToListAsync();
-            var nowLocal = workDate.Date.Add(localTime);
-            var sessions = rows.Select(schedule => new
-            {
-                Schedule = schedule,
-                Session = AttendanceWorkSessionCalculator.Calculate(
-                    schedule,
-                    punches,
-                    segmentLimit,
-                    nowLocal,
-                    settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes),
-            }).ToList();
-
-            var open = sessions
-                .Where(item => item.Session.HasOpenSegment)
-                .OrderByDescending(item => item.Session.Segments.Last().ClockIn?.PunchTimeLocal)
-                .FirstOrDefault();
-            if (open != null)
-            {
-                return open.Schedule;
-            }
-
-            return sessions
-                .Where(item => item.Session.ScheduleState != "Completed")
-                .Where(item => item.Session.Segments.Count < segmentLimit)
-                .Where(item => item.Session.ScheduleState != "NotStarted"
-                    || localTime < item.Schedule.EndTime)
-                .OrderBy(item => localTime < item.Schedule.StartTime
-                    ? (item.Schedule.StartTime - localTime).TotalMinutes
-                    : localTime > item.Schedule.EndTime
-                        ? (localTime - item.Schedule.EndTime).TotalMinutes
-                        : 0)
-                .ThenBy(item => item.Schedule.StartTime)
-                .Select(item => item.Schedule)
-                .FirstOrDefault();
+            // 选择规则与「未排班打卡挂回」的重放共用同一个纯函数，保证两处口径永远一致。
+            return SelectScheduleForPunch(rows, punches, workDate, localTime, segmentLimit, settings);
         }
 
         private static string ResolveSegmentPunchStatus(
@@ -4724,13 +4731,29 @@ namespace BlazorApp.Api.Services.React
 
                     if (activeSchedules.Count > 0)
                     {
+                        var settings = await GetOrCreateSettingsModelAsync();
+                        // 对账前先把未挂排班的打卡挂回（排班晚建 / 晚发布留下的，含修复上线前的历史数据）。
+                        // 挂回可能落在同一天的其他已发布排班上，这些排班也要并入本轮对账。
+                        var adoptedScheduleGuids = await AdoptUnscheduledPunchesForSchedulesAsync(
+                            activeSchedules,
+                            settings);
+                        var extraScheduleGuids = adoptedScheduleGuids
+                            .Where(item => !activeScheduleGuids.Contains(item))
+                            .ToList();
+                        if (extraScheduleGuids.Count > 0)
+                        {
+                            activeSchedules.AddRange(await _db.Queryable<AttendanceSchedule>()
+                                .Where(item => !item.IsDeleted
+                                    && item.Status == "Active"
+                                    && extraScheduleGuids.Contains(item.ScheduleGuid))
+                                .ToListAsync());
+                        }
                         var activeGuids = activeSchedules.Select(item => item.ScheduleGuid).ToList();
                         var lockedPunches = await _db.Queryable<AttendancePunch>()
                             .Where(item => !item.IsDeleted
                                 && item.ScheduleGuid != null
                                 && activeGuids.Contains(item.ScheduleGuid))
                             .ToListAsync();
-                        var settings = await GetOrCreateSettingsModelAsync();
                         var segmentLimitMap = await ResolveSegmentLimitMapAsync(activeSchedules);
                         foreach (var schedule in activeSchedules)
                         {
