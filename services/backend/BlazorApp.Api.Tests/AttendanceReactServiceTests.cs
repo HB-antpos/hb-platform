@@ -2194,7 +2194,7 @@ namespace BlazorApp.Api.Tests
             await SetScheduleMealBreakCountAsync("schedule-1", 2);
 
             // 旧版 App 不传用餐次数：必须保持店长已设置的值。
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
                 {
                     WorkDate = new DateTime(2026, 5, 18),
@@ -2214,7 +2214,7 @@ namespace BlazorApp.Api.Tests
             await SeedScheduleAsync();
             await SetScheduleMealBreakCountAsync("schedule-1", 2);
 
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
                 {
                     WorkDate = new DateTime(2026, 5, 18),
@@ -2236,7 +2236,7 @@ namespace BlazorApp.Api.Tests
             await SetScheduleMealBreakCountAsync("schedule-1", 1);
 
             // 恢复自动优先于同时传入的次数（即便次数越界也不校验）。
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
                 {
                     WorkDate = new DateTime(2026, 5, 18),
@@ -3559,7 +3559,7 @@ namespace BlazorApp.Api.Tests
             await SeedScheduleAsync();
             await SeedPendingScheduleDerivedApprovalsAsync("schedule-1", "cancel-schedule-punch");
 
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
                 {
                     WorkDate = new DateTime(2026, 5, 18),
@@ -3583,7 +3583,7 @@ namespace BlazorApp.Api.Tests
             await SeedScheduleAsync("delete-schedule", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active");
             await SeedPendingScheduleDerivedApprovalsAsync("delete-schedule", "delete-schedule-punch");
 
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .DeleteScheduleAsync("delete-schedule");
 
             Assert.True(result.Success, result.Message);
@@ -5101,6 +5101,108 @@ namespace BlazorApp.Api.Tests
 
             request.PreviewRevision = preview.Data!.PreviewRevision;
             return await service.CreateMyPunchAdjustmentAsync(request);
+        }
+
+        // 2026-05-18 是周一；5 月悉尼 / 布里斯班都是 UTC+10，周一 00:00 当地时间 = 2026-05-17 14:00 UTC。
+        private static readonly DateTime PublishedWeekLockAtUtc = new(2026, 5, 17, 14, 0, 0, DateTimeKind.Utc);
+
+        private static UpdateAttendanceScheduleDto ShiftUpdate(DateTime workDate) => new()
+        {
+            WorkDate = workDate,
+            StartTime = new TimeSpan(10, 0, 0),
+            EndTime = new TimeSpan(16, 0, 0),
+        };
+
+        [Fact]
+        public async Task 已发布排班_周一之前店长可以修改()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            _timeProvider.SetUtcNow(PublishedWeekLockAtUtc.AddMinutes(-1));
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .UpdateScheduleAsync("schedule-1", ShiftUpdate(new DateTime(2026, 5, 18)));
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+        }
+
+        [Fact]
+        public async Task 已发布排班_到了周一店长不能修改删除_管理员可以()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync();
+            _timeProvider.SetUtcNow(PublishedWeekLockAtUtc);
+            var manager = CreateService("manager-user", "manager", "StoreManager");
+
+            var update = await manager.UpdateScheduleAsync("schedule-1", ShiftUpdate(new DateTime(2026, 5, 18)));
+            Assert.Equal(AttendanceReactService.PublishedWeekLockedErrorCode, update.ErrorCode);
+            // 撤回发布（改回草稿）也算修改，同样拦截。
+            var unpublish = await manager.UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
+            {
+                WorkDate = new DateTime(2026, 5, 18),
+                StartTime = new TimeSpan(9, 0, 0),
+                EndTime = new TimeSpan(17, 0, 0),
+                Status = "Draft",
+            });
+            Assert.Equal(AttendanceReactService.PublishedWeekLockedErrorCode, unpublish.ErrorCode);
+            var delete = await manager.DeleteScheduleAsync("schedule-1");
+            Assert.Equal(AttendanceReactService.PublishedWeekLockedErrorCode, delete.ErrorCode);
+            var unchanged = await _db.Queryable<AttendanceSchedule>().FirstAsync(item => item.ScheduleGuid == "schedule-1");
+            Assert.Equal(new TimeSpan(9, 0, 0), unchanged.StartTime);
+            Assert.Equal("Active", unchanged.Status);
+            Assert.False(unchanged.IsDeleted);
+
+            var admin = CreateService("admin-user", "admin", "Admin");
+            var adminUpdate = await admin.UpdateScheduleAsync("schedule-1", ShiftUpdate(new DateTime(2026, 5, 18)));
+            Assert.True(adminUpdate.Success, $"{adminUpdate.ErrorCode}: {adminUpdate.Message}");
+            Assert.True((await admin.DeleteScheduleAsync("schedule-1")).Success);
+        }
+
+        [Fact]
+        public async Task 已发布周锁定_草稿不受影响()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("draft-locked-week", "BRI", "staff-user", new DateTime(2026, 5, 19), "Draft");
+            _timeProvider.SetUtcNow(PublishedWeekLockAtUtc.AddDays(2));
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .UpdateScheduleAsync("draft-locked-week", ShiftUpdate(new DateTime(2026, 5, 19)));
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+        }
+
+        [Fact]
+        public async Task 已发布周锁定_不能把已发布的班挪进已锁定的周()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("next-week", "BRI", "staff-user", new DateTime(2026, 5, 26), "Active");
+            _timeProvider.SetUtcNow(PublishedWeekLockAtUtc.AddDays(1));
+
+            var manager = CreateService("manager-user", "manager", "StoreManager");
+            var moveIn = await manager.UpdateScheduleAsync("next-week", ShiftUpdate(new DateTime(2026, 5, 20)));
+            Assert.Equal(AttendanceReactService.PublishedWeekLockedErrorCode, moveIn.ErrorCode);
+            // 下周还没到周一，留在下周内调整仍然可以。
+            var stay = await manager.UpdateScheduleAsync("next-week", ShiftUpdate(new DateTime(2026, 5, 27)));
+            Assert.True(stay.Success, $"{stay.ErrorCode}: {stay.Message}");
+        }
+
+        [Fact]
+        public async Task 已发布周锁定_周排班列表标出锁定_管理员不标()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("locked-active", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active");
+            await SeedScheduleAsync("locked-draft", "BRI", "staff-user", new DateTime(2026, 5, 19), "Draft");
+            _timeProvider.SetUtcNow(PublishedWeekLockAtUtc);
+            var query = new AttendanceScheduleQueryDto { StoreCode = "BRI", WeekStartDate = new DateTime(2026, 5, 18) };
+
+            var managerWeek = await CreateService("manager-user", "manager", "StoreManager").GetWeekSchedulesAsync(query);
+            Assert.True(managerWeek.Success, managerWeek.Message);
+            Assert.True(managerWeek.Data!.Single(item => item.ScheduleGuid == "locked-active").IsPublishedWeekLocked);
+            Assert.False(managerWeek.Data!.Single(item => item.ScheduleGuid == "locked-draft").IsPublishedWeekLocked);
+
+            var adminWeek = await CreateService("admin-user", "admin", "Admin").GetWeekSchedulesAsync(
+                new AttendanceScheduleQueryDto { StoreCode = "BRI", WeekStartDate = new DateTime(2026, 5, 18) });
+            Assert.All(adminWeek.Data!, item => Assert.False(item.IsPublishedWeekLocked));
         }
 
         private AttendanceReactService CreateService(string userGuid, string username, params string[] roles)

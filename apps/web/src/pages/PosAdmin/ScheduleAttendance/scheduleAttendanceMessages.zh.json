@@ -148,6 +148,7 @@
         "flagOutside": "超出可上班时间",
         "locked": "已有打卡记录，不能拖动（可点「×」删除）",
         "lockedUnknown": "无法确认打卡记录，今天及以前的班次不能拖动（可点「×」删除）",
+        "publishedWeekLocked": "本周排班已发布且已过周一，不能再修改或删除；需要调整请联系管理员",
         "moveFailed": "未移动：{{reason}}",
         "addFailed": "未添加：{{reason}}",
         "transferDeleteFailed": "已在新位置创建，但原班次删除失败，请手动删除原班次",

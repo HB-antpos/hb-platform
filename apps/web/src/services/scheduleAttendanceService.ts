@@ -88,6 +88,7 @@ export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleD
     startTime: readCompat<string>(source, 'startTime', 'StartTime') ?? '',
     endTime: readCompat<string>(source, 'endTime', 'EndTime') ?? '',
     status: readCompat<AttendanceScheduleDto['status']>(source, 'status', 'Status') ?? 'Draft',
+    isPublishedWeekLocked: readCompat<boolean>(source, 'isPublishedWeekLocked', 'IsPublishedWeekLocked') === true,
     remark: readCompat<string>(source, 'remark', 'Remark'),
     createdAt: readCompat<string>(source, 'createdAt', 'CreatedAt'),
     updatedAt: readCompat<string>(source, 'updatedAt', 'UpdatedAt'),

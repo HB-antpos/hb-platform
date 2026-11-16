@@ -319,7 +319,7 @@ namespace BlazorApp.Api.Tests
             var approved = await CreateService("manager-user", "manager", "StoreManager")
                 .ApproveAsync(punchApproval.ApprovalGuid, new ReviewAttendanceApprovalDto { ReviewRemark = "OK" });
             Assert.True(approved.Success, $"{approved.ErrorCode}: {approved.Message}");
-            var cancelled = await CreateService("manager-user", "manager", "StoreManager")
+            var cancelled = await CreateService("admin-user", "admin", "Admin")
                 .DeleteScheduleAsync("schedule-1");
             Assert.True(cancelled.Success, cancelled.Message);
 
@@ -583,7 +583,7 @@ namespace BlazorApp.Api.Tests
         {
             await SeedPendingMealClaimWithSubmittedNotificationAsync();
 
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
                 {
                     WorkDate = new DateTime(2026, 5, 18),
@@ -603,7 +603,7 @@ namespace BlazorApp.Api.Tests
         {
             await SeedPendingMealClaimWithSubmittedNotificationAsync();
 
-            var result = await CreateService("manager-user", "manager", "StoreManager")
+            var result = await CreateService("admin-user", "admin", "Admin")
                 .DeleteScheduleAsync("schedule-1");
 
             Assert.True(result.Success, result.Message);
@@ -817,7 +817,7 @@ namespace BlazorApp.Api.Tests
             await SeedPendingMealClaimWithSubmittedNotificationAsync();
             UseFailingApprovalNotifications(layer);
 
-            var cancelled = await CreateService("manager-user", "manager", "StoreManager")
+            var cancelled = await CreateService("admin-user", "admin", "Admin")
                 .UpdateScheduleAsync("schedule-1", new UpdateAttendanceScheduleDto
                 {
                     WorkDate = new DateTime(2026, 5, 18),
@@ -831,7 +831,7 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("Cancelled", (await _db.Queryable<AttendanceApproval>()
                 .FirstAsync(item => item.SourceType == "MealBreak")).ReviewStatus);
 
-            var deleted = await CreateService("manager-user", "manager", "StoreManager")
+            var deleted = await CreateService("admin-user", "admin", "Admin")
                 .DeleteScheduleAsync("schedule-1");
             Assert.True(deleted.Success, deleted.Message);
         }

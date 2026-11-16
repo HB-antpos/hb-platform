@@ -119,6 +119,13 @@ namespace BlazorApp.Api.Services.React
                     // 没有打卡的恢复为草稿，由店长确认后再发布，避免误恢复直接出现在员工的排班里。
                     var hasPunches = await _db.Queryable<AttendancePunch>().AnyAsync(item =>
                         !item.IsDeleted && item.ScheduleGuid == model.ScheduleGuid);
+                    // 恢复成 Active 等于改动已发布的周排班；过了周一只有管理员可以。恢复成草稿不受限。
+                    if (await IsBlockedByPublishedWeekLockAsync(
+                            model.StoreCode, model.WorkDate, hasPunches ? "Active" : "Draft"))
+                    {
+                        await _db.Ado.RollbackTranAsync();
+                        return PublishedWeekLocked<AttendanceScheduleDto>();
+                    }
                     var now = _timeProvider.GetUtcNow().UtcDateTime;
                     model.IsDeleted = false;
                     model.Status = hasPunches ? "Active" : "Draft";

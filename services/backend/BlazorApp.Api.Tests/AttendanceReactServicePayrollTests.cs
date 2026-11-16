@@ -204,7 +204,8 @@ namespace BlazorApp.Api.Tests
             Assert.True(unlocked.Success, unlocked.Message);
             Assert.Equal("Open", unlocked.Data!.Status);
             Assert.Equal("补一张漏打的卡", unlocked.Data.UnlockReason);
-            Assert.True((await Manager().DeleteScheduleAsync("lock-tue")).Success);
+            // 工资期解锁后可以删；该班已发布且早已过周一，按已发布周锁定只有管理员能删。
+            Assert.True((await CreateService("admin-user", "admin", "Admin").DeleteScheduleAsync("lock-tue")).Success);
         }
 
         [Fact]

@@ -709,6 +709,7 @@
       "stepMinus": "{{label}}提前 30 分钟",
       "stepPlus": "{{label}}推后 30 分钟",
       "setRest": "设为休息",
+      "publishedWeekLockedNotice": "本周排班已发布且已过周一，不能再修改或删除；需要调整请联系管理员",
       "mealBreakLabel": "用餐",
       "mealBreakValue": "{{count}} 次 × {{minutes}} 分钟",
       "mealBreakNone": "不扣用餐",

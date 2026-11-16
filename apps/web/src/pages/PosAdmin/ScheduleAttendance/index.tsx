@@ -1939,7 +1939,9 @@ export default function ScheduleAttendancePage() {
     const color = staffColors.get(schedule.userGuid) ?? FALLBACK_STAFF_COLOR
     const name = nameOf(schedule.userGuid)
     const age = employeeAges.get(schedule.userGuid)
-    const canEditSchedule = !shellReadOnly && access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode)
+    // 已发布且过了周一的班次只有管理员能改（后端判定，管理员恒为 false）：不打开编辑、不能删除和拖动。
+    const publishedWeekLocked = schedule.isPublishedWeekLocked === true
+    const canEditSchedule = !shellReadOnly && access.canEditAttendanceSchedule && canEditStoreCode(schedule.storeCode) && !publishedWeekLocked
     const cardCell: EditingCell = { userGuid: schedule.userGuid, dateKey, scheduleGuid: schedule.scheduleGuid }
     // 班次与员工上报的时间冲突：卡片上加 ⚠，悬停说明原因（不阻止保存，仅提醒排班的人）
     const conflict = getScheduleAvailabilityConflict(schedule, availabilityOf(schedule.userGuid, dateKey))
@@ -1969,6 +1971,7 @@ export default function ScheduleAttendancePage() {
       mealBadge && mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : '',
       schedule.remark ?? '',
       locked ? t(weekPunches.known ? 'posAdmin.scheduleAttendance.drag.locked' : 'posAdmin.scheduleAttendance.drag.lockedUnknown') : '',
+      publishedWeekLocked ? t('posAdmin.scheduleAttendance.drag.publishedWeekLocked') : '',
     ].filter(Boolean).join(' · ')
     // 用 div 而不是 button：部分浏览器（Firefox）里 button 不能被拖动
     const card = (
@@ -1993,7 +1996,7 @@ export default function ScheduleAttendancePage() {
           `sce-card--${schedule.status}`,
           canEditSchedule ? 'sce-card--editable' : '',
           canDrag ? 'sce-card--draggable' : '',
-          locked ? 'sce-card--locked' : '',
+          locked || publishedWeekLocked ? 'sce-card--locked' : '',
           dragging ? 'sce-card--drag-src' : '',
           isSameEditingCell(editingCell, cardCell) ? 'sce-card--active' : '',
           conflict ? 'sce-card--conflict' : '',
@@ -2009,7 +2012,7 @@ export default function ScheduleAttendancePage() {
         <div className="sce-card-line2">
           <span className="sce-card-time">{timeText}</span>
           {conflict ? <WarningOutlined className="sce-card-warn" /> : null}
-          {locked ? <LockOutlined className="sce-card-lock" /> : null}
+          {locked || publishedWeekLocked ? <LockOutlined className="sce-card-lock" /> : null}
           {/* 手动指定过用餐次数的班次：工时加点状下划线，具体扣餐说明在悬停提示里 */}
           {shiftHours > 0 ? <span className={`sce-card-hours${mealBadge ? ' sce-card-hours--meal' : ''}`}>{formatHours(shiftHours)}</span> : null}
         </div>

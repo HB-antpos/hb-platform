@@ -709,6 +709,7 @@
       "stepMinus": "{{label}} 30 minutes earlier",
       "stepPlus": "{{label}} 30 minutes later",
       "setRest": "Set as day off",
+      "publishedWeekLockedNotice": "This week's roster was published and Monday has passed, so this shift can no longer be edited or deleted. Ask an admin to change it.",
       "mealBreakLabel": "Meal breaks",
       "mealBreakValue": "{{count}} × {{minutes}} min",
       "mealBreakNone": "No meal break",

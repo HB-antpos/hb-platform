@@ -760,7 +760,9 @@ export function ScheduleManagementCard({
     setForm(EMPTY_FORM);
   };
 
+  // 已发布且过了周一的班次（后端按分店时区算好下发，管理员恒为 false）同样不能移动 / 复制 / 拖动 / 改派。
   const isLocked = (schedule: AttendanceSchedule) =>
+    schedule.isPublishedWeekLocked === true ||
     isScheduleLocked({
       scheduleGuid: schedule.scheduleGuid,
       workDate: schedule.workDate,
@@ -768,6 +770,8 @@ export function ScheduleManagementCard({
       punchScheduleGuids,
       punchesKnown,
     });
+  // 正在编辑的班次已被「已发布周锁定」：保存、删除、改状态都不可用，只有管理员能改。
+  const editingPublishedLocked = editingTarget?.schedule?.isPublishedWeekLocked === true;
 
   // 编辑器里点「移到… / 复制到…」：关掉编辑器，进入点选目标格模式
   const startPlacement = (kind: Extract<PlacementKind, "move" | "copy">, schedule: AttendanceSchedule) => {
@@ -2331,7 +2335,7 @@ export function ScheduleManagementCard({
                 onPress={() =>
                   openEdit(item, row, editingTarget.weekdayIndex, editingTarget.daySchedules)
                 }
-                onClose={() => confirmDelete(item)}
+                onClose={item.isPublishedWeekLocked ? undefined : () => confirmDelete(item)}
                 closeIconAccessibilityLabel={t("scheduleManagement.placement.closeA11y", {
                   shift: formatShiftShort(item.startTime, item.endTime),
                 })}
@@ -2420,7 +2424,11 @@ export function ScheduleManagementCard({
             <Text variant="labelSmall" style={styles.muted}>{t("scheduleManagement.transfer.hint")}</Text>
           </View>
         ) : null}
-        {editingLocked ? (
+        {editingPublishedLocked ? (
+          <Text variant="labelMedium" style={styles.conflictNotice}>
+            {t("scheduleManagement.editor.publishedWeekLockedNotice")}
+          </Text>
+        ) : editingLocked ? (
           <Text variant="labelMedium" style={styles.muted}>
             {t(punchesKnown
               ? "scheduleManagement.placement.lockedNotice"
@@ -2494,7 +2502,7 @@ export function ScheduleManagementCard({
           mode="outlined"
           textColor={HB_COLORS.danger}
           onPress={() => confirmDelete()}
-          disabled={isBusy}
+          disabled={isBusy || editingPublishedLocked}
         >
           {t("scheduleManagement.editor.setRest")}
         </Button>
@@ -2502,7 +2510,7 @@ export function ScheduleManagementCard({
       <Button
         mode="contained"
         onPress={submit}
-        disabled={!canSubmit || isBusy}
+        disabled={!canSubmit || isBusy || editingPublishedLocked}
         loading={isBusy}
         buttonColor={HB_COLORS.action}
         textColor={HB_COLORS.white}

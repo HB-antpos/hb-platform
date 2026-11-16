@@ -148,6 +148,7 @@
         "flagOutside": "Outside available time",
         "locked": "Has punch records, cannot be dragged (use × to delete)",
         "lockedUnknown": "Punch records unknown; shifts today or earlier cannot be dragged (use × to delete)",
+        "publishedWeekLocked": "This week's roster was published and Monday has passed, so this shift can no longer be edited or deleted. Ask an admin to change it.",
         "moveFailed": "Not moved: {{reason}}",
         "addFailed": "Not added: {{reason}}",
         "transferDeleteFailed": "Created at the new place, but deleting the original failed. Please delete it manually",
