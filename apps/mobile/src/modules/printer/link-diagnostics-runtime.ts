@@ -4,11 +4,17 @@ import { AppState, Platform } from "react-native";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import {
   appendPendingLinkLog,
+  buildAppStartFields,
+  EMPTY_LINK_LAST_SEEN,
   installPrinterLinkRecorder,
   LINK_DIAGNOSTICS_STORAGE_KEY,
+  LINK_LAST_SEEN_STORAGE_KEY,
+  nextLinkLastSeen,
+  parseLinkLastSeen,
   parsePendingLinkLogs,
   recordPrinterLink,
   uploadPendingPrinterLinkLogs,
+  type LinkLastSeen,
   type PrinterLinkContext,
   type PrinterLinkLogItem,
   type PrinterLinkUploadResult,
@@ -102,9 +108,27 @@ function enqueue(item: PrinterLinkLogItem) {
 export function installPrinterLinkDiagnostics(): () => void {
   installPrinterLinkRecorder({ now: Date.now, newId: createId, emit: enqueue, context: readContext });
 
+  // 冷启动标记：读出上一次进程退出前最后的已知状态，记一条 app.start，
+  // 之后看日志就能分清「运行中断线」与「App 被系统杀掉 / 重启后一上来就没连上」。
+  const installedAtMs = Date.now();
+  let lastSeen: LinkLastSeen = EMPTY_LINK_LAST_SEEN;
+  const persistLastSeen = () => {
+    lastSeen = nextLinkLastSeen(lastSeen, usePrinterStore.getState().status === "connected", Date.now());
+    void AppAsyncStorage.setString(LINK_LAST_SEEN_STORAGE_KEY, JSON.stringify(lastSeen)).catch(() => undefined);
+  };
+  void AppAsyncStorage.getString(LINK_LAST_SEEN_STORAGE_KEY)
+    .then((raw) => {
+      const stored = parseLinkLastSeen(raw);
+      // 读取期间若已落过盘（lastSeenAtMs 有值），以内存里更新的为准。
+      if (stored && lastSeen.lastSeenAtMs === null) lastSeen = stored;
+      recordPrinterLink("app.start", buildAppStartFields(stored, installedAtMs), installedAtMs);
+    })
+    .catch(() => recordPrinterLink("app.start", buildAppStartFields(null, installedAtMs), installedAtMs));
+
   // 自动重连只在前台运行：前后台切换是“为什么没在重连”的关键线索。
   const appSubscription = AppState.addEventListener("change", (state) => {
     recordPrinterLink("app.state", { state });
+    persistLastSeen();
     if (state === "active") void flushPrinterLinkDiagnostics();
   });
   // 用户暂停/恢复自动重连（手动断开、小票测试临时占用）：暂停期间的断线不算故障。
@@ -112,6 +136,8 @@ export function installPrinterLinkDiagnostics(): () => void {
     if (current.autoReconnectPaused !== previous.autoReconnectPaused) {
       recordPrinterLink("auto.reconnect", { paused: current.autoReconnectPaused });
     }
+    // 连接状态在「已连接」与其他状态之间切换时落盘一次：写入次数 = 连上 / 断开的次数，很少。
+    if ((current.status === "connected") !== (previous.status === "connected")) persistLastSeen();
   });
   // 登录成功后补传此前（未登录时）遗留的日志。
   const unsubscribeAuth = useAuthStore.subscribe((current, previous) => {

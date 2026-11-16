@@ -649,6 +649,12 @@ function createSendProductLabel(options: { quantity?: number; failProduct?: bool
       quantitySingleUse: true,
       setPrintQuantity: (value: number) => quantityResets.push(value),
       getErrorMessage: (_error: unknown, fallback: string) => fallback,
+      // 打印失败的统一提示与「重新连接并重试」：本回归只关心提示文字，重连入口另有专门的契约测试。
+      handleReconnectPrinter: async () => true,
+      setSnackbarAction: () => undefined,
+      getPrintedLabelCount: () => 0,
+      showPrintFailure: (_error: unknown, fallback: string) => { messages.push(fallback); },
+      sendProductLabelRef: { current: null },
     },
   );
   return { sendProductLabel, calls, messages, feedback, quantityResets };
@@ -781,6 +787,9 @@ async function runManualPrintRegression() {
     quantitySingleUse: true,
     setPrintQuantity: () => undefined,
     getErrorMessage: (_error: unknown, fallback: string) => fallback,
+    getPrintedLabelCount: () => 0,
+    showPrintFailure: (_error: unknown, fallback: string) => { messages.push(fallback); },
+    handlePrintRef: { current: null },
     getMultiCodeItemId: (item: { id: string }) => item.id,
     resolveMultiCodeLabelPrice: () => ({ retailPrice: 5, discountRate: 0.2 }),
     // 默认没有扫码焦点：价格页签的按钮打主档。

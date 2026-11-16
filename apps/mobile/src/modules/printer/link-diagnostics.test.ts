@@ -2,17 +2,28 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   appendPendingLinkLog,
+  buildAppStartFields,
   createPrinterLinkRecorder,
   describeLinkError,
+  EMPTY_LINK_LAST_SEEN,
+  fitLinkEventsToBudget,
   installPrinterLinkRecorder,
+  LINK_CONTEXT_MAX,
   LINK_DIAGNOSTICS_STORAGE_KEY,
+  LINK_EVENTS_BUDGET_CHARS,
+  LINK_EVENTS_MIN_KEPT,
   LINK_HEAD_CAP,
   LINK_SNAPSHOT_TAIL,
   MAX_PENDING_LINK_LOGS,
+  nextLinkLastSeen,
+  parseLinkLastSeen,
   parsePendingLinkLogs,
+  pickLinkContext,
   recordPrinterLink,
   recordPrinterNativeStatus,
+  recordPrinterPrintSuccess,
   uploadPendingPrinterLinkLogs,
+  type PrinterLinkEvent,
   type PrinterLinkLogItem,
   type PrinterLinkRecorder,
   type PrinterLinkStorage,
@@ -187,7 +198,8 @@ test("环形缓冲有上限：长时间失败的快照保留开头与最近事�
   const last = emitted[emitted.length - 1];
   assert.equal((last.properties.failures as number) >= 100, true);
   const events = eventsOf(last);
-  assert.ok(events.length <= LINK_HEAD_CAP + LINK_SNAPSHOT_TAIL);
+  // 开头 = 故障前上下文（最多 LINK_CONTEXT_MAX + 1 条，含触发事件）+ LINK_HEAD_CAP 条，再加最近 LINK_SNAPSHOT_TAIL 条。
+  assert.ok(events.length <= LINK_CONTEXT_MAX + 1 + LINK_HEAD_CAP + LINK_SNAPSHOT_TAIL);
   assert.equal(events[0].marker, "first-event", "开头事件（最初是怎么断的）必须保留");
   assert.equal(events[0].t, 0);
   const times = events.map((event) => event.t);
@@ -357,4 +369,275 @@ test("暂存里的日志按批次补传，只清除本批已发送的", async ()
   assert.equal(batchSize, MAX_PENDING_LINK_LOGS);
   assert.deepEqual(parsePendingLinkLogs(storage.value), []);
   assert.equal(typeof LINK_DIAGNOSTICS_STORAGE_KEY, "string");
+});
+
+// ---------------------------------------------------------------------------
+// 补断线前的日志（C1～C6）：会话摘要、断线原因、上下文、上报量、冷启动标记
+// ---------------------------------------------------------------------------
+
+function triggerThreeFailures(recorder: PrinterLinkRecorder, advance: (ms: number) => void) {
+  for (let i = 0; i < 3; i += 1) {
+    fail(recorder);
+    advance(5_000);
+  }
+}
+
+test("断线时补上会话摘要：连了多久、距上次打印多久、断开原因，故障日志带 session", () => {
+  const { emitted, recorder, advance } = setup();
+  const start = 5_000_000;
+  recorder.record("connect.ok", { role: "label", address: "AA:BB" });
+  advance(60_000);
+  recorder.recordPrintSuccess();
+  advance(60_000);
+  recorder.recordPrintSuccess();
+  advance(180_000); // 最后一次打印后空闲 3 分钟，打印机可能已自动休眠
+  recorder.record("app.state", { state: "background" });
+  advance(10_000);
+  recorder.record("native.diag", { ev: "acl.disconnected", tracked: true });
+  recorder.record("native.diag", { ev: "connection.cleared", reason: "acl_disconnected" });
+  recorder.record("link.lost", { source: "native", bluetoothEnabled: true });
+  triggerThreeFailures(recorder, advance);
+
+  assert.equal(emitted.length, 1);
+  const lost = eventsOf(emitted[0]).find((event) => event.kind === "link.lost")!;
+  assert.equal(lost.connectedForMs, 310_000);
+  assert.equal(lost.idleSincePrintMs, 190_000);
+  assert.equal(lost.printsInSession, 2);
+  assert.equal(lost.endReason, "acl_disconnected");
+  assert.equal(lost.appState, "background", "断线时 App 在后台（息屏 / 切走）");
+  assert.equal(lost.appStateForMs, 10_000);
+  assert.deepEqual(emitted[0].properties.session, {
+    endedAtUtc: new Date(start + 310_000).toISOString(),
+    connectedForMs: 310_000,
+    idleSincePrintMs: 190_000,
+    printsInSession: 2,
+    endReason: "acl_disconnected",
+    appState: "background",
+    appStateForMs: 10_000,
+  });
+});
+
+test("会话摘要：没打印过则 idleSincePrintMs 为 null；冷启动没有会话则各项为 null；连上后清掉不带进下一次故障", () => {
+  const { emitted, recorder, advance } = setup();
+  // 没有已连接的会话就断线（如冷启动后一直没连上）：不能编造「连了多久」。
+  recorder.record("link.lost", { source: "native", bluetoothEnabled: true });
+  triggerThreeFailures(recorder, advance);
+  assert.deepEqual(
+    (emitted[0].properties.session as Record<string, unknown>),
+    {
+      endedAtUtc: new Date(5_000_000).toISOString(),
+      connectedForMs: null,
+      idleSincePrintMs: null,
+      printsInSession: null,
+      endReason: "unknown",
+      appState: null,
+      appStateForMs: null,
+    },
+  );
+
+  // 连上（恢复日志带上旧摘要）→ 新会话没打印过就断线：idleSincePrintMs 为 null，printsInSession 为 0。
+  recorder.record("connect.ok", { role: "label" });
+  assert.ok(emitted[1].properties.session, "恢复日志仍带断线时的会话摘要");
+  advance(30_000);
+  recorder.record("link.lost", { source: "native", bluetoothEnabled: true });
+  const second = emitted.length;
+  triggerThreeFailures(recorder, advance);
+  const session = emitted[second].properties.session as Record<string, unknown>;
+  assert.equal(session.connectedForMs, 30_000);
+  assert.equal(session.idleSincePrintMs, null);
+  assert.equal(session.printsInSession, 0);
+
+  // 再次连上并正常恢复后，下一次「没有会话」的故障不能带着上一次的摘要。
+  recorder.record("connect.ok", { role: "label" });
+  const afterRecover = emitted.length;
+  fail(recorder);
+  fail(recorder);
+  fail(recorder);
+  assert.equal(emitted.length, afterRecover + 1);
+  assert.equal(emitted[afterRecover].properties.session, undefined, "没有断线事件时不带 session");
+});
+
+test("断线原因：打印失败 / 蓝牙关闭 / GATT 断开 / 连接被清理的原因各自识别，优先级 蓝牙关闭 > 清理原因", () => {
+  const reasonOf = (setupEvents: (recorder: PrinterLinkRecorder) => void, lost: Record<string, string | boolean> = { source: "native", bluetoothEnabled: true }) => {
+    const { emitted, recorder, advance } = setup();
+    recorder.record("connect.ok", { role: "label" });
+    advance(1_000);
+    setupEvents(recorder);
+    recorder.record("link.lost", lost);
+    triggerThreeFailures(recorder, advance);
+    return (emitted[0].properties.session as Record<string, unknown>).endReason;
+  };
+  assert.equal(reasonOf(() => undefined, { source: "print" }), "print_failed");
+  assert.equal(reasonOf(() => undefined, { source: "native", bluetoothEnabled: false }), "bluetooth_off");
+  assert.equal(reasonOf((r) => r.record("native.diag", { ev: "adapter.state", state: "turning_off" })), "bluetooth_off");
+  assert.equal(reasonOf((r) => r.record("native.diag", { ev: "connection.cleared", reason: "ble_lost" })), "ble_lost");
+  assert.equal(reasonOf((r) => r.record("native.diag", { ev: "acl.disconnected" })), "acl_disconnected");
+  assert.equal(reasonOf((r) => r.record("native.diag", { ev: "ble.gatt.state", status: 8, newState: 0 })), "gatt_disconnected");
+  assert.equal(reasonOf((r) => {
+    r.record("native.diag", { ev: "connection.cleared", reason: "acl_disconnected" });
+    r.record("native.diag", { ev: "adapter.state", state: "off" });
+  }), "bluetooth_off");
+  assert.equal(reasonOf(() => undefined), "unknown", "原生没有任何线索时如实记 unknown，不猜");
+});
+
+test("故障前上下文：自上一次连接成功之后的全部事件，超过上限时优先保留断线类事件，且不带更早的事件", () => {
+  const { emitted, recorder, advance } = setup();
+  recorder.record("app.state", { state: "active", marker: "before-ok" });
+  recorder.record("connect.ok", { role: "label", marker: "session-start" });
+  recorder.record("native.diag", { ev: "acl.disconnected", marker: "early-acl" });
+  for (let i = 0; i < 40; i += 1) recorder.record("native.status", { supported: true, enabled: true, connected: true, filler: i });
+  recorder.record("link.lost", { source: "native", bluetoothEnabled: true });
+  triggerThreeFailures(recorder, advance);
+
+  const events = eventsOf(emitted[0]);
+  const markers = events.map((event) => event.marker);
+  assert.ok(!markers.includes("before-ok"), "上一次连接成功之前的事件不属于这次故障的上下文");
+  assert.ok(markers.includes("session-start") && markers.includes("early-acl"), "早期的连接成功与 ACL 断开属于断线类事件，要保留");
+  const fillers = events.filter((event) => typeof event.filler === "number");
+  assert.ok(fillers.length < 40, "普通状态事件被截断");
+  assert.ok(events.length <= LINK_CONTEXT_MAX + 1 + LINK_HEAD_CAP + LINK_SNAPSHOT_TAIL);
+});
+
+test("没有上一次连接成功（如冷启动）时，上下文仍只带最近几条，行为与以前一致", () => {
+  const { emitted, recorder, advance } = setup();
+  for (let i = 0; i < 12; i += 1) recorder.record("app.state", { state: "active", seq: i });
+  triggerThreeFailures(recorder, advance);
+  const seqs = eventsOf(emitted[0]).filter((event) => event.kind === "app.state").map((event) => event.seq);
+  // 开头上下文 = 失败前最近 LINK_CONTEXT_BEFORE 条 + 触发事件；更早的 app.state 不进来（会被 head 以外的环形缓冲尾部覆盖，尾部 30 条内仍有）
+  assert.ok(seqs.length > 0);
+  assert.equal(eventsOf(emitted[0])[0].t <= 0, true);
+});
+
+test("上报量控制：events 超过字符预算时从中间丢事件，保留开头与最近的，并标记 eventsTrimmed", () => {
+  const { emitted, recorder, advance } = setup();
+  const wide = (tag: string) => Object.fromEntries(
+    Array.from({ length: 4 }, (_, index) => [`f${index}`, `${tag}-${"x".repeat(150)}`]),
+  );
+  recorder.record("link.lost", { source: "native", marker: "first-event", ...wide("a") });
+  for (let i = 0; i < 40; i += 1) {
+    recorder.record("native.diag", { ev: "connect.begin", marker: `m${i}`, ...wide("b") });
+  }
+  triggerThreeFailures(recorder, advance);
+  const item = emitted[0];
+  const events = eventsOf(item);
+  assert.ok(JSON.stringify(events).length <= LINK_EVENTS_BUDGET_CHARS, "序列化后不超过预算");
+  assert.ok((item.properties.eventsTrimmed as number) > 0, "被丢弃的条数要如实标出");
+  assert.equal(events[0].marker, "first-event", "开头保留");
+  assert.ok(events.length >= LINK_EVENTS_MIN_KEPT);
+  assert.equal(events[events.length - 1].kind, "connect.fail", "最近的事件保留");
+});
+
+test("fitLinkEventsToBudget 与 pickLinkContext：纯函数边界", () => {
+  const small = [{ a: 1 }, { a: 2 }];
+  assert.deepEqual(fitLinkEventsToBudget(small, 1_000), { events: small, dropped: 0 });
+  const big = Array.from({ length: 30 }, (_, index) => ({ index, pad: "y".repeat(100) }));
+  const fitted = fitLinkEventsToBudget(big, 800, 5);
+  assert.ok(JSON.stringify(fitted.events).length <= 800 || fitted.events.length === 5);
+  assert.equal(fitted.events[0].index, 0);
+  assert.equal(fitted.events[fitted.events.length - 1].index, 29);
+  assert.equal(fitted.dropped, 30 - fitted.events.length);
+
+  const mk = (seq: number, kind: PrinterLinkEvent["kind"], fields: PrinterLinkEvent["fields"] = {}): PrinterLinkEvent => ({ seq, atMs: seq, kind, fields });
+  const events = [
+    mk(1, "connect.ok"),
+    ...Array.from({ length: 10 }, (_, i) => mk(2 + i, "native.status")),
+    mk(12, "native.diag", { ev: "acl.disconnected" }),
+    ...Array.from({ length: 10 }, (_, i) => mk(13 + i, "native.status")),
+  ];
+  const picked = pickLinkContext(events, 10);
+  assert.ok(picked.length <= 10);
+  assert.ok(picked.some((event) => event.seq === 1) || picked.some((event) => event.seq === 12), "更早的断线类事件优先保留");
+  assert.equal(picked[picked.length - 1].seq, 22, "最近的事件一定保留");
+  assert.equal(pickLinkContext(events.slice(0, 3), 10).length, 3, "未超上限时原样返回");
+});
+
+test("自动重连阶段事件（phase）不改写暂停状态：暂停期间仍不开故障；不产生额外日志条数", () => {
+  const { emitted, recorder, advance } = setup();
+  recorder.record("auto.reconnect", { paused: true });
+  recorder.record("auto.reconnect", { phase: "probe_fast", failures: 10, nextInMs: 60_000 });
+  recorder.record("link.lost", { source: "native", bluetoothEnabled: true });
+  advance(100_000);
+  // 暂停期间的断线不开故障：阶段事件没有把暂停状态改回 false。若被改回，故障会从上面那条 link.lost 起算。
+  recorder.record("auto.reconnect", { paused: false });
+  triggerThreeFailures(recorder, advance);
+  assert.equal(emitted.length, 1);
+  assert.equal(
+    emitted[0].properties.startedAtUtc,
+    new Date(5_000_000 + 100_000).toISOString(),
+    "故障从恢复后的第一次连接失败起算，而不是暂停期间的断线",
+  );
+
+  const before = emitted.length;
+  recorder.record("auto.reconnect", { phase: "probe_slow", failures: 20, nextInMs: 300_000 });
+  recorder.record("auto.reconnect", { phase: "resumed", failures: 20, resumeReason: "foreground" });
+  assert.equal(emitted.length, before, "阶段事件本身不单独生成日志，只作为上下文");
+});
+
+test("故障日志带最近一次冷启动信息与阶段事件（作为上下文随里程碑上报）", () => {
+  const { emitted, recorder, advance } = setup();
+  recorder.record("app.start", buildAppStartFields({ lastConnectedAtMs: 4_990_000, lastSeenAtMs: 4_999_000, wasConnected: true }, 5_000_000));
+  recorder.record("auto.reconnect", { phase: "probe_fast", failures: 10, nextInMs: 60_000 });
+  triggerThreeFailures(recorder, advance);
+  assert.deepEqual(emitted[0].properties.appStart, {
+    coldStart: true,
+    sinceLastConnectedMs: 10_000,
+    sinceLastSeenMs: 1_000,
+    wasConnectedAtLastSeen: true,
+  });
+  assert.ok(eventsOf(emitted[0]).some((event) => event.kind === "auto.reconnect" && event.phase === "probe_fast"));
+});
+
+test("冷启动标记：解析容错、落盘更新规则、app.start 字段", () => {
+  assert.equal(parseLinkLastSeen(null), null);
+  assert.equal(parseLinkLastSeen("not json"), null);
+  assert.equal(parseLinkLastSeen("[1,2]")?.lastSeenAtMs ?? null, null);
+  assert.deepEqual(
+    parseLinkLastSeen(JSON.stringify({ lastConnectedAtMs: 100, lastSeenAtMs: "bad", wasConnected: true })),
+    { lastConnectedAtMs: 100, lastSeenAtMs: null, wasConnected: true },
+  );
+  // 已连接时刷新最后连接时间；未连接时保留旧值，只更新「最后落盘」与「落盘时是否连着」。
+  const connected = nextLinkLastSeen(EMPTY_LINK_LAST_SEEN, true, 1_000);
+  assert.deepEqual(connected, { lastConnectedAtMs: 1_000, lastSeenAtMs: 1_000, wasConnected: true });
+  assert.deepEqual(nextLinkLastSeen(connected, false, 5_000), { lastConnectedAtMs: 1_000, lastSeenAtMs: 5_000, wasConnected: false });
+  assert.deepEqual(buildAppStartFields(null, 9_000), {
+    coldStart: true,
+    sinceLastConnectedMs: null,
+    sinceLastSeenMs: null,
+    wasConnectedAtLastSeen: null,
+  });
+  assert.deepEqual(buildAppStartFields({ lastConnectedAtMs: 4_000, lastSeenAtMs: 8_000, wasConnected: false }, 9_000), {
+    coldStart: true,
+    sinceLastConnectedMs: 5_000,
+    sinceLastSeenMs: 1_000,
+    wasConnectedAtLastSeen: false,
+  });
+  // 时钟被调回（落盘时间在未来）不能产生负数。
+  assert.equal(buildAppStartFields({ lastConnectedAtMs: 20_000, lastSeenAtMs: 20_000, wasConnected: true }, 9_000).sinceLastSeenMs, 0);
+});
+
+test("全局 recordPrinterPrintSuccess：未安装记录器时是空操作，安装后计入会话", () => {
+  recordPrinterPrintSuccess(); // 未安装：不抛错
+  const emitted: PrinterLinkLogItem[] = [];
+  let clock = 1_000_000;
+  installPrinterLinkRecorder({
+    now: () => clock,
+    newId: () => "00000000-0000-4000-8000-000000000001",
+    emit: (item) => emitted.push(item),
+    context: () => ({ environment: "test" }),
+  });
+  try {
+    recordPrinterLink("connect.ok", { role: "label" });
+    clock += 1_000;
+    recordPrinterPrintSuccess();
+    clock += 9_000;
+    recordPrinterLink("link.lost", { source: "native", bluetoothEnabled: true });
+    for (let i = 0; i < 3; i += 1) {
+      recordPrinterLink("connect.fail", { role: "label", code: "CONNECT_ERROR", message: "x", elapsedMs: 1 });
+    }
+    const session = emitted[0].properties.session as Record<string, unknown>;
+    assert.equal(session.printsInSession, 1);
+    assert.equal(session.idleSincePrintMs, 9_000);
+  } finally {
+    installPrinterLinkRecorder(null);
+  }
 });

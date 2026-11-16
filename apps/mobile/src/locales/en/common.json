@@ -164,7 +164,7 @@
     "printerPairingRejected": "Pairing was not completed. Confirm the system pairing prompt, or restart pairing if it was cancelled or rejected.",
     "printerPairingTimeout": "Waiting for system pairing timed out. Put the printer in pairing mode and complete the system prompt.",
     "printerPairingUnavailable": "This installed app version cannot start pairing. Install the updated app or pair the printer in Android Bluetooth settings first.",
-    "printerConnectTimeout": "The printer is paired, but the connection timed out. Make sure it is on and not connected to another device, then retry.",
+    "printerConnectTimeout": "The printer is not responding (connection timed out). Press its power button to wake it, make sure it is on, close to the PDA and not connected to another device; if that does not help turn it off and on, then tap Reconnect.",
     "timeout": "The request timed out. Please try again.",
     "unauthorized": "Your session has expired or you don't have access. Log in again.",
     "server": "The server is temporarily unavailable. Please try again later.",

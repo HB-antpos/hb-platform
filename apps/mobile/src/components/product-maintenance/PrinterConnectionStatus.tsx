@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Button, Icon, Text } from "react-native-paper";
-import type { PrinterConnectionState } from "@/modules/printer/state";
+import type { PrinterConnectionState, PrinterReconnectInfo } from "@/modules/printer/state";
 import type { SavedPrinter } from "@/modules/printer/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -13,14 +13,27 @@ interface PrinterConnectionViewProps {
 }
 
 interface PrinterConnectionChipProps extends PrinterConnectionViewProps {
+  /** 打开打印设置（正常状态点按、需要重连时长按）。 */
   onPress?: () => void;
+  /** 一键重新连接：只在「已断开 / 连接已暂停 / 连接异常」时生效——此时点按直接重连，不再先开设置。 */
+  onReconnect?: () => void;
 }
 
 interface PrinterConnectionSummaryProps extends PrinterConnectionViewProps {
   onManage?: () => void;
+  onReconnect?: () => void;
+  /** 自动重连进度：用来告诉操作员「正在自动重试 / 多久重试一次」，避免以为 App 卡死。 */
+  reconnectInfo?: PrinterReconnectInfo;
 }
 
 type EffectiveStatus = PrinterConnectionState | "unselected";
+
+/** 需要用户介入的状态：这些状态下提供「重新连接」入口。 */
+const RECONNECTABLE_STATUSES: ReadonlySet<EffectiveStatus> = new Set<EffectiveStatus>([
+  "disconnected",
+  "paused",
+  "error",
+]);
 
 // 图标形状随状态变化，不单靠颜色区分；需要处理的状态（断开 / 暂停 / 异常）用带色底，
 // 正常与过渡状态用中性或浅色底，操作员扫一眼就能分出"能不能打"。
@@ -51,6 +64,7 @@ function usePrinterConnectionView({ savedPrinter, status, lastError }: PrinterCo
 
   return {
     t,
+    effectiveStatus,
     presentation: STATUS_PRESENTATION[effectiveStatus],
     statusLabel,
     printerName,
@@ -70,27 +84,38 @@ export const PrinterConnectionChip = memo(function PrinterConnectionChip({
   status,
   lastError,
   onPress,
+  onReconnect,
 }: PrinterConnectionChipProps) {
-  const { t, presentation, summary } = usePrinterConnectionView({
+  const { t, effectiveStatus, presentation, summary } = usePrinterConnectionView({
     savedPrinter,
     status,
     lastError,
   });
+  // 断开 / 暂停 / 异常时，点按直接重连（门店反馈：连不上时要连点好几层设置才能重连）；设置改为长按进入。
+  const reconnectable = Boolean(onReconnect) && RECONNECTABLE_STATUSES.has(effectiveStatus);
+  const handlePress = reconnectable ? onReconnect : onPress;
 
   return (
     <Pressable
-      accessibilityRole={onPress ? "button" : undefined}
+      accessibilityRole={handlePress ? "button" : undefined}
       accessibilityLabel={summary}
-      accessibilityHint={onPress ? t("print.printerStatus.openSettingsHint") : undefined}
+      accessibilityHint={
+        reconnectable
+          ? t("print.printerStatus.reconnectHint")
+          : onPress
+            ? t("print.printerStatus.openSettingsHint")
+            : undefined
+      }
       // 状态变化（连接中 → 已连接 / 断开）要主动播报，操作员不一定盯着这个角落。
       accessibilityLiveRegion="polite"
-      disabled={!onPress}
+      disabled={!handlePress}
       hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-      onPress={onPress}
+      onPress={handlePress}
+      onLongPress={reconnectable ? onPress : undefined}
       style={({ pressed }) => [
         styles.chip,
         { backgroundColor: presentation.background },
-        pressed && onPress ? styles.pressed : null,
+        pressed && handlePress ? styles.pressed : null,
       ]}
     >
       <Icon source={presentation.icon} size={20} color={presentation.color} />
@@ -104,12 +129,23 @@ export const PrinterConnectionSummary = memo(function PrinterConnectionSummary({
   status,
   lastError,
   onManage,
+  onReconnect,
+  reconnectInfo,
 }: PrinterConnectionSummaryProps) {
-  const { t, presentation, statusLabel, printerName, errorHint, summary } = usePrinterConnectionView({
+  const { t, effectiveStatus, presentation, statusLabel, printerName, errorHint, summary } = usePrinterConnectionView({
     savedPrinter,
     status,
     lastError,
   });
+  const reconnectable = Boolean(onReconnect) && RECONNECTABLE_STATUSES.has(effectiveStatus);
+  // 自动重连进度只在没连上时显示：前 10 次显示次数，之后说明探测频率。
+  const retryHint = effectiveStatus !== "connected" && reconnectInfo && reconnectInfo.phase !== "idle"
+    ? reconnectInfo.phase === "backoff"
+      ? t("print.printerStatus.retry.backoff", { count: reconnectInfo.failures })
+      : reconnectInfo.phase === "probe_fast"
+        ? t("print.printerStatus.retry.probeFast")
+        : t("print.printerStatus.retry.probeSlow")
+    : null;
 
   return (
     <View style={styles.summary} accessible accessibilityLabel={summary} accessibilityLiveRegion="polite">
@@ -126,9 +162,19 @@ export const PrinterConnectionSummary = memo(function PrinterConnectionSummary({
           </Text>
         ) : null}
         {errorHint ? (
-          <Text variant="bodySmall" style={styles.summaryHint} numberOfLines={2}>
+          <Text variant="bodySmall" style={styles.summaryHint} numberOfLines={3}>
             {errorHint}
           </Text>
+        ) : null}
+        {retryHint ? (
+          <Text variant="bodySmall" style={styles.summaryRetry} numberOfLines={2}>
+            {retryHint}
+          </Text>
+        ) : null}
+        {reconnectable ? (
+          <Button compact mode="contained" icon="bluetooth-connect" onPress={onReconnect} style={styles.summaryReconnect}>
+            {t("print.printerStatus.reconnect")}
+          </Button>
         ) : null}
       </View>
       {onManage ? (
@@ -179,6 +225,14 @@ const styles = StyleSheet.create({
   },
   summaryHint: {
     color: HB_COLORS.danger,
+  },
+  summaryRetry: {
+    color: HB_COLORS.textSecondary,
+  },
+  summaryReconnect: {
+    alignSelf: "flex-start",
+    marginTop: HB_SPACING.xs,
+    borderRadius: HB_RADIUS.control,
   },
   summaryAction: {
     flexShrink: 0,

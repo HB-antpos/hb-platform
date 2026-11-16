@@ -116,9 +116,13 @@
     "emptyPrompt": "输入条码、货号或商品编码开始查询",
     "cameraTip": "将条码对准取景框中心",
     "printerRequired": "请先在设置页选择标签打印机",
-    "printerPaused": "打印机连接已暂停，请先到设置页重新连接",
+    "printerPaused": "打印机连接已暂停，请重新连接后再打印",
     "printSuccess": "打印任务已发送",
     "printFailed": "打印失败",
+    "printerReconnected": "打印机已连接",
+    "printerReconnectFailed": "还没连上打印机：请确认已开机、按一下电源键唤醒，并靠近 PDA",
+    "reconnectAction": "重新连接",
+    "reconnectAndRetryAction": "重新连接并重试",
     "autoPricingEvaluateFailed": "自动价格评估失败",
     "autoPricingUpdateFailed": "自动价格更新失败",
     "productTypeUpdateFailed": "商品类型更新失败",
@@ -475,9 +479,16 @@
       "disconnected": "已断开",
       "paused": "连接已暂停",
       "error": "连接异常",
-      "errorHint": "请打开设置检查连接",
+      "errorHint": "请确认打印机已开机并靠近 PDA，按一下打印机电源键唤醒；仍连不上就关机再开机，然后点「重新连接」",
       "openSettingsHint": "打开打印设置",
-      "manage": "打印机设置"
+      "manage": "打印机设置",
+      "reconnect": "重新连接",
+      "reconnectHint": "点按重新连接，长按打开打印设置",
+      "retry": {
+        "backoff": "正在自动重连（已失败 {{count}} 次）",
+        "probeFast": "打印机没有响应，每分钟自动重试一次；也可以点「重新连接」立即重试",
+        "probeSlow": "打印机没有响应，每 5 分钟自动重试一次；也可以点「重新连接」立即重试"
+      }
     },
     "label": "标签"
   },

@@ -164,7 +164,7 @@
     "printerPairingRejected": "配对未完成。请在系统配对窗口确认；如已取消或拒绝，请重新开始配对。",
     "printerPairingTimeout": "等待系统配对确认超时。请确认打印机处于配对模式，并在系统弹窗中完成配对。",
     "printerPairingUnavailable": "当前安装版本不支持应用内配对。请安装新版 App，或先在 Android 蓝牙设置中完成配对。",
-    "printerConnectTimeout": "打印机已配对，但连接超时。请确认打印机已开机且未连接其他设备，然后重试。",
+    "printerConnectTimeout": "打印机没有响应（连接超时）。请先按一下打印机电源键唤醒，确认它已开机、离 PDA 不远且没有连着别的设备；仍不行就关机再开机，然后点「重新连接」。",
     "timeout": "请求超时，请稍后重试。",
     "unauthorized": "登录已失效或当前无权限，请重新登录。",
     "server": "服务器暂时不可用，请稍后重试。",
