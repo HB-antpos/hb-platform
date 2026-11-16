@@ -184,10 +184,36 @@
     "grantPermission": "允许相机权限",
     "retry": "重新扫描"
   },
-  "backgroundLocation": {
-    "title": "班中定位说明",
-    "description": "在活动班次期间（包括 App 在后台运行时），App 会使用你的位置信息用于考勤核对。",
-    "confirm": "继续打卡"
+  "locationNotice": {
+    "title": "定位使用说明",
+    "shiftLabel": "上班期间",
+    "shiftBody": "打卡上班后，App 会持续使用你的位置（含 App 在后台时），仅用于考勤核对。",
+    "afterLabel": "下班之后",
+    "afterBody": "扫码下班打卡后立即停止，不再使用你的位置。",
+    "details": "了解详情",
+    "activeTitle": "班中定位已开启",
+    "activeBody": "扫码下班打卡后将自动停止",
+    "explain": "说明",
+    "stoppedTitle": "班中定位已停止",
+    "stoppedBody": "下班打卡后，App 不再使用你的位置",
+    "sheet": {
+      "consentTitle": "班中定位说明",
+      "consentLead": "为核对你是否在店内上班，打卡会用到你的位置。请先了解它何时开始、何时结束：",
+      "consentTip": "下一步系统会请求定位权限；为了在 App 退到后台时仍能核对考勤，请选择“始终允许”。",
+      "consentConfirm": "同意并扫码打卡",
+      "infoTitle": "定位使用说明",
+      "scanTitle": "扫码时",
+      "scanBody": "上班、下班扫码各获取一次当前精确位置，用于核对打卡地点。",
+      "shiftTitle": "上班期间",
+      "shiftBody": "上班打卡成功后开始持续使用你的位置（含 App 在后台时），仅用于考勤核对，不用于其他用途。手机状态栏会出现定位提示。",
+      "afterTitle": "下班打卡后",
+      "afterBody": "扫码下班打卡后立即停止，不再使用你的位置。",
+      "autoStopTitle": "自动停止",
+      "autoStopBody": "超过 10 小时、跨过门店当天 24:00 或退出登录，也会自动停止。",
+      "uploadTitle": "补传说明",
+      "uploadBody": "下班前已记录、因网络未及时上传的少量位置，可能在下班后补传；不会再新增记录。",
+      "gotIt": "知道了"
+    }
   },
   "locationPermission": {
     "title": "需要定位权限",

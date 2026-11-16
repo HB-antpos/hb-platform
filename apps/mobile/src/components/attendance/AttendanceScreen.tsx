@@ -46,6 +46,7 @@ import type { PlacementTargetCell } from "@/modules/attendance/schedule-placemen
 import type { PlacementSource } from "@/modules/attendance/schedule-placement";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
+import { LocationUsageSheet } from "./LocationUsageSheet";
 import {
   approveAttendanceApproval,
   cancelAvailability,
@@ -112,6 +113,8 @@ import {
   startAttendanceLocationTracking,
   stopAttendanceLocationTracking,
 } from "@/modules/attendance/location-tracking";
+import { useShiftLocationTrackingState } from "@/modules/attendance/use-shift-location-tracking-state";
+import { resolveAttendanceTodayStatus } from "@/modules/attendance/attendance-today-status";
 import {
   PUBLIC_HOLIDAY_SYNC_DAYS_AHEAD,
   normalizeAustralianHolidayJurisdiction,
@@ -286,6 +289,13 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const [punchStage, setPunchStage] = useState<"validating" | "locating" | "saving" | "tracking">();
   const [lastQrPunch, setLastQrPunch] = useState<AttendancePunch>();
   const [lastQrTrackingWarning, setLastQrTrackingWarning] = useState("");
+  // 定位使用说明弹层：上班扫码前披露，Promise 化后嵌入扫码流程；resolver 保证每次只会结算一次。
+  const [locationConsentVisible, setLocationConsentVisible] = useState(false);
+  const locationConsentResolverRef = useRef<((accepted: boolean) => void) | null>(null);
+  // 本次扫码前员工是否已在说明弹层里同意；同意过就不在扫码后重复弹。
+  const locationUsageConsentedRef = useRef(false);
+  // 上 / 下班后的定位生命周期（启动 / 停止原生任务）完成时加一，通知打卡页重新读取真实采集状态。
+  const [trackingStateVersion, setTrackingStateVersion] = useState(0);
   // 扫码下班前核对用餐期间（刷新今日状态 + 等员工回答）禁用打卡按钮，防止重复点。
   const [isPreparingScan, setIsPreparingScan] = useState(false);
   // 员工在扫码前对「吃饭休息了吗」的回答；随本次扫码的打卡请求提交，关闭扫码器或打卡成功后清空。
@@ -403,6 +413,11 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     enabled: Boolean(isAuthenticated && user && isPunchRecordsTab
       && (!attendanceScannerSubmitting || punchStage === "tracking")),
   });
+  // 班中定位的真实状态：今日数据刷新、上下班后的定位生命周期完成、App 回前台时重新读取；只关心当天。
+  const locationTrackingState = useShiftLocationTrackingState(
+    `${todayQuery.dataUpdatedAt}:${trackingStateVersion}`,
+    selectedDate === todayDate && isPunchRecordsTab,
+  );
   const weekQuery = useQuery({
     queryKey: attendanceKeys.week(selectedStoreCode, employeeWeekStartDate),
     queryFn: () =>
@@ -1041,28 +1056,26 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const confirmBackgroundLocationUsage = useCallback(
     () =>
       new Promise<boolean>((resolve) => {
-        Alert.alert(
-          t("backgroundLocation.title"),
-          t("backgroundLocation.description"),
-          [
-            {
-              text: t("common:actions.cancel"),
-              style: "cancel",
-              onPress: () => resolve(false),
-            },
-            {
-              text: t("backgroundLocation.confirm"),
-              onPress: () => resolve(true),
-            },
-          ],
-          {
-            cancelable: true,
-            onDismiss: () => resolve(false),
-          },
-        );
+        // 扫码流程是串行的，正常不会并发；万一已有未决弹层，先按取消结算，避免 Promise 泄漏。
+        locationConsentResolverRef.current?.(false);
+        locationConsentResolverRef.current = resolve;
+        setLocationConsentVisible(true);
       }),
-    [t],
+    [],
   );
+
+  const settleLocationConsent = useCallback((accepted: boolean) => {
+    const resolve = locationConsentResolverRef.current;
+    locationConsentResolverRef.current = null;
+    setLocationConsentVisible(false);
+    resolve?.(accepted);
+  }, []);
+
+  // 页面卸载时若弹层还没结算，按取消结算，避免扫码流程永远挂起。
+  useEffect(() => () => {
+    locationConsentResolverRef.current?.(false);
+    locationConsentResolverRef.current = null;
+  }, []);
 
   /**
    * 扫码下班前问「今天吃饭休息了吗」。放在打开扫码器之前：二维码与打卡授权都有有效期，
@@ -1134,7 +1147,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     if (alreadyAllowed) {
       return true;
     }
-    const confirmed = await confirmBackgroundLocationUsage();
+    // 扫码前已经在说明弹层里同意过就不再重复弹；只有扫码前没能判断出是上班（如状态过期）才在这里补弹。
+    const confirmed = locationUsageConsentedRef.current || await confirmBackgroundLocationUsage();
     if (!isActive() || !confirmed) {
       return false;
     }
@@ -1375,6 +1389,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           : "messages.qrTrackingWarning",
       );
     }
+    // 定位生命周期（启动 / 停止）已经跑完，不受 UI 会话是否失效影响：通知打卡页重新读取真实状态。
+    setTrackingStateVersion((version) => version + 1);
     if (!attendanceScannerSessionGate.isActive(session)) return;
 
     closeAttendanceScanner(true);
@@ -1469,12 +1485,28 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     return buildAttendanceMealDeclaration(answer, meal.missingCountIfClockOutNow);
   };
 
+  /**
+   * 上班扫码前的定位使用说明。放在打开扫码器之前：二维码与打卡授权都有有效期，扫完再读说明会过期。
+   * 只在「当天、状态是待上班、后台定位权限还没授权」时出现；已授权的员工靠打卡页常驻的说明卡了解。
+   * 返回 false 表示员工取消，本次不打开扫码器。
+   */
+  const confirmLocationUsageBeforeClockIn = async (): Promise<boolean> => {
+    locationUsageConsentedRef.current = false;
+    if (selectedDate !== todayDate) return true;
+    if (resolveAttendanceTodayStatus(todayQuery.data, true) !== "readyToClockIn") return true;
+    if (await hasAttendanceBackgroundLocationPermission()) return true;
+    const confirmed = await confirmBackgroundLocationUsage();
+    locationUsageConsentedRef.current = confirmed;
+    return confirmed;
+  };
+
   const openAttendanceScanner = async () => {
     if (isPreparingScan) return;
     setIsPreparingScan(true);
     let declaration: AttendanceMealDeclaration | undefined | "cancelled";
     try {
       declaration = await resolveClockOutMealDeclaration();
+      if (declaration !== "cancelled" && !(await confirmLocationUsageBeforeClockIn())) declaration = "cancelled";
     } finally {
       setIsPreparingScan(false);
     }
@@ -1715,6 +1747,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 verification={verification}
                 lastQrPunch={lastQrPunch}
                 trackingWarning={lastQrTrackingWarning}
+                locationTrackingState={locationTrackingState}
                 onScan={() => void openAttendanceScanner()}
                 isMealBreakBusy={mealBreakMutation.isPending}
                 onStartMealBreak={(storeCode) => mealBreakMutation.mutate({ action: "start", storeCode })}
@@ -2161,6 +2194,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       >
         {snackbarMessage}
       </Snackbar>
+      <LocationUsageSheet
+        visible={locationConsentVisible}
+        mode="consent"
+        onConfirm={() => settleLocationConsent(true)}
+        onDismiss={() => settleLocationConsent(false)}
+      />
       <StorePickerModal
         visible={storePickerVisible}
         presentation="sheet"

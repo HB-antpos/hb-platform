@@ -184,10 +184,36 @@
     "grantPermission": "Allow camera",
     "retry": "Scan again"
   },
-  "backgroundLocation": {
-    "title": "Shift location notice",
-    "description": "During an active shift, including when the app is in the background, the app uses your location for attendance verification.",
-    "confirm": "Continue"
+  "locationNotice": {
+    "title": "Location use",
+    "shiftLabel": "During your shift",
+    "shiftBody": "After you clock in, the app keeps using your location (including when the app is in the background), only for attendance verification.",
+    "afterLabel": "After your shift",
+    "afterBody": "It stops as soon as you scan to clock out. The app no longer uses your location.",
+    "details": "Learn more",
+    "activeTitle": "Shift location is on",
+    "activeBody": "It stops automatically after you scan to clock out",
+    "explain": "Details",
+    "stoppedTitle": "Shift location stopped",
+    "stoppedBody": "After clocking out, the app no longer uses your location",
+    "sheet": {
+      "consentTitle": "Shift location notice",
+      "consentLead": "To verify you are at the store, clocking in uses your location. Here is when it starts and when it ends:",
+      "consentTip": "Next, the system will ask for location access. To keep verifying attendance while the app is in the background, choose \"Always Allow\".",
+      "consentConfirm": "Agree and scan",
+      "infoTitle": "Location use",
+      "scanTitle": "When you scan",
+      "scanBody": "Each clock-in and clock-out scan gets your current precise location once, to verify where you clocked in.",
+      "shiftTitle": "During your shift",
+      "shiftBody": "After you clock in, the app keeps using your location (including when the app is in the background), only for attendance verification and nothing else. Your phone shows a location indicator.",
+      "afterTitle": "After you clock out",
+      "afterBody": "It stops as soon as you scan to clock out. The app no longer uses your location.",
+      "autoStopTitle": "Automatic stop",
+      "autoStopBody": "It also stops after 10 hours, after midnight store time, or when you log out.",
+      "uploadTitle": "Late upload",
+      "uploadBody": "A few locations recorded before you clocked out may be uploaded after clock-out if the network was slow. No new locations are recorded.",
+      "gotIt": "Got it"
+    }
   },
   "locationPermission": {
     "title": "Location access required",

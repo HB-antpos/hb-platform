@@ -222,6 +222,30 @@ export async function stopAttendanceLocationTracking(options?: { force?: boolean
   }
 }
 
+/**
+ * 只读：班中定位此刻是否真的在采集，给打卡页「定位使用说明」状态条用。
+ * 必须同时满足：有班次上下文、窗口未过期、原生任务在运行——任一不满足都不能告诉员工「定位已开启」。
+ * 只读不改任何状态（不自愈、不启停），读取失败按「没有在采集」处理（不撒谎说已开启）。
+ */
+export async function readAttendanceLocationTrackingActive(): Promise<boolean> {
+  if (isIosReviewSessionActive()) {
+    // 审核会话从不启动真实后台定位。
+    return false;
+  }
+  try {
+    const context = await readStoredShiftContext();
+    if (!context?.storeCode) {
+      return false;
+    }
+    if (isAttendanceLocationWindowExpired(context, new Date().toISOString())) {
+      return false;
+    }
+    return await Location.hasStartedLocationUpdatesAsync(ATTENDANCE_LOCATION_TASK);
+  } catch {
+    return false;
+  }
+}
+
 export type AttendanceLocationHealth =
   | "skipped"
   | "inactive"
