@@ -57,11 +57,14 @@ import { SyncToOtherStoresSection } from "@/components/product-maintenance/SyncT
 import { CameraScanSheet } from "@/components/ui/CameraScanSheet";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
 import {
+  getPrintedLabelCount,
   getSavedPrinter,
+  isPrinterConnectFailureBeforeSend,
   printBigDiscountLabel,
   printClearanceLabel,
   printDiscountLabel,
   printProductLabel,
+  requestPrinterReconnect,
 } from "@/modules/printer/api";
 import { usePrinterStore } from "@/modules/printer/state";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
@@ -198,6 +201,23 @@ import { resolveScanPosterAvailability } from "@/modules/promo-posters/logic";
 import type { PromoPosterKind } from "@/modules/promo-posters/types";
 
 type LookupTrigger = "manual" | "scan" | "refresh" | "deep-link";
+
+interface SendProductLabelOptions {
+  barcode?: string | null;
+  retailPrice?: number | null;
+  discountRate?: number | null;
+  action?: PrintAction;
+  printType?: string | null;
+  /** 自动打印链路专用：普通标签打完后，有折扣就接着补打折扣标签（手动按钮不传）。 */
+  withDiscountLabel?: boolean;
+}
+
+/** 提示条上的操作按钮（如「重新连接并重试」）；只在提示文字仍是当时那条时才显示，避免挂到别的提示上。 */
+interface SnackbarAction {
+  message: string;
+  label: string;
+  onPress: () => void;
+}
 
 function cloneDetail(detail: ProductDetail | null): ProductDetail | null {
   return detail ? JSON.parse(JSON.stringify(detail)) : null;
@@ -628,6 +648,7 @@ function ProductQueryContent() {
   const savedPrinter = usePrinterStore((state) => state.savedPrinter);
   const printerConnectionStatus = usePrinterStore((state) => state.status);
   const printerLastError = usePrinterStore((state) => state.lastError);
+  const printerReconnectInfo = usePrinterStore((state) => state.reconnectInfo);
   const [keyword, setKeyword] = useState("");
   const [lookupItems, setLookupItems] = useState<ProductLookupItem[]>([]);
   const [selectedLookupProductCode, setSelectedLookupProductCode] =
@@ -669,6 +690,7 @@ function ProductQueryContent() {
   const [saving, setSaving] = useState(false);
   const [savingItemId, setSavingItemId] = useState<string | null>(null);
   const [snackbarMessage, setSnackbarMessage] = useState("");
+  const [snackbarAction, setSnackbarAction] = useState<SnackbarAction | null>(null);
   const [hqSyncOperation, setHqSyncOperation] =
     useState<ProductHqSyncOperation | null>(null);
   const [hqSyncRetrying, setHqSyncRetrying] = useState(false);
@@ -771,6 +793,52 @@ function ProductQueryContent() {
       }),
     [language, t],
   );
+  // 一键重新连接（打印行图标 / 打印设置弹窗里的按钮 / 提示条上的操作共用）：成败都给出提示。
+  const handleReconnectPrinter = useCallback(async () => {
+    try {
+      await requestPrinterReconnect();
+      setSnackbarMessage(t("messages.printerReconnected"));
+      return true;
+    } catch (error) {
+      setSnackbarMessage(getErrorMessage(error, "messages.printerReconnectFailed"));
+      return false;
+    }
+  }, [getErrorMessage, t]);
+  /**
+   * 打印失败的统一提示。若失败发生在「连接打印机」这一步（还没有任何数据发给打印机），
+   * 提示条上带「重新连接并重试」：重连成功后再打一次；写入途中才失败 / 本次已经打出过标签时
+   * 只提供「重新连接」，绝不自动重印（可能已经打出部分标签）。
+   */
+  const showPrintFailure = useCallback(
+    (
+      error: unknown,
+      fallbackKey: string,
+      options?: { printedBefore: number; retry: () => Promise<unknown> },
+    ) => {
+      const message = getErrorMessage(error, fallbackKey);
+      setSnackbarMessage(message);
+      if (!isPrinterConnectFailureBeforeSend(error)) {
+        setSnackbarAction(null);
+        return;
+      }
+      const retry = options && getPrintedLabelCount() === options.printedBefore ? options.retry : null;
+      setSnackbarAction({
+        message,
+        label: t(retry ? "messages.reconnectAndRetryAction" : "messages.reconnectAction"),
+        onPress: () => {
+          void (async () => {
+            if (!(await handleReconnectPrinter())) return;
+            await retry?.();
+          })();
+        },
+      });
+    },
+    [getErrorMessage, handleReconnectPrinter, t],
+  );
+  // sendProductLabel 失败后「重新连接并重试」要再调用它自己；用 ref 避免 useCallback 自引用。
+  const sendProductLabelRef = useRef<
+    ((targetDetail: ProductDetail, options?: SendProductLabelOptions) => Promise<boolean>) | null
+  >(null);
   const autoPricingDialogResolverRef = useRef<
     ((result: AutoPricingDialogResolution) => void) | null
   >(null);
@@ -2040,18 +2108,7 @@ function ProductQueryContent() {
   );
 
   const sendProductLabel = useCallback(
-    async (
-      targetDetail: ProductDetail,
-      options?: {
-        barcode?: string | null;
-        retailPrice?: number | null;
-        discountRate?: number | null;
-        action?: PrintAction;
-        printType?: string | null;
-        /** 自动打印链路专用：普通标签打完后，有折扣就接着补打折扣标签（手动按钮不传）。 */
-        withDiscountLabel?: boolean;
-      },
-    ) => {
+    async (targetDetail: ProductDetail, options?: SendProductLabelOptions) => {
       const savedPrinter = await getSavedPrinter();
       if (!savedPrinter?.address) {
         setSnackbarMessage(t("messages.printerRequired"));
@@ -2060,13 +2117,26 @@ function ProductQueryContent() {
       }
 
       if (printerAutoReconnectPaused) {
-        setSnackbarMessage(t("messages.printerPaused"));
+        // 自动重连被暂停：提示条上直接给「重新连接」（会恢复自动重连），不用再跑去设置页。
+        const pausedMessage = t("messages.printerPaused");
+        setSnackbarMessage(pausedMessage);
+        setSnackbarAction({
+          message: pausedMessage,
+          label: t("messages.reconnectAndRetryAction"),
+          onPress: () => {
+            void (async () => {
+              if (await handleReconnectPrinter()) await sendProductLabelRef.current?.(targetDetail, options);
+            })();
+          },
+        });
         playQueryFeedback("error");
         return false;
       }
 
       const action = options?.action ?? "product";
       setPrintingAction(action);
+      // 这次打印开始前已打出的标签数：失败时用它判断中途有没有已经打出标签（有就不能自动重印）。
+      const printedBefore = getPrintedLabelCount();
       const printStartedAt = Date.now();
       try {
         console.log("[product-query] sendProductLabel", {
@@ -2137,7 +2207,10 @@ function ProductQueryContent() {
           error: error instanceof Error ? error.message : String(error),
           stack: error instanceof Error ? error.stack : undefined,
         });
-        setSnackbarMessage(getErrorMessage(error, "messages.printFailed"));
+        showPrintFailure(error, "messages.printFailed", {
+          printedBefore,
+          retry: () => sendProductLabelRef.current?.(targetDetail, options) ?? Promise.resolve(false),
+        });
         playQueryFeedback("error");
         return false;
       } finally {
@@ -2146,13 +2219,16 @@ function ProductQueryContent() {
     },
     [
       getErrorMessage,
+      handleReconnectPrinter,
       playQueryFeedback,
       printQuantity,
       printerAutoReconnectPaused,
       quantitySingleUse,
+      showPrintFailure,
       t,
     ],
   );
+  sendProductLabelRef.current = sendProductLabel;
 
   /** 打印套装 / 多码子项标签；子项没有可用价格时拒绝打印，避免打印层回退成主档价。 */
   const sendCodeLabel = useCallback(
@@ -4387,6 +4463,7 @@ function ProductQueryContent() {
       }
 
       setPrintingAction(kind);
+      const printedBefore = getPrintedLabelCount();
       try {
         const printType = smallLabel ? "small" : null;
         if ((kind === "product" || kind === "small") && focusTarget) {
@@ -4433,7 +4510,10 @@ function ProductQueryContent() {
           setPrintQuantity(1);
         }
       } catch (error) {
-        setSnackbarMessage(getErrorMessage(error, "messages.printFailed"));
+        showPrintFailure(error, "messages.printFailed", {
+          printedBefore,
+          retry: () => handlePrintRef.current(kind, targetDetail),
+        });
       } finally {
         setPrintingAction(null);
       }
@@ -4441,11 +4521,11 @@ function ProductQueryContent() {
     [
       activePrintFocus,
       detail,
-      getErrorMessage,
       printQuantity,
       quantitySingleUse,
       sendCodeLabel,
       sendProductLabel,
+      showPrintFailure,
       smallLabel,
       t,
     ],
@@ -5309,6 +5389,7 @@ function ProductQueryContent() {
                 status={printerConnectionStatus}
                 lastError={printerLastError}
                 onPress={pendingScanPresentation ? undefined : handleOpenPrintSettings}
+                onReconnect={pendingScanPresentation ? undefined : () => void handleReconnectPrinter()}
               />
             }
             isPrintingProduct={printingAction === "product"}
@@ -5796,7 +5877,9 @@ function ProductQueryContent() {
                   savedPrinter={savedPrinter}
                   status={printerConnectionStatus}
                   lastError={printerLastError}
+                  reconnectInfo={printerReconnectInfo}
                   onManage={handleOpenPrinterSettings}
+                  onReconnect={() => void handleReconnectPrinter()}
                 />
               }
               onToggleContinuousPrint={setContinuousPrintEnabled}
@@ -5894,9 +5977,22 @@ function ProductQueryContent() {
 
       <Snackbar
         visible={Boolean(snackbarMessage)}
-        onDismiss={() => setSnackbarMessage("")}
-        // 短提示 2.5 秒；较长的提示（如「请先关闭自动定价」）按字数多留阅读时间，最长 6 秒。
-        duration={Math.min(6000, Math.max(2500, snackbarMessage.length * 120))}
+        onDismiss={() => {
+          setSnackbarMessage("");
+          setSnackbarAction(null);
+        }}
+        // 短提示 2.5 秒；较长的提示（如「请先关闭自动定价」）按字数多留阅读时间，最长 6 秒；
+        // 带操作按钮的提示（重新连接并重试）要留够时间让人点，固定 10 秒。
+        duration={
+          snackbarAction && snackbarAction.message === snackbarMessage
+            ? 10000
+            : Math.min(6000, Math.max(2500, snackbarMessage.length * 120))
+        }
+        action={
+          snackbarAction && snackbarAction.message === snackbarMessage
+            ? { label: snackbarAction.label, onPress: snackbarAction.onPress }
+            : undefined
+        }
       >
         {snackbarMessage}
       </Snackbar>

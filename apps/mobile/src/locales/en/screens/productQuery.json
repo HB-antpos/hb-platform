@@ -116,9 +116,13 @@
     "emptyPrompt": "Enter a barcode, item no. or product code to start.",
     "cameraTip": "Align the barcode with the centre of the frame.",
     "printerRequired": "Select a label printer in Settings first.",
-    "printerPaused": "Printer connection is paused. Reconnect it in Settings first.",
+    "printerPaused": "Printer connection is paused. Reconnect it before printing.",
     "printSuccess": "Sent to printer.",
     "printFailed": "Print failed.",
+    "printerReconnected": "Printer connected.",
+    "printerReconnectFailed": "Still cannot reach the printer. Make sure it is on, press its power button to wake it, and keep it close to the PDA.",
+    "reconnectAction": "Reconnect",
+    "reconnectAndRetryAction": "Reconnect and retry",
     "autoPricingEvaluateFailed": "Auto pricing evaluation failed.",
     "autoPricingUpdateFailed": "Auto pricing update failed.",
     "productTypeUpdateFailed": "Failed to update product type.",
@@ -475,9 +479,16 @@
       "disconnected": "Disconnected",
       "paused": "Connection paused",
       "error": "Connection issue",
-      "errorHint": "Open settings to check the connection",
+      "errorHint": "Make sure the printer is on and close to the PDA, press its power button to wake it, and if it still will not connect turn it off and on, then tap Reconnect",
       "openSettingsHint": "Open print settings",
-      "manage": "Printer settings"
+      "manage": "Printer settings",
+      "reconnect": "Reconnect",
+      "reconnectHint": "Tap to reconnect, long press to open print settings",
+      "retry": {
+        "backoff": "Reconnecting automatically ({{count}} failed)",
+        "probeFast": "The printer is not responding. Retrying every minute; you can also tap Reconnect to retry now",
+        "probeSlow": "The printer is not responding. Retrying every 5 minutes; you can also tap Reconnect to retry now"
+      }
     },
     "label": "Labels"
   },

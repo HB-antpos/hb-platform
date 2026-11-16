@@ -566,6 +566,117 @@ async function run() {
     }
   });
 
+  test("手动重新连接：先恢复被暂停的自动重连、按 manual 连接；成败都通知自动重连重新开始一轮", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      usePrinterStore.setState({ status: "paused", autoReconnectPaused: true });
+      const nonce0 = usePrinterStore.getState().retryNonce;
+      assert.equal(await api.requestPrinterReconnect(), true);
+      assert.deepEqual(events, ["connect:label"]);
+      assert.equal(usePrinterStore.getState().autoReconnectPaused, false, "点重新连接就是要恢复自动重连");
+      assert.equal(usePrinterStore.getState().status, "connected");
+      assert.equal(usePrinterStore.getState().retryNonce, nonce0 + 1, "成功后也通知自动重连清零");
+
+      // 连续三次手动重连都失败：每次都抛出原错误，每次结束都 bump 信号；诊断里的触发来源是 manual。
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      usePrinterStore.setState({ status: "disconnected" });
+      connectError = Object.assign(new Error("Bluetooth printer BLE connection timed out."), { code: "CONNECT_ERROR" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(api.requestPrinterReconnect(), /timed out/);
+      }
+      assert.equal(usePrinterStore.getState().retryNonce, nonce0 + 4, "失败也要通知：用户已经亲自试过了");
+      assert.equal(usePrinterStore.getState().status, "error");
+      const starts = (emitted[0].properties.events as LoggedEvent[]).filter((event) => event.kind === "connect.start");
+      assert.ok(starts.length >= 3 && starts.every((event) => event.trigger === "manual"));
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
+
+  test("打印前补连接失败：错误标记为「还没发出任何数据」且不计入已打印标签；写入途中失败不标记、也不自动重印", async () => {
+    const printedBefore = api.getPrintedLabelCount();
+    await api.printProductLabelPayload(payload);
+    assert.equal(api.getPrintedLabelCount(), printedBefore + 1, "成功打印计一次");
+
+    // 补连接就失败：数据一个字节都没发，可以安全地重新连接后重试。
+    nativeStatus = { ...nativeStatus, connected: false, address: null };
+    usePrinterStore.setState({ status: "disconnected" });
+    connectError = Object.assign(new Error("Bluetooth printer BLE connection timed out."), { code: "CONNECT_ERROR" });
+    events = [];
+    const connectFailure = await api.printProductLabelPayload(payload).then(() => null, (error: unknown) => error);
+    assert.ok(connectFailure instanceof Error);
+    assert.equal(api.isPrinterConnectFailureBeforeSend(connectFailure), true);
+    assert.deepEqual(events, ["connect:label"], "没有任何 print 事件");
+    assert.equal(api.getPrintedLabelCount(), printedBefore + 1, "没打出标签就不计数");
+
+    // 写入途中才失败：可能已打出部分标签，不能标记为可重试，也不自动重印。
+    connectError = null;
+    nativeStatus = { ...nativeStatus, connected: true, address: "label" };
+    usePrinterStore.setState({ status: "connected" });
+    writeError = new Error("write failed: EPIPE (Broken pipe)");
+    const writeFailure = await api.printProductLabelPayload(payload).then(() => null, (error: unknown) => error);
+    assert.ok(writeFailure instanceof Error);
+    assert.equal(api.isPrinterConnectFailureBeforeSend(writeFailure), false);
+    assert.equal(api.getPrintedLabelCount(), printedBefore + 1);
+
+    // 非错误对象 / 空值都不是「打印前连接失败」。
+    for (const value of ["timed out", null, undefined, 3, new Error("x")]) {
+      assert.equal(api.isPrinterConnectFailureBeforeSend(value), false);
+    }
+  });
+
+  test("原生状态变化时立即取走原生事件，状态没变的 5 秒轮询不重复调用原生", async () => {
+    nativeStatus = { ...nativeStatus, connected: true, address: "label" };
+    await api.syncPrinterStatus();
+    drainCalls = 0;
+    await api.syncPrinterStatus();
+    await api.syncPrinterStatus();
+    assert.equal(drainCalls, 0, "状态没变不取");
+    nativeStatus = { ...nativeStatus, connected: false, address: null };
+    await api.syncPrinterStatus();
+    assert.equal(drainCalls, 1, "断开这一刻就取");
+    await api.syncPrinterStatus();
+    assert.equal(drainCalls, 1);
+    nativeStatus = { ...nativeStatus, enabled: false };
+    await api.syncPrinterStatus();
+    assert.equal(drainCalls, 2, "蓝牙开关变化也取");
+  });
+
+  test("断线链路：先取走原生 ACL 事件再记状态变化，断线原因与会话摘要随故障日志上报", async () => {
+    const emitted: PrinterLinkLogItem[] = [];
+    installRecorder(emitted);
+    try {
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      usePrinterStore.setState({ status: "disconnected" });
+      await api.syncPrinterStatus();
+      await api.connectSavedPrinter({ status: "connecting" });
+      await api.printProductLabelPayload(payload);
+      await api.syncPrinterStatus();
+
+      // 打印机走了：原生先记 ACL 断开与连接被清理，随后 JS 同步状态。
+      nativeLinkEvents = [
+        { ev: "acl.disconnected", atMs: 2_000_000, tracked: true, socketConnected: true },
+        { ev: "connection.cleared", atMs: 2_000_001, reason: "acl_disconnected" },
+      ] as NativeLinkEvent[];
+      nativeStatus = { ...nativeStatus, connected: false, address: null };
+      await api.syncPrinterStatus();
+
+      connectError = Object.assign(new Error("read failed, socket might closed or timeout, read ret: -1"), { code: "CONNECT_ERROR" });
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await assert.rejects(api.connectSavedPrinter({ status: "reconnecting" }), /read failed/);
+      }
+      assert.equal(emitted.length, 1);
+      const session = emitted[0].properties.session as Record<string, unknown>;
+      assert.equal(session.endReason, "acl_disconnected", "断线原因来自提前取走的原生事件");
+      assert.equal(session.printsInSession, 1, "会话内打印过一次");
+      assert.equal(typeof session.connectedForMs, "number");
+      assert.equal(typeof session.idleSincePrintMs, "number");
+    } finally {
+      installPrinterLinkRecorder(null);
+    }
+  });
 }
 
 void run();

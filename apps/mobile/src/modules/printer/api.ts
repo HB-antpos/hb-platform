@@ -26,6 +26,7 @@ import {
   describeLinkError,
   recordPrinterLink,
   recordPrinterNativeStatus,
+  recordPrinterPrintSuccess,
   type PrinterLinkTrigger,
 } from "@/modules/printer/link-diagnostics";
 import { buildReceiptPrinterTestCommand } from "@/modules/printer/receipt";
@@ -65,6 +66,25 @@ interface ProductLabelOverrides {
 let printerOperationTail: Promise<unknown> = Promise.resolve();
 let labelConnectionInvalidated = false;
 let autoReconnectIntent = 0;
+// 标签累计成功发出的次数：调用方在一次打印前后比较，就知道这次打印中途有没有已经打出标签。
+let labelsPrinted = 0;
+// 打印前「补连接」就失败的错误（数据还一个字节都没发出去），可以安全地重新连接后重试。
+const connectFailedBeforeSendErrors = new WeakSet<object>();
+// 原生蓝牙状态上一次的指纹：只在变化时才取走原生事件，避免每 5 秒轮询都调一次原生。
+let lastNativeDrainKey: string | null = null;
+
+/** 已成功发出的标签总数（单调递增）。 */
+export function getPrintedLabelCount() {
+  return labelsPrinted;
+}
+
+/**
+ * 这次打印是否在「连接打印机」这一步就失败了（还没有任何数据发给打印机）。
+ * 写入途中才失败的错误返回 false：可能已经打出部分标签，调用方不能自动重印。
+ */
+export function isPrinterConnectFailureBeforeSend(error: unknown) {
+  return typeof error === "object" && error !== null && connectFailedBeforeSendErrors.has(error);
+}
 
 function runPrinterOperation<T>(operation: () => Promise<T>): Promise<T> {
   // 两类打印机共用一个原生连接；检查、写入、切换设备必须作为完整操作串行执行。
@@ -150,9 +170,21 @@ async function connectPrinterLogged(
 
 async function runLabelPrint(print: () => Promise<boolean>) {
   return runPrinterOperation(async () => {
-    await ensureConnectedPrinter({ preferHotWrite: true });
     try {
-      return await print();
+      await ensureConnectedPrinter({ preferHotWrite: true });
+    } catch (error) {
+      // 补连接失败：还没有任何数据发出，标记出来供界面提供「重新连接并重试」。
+      if (typeof error === "object" && error !== null) connectFailedBeforeSendErrors.add(error);
+      throw error;
+    }
+    try {
+      const printed = await print();
+      if (printed) {
+        labelsPrinted += 1;
+        // 累计本次连接会话内的打印次数与最近打印时间（诊断用：判断是不是空闲一段时间后断线）。
+        recordPrinterPrintSuccess();
+      }
+      return printed;
     } catch (error) {
       if (isPrinterConnectionError(error)) {
         const { code, message } = describeLinkError(error);
@@ -541,6 +573,20 @@ export async function disconnectCurrentPrinter(options?: { pauseAutoReconnect?: 
   });
 }
 
+/**
+ * 用户主动点「重新连接」：必要时先恢复被暂停的自动重连，再立即连一次（诊断里记为 manual）。
+ * 无论成败，结束后都通知自动重连清零失败计数、重新开始一轮：用户已经亲自试过了，
+ * 之前累积的退避 / 探测间隔不该继续拖慢后面的自动重试。连接失败会照常抛出，由调用方提示。
+ */
+export async function requestPrinterReconnect() {
+  if (usePrinterStore.getState().autoReconnectPaused) resumePrinterAutoReconnect();
+  try {
+    return await connectSavedPrinter({ status: "connecting" });
+  } finally {
+    usePrinterStore.getState().bumpRetryNonce();
+  }
+}
+
 export function resumePrinterAutoReconnect() {
   autoReconnectIntent += 1;
   const store = usePrinterStore.getState();
@@ -575,6 +621,14 @@ export async function syncPrinterStatus() {
     ? { ...reportedStatus, connected: false }
     : reportedStatus;
   const store = usePrinterStore.getState();
+  // 原生状态一变化（连上 / 断开 / 蓝牙开关 / 换设备）就立刻取走原生缓冲的蓝牙事件，
+  // 不等下一次连接尝试结束：这样断线前的 ACL / GATT / 蓝牙开关事件先入账，断线原因才推断得出来，
+  // 也不会因 App 长时间不连接而被原生缓冲（上限 120 条）挤掉。必须在记录状态变化之前取。
+  const drainKey = `${nativeStatus.supported}|${nativeStatus.enabled}|${nativeStatus.connected}|${nativeStatus.address ?? ""}`;
+  if (drainKey !== lastNativeDrainKey) {
+    lastNativeDrainKey = drainKey;
+    await recordNativeLinkEvents();
+  }
   // 原生状态变化（蓝牙开关、标签打印机连上/断开）才记一条，每 5 秒的轮询不会产生噪音。
   recordPrinterNativeStatus(nativeStatus, store.savedPrinter?.address ?? null);
 
