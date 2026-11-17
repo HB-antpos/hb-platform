@@ -233,6 +233,49 @@ export function getChangedImportFields(row: ProductImportItem): ImportDiffField[
 }
 
 /* ------------------------------------------------------------------ */
+/* 库内已有值（没填的格子里显示灰字）                                      */
+/* ------------------------------------------------------------------ */
+
+export interface ImportExistingValue {
+  /** 库里当前值的展示文本（价格带币种、体积三位小数）；null 表示库里也是空，页面显示「—」。 */
+  display: string | null
+}
+
+/** 新值「没填」：undefined / null / 空白文本。数字 0 是用户填的值（与 isBlankImportRow 同口径），不算没填。 */
+function isImportFieldUnfilled(raw: unknown): boolean {
+  if (raw === undefined || raw === null) return true
+  return typeof raw === 'string' && raw.trim() === ''
+}
+
+/**
+ * 匹配结果是否仍属于这一行：库里商品的货号必须等于当前货号。
+ * 改货号只会标记「需重新检测」，不会清掉旧的 matchedProduct；不做这个校验，改货号后灰字就会显示成别的商品的库内值。
+ * 后端按货号精确匹配后才返回 existingData，所以这里同样按 trim 后精确比较；库里货号缺失时无法确认，宁可不显示。
+ */
+function isMatchedProductCurrent(row: ProductImportItem): boolean {
+  const matchedNo = row.matchedProduct?.hbProductNo?.trim()
+  return !!matchedNo && matchedNo === (row.newProduct.productCode ?? '').trim()
+}
+
+/**
+ * 该单元格要不要显示「库内已有值」。返回 null = 不显示（保持现状的空格）。
+ * 只做展示：值不会写进 newProduct，所以检测 / 状态 / 提交内容都不受影响；空格仍然表示「这一项不改」。
+ * 条件：库里有对应商品的三类行（更新 / 无变化 / 库内重复）、匹配结果仍对得上货号、本次这一格没填。
+ */
+export function getImportExistingValue(row: ProductImportItem, field: ImportDiffField, kind: ImportRowKind): ImportExistingValue | null {
+  if (kind !== 'updated' && kind !== 'unchanged' && kind !== 'dbDuplicate') return null
+  const matched = row.matchedProduct
+  if (!matched || !isMatchedProductCurrent(row)) return null
+  if (!isImportFieldUnfilled(row.newProduct[field])) return null
+  return { display: formatImportOldValue(field, matched[DIFF_FIELD_SOURCES[field].matchedKey]) }
+}
+
+/** 本次没填、库里也没有的字段（按列顺序），用于「无变化」行的状态列提示「库内缺 …」，方便导入时顺手补。 */
+export function getImportExistingMissingFields(row: ProductImportItem, kind: ImportRowKind): ImportDiffField[] {
+  return IMPORT_DIFF_FIELDS.filter((field) => getImportExistingValue(row, field, kind)?.display === null)
+}
+
+/* ------------------------------------------------------------------ */
 /* 5 步分段                                                             */
 /* ------------------------------------------------------------------ */
 

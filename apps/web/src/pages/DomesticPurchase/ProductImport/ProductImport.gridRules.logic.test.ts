@@ -9,6 +9,8 @@ import {
   getChangedImportFields,
   getDuplicatePartnerRowNumbers,
   getImportCellDiff,
+  getImportExistingMissingFields,
+  getImportExistingValue,
   getImportRowClassName,
   getImportRowErrors,
   IMPORT_FILLER_MIN_WIDTH,
@@ -151,6 +153,55 @@ assertEqual(formatImportOldValue('oemPrice', 3.49), '$ 3.49', '零售价旧值�
 assertEqual(formatImportOldValue('domesticPrice', 0), null, '价格 0 视为库里没填')
 assertEqual(formatImportOldValue('barcode', '  '), null, '空白文本视为空')
 assertEqual(formatImportOldValue('productName', ' 收纳盒 大号 '), '收纳盒 大号', '文本旧值去掉首尾空白')
+
+/* ------------------------------ 库内已有值（没填的格子显示灰字） ------------------------------ */
+
+// 只填了货号和件数的「无变化」行：库里有商品，其余 8 个字段都没填
+const existingRow = makeRow('ex', { productCode: 'HB038-111', quantity: 5 }, {
+  status: 'unchanged',
+  diffFields: [],
+  matchedProduct: {
+    productCode: 'LOC9', hbProductNo: 'HB038-111', productName: '拉菲手工纸 深蓝 A4 20张', englishProductName: 'Raffia Craft Paper Navy A4',
+    barcode: '6921234560112', domesticPrice: 3.6, oemPrice: 1.99, middlePackQuantity: 0, packingQuantity: 144, unitVolume: undefined,
+  },
+})
+assertDeepEqual(getImportExistingValue(existingRow, 'productName', 'unchanged'), { display: '拉菲手工纸 深蓝 A4 20张' }, '没填的名称显示库内名称')
+assertDeepEqual(getImportExistingValue(existingRow, 'barcode', 'unchanged'), { display: '6921234560112' }, '没填的条码显示库内条码')
+assertDeepEqual(getImportExistingValue(existingRow, 'domesticPrice', 'unchanged'), { display: '¥ 3.60' }, '价格复用旧值格式：带币种、两位小数')
+assertDeepEqual(getImportExistingValue(existingRow, 'oemPrice', 'unchanged'), { display: '$ 1.99' }, '零售价带 $')
+assertDeepEqual(getImportExistingValue(existingRow, 'casePackQuantity', 'unchanged'), { display: '144' }, '装箱取 packingQuantity')
+assertDeepEqual(getImportExistingValue(existingRow, 'midPackQuantity', 'unchanged'), { display: null }, '库里中包是 0 视为没填，显示「—」')
+assertDeepEqual(getImportExistingValue(existingRow, 'volume', 'unchanged'), { display: null }, '库里体积缺失显示「—」')
+assertDeepEqual(getImportExistingMissingFields(existingRow, 'unchanged'), ['midPackQuantity', 'volume'], '库内缺项按列顺序列出，用于状态列提示')
+
+// 本次填了的格子不再叠灰字（填的值与库内一致 / 不一致都一样）；数字 0 是用户填的值，也不算没填
+const filledRow = { ...existingRow, newProduct: { ...existingRow.newProduct, productName: '拉菲手工纸 深蓝 A4 20张', domesticPrice: 0 } }
+assertEqual(getImportExistingValue(filledRow, 'productName', 'unchanged'), null, '填了名称就不显示库内名称')
+assertEqual(getImportExistingValue(filledRow, 'domesticPrice', 'unchanged'), null, '价格填了 0 也算填了')
+assertDeepEqual(getImportExistingMissingFields(filledRow, 'unchanged'), ['midPackQuantity', 'volume'], '填过的字段不进「库内缺」')
+const blankTextRow = { ...existingRow, newProduct: { ...existingRow.newProduct, barcode: '   ' } }
+assertDeepEqual(getImportExistingValue(blankTextRow, 'barcode', 'unchanged'), { display: '6921234560112' }, '只有空白的文本视为没填')
+
+// 范围：只有库里有对应商品的三类行显示；新 / 重复 / 错误 / 未检测 / 空行都不显示
+assertDeepEqual(getImportExistingValue(existingRow, 'productName', 'updated'), { display: '拉菲手工纸 深蓝 A4 20张' }, '更新行没填的格子也显示')
+assertDeepEqual(getImportExistingValue(existingRow, 'productName', 'dbDuplicate'), { display: '拉菲手工纸 深蓝 A4 20张' }, '库内重复行也显示（沿用后端返回的那一条）')
+for (const kind of ['new', 'duplicate', 'error', 'pending', 'blank'] as const) {
+  assertEqual(getImportExistingValue(existingRow, 'productName', kind), null, `「${kind}」行不显示库内已有值`)
+}
+assertEqual(getImportExistingValue(makeRow('nm', { productCode: 'HB038-111' }, { status: 'unchanged' }), 'productName', 'unchanged'), null, '没有匹配商品（如入库后的新增行）不显示')
+
+// 改货号后旧匹配结果还在（页面只标记需重新检测）：货号对不上就必须隐藏，不能显示成别的商品的库内值
+const renumberedRow = { ...existingRow, newProduct: { ...existingRow.newProduct, productCode: 'HB038-999' } }
+assertEqual(getImportExistingValue(renumberedRow, 'productName', 'unchanged'), null, '改了货号后不再显示旧匹配商品的值')
+assertDeepEqual(getImportExistingMissingFields(renumberedRow, 'unchanged'), [], '改了货号后也不提示「库内缺」')
+const paddedCodeRow = { ...existingRow, newProduct: { ...existingRow.newProduct, productCode: '  HB038-111 ' } }
+assertDeepEqual(getImportExistingValue(paddedCodeRow, 'barcode', 'unchanged'), { display: '6921234560112' }, '货号前后空格不影响对得上')
+const noHbNoRow = { ...existingRow, matchedProduct: { ...existingRow.matchedProduct, hbProductNo: undefined } }
+assertEqual(getImportExistingValue(noHbNoRow, 'productName', 'unchanged'), null, '库里货号缺失时无法确认匹配关系，不显示')
+
+// 纯展示：不会改动传入的行
+assertEqual(existingRow.newProduct.productName, '', '读取库内已有值不会写进 newProduct')
+assertEqual(existingRow.newProduct.volume, undefined, '读取库内已有值不会改动数值字段')
 
 /* ------------------------------ 5 步分段 ------------------------------ */
 

@@ -254,6 +254,63 @@
   outline-offset: 2px;
 }
 
+/* 状态条右侧：库内已有值开关 + 图例 */
+.pi-existing-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 14px;
+}
+
+.pi-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  color: #5b6472;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pi-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pi-legend-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+/* 图例色块与表格里对应的单元格样式保持同一套取值 */
+.pi-legend-swatch.is-existing {
+  border: 1px dashed #cdd5e1;
+  background: #f6f8fb;
+}
+
+.pi-legend-swatch.is-changed {
+  border: 1px solid #f6d9a8;
+  background: #fff8e6;
+}
+
+.pi-existing-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border: 1px solid #cfe0ff;
+  border-radius: 6px;
+  background: #f5f9ff;
+  color: #0958d9;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
 /* ---------------------------- 表格 ---------------------------- */
 
 .pi-table-wrap {
@@ -429,6 +486,45 @@
   white-space: nowrap;
 }
 
+/* 库内已有值：灰底 + 虚线 + 灰字（用 placeholder 实现，格子的值仍为空，打字即覆盖）。
+   与「有变化」的浅黄、「本次填写」的白底三者一眼可分；灰字 #657083 在 #f6f8fb 上约 4.7:1。 */
+.pi-cell.is-existing .ant-input,
+.pi-cell.is-existing .ant-input-affix-wrapper,
+.pi-cell.is-existing .ant-input-number {
+  border-style: dashed;
+  border-color: #cdd5e1;
+  background: #f6f8fb;
+}
+
+.pi-cell.is-existing input::placeholder {
+  color: #657083;
+  opacity: 1;
+}
+
+/* 库里本来也没有：只留一个淡淡的「—」，框线更淡，提示「这里可以补」 */
+.pi-cell.is-existing-empty .ant-input,
+.pi-cell.is-existing-empty .ant-input-affix-wrapper,
+.pi-cell.is-existing-empty .ant-input-number {
+  border-style: dashed;
+  border-color: #d3d9e3;
+}
+
+.pi-cell.is-existing-empty input::placeholder {
+  color: #aab3c0;
+  opacity: 1;
+}
+
+/* 聚焦时恢复实线白底，表示这格现在可以输入 */
+.pi-cell.is-existing .ant-input:focus,
+.pi-cell.is-existing .ant-input-affix-wrapper-focused,
+.pi-cell.is-existing .ant-input-number-focused,
+.pi-cell.is-existing-empty .ant-input:focus,
+.pi-cell.is-existing-empty .ant-input-affix-wrapper-focused,
+.pi-cell.is-existing-empty .ant-input-number-focused {
+  border-style: solid;
+  background: #fff;
+}
+
 /* 错误：整格标红（目前只有货号为空） */
 .pi-cell.is-invalid .ant-input,
 .pi-cell.is-invalid .ant-input-affix-wrapper {
@@ -453,6 +549,11 @@
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 「库内缺 中包、体积」：信息性提示，用与「重复」标签同一档的琥珀色 */
+.pi-status-note.is-warn {
+  color: #a35a00;
 }
 
 .pi-tag {

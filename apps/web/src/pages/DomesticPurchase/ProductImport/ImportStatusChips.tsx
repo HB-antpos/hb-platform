@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { ImportStatusCounts, ImportStatusFilter } from './importGridLogic'
 
@@ -5,6 +6,8 @@ interface ImportStatusChipsProps {
   counts: ImportStatusCounts
   active: ImportStatusFilter
   onChange: (filter: ImportStatusFilter) => void
+  /** 状态条右侧的附加控件（如「显示库内已有值」开关），与计数按钮同一行，放不下时随 flex-wrap 换行。 */
+  trailing?: ReactNode
 }
 
 /** 色调只决定数字颜色 / 选中态边框，与表格行色一一对应。 */
@@ -20,7 +23,7 @@ const CHIPS: Array<{ filter: ImportStatusFilter; tone: string; labelKey: string;
 ]
 
 /** 状态统计条：每个计数都是过滤按钮，再点一次已选中的回到「全部」。 */
-export function ImportStatusChips({ counts, active, onChange }: ImportStatusChipsProps) {
+export function ImportStatusChips({ counts, active, onChange, trailing }: ImportStatusChipsProps) {
   const { t } = useTranslation()
   return (
     <div className="pi-chips" role="group" aria-label={t('productImport.chipsAriaLabel', '按状态筛选')} data-testid="product-import-status-chips">
@@ -41,6 +44,12 @@ export function ImportStatusChips({ counts, active, onChange }: ImportStatusChip
           </button>
         )
       })}
+      {trailing ? (
+        <>
+          <span className="pi-spacer" />
+          {trailing}
+        </>
+      ) : null}
     </div>
   )
 }
