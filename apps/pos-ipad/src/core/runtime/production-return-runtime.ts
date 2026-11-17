@@ -28,6 +28,7 @@ import {
   type ReturnSupervisorResolutionPort,
   type DurableOfflineCashRefundPort,
   type DurableOnlineReturnRefundPort,
+  type DurableReturnAllocation,
   type DurableReturnLine,
   type DurableReturnRecoveryAction,
   type ReturnExecutionLedgerPort,
@@ -372,7 +373,7 @@ function createPresenterForLease(
     onAllocationFinalized: (finalized) =>
       acknowledgeFinalizedReturnAllocation(
         input.acknowledgements,
-        finalized.allocation.durableAttemptId,
+        finalized.allocation,
       ),
     supervisorResolution: input.supervisorResolution,
   });
@@ -924,9 +925,18 @@ class MaterializingReturnExecution implements ReturnExecutionPort {
 
 async function acknowledgeFinalizedReturnAllocation(
   acknowledgements: PaymentAcknowledgementRuntimePort | undefined,
-  durableAttemptId: string | null,
+  allocation: Pick<
+    DurableReturnAllocation,
+    "durableAttemptId" | "externalAttemptKind"
+  >,
 ): Promise<boolean> {
+  const durableAttemptId = allocation.durableAttemptId;
   if (!acknowledgements || durableAttemptId === null) return true;
+  // 中文注释：ACK 服务按 attemptId 去「支付账本」取记录。只有 payment-provider 的
+  // attempt 在那里；在线现金退款是 hbpos-api attempt，只存在于 return_api_attempts，
+  // 配了 Linkly 环境（有 ACK 服务）时去支付账本查必抛 NotFound，会被下面的 catch
+  // 当成「ACK 未完成」，整笔现金退款被判 Unknown 且恢复必再失败。它们没有通道 ACK，直接放行。
+  if (allocation.externalAttemptKind !== "payment-provider") return true;
   try {
     const result = await acknowledgements.acknowledge(durableAttemptId);
     // 中文注释：Square 等非 Linkly attempt 会明确返回 pending=false，不能因它们

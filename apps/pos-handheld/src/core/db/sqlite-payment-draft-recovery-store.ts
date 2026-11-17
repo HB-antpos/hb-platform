@@ -458,6 +458,30 @@ implements PersistedOrderDraftPort {
   }
 
   /**
+   * 该订单是否是「进行中的退货单」：return_actions 里有未结案（processing / unknown）的退货，
+   * 且退货单在 local_orders 里仍是 Draft。
+   *
+   * 退货退款的 attempt 复用 PaymentAttemptService，其订单 GUID 是退货单：退货单在 prepare 阶段
+   * 以 Draft 写入 local_orders，耐久事实在退货执行账本，永远没有「支付草稿绑定」。
+   * assertPersisted 要求支付草稿绑定，所以对退货单必然失败——调用方先用本方法放行退货单，
+   * 再对其余订单走 assertPersisted。只读；已结案（declined / completed）的退货不放行，
+   * 结案之后不应再有任何 provider 动作。
+   */
+  public async isActiveReturnRefundOrder(orderGuidInput: string): Promise<boolean> {
+    const orderGuid = strictId(orderGuidInput, "return refund order guid");
+    const row = await this.connection.getFirst<{ present: unknown }>(
+      `SELECT 1 AS present
+       FROM return_actions a
+       INNER JOIN local_orders o ON o.order_guid = a.return_order_guid
+       WHERE a.return_order_guid = ?
+         AND a.state IN ('processing', 'unknown')
+         AND o.state = 'Draft'`,
+      [orderGuid],
+    );
+    return row !== null && row !== undefined;
+  }
+
+  /**
    * 运行时公开投影只读取订单和活动 tender 真相。定价状态、provider 引用、
    * idempotency key 及受保护字段均不越过此边界。
    */

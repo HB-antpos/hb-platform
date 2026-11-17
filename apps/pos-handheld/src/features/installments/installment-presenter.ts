@@ -181,6 +181,8 @@ export type InstallmentWorkflowErrorCode =
   | "refund-method-unsupported"
   /** 服务端未按所选退款方式建立取消 claim（旧服务端不支持退代金券）；未发生任何退款。 */
   | "refund-mode-unsupported"
+  /** 本机取不到原付款凭据（常见于他机开的分期单），provider 未被调用、中央占用已释放；未发生任何退款。 */
+  | "refund-unavailable"
   | "service-unavailable";
 
 export class InstallmentWorkflowError extends Error {
@@ -199,6 +201,7 @@ export type InstallmentStatusCode =
   | "cancel-complete"
   | "cancel-refund-method-unsupported"
   | "cancel-refund-mode-unsupported"
+  | "cancel-refund-unavailable"
   | "claim-busy"
   | "claim-review-required"
   | "conflict"
@@ -1520,6 +1523,9 @@ function workflowFailureCode(error: unknown): InstallmentStatusCode {
     }
     if (error.code === "refund-mode-unsupported") {
       return "cancel-refund-mode-unsupported";
+    }
+    if (error.code === "refund-unavailable") {
+      return "cancel-refund-unavailable";
     }
     return "service-unavailable";
   }

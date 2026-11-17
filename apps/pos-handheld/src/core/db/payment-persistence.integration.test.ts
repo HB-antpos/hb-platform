@@ -2807,6 +2807,179 @@ test("真实 SQLite：MANUAL outbox 取得租约后 provider Approved 仍在 HTT
   });
 });
 
+test("真实 SQLite：进行中的退货单（有 return action、无支付草稿绑定）通过退款 attempt 的草稿校验；销售草稿、未知订单不被放行", async () => {
+  // 回归：PaymentAttemptService 在建退款 attempt 前先 assertPersisted(订单)，生产接线里这个校验要求
+  // 「支付草稿绑定」。退货单只在 prepare 阶段以 Draft 写入 local_orders，永远没有支付草稿绑定，
+  // 所以卡 / 券退款在第一步就被拒，退货 action 直接落 Unknown 并锁住本机。
+  await withDatabase("return-refund-order-draft-check", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-cash",
+      originalOrderGuid: "original-return-order",
+      method: "cash",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: null,
+      observedAtIso: T0,
+    });
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: { paymentId: "PAYMENT-ID", rfn: "RFN" },
+      observedAtIso: T0,
+    });
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      {
+        createTenderGuid: () => "return-tender-1",
+        createAuditEventId: () => "return-audit-1",
+      },
+      () => T2,
+    );
+    const draft = durableReturnDraft();
+    await ledger.prepareOrLoad(draft);
+    const store = new SqlitePaymentDraftRecoveryStore(
+      connection,
+      sequenceIds("sale-order", "sale-audit"),
+      () => T2,
+    );
+
+    // 退货单没有支付草稿绑定，原校验必然拒绝——这正是退款在生产里失败的原因。
+    await assert.rejects(
+      () => store.assertPersisted(draft.returnOrderGuid),
+      /not active and persisted/,
+    );
+    // 退货单的耐久事实在退货执行账本里：进行中的 return action 才算数。
+    assert.equal(await store.isActiveReturnRefundOrder(draft.returnOrderGuid), true);
+    assert.equal(await store.isActiveReturnRefundOrder("no-such-return-order"), false);
+
+    // 销售草稿不是退货单：不能借这条放宽绕过支付草稿校验。
+    const sale = await store.createOrReuseDraft(
+      draftInput({
+        draftId: "sale-draft-not-return",
+        identity: {
+          storeCode: draft.identity.storeCode,
+          deviceCode: draft.identity.deviceCode,
+          cashierId: draft.identity.cashierId,
+          cashierName: draft.identity.cashierName,
+        },
+      }),
+    );
+    assert.equal(await store.isActiveReturnRefundOrder(sale.orderGuid), false);
+    await store.assertPersisted(sale.orderGuid);
+  });
+});
+
+test("真实 SQLite：退款 attempt 的 5 元素签名（末位为容量 ID，即 PaymentAttemptService 实际写出的格式）可绑定到退货 allocation；容量 ID 不符则拒绝", async () => {
+  // 回归：PaymentAttemptService 对 refund 写出 [provider, "refund", 币种, 金额, 容量ID]，
+  // 退货账本曾只认 4 元素，生产接线下所有卡 / 券退款在绑定 allocation 这一步必然被拒。
+  await withDatabase("return-refund-five-element-signature", async (connection) => {
+    await migrateFresh(connection);
+    const vault = new SqliteReturnCapacityVault(connection, encryptor, () => T0);
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-cash",
+      originalOrderGuid: "original-return-order",
+      method: "cash",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: null,
+      observedAtIso: T0,
+    });
+    await vault.seedOrLoad({
+      capacityId: "return-capacity-card",
+      originalOrderGuid: "original-return-order",
+      method: "card",
+      originalAmountCents: 500,
+      remainingAmountCents: 500,
+      protectedContext: { paymentId: "PAYMENT-ID", rfn: "RFN" },
+      observedAtIso: T0,
+    });
+    const ledger = new SqliteReturnExecutionLedger(
+      connection,
+      encryptor,
+      {
+        createTenderGuid: () => "return-tender-1",
+        createAuditEventId: () => "return-audit-1",
+      },
+      () => T2,
+    );
+    const draft = durableReturnDraft();
+    await ledger.prepareOrLoad(draft);
+    assert.equal(
+      await ledger.markAllocationSubmitted({
+        actionId: draft.actionId,
+        allocationId: "return-allocation-card",
+      }),
+      true,
+    );
+
+    // 容量 ID 与 allocation 的容量不一致：不能把别的原付款的退款绑到这条 allocation 上。
+    await insertActionBinding(
+      connection,
+      draft.returnOrderGuid,
+      "wrong-capacity-action",
+      "wrong-capacity-attempt",
+      "wrong-capacity-idempotency",
+      ["square", "refund", "AUD", -300, "return-capacity-OTHER"],
+    );
+    await insertAttempt(connection, {
+      attemptId: "wrong-capacity-attempt",
+      idempotencyKey: "wrong-capacity-idempotency",
+      orderGuid: draft.returnOrderGuid,
+      provider: "square",
+      operation: "refund",
+      amountCents: -300,
+      // 非阻塞状态，避免与下面的 Created attempt 撞「同单只允许一个阻塞 attempt」。
+      state: "Declined",
+    });
+    await assert.rejects(
+      () =>
+        ledger.bindAllocationAttempt({
+          actionId: draft.actionId,
+          allocationId: "return-allocation-card",
+          attemptKind: "payment-provider",
+          externalActionId: "wrong-capacity-action",
+          durableAttemptId: "wrong-capacity-attempt",
+        }),
+      /identity is inconsistent/,
+    );
+
+    // 与 allocation 容量一致的 5 元素签名：正常绑定。
+    await insertActionBinding(
+      connection,
+      draft.returnOrderGuid,
+      "return-provider-action",
+      "return-payment-attempt",
+      "return-payment-idempotency",
+      ["square", "refund", "AUD", -300, "return-capacity-card"],
+    );
+    await insertAttempt(connection, {
+      attemptId: "return-payment-attempt",
+      idempotencyKey: "return-payment-idempotency",
+      orderGuid: draft.returnOrderGuid,
+      provider: "square",
+      operation: "refund",
+      amountCents: -300,
+      state: "Created",
+    });
+    assert.equal(
+      await ledger.bindAllocationAttempt({
+        actionId: draft.actionId,
+        allocationId: "return-allocation-card",
+        attemptKind: "payment-provider",
+        externalActionId: "return-provider-action",
+        durableAttemptId: "return-payment-attempt",
+      }),
+      true,
+    );
+  });
+});
+
 test("真实 SQLite：退货多 allocation 在 provider 前耐久绑定，Unknown 跨恢复冻结容量并以同一 OrderGuid 完成", async () => {
   await withDatabase("durable-return-ledger", async (connection) => {
     await migrateFresh(connection);
@@ -7104,7 +7277,8 @@ function insertActionBinding(
   actionId: string,
   attemptId: string,
   idempotencyKey: string,
-  signature: readonly [string, string, "AUD", number] = [
+  // 末位可带原付款容量 ID（5 元素，与 PaymentAttemptService 对 refund 实际写出的格式一致）。
+  signature: readonly [string, string, "AUD", number, ...string[]] = [
     "square",
     "purchase",
     "AUD",

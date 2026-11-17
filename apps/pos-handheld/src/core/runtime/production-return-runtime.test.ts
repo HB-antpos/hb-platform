@@ -473,6 +473,30 @@ test("在线退款的本地 action/allocation 完成后才确认其耐久支付 
   assert.equal(harness.onlineRecovers.length, 0);
 });
 
+test("在线现金退款（hbpos-api attempt）不走 Linkly ACK：支付账本里没有它的 attempt，不能因此判成 Unknown", async () => {
+  // 生产里配了 Linkly 环境就会有 ACK 服务；它按 attemptId 去支付账本取记录，
+  // 现金退款的 attempt 只在 return_api_attempts，取不到会抛 NotFound。
+  const harness = createHarness({
+    acknowledgementImpl: async (attemptId) => {
+      throw new Error(`PAYMENT_ATTEMPT_NOT_FOUND:${attemptId}`);
+    },
+  });
+  const presenter = await harness.runtime.createPresenter();
+  assert.equal(presenter.beginNoReceipt(), true);
+  assert.equal(await presenter.addNoReceiptProduct("P1"), true);
+  assert.equal(presenter.selectMethod("cash"), true);
+
+  assert.equal(await presenter.confirm(), true);
+
+  const allocation = harness.ledger.actions()[0]?.allocations[0];
+  assert.equal(harness.ledger.actions()[0]?.status, "completed");
+  assert.equal(allocation?.executionKind, "online-refund");
+  assert.equal(allocation?.externalAttemptKind, "hbpos-api");
+  // 一次 ACK 都不该发：它不是支付通道 attempt。
+  assert.deepEqual(harness.acknowledgementCalls, []);
+  assert.equal(presenter.getState().phase, "success");
+});
+
 test("退货 ACK pending 暂停 action；恢复只确认原退款，不重放 provider", async () => {
   let failOnce = true;
   const harness = createHarness({

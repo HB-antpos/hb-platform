@@ -2057,6 +2057,9 @@ async function assertPaymentProviderAttemptBinding(
     text(row.operation, "return payment operation") !== "refund" ||
     signature.operation !== "refund" ||
     signature.provider !== provider ||
+    // 签名冻结了原付款容量时，必须就是这条 allocation 的容量：不能把别的原付款的退款绑过来。
+    (signature.capacityId !== null &&
+      signature.capacityId !== nullableText(allocation.capacity_id)) ||
     signature.amountCents !==
       negativeInteger(
         allocation.signed_amount_cents,
@@ -2374,6 +2377,8 @@ function parsePaymentSignature(value: string): Readonly<{
   provider: string;
   operation: "refund";
   amountCents: number;
+  /** 5 元素签名里冻结的原付款容量 ID；4 元素旧格式或真实服务没有容量时为 null。 */
+  capacityId: string | null;
 }> {
   let parsed: unknown;
   try {
@@ -2381,14 +2386,20 @@ function parsePaymentSignature(value: string): Readonly<{
   } catch {
     throw new Error("Return payment request signature is invalid JSON.");
   }
+  // 中文注释：PaymentAttemptService 对 refund 写出 [provider, "refund", 币种, 金额, 容量ID]
+  // （容量缺失时末位为 null）共 5 项；此前这里只认 4 项，生产接线下所有卡 / 券退款在绑定
+  // allocation 时必然被拒。4 项旧格式继续接受（容量不参与核对）。
   if (
     !Array.isArray(parsed) ||
-    parsed.length !== 4 ||
+    (parsed.length !== 4 && parsed.length !== 5) ||
     typeof parsed[0] !== "string" ||
     parsed[1] !== "refund" ||
     parsed[2] !== "AUD" ||
     !Number.isSafeInteger(parsed[3]) ||
-    Number(parsed[3]) >= 0
+    Number(parsed[3]) >= 0 ||
+    (parsed.length === 5 &&
+      parsed[4] !== null &&
+      (typeof parsed[4] !== "string" || parsed[4].trim() === ""))
   ) {
     throw new Error("Return payment request signature is invalid.");
   }
@@ -2396,6 +2407,7 @@ function parsePaymentSignature(value: string): Readonly<{
     provider: parsed[0],
     operation: "refund",
     amountCents: Number(parsed[3]),
+    capacityId: parsed.length === 5 ? (parsed[4] as string | null) : null,
   };
 }
 
