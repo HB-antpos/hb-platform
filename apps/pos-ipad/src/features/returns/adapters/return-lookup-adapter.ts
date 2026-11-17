@@ -408,11 +408,16 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       originalOrderGuid,
       context.paymentCapacities ?? [],
     );
-    const tenderCapacities = await this.protectCapacities(
+    // 读不到本机尚未同步的退货时无法保证数量准确，按过期处理（界面会提示）；此时不提供原路退卡额度。
+    const recordsMayBeStale = localRecords === null;
+    const protectedCapacities = await this.protectCapacities(
       originalOrderGuid,
       "remote",
       materials,
     );
+    const tenderCapacities = recordsMayBeStale
+      ? withoutCardRefundCapacities(protectedCapacities)
+      : protectedCapacities;
 
     return {
       originalOrderGuid,
@@ -420,8 +425,7 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       soldAtIso: order.soldAt?.trim() || null,
       cashierName: order.cashierName?.trim() || null,
       loadedFrom: "remote",
-      // 读不到本机退货时无法保证数量准确，按过期处理（界面会提示）。
-      returnRecordsMayBeStale: localRecords === null,
+      returnRecordsMayBeStale: recordsMayBeStale,
       lines,
       tenderCapacities,
       voucherFundedBasis,
@@ -467,10 +471,13 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
         throw new ReturnFeatureError("RETURN_SOURCE_MISMATCH");
       }
     }
-    const tenderCapacities = await this.protectCapacities(
-      originalOrderGuid,
-      "local",
-      snapshot.capacities,
+    // 本地降级读不到其它设备 / 服务端的退货，记录一定可能过期：不提供原路退卡额度（见 withoutCardRefundCapacities）。
+    const tenderCapacities = withoutCardRefundCapacities(
+      await this.protectCapacities(
+        originalOrderGuid,
+        "local",
+        snapshot.capacities,
+      ),
     );
     return {
       originalOrderGuid,
@@ -847,6 +854,17 @@ function isGuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
     value,
   );
+}
+
+/**
+ * 退货记录可能过期（本地降级、读不到本机退货）时，原路退卡额度一律不提供，与 WPF 的 DisableCardRefunds 同口径：
+ * 其它设备的退货、服务端已记录的退货此时都不可见，继续退卡会在同步窗口里重复退款（刷卡机真实退款，无法撤回）。
+ * 现金与代金券额度不受影响；卡付款部分要等联网读到完整退货记录后才能原路退。
+ */
+function withoutCardRefundCapacities(
+  capacities: readonly OriginalReturnTenderCapacity[],
+): readonly OriginalReturnTenderCapacity[] {
+  return capacities.filter((capacity) => capacity.method !== "card");
 }
 
 function sameStore(value: string | null | undefined, expected: string): boolean {

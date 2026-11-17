@@ -685,6 +685,59 @@ test("在线查单：读不到本机退货时标记记录可能过期，但不�
   assert.equal(context?.lines[0]?.availableQuantity, 2);
 });
 
+test("退货记录可能过期（本地降级 / 读不到本机退货）时不提供原路退卡额度，现金额度不受影响；记录完整时卡额度保留", async () => {
+  // 回归：记录可能过期时，其它设备的退货、服务端已记录的退货都看不到。
+  // 此时若仍允许原路退卡，同一笔卡付款可能在同步窗口里被重复退款（刷卡机真实退款，无法撤回）；
+  // 服务端上传时再拒也已经晚了。WPF 同场景把卡额度清零（DisableCardRefunds），iPad 与之对齐。
+  const methodsOf = (context: { tenderCapacities: readonly { method: string }[] } | null) =>
+    context?.tenderCapacities.map((capacity) => capacity.method) ?? [];
+
+  // 1) 查单网络故障 → 回退本机订单（本机订单里有卡付款）。
+  const offline = new FakeHistoryApi();
+  offline.searchError = new HbposApiError("offline", { kind: "transport" });
+  const local = new FakeLocalOrders();
+  const base = localSnapshot();
+  local.result = {
+    ...base,
+    capacities: [
+      ...base.capacities,
+      {
+        sourceKey: "local-card",
+        method: "card",
+        originalOrderGuid: orderGuid,
+        remainingCents: 500,
+        protectedProviderMaterial: { reference: "SQ:PAY-LOCAL", cardTransactions: [] },
+      },
+    ],
+  };
+  const fallback = await createAdapter({ historyApi: offline, localOrders: local }).lookupReceipt("receipt-local");
+  assert.equal(fallback?.returnRecordsMayBeStale, true);
+  assert.deepEqual(methodsOf(fallback), ["cash"]);
+
+  // 2) 在线查到订单，但读不到本机尚未同步的退货 → 同样按过期处理。
+  const remoteStale = new FakeHistoryApi();
+  remoteStale.contextResult = remoteContext();
+  const unreadable = new FakeLocalReturnRecords([]);
+  unreadable.error = new Error("db busy");
+  const stale = await createAdapter({
+    historyApi: remoteStale,
+    localReturnRecords: unreadable,
+  }).lookupReceipt(orderGuid);
+  assert.equal(stale?.returnRecordsMayBeStale, true);
+  assert.ok(!methodsOf(stale).includes("card"));
+  assert.ok(methodsOf(stale).includes("cash"));
+
+  // 3) 对照：记录完整（服务端 + 本机都读到了）时，卡额度照常保留。
+  const remoteFresh = new FakeHistoryApi();
+  remoteFresh.contextResult = remoteContext();
+  const fresh = await createAdapter({
+    historyApi: remoteFresh,
+    localReturnRecords: new FakeLocalReturnRecords([]),
+  }).lookupReceipt(orderGuid);
+  assert.equal(fresh?.returnRecordsMayBeStale, false);
+  assert.ok(methodsOf(fresh).includes("card"));
+});
+
 test("本地降级查单扣掉本机全部已退数量（含已同步的），不再取原单全量", async () => {
   const remote = new FakeHistoryApi();
   remote.searchError = new HbposApiError("offline", { kind: "transport" });

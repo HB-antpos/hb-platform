@@ -817,6 +817,41 @@ test("详情优先使用服务端 updatedAt，null 时回退 createdAt", async (
   assert.equal(legacy?.updatedAtIso, "2026-07-27T01:02:03.000Z");
 });
 
+test("详情里人工录入的备注 / 取货备注 / 取消原因允许换行与制表符，其它控制字符仍整份拒绝", async () => {
+  // 回归：WPF 开单备注框允许换行（AcceptsReturn）。iPad 解析响应时对所有文本一律拒绝控制字符（含 \r \n \t），
+  // 一旦备注里有换行，整份详情被判「响应无效」，这类分期单在 iPad 上打不开，跨机续付 / 提货 / 取消都做不了。
+  const multiline = "第一行\r\n第二行\t缩进";
+  const transport = new QueueTransport([
+    { success: true, data: { ...detailsPayload({ status: 1, balanceAmount: 80 }), note: multiline } },
+    {
+      success: true,
+      data: {
+        ...detailsPayload({ status: 2, balanceAmount: 0 }),
+        pickupInfo: { pickedUpAt: "2026-07-28T01:00:00Z", pickedUpBy: "Alice", note: multiline },
+      },
+    },
+    {
+      success: true,
+      data: {
+        ...detailsPayload({ status: 4, balanceAmount: 0 }),
+        cancellationInfo: { kind: 1, cancelledAt: "2026-07-28T02:00:00Z", cancelledBy: "Alice", reason: multiline },
+      },
+    },
+    // 其它控制字符（如响铃符）仍然不是合法的人工录入文本。
+    { success: true, data: { ...detailsPayload({ status: 1, balanceAmount: 80 }), note: "bad\u0007bell" } },
+  ]);
+  const api = new HbposInstallmentsApi(transport, "S1");
+
+  const withNote = await api.getDetails(installmentGuid);
+  const pickedUp = await api.getDetails(installmentGuid);
+  const cancelled = await api.getDetails(installmentGuid);
+
+  assert.equal(withNote?.note, multiline);
+  assert.equal(pickedUp?.pickupInfo?.note, multiline);
+  assert.equal(cancelled?.cancellationInfo?.reason, multiline);
+  await assert.rejects(() => api.getDetails(installmentGuid));
+});
+
 test("创建、补款、退款取消、作废和取货使用固定 v1 路由", async () => {
   const responseDetails = detailsPayload({ status: 1, balanceAmount: 80 });
   const transport = new QueueTransport([

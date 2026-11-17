@@ -59,6 +59,50 @@ public sealed class InstallmentRepaymentClaimServiceTests
         Assert.Equal(before, await harness.Installments.GetDetailsAsync(harness.InstallmentGuid, CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(80)] // 最后一笔：入账后余额为 0
+    [InlineData(60)] // 部分续付：入账后余额 20，小于本笔金额 60
+    public async Task Create_replay_of_committed_repayment_returns_the_existing_claim_instead_of_mismatch(int amount)
+    {
+        // 回归：续付已入账后客户端因回包丢失用同一 operationGuid 重试「建 claim」。
+        // 以前先按「新 claim」校验分期当前状态（必须有余额、金额不得超过余额），已入账后这些条件必然不成立，
+        // 返回 MISMATCH；客户端把它当确定失败、清掉草稿，收银员可能因此把现金退给顾客。
+        // 重放必须先认出同一 operation 已有的 claim（PrepareProvider 本来就是这个顺序）。
+        var harness = CreateHarness();
+        var create = CreateRequest(amount: amount, method: PaymentMethodKind.Cash);
+        await harness.Service.PrepareProviderAsync(
+            harness.InstallmentGuid,
+            create.OperationGuid,
+            PrepareRequest(create, provider: "cash", providerAttemptId: "attempt-replay-after-commit"),
+            Identity(),
+            CancellationToken.None);
+        var committed = await harness.Service.CommitAsync(
+            harness.InstallmentGuid,
+            create.OperationGuid,
+            new InstallmentRepaymentClaimCommitRequest(),
+            Identity(),
+            CancellationToken.None);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, committed.Status);
+        var after = await harness.Installments.GetDetailsAsync(harness.InstallmentGuid, CancellationToken.None);
+        Assert.True(after!.BalanceAmount < amount, "前提：入账后余额必须小于本笔金额，才会触发旧的新 claim 校验");
+
+        var replay = await harness.Service.CreateAsync(
+            harness.InstallmentGuid,
+            create,
+            Identity(),
+            CancellationToken.None);
+
+        Assert.True(replay.AlreadyExists);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, replay.Status);
+        Assert.Equal(1, harness.Installments.AppendCount);
+
+        // 换一个新的 operationGuid 仍然是新 claim：余额不足时照常拒绝，不因此放宽。
+        var different = CreateRequest(amount: amount, method: PaymentMethodKind.Cash);
+        var rejected = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.CreateAsync(harness.InstallmentGuid, different, Identity(), CancellationToken.None));
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.Mismatch, rejected.Code);
+    }
+
     [Fact]
     public async Task Prepare_provider_binds_prepared_claim_and_recovers_unknown_only_for_the_same_binding()
     {

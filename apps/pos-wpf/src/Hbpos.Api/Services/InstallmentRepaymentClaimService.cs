@@ -165,12 +165,15 @@ public sealed class InstallmentRepaymentClaimService(
         EnsureNewCardRepaymentAllowed(normalizedRequest.Method, provider: null);
         ValidatePaymentPermissions(normalizedIdentity, normalizedRequest.Method);
         var details = await GetRequiredInstallmentAsync(installmentGuid, cancellationToken);
-        ValidateInstallmentForNewClaim(details, normalizedIdentity, normalizedRequest.Amount);
         var fingerprint = CreateFingerprint(installmentGuid, normalizedRequest);
 
         var existing = await claimRepository.GetAsync(normalizedRequest.OperationGuid, cancellationToken);
         if (existing is not null)
         {
+            // 中文注释：同一 operation 的重放必须先认出已有 claim，不能先按「新 claim」校验分期当前状态
+            // （PrepareProviderAsync 本来就是这个顺序）。续付已入账后，分期余额已扣减、甚至为 0，
+            // 「必须有余额 / 金额不得超过余额」必然不成立，重放会被误报 MISMATCH；客户端把它当确定失败清掉草稿，
+            // 收银员可能因此把现金退给顾客。门店 / 设备归属由 ValidateAccess 对已有 claim 校验。
             existing = await ExpirePreparedAsync(existing, cancellationToken);
             ValidateAccess(existing, installmentGuid, normalizedIdentity);
             if (!string.Equals(existing.Fingerprint, fingerprint, StringComparison.Ordinal))
@@ -181,6 +184,8 @@ public sealed class InstallmentRepaymentClaimService(
             return await MapAsync(existing, alreadyExists: true);
         }
 
+        // 只有真的要新建 claim 才按分期当前状态校验（门店 / 跨设备 / 状态 / 余额）。
+        ValidateInstallmentForNewClaim(details, normalizedIdentity, normalizedRequest.Amount);
         await EnsureNoBlockingClaimAsync(installmentGuid, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var claim = new InstallmentRepaymentClaimRecord(

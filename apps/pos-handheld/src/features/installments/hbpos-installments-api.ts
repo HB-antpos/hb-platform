@@ -831,7 +831,7 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
       ),
       pickupInfo: mapPickupInfo(details.pickupInfo),
       cancellationInfo: mapCancellationInfo(details.cancellationInfo),
-      note: responseOptionalText(details.note, "details.note", 2_000),
+      note: responseOptionalFreeText(details.note, "details.note", 2_000),
     });
   }
 
@@ -1182,7 +1182,7 @@ function mapPickupInfo(
       "pickup.pickedUpBy",
       256,
     ),
-    note: responseOptionalText(pickup.note, "pickup.note", 1_000),
+    note: responseOptionalFreeText(pickup.note, "pickup.note", 1_000),
   });
 }
 
@@ -1211,7 +1211,7 @@ function mapCancellationInfo(
       "cancellation.cancelledBy",
       256,
     ),
-    reason: responseOptionalText(
+    reason: responseOptionalFreeText(
       cancellation.reason,
       "cancellation.reason",
       1_000,
@@ -1564,6 +1564,28 @@ function responseOptionalText(
 ): string | null {
   if (value === null || value === undefined || value === "") return null;
   return responseText(value, field, maxLength);
+}
+
+/**
+ * 人工录入的自由文本（开单备注、取货备注、取消原因）。
+ * 中文注释：WPF 开单备注框允许换行，服务端原样保存；这里若按「标识类文本」一律拒绝控制字符，
+ * 备注里有换行的分期单整份详情都会被判响应无效，在本机上打不开。
+ * 允许制表符 / 换行 / 回车，其余 C0 控制字符与 DEL 仍然拒绝；这些字段只读展示，不参与任何金融决策。
+ */
+function responseOptionalFreeText(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (
+    typeof value !== "string" ||
+    value.length > maxLength ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
+  ) {
+    throw invalidResponse(field);
+  }
+  return value;
 }
 
 function responseIso(value: unknown, field: string): string {
