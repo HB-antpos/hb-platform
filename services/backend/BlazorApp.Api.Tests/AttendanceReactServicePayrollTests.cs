@@ -130,6 +130,76 @@ namespace BlazorApp.Api.Tests
             Assert.Equal("Open", pay.Data.PeriodStatus);
         }
 
+        /// <summary>再造一个绑定 BRI 的员工（可带生日）：没有排班、没有打卡。</summary>
+        private async Task SeedBoundStaffAsync(string userGuid, EmployeeType type, DateTime? birthday = null)
+        {
+            await _db.Insertable(new User
+            {
+                UserGUID = userGuid,
+                Username = userGuid,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new UserStore
+            {
+                UserStoreGUID = $"{userGuid}-bri",
+                UserGUID = userGuid,
+                StoreGUID = "store-bri",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new EmployeeProfile
+            {
+                UserGUID = userGuid,
+                EmployeeType = type,
+                Birthday = birthday,
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+        }
+
+        [Fact]
+        public async Task 工时统计_只列本期有工时或有待处理的人_工资表与生日提醒不受影响()
+        {
+            await SeedPayrollStoreAsync();
+            // staff-user：本期有 4 小时工时 → 列。
+            await SeedWorkedScheduleAsync("hours-tue", new DateTime(2026, 10, 6), "09:00-13:00", "09:00-13:00");
+            // manager-user：本店店长，本期没有任何工时 → 不列。
+            await SeedEmployeeProfileAsync("manager-user", EmployeeType.FullTime);
+            // idle-teen：没工时，生日 10-08 落在本期内 → 工时表不列，但生日提醒（提前核对时薪）仍要有。
+            await SeedBoundStaffAsync("idle-teen", EmployeeType.Temporary, new DateTime(2010, 10, 8));
+            // pending-staff：只有一条没闭合的上班打卡（工时 0）+ 待处理的打卡审批 → 列，否则店长找不到要处理的人。
+            await SeedBoundStaffAsync("pending-staff", EmployeeType.PartTime);
+            await SeedScheduleAsync("pending-shift", "BRI", "pending-staff", new DateTime(2026, 10, 7), "Active");
+            await _db.Insertable(CreateStoredPunchForSchedule(
+                "pending-shift-in", "pending-shift", "BRI", "pending-staff", "ClockIn", new DateTime(2026, 10, 7, 9, 0, 0)))
+                .ExecuteCommandAsync();
+            await _db.Insertable(new AttendanceApproval
+            {
+                ApprovalGuid = "pending-shift-punch",
+                SourceType = "Punch",
+                SourceGuid = "pending-shift-in",
+                StoreCode = "BRI",
+                ApplicantUserGuid = "pending-staff",
+                ReviewStatus = "Pending",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+
+            Assert.True(hours.Success, hours.Message);
+            Assert.Equal(
+                new[] { "pending-staff", "staff-user" },
+                hours.Data!.Employees.Select(item => item.UserGuid).OrderBy(item => item).ToArray());
+            Assert.Equal(0m, hours.Data.Employees.Single(item => item.UserGuid == "pending-staff").Totals.Total);
+            Assert.Equal(1, hours.Data.Employees.Single(item => item.UserGuid == "pending-staff").PendingCount);
+            Assert.Equal(4m, hours.Data.Totals.Total);
+            Assert.Contains(hours.Data.Alerts, item => item.Type == "Birthday" && item.UserGuid == "idle-teen");
+
+            // 只收紧工时统计页：工资表仍用完整名单（零工时的人可能有固定转账工时 / 津贴，不能漏人）。
+            var pay = await Manager().GetPayrollPayAsync(PayrollQuery());
+            Assert.True(pay.Success, pay.Message);
+            Assert.Contains(pay.Data!.Rows, row => row.UserGuid == "manager-user");
+            Assert.Contains(pay.Data.Rows, row => row.UserGuid == "idle-teen");
+        }
+
         [Fact]
         public async Task 工资周期_待处理清零才能提交_锁定后写接口返回PERIOD_LOCKED_解锁后恢复()
         {
