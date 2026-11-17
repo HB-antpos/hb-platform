@@ -169,7 +169,15 @@
         "shellExit": "退出",
         "prevWeek": "上一周",
         "nextWeek": "下一周",
-        "rotatedHint": "只读 · 把手机横过来即可编辑"
+        "rotatedHint": "只读 · 把手机横过来即可编辑",
+        "nameModeLabel": "员工名",
+        "nameModeNickname": "昵称",
+        "nameModeFull": "全名",
+        "nameModeTipNickname": "昵称：显示昵称，没填则显示名",
+        "nameModeTipFull": "全名：显示完整姓名",
+        "nameModeTipRemember": "选择会记在这台电脑的浏览器里",
+        "nameAltFull": "全名：{{name}}",
+        "nameAltNickname": "昵称：{{name}}"
       },
       "batch": {
         "title": "排班",

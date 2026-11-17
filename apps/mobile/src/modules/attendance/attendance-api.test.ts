@@ -30,3 +30,8 @@ assert.match(source, /export async function restoreAttendanceSchedule\(scheduleG
 assert.match(source, /export async function getAttendancePunchScheduleGuids[\s\S]{0,400}apiClient\.get\(`\$\{ATTENDANCE_BASE\}\/punches`[\s\S]{0,200}fromDate: params\.fromDate/,
   "本周打卡应 GET /punches 并按起止日期过滤");
 console.log("attendance-api.test.ts (schedule placement): ok");
+
+// 排班看板「昵称 / 全名」切换：考勤员工接口必须把后端已返回的姓名拆分字段映射出来，否则昵称模式永远回落到全名
+assert.match(source, /export async function getAttendanceEmployees[\s\S]{0,900}givenName: asOptionalString\(pick\(raw, "givenName", "GivenName"\)\)[\s\S]{0,200}familyName: asOptionalString\(pick\(raw, "familyName", "FamilyName"\)\)[\s\S]{0,200}nickname: asOptionalString\(pick\(raw, "nickname", "Nickname"\)\)/,
+  "考勤员工接口必须映射 givenName / familyName / nickname（兼容 PascalCase）");
+console.log("attendance-api.test.ts (employee name parts): ok");

@@ -814,6 +814,13 @@
     "weekLater": "下 {{count}} 周",
     "weekEarlier": "上 {{count}} 周",
     "board": {
+      "nameMode": {
+        "label": "员工名",
+        "nickname": "昵称",
+        "full": "全名",
+        "a11y": "员工名显示方式",
+        "hint": "切换看板上显示昵称还是全名；没填昵称时显示名"
+      },
       "legendA11y": "高亮 {{name}} 的班次",
       "legendMeta": "{{hours}}h · {{count}} 班",
       "dayStat": "{{people}} 人 · {{hours}}h",

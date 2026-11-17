@@ -9,10 +9,12 @@ import { formatScheduleHours, schedulePaidMinutes } from "@/modules/attendance/a
 import { FALLBACK_STAFF_COLOR, type BoardDay, type StaffColor, type StaffLegendItem } from "@/modules/attendance/schedule-board";
 import { normalizeClockTime } from "@/modules/attendance/schedule-grid";
 import type { PlacementVerdict } from "@/modules/attendance/schedule-placement";
+import type { StaffNameMode } from "@/modules/attendance/staff-display-name";
 import type { AttendanceSchedule } from "@/modules/attendance/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { PatternFill } from "../approvals/approval-ui";
+import { StaffNameModeSwitch } from "./StaffNameModeSwitch";
 
 export interface ScheduleBoardCardFlags {
   /** 与员工上报的可上班 / 不能上班冲突，或未成年用工提醒：卡片时间后加橙色「!」。 */
@@ -26,7 +28,13 @@ interface ScheduleBoardProps {
   days: readonly BoardDay[];
   today: string;
   colors: ReadonlyMap<string, StaffColor>;
+  /** 看板上显示的名字（昵称 / 全名，由上层按开关算好）。 */
   nameOf: (userGuid: string) => string;
+  /** 全名：只给读屏用（卡片 / 图例的无障碍文案），避免读屏只读昵称认不出人；不传就退回 nameOf。 */
+  fullNameOf?: (userGuid: string) => string;
+  /** 员工名显示方式及切换回调；不传 onChangeNameMode 就不显示开关。 */
+  nameMode?: StaffNameMode;
+  onChangeNameMode?: (mode: StaffNameMode) => void;
   ageOf: (userGuid: string) => number | undefined;
   flagsOf: (schedule: AttendanceSchedule) => ScheduleBoardCardFlags;
   legend: readonly StaffLegendItem[];
@@ -52,6 +60,9 @@ export function ScheduleBoard({
   today,
   colors,
   nameOf,
+  fullNameOf,
+  nameMode = "nickname",
+  onChangeNameMode,
   ageOf,
   flagsOf,
   legend,
@@ -68,8 +79,13 @@ export function ScheduleBoard({
   const columns = layout === "columns";
   const hoursShort = (minutes: number) => t("scheduleManagement.hoursShort", { hours: formatScheduleHours(minutes) });
 
+  // 图例行：最左边是「员工名」昵称 / 全名开关（固定不滚动，始终点得到），右边是可横向滚动的员工图例
   const renderLegend = () => (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.legend}>
+    <View style={styles.legendRow}>
+      {onChangeNameMode ? (
+        <StaffNameModeSwitch mode={nameMode} onChange={onChangeNameMode} compact={columns} />
+      ) : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.legendScroll} contentContainerStyle={styles.legend}>
       {legend.map((item) => {
         const color = colors.get(item.userGuid) ?? FALLBACK_STAFF_COLOR;
         const selected = highlighted === item.userGuid;
@@ -79,7 +95,7 @@ export function ScheduleBoard({
             key={item.userGuid}
             accessibilityRole="button"
             accessibilityState={{ selected }}
-            accessibilityLabel={t("scheduleManagement.board.legendA11y", { name: item.name })}
+            accessibilityLabel={t("scheduleManagement.board.legendA11y", { name: fullNameOf?.(item.userGuid) ?? item.name })}
             onPress={() => onToggleHighlight(item.userGuid)}
             style={[
               styles.legendChip,
@@ -98,7 +114,8 @@ export function ScheduleBoard({
           </Pressable>
         );
       })}
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 
   const renderCard = (schedule: AttendanceSchedule, dayIndex: number) => {
@@ -131,7 +148,7 @@ export function ScheduleBoard({
       <Pressable
         key={schedule.scheduleGuid}
         accessibilityRole="button"
-        accessibilityLabel={`${name} ${normalizeClockTime(schedule.startTime)}–${normalizeClockTime(schedule.endTime)}`}
+        accessibilityLabel={`${fullNameOf?.(schedule.userGuid) ?? name} ${normalizeClockTime(schedule.startTime)}–${normalizeClockTime(schedule.endTime)}`}
         disabled={disabled}
         onPress={() => onPressCard(schedule, dayIndex)}
         style={[
@@ -248,6 +265,8 @@ export function ScheduleBoard({
 const styles = StyleSheet.create({
   rootList: { gap: HB_SPACING.xs },
   rootColumns: { gap: 6 },
+  legendRow: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
+  legendScroll: { flex: 1 },
   legend: { gap: 6, paddingVertical: 2, paddingRight: HB_SPACING.xs },
   legendChip: {
     flexDirection: "row",

@@ -235,8 +235,24 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('<WeekBoard'), '周排班应使用按天分列的看板')
   assert(!pageSource.includes('scheduleColumns') && !pageSource.includes('renderScheduleCell'), '周排班不应再用员工行的表格')
   assert(!pageSource.includes('filterRowsByKeyword'), '搜索员工只做高亮，不再过滤出员工行')
-  assert(pageSource.includes('groupSchedulesByDay(weekSchedules, weekDateKeys, nameOf)'), '每天的班次要按时间、员工名排序后再渲染')
+  assert(pageSource.includes('groupSchedulesByDay(weekSchedules, weekDateKeys, boardNameOf)'), '每天的班次要按时间、看板上显示的名字排序后再渲染')
   assert(pageSource.includes('assignStaffColors('), '员工颜色统一由 assignStaffColors 分配')
+  // 员工名显示切换（昵称 / 全名）：只影响看板（图例 + 卡片 + 排序）；颜色、搜索、弹窗仍用全名
+  assert(pageSource.includes('readStaffNameMode(getBrowserStorage())') && pageSource.includes('writeStaffNameMode(storage, next)'), '员工名显示方式要按浏览器记住')
+  assert(pageSource.includes('buildStaffLegend(weekSchedules, boardNameOf)'), '图例要用看板当前显示的名字')
+  assert(pageSource.includes('const name = boardNameOf(schedule.userGuid)'), '班次卡片要用看板当前显示的名字')
+  assert(pageSource.includes('assignStaffColors(Array.from(userNameMap'), '员工颜色仍按全名分配，切换开关不能换色')
+  assert(pageSource.includes('name: displayStoreUserName(user)') && pageSource.includes('label: displayStoreUserName(user)'), '批量排班弹窗、换人下拉仍用全名，避免选错人')
+  assert(pageSource.includes('...Array.from(nicknameNames'), '搜索要同时匹配全名和昵称')
+  assert((pageSource.match(/<Switch (size="small" )?\{\.\.\.staffNameSwitchProps\}/g) ?? []).length === 2, '工具栏和手机横屏顶栏各有一个员工名开关')
+  {
+    const boardKeys = (file: string) => Object.keys(JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')).posAdmin.scheduleAttendance.board)
+    const zhBoard = boardKeys('scheduleAttendanceMessages.zh.json')
+    const enBoard = boardKeys('scheduleAttendanceMessages.en.json')
+    for (const key of ['nameModeLabel', 'nameModeNickname', 'nameModeFull', 'nameModeTipNickname', 'nameModeTipFull', 'nameModeTipRemember', 'nameAltFull', 'nameAltNickname']) {
+      assert(zhBoard.includes(key) && enBoard.includes(key), `员工名切换文案 ${key} 中英文都要有`)
+    }
+  }
   // 编辑浮层「改给其他员工」复用拖拽换人的落地逻辑（新建给对方 + 删除原班次，可撤销）
   const transferStart = pageSource.indexOf('const transferSchedule = async')
   const transferEnd = pageSource.indexOf('const deleteScheduleViaX', transferStart)

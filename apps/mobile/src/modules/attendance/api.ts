@@ -811,6 +811,11 @@ export async function getAttendanceEmployees(storeCode: string): Promise<StoreUs
     userGUID: asString(pick(raw, "userGuid", "UserGuid", "userGUID")),
     username: asString(pick(raw, "username", "Username")),
     fullName: asOptionalString(pick(raw, "fullName", "FullName")),
+    // 姓名拆分字段（后端本就返回，旧后端缺省）：排班看板「昵称 / 全名」切换要用，缺了就永远回落到全名。
+    givenName: asOptionalString(pick(raw, "givenName", "GivenName")),
+    middleName: asOptionalString(pick(raw, "middleName", "MiddleName")),
+    familyName: asOptionalString(pick(raw, "familyName", "FamilyName")),
+    nickname: asOptionalString(pick(raw, "nickname", "Nickname")),
     employmentType: asOptionalString(pick(raw, "employmentType", "EmploymentType")),
     age: asOptionalNumber(pick(raw, "age", "Age")),
     isStoreManager: asBoolean(pick(raw, "isStoreManager", "IsStoreManager")),

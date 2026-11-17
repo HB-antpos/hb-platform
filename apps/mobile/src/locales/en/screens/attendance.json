@@ -814,6 +814,13 @@
     "weekLater": "{{count}} wk ahead",
     "weekEarlier": "{{count}} wk ago",
     "board": {
+      "nameMode": {
+        "label": "Names",
+        "nickname": "Nickname",
+        "full": "Full name",
+        "a11y": "Staff name display",
+        "hint": "Switches the board between nicknames and full names; staff without a nickname show their first name"
+      },
       "legendA11y": "Highlight shifts of {{name}}",
       "legendMeta": "{{hours}}h · {{count}}",
       "dayStat": "{{people}} on · {{hours}}h",
