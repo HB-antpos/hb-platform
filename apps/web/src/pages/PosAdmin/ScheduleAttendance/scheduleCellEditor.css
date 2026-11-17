@@ -793,7 +793,8 @@
 /* 状态图例：实线 = 已发布，虚线斜纹 = 草稿，灰底 = 已取消（颜色只用来区分员工） */
 .sce-status-legend {
   display: inline-flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 4px 12px;
   font-size: 12px;
   color: rgba(0, 0, 0, 0.45);
 }
@@ -933,6 +934,53 @@
   line-height: 14px;
 }
 
+/* 有无午饭标识：卡片第一行右侧的叉勺小图标；自动 = 图标，手动 = 虚线框，长班次无午饭 = 橙色斜杠 */
+.sce-card-meal {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  height: 14px;
+  margin-left: auto;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.sce-card-meal svg {
+  width: 10px;
+  height: 10px;
+}
+
+.sce-card-meal--manual {
+  outline: 1px dashed currentColor;
+  outline-offset: -1px;
+}
+
+.sce-card-meal--none {
+  background: #fff7e6;
+  color: #ad4e00;
+  outline: 1px dashed #ffa940;
+  outline-offset: -1px;
+}
+
+/* 图例里的标识不贴右边，颜色用中性灰 */
+.sce-meal-legend .sce-card-meal {
+  margin-left: 0;
+  margin-right: 4px;
+  vertical-align: -3px;
+  color: rgba(0, 0, 0, 0.55);
+  background: #fff;
+}
+
+.sce-meal-legend .sce-card-meal--none {
+  background: #fff7e6;
+  color: #ad4e00;
+}
+
 .sce-card-tag {
   flex: none;
   margin-left: auto;
@@ -1068,6 +1116,8 @@
 
 .sce-card:hover .sce-card-tag,
 .sce-card:focus-within .sce-card-tag,
+.sce-card--editable:hover .sce-card-meal,
+.sce-card--editable:focus-within .sce-card-meal,
 .sce-card--editable:hover .sce-card-hours,
 .sce-card--editable:focus-within .sce-card-hours {
   visibility: hidden;
@@ -2332,4 +2382,82 @@ body.sce-shell-open {
 /* antd 提示默认最宽 250px，36 位 GUID 会折成两行；放宽到一行放得下 */
 .ant-tooltip.sce-guid-tip {
   max-width: 340px;
+}
+
+/* ===== 导出排班图片弹窗 ===== */
+.sce-export-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.sce-export-options {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 13px;
+}
+
+.sce-export-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sce-export-group h4 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-export-group small {
+  margin-left: 6px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.sce-export-privacy {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #b7eb8f;
+  border-radius: 6px;
+  background: #f6ffed;
+  color: #237804;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sce-export-preview {
+  max-height: 58vh;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: #f3f4f7;
+}
+
+.sce-export-preview img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid #d0d5dd;
+  background: #fff;
+}
+
+.sce-export-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sce-export-size {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+@media (max-width: 760px) {
+  .sce-export-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

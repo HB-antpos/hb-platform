@@ -12,6 +12,7 @@ import {
   LeftOutlined,
   LoadingOutlined,
   LockOutlined,
+  PictureOutlined,
   PlusOutlined,
   ReloadOutlined,
   RightOutlined,
@@ -169,6 +170,11 @@ import { FALLBACK_STAFF_COLOR, assignStaffColors } from './staffColorLogic'
 import type { StaffColor } from './staffColorLogic'
 import { mergeStaffNameSources, readStaffNameMode, resolveStaffNames, writeStaffNameMode } from './staffNameLogic'
 import type { StaffNameMode, StaffNameSource } from './staffNameLogic'
+import { MealIcon, MealMarkBadge } from './MealMarkBadge'
+import ScheduleExportModal from './ScheduleExportModal'
+import { buildScheduleExportModel, exportFileName } from './scheduleExportLogic'
+import type { ExportOptions } from './scheduleExportLogic'
+import { getMealMark } from './mealMarkLogic'
 import {
   buildEmployeeOptions,
   matchesEmployeeKeyword,
@@ -485,6 +491,7 @@ export default function ScheduleAttendancePage() {
   const [publishing, setPublishing] = useState(false)
   const [syncingHolidays, setSyncingHolidays] = useState(false)
   const [deletedSchedulesOpen, setDeletedSchedulesOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [holidayForm] = Form.useForm<HolidayFormValues>()
   const [batchHolidayForm] = Form.useForm<BatchHolidayFormValues>()
   const [adjustmentForm] = Form.useForm<PunchAdjustmentFormValues>()
@@ -2148,6 +2155,14 @@ export default function ScheduleAttendancePage() {
         paid: formatHours(mealSummary.paidHours),
       })
       : ''
+    // 有无午饭标识：自动含午饭 / 手动指定 / 长班次无午饭（手动不扣）显示，短班次与已取消不显示
+    const mealMark = getMealMark({ startTime: schedule.startTime, endTime: schedule.endTime, mealBreakCount: schedule.mealBreakCount, status: schedule.status })
+    const mealMarkLabel = mealMark.kind === 'none'
+      ? t('posAdmin.scheduleAttendance.board.mealMark.none')
+      : mealMark.kind === 'meal' ? t('posAdmin.scheduleAttendance.board.mealMark.meal', { count: mealMark.count }) : ''
+    const mealNoneTip = mealMark.kind === 'none'
+      ? t('posAdmin.scheduleAttendance.board.mealNoneTip', { hours: formatHours(mealMark.durationMinutes / 60) })
+      : ''
     const timeText = `${formatTime(schedule.startTime)}–${formatTime(schedule.endTime)}`
     const dim = highlighting && !isHighlighted(schedule.userGuid)
     const hi = highlighting && isHighlighted(schedule.userGuid)
@@ -2157,6 +2172,7 @@ export default function ScheduleAttendancePage() {
       otherNameTip,
       statusLabel('schedule', schedule.status),
       hoursTip,
+      mealNoneTip,
       conflict ? t(`posAdmin.scheduleAttendance.weekAvailability.${conflict === 'unavailable' ? 'conflictUnavailable' : 'conflictOutside'}`) : '',
       mealBadge && mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : '',
       schedule.remark ?? '',
@@ -2197,6 +2213,7 @@ export default function ScheduleAttendancePage() {
         <div className="sce-card-line1">
           <b>{name}</b>
           {age !== undefined ? <span className="sce-card-age">{age}</span> : null}
+          <MealMarkBadge mark={mealMark} label={mealMarkLabel} />
           {schedule.status === 'Cancelled' ? <span className="sce-card-tag">{statusLabel('schedule', 'Cancelled')}</span> : null}
         </div>
         <div className="sce-card-line2">
@@ -2729,6 +2746,28 @@ export default function ScheduleAttendancePage() {
     </Popover>
   ) : null
 
+  // ===== 导出排班图片 =====
+  // 模型只取班次的白名单字段（见 scheduleExportLogic）：年龄、打卡、锁定、冲突、备注一律不进导出图
+  const exportStoreName = storeCode ? (storeNameMap.get(storeCode) ?? storeCode) : ''
+  const buildExportModel = useCallback((options: ExportOptions) => buildScheduleExportModel({
+    schedules: weekSchedules,
+    weekDateKeys,
+    weekdayLabels: weekDays.map((_, index) => t(`posAdmin.scheduleAttendance.weekdays.${index}`)),
+    nameOf: boardNameOf,
+    colorOf: (userGuid) => staffColors.get(userGuid) ?? FALLBACK_STAFF_COLOR,
+    options,
+    texts: {
+      title: t('posAdmin.scheduleAttendance.export.imageTitle', { store: exportStoreName }),
+      subtitle: t(options.includeDrafts ? 'posAdmin.scheduleAttendance.export.imageSubtitleDrafts' : 'posAdmin.scheduleAttendance.export.imageSubtitle', { week: formatWeekRange(selectedWeek) }),
+      onDuty: (count) => t('posAdmin.scheduleAttendance.export.onDuty', { count }),
+      total: (count) => t('posAdmin.scheduleAttendance.export.total', { count }),
+      generatedAt: t('posAdmin.scheduleAttendance.export.generatedAt', { time: dayjs().format('YYYY-MM-DD HH:mm') }),
+      draft: t('posAdmin.scheduleAttendance.export.draft'),
+      mealLegendMeal: t('posAdmin.scheduleAttendance.export.mealLegendMeal'),
+      mealLegendNone: t('posAdmin.scheduleAttendance.export.mealLegendNone'),
+    },
+  }), [boardNameOf, exportStoreName, formatWeekRange, selectedWeek, staffColors, t, weekDateKeys, weekDays, weekSchedules])
+
   // 员工名显示方式：开＝昵称（没填用名兜底），关＝全名；选择写进浏览器，下次沿用
   const changeStaffNameMode = (checked: boolean) => {
     const next: StaffNameMode = checked ? 'nickname' : 'full'
@@ -2847,6 +2886,10 @@ export default function ScheduleAttendancePage() {
           <span><i className="is-Active" />{statusLabel('schedule', 'Active')}</span>
           <span><i className="is-Draft" />{statusLabel('schedule', 'Draft')}</span>
           <span><i className="is-Cancelled" />{statusLabel('schedule', 'Cancelled')}</span>
+          {/* 午饭标识图例：含午饭 / 长班次无午饭 / 虚线框＝手动指定 */}
+          <span className="sce-meal-legend"><span className="sce-card-meal"><MealIcon /></span>{t('posAdmin.scheduleAttendance.board.mealLegend.meal')}</span>
+          <span className="sce-meal-legend"><span className="sce-card-meal sce-card-meal--none"><MealIcon slashed /></span>{t('posAdmin.scheduleAttendance.board.mealLegend.none')}</span>
+          <span className="sce-meal-legend"><span className="sce-card-meal sce-card-meal--manual"><MealIcon /></span>{t('posAdmin.scheduleAttendance.board.mealLegend.manual')}</span>
         </span>
       )}
       loading={schedules.loading || storeUsersLoading || scheduleHolidaysLoading}
@@ -3062,6 +3105,14 @@ export default function ScheduleAttendancePage() {
       extra={activeTab === 'review' ? undefined : (
         <Space wrap>
           {filterBar}
+          {/* 导出图片：只要能看排班就能导出（不依赖编辑权限） */}
+          {activeTab === 'schedules' ? (
+            <Tooltip title={!storeCode ? t('posAdmin.scheduleAttendance.export.selectStore') : undefined}>
+              <Button icon={<PictureOutlined />} disabled={!storeCode} onClick={() => setExportOpen(true)}>
+                {t('posAdmin.scheduleAttendance.export.button')}
+              </Button>
+            </Tooltip>
+          ) : null}
           {activeTab === 'schedules' && access.canEditAttendanceSchedule ? (
             <>
               <Tooltip title={!storeCode ? t('posAdmin.scheduleAttendance.messages.selectStoreBeforePublish') : !canEditSelectedStore ? t('message.noPermission', '无权操作该数据') : undefined}>
@@ -3134,6 +3185,14 @@ export default function ScheduleAttendancePage() {
           <Tabs activeKey={activeTab} onChange={handleTabChange} items={tabItems} />
         </div>
       </div>
+
+      <ScheduleExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        buildModel={buildExportModel}
+        fileName={exportFileName(exportStoreName, weekDateKeys[0] ?? '', weekDateKeys[6] ?? '')}
+        nameModeLabel={t(staffNameMode === 'nickname' ? 'posAdmin.scheduleAttendance.board.nameModeNickname' : 'posAdmin.scheduleAttendance.board.nameModeFull')}
+      />
 
       <DeletedSchedulesDrawer
         open={deletedSchedulesOpen}

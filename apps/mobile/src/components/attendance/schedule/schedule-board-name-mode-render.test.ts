@@ -49,6 +49,10 @@ async function run() {
     View: host("View"), Pressable: host("Pressable"), ScrollView: host("ScrollView"),
   });
   mockModule("react-native-paper", { Text: host("Text") });
+  // 午饭标识用 react-native-svg 画图标：测试里换成会留下节点的占位，便于断言
+  mockModule("react-native-svg", {
+    __esModule: true, default: host("Svg"), Path: host("Path"), G: host("G"), Rect: host("Rect"), Line: host("Line"), Text: host("SvgText"),
+  });
   mockModule(require.resolve("../../../shared/i18n/use-app-translation"), { useAppTranslation: () => ({ t: lookup, language: "zh" }) });
   mockModule(require.resolve("../approvals/approval-ui"), { PatternFill: host("PatternFill") });
 
@@ -109,7 +113,8 @@ async function run() {
     // 读屏标签一律用全名，避免只读昵称认不出人
     const labels = view.labels();
     assert.ok(labels.includes("高亮 Cody Johnson 的班次"), "图例的读屏文案用全名");
-    assert.ok(labels.includes("Taylor Keating 09:00–17:30"), "卡片的读屏文案用全名 + 时间");
+    // 卡片读屏标签以「全名 + 时间」开头；8.5 小时的班次末尾还会带「含午饭 1 次」（见 schedule-board-meal-mark-render.test.ts）
+    assert.ok(labels.some((label) => label.startsWith("Taylor Keating 09:00–17:30")), "卡片的读屏文案用全名 + 时间");
 
     // 开关：switch 角色、当前状态为开（昵称）、文案「员工名 / 昵称」
     const toggle = view.switchNode()!;
