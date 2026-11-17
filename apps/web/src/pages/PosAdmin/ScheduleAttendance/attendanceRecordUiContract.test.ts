@@ -290,3 +290,58 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('format={(value) => formatWeekRange(value)}'), '周选择器显示周范围')
   assert(!pageSource.includes('<Tag color="blue" style={{ lineHeight'), '原来的蓝色周标签已并入周范围')
 }
+
+// 表格页签（考勤记录 / 员工可用时间 / 打卡记录）：左侧分店列表更早展开 + 员工下拉筛选 + 员工列显示昵称 / 全名
+{
+  // 左侧分店列表：周排班仍按 7 天看板的阈值，其它页签放宽
+  assert(
+    pageSource.includes("dockMinWidth: activeTab === 'schedules' ? STORE_SIDEBAR_DOCK_MIN_WIDTH : STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH"),
+    '周排班用 7 天看板的阈值，表格页签用放宽后的阈值',
+  )
+  // 员工筛选：取代「员工 GUID」输入框；只在按员工查询的三个页签出现，选中即查询
+  assert(!pageSource.includes("placeholder={t('posAdmin.scheduleAttendance.filters.userGuid')}"), '员工 GUID 输入框已被员工下拉取代')
+  assert(
+    pageSource.includes("const employeeFilterActive = activeTab === 'records' || activeTab === 'availability' || activeTab === 'punches'"),
+    '员工下拉只在考勤记录 / 员工可用时间 / 打卡记录页签出现',
+  )
+  assert(pageSource.includes(') : employeeFilterActive ? employeeSelect : null}'), '筛选栏里非周排班页签放员工下拉')
+  assert(pageSource.includes('filterOption={(input, option) => matchesEmployeeKeyword('), '员工下拉要同时匹配昵称 / 名 / 全名 / 登录名 / GUID')
+  assert(pageSource.includes('disabled={!storeCode}'), '全部分店没有员工名单，员工下拉要置灰')
+  assert(pageSource.includes('}, [activeTab, storeCode, dateRange, selectedWeek, userGuid])'), '选中 / 清除员工后要立即重新查询')
+  // 员工名开关：周排班与这三个页签共用同一个开关（工具栏里只有一个 <Switch>，横屏顶栏另有一个）
+  assert(pageSource.includes("{activeTab === 'schedules' || employeeFilterActive ? ("), '员工名开关也要出现在员工筛选页签')
+  // 换店清掉上一家店选的员工
+  {
+    const selectStoreStart = pageSource.indexOf('const selectStore = useCallback(')
+    const selectStoreEnd = pageSource.indexOf('const setSidebarDock', selectStoreStart)
+    assert(selectStoreStart >= 0 && selectStoreEnd > selectStoreStart, '应能定位 selectStore')
+    const selectStoreSource = pageSource.slice(selectStoreStart, selectStoreEnd)
+    assert(selectStoreSource.includes('setUserGuid(undefined)') && selectStoreSource.includes('employeeFilter.storeChanged'), '换到另一家店要清掉已选员工并提示')
+    assert(selectStoreSource.includes('code !== storeCode && userGuid'), '只有真的换了店、且选过员工才清除')
+  }
+  // 员工名单：非周排班页签按分店加载一次，已加载过的分店不重复请求；快速换店时旧响应不能覆盖新名单
+  assert(
+    pageSource.includes("if (activeTab !== 'records' && activeTab !== 'availability' && activeTab !== 'punches') return"),
+    '员工名单要在员工筛选页签里加载',
+  )
+  assert(pageSource.includes("if (storeUsersKeyRef.current === (storeCode ?? '')) return"), '已加载过的分店不重复请求员工名单')
+  assert(pageSource.includes('if (requestId !== storeUsersRequestRef.current) return'), '旧分店的员工名单响应要丢弃')
+  // 员工列：显示名跟开关走，名字取不到显示 GUID 前 8 位；完整 GUID 在悬停提示里可复制
+  assert(pageSource.includes('resolveEmployeeCell({'), '员工列要按开关显示昵称 / 全名')
+  assert(pageSource.includes('copyable={{ text: guid, tooltips: false }}'), '完整 GUID 放进悬停提示并可复制')
+  assert(!pageSource.includes('{record.userGuid || record.applicantUserGuid ||'), '员工列不再直接铺两行 GUID')
+  // 选了单店后隐藏「分店」列（整列都是同一家店），选「全部分店」时保留
+  assert(recordColumnsSource.includes("key: 'store'") && punchColumnsSource.includes("key: 'store'"), '考勤记录 / 打卡记录的分店列要有 key 才能被隐藏')
+  assert(pageSource.includes('columns={hideStoreColumn(recordColumns)}') && pageSource.includes('columns={hideStoreColumn(punchColumns)}'), '选了单店要隐藏分店列')
+  assert(pageSource.includes('(storeCode ? columns.filter((column) => column.key !== \'store\') : columns)'), '只有选了单店才隐藏分店列')
+  // 文案中英文都要有
+  {
+    const filterKeys = (file: string) => Object.keys(JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')).posAdmin.scheduleAttendance.employeeFilter)
+    const zhKeys = filterKeys('scheduleAttendanceMessages.zh.json')
+    const enKeys = filterKeys('scheduleAttendanceMessages.en.json')
+    for (const key of ['placeholder', 'needStore', 'empty', 'storeStaff', 'matchCount', 'storeChanged', 'notInRoster']) {
+      assert(zhKeys.includes(key) && enKeys.includes(key), `员工筛选文案 ${key} 中英文都要有`)
+    }
+    assert(pageSource.includes("t(`posAdmin.scheduleAttendance.board.${display.alt.kind === 'full' ? 'nameAltFull' : 'nameAltNickname'}`"), '员工列第二行复用看板的「全名：/ 昵称：」文案')
+  }
+}

@@ -2258,3 +2258,78 @@ body.sce-shell-open {
   overflow: visible;
   margin-right: 12px;
 }
+
+/* ---------- 员工筛选下拉 / 员工列（考勤记录、员工可用时间、打卡记录） ---------- */
+/* 下拉选项：左边显示名（跟开关），右边灰字是另一种叫法；命中搜索的字标蓝 */
+.sce-emp-opt {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.sce-emp-opt-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sce-emp-opt-alt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+.sce-emp-opt mark {
+  background: none;
+  color: #1677ff;
+  font-weight: 600;
+}
+.sce-emp-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 7px 16px 4px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+/* 员工列：第一行显示名，第二行灰字另一种叫法；名字取不到时第一行是等宽的 GUID 前 8 位 */
+.sce-emp-cell {
+  min-width: 0;
+}
+.sce-emp-name {
+  line-height: 1.5;
+}
+.sce-emp-name.is-guid {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(0, 0, 0, 0.45);
+}
+.sce-emp-alt {
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(0, 0, 0, 0.45);
+}
+.sce-emp-tag.ant-tag {
+  margin: 2px 0 0;
+  padding-inline: 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+/* 悬停提示里的完整 GUID（等宽，可点右侧图标复制） */
+.sce-guid-tip-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sce-guid-tip-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.sce-guid-tip .ant-typography-copy {
+  color: #69b1ff;
+}
+/* antd 提示默认最宽 250px，36 位 GUID 会折成两行；放宽到一行放得下 */
+.ant-tooltip.sce-guid-tip {
+  max-width: 340px;
+}
