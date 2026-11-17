@@ -299,8 +299,10 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
             }
 
             // 码冲突时只列精确命中的商品，口径同 ProcessSearchScanAsync。
+            // 精确命中唯一一行时必须直接用这一行：同一商品的主条码 / 套装码 / 清货码等多行共用主条码作为 Barcode，
+            // 关键词搜索把它们排在同一档，「取搜索第一条」可能落到另一行（套装价 / 清货价），与扫码枪结果不一致。
             var searchStopwatch = Stopwatch.StartNew();
-            var matches = hasDuplicateExactMatch
+            var matches = exactMatches.Count > 0
                 ? exactMatches
                 : _priceIndex.Search(session.StoreCode, submittedScanText);
             searchStopwatch.Stop();
@@ -407,8 +409,9 @@ public sealed class PosTerminalWorkflowService : IPosTerminalWorkflowService
 
         // 输入的码精确命中多个商品（码冲突）时只列这些商品，与扫码枪口径一致：关键词搜索会把同一商品
         // 按它自己的货号再列一次，且只取前 20 条，候选多时排在后面的商品选不到。
+        // 精确命中唯一一行时直接用这一行（同一商品的多条查询码行共用主条码作 Barcode，搜索排序不可靠），与扫码枪同口径。
         var searchStopwatch = Stopwatch.StartNew();
-        var matches = hasDuplicateExactMatch
+        var matches = exactMatches.Count > 0
             ? exactMatches
             : await _priceIndex.SearchAsync(session.StoreCode, submittedScanText, cancellationToken);
         searchStopwatch.Stop();
