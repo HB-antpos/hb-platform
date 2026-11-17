@@ -4244,6 +4244,30 @@ function sameInstallmentLines(
   });
 }
 
+/**
+ * 服务端把 DateTime 参数写进 SQL Server `datetime` 列，精度只有 1/300 秒（毫秒尾数只会是 0 / 3 / 7），
+ * 回包读到的时间与本机冻结命令里的毫秒值最多差 2~3 ms（同一根因见 WPF LinklySettlementRepository 的 #600）。
+ * 严格相等会让约 7 成的提货 / 作废回包被误判为不一致：服务端已经提交，本机却抛错进入恢复，
+ * 而 lifecycle 动作只有 Completed 一种结案，重试拿到的是同一个舍入值，整台设备因此卡在付款恢复页。
+ * 所以按服务端精度做容差比较；10 ms 远小于任何真实的「不是同一次操作」的时间差。
+ */
+const SERVER_TIMESTAMP_TOLERANCE_MS = 10;
+
+function isSameInstantWithinServerPrecision(
+  serverIso: string | null | undefined,
+  frozenIso: string,
+): boolean {
+  if (typeof serverIso !== "string") return false;
+  if (serverIso === frozenIso) return true;
+  const server = Date.parse(serverIso);
+  const frozen = Date.parse(frozenIso);
+  return (
+    Number.isFinite(server) &&
+    Number.isFinite(frozen) &&
+    Math.abs(server - frozen) <= SERVER_TIMESTAMP_TOLERANCE_MS
+  );
+}
+
 function validateLifecycleMutationResult(
   details: InstallmentDetails,
   persisted: PersistedInstallmentLifecycleAction,
@@ -4259,7 +4283,10 @@ function validateLifecycleMutationResult(
       !commonMatches ||
       details.status !== "Cancelled" ||
       cancellation?.kind !== "VoidCancel" ||
-      cancellation.cancelledAtIso !== command.voidedAtIso ||
+      !isSameInstantWithinServerPrecision(
+        cancellation.cancelledAtIso,
+        command.voidedAtIso,
+      ) ||
       cancellation.reason !== command.reason
     ) {
       throw paymentRecoveryError(
@@ -4274,7 +4301,11 @@ function validateLifecycleMutationResult(
   if (
     !commonMatches ||
     details.status !== "PickedUp" ||
-    pickup?.pickedUpAtIso !== command.confirmedAtIso ||
+    !pickup ||
+    !isSameInstantWithinServerPrecision(
+      pickup.pickedUpAtIso,
+      command.confirmedAtIso,
+    ) ||
     pickup.note !== command.note
   ) {
     throw paymentRecoveryError(

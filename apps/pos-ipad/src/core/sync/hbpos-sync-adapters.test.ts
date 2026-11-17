@@ -189,6 +189,30 @@ test("已收款历史订单小数数量 400 保留待同步，其余 400 仍是�
   });
 });
 
+test("网关 / 路由类响应（404、405、413、408、非信封 2xx）保留待传，只有服务端明确的业务结论才永久拒绝", async () => {
+  // 回归：反代配错（例如 nginx 少一个斜杠让 POS 路由全部 404）时，旧实现把窗口内所有积压订单置 Rejected，
+  // 网关恢复后也永不重传，同步历史页没有重试入口。
+  const cases: readonly [string, Error, "retry" | "rejected"][] = [
+    ["404 非信封", new HbposApiError("not found", { kind: "http", status: 404, apiEnvelope: false }), "retry"],
+    ["405 非信封", new HbposApiError("method", { kind: "http", status: 405, apiEnvelope: false }), "retry"],
+    ["413 非信封", new HbposApiError("too large", { kind: "http", status: 413, apiEnvelope: false }), "retry"],
+    ["408 请求超时", new HbposApiError("timeout", { kind: "http", status: 408 }), "retry"],
+    ["2xx 非信封正文", new HbposApiError("html", { kind: "envelope", apiEnvelope: false }), "retry"],
+    ["404 但带业务信封", new HbposApiError("business", { kind: "http", status: 404, code: "ORDER_GONE", apiEnvelope: true }), "rejected"],
+    ["409 冲突", new HbposApiError("conflict", { kind: "http", status: 409, code: "ORDER_CONFLICT" }), "rejected"],
+    ["422 无效", new HbposApiError("invalid", { kind: "http", status: 422, code: "ORDER_INVALID" }), "rejected"],
+    ["2xx 业务信封拒绝", new HbposApiError("rejected", { kind: "envelope", code: "ORDER_REJECTED", apiEnvelope: true }), "rejected"],
+  ];
+  for (const [name, error, kind] of cases) {
+    const result = await orderAdapter(error).adapter.sync(orderGuid, JSON.stringify({ orderGuid }));
+    assert.equal(result.kind, kind, name);
+  }
+  const retry = await orderAdapter(
+    new HbposApiError("not found", { kind: "http", status: 404, apiEnvelope: false }),
+  ).adapter.sync(orderGuid, JSON.stringify({ orderGuid }));
+  assert.deepEqual(retry, { kind: "retry", failure: "server", code: "HTTP_404" });
+});
+
 test("受信任材料只进入本次 HTTP 载荷，仓储中的脱敏订单保持不变", async () => {
   const local = order("card");
   const resolverInputs: LocalOrder[] = [];

@@ -4489,6 +4489,141 @@ test("真实 SQLite：尚无 attempt 的 manual-card binding 不可 abandon 且�
   });
 });
 
+test("真实 SQLite：断网连点付款留下多条从未建 attempt 的绑定时，恢复取最新一条且可放弃，不再整机启动失败", async () => {
+  // 回归：界面每次点付款都生成新动作号，断网（或配置门禁）在建 attempt 之前拦下，
+  // 同一订单留下多条无 attempt 的绑定。旧实现抛 "Multiple payment action bindings require support."，
+  // 本单卡死，启动恢复也走同一查询，重启后整台设备停在启动失败页；绑定表有不可变触发器，无法清理。
+  await withDatabase("draft-multi-unstarted-bindings", async (connection) => {
+    await migrateFresh(connection);
+    const input = draftInput({
+      draftId: "draft-multi-unstarted",
+      identity: {
+        storeCode: "S-MULTI-UNSTARTED",
+        deviceCode: "D-MULTI-UNSTARTED",
+        cashierId: "C-MULTI-UNSTARTED",
+        cashierName: "Multi unstarted",
+      },
+    });
+    const store = new SqlitePaymentDraftRecoveryStore(
+      connection,
+      sequenceIds("order-multi-unstarted", "audit-multi-unstarted"),
+      () => T1,
+    );
+    const created = await store.createOrReuseDraft(input);
+    const insertBinding = (actionId: string, createdAtIso: string) =>
+      connection.run(
+        `INSERT INTO payment_action_bindings (
+          order_guid, action_id, request_signature, attempt_id,
+          idempotency_key, created_at_iso, audit_actor_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          created.orderGuid,
+          actionId,
+          JSON.stringify(["square", "purchase", "AUD", 900]),
+          `attempt-${actionId}`,
+          `idempotency-${actionId}`,
+          createdAtIso,
+          paymentActorJson(),
+        ],
+      );
+    await insertBinding("click-1", T0);
+    await insertBinding("click-2", T1);
+    await insertBinding("click-3", T2);
+
+    const recovery = await store.findBlockingRecovery(input.identity);
+    assert.equal(recovery?.kind, "DraftPrepared");
+    assert.equal(recovery?.boundAction?.actionId, "click-3", "取创建时间最新的一条");
+    assert.equal(recovery?.attemptId, null);
+
+    const abandoned = await store.abandonPreparedDraft({
+      actionId: "abandon-multi-unstarted",
+      draftId: input.draftId,
+      orderGuid: created.orderGuid,
+      actor: paymentAuditActor(),
+      ...input.identity,
+    });
+    assert.equal(abandoned.replayed, false);
+    assert.equal(await store.findBlockingRecovery(input.identity), null);
+    // 不可变历史完整保留，没有任何 attempt / tender。
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM payment_action_bindings WHERE order_guid = ?", [created.orderGuid]),
+      3,
+    );
+    assert.equal(
+      await scalar(connection, "SELECT COUNT(*) AS count FROM payment_attempts WHERE order_guid = ?", [created.orderGuid]),
+      0,
+    );
+  });
+});
+
+test("真实 SQLite：多条无 attempt 绑定里含手动刷卡时仍禁止 abandon；已建 attempt 的绑定优先，两条已建 attempt 仍 fail closed", async () => {
+  await withDatabase("draft-multi-bindings-guards", async (connection) => {
+    await migrateFresh(connection);
+    const input = draftInput({
+      draftId: "draft-multi-guards",
+      identity: {
+        storeCode: "S-MULTI-GUARDS",
+        deviceCode: "D-MULTI-GUARDS",
+        cashierId: "C-MULTI-GUARDS",
+        cashierName: "Multi guards",
+      },
+    });
+    const store = new SqlitePaymentDraftRecoveryStore(
+      connection,
+      sequenceIds("order-multi-guards", "audit-multi-guards"),
+      () => T1,
+    );
+    const created = await store.createOrReuseDraft(input);
+
+    // 手动刷卡绑定表示外部卡机已确认付款：即使还有别的无 attempt 绑定，也不能放弃。
+    await insertActionBinding(connection, created.orderGuid, "guard-square", "attempt-guard-square", "idem-guard-square");
+    // 手持端的 insertActionBinding 夹具只接受 4 元组签名，手动刷卡（第 5 项 "confirmed"）用原生 INSERT。
+    await connection.run(
+      `INSERT INTO payment_action_bindings (
+        order_guid, action_id, request_signature,
+        attempt_id, idempotency_key, created_at_iso, audit_actor_json
+      ) VALUES (?, 'guard-manual', ?, 'attempt-guard-manual', 'idem-guard-manual', ?, ?)`,
+      [
+        created.orderGuid,
+        JSON.stringify(["manual-card", "purchase", "AUD", 900, "confirmed"]),
+        T0,
+        paymentActorJson(),
+      ],
+    );
+    assert.equal((await store.findBlockingRecovery(input.identity))?.kind, "DraftPrepared");
+    await assert.rejects(
+      () => store.abandonPreparedDraft({
+        actionId: "abandon-with-manual",
+        draftId: input.draftId,
+        orderGuid: created.orderGuid,
+        actor: paymentAuditActor(),
+        ...input.identity,
+      }),
+      /cannot be abandoned/,
+    );
+
+    // 已建出 attempt 的绑定才有外部副作用，优先于无 attempt 的旧绑定。
+    await insertActionBinding(connection, created.orderGuid, "guard-started", "attempt-guard-started", "idem-guard-started");
+    await insertAttempt(connection, {
+      attemptId: "attempt-guard-started", idempotencyKey: "idem-guard-started", orderGuid: created.orderGuid,
+      provider: "square", operation: "purchase", amountCents: 900, state: "Created",
+    });
+    const withStarted = await store.findBlockingRecovery(input.identity);
+    assert.equal(withStarted?.boundAction?.actionId, "guard-started");
+
+    // 两条都已建出 attempt 才是真正的歧义：仍然 fail closed（先被 attempt 层的多阻塞 attempt 检查拦下）。
+    await insertActionBinding(connection, created.orderGuid, "guard-started-2", "attempt-guard-started-2", "idem-guard-started-2");
+    await insertAttempt(connection, {
+      attemptId: "attempt-guard-started-2", idempotencyKey: "idem-guard-started-2", orderGuid: created.orderGuid,
+      provider: "square", operation: "purchase", amountCents: 900, state: "Unknown",
+    });
+    await assert.rejects(
+      () => store.findBlockingRecovery(input.identity),
+      /Multiple blocking payment attempts require support/,
+    );
+  });
+});
+
 test("真实 SQLite：仅有已拒付历史的 DraftPrepared 可安全 abandon 且完整保留账本", async () => {
   await withDatabase("draft-abandon-declined-history", async (connection) => {
     await migrateFresh(connection);
@@ -5030,7 +5165,7 @@ test("真实 SQLite：blocking attempt 与无 attempt prepared draft 均跨重�
   }
 });
 
-test("真实 SQLite：payment action-only recovery 严格解析签名，多 binding 或非法签名失败关闭", async () => {
+test("真实 SQLite：payment action-only recovery 严格解析签名，非法签名失败关闭；多条从未建 attempt 的 binding 取最新一条", async () => {
   await withDatabase("draft-bound-action-fail-closed", async (connection) => {
     await migrateFresh(connection);
     const store = new SqlitePaymentDraftRecoveryStore(
@@ -5146,10 +5281,12 @@ test("真实 SQLite：payment action-only recovery 严格解析签名，多 bind
       "attempt-two",
       "idempotency-two",
     );
-    await assert.rejects(
-      () => store.findBlockingRecovery(multipleInput.identity),
-      /Multiple payment action bindings require support/,
-    );
+    // 两条都没有建出 attempt（从未调用过任何 provider、没有 tender）是可证明安全的：
+    // 断网连点付款就会走到这里，旧实现抛错会让本单卡死、重启后整机启动失败。取创建时间最新（同刻按动作号）的一条。
+    // 真正有歧义的「两条已建 attempt」由 attempt 层 "Multiple blocking payment attempts" 继续 fail closed，见回归测试。
+    const recovered = await store.findBlockingRecovery(multipleInput.identity);
+    assert.equal(recovered?.kind, "DraftPrepared");
+    assert.equal(recovered?.boundAction?.actionId, "binding-two");
   });
 });
 

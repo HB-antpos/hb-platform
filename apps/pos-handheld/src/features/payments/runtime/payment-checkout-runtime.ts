@@ -90,6 +90,12 @@ export interface PaymentCartLeasePort {
     lease: PaymentCartLease,
     orderGuid: string,
   ): Promise<void>;
+
+  /**
+   * 支付启动在建出任何草稿之前就失败时放弃 lease（例如草稿层拒绝 0 元行）。只释放内存写锁，不改任何耐久状态。
+   * 调用方必须先确认没有阻塞草稿：若耐久草稿已存在，放开购物车会让重启后的恢复材料与被改过的购物车冲突。
+   */
+  releaseWithoutDraft(lease: PaymentCartLease): Promise<void>;
 }
 
 export type PaymentCheckoutTender = Readonly<{
@@ -554,13 +560,19 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
         checkoutIntentId,
         expectedRevision: input.expectedCartRevision,
       });
-      assertLease(lease, checkoutIntentId, input.expectedCartRevision, true);
-      await this.assertCashAction();
-      await this.assertExact(lease, true);
-      const draft = await this.options.drafts.createOrReuse({
-        checkoutIntentId,
-        lease,
-      });
+      let draft: PaymentCheckoutDraft;
+      try {
+        assertLease(lease, checkoutIntentId, input.expectedCartRevision, true);
+        await this.assertCashAction();
+        await this.assertExact(lease, true);
+        draft = await this.options.drafts.createOrReuse({
+          checkoutIntentId,
+          lease,
+        });
+      } catch (error) {
+        await this.releaseLeaseWhenNoDraftExists(lease);
+        throw error;
+      }
       await this.assertCashAction();
       await this.assertExact(lease, true);
       assertDraftMatchesLease(draft, lease);
@@ -802,13 +814,19 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
       checkoutIntentId: input.checkoutIntentId,
       expectedRevision: input.expectedCartRevision,
     });
-    assertLease(lease, input.checkoutIntentId, input.expectedCartRevision, true);
-    await this.assertProviderAction(input.provider);
-    await this.assertExact(lease, true);
-    const draft = await this.options.drafts.createOrReuse({
-      checkoutIntentId: input.checkoutIntentId,
-      lease,
-    });
+    let draft: PaymentCheckoutDraft;
+    try {
+      assertLease(lease, input.checkoutIntentId, input.expectedCartRevision, true);
+      await this.assertProviderAction(input.provider);
+      await this.assertExact(lease, true);
+      draft = await this.options.drafts.createOrReuse({
+        checkoutIntentId: input.checkoutIntentId,
+        lease,
+      });
+    } catch (error) {
+      await this.releaseLeaseWhenNoDraftExists(lease);
+      throw error;
+    }
     await this.assertProviderAction(input.provider);
     await this.assertExact(lease, true);
     assertDraftMatchesLease(draft, lease);
@@ -1260,6 +1278,21 @@ export class PaymentCheckoutRuntime implements PaymentCheckoutRuntimePort {
     );
     await this.assertProviderAction(attempt.provider);
     return abandonedSnapshot(closed.draft);
+  }
+
+  /**
+   * 支付启动在建出草稿之前失败（草稿层拒绝实收 ≤ 0 的销售行、数量门禁、会话过期等），
+   * 购物车独占租约没有人释放：销售页的删行、改量、清空、挂单全部报「购物车忙」，只能强退 App 重扫。
+   * 只在确认没有任何阻塞草稿时释放；读库失败等无法确认的情况保持锁定——
+   * 此时若耐久草稿已经存在，放开购物车会让重启后的恢复材料与被改过的购物车冲突。
+   */
+  private async releaseLeaseWhenNoDraftExists(lease: PaymentCartLease): Promise<void> {
+    try {
+      if ((await this.options.drafts.findBlockingRecovery()) !== null) return;
+      await this.options.cartLease.releaseWithoutDraft(lease);
+    } catch {
+      // 保持锁定，由恢复流程处理；这里不能掩盖调用方原本要抛出的启动失败。
+    }
   }
 
   private deleteFlight(checkoutIntentId: string, flight: CheckoutFlight): void {

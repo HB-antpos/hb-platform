@@ -897,11 +897,23 @@ implements PersistedOrderDraftPort {
       // 单个 binding 尚无 attempt 时，Abandoned 与 attempt INSERT 在同一排他事务序列化；
       // 旧异步流程之后会被 abandoned-draft 触发器拒绝，无法越过首次 provider 调用门。
       // 手动刷卡的 binding 表示外部卡机已确认付款，即使本地 attempt 尚未落库也不能放弃。
+      // 界面每次点付款都会生成新动作号，断网时连点两次会留下多条「从未建 attempt」的绑定；
+      // 只要全部都没有 attempt 且没有手动刷卡，就都是未触碰的动作，可以放弃（否则只能等联网或强退重来）。
+      const bindingSignatures = await transaction.getAll<{ request_signature: unknown }>(
+        "SELECT request_signature FROM payment_action_bindings WHERE order_guid = ?",
+        [orderGuid],
+      );
+      const hasManualCardBinding = bindingSignatures.some(
+        (row) =>
+          parseBoundActionSignature(
+            text(row.request_signature, "payment action request signature"),
+          ).provider === "manual-card",
+      );
       const untouchedBoundAction =
         attemptCount === 0 &&
-        actionCount === 1 &&
+        actionCount >= 1 &&
         unresolvedBoundAction !== null &&
-        unresolvedBoundAction.provider !== "manual-card";
+        !hasManualCardBinding;
       const resolvedHistory = attemptCount === actionCount && unresolvedBoundAction === null;
       if (
         tenderCount !== 0 ||
@@ -1837,12 +1849,22 @@ async function readBoundAction(
   // 先校验每条不可变历史，再忽略可证明安全的终态，避免损坏记录被 SQL 过滤掉。
   const candidates = rows.flatMap((row) => {
     const candidate = recoverBoundActionCandidate(row, orderGuid);
-    return candidate ? [candidate] : [];
+    return candidate
+      ? [{ action: candidate, started: nullableText(row.persisted_attempt_id) !== null }]
+      : [];
   });
-  if (candidates.length > 1) {
+  // 已经建出 attempt 的绑定才可能有外部副作用，多于一条是真正需要人工支持的歧义，仍然 fail closed。
+  const started = candidates.filter((candidate) => candidate.started);
+  if (started.length > 1) {
     throw new Error("Multiple payment action bindings require support.");
   }
-  return candidates[0] ?? null;
+  if (started[0]) return started[0].action;
+  // 没有任何 attempt 的绑定（动作号已绑定，但在建 attempt 之前就被离线 / 配置门禁拦下）从未调用过任何 provider，
+  // 也没有 tender，可证明安全：界面每次点付款都会生成新动作号，断网时连点两次、或刷卡两次都没走到建 attempt，
+  // 同一订单就会留下两条这样的绑定。旧实现把它们当成「多个未决动作」抛错，本单卡死，
+  // 而启动恢复也走同一查询，重启后整台设备停在启动失败页。绑定表有不可变触发器无法清理，
+  // 所以恢复时取最新的一条（rows 按创建时间升序），更早的一律忽略。
+  return candidates.at(-1)?.action ?? null;
 }
 
 function recoverBoundActionCandidate(

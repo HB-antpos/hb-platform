@@ -84,6 +84,38 @@ test("支付 lease 跨异步生命周期独占购物车，安全取消后保留�
   );
 });
 
+test("支付启动在建出草稿前失败：releaseWithoutDraft 放开购物车且不改购物车内容", async () => {
+  const active = session(cartWithDiscount());
+  const leaseCoordinator = createCoordinator(active, null);
+  const expected = active.read();
+  const lease = await leaseCoordinator.acquireExact({
+    checkoutIntentId: "checkout-no-draft",
+    expectedRevision: expected.cart.revision,
+  });
+  assert.equal(active.hasPendingExclusiveOperation(), true);
+
+  await leaseCoordinator.releaseWithoutDraft(lease);
+
+  assert.equal(active.hasPendingExclusiveOperation(), false);
+  assert.deepEqual(active.read().cart, expected.cart, "只释放写锁，购物车原样保留");
+  // 释放后销售页可以继续删行 / 改量 / 清空，这是用户感知到的修复。
+  assert.equal(active.setLineQuantity("line-1", 2), true);
+  await assert.rejects(
+    () => leaseCoordinator.readExact(lease),
+    hasCode("PAYMENT_CART_LEASE_CONFLICT"),
+  );
+  await assert.rejects(
+    () => leaseCoordinator.releaseWithoutDraft(lease),
+    hasCode("PAYMENT_CART_LEASE_CONFLICT"),
+  );
+  // 同一购物车可以立刻用新的 checkout 重新取得租约。
+  const again = await leaseCoordinator.acquireExact({
+    checkoutIntentId: "checkout-after-release",
+    expectedRevision: active.read().cart.revision,
+  });
+  await leaseCoordinator.releaseAfterSafeCancel(again, "order-after-release");
+});
+
 test("订单确认后才清空购物车并释放支付 lease", async () => {
   const active = session(cartWithDiscount());
   const leaseCoordinator = createCoordinator(active, null);
