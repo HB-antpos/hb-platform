@@ -200,6 +200,22 @@
 }
 
 /* 表格上方的「已加载员工」提示条 */
+/* 员工名显示切换（昵称 / 全名）：工具栏里一个带文字的开关，左侧细线与前面的控件隔开 */
+.sce-name-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding-left: 12px;
+  border-left: 1px solid #e5e5e5;
+}
+
+.sce-name-toggle-label {
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.65);
+  white-space: nowrap;
+}
+
 .sce-strip {
   display: flex;
   align-items: center;

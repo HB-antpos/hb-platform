@@ -19,6 +19,8 @@ export const STORAGE_KEYS = {
   lastStore: 'schedule-attendance:last-store',
   recentStores: 'schedule-attendance:recent-stores',
   sidebarDock: 'schedule-attendance:store-sidebar',
+  /** 周视图员工名显示方式：nickname（默认）/ full。 */
+  staffNameMode: 'schedule-attendance:staff-name-mode',
 } as const
 
 /** 侧栏偏好：docked＝固定在左侧，floating＝收起成按钮，null＝按宽度自动。 */

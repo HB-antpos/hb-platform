@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as ScreenOrientation from "expo-screen-orientation";
 import {
   Alert,
@@ -90,6 +90,14 @@ import {
   groupScheduleBoardDays,
   summarizeBatchMatrix,
 } from "@/modules/attendance/schedule-board";
+import {
+  DEFAULT_STAFF_NAME_MODE,
+  readStaffNameMode,
+  resolveStaffNames,
+  writeStaffNameMode,
+  type StaffNameMode,
+  type StaffNameSource,
+} from "@/modules/attendance/staff-display-name";
 import type {
   AttendanceAvailability,
   AttendanceSchedule,
@@ -99,6 +107,7 @@ import type {
 } from "@/modules/attendance/types";
 import type { StoreUserListItem } from "@/modules/users/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
+import { AppAsyncStorage } from "@/shared/storage/async-storage";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 const ROW_HEADER_WIDTH = 104;
@@ -180,7 +189,10 @@ interface EditingTarget {
 
 interface ScheduleRow {
   userGuid: string;
+  /** 全名（弹窗、员工 × 日期表格、按人视图一直用它）；看板的显示名另算，见 boardNameOf。 */
   employeeName?: string;
+  /** 看板「昵称 / 全名」取名的原料；只有排班、没有员工资料的行只有 fullName（来自排班记录）。 */
+  nameParts?: Omit<StaffNameSource, "userGuid">;
   employmentType?: EmploymentTypeCode;
   /** 仅 21 岁以下员工有值（后端 ResolveMinorAge 只给 JuniorAgeLimit 以内的周岁，青少年时薪按年龄计）。 */
   age?: number;
@@ -465,6 +477,25 @@ export function ScheduleManagementCard({
   const [viewMode, setViewMode] = useState<"week" | "staff" | "day">("week");
   // 看板图例点选的员工：其他人的卡片变淡
   const [highlighted, setHighlighted] = useState<string | undefined>();
+  // 看板员工名显示方式：默认昵称（没填则用名兜底），可切换成全名；偏好记在本机，只影响看板（图例 + 卡片）。
+  // AsyncStorage 是异步读取：先用默认值渲染，读到 "full" 再切过去；
+  // 若用户在读完之前就点了开关，以用户的选择为准（staffNameChosenRef），不让迟到的读取结果覆盖。
+  const [staffNameMode, setStaffNameMode] = useState<StaffNameMode>(DEFAULT_STAFF_NAME_MODE);
+  const staffNameChosenRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    void readStaffNameMode(AppAsyncStorage).then((stored) => {
+      if (!cancelled && !staffNameChosenRef.current) setStaffNameMode(stored);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const changeStaffNameMode = useCallback((mode: StaffNameMode) => {
+    staffNameChosenRef.current = true;
+    setStaffNameMode(mode);
+    void writeStaffNameMode(AppAsyncStorage, mode);
+  }, []);
   // 员工 × 日期批量排班
   const [matrixUsers, setMatrixUsers] = useState<ReadonlySet<string>>(() => new Set());
   const [matrixDates, setMatrixDates] = useState<ReadonlySet<string>>(() => new Set());
@@ -568,6 +599,13 @@ export function ScheduleManagementCard({
       rowMap.set(user.userGUID, {
         userGuid: user.userGUID,
         employeeName: getUserDisplayName(user),
+        nameParts: {
+          username: user.username,
+          fullName: user.fullName,
+          givenName: user.givenName,
+          familyName: user.familyName,
+          nickname: user.nickname,
+        },
         employmentType: employmentTypeCode(user.employmentType),
         age: user.age,
         isStoreManager: user.isStoreManager,
@@ -580,6 +618,8 @@ export function ScheduleManagementCard({
       const row = existing ?? {
         userGuid: schedule.userGuid,
         employeeName: schedule.employeeName || schedule.userGuid,
+        // 没有员工资料（例如已离职但本周仍有班次）：拿不到昵称，只能用排班记录里的名字
+        nameParts: { fullName: schedule.employeeName },
         schedules: [],
       };
       row.schedules = [...row.schedules, schedule];
@@ -635,8 +675,20 @@ export function ScheduleManagementCard({
     () => assignStaffColors(rows.map((row) => ({ userGuid: row.userGuid, name: row.employeeName }))),
     [rows],
   );
-  const boardDays = useMemo(() => groupScheduleBoardDays(days, schedules, nameOfUser), [days, nameOfUser, schedules]);
-  const staffLegend = useMemo(() => buildStaffLegend(schedules, nameOfUser), [nameOfUser, schedules]);
+  // 看板专用显示名（昵称 / 全名 + 重名区分）；nameOfUser（全名）仍供颜色、弹窗、转移班次等使用。
+  const boardNames = useMemo(
+    () => resolveStaffNames(
+      rows.map((row) => ({ userGuid: row.userGuid, ...row.nameParts })),
+      staffNameMode,
+    ),
+    [rows, staffNameMode],
+  );
+  const boardNameOf = useCallback(
+    (userGuid: string) => boardNames.get(userGuid) ?? nameOfUser(userGuid),
+    [boardNames, nameOfUser],
+  );
+  const boardDays = useMemo(() => groupScheduleBoardDays(days, schedules, boardNameOf), [boardNameOf, days, schedules]);
+  const staffLegend = useMemo(() => buildStaffLegend(schedules, boardNameOf), [boardNameOf, schedules]);
   const freeByDay = useMemo(
     () => days.map((day) => findAvailableUnscheduled(day, rows.map((row) => row.userGuid), schedules, availabilityMap)),
     [availabilityMap, days, rows, schedules],
@@ -1816,7 +1868,10 @@ export function ScheduleManagementCard({
           days={boardDays}
           today={today}
           colors={staffColors}
-          nameOf={nameOfUser}
+          nameOf={boardNameOf}
+          fullNameOf={nameOfUser}
+          nameMode={staffNameMode}
+          onChangeNameMode={changeStaffNameMode}
           ageOf={(userGuid) => rows.find((row) => row.userGuid === userGuid)?.age}
           flagsOf={(schedule) => ({
             warn: Boolean(

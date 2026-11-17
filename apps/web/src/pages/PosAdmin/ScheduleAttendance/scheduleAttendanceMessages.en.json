@@ -169,7 +169,15 @@
         "shellExit": "Exit",
         "prevWeek": "Previous week",
         "nextWeek": "Next week",
-        "rotatedHint": "View only · turn your phone sideways to edit"
+        "rotatedHint": "View only · turn your phone sideways to edit",
+        "nameModeLabel": "Staff name",
+        "nameModeNickname": "Nickname",
+        "nameModeFull": "Full name",
+        "nameModeTipNickname": "Nickname: shows the nickname, or the first name if none is set",
+        "nameModeTipFull": "Full name: shows the complete name",
+        "nameModeTipRemember": "Remembered in this browser",
+        "nameAltFull": "Full name: {{name}}",
+        "nameAltNickname": "Nickname: {{name}}"
       },
       "batch": {
         "title": "Roster",

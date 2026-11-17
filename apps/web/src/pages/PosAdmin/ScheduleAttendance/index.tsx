@@ -165,6 +165,8 @@ import {
 import type { SidebarPreference } from './storePickerLogic'
 import { FALLBACK_STAFF_COLOR, assignStaffColors } from './staffColorLogic'
 import type { StaffColor } from './staffColorLogic'
+import { readStaffNameMode, resolveStaffNames, writeStaffNameMode } from './staffNameLogic'
+import type { StaffNameMode, StaffNameSource } from './staffNameLogic'
 import WeekBoard from './WeekBoard'
 import type { WeekBoardDay, WeekBoardDayDrop, WeekBoardLegendItem } from './WeekBoard'
 import { buildStaffLegend, findAvailableUnscheduled, groupSchedulesByDay, matchStaffKeyword, summarizeDayList } from './weekBoardLogic'
@@ -403,6 +405,8 @@ export default function ScheduleAttendancePage() {
   const storage = useMemo(() => getBrowserStorage(), [])
   const [recentStores, setRecentStores] = useState<string[]>(() => parseRecentStores(safeStorageGet(getBrowserStorage(), STORAGE_KEYS.recentStores)))
   const [sidebarPreference, setSidebarPreference] = useState<SidebarPreference>(() => parseSidebarPreference(safeStorageGet(getBrowserStorage(), STORAGE_KEYS.sidebarDock)))
+  // 周视图员工名：昵称（默认，没填用名兜底）/ 全名；同样按浏览器记住
+  const [staffNameMode, setStaffNameMode] = useState<StaffNameMode>(() => readStaffNameMode(getBrowserStorage()))
   const [storePopoverOpen, setStorePopoverOpen] = useState(false)
   const [cardWidth, setCardWidth] = useState(0)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -1414,15 +1418,41 @@ export default function ScheduleAttendancePage() {
     })
     return map
   }, [storeUsers, weekSchedules])
+  // nameOf＝全名：员工颜色、搜索、弹窗 / 选人下拉都用它，保证切换开关不换色、不选错人
   const nameOf = useCallback((userGuid: string) => userNameMap.get(userGuid) ?? userGuid, [userNameMap])
+  // 看板显示名的原料：在职员工带昵称 / 名 / 姓；只有班次、没有员工资料的人（如已离职）只有全名
+  const nameSources = useMemo<StaffNameSource[]>(() => {
+    const list: StaffNameSource[] = storeUsers.map((user) => ({
+      userGuid: user.userGuid,
+      username: user.username,
+      fullName: user.fullName,
+      givenName: user.givenName,
+      familyName: user.familyName,
+      nickname: user.nickname,
+    }))
+    const known = new Set(storeUsers.map((user) => user.userGuid))
+    weekSchedules.forEach((schedule) => {
+      if (known.has(schedule.userGuid)) return
+      known.add(schedule.userGuid)
+      list.push({ userGuid: schedule.userGuid, fullName: schedule.userName })
+    })
+    return list
+  }, [storeUsers, weekSchedules])
+  // 昵称模式的显示名（昵称 → 名 → 全名 → 登录名，重名时自动区分）；全名模式直接用 userNameMap
+  const nicknameNames = useMemo(() => resolveStaffNames(nameSources, 'nickname'), [nameSources])
+  // boardNameOf＝看板（图例、班次卡片、同一天的排序）当前显示的名字
+  const boardNameOf = useCallback(
+    (userGuid: string) => (staffNameMode === 'nickname' ? nicknameNames : userNameMap).get(userGuid) ?? userGuid,
+    [nicknameNames, staffNameMode, userNameMap],
+  )
   // 颜色按「全部在职员工 + 本周有班次的人」一起分配：排班前后颜色不变，同一批人不撞色
   const staffColors = useMemo(
     () => assignStaffColors(Array.from(userNameMap, ([userGuid, name]) => ({ userGuid, name }))),
     [userNameMap],
   )
   const rowByGuid = useMemo(() => new Map(scheduleRows.map((row) => [row.userGuid, row])), [scheduleRows])
-  // 每天的班次：按「开始时间 → 员工名」排好
-  const daySchedules = useMemo(() => groupSchedulesByDay(weekSchedules, weekDateKeys, nameOf), [nameOf, weekDateKeys, weekSchedules])
+  // 每天的班次：按「开始时间 → 员工名（看板上显示的名字）」排好
+  const daySchedules = useMemo(() => groupSchedulesByDay(weekSchedules, weekDateKeys, boardNameOf), [boardNameOf, weekDateKeys, weekSchedules])
   const schedulesByUserDate = useMemo(() => {
     const map = new Map<string, AttendanceScheduleDto[]>()
     weekSchedules.forEach((schedule) => {
@@ -1431,7 +1461,7 @@ export default function ScheduleAttendancePage() {
     })
     return map
   }, [weekSchedules])
-  const staffLegend = useMemo(() => buildStaffLegend(weekSchedules, nameOf), [nameOf, weekSchedules])
+  const staffLegend = useMemo(() => buildStaffLegend(weekSchedules, boardNameOf), [boardNameOf, weekSchedules])
   const existingOf = useCallback(
     (userGuid: string, dateKey: string) => schedulesByUserDate.get(`${userGuid}|${dateKey}`) ?? [],
     [schedulesByUserDate],
@@ -1446,9 +1476,13 @@ export default function ScheduleAttendancePage() {
     findAvailableUnscheduled(dateKey, storeUsers.map((user) => user.userGuid), daySchedules.get(dateKey) ?? [], availabilityOf),
   ])), [availabilityOf, daySchedules, storeUsers, weekDateKeys])
   // 高亮：点图例选中的人 + 搜索框命中的人；有高亮对象时其余卡片变淡（搜索无命中则全部变淡，提示没找到）
+  // 搜索同时匹配全名和昵称：不管开关在哪一档，看到什么名字就能搜到什么名字
   const keywordMatches = useMemo(
-    () => matchStaffKeyword(Array.from(userNameMap, ([userGuid, name]) => ({ userGuid, name })), staffKeyword),
-    [staffKeyword, userNameMap],
+    () => matchStaffKeyword([
+      ...Array.from(userNameMap, ([userGuid, name]) => ({ userGuid, name })),
+      ...Array.from(nicknameNames, ([userGuid, name]) => ({ userGuid, name })),
+    ], staffKeyword),
+    [nicknameNames, staffKeyword, userNameMap],
   )
   const highlighting = legendSelected.size > 0 || staffKeyword.trim() !== ''
   const isHighlighted = (userGuid: string) => legendSelected.has(userGuid) || keywordMatches.has(userGuid)
@@ -1833,7 +1867,7 @@ export default function ScheduleAttendancePage() {
     const noteKey = source.kind === 'preset' ? 'dropPreset' : source.kind === 'copy' ? 'dropCopy' : 'dropMove'
     const slot = hovered ? (
       <div className="sce-slot">
-        {t(`posAdmin.scheduleAttendance.drag.${noteKey}`, { name: origin ? nameOf(origin.userGuid) : '', date: dateKey.slice(5) })}
+        {t(`posAdmin.scheduleAttendance.drag.${noteKey}`, { name: origin ? boardNameOf(origin.userGuid) : '', date: dateKey.slice(5) })}
       </div>
     ) : null
     return { className, props, flag, slot }
@@ -1937,7 +1971,12 @@ export default function ScheduleAttendancePage() {
   const renderCard = (schedule: AttendanceScheduleDto) => {
     const dateKey = schedule.workDate.slice(0, 10)
     const color = staffColors.get(schedule.userGuid) ?? FALLBACK_STAFF_COLOR
-    const name = nameOf(schedule.userGuid)
+    // 卡片上显示看板当前的名字；悬停提示里再补上「另一种写法」（昵称档补全名，全名档补昵称）
+    const name = boardNameOf(schedule.userGuid)
+    const otherName = staffNameMode === 'nickname' ? nameOf(schedule.userGuid) : nicknameNames.get(schedule.userGuid) ?? name
+    const otherNameTip = otherName !== name
+      ? t(`posAdmin.scheduleAttendance.board.${staffNameMode === 'nickname' ? 'nameAltFull' : 'nameAltNickname'}`, { name: otherName })
+      : ''
     const age = employeeAges.get(schedule.userGuid)
     // 已发布且过了周一的班次只有管理员能改（后端判定，管理员恒为 false）：不打开编辑、不能删除和拖动。
     const publishedWeekLocked = schedule.isPublishedWeekLocked === true
@@ -1963,9 +2002,10 @@ export default function ScheduleAttendancePage() {
     const timeText = `${formatTime(schedule.startTime)}–${formatTime(schedule.endTime)}`
     const dim = highlighting && !isHighlighted(schedule.userGuid)
     const hi = highlighting && isHighlighted(schedule.userGuid)
-    // 悬停提示：姓名、状态、冲突原因、手动用餐的计薪、备注、锁定原因
+    // 悬停提示：姓名（含另一种写法）、状态、冲突原因、手动用餐的计薪、备注、锁定原因
     const title = [
       name,
+      otherNameTip,
       statusLabel('schedule', schedule.status),
       conflict ? t(`posAdmin.scheduleAttendance.weekAvailability.${conflict === 'unavailable' ? 'conflictUnavailable' : 'conflictOutside'}`) : '',
       mealBadge && mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : '',
@@ -2537,6 +2577,20 @@ export default function ScheduleAttendancePage() {
     </Popover>
   ) : null
 
+  // 员工名显示方式：开＝昵称（没填用名兜底），关＝全名；选择写进浏览器，下次沿用
+  const changeStaffNameMode = (checked: boolean) => {
+    const next: StaffNameMode = checked ? 'nickname' : 'full'
+    setStaffNameMode(next)
+    writeStaffNameMode(storage, next)
+  }
+  const staffNameSwitchProps = {
+    checked: staffNameMode === 'nickname',
+    checkedChildren: t('posAdmin.scheduleAttendance.board.nameModeNickname'),
+    unCheckedChildren: t('posAdmin.scheduleAttendance.board.nameModeFull'),
+    onChange: changeStaffNameMode,
+    'aria-label': t('posAdmin.scheduleAttendance.board.nameModeLabel'),
+  }
+
   const filterBar = (
     <Space wrap>
       {activeTab === 'schedules' ? (
@@ -2599,6 +2653,22 @@ export default function ScheduleAttendancePage() {
       <Tooltip title={t('common.search')}>
         <Button icon={<ReloadOutlined />} aria-label={t('common.search')} onClick={() => loadActiveTab(1)} />
       </Tooltip>
+      {activeTab === 'schedules' ? (
+        <Tooltip
+          title={(
+            <>
+              <div>{t('posAdmin.scheduleAttendance.board.nameModeTipNickname')}</div>
+              <div>{t('posAdmin.scheduleAttendance.board.nameModeTipFull')}</div>
+              <div style={{ opacity: 0.65 }}>{t('posAdmin.scheduleAttendance.board.nameModeTipRemember')}</div>
+            </>
+          )}
+        >
+          <span className="sce-name-toggle">
+            <span className="sce-name-toggle-label">{t('posAdmin.scheduleAttendance.board.nameModeLabel')}</span>
+            <Switch {...staffNameSwitchProps} />
+          </span>
+        </Tooltip>
+      ) : null}
     </Space>
   )
 
@@ -2936,6 +3006,8 @@ export default function ScheduleAttendancePage() {
             <Button size="small" icon={<RightOutlined />} aria-label={t('posAdmin.scheduleAttendance.board.nextWeek')} onClick={() => setSelectedWeek((prev) => prev.add(1, 'week'))} />
             <span className="sce-shell-store">{storeCode ? storeNameMap.get(storeCode) : ''}</span>
             {shellReadOnly ? <span className="sce-shell-hint">{t('posAdmin.scheduleAttendance.board.rotatedHint')}</span> : null}
+            {/* 横屏看板同一个开关（共用同一份浏览器记忆），小号放在顶栏 */}
+            <Switch size="small" {...staffNameSwitchProps} />
             <span style={{ flex: 1 }} />
             {!shellReadOnly && access.canEditAttendanceSchedule && canEditSelectedStore ? (
               <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openBatchModal()}>
