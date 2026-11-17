@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Globalization;
 using BlazorApp.Api.Data;
 using BlazorApp.Api.Interfaces;
@@ -6,7 +5,6 @@ using BlazorApp.Api.Models.Myob;
 using BlazorApp.Shared.Constants;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
-using Microsoft.Extensions.Caching.Memory;
 using MimeKit;
 using SqlSugar;
 
@@ -18,6 +16,12 @@ public interface IMyobPayslipService
     Task<ApiResponse<List<MyobPayslipCompanyDto>>> GetCompaniesAsync(CancellationToken cancellationToken);
 
     Task<ApiResponse<MyobPayslipListDto>> ListAsync(MyobPayslipQuery query, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// 手动同步：立即从 MYOB 把可见公司文件的工资单拉到本地库（首次回填 24 个月，之后对账最近 8 周）。
+    /// 需要查看权限且不是「仅本人」口径；每家公司 60 秒内最多同步一次，别处正在同步的公司会标 Busy。同步完成后再调列表读取。
+    /// </summary>
+    Task<ApiResponse<MyobPayslipSyncResultDto>> SyncAsync(MyobPayslipSyncRequest request, CancellationToken cancellationToken);
 
     /// <summary>单张工资单明细；每次成功打开写一条查看记录（只记谁看了谁哪一期，不含金额）。</summary>
     Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken);
@@ -63,13 +67,12 @@ internal sealed class RoleServicePayslipPermissionChecker : IMyobPayslipPermissi
 }
 
 /// <summary>
-/// MYOB 历史工资单（只读）：读 Report/Payroll/EmployeePayrollAdvice，按绑定 → 周期内考勤分店 → 支付日发薪公司归到分店，再按权限范围过滤。
-/// 工资单本身不落库（进程内存缓存 10 分钟）；日志与异常消息不含姓名 / 金额 / MYOB 响应体。
+/// MYOB 历史工资单（只读）：读本地快照（MyobPayslipSnapshot，由 MyobPayslipSyncService 从 Report/Payroll/EmployeePayrollAdvice 同步），
+/// 按绑定 → 周期内考勤分店 → 支付日发薪公司归到分店，再按权限范围过滤。列表 / 明细 / PDF / 邮件都不再实时请求 MYOB。
+/// 日志与异常消息不含姓名 / 金额 / MYOB 响应体。
 /// </summary>
 internal sealed class MyobPayslipService : IMyobPayslipService
 {
-    internal static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(10);
-
     /// <summary>单次查询的最长区间（含首尾）：24 个月。</summary>
     internal const int MaxRangeDays = 731;
 
@@ -77,51 +80,42 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     internal const int DefaultRangeDays = 90;
 
     private const int InChunk = 500;
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks = new();
 
     private readonly ISqlSugarClient _db;
-    private readonly IMyobApiClient _client;
-    private readonly IMyobTokenProvider _tokens;
+    private readonly IMyobPayslipSyncService _sync;
     private readonly ICurrentUserManageableStoreScopeService _scope;
     private readonly IMyobPayslipPermissionChecker _permissions;
     private readonly IAttendancePayrollPushSource _source;
-    private readonly IMemoryCache _cache;
     private readonly TimeProvider _time;
     private readonly IMyobPayslipEmailSender? _emailSender;
 
     public MyobPayslipService(
         SqlSugarContext context,
-        IMyobApiClient client,
-        IMyobTokenProvider tokens,
+        IMyobPayslipSyncService sync,
         ICurrentUserManageableStoreScopeService scope,
         IMyobPayslipPermissionChecker permissions,
         IAttendancePayrollPushSource source,
-        IMemoryCache cache,
         TimeProvider? timeProvider = null,
         IMyobPayslipEmailSender? emailSender = null)
-        : this(context.Db, client, tokens, scope, permissions, source, cache, timeProvider, emailSender)
+        : this(context.Db, sync, scope, permissions, source, timeProvider, emailSender)
     {
     }
 
     internal MyobPayslipService(
         ISqlSugarClient db,
-        IMyobApiClient client,
-        IMyobTokenProvider tokens,
+        IMyobPayslipSyncService sync,
         ICurrentUserManageableStoreScopeService scope,
         IMyobPayslipPermissionChecker permissions,
         IAttendancePayrollPushSource source,
-        IMemoryCache cache,
         TimeProvider? timeProvider = null,
         IMyobPayslipEmailSender? emailSender = null)
     {
         _emailSender = emailSender;
         _db = db;
-        _client = client;
-        _tokens = tokens;
+        _sync = sync;
         _scope = scope;
         _permissions = permissions;
         _source = source;
-        _cache = cache;
         _time = timeProvider ?? TimeProvider.System;
     }
 
@@ -268,27 +262,39 @@ internal sealed class MyobPayslipService : IMyobPayslipService
         // 仅本人口径：先取本人的员工卡绑定（含历史）。一张都没有就只剩空列表 + SelfUnbound 标记（前端给友好提示），不会请求 MYOB。
         var selfLinks = access.Access.SelfOnly ? await LoadSelfLinksAsync(access.Access.SelfUserGuid!) : null;
         var connections = await LoadVisibleConnectionsAsync(access.Access, query.ConnectionGuid, selfLinks);
+        var states = await LoadSyncStatesAsync(connections);
+        var now = _time.GetUtcNow().UtcDateTime;
         var statuses = new List<MyobPayslipCompanyStatusDto>();
         var items = new List<AdviceItem>();
-        DateTime? oldestFetch = null;
+        DateTime? oldestSync = null;
         foreach (var connection in connections)
         {
-            var status = new MyobPayslipCompanyStatusDto { ConnectionGuid = connection.ConnectionGuid, ConnectionName = connection.BusinessName };
-            try
+            cancellationToken.ThrowIfCancellationRequested();
+            states.TryGetValue(connection.ConnectionGuid, out var state);
+            var status = new MyobPayslipCompanyStatusDto
             {
-                var cached = await GetAdvicesCachedAsync(connection, from, to.AddDays(1), query.Refresh, cancellationToken);
-                status.Ok = true;
-                status.Count = cached.Records.Count;
-                oldestFetch = oldestFetch is null || cached.FetchedAt < oldestFetch ? cached.FetchedAt : oldestFetch;
-                items.AddRange(cached.Records.Select(record => new AdviceItem(connection.ConnectionGuid, connection.BusinessName, record)));
-            }
-            catch (MyobApiException ex)
+                ConnectionGuid = connection.ConnectionGuid,
+                ConnectionName = connection.BusinessName,
+                LastSyncedAt = FormatUtc(state?.LastSuccessAt),
+                Syncing = state?.LeaseUntil is { } lease && lease > now,
+                SyncError = state?.LastError,
+                HistoryIncomplete = state?.CoveredFrom is { } covered && from < covered.Date,
+            };
+
+            if (state?.LastSuccessAt is not { } lastSuccess)
             {
-                // 一家失败不拖垮另一家；消息只含状态码，不含 MYOB 响应体。
-                status.ErrorCode = ex.Code;
-                status.ErrorMessage = ex.Message;
+                // 从没同步成功过：本地没有这家公司的任何数据，不能当作「没有工资单」。一家没好不拖垮另一家。
+                status.ErrorCode = MyobPayslipErrorCodes.SyncPending;
+                status.ErrorMessage = "这家公司的工资单还没有同步到本地，首次同步完成后才能查看";
+                statuses.Add(status);
+                continue;
             }
 
+            var records = await LoadSnapshotRecordsAsync(connection.ConnectionGuid, from, to.AddDays(1));
+            status.Ok = true;
+            status.Count = records.Count;
+            oldestSync = oldestSync is null || lastSuccess < oldestSync ? lastSuccess : oldestSync;
+            items.AddRange(records.Select(record => new AdviceItem(connection.ConnectionGuid, connection.BusinessName, record)));
             statuses.Add(status);
         }
 
@@ -338,7 +344,8 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             CanViewAllStores = access.Access.All,
             SelfOnly = access.Access.SelfOnly,
             SelfUnbound = selfLinks is { Count: 0 },
-            FetchedAt = (oldestFetch ?? _time.GetUtcNow().UtcDateTime).ToString("O", CultureInfo.InvariantCulture),
+            // 没有任何公司成功同步过时为空（页面不显示「最近同步于」，免得首次同步还没完成时给出一个假的时间）。
+            FetchedAt = FormatUtc(oldestSync) ?? string.Empty,
         });
     }
 
@@ -389,50 +396,75 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     // 澳洲东部标准时间（UTC+10）足够用来取「今天」，与推送预览同口径。
     private DateTime Today() => _time.GetUtcNow().UtcDateTime.AddHours(10).Date;
 
-    // ───────────────────────── 取数 + 缓存 ─────────────────────────
-
-    private sealed record CachedAdvices(DateTime FetchedAt, IReadOnlyList<MyobPayrollAdviceRecord> Records);
+    // ───────────────────────── 读本地快照 ─────────────────────────
 
     private sealed record AdviceItem(string ConnectionGuid, string ConnectionName, MyobPayrollAdviceRecord Record);
 
-    internal static string CacheKey(string connectionGuid, DateTime from, DateTime toExclusive) =>
-        $"myob:advice:{connectionGuid}:{from:yyyyMMdd}:{toExclusive:yyyyMMdd}";
-
-    /// <summary>
-    /// 某公司文件某区间的工资单，进程内存缓存 10 分钟（只存精简对象，不落盘不落库）；refresh 绕过缓存；
-    /// 同一公司文件的并发请求串行，同键的后到请求直接用先到请求的结果，只打一轮 MYOB。
-    /// </summary>
-    private async Task<CachedAdvices> GetAdvicesCachedAsync(
-        MyobConnection connection, DateTime from, DateTime toExclusive, bool refresh, CancellationToken cancellationToken)
+    /// <summary>本地快照里某公司、支付日期在 [from, toExclusive) 内的有效工资单（排除 MYOB 里已撤销 / 重发的）；顺序由调用方排。</summary>
+    private async Task<List<MyobPayrollAdviceRecord>> LoadSnapshotRecordsAsync(string connectionGuid, DateTime from, DateTime toExclusive)
     {
-        var key = CacheKey(connection.ConnectionGuid, from, toExclusive);
-        CachedAdvices? cached;
-        if (!refresh && _cache.TryGetValue(key, out cached) && cached is not null)
+        var rows = await _db.Queryable<MyobPayslipSnapshot>()
+            .Where(row => row.ConnectionGuid == connectionGuid && row.RemovedAt == null && row.PaymentDate >= from && row.PaymentDate < toExclusive)
+            .ToListAsync();
+        return rows.Select(MyobPayslipSnapshotRules.ToRecord).ToList();
+    }
+
+    private async Task<Dictionary<string, MyobPayslipSyncState>> LoadSyncStatesAsync(IReadOnlyList<MyobConnection> connections)
+    {
+        var guids = connections.Select(connection => connection.ConnectionGuid).ToList();
+        if (guids.Count == 0)
         {
-            return cached;
+            return new Dictionary<string, MyobPayslipSyncState>(StringComparer.OrdinalIgnoreCase);
         }
 
-        // 锁按公司文件而不是按查询键：键里带日期会让字典无限增长；同一公司的查询本来也共用同一个 MYOB 限流闸。
-        var gate = Locks.GetOrAdd(connection.ConnectionGuid, _ => new SemaphoreSlim(1, 1));
-        await gate.WaitAsync(cancellationToken);
-        try
+        return (await _db.Queryable<MyobPayslipSyncState>().Where(state => guids.Contains(state.ConnectionGuid)).ToListAsync())
+            .ToDictionary(state => state.ConnectionGuid, StringComparer.OrdinalIgnoreCase);
+    }
+
+    // 数据库读出的 UTC 时间 Kind 是 Unspecified，序列化给客户端前必须标成 UTC（带 Z），否则前端会按本地时间解析。
+    private static string? FormatUtc(DateTime? value) =>
+        value is { } utc ? DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToString("O", CultureInfo.InvariantCulture) : null;
+
+    // ───────────────────────── 手动同步 ─────────────────────────
+
+    public async Task<ApiResponse<MyobPayslipSyncResultDto>> SyncAsync(MyobPayslipSyncRequest request, CancellationToken cancellationToken)
+    {
+        var access = await ResolveAccessAsync();
+        if (access.Access is null)
         {
-            if (!refresh && _cache.TryGetValue(key, out cached) && cached is not null)
+            return ApiResponse<MyobPayslipSyncResultDto>.Error(access.Message, MyobPayslipErrorCodes.Forbidden);
+        }
+
+        // 「仅本人」口径的员工只能看自己的工资单，不能触发整家公司的同步（会占用 MYOB 配额）；他们看到的是定时同步的结果。
+        if (access.Access.SelfOnly)
+        {
+            return ApiResponse<MyobPayslipSyncResultDto>.Error("你没有同步工资单的权限", MyobPayslipErrorCodes.Forbidden);
+        }
+
+        var requestedGuid = string.IsNullOrWhiteSpace(request.ConnectionGuid) ? null : request.ConnectionGuid.Trim();
+        var connections = await LoadVisibleConnectionsAsync(access.Access, requestedGuid);
+        if (requestedGuid is not null && connections.Count == 0)
+        {
+            // 公司文件不存在、未启用或对该账号不可见：统一当作找不到，不暴露区别。
+            return ApiResponse<MyobPayslipSyncResultDto>.Error("找不到这家公司文件", MyobPayslipErrorCodes.NotFound);
+        }
+
+        var outcomes = await _sync.SyncAsync(connections, MyobPayslipSyncTrigger.Manual, cancellationToken);
+        return ApiResponse<MyobPayslipSyncResultDto>.OK(new MyobPayslipSyncResultDto
+        {
+            Companies = outcomes.Select(outcome => new MyobPayslipSyncCompanyResultDto
             {
-                return cached;
-            }
-
-            var accessToken = await _tokens.GetAccessTokenAsync(connection.ConnectionGuid, cancellationToken);
-            var records = await _client.GetPayrollAdvicesAsync(
-                connection.BusinessId, accessToken, new MyobPayrollAdviceQuery(from, toExclusive), cancellationToken);
-            cached = new CachedAdvices(_time.GetUtcNow().UtcDateTime, records);
-            _cache.Set(key, cached, CacheLifetime);
-            return cached;
-        }
-        finally
-        {
-            gate.Release();
-        }
+                ConnectionGuid = outcome.ConnectionGuid,
+                ConnectionName = outcome.ConnectionName,
+                Status = outcome.Status,
+                ErrorCode = outcome.ErrorCode,
+                ErrorMessage = outcome.ErrorMessage,
+                Backfilled = outcome.Backfilled,
+                Inserted = outcome.Inserted,
+                Updated = outcome.Updated,
+                Removed = outcome.Removed,
+            }).ToList(),
+        });
     }
 
     // ───────────────────────── 归类 ─────────────────────────
@@ -612,7 +644,7 @@ internal sealed class MyobPayslipService : IMyobPayslipService
     private static ResolveOutcome NotFoundOutcome() => new(null, MyobPayslipErrorCodes.NotFound, "找不到这张工资单");
 
     /// <summary>
-    /// 取出并校验单张工资单：权限 → 参数格式 → 公司文件可见 → 从 MYOB 只取这名员工这一天 → 归类 → 可见性。
+    /// 取出并校验单张工资单：权限 → 参数格式 → 公司文件可见 → 从本地快照取这名员工这一天 → 归类 → 可见性。
     /// 越权与不存在返回同样的 NotFound，不暴露这张工资单是否存在。工时接口也走这里重新取工资单，
     /// 不信任客户端传来的周期，避免用伪造的周期绕过「分店归属」判断。
     /// </summary>
@@ -656,22 +688,8 @@ internal sealed class MyobPayslipService : IMyobPayslipService
             return NotFoundOutcome();
         }
 
-        IReadOnlyList<MyobPayrollAdviceRecord> records;
-        try
-        {
-            var accessToken = await _tokens.GetAccessTokenAsync(connection.ConnectionGuid, cancellationToken);
-            records = await _client.GetPayrollAdvicesAsync(
-                connection.BusinessId,
-                accessToken,
-                new MyobPayrollAdviceQuery(paymentDate, paymentDate.AddDays(1), request.EmployeeUid.Trim()),
-                cancellationToken);
-        }
-        catch (MyobApiException ex)
-        {
-            return new ResolveOutcome(null, ex.Code, ex.Message);
-        }
-
-        var sameDay = records
+        // 只取这一天（一个公司当天最多几十张）再在内存里按员工卡比对：员工卡 UID 不分大小写，不依赖数据库排序规则（测试库是 SQLite，区分大小写）。
+        var sameDay = (await LoadSnapshotRecordsAsync(connection.ConnectionGuid, paymentDate, paymentDate.AddDays(1)))
             .Where(record => record.EmployeeUid.Equals(request.EmployeeUid.Trim(), StringComparison.OrdinalIgnoreCase)
                 && record.PaymentDate?.Date == paymentDate)
             .ToList();

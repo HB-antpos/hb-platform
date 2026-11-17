@@ -3,9 +3,8 @@
     "title": "Payslips",
     "subtitle": "View employees' historical paid payslips from MYOB (read-only)",
     "cardTitle": "Historical payslips",
-    "cardHint": "Read live from MYOB, read-only; filtered by payment date. A payslip has no store of its own: stores are derived from employee matching, the paying company and attendance in the pay period.",
-    "fetchedAt": "MYOB data read at {{time}}",
-    "reload": "Refresh",
+    "cardHint": "Synced from MYOB into our database every day at 12 am, 8 am, 12 pm, 3 pm, 6 pm and 9 pm Sydney time (or click Sync to update now); read-only, filtered by payment date. A payslip has no store of its own: stores are derived from employee matching, the paying company and attendance in the pay period.",
+    "fetchedAt": "Last synced at {{time}}",
     "retry": "Retry",
     "total": "{{total}} payslips",
     "filters": {
@@ -89,7 +88,7 @@
       "howTo": "For unmatched employees, match the MYOB card on MYOB integration → Employee matching. For \"store unknown\", check the employee's store assignment, the paying company (MYOB integration → Paying company) and whether there was a roster in the period."
     },
     "companies": {
-      "failedTitle": "{{name}}: could not read MYOB",
+      "failedTitle": "{{name}}: MYOB sync failed",
       "ok": "Read OK",
       "failed": "Read failed",
       "count": "{{count}}",
@@ -98,9 +97,17 @@
       "kinds": {
         "reauth": "The MYOB authorisation has expired or lacks scope. An administrator of the company file must re-authorise.",
         "forbidden": "This company file does not allow reading payroll data. Contact the company file administrator.",
-        "unavailable": "MYOB is temporarily unavailable or rate-limited. Please try again shortly.",
-        "other": "Could not read MYOB payslips. Please try again shortly."
-      }
+        "unavailable": "MYOB is temporarily unavailable or rate-limited. Please click Sync to try again shortly.",
+        "syncPending": "Payslips for this company have not been synced yet.",
+        "other": "Could not sync MYOB payslips. Please try again shortly."
+      },
+      "pendingTitle": "{{name}}: waiting for the first sync",
+      "syncingTitle": "{{name}}: syncing from MYOB",
+      "staleTitle": "{{name}}: the last sync failed; showing data from {{time}}",
+      "historyTitle": "{{name}}: older payslips are still being synced",
+      "pendingBody": "Payslips for this company have not been synced yet. The system checks every minute; you can also click Sync at the top right to start now.",
+      "syncingBody": "Pulling from MYOB now. Refresh the page when it finishes to see the latest data.",
+      "historyBody": "The first sync pulls the last 24 months in one go, so older payslips will appear shortly."
     },
     "states": {
       "empty": {
@@ -115,15 +122,20 @@
         "back": "Go back"
       },
       "failed": {
-        "title": "Cannot read MYOB payslips right now",
+        "title": "No payslips can be shown right now",
         "retry": "Retry",
         "goConnect": "View connections",
         "reauth": "The MYOB authorisation has expired or lacks scope (401). An administrator of the company file must re-authorise in MYOB integration.",
         "forbidden": "This company file does not allow reading payroll data (403). Contact the company file administrator.",
-        "unavailable": "The MYOB service is temporarily unavailable or rate-limited. Payslips are not cached here; please try again shortly.",
+        "unavailable": "The MYOB service is temporarily unavailable or rate-limited. Please click Sync to try again shortly.",
         "other": "Could not read MYOB payslips. Please try again shortly."
       },
-      "loadFailed": "Failed to load payslips"
+      "loadFailed": "Failed to load payslips",
+      "pending": {
+        "title": "Payslips are being synced for the first time",
+        "description": "The payslip history has not been synced into our database yet. The first sync pulls the last 24 months in one go and usually finishes within a minute; the system checks every minute, or you can click Sync now.",
+        "sync": "Sync now"
+      }
     },
     "drawer": {
       "title": "Payslip of {{name}}",
@@ -194,6 +206,16 @@
         "notFound": "This payslip cannot be found (you may no longer have access, or MYOB has corrected it).",
         "other": "Send failed. Please retry later. The payslip itself is unaffected; you can download the PDF and send it manually."
       }
+    },
+    "sync": {
+      "button": "Sync",
+      "running": "Syncing…",
+      "done": "Synced: {{inserted}} added, {{updated}} updated, {{removed}} withdrawn",
+      "upToDate": "Already up to date; nothing new in MYOB",
+      "recent": "Synced a moment ago; please try again in a minute",
+      "busy": "{{names}} is being synced in the background; check again shortly",
+      "failed": "{{names}} failed to sync; existing data has been kept (see the notice on the page)",
+      "error": "Sync failed. Please try again shortly."
     }
   }
 }

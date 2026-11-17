@@ -121,6 +121,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string PickRecordCartonMigrationId = "20261114.002-pick-record-carton";
     internal const string PosSettingsMigrationId = "20261114.003-pos-settings";
     internal const string PackBlankCartonsMigrationId = "20261115.001-pack-blank-cartons";
+    internal const string MyobPayslipSnapshotMigrationId = "20261117.001-myob-payslip-snapshot";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -512,6 +513,11 @@ internal sealed class SchemaMigrationCoordinator
             PackBlankCartonsMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyPackBlankCartonsAsync(cancellationToken)
+        ),
+        new(
+            MyobPayslipSnapshotMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyMyobPayslipSnapshotAsync(cancellationToken)
         ),
     ];
 

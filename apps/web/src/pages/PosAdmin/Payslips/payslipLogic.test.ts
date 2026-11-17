@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
 
-import type { MyobPayslipCompanyStatus, MyobPayslipRow } from '../../../types/myobPayslip'
+import type { MyobPayslipCompanyStatus, MyobPayslipRow, MyobPayslipSyncCompanyResult } from '../../../types/myobPayslip'
 
 import {
   PAYSLIP_DEFAULT_PRESET,
   PAYSLIP_MAX_RANGE_DAYS,
   addDays,
   allCompaniesFailed,
+  buildPayslipCompanyNotices,
   classifyPayslipError,
   firstFailureKind,
   formatHours,
@@ -25,6 +26,7 @@ import {
   paperLineCells,
   payslipRowKey,
   resolvePayslipPreset,
+  summarizePayslipSync,
   sydneyToday,
   validatePayslipRange,
 } from './payslipLogic'
@@ -141,9 +143,24 @@ assert.equal(classifyPayslipError('MYOB_API_CALL_FAILED', '无法连接 MYOB 服
 assert.equal(classifyPayslipError('MYOB_API_CALL_FAILED', '连接 MYOB 服务超时'), 'unavailable')
 assert.equal(classifyPayslipError('MYOB_API_CALL_FAILED', 'MYOB 工资单报表接口返回 404'), 'other')
 assert.equal(classifyPayslipError(null, null), 'other')
+// 本地还没有这家公司的数据（首次同步没完成）：单独一类，不当作 MYOB 出错（即使消息里碰巧有状态码）。
+assert.equal(classifyPayslipError('MYOB_PAYSLIP_SYNC_PENDING', null), 'syncPending')
+assert.equal(classifyPayslipError('MYOB_PAYSLIP_SYNC_PENDING', '返回 503'), 'syncPending')
 
 function status(overrides: Partial<MyobPayslipCompanyStatus>): MyobPayslipCompanyStatus {
-  return { connectionGuid: 'c', connectionName: 'C', ok: true, count: 1, errorCode: null, errorMessage: null, ...overrides }
+  return {
+    connectionGuid: 'c',
+    connectionName: 'C',
+    ok: true,
+    count: 1,
+    errorCode: null,
+    errorMessage: null,
+    lastSyncedAt: '2026-11-17T02:00:00.0000000Z',
+    syncing: false,
+    historyIncomplete: false,
+    syncError: null,
+    ...overrides,
+  }
 }
 assert.equal(allCompaniesFailed([]), false) // 没有公司不算「全部失败」
 assert.equal(allCompaniesFailed([status({}), status({ ok: false })]), false) // 一家成功就照常显示
@@ -153,6 +170,49 @@ assert.equal(
   'unavailable',
 )
 assert.equal(firstFailureKind([status({})]), 'other')
+assert.equal(firstFailureKind([status({ ok: false, errorCode: 'MYOB_PAYSLIP_SYNC_PENDING' })]), 'syncPending')
+
+// ───────────────────────── 同步状态提示 ─────────────────────────
+
+// 一切正常的公司没有提示（不打扰）。
+assert.deepEqual(buildPayslipCompanyNotices([status({}), status({ connectionGuid: 'c2' })]), [])
+
+const pending = status({ connectionGuid: 'p', connectionName: 'Pending', ok: false, count: 0, errorCode: 'MYOB_PAYSLIP_SYNC_PENDING', lastSyncedAt: null })
+// 本地没数据：正在同步 > 等待首次同步（带上次失败原因的归类）> 其它失败。
+assert.deepEqual(
+  buildPayslipCompanyNotices([{ ...pending, syncing: true }]).map((notice) => notice.kind),
+  ['syncing'],
+)
+const waiting = buildPayslipCompanyNotices([{ ...pending, syncError: 'MYOB 工资单报表接口返回 401' }])
+assert.deepEqual(waiting.map((notice) => [notice.kind, notice.errorKind]), [['pending', 'reauth']])
+assert.deepEqual(buildPayslipCompanyNotices([pending]).map((notice) => [notice.kind, notice.errorKind]), [['pending', 'other']])
+assert.deepEqual(
+  buildPayslipCompanyNotices([status({ ok: false, errorCode: 'MYOB_API_CALL_FAILED', errorMessage: '返回 503' })]).map((notice) => [notice.kind, notice.errorKind]),
+  [['failed', 'unavailable']],
+)
+
+// 有数据：同步失败（仍显示旧数据）> 历史没回填完 > 正在同步；每家最多一条。
+const stale = buildPayslipCompanyNotices([status({ syncError: 'MYOB 工资单报表接口返回 503', historyIncomplete: true, syncing: true })])
+assert.deepEqual(stale.map((notice) => [notice.kind, notice.errorKind, notice.lastSyncedAt]), [['staleAfterFailure', 'unavailable', '2026-11-17T02:00:00.0000000Z']])
+assert.deepEqual(buildPayslipCompanyNotices([status({ historyIncomplete: true, syncing: true })]).map((notice) => notice.kind), ['historyIncomplete'])
+assert.deepEqual(buildPayslipCompanyNotices([status({ syncing: true })]).map((notice) => notice.kind), ['syncing'])
+
+// ───────────────────────── 手动同步结果汇总 ─────────────────────────
+
+function synced(overrides: Partial<MyobPayslipSyncCompanyResult>): MyobPayslipSyncCompanyResult {
+  return { connectionGuid: 'c', connectionName: 'C', status: 'Synced', errorCode: null, errorMessage: null, backfilled: false, inserted: 0, updated: 0, removed: 0, ...overrides }
+}
+// 任何一家失败 → failed（点名失败的公司）；其次有公司正在别处同步 → busy；全部在冷却内 → recent。
+assert.deepEqual(summarizePayslipSync({ companies: [synced({ inserted: 3 }), synced({ connectionName: 'Aus', status: 'Failed' })] }), { kind: 'failed', names: ['Aus'] })
+assert.deepEqual(summarizePayslipSync({ companies: [synced({ connectionName: 'Inv', status: 'Busy' }), synced({})] }), { kind: 'busy', names: ['Inv'] })
+assert.deepEqual(summarizePayslipSync({ companies: [synced({ status: 'Skipped' }), synced({ status: 'Skipped' })] }), { kind: 'recent' })
+assert.deepEqual(summarizePayslipSync({ companies: [] }), { kind: 'recent' })
+// 成功的几家都没变化 → upToDate；否则累计新增 / 更新 / 撤销（Skipped 的不计）。
+assert.deepEqual(summarizePayslipSync({ companies: [synced({}), synced({ status: 'Skipped', inserted: 9 })] }), { kind: 'upToDate' })
+assert.deepEqual(
+  summarizePayslipSync({ companies: [synced({ inserted: 130, backfilled: true }), synced({ updated: 2, removed: 1 }), synced({ status: 'Skipped', inserted: 9 })] }),
+  { kind: 'done', inserted: 130, updated: 2, removed: 1 },
+)
 
 // ───────────────────────── 分店下拉 ─────────────────────────
 

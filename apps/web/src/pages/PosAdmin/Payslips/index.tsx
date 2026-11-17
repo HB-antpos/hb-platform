@@ -1,5 +1,5 @@
-import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, DatePicker, Empty, Input, Select, Skeleton, Tag } from 'antd'
+import { SearchOutlined, SyncOutlined } from '@ant-design/icons'
+import { Alert, Button, DatePicker, Empty, Input, Select, Skeleton, Tag, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -9,7 +9,7 @@ import { useNavigate } from 'react-router-dom'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import PageContainer from '../../../components/PageContainer'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
-import { getMyobPayslipCompanies, getMyobPayslips } from '../../../services/myobPayslipService'
+import { getMyobPayslipCompanies, getMyobPayslips, syncMyobPayslips } from '../../../services/myobPayslipService'
 import { useAuthStore } from '../../../store/auth'
 import type {
   MyobPayslipCompany,
@@ -24,6 +24,7 @@ import {
   PAYSLIP_DEFAULT_PRESET,
   PAYSLIP_PRESETS,
   allCompaniesFailed,
+  buildPayslipCompanyNotices,
   classifyPayslipError,
   firstFailureKind,
   formatMoney,
@@ -32,8 +33,11 @@ import {
   mergePayslipStoreOptions,
   payslipRowKey,
   resolvePayslipPreset,
+  summarizePayslipSync,
   sydneyToday,
   validatePayslipRange,
+  type PayslipCompanyNotice,
+  type PayslipCompanyNoticeKind,
   type PayslipErrorKind,
   type PayslipPresetKey,
   type PayslipStoreOption,
@@ -66,6 +70,8 @@ function failedMessageKey(kind: PayslipErrorKind) {
       return 'payslips.states.failed.forbidden'
     case 'unavailable':
       return 'payslips.states.failed.unavailable'
+    case 'syncPending':
+      return 'payslips.states.pending.description'
     default:
       return 'payslips.states.failed.other'
   }
@@ -79,8 +85,52 @@ function companyKindMessageKey(kind: PayslipErrorKind) {
       return 'payslips.companies.kinds.forbidden'
     case 'unavailable':
       return 'payslips.companies.kinds.unavailable'
+    case 'syncPending':
+      return 'payslips.companies.kinds.syncPending'
     default:
       return 'payslips.companies.kinds.other'
+  }
+}
+
+function noticeTitleKey(kind: PayslipCompanyNoticeKind) {
+  switch (kind) {
+    case 'syncing':
+      return 'payslips.companies.syncingTitle'
+    case 'pending':
+      return 'payslips.companies.pendingTitle'
+    case 'failed':
+      return 'payslips.companies.failedTitle'
+    case 'staleAfterFailure':
+      return 'payslips.companies.staleTitle'
+    default:
+      return 'payslips.companies.historyTitle'
+  }
+}
+
+/** 失败类提示给出原因（按错误归类选文案）；纯状态类提示给一句说明。 */
+function noticeBodyKey(notice: PayslipCompanyNotice) {
+  switch (notice.kind) {
+    case 'syncing':
+      return 'payslips.companies.syncingBody'
+    case 'historyIncomplete':
+      return 'payslips.companies.historyBody'
+    case 'pending':
+      return notice.errorKind === 'other' ? 'payslips.companies.pendingBody' : companyKindMessageKey(notice.errorKind)
+    default:
+      return companyKindMessageKey(notice.errorKind)
+  }
+}
+
+function noticeAlertType(notice: PayslipCompanyNotice): 'info' | 'warning' | 'error' {
+  switch (notice.kind) {
+    case 'failed':
+      return 'error'
+    case 'staleAfterFailure':
+      return 'warning'
+    case 'pending':
+      return notice.errorKind === 'other' ? 'info' : 'warning'
+    default:
+      return 'info'
   }
 }
 
@@ -118,6 +168,7 @@ export default function PayslipsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [forbidden, setForbidden] = useState(false)
+  const [syncingNow, setSyncingNow] = useState(false)
   const [opened, setOpened] = useState<MyobPayslipKey | null>(null)
   const requestSeq = useRef(0)
   // 「全部」标签的张数：在未归属视图里数据只含未归属行，所以沿用最近一次全部视图的总数。
@@ -147,7 +198,7 @@ export default function PayslipsPage() {
   }, [])
 
   const load = useCallback(
-    async (refresh = false) => {
+    async () => {
       if (rangeState !== 'ok') {
         setLoading(false)
         return
@@ -162,7 +213,6 @@ export default function PayslipsPage() {
           to: range.to,
           keyword: debouncedKeyword,
           onlyUnassigned: view === 'unassigned',
-          refresh,
         })
         if (seq === requestSeq.current) {
           if (view === 'all') {
@@ -207,9 +257,53 @@ export default function PayslipsPage() {
     [],
   )
 
-  const failedCompanies = useMemo(() => (data ? data.companies.filter((company) => !company.ok) : []), [data])
+  const companyNotices = useMemo(() => (data ? buildPayslipCompanyNotices(data.companies) : []), [data])
+  // 整页都在等首次同步时，如果上一次同步失败过，补一句具体原因（授权失效 / 没权限 / MYOB 不可用），免得用户只看到「请等待」。
+  const pendingReasonKind = useMemo(
+    () =>
+      data?.companies
+        .map((company) => (company.syncError ? classifyPayslipError(null, company.syncError) : 'other'))
+        .find((kind) => kind !== 'other'),
+    [data],
+  )
   const wholePageFailed = data !== null && allCompaniesFailed(data.companies)
   const unassignedView = view === 'unassigned'
+
+  /** 立即从 MYOB 同步（选了公司只同步那一家，否则同步所有可见公司），完成后重新读取本地数据。 */
+  const syncNow = async () => {
+    if (syncingNow) {
+      return
+    }
+    setSyncingNow(true)
+    try {
+      const summary = summarizePayslipSync(await syncMyobPayslips(companyGuid))
+      switch (summary.kind) {
+        case 'failed':
+          message.warning(t('payslips.sync.failed', { names: summary.names.join('、') }))
+          break
+        case 'busy':
+          message.info(t('payslips.sync.busy', { names: summary.names.join('、') }))
+          break
+        case 'recent':
+          message.info(t('payslips.sync.recent'))
+          break
+        case 'upToDate':
+          message.success(t('payslips.sync.upToDate'))
+          break
+        default:
+          message.success(t('payslips.sync.done', { inserted: summary.inserted, updated: summary.updated, removed: summary.removed }))
+      }
+      await load()
+    } catch (err) {
+      if (isForbidden(err)) {
+        setForbidden(true)
+      } else {
+        message.error(extractMyobError(err, t('payslips.sync.error')).message)
+      }
+    } finally {
+      setSyncingNow(false)
+    }
+  }
 
   const clearFilters = () => {
     setCompanyGuid(undefined)
@@ -369,8 +463,8 @@ export default function PayslipsPage() {
   const headerActions = (
     <div className="payslip-head-actions">
       {data?.fetchedAt ? <span className="payslip-fetched">{t('payslips.fetchedAt', { time: formatMyobTime(data.fetchedAt) })}</span> : null}
-      <Button icon={<ReloadOutlined />} loading={loading} disabled={rangeState !== 'ok'} onClick={() => void load(true)}>
-        {t('payslips.reload')}
+      <Button icon={<SyncOutlined />} loading={syncingNow} disabled={loading} onClick={() => void syncNow()}>
+        {syncingNow ? t('payslips.sync.running') : t('payslips.sync.button')}
       </Button>
     </div>
   )
@@ -482,7 +576,7 @@ export default function PayslipsPage() {
               message={t('payslips.states.loadFailed')}
               description={error}
               action={
-                <Button size="small" onClick={() => void load(true)}>
+                <Button size="small" onClick={() => void load()}>
                   {t('payslips.retry')}
                 </Button>
               }
@@ -491,12 +585,28 @@ export default function PayslipsPage() {
 
           {loading && !data ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
 
-          {data && wholePageFailed ? (
+          {data && wholePageFailed && firstFailureKind(data.companies) === 'syncPending' ? (
+            <div className="payslip-state">
+              <h3>{t('payslips.states.pending.title')}</h3>
+              <p>{t('payslips.states.pending.description')}</p>
+              {pendingReasonKind ? <p>{t(failedMessageKey(pendingReasonKind))}</p> : null}
+              <div className="payslip-state-actions">
+                <Button type="primary" loading={syncingNow} onClick={() => void syncNow()}>
+                  {t('payslips.states.pending.sync')}
+                </Button>
+                {pendingReasonKind === 'reauth' && access.canAccessMyob ? (
+                  <Button onClick={() => navigate(MYOB_PAGE)}>{t('payslips.states.failed.goConnect')}</Button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
+          {data && wholePageFailed && firstFailureKind(data.companies) !== 'syncPending' ? (
             <div className="payslip-state">
               <h3>{t('payslips.states.failed.title')}</h3>
               <p>{t(failedMessageKey(firstFailureKind(data.companies)))}</p>
               <div className="payslip-state-actions">
-                <Button type="primary" loading={loading} onClick={() => void load(true)}>
+                <Button type="primary" loading={loading} onClick={() => void load()}>
                   {t('payslips.states.failed.retry')}
                 </Button>
                 {access.canAccessMyob ? <Button onClick={() => navigate(MYOB_PAGE)}>{t('payslips.states.failed.goConnect')}</Button> : null}
@@ -506,17 +616,17 @@ export default function PayslipsPage() {
 
           {data && !wholePageFailed ? (
             <>
-              {failedCompanies.map((company) => (
+              {companyNotices.map((notice) => (
                 <Alert
-                  key={company.connectionGuid}
+                  key={`${notice.connectionGuid}-${notice.kind}`}
                   className="payslip-alert"
-                  type="error"
+                  type={noticeAlertType(notice)}
                   showIcon
-                  message={t('payslips.companies.failedTitle', { name: company.connectionName })}
+                  message={t(noticeTitleKey(notice.kind), { name: notice.name, time: formatMyobTime(notice.lastSyncedAt) })}
                   description={
                     <>
-                      {t(companyKindMessageKey(classifyPayslipError(company.errorCode, company.errorMessage)))}
-                      {classifyPayslipError(company.errorCode, company.errorMessage) === 'reauth' && access.canManageMyobConnections ? (
+                      {t(noticeBodyKey(notice))}
+                      {notice.errorKind === 'reauth' && access.canManageMyobConnections ? (
                         <>
                           {' '}
                           <Button type="link" size="small" onClick={() => navigate(MYOB_PAGE)}>

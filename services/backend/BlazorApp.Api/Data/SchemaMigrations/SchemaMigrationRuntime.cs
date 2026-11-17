@@ -316,6 +316,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyPackBlankCartonsAsync(CancellationToken cancellationToken);
 
+    Task ApplyMyobPayslipSnapshotAsync(CancellationToken cancellationToken);
+
+    Task VerifyMyobPayslipSnapshotAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -2018,6 +2022,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             PackBlankCartonsSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyMyobPayslipSnapshotAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayslipSnapshotSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 两张表的列签名、主键与索引通过后协调器才登记账本。
+        await VerifyMyobPayslipSnapshotAsync(cancellationToken);
+    }
+
+    public async Task VerifyMyobPayslipSnapshotAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            MyobPayslipSnapshotSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

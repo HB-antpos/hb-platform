@@ -1,4 +1,9 @@
-import type { MyobPayslipCompanyStatus, MyobPayslipFlatLine, MyobPayslipRow } from '../../../types/myobPayslip'
+import type {
+  MyobPayslipCompanyStatus,
+  MyobPayslipFlatLine,
+  MyobPayslipRow,
+  MyobPayslipSyncResult,
+} from '../../../types/myobPayslip'
 
 // 工资单页的纯逻辑：日期预设（澳洲财年）、金额 / 工时 / 周期格式化、错误归类、分店下拉。
 // 所有函数都是纯函数（today 由调用方传入），便于单测。
@@ -129,18 +134,25 @@ export function isUnassignedPlacement(placement: MyobPayslipRow['placement']): b
 
 // ───────────────────────── 错误归类 ─────────────────────────
 
-export type PayslipErrorKind = 'reauth' | 'forbidden' | 'unavailable' | 'other'
+export type PayslipErrorKind = 'reauth' | 'forbidden' | 'unavailable' | 'syncPending' | 'other'
 
 const HTTP_STATUS = /返回\s*(\d{3})/
+
+/** 后端：这家公司的工资单还没有成功同步到本地（首次同步进行中或失败），本地没有任何数据可读。 */
+export const PAYSLIP_SYNC_PENDING_CODE = 'MYOB_PAYSLIP_SYNC_PENDING'
 
 /**
  * 把后端的 MYOB 读取错误归成几类，界面按类给不同文案（不显示后端原文，避免暴露内部细节）：
  * - reauth：授权失效或 scope 不够（NEEDS_REAUTHORIZATION / 401）→ 引导去「MYOB 对接」重新授权；
  * - forbidden：公司文件没有开放工资读取（403）；
  * - unavailable：MYOB 暂时不可用 / 限流 / 网络（5xx、429、连不上、超时）；
+ * - syncPending：本地还没有这家公司的数据（首次同步还没完成）——不是 MYOB 出错；
  * - other：其余。
  */
 export function classifyPayslipError(code: string | null | undefined, message: string | null | undefined): PayslipErrorKind {
+  if (code === PAYSLIP_SYNC_PENDING_CODE) {
+    return 'syncPending'
+  }
   if (code === 'MYOB_NEEDS_REAUTHORIZATION') {
     return 'reauth'
   }
@@ -166,6 +178,80 @@ export function allCompaniesFailed(companies: readonly MyobPayslipCompanyStatus[
 export function firstFailureKind(companies: readonly MyobPayslipCompanyStatus[]): PayslipErrorKind {
   const failed = companies.find((company) => !company.ok)
   return failed ? classifyPayslipError(failed.errorCode, failed.errorMessage) : 'other'
+}
+
+// ───────────────────────── 同步状态（本地快照） ─────────────────────────
+
+/** 公司提示的种类：正在同步 / 等待首次同步 / 读取失败 / 同步失败（仍显示旧数据）/ 历史还没回填完。 */
+export type PayslipCompanyNoticeKind = 'syncing' | 'pending' | 'failed' | 'staleAfterFailure' | 'historyIncomplete'
+
+export interface PayslipCompanyNotice {
+  connectionGuid: string
+  name: string
+  kind: PayslipCompanyNoticeKind
+  /** 失败原因归类（pending / failed / staleAfterFailure 用来选文案）。 */
+  errorKind: PayslipErrorKind
+  lastSyncedAt: string | null
+}
+
+/**
+ * 每家公司最多一条提示，优先级：本地没数据（正在同步 > 等待首次同步 > 失败）；有数据时 同步失败 > 历史没回填完 > 正在同步。
+ * 一切正常的公司没有提示（不打扰）。
+ */
+export function buildPayslipCompanyNotices(companies: readonly MyobPayslipCompanyStatus[]): PayslipCompanyNotice[] {
+  const notices: PayslipCompanyNotice[] = []
+  for (const company of companies) {
+    const base = { connectionGuid: company.connectionGuid, name: company.connectionName, lastSyncedAt: company.lastSyncedAt }
+    const syncErrorKind = company.syncError ? classifyPayslipError(null, company.syncError) : 'other'
+    if (!company.ok) {
+      if (company.syncing) {
+        notices.push({ ...base, kind: 'syncing', errorKind: 'other' })
+      } else if (company.errorCode === PAYSLIP_SYNC_PENDING_CODE) {
+        notices.push({ ...base, kind: 'pending', errorKind: syncErrorKind })
+      } else {
+        notices.push({ ...base, kind: 'failed', errorKind: classifyPayslipError(company.errorCode, company.errorMessage) })
+      }
+    } else if (company.syncError) {
+      notices.push({ ...base, kind: 'staleAfterFailure', errorKind: syncErrorKind })
+    } else if (company.historyIncomplete) {
+      notices.push({ ...base, kind: 'historyIncomplete', errorKind: 'other' })
+    } else if (company.syncing) {
+      notices.push({ ...base, kind: 'syncing', errorKind: 'other' })
+    }
+  }
+  return notices
+}
+
+/** 手动同步完成后给用户的一句话：按严重程度取一种。 */
+export type PayslipSyncSummary =
+  | { kind: 'failed'; names: string[] }
+  | { kind: 'busy'; names: string[] }
+  | { kind: 'recent' }
+  | { kind: 'upToDate' }
+  | { kind: 'done'; inserted: number; updated: number; removed: number }
+
+/**
+ * 汇总手动同步结果：任何一家失败 → failed（本地数据已保留，各家原因在页面提示里）；其次有公司正在别处同步 → busy；
+ * 全部在 60 秒冷却内 → recent；成功的几家都没有变化 → upToDate；否则累计新增 / 更新 / 撤销。
+ */
+export function summarizePayslipSync(result: MyobPayslipSyncResult): PayslipSyncSummary {
+  const named = (status: string) => result.companies.filter((company) => company.status === status).map((company) => company.connectionName)
+  const failed = named('Failed')
+  if (failed.length > 0) {
+    return { kind: 'failed', names: failed }
+  }
+  const busy = named('Busy')
+  if (busy.length > 0) {
+    return { kind: 'busy', names: busy }
+  }
+  const synced = result.companies.filter((company) => company.status === 'Synced')
+  if (synced.length === 0) {
+    return { kind: 'recent' }
+  }
+  const inserted = synced.reduce((sum, company) => sum + company.inserted, 0)
+  const updated = synced.reduce((sum, company) => sum + company.updated, 0)
+  const removed = synced.reduce((sum, company) => sum + company.removed, 0)
+  return inserted + updated + removed === 0 ? { kind: 'upToDate' } : { kind: 'done', inserted, updated, removed }
 }
 
 // ───────────────────────── 分店下拉 ─────────────────────────

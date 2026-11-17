@@ -17,6 +17,9 @@ import type {
   MyobPayslipRow,
   MyobPayslipStore,
   MyobPayslipStoreHours,
+  MyobPayslipSyncCompanyResult,
+  MyobPayslipSyncResult,
+  MyobPayslipSyncStatus,
 } from '../types/myobPayslip'
 import request, { unwrapApiData } from '../utils/request'
 
@@ -83,6 +86,10 @@ function normalizeCompanyStatus(raw: unknown): MyobPayslipCompanyStatus | null {
     count: number(item.count),
     errorCode: nullableText(item.errorCode),
     errorMessage: nullableText(item.errorMessage),
+    lastSyncedAt: nullableText(item.lastSyncedAt),
+    syncing: item.syncing === true,
+    historyIncomplete: item.historyIncomplete === true,
+    syncError: nullableText(item.syncError),
   }
 }
 
@@ -226,13 +233,47 @@ export function buildMyobPayslipParams(query: MyobPayslipQuery) {
     to: query.to || undefined,
     keyword: query.keyword?.trim() || undefined,
     onlyUnassigned: query.onlyUnassigned ? true : undefined,
-    refresh: query.refresh ? true : undefined,
   }
 }
 
 export async function getMyobPayslips(query: MyobPayslipQuery = {}): Promise<MyobPayslipList> {
   const response = await request.get<ApiResponse<unknown>>(PAYSLIP_BASE, { params: buildMyobPayslipParams(query) })
   return normalizeMyobPayslipList(unwrapApiData(response))
+}
+
+const SYNC_STATUSES: readonly MyobPayslipSyncStatus[] = ['Synced', 'Skipped', 'Busy', 'Failed']
+
+function normalizeSyncCompany(raw: unknown): MyobPayslipSyncCompanyResult | null {
+  const item = record(raw)
+  const connectionGuid = text(item.connectionGuid)
+  if (!connectionGuid) {
+    return null
+  }
+  return {
+    connectionGuid,
+    connectionName: text(item.connectionName),
+    // 不认识的状态按失败处理：偏保守，不会把未知结果当成「已同步」。
+    status: SYNC_STATUSES.find((status) => status === item.status) ?? 'Failed',
+    errorCode: nullableText(item.errorCode),
+    errorMessage: nullableText(item.errorMessage),
+    backfilled: item.backfilled === true,
+    inserted: number(item.inserted),
+    updated: number(item.updated),
+    removed: number(item.removed),
+  }
+}
+
+export function normalizeMyobPayslipSyncResult(payload: unknown): MyobPayslipSyncResult {
+  return { companies: list(record(payload).companies, normalizeSyncCompany) }
+}
+
+/**
+ * 立即把工资单从 MYOB 同步到本地（connectionGuid 为空 = 当前账号可见的所有公司）。只读 MYOB；每家公司 60 秒内最多一次。
+ * 首次回填要一次拉 24 个月，可能要十几秒；之后只对账最近 8 周，通常几秒。
+ */
+export async function syncMyobPayslips(connectionGuid?: string): Promise<MyobPayslipSyncResult> {
+  const response = await request.post<ApiResponse<unknown>>(`${PAYSLIP_BASE}/sync`, { connectionGuid: connectionGuid || null })
+  return normalizeMyobPayslipSyncResult(unwrapApiData(response))
 }
 
 function keyParams(key: MyobPayslipKey) {

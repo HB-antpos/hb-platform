@@ -15,8 +15,10 @@ import {
   normalizeMyobPayslipList,
   normalizeMyobPayslipPlacement,
   normalizeMyobPayslipRow,
+  normalizeMyobPayslipSyncResult,
   parseContentDispositionFilename,
   sendMyobPayslipEmail,
+  syncMyobPayslips,
 } from './myobPayslipService'
 
 // 契约：MyobPayslipDtos.cs，camelCase；后端字段缺失 / 类型异常时前端不崩，金额缺失显示为 null（界面 —），不是 0。
@@ -74,8 +76,8 @@ const full = normalizeMyobPayslipList({
   from: '2026-08-01',
   to: '2026-10-29',
   companies: [
-    { connectionGuid: 'c1', connectionName: 'Investment', ok: true, count: 23 },
-    { connectionGuid: 'c2', connectionName: 'Australian', ok: false, count: 0, errorCode: 'MYOB_API_CALL_FAILED', errorMessage: '返回 503' },
+    { connectionGuid: 'c1', connectionName: 'Investment', ok: true, count: 23, lastSyncedAt: '2026-10-29T01:00:00.0000000Z', syncing: true, historyIncomplete: true, syncError: '返回 503' },
+    { connectionGuid: 'c2', connectionName: 'Australian', ok: false, count: 0, errorCode: 'MYOB_PAYSLIP_SYNC_PENDING', errorMessage: '还没同步' },
     { connectionName: 'no guid' },
   ],
   rows: [{ employeeUid: 'e1', paymentDate: '2026-10-23' }, {}],
@@ -89,11 +91,40 @@ const full = normalizeMyobPayslipList({
 })
 assert.equal(full.companies.length, 2) // 没有 connectionGuid 的丢弃
 assert.equal(full.companies[1].ok, false)
-assert.equal(full.companies[1].errorMessage, '返回 503')
+assert.equal(full.companies[1].errorCode, 'MYOB_PAYSLIP_SYNC_PENDING')
+// 同步状态：只认明确的 true / 文本，缺失按「没有」处理（不把缺字段当成正在同步或有错误）。
+assert.equal(full.companies[0].lastSyncedAt, '2026-10-29T01:00:00.0000000Z')
+assert.equal(full.companies[0].syncing, true)
+assert.equal(full.companies[0].historyIncomplete, true)
+assert.equal(full.companies[0].syncError, '返回 503')
+assert.equal(full.companies[1].lastSyncedAt, null)
+assert.equal(full.companies[1].syncing, false)
+assert.equal(full.companies[1].historyIncomplete, false)
+assert.equal(full.companies[1].syncError, null)
 assert.equal(full.rows.length, 1)
 assert.equal(full.unassignedCount, 3)
 assert.equal(full.canViewAllStores, true)
 assert.equal(normalizeMyobPayslipList({ canViewAllStores: 'true' }).canViewAllStores, false)
+
+// 手动同步结果：不认识的状态按失败处理（偏保守，不会把未知结果当成已同步）；缺字段不崩。
+const synced = normalizeMyobPayslipSyncResult({
+  companies: [
+    { connectionGuid: 'c1', connectionName: 'Investment', status: 'Synced', backfilled: true, inserted: 130, updated: 1, removed: 2 },
+    { connectionGuid: 'c2', connectionName: 'Australian', status: 'Failed', errorCode: 'MYOB_API_CALL_FAILED', errorMessage: '返回 503' },
+    { connectionGuid: 'c3', connectionName: 'Orion', status: 'SomethingNew' },
+    { connectionName: 'no guid', status: 'Synced' },
+  ],
+})
+assert.equal(synced.companies.length, 3)
+assert.deepEqual(
+  synced.companies.map((company) => company.status),
+  ['Synced', 'Failed', 'Failed'],
+)
+assert.equal(synced.companies[0].backfilled, true)
+assert.equal(synced.companies[0].inserted, 130)
+assert.equal(synced.companies[1].errorMessage, '返回 503')
+assert.equal(synced.companies[2].inserted, 0)
+assert.deepEqual(normalizeMyobPayslipSyncResult(null).companies, [])
 
 // 公司下拉。
 assert.deepEqual(normalizeMyobPayslipCompanies([{ connectionGuid: 'c1', connectionName: 'A' }, {}, null]), [{ connectionGuid: 'c1', connectionName: 'A' }])
@@ -196,18 +227,16 @@ assert.deepEqual(buildMyobPayslipParams({}), {
   to: undefined,
   keyword: undefined,
   onlyUnassigned: undefined,
-  refresh: undefined,
 })
-assert.deepEqual(buildMyobPayslipParams({ connectionGuid: 'c1', storeCode: '1002', from: '2026-08-01', to: '2026-10-29', keyword: '  jane  ', onlyUnassigned: true, refresh: true }), {
+assert.deepEqual(buildMyobPayslipParams({ connectionGuid: 'c1', storeCode: '1002', from: '2026-08-01', to: '2026-10-29', keyword: '  jane  ', onlyUnassigned: true }), {
   connectionGuid: 'c1',
   storeCode: '1002',
   from: '2026-08-01',
   to: '2026-10-29',
   keyword: 'jane',
   onlyUnassigned: true,
-  refresh: true,
 })
-assert.equal(buildMyobPayslipParams({ keyword: '   ', onlyUnassigned: false, refresh: false }).keyword, undefined)
+assert.equal(buildMyobPayslipParams({ keyword: '   ', onlyUnassigned: false }).keyword, undefined)
 assert.equal(buildMyobPayslipParams({ onlyUnassigned: false }).onlyUnassigned, undefined)
 
 // Content-Disposition 文件名：优先 filename*，其次 filename；去掉路径分隔符。
@@ -257,7 +286,7 @@ try {
   assert.ok(calls[0].url.startsWith('/api/react/v1/myob/payslips?'))
   assert.ok(calls[0].url.includes('connectionGuid=c1'))
   assert.ok(calls[0].url.includes('onlyUnassigned=true'))
-  assert.equal(calls[0].url.includes('refresh'), false)
+  assert.equal(calls[0].url.includes('refresh'), false) // 列表只读本地快照：没有「绕过缓存」参数了
   assert.equal(calls[0].url.includes('keyword'), false)
 
   body = { success: true, data: { employeeName: 'Jane' } }
@@ -306,6 +335,17 @@ try {
   assert.equal((last.body as { to: string }).to, 'alex.morgan@example.com')
   assert.equal((last.body as { recipientChangeConfirmed: boolean }).recipientChangeConfirmed, false)
   assert.deepEqual(sent, { sentTo: 'a***@example.com', copiedToMe: true })
+
+  // 手动同步：POST /sync，body 带公司（不选公司传 null = 全部可见公司）；结果逐家规范化。
+  body = { success: true, data: { companies: [{ connectionGuid: 'c1', connectionName: 'Investment', status: 'Synced', inserted: 2 }] } }
+  const syncedAll = await syncMyobPayslips()
+  const syncCall = calls[calls.length - 1]
+  assert.equal(syncCall.method, 'POST')
+  assert.equal(syncCall.url, '/api/react/v1/myob/payslips/sync')
+  assert.deepEqual(syncCall.body, { connectionGuid: null })
+  assert.equal(syncedAll.companies[0].inserted, 2)
+  await syncMyobPayslips('c1')
+  assert.deepEqual(calls[calls.length - 1].body, { connectionGuid: 'c1' })
 } finally {
   globalThis.fetch = originalFetch
 }
