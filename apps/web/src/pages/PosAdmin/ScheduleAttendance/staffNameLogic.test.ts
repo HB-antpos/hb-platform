@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 
 import {
   DEFAULT_STAFF_NAME_MODE,
+  mergeStaffNameSources,
   parseStaffNameMode,
   readStaffNameMode,
   resolveStaffName,
@@ -99,6 +100,29 @@ assert.deepEqual(
   ], 'full'),
   { a: 'Sam Chen', b: 'Sam Chen' },
 )
+
+// ---------- 合并取名原料：店长不在员工管理列表里，要靠可排班员工补上 ----------
+{
+  const grid = [person({ userGuid: 'staff', nickname: 'Cody', fullName: 'Cody Johnson' })]
+  // 可排班员工：店员 + 店长。店长 Zhan Chen 只在这里有昵称；店员 Cody 在两边都有（以员工管理列表为准）
+  const employees = [
+    person({ userGuid: 'staff', nickname: 'Codee', fullName: 'Cody Johnson' }),
+    person({ userGuid: 'manager', nickname: 'Terry', givenName: 'Zhan', familyName: 'Chen', fullName: 'Zhan Chen' }),
+  ]
+  const scheduleOnly = [{ userGuid: 'left', fullName: 'Left Person' }]
+
+  const merged = mergeStaffNameSources(grid, employees, scheduleOnly)
+  assert.deepEqual(merged.map((item) => item.userGuid), ['staff', 'manager', 'left'], '同一个人只保留一份，先传的优先，顺序稳定')
+  assert.equal(merged[0].nickname, 'Cody', '员工管理列表里有的人以它为准')
+  const shown = Object.fromEntries(resolveStaffNames(merged, 'nickname'))
+  assert.equal(shown.manager, 'Terry', '店长的昵称来自可排班员工，看板上要显示昵称')
+  assert.equal(shown.left, 'Left Person', '已离职只有班次记录的人仍显示全名')
+  // 没合并时的老问题：店长只剩排班记录里的全名
+  const without = Object.fromEntries(resolveStaffNames(mergeStaffNameSources(grid, [{ userGuid: 'manager', fullName: 'Zhan Chen' }]), 'nickname'))
+  assert.equal(without.manager, 'Zhan Chen', '拿不到店长资料时只能显示全名（这正是合并要解决的）')
+  assert.deepEqual(mergeStaffNameSources(), [], '没有任何来源时为空')
+  assert.deepEqual(mergeStaffNameSources([], []), [], '空列表合并为空')
+}
 
 // ---------- 本机记忆 ----------
 assert.equal(parseStaffNameMode('full'), 'full')
