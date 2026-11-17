@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   ALL_STORES_TOKEN,
   STORE_SIDEBAR_DOCK_MIN_WIDTH,
+  STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH,
   buildStoreSections,
   filterStoreOptions,
   getRelativeWeekOffset,
@@ -73,6 +74,14 @@ assert.equal(dock({ containerWidth: 900, preference: 'docked' }), true) // 用�
 assert.equal(dock({ preference: 'floating' }), false)
 assert.equal(dock({ phone: true, preference: 'docked' }), false) // 手机永远不展开
 assert.equal(dock({ storeCount: 1, preference: 'docked' }), false) // 只有 1 家不显示
+// 表格页签（考勤记录 / 打卡记录等）放宽到约 940px：表格本来就能横向滚动
+assert.equal(STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH, 940)
+assert.equal(dock({ containerWidth: 1000, dockMinWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH }), true)
+assert.equal(dock({ containerWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH, dockMinWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH }), true)
+assert.equal(dock({ containerWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH - 1, dockMinWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH }), false)
+assert.equal(dock({ containerWidth: 1000 }), false) // 不传阈值仍按周排班：1000px 放不下 7 天
+assert.equal(dock({ containerWidth: 900, preference: 'docked', dockMinWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH }), true) // 偏好优先于宽度
+assert.equal(dock({ containerWidth: 1400, preference: 'floating', dockMinWidth: STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH }), false)
 
 assert.equal(parseSidebarPreference('docked'), 'docked')
 assert.equal(parseSidebarPreference('floating'), 'floating')

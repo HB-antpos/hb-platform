@@ -180,6 +180,15 @@
         "nameAltFull": "Full name: {{name}}",
         "nameAltNickname": "Nickname: {{name}}"
       },
+      "employeeFilter": {
+        "placeholder": "Select employee (searchable)",
+        "needStore": "Select a store first",
+        "empty": "No matching employees",
+        "storeStaff": "{{store}} active staff",
+        "matchCount": "{{matched}} / {{total}}",
+        "storeChanged": "Store changed. Employee filter cleared",
+        "notInRoster": "Not in active roster"
+      },
       "batch": {
         "title": "Roster",
         "openButton": "Roster",

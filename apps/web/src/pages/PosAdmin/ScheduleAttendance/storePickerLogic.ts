@@ -12,6 +12,12 @@ export const RECENT_STORE_LIMIT = 3
 export const STORE_SIDEBAR_WIDTH = 212
 export const STORE_SIDEBAR_DOCK_MIN_WIDTH = STORE_SIDEBAR_WIDTH + 7 * 132 + 84
 
+/**
+ * 表格页签（考勤记录 / 员工可用时间 / 打卡记录 / 公共假期等）的展开阈值：侧栏 + 约 644 的表格可视宽度 + 两侧留白。
+ * 比周排班放宽，因为这些表格本来就能横向滚动，不需要像 7 天看板那样一屏放下。
+ */
+export const STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH = STORE_SIDEBAR_WIDTH + 644 + 84
+
 /** 记住「全部分店」用的占位值（分店编码不会是这个）。 */
 export const ALL_STORES_TOKEN = '*'
 
@@ -76,16 +82,20 @@ export function resolveInitialStore(options: readonly StorePickerOption[], remem
   return undefined
 }
 
-/** 侧栏是否展开：手机、只有 1 家分店时不显示；用户点过「固定 / 收起」按偏好；否则看卡片宽度。 */
+/**
+ * 侧栏是否展开：手机、只有 1 家分店时不显示；用户点过「固定 / 收起」按偏好；否则看卡片宽度。
+ * dockMinWidth 缺省按周排班（7 天看板）的阈值；表格页签传 STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH。
+ */
 export function shouldDockSidebar(input: {
   phone: boolean
   storeCount: number
   containerWidth: number
   preference: SidebarPreference
+  dockMinWidth?: number
 }): boolean {
   if (input.phone || input.storeCount <= 1) return false
   if (input.preference) return input.preference === 'docked'
-  return input.containerWidth >= STORE_SIDEBAR_DOCK_MIN_WIDTH
+  return input.containerWidth >= (input.dockMinWidth ?? STORE_SIDEBAR_DOCK_MIN_WIDTH)
 }
 
 export function parseSidebarPreference(value: string | null | undefined): SidebarPreference {

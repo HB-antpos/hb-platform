@@ -152,6 +152,8 @@ import StorePicker from './StorePicker'
 import {
   ALL_STORES_TOKEN,
   STORAGE_KEYS,
+  STORE_SIDEBAR_DOCK_MIN_WIDTH,
+  STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH,
   getBrowserStorage,
   getRelativeWeekOffset,
   parseRecentStores,
@@ -167,6 +169,14 @@ import { FALLBACK_STAFF_COLOR, assignStaffColors } from './staffColorLogic'
 import type { StaffColor } from './staffColorLogic'
 import { mergeStaffNameSources, readStaffNameMode, resolveStaffNames, writeStaffNameMode } from './staffNameLogic'
 import type { StaffNameMode, StaffNameSource } from './staffNameLogic'
+import {
+  buildEmployeeOptions,
+  matchesEmployeeKeyword,
+  resolveEmployeeCell,
+  splitHighlight,
+  toStaffNameSource,
+} from './employeeFilterLogic'
+import type { EmployeeOption } from './employeeFilterLogic'
 import WeekBoard from './WeekBoard'
 import type { WeekBoardDay, WeekBoardDayDrop, WeekBoardLegendItem } from './WeekBoard'
 import { buildStaffLegend, findAvailableUnscheduled, groupSchedulesByDay, matchStaffKeyword, summarizeDayList } from './weekBoardLogic'
@@ -411,7 +421,10 @@ export default function ScheduleAttendancePage() {
   const [cardWidth, setCardWidth] = useState(0)
   const cardRef = useRef<HTMLDivElement>(null)
   const storeRestoredRef = useRef(false)
+  // 考勤记录 / 员工可用时间 / 打卡记录页签按员工筛选：值是 userGuid，名单来自左侧选中分店的在职员工
   const [userGuid, setUserGuid] = useState<string | undefined>()
+  // 员工下拉里正在输入的关键字：用来把命中的字标蓝、统计「命中 / 总人数」
+  const [employeeSearchText, setEmployeeSearchText] = useState('')
   // 周排班页的员工搜索：员工已一次性加载，姓名只在本地过滤，不再带进接口查询
   const [staffKeyword, setStaffKeyword] = useState('')
   // 点图例选中要高亮的员工（可多选）；搜索框命中的人同样高亮
@@ -658,11 +671,19 @@ export default function ScheduleAttendancePage() {
     }
   }, [access.canViewAttendancePunches, queryParams, records.page, records.pageSize, shouldSkipVisibleStoreQuery, t])
 
+  // 员工名单当前对应哪家分店（'' ＝ 没选分店）：其它页签的员工筛选据此判断要不要重新加载，已加载过的分店不重复请求
+  const storeUsersKeyRef = useRef<string | null>(null)
+  // 请求编号：快速换店时，旧分店的响应不能覆盖新分店的名单
+  const storeUsersRequestRef = useRef(0)
+
   const loadStoreUsers = useCallback(async () => {
+    const requestId = ++storeUsersRequestRef.current
+    storeUsersKeyRef.current = storeCode ?? ''
     if (!storeCode || !canViewStoreCode(storeCode)) {
       setStoreUsers([])
       setEmployeeAges(new Map())
       setEmployeeNameSources([])
+      setStoreUsersLoading(false)
       return
     }
 
@@ -679,6 +700,7 @@ export default function ScheduleAttendancePage() {
           return []
         }),
       ])
+      if (requestId !== storeUsersRequestRef.current) return // 期间换了分店，丢弃旧响应
       setStoreUsers(result.items)
       setEmployeeAges(new Map(employees.flatMap((employee) => (employee.age == null ? [] : [[employee.userGuid, employee.age] as const]))))
       setEmployeeNameSources(employees.map((employee) => ({
@@ -691,12 +713,14 @@ export default function ScheduleAttendancePage() {
       })))
     } catch (error) {
       console.error(error)
+      if (requestId !== storeUsersRequestRef.current) return
+      storeUsersKeyRef.current = null // 加载失败：下次切回员工筛选页签时允许再试
       message.error(t('posAdmin.scheduleAttendance.messages.loadStoreUsersFailed'))
       setStoreUsers([])
       setEmployeeAges(new Map())
       setEmployeeNameSources([])
     } finally {
-      setStoreUsersLoading(false)
+      if (requestId === storeUsersRequestRef.current) setStoreUsersLoading(false)
     }
   }, [canViewStoreCode, storeCode, t])
 
@@ -875,6 +899,11 @@ export default function ScheduleAttendancePage() {
   }, [storage, storeCode, storeOptions])
 
   const selectStore = useCallback((code: string | undefined) => {
+    // 员工筛选的名单跟着分店走：换到另一家店时，上一家店选的员工要一并清掉（同一次渲染里更新，只会查询一次）
+    if (code !== storeCode && userGuid) {
+      setUserGuid(undefined)
+      message.info(t('posAdmin.scheduleAttendance.employeeFilter.storeChanged'))
+    }
     setStoreCode(code)
     setStorePopoverOpen(false)
     safeStorageSet(storage, STORAGE_KEYS.lastStore, code ?? ALL_STORES_TOKEN)
@@ -884,7 +913,7 @@ export default function ScheduleAttendancePage() {
       safeStorageSet(storage, STORAGE_KEYS.recentStores, JSON.stringify(next))
       return next
     })
-  }, [storage])
+  }, [storage, storeCode, t, userGuid])
 
   const setSidebarDock = useCallback((next: Exclude<SidebarPreference, null>) => {
     setSidebarPreference(next)
@@ -892,7 +921,8 @@ export default function ScheduleAttendancePage() {
     safeStorageSet(storage, STORAGE_KEYS.sidebarDock, next)
   }, [storage])
 
-  // 卡片宽度决定侧栏默认展开还是收起（7 天要一屏放下）；先同步量一次，避免首屏先收起再展开的闪动
+  // 卡片宽度决定侧栏默认展开还是收起；先同步量一次，避免首屏先收起再展开的闪动。
+  // 周排班要 7 天一屏放下，阈值高；其它页签是可横向滚动的表格，阈值放宽（见 storePickerLogic）。
   useLayoutEffect(() => {
     const node = cardRef.current
     if (!node) return
@@ -909,13 +939,22 @@ export default function ScheduleAttendancePage() {
     storeCount: storeOptions.length,
     containerWidth: cardWidth,
     preference: sidebarPreference,
+    dockMinWidth: activeTab === 'schedules' ? STORE_SIDEBAR_DOCK_MIN_WIDTH : STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH,
   })
   const currentWeekStart = getIsoWeekStart(dayjs()).format('YYYY-MM-DD')
   const relativeWeek = getRelativeWeekOffset(weekStart.format('YYYY-MM-DD'), currentWeekStart)
 
+  // userGuid 也算触发条件：员工下拉选中 / 清除后立即按该员工查询（周排班不用 userGuid，它只会在其它页签里变化）
   useEffect(() => {
     loadActiveTab(1)
-  }, [activeTab, storeCode, dateRange, selectedWeek])
+  }, [activeTab, storeCode, dateRange, selectedWeek, userGuid])
+
+  // 员工筛选下拉要用分店名单：周排班页签在 loadActiveTab 里加载，其它页签按分店加载一次，已加载过的分店不重复请求
+  useEffect(() => {
+    if (activeTab !== 'records' && activeTab !== 'availability' && activeTab !== 'punches') return
+    if (storeUsersKeyRef.current === (storeCode ?? '')) return
+    void loadStoreUsers()
+  }, [activeTab, loadStoreUsers, storeCode])
 
   // 切页签 / 换分店 / 换周后，上一张表里的编辑浮层已经没有意义，直接收起
   useEffect(() => {
@@ -1336,13 +1375,6 @@ export default function ScheduleAttendancePage() {
     }
   }
 
-  const userCell = (record: { userName?: string; userGuid?: string; applicantName?: string; applicantUserGuid?: string }) => (
-    <Space direction="vertical" size={0}>
-      <Typography.Text>{record.userName || record.applicantName || '--'}</Typography.Text>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>{record.userGuid || record.applicantUserGuid || '--'}</Typography.Text>
-    </Space>
-  )
-
   const handlePublishWeek = async () => {
     if (!storeCode) {
       message.warning(t('posAdmin.scheduleAttendance.messages.selectStoreBeforePublish'))
@@ -1432,20 +1464,18 @@ export default function ScheduleAttendancePage() {
   }, [storeUsers, weekSchedules])
   // nameOf＝全名：员工颜色、搜索、弹窗 / 选人下拉都用它，保证切换开关不换色、不选错人
   const nameOf = useCallback((userGuid: string) => userNameMap.get(userGuid) ?? userGuid, [userNameMap])
-  // 看板显示名的原料，按优先级合并：员工管理列表（店员）→ 可排班员工（含店长，员工管理列表会剔除其他店长）
-  // → 只有班次、没有员工资料的人（如已离职）只有全名
+  // rosterSources＝当前分店的名单（带昵称 / 名 / 姓），按优先级合并：员工管理列表（店员）→ 可排班员工
+  // （含店长，员工管理列表会剔除其他店长）。周排班看板和其它页签的员工筛选 / 员工列共用，
+  // 这样店长打卡也能显示名字，员工下拉里也找得到店长。
+  const rosterSources = useMemo<StaffNameSource[]>(
+    () => mergeStaffNameSources(storeUsers.map(toStaffNameSource), employeeNameSources),
+    [employeeNameSources, storeUsers],
+  )
+  // 看板显示名的原料：名单之外再补「只有班次、没有员工资料的人」（如已离职，只有全名）
   const nameSources = useMemo<StaffNameSource[]>(() => mergeStaffNameSources(
-    storeUsers.map((user) => ({
-      userGuid: user.userGuid,
-      username: user.username,
-      fullName: user.fullName,
-      givenName: user.givenName,
-      familyName: user.familyName,
-      nickname: user.nickname,
-    })),
-    employeeNameSources,
+    rosterSources,
     weekSchedules.map((schedule) => ({ userGuid: schedule.userGuid, fullName: schedule.userName })),
-  ), [employeeNameSources, storeUsers, weekSchedules])
+  ), [rosterSources, weekSchedules])
   // 昵称模式的显示名（昵称 → 名 → 全名 → 登录名，重名时自动区分）；全名模式直接用 userNameMap
   const nicknameNames = useMemo(() => resolveStaffNames(nameSources, 'nickname'), [nameSources])
   // boardNameOf＝看板（图例、班次卡片、同一天的排序）当前显示的名字
@@ -1453,6 +1483,109 @@ export default function ScheduleAttendancePage() {
     (userGuid: string) => (staffNameMode === 'nickname' ? nicknameNames : userNameMap).get(userGuid) ?? userGuid,
     [nicknameNames, staffNameMode, userNameMap],
   )
+
+  // ===== 员工筛选与员工列（考勤记录 / 员工可用时间 / 打卡记录页签）=====
+  // 只用当前分店的在职名单，不掺周排班里的班次：这几个页签的数据和周排班看板不是同一周、同一批人。
+  // 显示口径（昵称 → 名 → 全名，重名自动区分）与周排班看板一致，开关也是同一个。
+  const rosterByGuid = useMemo(() => new Map(rosterSources.map((source) => [source.userGuid, source])), [rosterSources])
+  const rosterNicknameNames = useMemo(() => resolveStaffNames(rosterSources, 'nickname'), [rosterSources])
+  const employeeOptions = useMemo<EmployeeOption[]>(() => buildEmployeeOptions(rosterSources, staffNameMode), [rosterSources, staffNameMode])
+  const employeeMatchCount = useMemo(
+    () => employeeOptions.filter((option) => matchesEmployeeKeyword(option.search, employeeSearchText)).length,
+    [employeeOptions, employeeSearchText],
+  )
+  // 把命中搜索关键字的字标蓝
+  const highlightEmployeeText = (text: string) => splitHighlight(text, employeeSearchText).map((segment, index) => (
+    segment.match ? <mark key={index}>{segment.text}</mark> : <span key={index}>{segment.text}</span>
+  ))
+
+  // 员工列：第一行显示名（昵称 / 全名跟开关走），第二行灰字补另一种叫法；完整 GUID 收进悬停提示并可复制。
+  // 打卡接口不返回姓名，名字全靠名单补；名单里没有又没带名字的人显示 GUID 前 8 位。
+  const userCell = (record: { userName?: string; userGuid?: string; applicantName?: string; applicantUserGuid?: string }) => {
+    const guid = record.userGuid || record.applicantUserGuid
+    if (!guid) return <Typography.Text type="secondary">--</Typography.Text>
+    const display = resolveEmployeeCell({
+      userGuid: guid,
+      mode: staffNameMode,
+      source: rosterByGuid.get(guid),
+      nicknameName: rosterNicknameNames.get(guid),
+      recordName: record.userName || record.applicantName,
+    })
+    return (
+      <Tooltip
+        mouseLeaveDelay={0.2}
+        classNames={{ root: 'sce-guid-tip' }}
+        title={(
+          <span className="sce-guid-tip-body">
+            <span className="sce-guid-tip-text">{guid}</span>
+            <Typography.Text copyable={{ text: guid, tooltips: false }} />
+          </span>
+        )}
+      >
+        <div className="sce-emp-cell">
+          <div className={`sce-emp-name${display.unresolved ? ' is-guid' : ''}`}>{display.primary}</div>
+          {display.alt ? (
+            <div className="sce-emp-alt">
+              {t(`posAdmin.scheduleAttendance.board.${display.alt.kind === 'full' ? 'nameAltFull' : 'nameAltNickname'}`, { name: display.alt.name })}
+            </div>
+          ) : null}
+          {/* 名单加载完、选了分店却仍找不到：多半是已离职；没选分店时没有名单，不能这么说 */}
+          {display.unresolved && storeCode && !storeUsersLoading ? (
+            <Tag className="sce-emp-tag">{t('posAdmin.scheduleAttendance.employeeFilter.notInRoster')}</Tag>
+          ) : null}
+        </div>
+      </Tooltip>
+    )
+  }
+
+  // 员工下拉：名单是左侧选中分店的在职员工；全部分店时没有名单，置灰并提示先选分店
+  const employeeSelect = (
+    <Select
+      showSearch
+      allowClear
+      disabled={!storeCode}
+      loading={storeUsersLoading}
+      style={{ width: 220 }}
+      popupMatchSelectWidth={310}
+      placeholder={t(storeCode ? 'posAdmin.scheduleAttendance.employeeFilter.placeholder' : 'posAdmin.scheduleAttendance.employeeFilter.needStore')}
+      aria-label={t('posAdmin.scheduleAttendance.fields.employee')}
+      value={userGuid}
+      options={employeeOptions}
+      optionLabelProp="label"
+      filterOption={(input, option) => matchesEmployeeKeyword((option as EmployeeOption | undefined)?.search, input)}
+      notFoundContent={t('posAdmin.scheduleAttendance.employeeFilter.empty')}
+      onSearch={setEmployeeSearchText}
+      onOpenChange={(open) => {
+        if (!open) setEmployeeSearchText('')
+      }}
+      onChange={(value?: string) => {
+        setUserGuid(value || undefined)
+        setEmployeeSearchText('')
+      }}
+      optionRender={(option) => {
+        const data = option.data as EmployeeOption
+        return (
+          <div className="sce-emp-opt">
+            <span className="sce-emp-opt-name">{highlightEmployeeText(data.label)}</span>
+            <span className="sce-emp-opt-alt">{highlightEmployeeText(data.secondary)}</span>
+          </div>
+        )
+      }}
+      popupRender={(menu) => (
+        <>
+          {menu}
+          <div className="sce-emp-foot">
+            <span>{t('posAdmin.scheduleAttendance.employeeFilter.storeStaff', { store: storeCode ? storeNameMap.get(storeCode) ?? storeCode : '' })}</span>
+            <span>{t('posAdmin.scheduleAttendance.employeeFilter.matchCount', { matched: employeeMatchCount, total: employeeOptions.length })}</span>
+          </div>
+        </>
+      )}
+    />
+  )
+
+  // 左侧已选了单个分店时，「分店」列整列都是同一家店，隐藏它给表格腾位置；选「全部分店」时保留
+  const hideStoreColumn = <T,>(columns: ColumnsType<T>) => (storeCode ? columns.filter((column) => column.key !== 'store') : columns)
+
   // 颜色按「全部在职员工 + 本周有班次的人」一起分配：排班前后颜色不变，同一批人不撞色
   const staffColors = useMemo(
     () => assignStaffColors(Array.from(userNameMap, ([userGuid, name]) => ({ userGuid, name }))),
@@ -2192,6 +2325,7 @@ export default function ScheduleAttendancePage() {
   const recordColumns: ColumnsType<AttendanceScheduleDto> = [
     {
       title: t('posAdmin.scheduleAttendance.fields.store'),
+      key: 'store',
       dataIndex: 'storeCode',
       width: 140,
       fixed: 'left',
@@ -2484,7 +2618,7 @@ export default function ScheduleAttendancePage() {
   }
 
   const punchColumns: ColumnsType<AttendancePunchDto> = [
-    { title: t('posAdmin.scheduleAttendance.fields.store'), dataIndex: 'storeCode', width: 150, render: (value: string, record) => record.storeName || storeNameMap.get(value) || value },
+    { title: t('posAdmin.scheduleAttendance.fields.store'), key: 'store', dataIndex: 'storeCode', width: 150, render: (value: string, record) => record.storeName || storeNameMap.get(value) || value },
     { title: t('posAdmin.scheduleAttendance.fields.employee'), key: 'user', width: 220, render: (_, record) => userCell(record) },
     { title: t('posAdmin.scheduleAttendance.fields.workDate'), dataIndex: 'workDate', width: 130, render: (value?: string) => renderBusinessDisplay(formatDate(value)) },
     { title: t('posAdmin.scheduleAttendance.fields.punchType'), dataIndex: 'punchType', width: 120, render: (value: string) => t(`posAdmin.scheduleAttendance.status.punchType.${value}`, value) },
@@ -2609,6 +2743,9 @@ export default function ScheduleAttendancePage() {
     'aria-label': t('posAdmin.scheduleAttendance.board.nameModeLabel'),
   }
 
+  // 这三个页签按员工查询（userGuid）：显示员工下拉和「员工名」开关；公共假期 / 考勤设置与员工无关，不显示
+  const employeeFilterActive = activeTab === 'records' || activeTab === 'availability' || activeTab === 'punches'
+
   const filterBar = (
     <Space wrap>
       {activeTab === 'schedules' ? (
@@ -2620,15 +2757,7 @@ export default function ScheduleAttendancePage() {
           value={staffKeyword}
           onChange={(event) => setStaffKeyword(event.target.value)}
         />
-      ) : (
-        <Input
-          allowClear
-          placeholder={t('posAdmin.scheduleAttendance.filters.userGuid')}
-          style={{ width: 220 }}
-          value={userGuid}
-          onChange={(event) => setUserGuid(event.target.value)}
-        />
-      )}
+      ) : employeeFilterActive ? employeeSelect : null}
       {activeTab === 'schedules' ? (
         <>
           {/* 周切换：‹ 本周 › + 周范围（点开是原来的周选择器）；不在本周时标出「下 1 周 / 上 2 周」 */}
@@ -2671,7 +2800,7 @@ export default function ScheduleAttendancePage() {
       <Tooltip title={t('common.search')}>
         <Button icon={<ReloadOutlined />} aria-label={t('common.search')} onClick={() => loadActiveTab(1)} />
       </Tooltip>
-      {activeTab === 'schedules' ? (
+      {activeTab === 'schedules' || employeeFilterActive ? (
         <Tooltip
           title={(
             <>
@@ -2697,11 +2826,11 @@ export default function ScheduleAttendancePage() {
       <MeasuredTable metricId="pos-admin.schedule-attendance.table-1"
         rowKey="scheduleGuid"
         loading={records.loading}
-        columns={recordColumns}
+        columns={hideStoreColumn(recordColumns)}
         dataSource={records.items}
         pagination={pagination(records, loadRecords)}
-        // 新增「用餐与计薪」列（170px）后同步加宽，避免挤压已有列。
-        scroll={{ x: 2070 }}
+        // 新增「用餐与计薪」列（170px）后同步加宽，避免挤压已有列；选了单店隐藏「分店」列（140px）时同步收窄。
+        scroll={{ x: storeCode ? 2070 - 140 : 2070 }}
         size="small"
       />
     ),
@@ -2818,10 +2947,11 @@ export default function ScheduleAttendancePage() {
         <MeasuredTable metricId="pos-admin.schedule-attendance.table-4"
           rowKey="punchGuid"
           loading={punches.loading}
-          columns={punchColumns}
+          columns={hideStoreColumn(punchColumns)}
           dataSource={punches.items}
           pagination={pagination(punches, loadPunches)}
-          scroll={{ x: 1350 }}
+          // 选了单店隐藏「分店」列（150px）时同步收窄
+          scroll={{ x: storeCode ? 1350 - 150 : 1350 }}
         />
       ),
     },

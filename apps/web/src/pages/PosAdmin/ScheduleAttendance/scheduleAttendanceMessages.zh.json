@@ -180,6 +180,15 @@
         "nameAltFull": "全名：{{name}}",
         "nameAltNickname": "昵称：{{name}}"
       },
+      "employeeFilter": {
+        "placeholder": "选择员工（可搜索）",
+        "needStore": "先选择分店",
+        "empty": "没有匹配的员工",
+        "storeStaff": "{{store}} 在职员工",
+        "matchCount": "{{matched}} / {{total}} 人",
+        "storeChanged": "已切换分店，员工筛选已清除",
+        "notInRoster": "不在在职名单"
+      },
       "batch": {
         "title": "排班",
         "openButton": "排班",
