@@ -216,17 +216,68 @@
       "noHistory": "还没有时薪记录",
       "readOnly": "只读：改时薪需要「工资编辑」权限",
       "cancel": "取消",
-      "mismatchTag": "公假价与平日价不一致",
-      "mismatchTip": "历史记录不会修改；请新建一条时薪记录，从下一个未锁定的工资周期起生效",
-      "mismatchBanner": "有 {{n}} 位员工公假价与平日价不一致，请新建时薪记录。",
-      "mismatchFilter": "只看公假价与平日价不一致",
-      "publicHolidayLocked": "公假按平日价发放（公司规定），不能单独设置",
       "saveNew": "保存为新生效记录",
       "saved": "已新增生效记录",
       "validation": {
         "transferRequired": "请填全四档转账时薪",
         "cashRequired": "请填现金时薪",
         "fixedRequired": "转账+现金要填固定转账工时"
+      },
+      "publicHolidayPlaceholder": "留空=同平日价",
+      "publicHolidayHint": "公假价可与平日价不同（按 MYOB 公共假期类别的倍数）；留空则按平日价",
+      "sync": {
+        "open": "从 MYOB 同步时薪",
+        "title": "从 MYOB 同步转账时薪",
+        "intro": "只读取 MYOB，把基础时薪写进本系统的转账时薪（新增生效记录，不改历史，也不会写回 MYOB）。平日价是同步值；周六 / 周日 / 公假是按 MYOB 工资类别倍数推算的建议值，请核对后再勾选。",
+        "company": "发薪公司",
+        "refresh": "重新读取 MYOB",
+        "loadFailed": "读取 MYOB 时薪失败",
+        "noCompany": "该分店还没有可用的发薪公司，请先在 MYOB 页面配置",
+        "noRows": "该分店没有已绑定这家公司的员工",
+        "nothingToDo": "没有需要同步的价格",
+        "fetchedAt": "MYOB 数据读取于 {{time}}",
+        "notBound": "另有 {{n}} 人未绑定这家公司，不在列表中",
+        "columns": {
+          "status": "状态",
+          "myob": "MYOB 基础时薪"
+        },
+        "kind": {
+          "Create": "新建",
+          "Fill": "补空",
+          "Differ": "与 MYOB 不同",
+          "Same": "平日已一致",
+          "Skip": "不参与"
+        },
+        "empty": "空",
+        "rawRate": "原值 {{rate}}",
+        "cannotCompute": "无法推算",
+        "selectColumn": "全选「{{column}}」",
+        "selected": "已选 {{employees}} 人 · {{cells}} 项",
+        "apply": "应用到时薪表",
+        "close": "关闭",
+        "applied": "已为 {{n}} 位员工新增时薪记录",
+        "confirmTitle": "为 {{employees}} 位员工新增时薪记录（共 {{cells}} 项）？",
+        "confirmEffective": "生效日期：{{date}}",
+        "confirmOverwrite": "其中 {{n}} 项会覆盖现有价格（旧记录保留在历史里）。",
+        "confirmNote": "只新增记录，不修改历史，也不会写回 MYOB。",
+        "failedTitle": "{{n}} 位员工没有写入",
+        "reason": {
+          "MYOB_RATE_NOT_HOURLY": "MYOB 不是时薪制或没填基础时薪",
+          "MYOB_EMPLOYEE_TERMINATED": "MYOB 里已离职",
+          "MYOB_CARD_MISSING": "MYOB 里找不到这张员工卡",
+          "PAY_MODE_CASH": "本系统是全现金，不需要转账价",
+          "CATEGORY_NOT_MAPPED": "映射页没配这一档类别",
+          "CATEGORY_NOT_FOUND": "映射的类别在 MYOB 里已不存在",
+          "CATEGORY_NOT_ON_CARD": "该员工的 MYOB 卡没挂这个类别",
+          "CATEGORY_NOT_RATE_MULTIPLE": "该类别不是「基础时薪 × 倍数」",
+          "unknown": "无法同步"
+        },
+        "failure": {
+          "MYOB_RATE_SYNC_NOT_IN_PREVIEW": "不在本次预览里，请重新读取后再试",
+          "MYOB_RATE_SYNC_NOT_BOUND": "没有绑定这家公司",
+          "MYOB_RATE_SYNC_VALUE_CHANGED": "MYOB 或本系统的价格在预览后变了，请重新读取后再试",
+          "MYOB_RATE_SYNC_NOT_APPLICABLE": "这些格已经没有可写入的变化"
+        }
       }
     },
     "submit": {

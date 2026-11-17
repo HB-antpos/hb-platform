@@ -171,21 +171,23 @@ export function findRatesBelowMinimum(rate: PayRates & Pick<AttendancePayRateDto
 }
 
 /**
- * 公假转账时薪永远等于平日转账时薪（公司规定，后端保存时也会强制）：
- * 保存前 / 平日价变动时，把公假价同步成平日价；平日价为空则公假价也为空。
+ * 公假转账时薪的实际取值：填了就用填的（公假价按 MYOB 走，可以与平日价不同）；
+ * 留空 = 等于平日价（与后端 CreatePayRateAsync 的默认一致，平日价也为空则公假价为空）。
+ * 用于抽屉里的实时试算，避免「留空」被当成缺价。
  */
-export function syncPublicHolidayRate<T extends PayRates>(rates: T): T {
-  return { ...rates, transferPublicHolidayRate: rates.transferWeekdayRate ?? undefined }
+export function resolvePublicHolidayRate<T extends PayRates>(rates: T): T & Pick<PayRates, 'transferPublicHolidayRate'> {
+  return { ...rates, transferPublicHolidayRate: rates.transferPublicHolidayRate ?? rates.transferWeekdayRate ?? undefined }
 }
 
-/** 当前生效记录里公假价与平日价不一致（以后端 publicHolidayRateMismatch 为准；全现金恒为 false）。 */
-export function hasPublicHolidayRateMismatch(rate: Pick<AttendancePayRateDto, 'publicHolidayRateMismatch'>): boolean {
-  return rate.publicHolidayRateMismatch === true
-}
-
-/** 列表里公假价与平日价不一致的员工数（只反映当前已加载的分店 / 筛选结果）。 */
-export function countPublicHolidayRateMismatch(rates: readonly Pick<AttendancePayRateDto, 'publicHolidayRateMismatch'>[]): number {
-  return rates.filter(hasPublicHolidayRateMismatch).length
+/**
+ * 改平日价时，若公假价此前恰好等于平日价（旧规则「公假恒等于平日价」留下的记录，或用户本来就想同价），
+ * 就把公假价清空让它继续跟随平日价，避免改了平日价、公假价却悄悄停在旧值。
+ * 公假价与平日价不同（例如按 MYOB 的 ×2.25）时不动。
+ */
+export function followWeekdayRateChange<T extends PayRates>(current: T, patch: Partial<PayRates>): T {
+  const changed = 'transferWeekdayRate' in patch && patch.transferWeekdayRate !== current.transferWeekdayRate
+  const following = current.transferPublicHolidayRate != null && current.transferPublicHolidayRate === current.transferWeekdayRate
+  return { ...current, ...patch, ...(changed && following && !('transferPublicHolidayRate' in patch) ? { transferPublicHolidayRate: undefined } : {}) }
 }
 
 // ===== 周期 =====

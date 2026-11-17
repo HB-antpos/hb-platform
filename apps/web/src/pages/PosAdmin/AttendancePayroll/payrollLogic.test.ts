@@ -5,12 +5,11 @@ import {
   PERIOD_PRESETS,
   calculatePay,
   cellHoursText,
-  countPublicHolidayRateMismatch,
   findRatesBelowMinimum,
   formatHours,
   formatMoney,
+  followWeekdayRateChange,
   formatSignedMoney,
-  hasPublicHolidayRateMismatch,
   isoWeekNumber,
   minutesToHours,
   multiplyToCents,
@@ -19,7 +18,7 @@ import {
   resolvePeriodStart,
   shiftPeriod,
   summarizeEmployeeHours,
-  syncPublicHolidayRate,
+  resolvePublicHolidayRate,
 } from './payrollLogic'
 import { buildSampleHours, buildSamplePay, setSampleLeaveApproval } from './payrollSample.fixture'
 
@@ -155,24 +154,29 @@ setSampleLeaveApproval('mock-emma', 'PaidAnnual', 24)
 const repaid = await buildSamplePay({ storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 })
 assert.equal(repaid.rows.find((row) => row.userName === 'Emma Walsh')!.hours.leave, 24)
 
-// 公假价同步为平日价：覆盖原值、不改其它档；平日价为空则公假价清空
+// 公假价按 MYOB 走：填了就用填的（可与平日价不同）；留空 = 平日价；平日价也空则为空
+assert.equal(resolvePublicHolidayRate({ transferWeekdayRate: 30, transferPublicHolidayRate: 67.5 }).transferPublicHolidayRate, 67.5)
+assert.equal(resolvePublicHolidayRate({ transferWeekdayRate: 30, transferPublicHolidayRate: null }).transferPublicHolidayRate, 30)
+assert.equal(resolvePublicHolidayRate({ transferWeekdayRate: 30 }).transferPublicHolidayRate, 30)
+assert.equal(resolvePublicHolidayRate({ transferWeekdayRate: null, transferPublicHolidayRate: null }).transferPublicHolidayRate, undefined)
+assert.equal(resolvePublicHolidayRate({ transferWeekdayRate: 30, transferPublicHolidayRate: 0 }).transferPublicHolidayRate, 0, '填 0 是明确填写，不回退到平日价')
+// 不改其它档
 assert.deepEqual(
-  syncPublicHolidayRate({ transferWeekdayRate: 28.5, transferSaturdayRate: 35.63, transferSundayRate: 42.75, transferPublicHolidayRate: 64.13, cashRate: 28.5 }),
+  resolvePublicHolidayRate({ transferWeekdayRate: 28.5, transferSaturdayRate: 35.63, transferSundayRate: 42.75, cashRate: 28.5 }),
   { transferWeekdayRate: 28.5, transferSaturdayRate: 35.63, transferSundayRate: 42.75, transferPublicHolidayRate: 28.5, cashRate: 28.5 },
 )
-assert.equal(syncPublicHolidayRate({ transferWeekdayRate: null, transferPublicHolidayRate: 60 }).transferPublicHolidayRate, undefined)
-assert.equal(syncPublicHolidayRate({ transferWeekdayRate: 0, transferPublicHolidayRate: 60 }).transferPublicHolidayRate, 0)
-// 同步后公假档试算与平日档同价（PayrollCalculator 不改，仍按公假档取价）
-const synced = syncPublicHolidayRate({ transferWeekdayRate: 30, transferSaturdayRate: 37.5, transferSundayRate: 45, transferPublicHolidayRate: 67.5 })
-const holidayPay = calculatePay({ hours: { sunday: 0, saturday: 0, leave: 0, publicHoliday: 8, weekday: 0 }, payMode: 'Transfer', weeks: 1, rates: synced })
-assert.equal(holidayPay.grossPay, 240)
+// 试算：公假档按填的价（MYOB 的 ×2.25）算；留空按平日价算
+const ratesWithHoliday = { transferWeekdayRate: 30, transferSaturdayRate: 37.5, transferSundayRate: 45, transferPublicHolidayRate: 67.5 }
+const holidayHours = { sunday: 0, saturday: 0, leave: 0, publicHoliday: 8, weekday: 0 }
+assert.equal(calculatePay({ hours: holidayHours, payMode: 'Transfer', weeks: 1, rates: resolvePublicHolidayRate(ratesWithHoliday) }).grossPay, 540)
+assert.equal(calculatePay({ hours: holidayHours, payMode: 'Transfer', weeks: 1, rates: resolvePublicHolidayRate({ ...ratesWithHoliday, transferPublicHolidayRate: null }) }).grossPay, 240)
 
-// 不一致标记以后端字段为准；缺字段按一致处理；N 只数标记为 true 的行
-assert.equal(hasPublicHolidayRateMismatch({ publicHolidayRateMismatch: true }), true)
-assert.equal(hasPublicHolidayRateMismatch({ publicHolidayRateMismatch: false }), false)
-assert.equal(hasPublicHolidayRateMismatch({}), false)
-assert.equal(countPublicHolidayRateMismatch([{ publicHolidayRateMismatch: true }, {}, { publicHolidayRateMismatch: false }, { publicHolidayRateMismatch: true }]), 2)
-assert.equal(countPublicHolidayRateMismatch([]), 0)
+// 改平日价：公假价原本等于平日价（旧规则留下的）就清空跟随；本来就不同（MYOB ×2.25）则不动
+assert.equal(followWeekdayRateChange({ transferWeekdayRate: 30, transferPublicHolidayRate: 30 }, { transferWeekdayRate: 31 }).transferPublicHolidayRate, undefined)
+assert.equal(followWeekdayRateChange({ transferWeekdayRate: 30, transferPublicHolidayRate: 67.5 }, { transferWeekdayRate: 31 }).transferPublicHolidayRate, 67.5)
+assert.equal(followWeekdayRateChange({ transferWeekdayRate: 30, transferPublicHolidayRate: undefined }, { transferWeekdayRate: 31 }).transferPublicHolidayRate, undefined)
+assert.equal(followWeekdayRateChange({ transferWeekdayRate: 30, transferPublicHolidayRate: 30 }, { transferSaturdayRate: 40 }).transferPublicHolidayRate, 30, '没改平日价不动公假价')
+assert.equal(followWeekdayRateChange({ transferWeekdayRate: 30, transferPublicHolidayRate: 30 }, { transferWeekdayRate: 31, transferPublicHolidayRate: 70 }).transferPublicHolidayRate, 70, '同时显式改公假价以显式值为准')
 
 // 工时页员工类型标签：三种类型与店长颜色两两不同，且避开已有语义色（未成年金、多店青、公假橙、异常红）
 const typeColors = [...Object.values(EMPLOYMENT_TYPE_TAG_COLORS), MANAGER_TAG_COLOR]
