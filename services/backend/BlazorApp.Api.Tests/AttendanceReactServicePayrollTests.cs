@@ -324,19 +324,19 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task 时薪表_公假转账价强制等于平日价_请求里传什么公假价都忽略()
+        public async Task 时薪表_公假转账价请求带了就按带的值保存_没带默认等于平日价_全现金存空()
         {
             await SeedPayrollStoreAsync();
 
-            // TransferRateRequest 里公假价是 60、平日价 30：保存后以平日价为准。
+            // TransferRateRequest 里公假价是 60、平日价 30：公假价按 MYOB 倍数设置（2026-11-17 起），带了就按 60 保存。
             var created = await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 10, 19)));
             Assert.True(created.Success, created.Message);
-            Assert.Equal(30m, created.Data!.TransferPublicHolidayRate);
-            Assert.False(created.Data.PublicHolidayRateMismatch);
+            Assert.Equal(60m, created.Data!.TransferPublicHolidayRate);
+            Assert.False(created.Data.PublicHolidayRateMismatch); // 不一致标记已退役，恒为 false
             var stored = await _db.Queryable<EmployeePayRate>().FirstAsync(item => item.RateGuid == created.Data.RateGuid);
-            Assert.Equal(30m, stored.TransferPublicHolidayRate);
+            Assert.Equal(60m, stored.TransferPublicHolidayRate);
 
-            // 转账 + 现金同样强制；全现金模式不用转账价，公假价存空。
+            // 转账 + 现金同样按带的值保存。
             var mixed = await Manager().CreatePayRateAsync(new CreateEmployeePayRateDto
             {
                 StoreCode = "BRI", UserGuid = "staff-user", PayMode = "Mixed", FixedTransferHoursPerWeek = 10m,
@@ -344,8 +344,18 @@ namespace BlazorApp.Api.Tests
                 EffectiveFrom = new DateTime(2026, 11, 2),
             });
             Assert.True(mixed.Success, mixed.Message);
-            Assert.Equal(32.5m, mixed.Data!.TransferPublicHolidayRate);
+            Assert.Equal(99m, mixed.Data!.TransferPublicHolidayRate);
 
+            // 没带公假价：默认等于平日价（保持手填时的旧体验，旧版 Web 表单不传公假价时行为不变）。
+            var omitted = await Manager().CreatePayRateAsync(new CreateEmployeePayRateDto
+            {
+                StoreCode = "BRI", UserGuid = "staff-user", PayMode = "Transfer",
+                TransferWeekdayRate = 33m, EffectiveFrom = new DateTime(2026, 11, 5),
+            });
+            Assert.True(omitted.Success, omitted.Message);
+            Assert.Equal(33m, omitted.Data!.TransferPublicHolidayRate);
+
+            // 全现金模式不用转账价，不管带什么公假价都存空。
             var cash = await Manager().CreatePayRateAsync(new CreateEmployeePayRateDto
             {
                 StoreCode = "BRI", UserGuid = "staff-user", PayMode = "Cash", TransferPublicHolidayRate = 99m, CashRate = 25m,
@@ -357,30 +367,25 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task 时薪表_历史记录公假价不一致_只标记不修改_列表可按不一致筛选()
+        public async Task 时薪表_公假价与平日价不同是合法的_历史记录原样返回_不再标记不一致()
         {
             await SeedPayrollStoreAsync();
-            // 历史记录：平日 30、公假 60（旧规则）。保存新规则前已存在，不得被改动。
+            // 历史记录：平日 30、公假 60。公假价按 MYOB 倍数设置后这是合法值，不再标记，也不得被改动。
             await SeedTransferRateAsync(30m, 35m, 40m, 60m);
 
             var all = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI" });
             var row = all.Data!.Single(item => item.UserGuid == "staff-user");
             Assert.Equal(60m, row.TransferPublicHolidayRate); // 历史值原样返回
-            Assert.True(row.PublicHolidayRateMismatch);
+            Assert.False(row.PublicHolidayRateMismatch);
             Assert.Equal(60m, (await _db.Queryable<EmployeePayRate>().FirstAsync(item => item.RateGuid == "rate-staff")).TransferPublicHolidayRate);
 
+            // 旧版 Web 缓存仍会带「只看不一致」筛选：现在没有任何员工算不一致，返回空即可。
             var mismatchOnly = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", PublicHolidayMismatchOnly = true });
-            Assert.Equal(["staff-user"], mismatchOnly.Data!.Select(item => item.UserGuid).ToArray());
-
-            // 财务新建一条从下一个未锁定周期起生效的记录后，当前记录仍是旧的（未到生效日），再往后才变一致。
-            var fixedRate = await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 10, 19)));
-            Assert.True(fixedRate.Success, fixedRate.Message);
-            var afterFix = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", PublicHolidayMismatchOnly = true });
-            Assert.Empty(afterFix.Data!); // 今天 10-20，10-19 的新记录已是当前记录且一致
+            Assert.Empty(mismatchOnly.Data!);
         }
 
         [Fact]
-        public void 时薪表_不一致判定_全现金不算_一边为空算()
+        public void 时薪表_不一致判定_已退役_恒为false()
         {
             static EmployeePayRate Rate(string mode, decimal? weekday, decimal? holiday) => new()
             {
@@ -389,8 +394,8 @@ namespace BlazorApp.Api.Tests
 
             Assert.False(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Cash", null, 60m)));
             Assert.False(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Transfer", 30m, 30m)));
-            Assert.True(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Transfer", 30m, 60m)));
-            Assert.True(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Mixed", 30m, null)));
+            Assert.False(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Transfer", 30m, 60m)));
+            Assert.False(AttendanceReactService.HasPublicHolidayRateMismatch(Rate("Mixed", 30m, null)));
         }
 
         [Fact]

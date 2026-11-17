@@ -516,7 +516,7 @@
     <Compile Include="MyobEmployeeCreateTests.cs" />
     <Compile Include="MyobEmployeeSyncTests.cs" />
     <Compile Include="MyobPayrollAdviceTests.cs" />
-    <Compile Include="MyobWageProbeTests.cs" />
+    <Compile Include="MyobPayRateSyncTests.cs" />
     <Compile Include="MyobPayslipTests.cs" />
     <Compile Include="MyobTimesheetTests.cs" />
     <Compile Include="MyobTimesheetPushTests.cs" />

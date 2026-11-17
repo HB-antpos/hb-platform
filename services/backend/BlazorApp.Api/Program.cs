@@ -857,10 +857,10 @@ builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewServ
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPlanSource>(sp =>
     (BlazorApp.Api.Services.Myob.IMyobTimesheetPlanSource)sp.GetRequiredService<BlazorApp.Api.Services.Myob.IMyobTimesheetPreviewService>()); // 推送与预览共用同一段规划代码
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobTimesheetPushService, BlazorApp.Api.Services.Myob.MyobTimesheetPushService>(); // Timesheet 推送 / 撤销（总闸默认关）
-// Wage 节只读探针（临时，核对完 EmployeePayrollDetails 的基础时薪字段后删除）：原始 JSON 读取走独立接口，不动 IMyobApiClient。
-builder.Services.AddHttpClient<BlazorApp.Api.Services.Myob.IMyobRawReadClient, BlazorApp.Api.Services.Myob.MyobApiClient>(
-    client => client.Timeout = TimeSpan.FromSeconds(30));
-builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobWageProbeService, BlazorApp.Api.Services.Myob.MyobWageProbeService>();
+// 从 MYOB 同步转账时薪到个人时薪表（docs/plans/2026-11-16-myob-hourly-rate-sync.md，无迁移）：
+// 时薪属于敏感数据，所以和员工名册分开拉取、分开缓存；写入经 IAttendanceReactService.CreatePayRateAsync，不另写校验。
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobEmployeeWageSource, BlazorApp.Api.Services.Myob.MyobEmployeeWageSource>();
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayRateSyncService, BlazorApp.Api.Services.Myob.MyobPayRateSyncService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipPermissionChecker, BlazorApp.Api.Services.Myob.RoleServicePayslipPermissionChecker>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipEmailSender, BlazorApp.Api.Services.Myob.MyobPayslipEmailSender>(); // 工资单 PDF 邮件，复用发票邮箱的公司 SMTP 账号
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipService, BlazorApp.Api.Services.Myob.MyobPayslipService>();

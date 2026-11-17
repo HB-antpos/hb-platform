@@ -35,6 +35,8 @@ public sealed record MyobEntitlementRecord(string? CategoryName, bool IsAssigned
 /// <summary>
 /// Contact/EmployeePayrollDetails 的一条（绑定、类型检查与资料同步需要的字段）。
 /// Gender 为 MYOB 原值（Male / Female / Other）；SuperFundName / SuperMembershipNumber 取自 Superannuation 节。
+/// 时薪同步（docs/plans/2026-11-16-myob-hourly-rate-sync.md）另读 Wage 节的 PayBasis（Hourly / Salary）、HourlyRate（基础时薪，
+/// 最多 4 位小数）、已挂的工资类别 UID 列表，以及 TerminationDate；年薪 AnnualSalary 不读。
 /// </summary>
 public sealed record MyobEmployeePayrollRecord(
     string EmployeeUid,
@@ -43,7 +45,11 @@ public sealed record MyobEmployeePayrollRecord(
     IReadOnlyList<MyobEntitlementRecord> Entitlements,
     string? Gender = null,
     string? SuperFundName = null,
-    string? SuperMembershipNumber = null);
+    string? SuperMembershipNumber = null,
+    string? PayBasis = null,
+    decimal? HourlyRate = null,
+    IReadOnlyList<string>? WageCategoryUids = null,
+    DateTime? TerminationDate = null);
 
 /// <summary>EmployeePaymentDetails.BankAccounts 的一条。</summary>
 public sealed record MyobBankAccountRecord(string? Bsb, string? AccountNumber);
@@ -51,8 +57,18 @@ public sealed record MyobBankAccountRecord(string? Bsb, string? AccountNumber);
 /// <summary>Contact/EmployeePaymentDetails 的一条（资料同步只取银行账户）。</summary>
 public sealed record MyobEmployeePaymentRecord(string EmployeeUid, IReadOnlyList<MyobBankAccountRecord> BankAccounts);
 
-/// <summary>Payroll/PayrollCategory/Wage 的一条（只取映射需要的字段）。</summary>
-public sealed record MyobWageCategoryRecord(string Uid, string Name, string? WageType);
+/// <summary>
+/// Payroll/PayrollCategory/Wage 的一条（只取映射与时薪倍数需要的字段）。
+/// 时薪类别才有嵌套对象 HourlyDetails（2026-11-17 用生产响应核对）：PayRate 为 RegularRate 时表示「基础时薪 × RegularRateMultiplier」，
+/// 为 FixedHourly 时是固定时薪 FixedHourlyRate；Salary 类别没有 HourlyDetails，三个字段都为 null。
+/// </summary>
+public sealed record MyobWageCategoryRecord(
+    string Uid,
+    string Name,
+    string? WageType,
+    string? PayRate = null,
+    decimal? RegularRateMultiplier = null,
+    decimal? FixedHourlyRate = null);
 
 /// <summary>某员工在某周期的 MYOB Timesheet 现状（只读判断用）。</summary>
 public sealed record MyobTimesheetStatus(bool HasEntries, bool HasProcessedEntries);
@@ -164,7 +180,7 @@ public interface IMyobApiClient
 /// MYOB Business API v2 的最小客户端（阶段 0 只需 OAuth 与 Company）。
 /// 所有请求经同一个最小间隔限流（MYOB 每个 API Key 每秒 8 次）。
 /// </summary>
-public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
+public sealed class MyobApiClient : IMyobApiClient
 {
     private const int MaxErrorTextLength = 200;
 
@@ -292,20 +308,6 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
             .ToList();
     }
 
-    // 临时探针专用：原样返回 EmployeePayrollDetails 的 JSON，供核对 Wage 节真实字段名（见 MyobWageProbeService）。
-    public async Task<IReadOnlyList<JsonElement>> GetEmployeePayrollDetailsRawAsync(
-        string businessId,
-        string accessToken,
-        CancellationToken cancellationToken) =>
-        await GetAllPagesAsync<JsonElement>(businessId, accessToken, "Contact/EmployeePayrollDetails", cancellationToken);
-
-    // 临时探针专用：原样返回工资类别 JSON，核对「倍数」字段真实名称（PayRate / RegularRateMultiplier 等）。
-    public async Task<IReadOnlyList<JsonElement>> GetWageCategoriesRawAsync(
-        string businessId,
-        string accessToken,
-        CancellationToken cancellationToken) =>
-        await GetAllPagesAsync<JsonElement>(businessId, accessToken, "Payroll/PayrollCategory/Wage", cancellationToken);
-
     public async Task<IReadOnlyList<MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(
         string businessId,
         string accessToken,
@@ -330,7 +332,14 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
                     : item.Superannuation!.SuperannuationFund!.Name!.Trim(),
                 string.IsNullOrWhiteSpace(item.Superannuation?.EmployeeMembershipNumber)
                     ? null
-                    : item.Superannuation!.EmployeeMembershipNumber!.Trim()))
+                    : item.Superannuation!.EmployeeMembershipNumber!.Trim(),
+                string.IsNullOrWhiteSpace(item.Wage?.PayBasis) ? null : item.Wage!.PayBasis!.Trim(),
+                item.Wage?.HourlyRate,
+                (item.Wage?.WageCategories ?? [])
+                    .Where(category => !string.IsNullOrWhiteSpace(category.Uid))
+                    .Select(category => category.Uid!)
+                    .ToList(),
+                item.TerminationDate))
             .ToList();
     }
 
@@ -423,7 +432,12 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
         return items
             .Where(item => !string.IsNullOrWhiteSpace(item.Uid) && !string.IsNullOrWhiteSpace(item.Name))
             .Select(item => new MyobWageCategoryRecord(
-                item.Uid!, item.Name!.Trim(), string.IsNullOrWhiteSpace(item.WageType) ? null : item.WageType.Trim()))
+                item.Uid!,
+                item.Name!.Trim(),
+                string.IsNullOrWhiteSpace(item.WageType) ? null : item.WageType.Trim(),
+                string.IsNullOrWhiteSpace(item.HourlyDetails?.PayRate) ? null : item.HourlyDetails!.PayRate!.Trim(),
+                item.HourlyDetails?.RegularRateMultiplier,
+                item.HourlyDetails?.FixedHourlyRate))
             .ToList();
     }
 
@@ -933,6 +947,14 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
         public string? Uid { get; set; }
         public string? Name { get; set; }
         public string? WageType { get; set; }
+        public HourlyDetailsPayload? HourlyDetails { get; set; }
+    }
+
+    private sealed class HourlyDetailsPayload
+    {
+        public string? PayRate { get; set; }
+        public decimal? RegularRateMultiplier { get; set; }
+        public decimal? FixedHourlyRate { get; set; }
     }
 
     private sealed class ListPayload<T>
@@ -972,8 +994,18 @@ public sealed class MyobApiClient : IMyobApiClient, IMyobRawReadClient
         public DateTime? DateOfBirth { get; set; }
         public string? EmploymentStatus { get; set; }
         public string? Gender { get; set; }
+        public DateTime? TerminationDate { get; set; }
+        public WagePayload? Wage { get; set; }
         public SuperannuationPayload? Superannuation { get; set; }
         public List<EntitlementPayload>? Entitlements { get; set; }
+    }
+
+    // 只声明要读的 Wage 字段；AnnualSalary 不声明，反序列化时直接丢弃。
+    private sealed class WagePayload
+    {
+        public string? PayBasis { get; set; }
+        public decimal? HourlyRate { get; set; }
+        public List<EmployeeRefPayload>? WageCategories { get; set; }
     }
 
     private sealed class SuperannuationPayload

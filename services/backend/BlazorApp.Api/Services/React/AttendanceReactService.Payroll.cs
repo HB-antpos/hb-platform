@@ -1110,10 +1110,11 @@ namespace BlazorApp.Api.Services.React
             {
                 return accessError;
             }
-            // 公司规定公假转账价 = 平日转账价：以后端为准强制相等，前端传什么公假价都忽略；全现金模式不用转账价。
+            // 公假转账价按 MYOB 公共假期类别的倍数设置（2026-11-17 决定，取代原先「恒等于平日价」的 11.4）：
+            // 请求带了公假价就按带的值保存；没带才默认等于平日价（保持手填时的旧体验）；全现金模式不用转账价，存空。
             request.TransferPublicHolidayRate = request.PayMode?.Trim() == PayrollCalculator.PayModeCash
                 ? null
-                : request.TransferWeekdayRate;
+                : request.TransferPublicHolidayRate ?? request.TransferWeekdayRate;
             var validation = ValidatePayRate(request);
             if (!validation.Success)
             {
@@ -1306,12 +1307,11 @@ namespace BlazorApp.Api.Services.React
         };
 
         /// <summary>
-        /// 公假转账价必须等于平日转账价（方案 docs/plans/2026-10-27-myob-payroll-integration.md 第 11.4 节）。
-        /// 全现金模式不用转账价，不算不一致；其余模式两个价（含一边为空）不相等即不一致。
+        /// 恒为 false：原先公假转账价必须等于平日转账价（docs/plans/2026-10-27-myob-payroll-integration.md 第 11.4 节），
+        /// 不相等就标「不一致」。2026-11-17 起公假价按 MYOB 公共假期类别的倍数设置（docs/plans/2026-11-16-myob-hourly-rate-sync.md 第 3.5 节），
+        /// 与平日价不同是合法的，所以不再标记。字段与列表筛选保留（旧版 Web 缓存还在读），Web 退役相关提示后再删。
         /// </summary>
-        internal static bool HasPublicHolidayRateMismatch(EmployeePayRate item) =>
-            item.PayMode != PayrollCalculator.PayModeCash
-            && item.TransferPublicHolidayRate != item.TransferWeekdayRate;
+        internal static bool HasPublicHolidayRateMismatch(EmployeePayRate item) => false;
 
         /// <summary>CreatedBy 存的是用户名；历史列表显示成姓名。</summary>
         private async Task<Dictionary<string, string>> ResolveUsernamesToDisplayAsync(IEnumerable<string?> usernames)
