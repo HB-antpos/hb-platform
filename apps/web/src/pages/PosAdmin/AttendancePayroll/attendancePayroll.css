@@ -91,10 +91,6 @@
   color: #93370d;
 }
 
-.atp-rate-mismatch {
-  margin-top: 4px;
-}
-
 .atp-alert-birthday {
   background: #fdf2fa;
   border-color: #fcceee;
@@ -613,4 +609,72 @@
   .atp-employee-col {
     min-width: 150px;
   }
+}
+
+/* ===== 从 MYOB 同步时薪抽屉 ===== */
+.atp-sync-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.atp-sync-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.atp-sync-foot {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.atp-sync-foot-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.atp-sync-table .ant-table-cell {
+  vertical-align: top;
+}
+
+.atp-sync-table .atp-sync-row-idle > td {
+  background: #fafafa;
+}
+
+.atp-sync-col-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atp-sync-diff,
+.atp-sync-same {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.atp-sync-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 12px;
+}
+
+.atp-sync-failed {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.atp-sync-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }

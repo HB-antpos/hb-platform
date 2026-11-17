@@ -216,17 +216,68 @@
       "noHistory": "No rate records yet",
       "readOnly": "Read only: editing rates needs the Payroll edit permission",
       "cancel": "Cancel",
-      "mismatchTag": "Public holiday rate differs from weekday",
-      "mismatchTip": "History is not changed. Create a new rate record; it takes effect from the next unlocked pay period.",
-      "mismatchBanner": "{{n}} staff have a public holiday rate that differs from the weekday rate. Please create new rate records.",
-      "mismatchFilter": "Only public holiday rate mismatches",
-      "publicHolidayLocked": "Public holidays are paid at the weekday rate (company policy); it can't be set separately.",
       "saveNew": "Save as new effective record",
       "saved": "New effective record added",
       "validation": {
         "transferRequired": "Fill in all four transfer rates",
         "cashRequired": "Fill in the cash rate",
         "fixedRequired": "Transfer + cash needs fixed transfer hours"
+      },
+      "publicHolidayPlaceholder": "Blank = weekday rate",
+      "publicHolidayHint": "The public holiday rate may differ from the weekday rate (MYOB public holiday multiplier); leave it blank to use the weekday rate.",
+      "sync": {
+        "open": "Sync rates from MYOB",
+        "title": "Sync transfer rates from MYOB",
+        "intro": "Reads MYOB only and writes its base hourly rate into the transfer rates here (adds an effective-dated record; history is kept and nothing is written back to MYOB). The weekday rate is synced; Saturday / Sunday / public holiday are suggestions derived from the MYOB pay category multipliers, so review them before ticking.",
+        "company": "Paying company",
+        "refresh": "Reload from MYOB",
+        "loadFailed": "Couldn't load MYOB rates",
+        "noCompany": "This store has no paying company yet. Set one up on the MYOB page first.",
+        "noRows": "No staff in this store are linked to this company",
+        "nothingToDo": "Nothing to sync",
+        "fetchedAt": "MYOB data read at {{time}}",
+        "notBound": "{{n}} more staff aren't linked to this company and are not listed",
+        "columns": {
+          "status": "Status",
+          "myob": "MYOB base rate"
+        },
+        "kind": {
+          "Create": "New",
+          "Fill": "Fill blank",
+          "Differ": "Differs from MYOB",
+          "Same": "Weekday matches",
+          "Skip": "Skipped"
+        },
+        "empty": "blank",
+        "rawRate": "raw {{rate}}",
+        "cannotCompute": "can't derive",
+        "selectColumn": "Select all in “{{column}}”",
+        "selected": "{{employees}} staff · {{cells}} items selected",
+        "apply": "Apply to rates",
+        "close": "Close",
+        "applied": "Added rate records for {{n}} staff",
+        "confirmTitle": "Add rate records for {{employees}} staff ({{cells}} items)?",
+        "confirmEffective": "Effective from: {{date}}",
+        "confirmOverwrite": "{{n}} items overwrite current rates (old records stay in the history).",
+        "confirmNote": "Only adds records; history is unchanged and nothing is written back to MYOB.",
+        "failedTitle": "{{n}} staff were not written",
+        "reason": {
+          "MYOB_RATE_NOT_HOURLY": "MYOB card isn't hourly, or has no base rate",
+          "MYOB_EMPLOYEE_TERMINATED": "Terminated in MYOB",
+          "MYOB_CARD_MISSING": "Employee card not found in MYOB",
+          "PAY_MODE_CASH": "Cash-only here; no transfer rate needed",
+          "CATEGORY_NOT_MAPPED": "Category not mapped on the mapping page",
+          "CATEGORY_NOT_FOUND": "Mapped category no longer exists in MYOB",
+          "CATEGORY_NOT_ON_CARD": "Category isn't on this MYOB card",
+          "CATEGORY_NOT_RATE_MULTIPLE": "Category isn't base rate × multiplier",
+          "unknown": "Can't sync"
+        },
+        "failure": {
+          "MYOB_RATE_SYNC_NOT_IN_PREVIEW": "Not in this preview. Reload and try again.",
+          "MYOB_RATE_SYNC_NOT_BOUND": "Not linked to this company",
+          "MYOB_RATE_SYNC_VALUE_CHANGED": "Rates changed in MYOB or here after the preview. Reload and try again.",
+          "MYOB_RATE_SYNC_NOT_APPLICABLE": "Nothing left to write for these cells"
+        }
       }
     },
     "submit": {

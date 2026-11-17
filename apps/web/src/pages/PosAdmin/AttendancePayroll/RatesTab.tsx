@@ -1,5 +1,5 @@
 import { CheckOutlined } from '@ant-design/icons'
-import { Avatar, Button, DatePicker, Drawer, Empty, Input, InputNumber, Segmented, Space, Spin, Tag, Tooltip, Typography, message } from 'antd'
+import { Avatar, Button, DatePicker, Drawer, Empty, Input, InputNumber, Segmented, Space, Spin, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
@@ -10,14 +10,13 @@ import type { AttendancePayMode, AttendancePayRateDto, AttendancePayResultDto } 
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
 import {
   calculatePay,
-  countPublicHolidayRateMismatch,
   findRatesBelowMinimum,
   formatHours,
   formatMoney,
+  followWeekdayRateChange,
   formatSignedMoney,
-  hasPublicHolidayRateMismatch,
   showsAgeBadge,
-  syncPublicHolidayRate,
+  resolvePublicHolidayRate,
   type PayRates,
 } from './payrollLogic'
 
@@ -40,27 +39,28 @@ interface RateDraft extends PayRates {
 }
 
 const TRANSFER_KEYS = ['transferWeekdayRate', 'transferSaturdayRate', 'transferSundayRate', 'transferPublicHolidayRate'] as const
-// 公假价只读、跟随平日价，不需要用户填写，必填校验只看这三档
+// 公假价按 MYOB 走、可以与平日价不同；留空 = 平日价（后端默认），所以必填校验只看这三档
 const TRANSFER_INPUT_KEYS = ['transferWeekdayRate', 'transferSaturdayRate', 'transferSundayRate'] as const
 
 const money = (value?: number | null) => (value === undefined || value === null ? '—' : value.toFixed(2))
 
 function toDraft(rate: AttendancePayRateDto): RateDraft {
   // 还没有时薪记录（payMode 为 null）的员工默认从「全转账」开始填
-  // 公假价一律取平日价：历史记录里公假价与平日价不一致的，新建记录时自动纠正
-  return syncPublicHolidayRate({
+  // 公假价原样带出（可与平日价不同）；没有记录的员工留空，保存时后端按平日价补
+  return {
     payMode: rate.payMode ?? 'Transfer',
     fixedTransferHoursPerWeek: rate.fixedTransferHoursPerWeek || undefined,
     transferWeekdayRate: rate.transferWeekdayRate ?? undefined,
     transferSaturdayRate: rate.transferSaturdayRate ?? undefined,
     transferSundayRate: rate.transferSundayRate ?? undefined,
+    transferPublicHolidayRate: rate.transferPublicHolidayRate ?? undefined,
     cashRate: rate.cashRate ?? undefined,
     cashAllowancePerPeriod: rate.cashAllowancePerPeriod ?? 0,
     minimumRate: rate.minimumRate ?? undefined,
     // 新生效记录默认从今天起；历史不改
     effectiveFrom: dayjs(),
     remark: rate.remark ?? '',
-  })
+  }
 }
 
 export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSaved }: RatesTabProps) {
@@ -85,8 +85,8 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
     }
   }, [editing, storeCode])
 
-  // 任何字段变动后都重新把公假价对齐到平日价，保证「平日价改变时同步」
-  const update = (patch: Partial<RateDraft>) => setDraft((current) => (current ? syncPublicHolidayRate({ ...current, ...patch }) : current))
+  // 平日价变动时，原本等于平日价的公假价跟着走（见 followWeekdayRateChange）
+  const update = (patch: Partial<RateDraft>) => setDraft((current) => (current ? followWeekdayRateChange(current, patch) : current))
   const belowMinimum = useMemo(
     () => new Set(draft ? findRatesBelowMinimum(draft) : []),
     [draft],
@@ -107,7 +107,8 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
       payMode: draft.payMode,
       fixedTransferHoursPerWeek: draft.fixedTransferHoursPerWeek,
       weeks: pay.weeks,
-      rates: draft,
+      // 公假价留空按平日价试算，与后端保存时的默认一致
+      rates: resolvePublicHolidayRate(draft),
       allowance: draft.cashAllowancePerPeriod,
     })
   }, [draft, pay, payRow])
@@ -138,8 +139,8 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
         transferWeekdayRate: needsTransfer ? draft.transferWeekdayRate ?? undefined : undefined,
         transferSaturdayRate: needsTransfer ? draft.transferSaturdayRate ?? undefined : undefined,
         transferSundayRate: needsTransfer ? draft.transferSundayRate ?? undefined : undefined,
-        // 公假价按平日价提交（后端也会强制；全现金不传）
-        transferPublicHolidayRate: needsTransfer ? syncPublicHolidayRate(draft).transferPublicHolidayRate ?? undefined : undefined,
+        // 公假价留空不传，后端按平日价补；全现金不传
+        transferPublicHolidayRate: needsTransfer ? draft.transferPublicHolidayRate ?? undefined : undefined,
         cashRate: needsCash ? draft.cashRate ?? undefined : undefined,
         cashAllowancePerPeriod: draft.cashAllowancePerPeriod ?? 0,
         minimumRate: draft.minimumRate ?? undefined,
@@ -157,7 +158,6 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
   }
 
   const birthdayRows = rates.filter((rate) => rate.birthdayReviewHint)
-  const mismatchCount = countPublicHolidayRateMismatch(rates)
 
   const columns: ColumnsType<AttendancePayRateDto> = [
     {
@@ -189,8 +189,9 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
       key: 'payMode',
       width: 110,
       render: (_, rate) => (
-        <Tag className="atp-tag" color={rate.payMode === 'Cash' ? 'green' : rate.payMode === 'Mixed' ? 'purple' : 'blue'}>
-          {t(`attendancePayroll.payMode.${rate.payMode}`)}
+        // 还没有时薪记录（payMode 为 null）显示「未设时薪」，不能拼出 payMode.null
+        <Tag className="atp-tag" color={rate.payMode === 'Cash' ? 'green' : rate.payMode === 'Mixed' ? 'purple' : rate.payMode ? 'blue' : 'default'}>
+          {t(`attendancePayroll.payMode.${rate.payMode ?? 'none'}`)}
         </Tag>
       ),
     },
@@ -210,23 +211,14 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
         if (rate.payMode === 'Cash') return '—'
         const low = new Set(findRatesBelowMinimum(rate))
         return (
-          <div>
-            <span>
-              {TRANSFER_KEYS.map((key, index) => (
-                <span key={key}>
-                  {index ? ' / ' : ''}
-                  <span className={low.has(key) ? 'atp-negative' : undefined}>{money(rate[key])}</span>
-                </span>
-              ))}
-            </span>
-            {hasPublicHolidayRateMismatch(rate) ? (
-              <div className="atp-rate-mismatch">
-                <Tooltip title={t('attendancePayroll.rates.mismatchTip')}>
-                  <Tag className="atp-tag" color="gold">{t('attendancePayroll.rates.mismatchTag')}</Tag>
-                </Tooltip>
-              </div>
-            ) : null}
-          </div>
+          <span>
+            {TRANSFER_KEYS.map((key, index) => (
+              <span key={key}>
+                {index ? ' / ' : ''}
+                <span className={low.has(key) ? 'atp-negative' : undefined}>{money(rate[key])}</span>
+              </span>
+            ))}
+          </span>
         )
       },
     },
@@ -311,14 +303,6 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
             </div>
           </div>
         ))}
-        {mismatchCount > 0 && canEdit ? (
-          <div className="atp-alert atp-alert-holiday">
-            <div className="atp-alert-text">
-              <strong>{t('attendancePayroll.rates.mismatchBanner', { n: mismatchCount })}</strong>
-              <span>{t('attendancePayroll.rates.mismatchTip')}</span>
-            </div>
-          </div>
-        ) : null}
         {rates.length ? (
           <div className="atp-rates-table">
             <MeasuredTable
@@ -403,21 +387,10 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
                   ))}
                   <span className="atp-rate-row-label">{t('attendancePayroll.pay.transfer')}</span>
                   {TRANSFER_INPUT_KEYS.map((key) => <span key={key}>{rateInput(key)}</span>)}
-                  {/* 公假价只读，自动等于平日价 */}
-                  <span>
-                    <InputNumber
-                      className="atp-rate-input"
-                      precision={2}
-                      controls={false}
-                      value={draft.transferWeekdayRate ?? undefined}
-                      status={belowMinimum.has('transferPublicHolidayRate') ? 'error' : undefined}
-                      disabled
-                      aria-label={t('attendancePayroll.rates.publicHolidayLocked')}
-                    />
-                  </span>
+                  <span>{rateInput('transferPublicHolidayRate', 'attendancePayroll.rates.publicHolidayPlaceholder')}</span>
                 </div>
               ) : null}
-              {draft.payMode !== 'Cash' ? <span className="atp-muted atp-small">{t('attendancePayroll.rates.publicHolidayLocked')}</span> : null}
+              {draft.payMode !== 'Cash' ? <span className="atp-muted atp-small">{t('attendancePayroll.rates.publicHolidayHint')}</span> : null}
               {draft.payMode !== 'Transfer' ? (
                 <div className="atp-rate-cash">
                   <span className="atp-rate-row-label">{t('attendancePayroll.pay.cash')}</span>

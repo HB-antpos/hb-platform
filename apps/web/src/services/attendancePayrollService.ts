@@ -104,8 +104,6 @@ export function normalizePayRate(value: unknown): AttendancePayRateDto {
     birthday: optionalDate(rate.birthday),
     effectiveFrom: optionalDate(rate.effectiveFrom),
     cashAllowancePerPeriod: rate.cashAllowancePerPeriod ?? 0,
-    // 旧后端不返回该字段时按「一致」处理
-    publicHolidayRateMismatch: rate.publicHolidayRateMismatch === true,
   }
 }
 
@@ -130,8 +128,6 @@ export async function getAttendancePayrollPay(query: AttendancePeriodQuery): Pro
 export async function getAttendancePayRates(params: {
   storeCode: string
   keyword?: string
-  /** true = 只返回公假价与平日价不一致的员工。 */
-  publicHolidayMismatchOnly?: boolean
 }): Promise<AttendancePayRateDto[]> {
   const response = await request.get<ApiResponse<AttendancePayRateDto[]>>(`${API_BASE}/payroll/rates`, { params })
   return (unwrapAttendanceApiData<unknown[]>(response) ?? []).map(normalizePayRate)
