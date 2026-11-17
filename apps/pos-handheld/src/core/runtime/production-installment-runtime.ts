@@ -2974,7 +2974,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       if (isProviderUntouchedFailure(error)) {
         // 中文注释：建退款计划（取原付款凭据并校验）就确定性失败，provider 一次都没被调用、
         // 计划也没落库，退款确定没发生。若仍按 Unknown 处理，中央 claim 已是 RefundPending，
-        // 两边都卡死（Unknown 只能由发起机恢复且不会超时，还会让整台 iPad 卖不了货）。
+        // 两边都卡死（Unknown 只能由发起机恢复且不会超时，还会让整台设备卖不了货）。
         // 这里干净地结案：释放中央占用 + 本地 action 置 Declined，让原开单设备还能正常取消。
         await this.declineCancelClaim(persisted, identity, cancelCommand);
         throw workflowError(
