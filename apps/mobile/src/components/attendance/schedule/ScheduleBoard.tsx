@@ -6,6 +6,7 @@
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { Text } from "react-native-paper";
 import { formatScheduleHours, schedulePaidMinutes } from "@/modules/attendance/attendance-my-week";
+import { getMealMark, HIDDEN_MEAL_MARK, type MealMark } from "@/modules/attendance/meal-mark";
 import { FALLBACK_STAFF_COLOR, type BoardDay, type StaffColor, type StaffLegendItem } from "@/modules/attendance/schedule-board";
 import { normalizeClockTime } from "@/modules/attendance/schedule-grid";
 import type { PlacementVerdict } from "@/modules/attendance/schedule-placement";
@@ -14,6 +15,7 @@ import type { AttendanceSchedule } from "@/modules/attendance/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { PatternFill } from "../approvals/approval-ui";
+import { MealMarkBadge } from "./MealMarkBadge";
 import { StaffNameModeSwitch } from "./StaffNameModeSwitch";
 
 export interface ScheduleBoardCardFlags {
@@ -118,6 +120,19 @@ export function ScheduleBoard({
     </View>
   );
 
+  // 请假卡片没有午饭；其余班次按用餐规则判定（已取消 / 短班次 / 时间不合法为 hidden）
+  const mealMarkOf = (schedule: AttendanceSchedule): MealMark => (
+    schedule.leaveType
+      ? HIDDEN_MEAL_MARK
+      : getMealMark({
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        mealBreakCount: schedule.mealBreakCount,
+        status: schedule.status,
+      })
+  );
+  const showMealCaption = days.some((day) => day.shifts.some((schedule) => mealMarkOf(schedule).kind !== "hidden"));
+
   const renderCard = (schedule: AttendanceSchedule, dayIndex: number) => {
     const name = nameOf(schedule.userGuid);
     const dimmed = Boolean(highlighted) && highlighted !== schedule.userGuid;
@@ -144,11 +159,18 @@ export function ScheduleBoard({
     const age = ageOf(schedule.userGuid);
     // 排班计薪时长（扣用餐）；注意不是 schedule.paidMinutes——那是按打卡算出的实际计薪
     const minutes = schedulePaidMinutes(schedule);
+    // 有无午饭标识：名字行右侧；读屏标签末尾补上「含午饭 N 次 / 无午饭」
+    const mark = mealMarkOf(schedule);
+    const mealA11y = mark.kind === "meal"
+      ? t("scheduleManagement.board.mealMark.meal", { count: mark.count })
+      : mark.kind === "none"
+        ? t("scheduleManagement.board.mealMark.none")
+        : "";
     return (
       <Pressable
         key={schedule.scheduleGuid}
         accessibilityRole="button"
-        accessibilityLabel={`${fullNameOf?.(schedule.userGuid) ?? name} ${normalizeClockTime(schedule.startTime)}–${normalizeClockTime(schedule.endTime)}`}
+        accessibilityLabel={`${fullNameOf?.(schedule.userGuid) ?? name} ${normalizeClockTime(schedule.startTime)}–${normalizeClockTime(schedule.endTime)}${mealA11y ? `，${mealA11y}` : ""}`}
         disabled={disabled}
         onPress={() => onPressCard(schedule, dayIndex)}
         style={[
@@ -167,6 +189,7 @@ export function ScheduleBoard({
             {name}
           </Text>
           {age !== undefined && !columns ? <Text style={styles.ageBadge}>{age}</Text> : null}
+          <MealMarkBadge mark={mark} tint={color.ink} />
         </View>
         <View style={styles.cardTimeRow}>
           <Text style={[styles.cardTime, columns ? styles.cardTimeCompact : null]} numberOfLines={1}>
@@ -253,6 +276,9 @@ export function ScheduleBoard({
   return (
     <View style={columns ? styles.rootColumns : styles.rootList}>
       {legend.length ? renderLegend() : null}
+      {showMealCaption ? (
+        <Text style={styles.mealCaption} numberOfLines={1}>{t("scheduleManagement.board.mealMark.caption")}</Text>
+      ) : null}
       {columns ? (
         <View style={styles.columnGrid}>{days.map(renderDay)}</View>
       ) : (
@@ -281,6 +307,7 @@ const styles = StyleSheet.create({
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendName: { fontSize: 12.5, fontWeight: "600", maxWidth: 120 },
   legendMeta: { fontSize: 11, color: HB_COLORS.textSecondary },
+  mealCaption: { fontSize: 12, color: HB_COLORS.textSecondary },
   dimmed: { opacity: 0.32 },
   dayGroup: {
     backgroundColor: HB_COLORS.white,

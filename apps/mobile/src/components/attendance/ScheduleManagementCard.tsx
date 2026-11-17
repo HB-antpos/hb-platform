@@ -687,6 +687,8 @@ export function ScheduleManagementCard({
     (userGuid: string) => boardNames.get(userGuid) ?? nameOfUser(userGuid),
     [boardNames, nameOfUser],
   );
+  // 导出图按屏幕看板同一套员工色取色（按全名分配，切换昵称 / 全名不换色）
+  const colorOfStaff = useCallback((userGuid: string) => staffColors.get(userGuid), [staffColors]);
   const boardDays = useMemo(() => groupScheduleBoardDays(days, schedules, boardNameOf), [boardNameOf, days, schedules]);
   const staffLegend = useMemo(() => buildStaffLegend(schedules, boardNameOf), [boardNameOf, schedules]);
   const freeByDay = useMemo(
@@ -2582,9 +2584,12 @@ export function ScheduleManagementCard({
     </View>
   );
 
+  // 导出图（按天分列的看板）：名字跟随看板当前的昵称 / 全名，只含已发布的上班班次、不含年龄
   const exportSheetProps = {
     days,
-    rows,
+    schedules,
+    nameOf: boardNameOf,
+    colorOf: colorOfStaff,
     storeCode,
     storeLabel,
     weekStartDate,

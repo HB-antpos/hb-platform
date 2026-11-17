@@ -3,39 +3,48 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import { Button, IconButton, Text } from "react-native-paper";
-import Svg, { G, Line, Rect, Text as SvgText } from "react-native-svg";
-import { ATTENDANCE_STATUS_TONES } from "./AdjustmentFormControls";
+import Svg, { G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import {
-  buildScheduleExportTable,
+  MEAL_ICON_PATH,
+  MEAL_NONE_TONE,
+  MEAL_SLASH_PATH,
+  type MealMark,
+} from "@/modules/attendance/meal-mark";
+import {
+  buildScheduleExportBoard,
+  estimateTextWidth,
   fitTextToWidth,
   layoutScheduleExport,
   SCHEDULE_EXPORT_LAYOUT as L,
   scheduleExportFileName,
-  type ScheduleExportSourceRow,
-  type ScheduleExportTable,
+  type ScheduleExportBoard,
 } from "@/modules/attendance/schedule-export";
+import type { StaffColor } from "@/modules/attendance/schedule-board";
+import type { AttendanceSchedule } from "@/modules/attendance/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 /** 截图用的隐藏画布最高 2000pt：iOS 按屏幕倍率出图，再高位图内存吃紧。 */
 const MAX_CAPTURE_HEIGHT = 2000;
-const ACCENT = ATTENDANCE_STATUS_TONES.accent;
-const LEAVE = ATTENDANCE_STATUS_TONES.warning;
-const GRID_LINE = HB_COLORS.outlineMuted;
 const MUTED_TEXT = "#98A2B3";
 const WEEKEND_FILL = "#F9FAFB";
+const GRID_LINE = HB_COLORS.outlineMuted;
+/**
+ * 预览按 0.8 倍显示、可左右滑动：整张图 7 列约 900 单位宽，塞进手机宽度里字会缩到看不清，
+ * 所以不再强行缩到屏幕宽，而是保持可读的字号让用户滑动查看；分享出去的图仍是完整高清大图。
+ */
+const PREVIEW_SCALE = 0.8;
 
 interface ScheduleImageLabels {
   title: string;
   subtitle: string;
-  employee: string;
-  rest: string;
-  onDuty: string;
   footerNote: string;
   generatedAt: string;
+  legendMeal: string;
+  legendNoMeal: string;
   weekday: (index: number) => string;
-  leaveType: (type?: string) => string;
+  dayOnDuty: (count: number) => string;
 }
 
 type CaptureSvg = Svg & {
@@ -47,155 +56,152 @@ function formatGeneratedAt(date: Date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+/** 午饭标识小块的宽度：内边距 + 图标，扣 2 次以上再加「×N」。 */
+function mealChipWidth(mark: MealMark) {
+  return 6 + 11 + (mark.count > 1 ? 13 : 0);
+}
+
 /**
- * 排班图片本体：固定 viewBox 坐标系，按传入宽度等比缩放。
+ * 午饭标识（与看板卡片同款：自动＝浅灰叉勺，手动＝加虚线框，长班次无午饭＝橙色斜杠 + 橙色虚线框）。
+ * right 是小块右边缘的 x，top 是上边缘的 y。
+ */
+function MealChip({ mark, right, top, tint }: { mark: MealMark; right: number; top: number; tint: string }) {
+  if (mark.kind === "hidden") return null;
+  const none = mark.kind === "none";
+  const width = mealChipWidth(mark);
+  const x = right - width;
+  const color = none ? MEAL_NONE_TONE.text : tint;
+  const dashed = none || mark.manual;
+  return (
+    <G>
+      <Rect
+        x={x}
+        y={top}
+        width={width}
+        height={14}
+        rx={3}
+        fill={none ? MEAL_NONE_TONE.background : "#FFFFFF"}
+        fillOpacity={none ? 1 : 0.72}
+        stroke={none ? MEAL_NONE_TONE.border : dashed ? tint : "none"}
+        strokeWidth={1}
+        strokeDasharray={dashed ? "2.5 2" : undefined}
+      />
+      {/* 图标按 24×24 的图形坐标画，缩放到 11 单位 */}
+      <G transform={`translate(${x + 3} ${top + 1.5}) scale(${11 / 24})`}>
+        <Path d={MEAL_ICON_PATH} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" opacity={none ? 1 : 0.75} />
+        {none ? <Path d={MEAL_SLASH_PATH} fill="none" stroke={MEAL_NONE_TONE.text} strokeWidth={2.6} strokeLinecap="round" /> : null}
+      </G>
+      {mark.count > 1 ? (
+        <SvgText x={x + 3 + 11 + 1} y={top + 10.5} fontSize={9.5} fontWeight="700" fill={color}>
+          {`×${mark.count}`}
+        </SvgText>
+      ) : null}
+    </G>
+  );
+}
+
+/** 页脚图例用的示意标记（不带次数）。 */
+const LEGEND_MEAL: MealMark = { kind: "meal", count: 1, manual: false, deductMinutes: 30, durationMinutes: 0 };
+const LEGEND_NONE: MealMark = { kind: "none", count: 0, manual: true, deductMinutes: 0, durationMinutes: 0 };
+
+/**
+ * 排班图片本体（按天分列的看板）：固定 viewBox 坐标系，按传入宽度等比缩放。
  * 预览与截图共用同一份绘制，只是渲染尺寸不同。
  */
 const ScheduleImage = forwardRef<Svg, {
-  table: ScheduleExportTable;
+  board: ScheduleExportBoard;
   labels: ScheduleImageLabels;
   width: number;
-}>(function ScheduleImage({ table, labels, width }, ref) {
-  const layout = useMemo(() => layoutScheduleExport(table), [table]);
+}>(function ScheduleImage({ board, labels, width }, ref) {
+  const layout = useMemo(() => layoutScheduleExport(board), [board]);
   const height = (width * layout.height) / layout.width;
-  const { tableLeft, tableTop, tableWidth, summaryTop, tableBottom } = layout;
-  const dayLeft = (index: number) => tableLeft + L.nameWidth + index * L.dayWidth;
-  const tableRight = tableLeft + tableWidth;
-  // SVG 文字以基线定位：取字号约 0.35 倍下移，让文字在行内视觉居中。
-  const baseline = (centerY: number, fontSize: number) => centerY + fontSize * 0.35;
+  const { boardLeft, boardTop, boardWidth, bodyTop, bodyHeight, boardBottom, cardWidth } = layout;
+  const boardRight = boardLeft + boardWidth;
+
+  // 页脚左侧：共 N 人 + 本周出现过的午饭图例（没出现过的不放，免得图例说明图里没有的东西）
+  const legendItems: { mark: MealMark; label: string }[] = [];
+  if (board.hasMeal) legendItems.push({ mark: LEGEND_MEAL, label: labels.legendMeal });
+  if (board.hasNoMeal) legendItems.push({ mark: LEGEND_NONE, label: labels.legendNoMeal });
+  let legendCursor = boardLeft + estimateTextWidth(labels.footerNote, 11) + 16;
 
   return (
     <Svg ref={ref} width={width} height={height} viewBox={`0 0 ${layout.width} ${layout.height}`}>
       <Rect x={0} y={0} width={layout.width} height={layout.height} fill={HB_COLORS.white} />
 
       <SvgText x={L.padding} y={L.padding + 22} fontSize={22} fontWeight="700" fill={HB_COLORS.textPrimary}>
-        {fitTextToWidth(labels.title, tableWidth, 22)}
+        {fitTextToWidth(labels.title, boardWidth, 22)}
       </SvgText>
       <SvgText x={L.padding} y={L.padding + 46} fontSize={13} fill={HB_COLORS.textSecondary}>
         {labels.subtitle}
       </SvgText>
 
-      {/* 周末两列整列浅灰底，员工一眼区分周末班。 */}
-      {table.days.map((day, index) =>
+      {/* 周末两列整列浅灰底，一眼区分周末班。 */}
+      {board.days.map((day, index) =>
         index >= 5 ? (
-          <Rect
-            key={`weekend-${day}`}
-            x={dayLeft(index)}
-            y={tableTop}
-            width={L.dayWidth}
-            height={summaryTop - tableTop}
-            fill={WEEKEND_FILL}
-          />
+          <Rect key={`weekend-${day.date}`} x={layout.columnLefts[index]} y={bodyTop} width={L.columnWidth} height={bodyHeight} fill={WEEKEND_FILL} />
         ) : null,
       )}
 
-      {/* 表头 */}
-      <Rect x={tableLeft} y={tableTop} width={tableWidth} height={L.headerHeight} fill={HB_COLORS.surfaceMuted} />
-      <SvgText x={tableLeft + 12} y={baseline(tableTop + L.headerHeight / 2, 13)} fontSize={13} fontWeight="600" fill={HB_COLORS.textSecondary}>
-        {labels.employee}
-      </SvgText>
-      {table.days.map((day, index) => {
-        const centerX = dayLeft(index) + L.dayWidth / 2;
+      {/* 表头：星期 + 日期，下面一行当天在岗人数（0 人标红） */}
+      <Rect x={boardLeft} y={boardTop} width={boardWidth} height={L.headerHeight} fill={HB_COLORS.surfaceMuted} />
+      {board.days.map((day, index) => {
+        const centerX = layout.columnLefts[index] + L.columnWidth / 2;
         return (
-          <G key={`head-${day}`}>
-            <SvgText x={centerX} y={tableTop + 19} fontSize={13} fontWeight="700" fill={HB_COLORS.textPrimary} textAnchor="middle">
-              {labels.weekday(index)}
+          <G key={`head-${day.date}`}>
+            <SvgText x={centerX} y={boardTop + 19} fontSize={13} fontWeight="700" fill={HB_COLORS.textPrimary} textAnchor="middle">
+              {`${labels.weekday(index)} ${day.date.slice(5, 10)}`}
             </SvgText>
-            <SvgText x={centerX} y={tableTop + 35} fontSize={11} fill={HB_COLORS.textSecondary} textAnchor="middle">
-              {day.slice(5, 10)}
+            <SvgText x={centerX} y={boardTop + 35} fontSize={11} fill={day.headcount ? HB_COLORS.textSecondary : HB_COLORS.danger} textAnchor="middle">
+              {labels.dayOnDuty(day.headcount)}
             </SvgText>
           </G>
         );
       })}
 
-      {/* 员工行 */}
-      {table.rows.map((row, rowIndex) => {
-        const top = layout.rowTops[rowIndex];
-        const rowHeight = layout.rowHeights[rowIndex];
-        const centerY = top + rowHeight / 2;
-        return (
-          <G key={row.userGuid}>
-            <SvgText x={tableLeft + 12} y={baseline(centerY, 14)} fontSize={14} fontWeight="600" fill={HB_COLORS.textPrimary}>
-              {fitTextToWidth(row.employeeName, L.nameWidth - 18, 14)}
-            </SvgText>
-            {row.cells.map((cell, dayIndex) => {
-              const left = dayLeft(dayIndex);
-              const centerX = left + L.dayWidth / 2;
-              const pillX = left + 5;
-              const pillWidth = L.dayWidth - 10;
-              if (cell.kind === "leave") {
-                return (
-                  <G key={dayIndex}>
-                    <Rect x={pillX} y={centerY - L.shiftHeight / 2} width={pillWidth} height={L.shiftHeight} rx={6} fill={LEAVE.background} stroke="#FEDF89" strokeWidth={1} />
-                    <SvgText x={centerX} y={baseline(centerY, 13)} fontSize={13} fontWeight="700" fill={LEAVE.text} textAnchor="middle">
-                      {fitTextToWidth(labels.leaveType(cell.leaveType), pillWidth - 8, 13)}
-                    </SvgText>
-                  </G>
-                );
-              }
-              if (cell.kind === "shift") {
-                // 多个班次从行顶依次叠放；开始时间加粗，结束时间常规，两行比一行「09:00–17:30」更易读。
-                return (
-                  <G key={dayIndex}>
-                    {cell.shifts.map((shift, shiftIndex) => {
-                      const shiftTop = top + L.cellPaddingY + shiftIndex * (L.shiftHeight + L.shiftGap);
-                      return (
-                        <G key={`${shift.startTime}-${shiftIndex}`}>
-                          <Rect x={pillX} y={shiftTop} width={pillWidth} height={L.shiftHeight} rx={6} fill={ACCENT.background} stroke="#B2DDFF" strokeWidth={1} />
-                          <SvgText x={centerX} y={shiftTop + 16} fontSize={13} fontWeight="700" fill={ACCENT.text} textAnchor="middle">
-                            {shift.startTime}
-                          </SvgText>
-                          <SvgText x={centerX} y={shiftTop + 30} fontSize={12} fill={ACCENT.text} textAnchor="middle">
-                            {`– ${shift.endTime}`}
-                          </SvgText>
-                        </G>
-                      );
-                    })}
-                  </G>
-                );
-              }
-              return (
-                <SvgText key={dayIndex} x={centerX} y={baseline(centerY, 13)} fontSize={13} fill={MUTED_TEXT} textAnchor="middle">
-                  {labels.rest}
-                </SvgText>
-              );
-            })}
-            <Line x1={tableLeft} y1={top} x2={tableRight} y2={top} stroke={GRID_LINE} strokeWidth={1} />
-          </G>
-        );
-      })}
+      {/* 班次卡片：浅底色 + 左侧色条 + 同色系边框（与屏幕看板同款），名字、时间一行、午饭标识在时间行右侧。 */}
+      {board.days.map((day, dayIndex) =>
+        day.cards.map((card, cardIndex) => {
+          const x = layout.columnLefts[dayIndex] + L.columnPaddingX;
+          const y = layout.cardTops[dayIndex][cardIndex];
+          return (
+            <G key={card.scheduleGuid}>
+              <Rect x={x} y={y} width={cardWidth} height={L.cardHeight} rx={6} fill={card.color.bg} stroke={card.color.bar} strokeOpacity={0.35} strokeWidth={1} />
+              <Rect x={x + 3} y={y + 5} width={3} height={L.cardHeight - 10} rx={1.5} fill={card.color.bar} />
+              <SvgText x={x + 12} y={y + 16} fontSize={13} fontWeight="700" fill={card.color.ink}>
+                {fitTextToWidth(card.name, cardWidth - 12 - 6, 13)}
+              </SvgText>
+              <SvgText x={x + 12} y={y + 31} fontSize={12} fill={card.color.ink}>
+                {`${card.startTime}–${card.endTime}`}
+              </SvgText>
+              <MealChip mark={card.meal} right={x + cardWidth - 5} top={y + 20} tint={card.color.ink} />
+            </G>
+          );
+        }),
+      )}
 
-      {/* 汇总行：每天在岗人数 */}
-      <Rect x={tableLeft} y={summaryTop} width={tableWidth} height={L.summaryHeight} fill={HB_COLORS.surfaceMuted} />
-      <Line x1={tableLeft} y1={summaryTop} x2={tableRight} y2={summaryTop} stroke={GRID_LINE} strokeWidth={1} />
-      <SvgText x={tableLeft + 12} y={baseline(summaryTop + L.summaryHeight / 2, 12)} fontSize={12} fontWeight="600" fill={HB_COLORS.textSecondary}>
-        {fitTextToWidth(labels.onDuty, L.nameWidth - 18, 12)}
-      </SvgText>
-      {table.dayHeadcounts.map((count, index) => (
-        <SvgText
-          key={`count-${index}`}
-          x={dayLeft(index) + L.dayWidth / 2}
-          y={baseline(summaryTop + L.summaryHeight / 2, 13)}
-          fontSize={13}
-          fontWeight="700"
-          fill={count ? HB_COLORS.textPrimary : HB_COLORS.danger}
-          textAnchor="middle"
-        >
-          {String(count)}
-        </SvgText>
-      ))}
+      {/* 列分隔线、表头下沿与外框 */}
+      {board.days.map((_, index) => (index > 0 ? (
+        <Line key={`v-${index}`} x1={layout.columnLefts[index]} y1={boardTop} x2={layout.columnLefts[index]} y2={boardBottom} stroke={GRID_LINE} strokeWidth={1} />
+      ) : null))}
+      <Line x1={boardLeft} y1={bodyTop} x2={boardRight} y2={bodyTop} stroke={GRID_LINE} strokeWidth={1} />
+      <Rect x={boardLeft} y={boardTop} width={boardWidth} height={boardBottom - boardTop} rx={2} fill="none" stroke={HB_COLORS.outline} strokeWidth={1} />
 
-      {/* 竖向分隔线与外框 */}
-      {table.days.map((_, index) => L.nameWidth + index * L.dayWidth).map((offset) => (
-        <Line key={`v-${offset}`} x1={tableLeft + offset} y1={tableTop} x2={tableLeft + offset} y2={tableBottom} stroke={GRID_LINE} strokeWidth={1} />
-      ))}
-      <Line x1={tableLeft} y1={tableTop + L.headerHeight} x2={tableRight} y2={tableTop + L.headerHeight} stroke={GRID_LINE} strokeWidth={1} />
-      <Rect x={tableLeft} y={tableTop} width={tableWidth} height={tableBottom - tableTop} rx={2} fill="none" stroke={HB_COLORS.outline} strokeWidth={1} />
-
-      <SvgText x={tableLeft} y={tableBottom + 21} fontSize={11} fill={MUTED_TEXT}>
+      <SvgText x={boardLeft} y={boardBottom + 21} fontSize={11} fill={MUTED_TEXT}>
         {labels.footerNote}
       </SvgText>
-      <SvgText x={tableRight} y={tableBottom + 21} fontSize={11} fill={MUTED_TEXT} textAnchor="end">
+      {legendItems.map((item) => {
+        const chipRight = legendCursor + mealChipWidth(item.mark);
+        const labelX = chipRight + 4;
+        const node = (
+          <G key={item.label}>
+            <MealChip mark={item.mark} right={chipRight} top={boardBottom + 10} tint={HB_COLORS.textSecondary} />
+            <SvgText x={labelX} y={boardBottom + 21} fontSize={11} fill={MUTED_TEXT}>{item.label}</SvgText>
+          </G>
+        );
+        legendCursor = labelX + estimateTextWidth(item.label, 11) + 14;
+        return node;
+      })}
+      <SvgText x={boardRight} y={boardBottom + 21} fontSize={11} fill={MUTED_TEXT} textAnchor="end">
         {labels.generatedAt}
       </SvgText>
     </Svg>
@@ -212,7 +218,9 @@ export function ScheduleExportSheet({
   visible,
   presentation,
   days,
-  rows,
+  schedules,
+  nameOf,
+  colorOf,
   storeCode,
   storeLabel,
   weekStartDate,
@@ -222,7 +230,12 @@ export function ScheduleExportSheet({
   visible: boolean;
   presentation: "sheet" | "overlay";
   days: string[];
-  rows: ScheduleExportSourceRow[];
+  /** 本周全部班次；只有已发布的上班班次会进图（草稿、请假、已取消都不进）。 */
+  schedules: readonly AttendanceSchedule[];
+  /** 图上显示的名字：与看板当前的昵称 / 全名开关一致。 */
+  nameOf: (userGuid: string) => string;
+  /** 员工色：与屏幕看板同一套（按全名分配，切换昵称 / 全名不换色）。 */
+  colorOf: (userGuid: string) => StaffColor | undefined;
   storeCode?: string;
   storeLabel: string;
   weekStartDate: string;
@@ -232,28 +245,31 @@ export function ScheduleExportSheet({
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
   const captureRef = useRef<Svg>(null);
-  const [previewWidth, setPreviewWidth] = useState(0);
   const [isSharing, setIsSharing] = useState(false);
 
-  const table = useMemo(() => buildScheduleExportTable(days, rows), [days, rows]);
-  const layout = useMemo(() => layoutScheduleExport(table), [table]);
+  const board = useMemo(
+    () => buildScheduleExportBoard({ days, schedules, nameOf, colorOf }),
+    [colorOf, days, nameOf, schedules],
+  );
+  const layout = useMemo(() => layoutScheduleExport(board), [board]);
   // 生成时间在打开时定格，预览与分享出去的图一致。
   const generatedAt = useMemo(() => (visible ? formatGeneratedAt(new Date()) : ""), [visible]);
   const labels = useMemo<ScheduleImageLabels>(() => ({
     title: t("scheduleManagement.export.imageTitle", { store: storeLabel }),
-    subtitle: weekLabel,
-    employee: t("scheduleManagement.export.employee"),
-    rest: t("scheduleManagement.export.rest"),
-    onDuty: t("scheduleManagement.export.onDuty"),
-    footerNote: t("scheduleManagement.export.footerNote", { count: table.rows.length }),
+    subtitle: t("scheduleManagement.export.subtitleWeek", { week: weekLabel }),
+    footerNote: t("scheduleManagement.export.footerNote", { count: board.peopleCount }),
     generatedAt: t("scheduleManagement.export.generatedAt", { time: generatedAt }),
+    legendMeal: t("scheduleManagement.export.legendMeal"),
+    legendNoMeal: t("scheduleManagement.export.legendNoMeal"),
     weekday: (index) => t(`weekdays.${index}`),
-    leaveType: (type) => (type ? t(`leaveTypes.${type}`, type) : t("scheduleManagement.legend.leave")),
-  }), [generatedAt, storeLabel, t, table.rows.length, weekLabel]);
+    dayOnDuty: (count) => t("scheduleManagement.export.dayOnDuty", { count }),
+  }), [board.peopleCount, generatedAt, storeLabel, t, weekLabel]);
 
-  // 隐藏画布按原始坐标 1:1 渲染（超高时等比缩小），出图分辨率与手机屏幕宽度无关。
+  // 隐藏画布按原始坐标 1:1 渲染（超高时等比缩小）：整图约 900pt 宽，按手机屏幕倍率出图至少是 2 倍清晰度，
+  // 出图分辨率与手机屏幕宽度无关。
   const captureScale = Math.min(1, MAX_CAPTURE_HEIGHT / layout.height);
   const captureWidth = Math.round(layout.width * captureScale);
+  const previewWidth = Math.round(layout.width * PREVIEW_SCALE);
 
   const share = async () => {
     const svg = captureRef.current as CaptureSvg | null;
@@ -292,22 +308,24 @@ export function ScheduleExportSheet({
     <>
       <View
         style={styles.previewFrame}
-        onLayout={(event) => {
-          const next = Math.floor(event.nativeEvent.layout.width) - 2;
-          setPreviewWidth((current) => (current === next ? current : next));
-        }}
         accessible
         accessibilityRole="image"
         accessibilityLabel={`${labels.title} ${weekLabel}`}
       >
-        {previewWidth > 0 ? <ScheduleImage table={table} labels={labels} width={previewWidth} /> : null}
+        {/* 预览保持可读的字号，左右滑动查看整周；分享出去的是完整高清大图 */}
+        <ScrollView horizontal showsHorizontalScrollIndicator>
+          <ScheduleImage board={board} labels={labels} width={previewWidth} />
+        </ScrollView>
       </View>
       <Text variant="bodySmall" style={styles.hint}>
         {t("scheduleManagement.export.hint")}
       </Text>
+      <Text variant="bodySmall" style={styles.hint}>
+        {t("scheduleManagement.export.previewHint")}
+      </Text>
       {/* 截图专用画布：透明、不拦截触摸，只给 toDataURL 取图。 */}
       <View pointerEvents="none" style={styles.captureHost} importantForAccessibility="no-hide-descendants">
-        <ScheduleImage ref={captureRef} table={table} labels={labels} width={captureWidth} />
+        <ScheduleImage ref={captureRef} board={board} labels={labels} width={captureWidth} />
       </View>
     </>
   );
@@ -318,7 +336,7 @@ export function ScheduleExportSheet({
       icon="share-variant"
       onPress={share}
       loading={isSharing}
-      disabled={isSharing || !table.rows.length}
+      disabled={isSharing || !board.peopleCount}
       buttonColor={HB_COLORS.action}
       textColor={HB_COLORS.white}
     >

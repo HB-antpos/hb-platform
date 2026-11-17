@@ -255,11 +255,29 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('weekHours: total.paidHours'), '批量排班弹窗里「本周已排」也用计薪时长')
   assert(!pageSource.includes('getScheduleHours('), '看板不再用不扣用餐的班次时长')
   assert(pageSource.includes("board.cardHoursTip'"), '卡片悬停要写明「班次 − 用餐 = 计薪」')
+  // 有无午饭标识：卡片第一行显示（短班次 / 已取消不显示由 getMealMark 判定），图例说明三种含义，悬停写明无午饭原因
+  assert(pageSource.includes('<MealMarkBadge mark={mealMark} label={mealMarkLabel} />'), '卡片第一行要显示有无午饭标识')
+  assert(pageSource.includes("board.mealLegend.none'") && pageSource.includes("board.mealLegend.manual'"), '图例要说明「无午饭」和「手动指定」')
+  assert(pageSource.includes("board.mealNoneTip'"), '长班次无午饭要在悬停提示里写明原因')
+  // 导出图片：按钮不依赖编辑权限；导出只走白名单模型，页面里喂给它的数据不含年龄；弹窗里没有「年龄」开关
+  assert(/\{filterBar\}[\s\S]*?setExportOpen\(true\)[\s\S]*?activeTab === 'schedules' && access\.canEditAttendanceSchedule/.test(pageSource), '导出图片按钮要放在编辑权限判断之外，只读用户也能导出')
+  const exportBuilder = pageSource.slice(pageSource.indexOf('const buildExportModel = useCallback('), pageSource.indexOf('// 员工名显示方式：开＝昵称'))
+  assert(exportBuilder.includes('buildScheduleExportModel({') && !/employeeAges|ageOf|\bage\b/.test(exportBuilder), '喂给导出模型的数据里不能有年龄')
+  for (const file of ['scheduleExportLogic.ts', 'scheduleExportImage.ts', 'ScheduleExportModal.tsx']) {
+    const code = readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\s\/\/.*$/gm, '')
+    assert(!/\b(age|ages|employeeAge|employeeAges|ageOf)\b/.test(code), `${file} 里不能出现年龄相关标识符`)
+    assert(!code.includes('foreignObject') && !code.includes('html2canvas'), `${file} 不能用 foreignObject / html2canvas（color-mix 解析不了、会污染画布）`)
+  }
+  {
+    const exportKeys = (file: string) => Object.keys(JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')).posAdmin.scheduleAttendance.export).sort()
+    assert(JSON.stringify(exportKeys('scheduleAttendanceMessages.zh.json')) === JSON.stringify(exportKeys('scheduleAttendanceMessages.en.json')), '导出图片文案中英文键要一致')
+  }
   {
     const boardKeys = (file: string) => Object.keys(JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')).posAdmin.scheduleAttendance.board)
     const zhBoard = boardKeys('scheduleAttendanceMessages.zh.json')
     const enBoard = boardKeys('scheduleAttendanceMessages.en.json')
-    for (const key of ['nameModeLabel', 'nameModeNickname', 'nameModeFull', 'nameModeTipNickname', 'nameModeTipFull', 'nameModeTipRemember', 'nameAltFull', 'nameAltNickname', 'cardHoursTip']) {
+    for (const key of ['nameModeLabel', 'nameModeNickname', 'nameModeFull', 'nameModeTipNickname', 'nameModeTipFull', 'nameModeTipRemember', 'nameAltFull', 'nameAltNickname', 'cardHoursTip', 'mealMark', 'mealNoneTip', 'mealLegend']) {
       assert(zhBoard.includes(key) && enBoard.includes(key), `员工名切换文案 ${key} 中英文都要有`)
     }
   }
