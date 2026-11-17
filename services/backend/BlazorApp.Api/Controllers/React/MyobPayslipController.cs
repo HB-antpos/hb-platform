@@ -31,14 +31,25 @@ namespace BlazorApp.Api.Controllers.React
         }
 
         /// <summary>
-        /// 工资单列表：from / to 按支付日期（含首尾，默认最近 90 天，最长 24 个月）；connectionGuid 为空 = 所有可见公司；
-        /// storeCode 按分店过滤；onlyUnassigned 只看无法归到分店的（仅全部分店权限）；refresh=true 绕过 10 分钟缓存。
+        /// 工资单列表（读本地快照，不再实时请求 MYOB）：from / to 按支付日期（含首尾，默认最近 90 天，最长 24 个月）；
+        /// connectionGuid 为空 = 所有可见公司；storeCode 按分店过滤；onlyUnassigned 只看无法归到分店的（仅全部分店权限）。
         /// </summary>
         [HttpGet]
         public async Task<IActionResult> List([FromQuery] MyobPayslipQuery query, CancellationToken cancellationToken)
         {
             NoStore();
             return ToResult(await _service.ListAsync(query ?? new MyobPayslipQuery(), cancellationToken));
+        }
+
+        /// <summary>
+        /// 手动同步：立即把可见公司文件的工资单从 MYOB 拉到本地库（首次回填 24 个月，之后对账最近 8 周）。
+        /// 每家公司 60 秒内最多一次；「仅本人」口径不能触发。只读 MYOB，不会往 MYOB 写任何东西。
+        /// </summary>
+        [HttpPost("sync")]
+        public async Task<IActionResult> Sync([FromBody] MyobPayslipSyncRequest request, CancellationToken cancellationToken)
+        {
+            NoStore();
+            return ToResult(await _service.SyncAsync(request ?? new MyobPayslipSyncRequest(), cancellationToken));
         }
 
         /// <summary>单张工资单明细；成功打开会写一条查看记录（只记谁看了谁哪一期，不含金额）。</summary>

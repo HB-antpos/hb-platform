@@ -1,6 +1,7 @@
 namespace BlazorApp.Api.Services.Myob;
 
 // MYOB 历史工资单（方案 docs/plans/2026-10-29-myob-payslip-history.md）。全局 JSON 为 camelCase；全部返回 ApiResponse<T>。
+// 2026-11-17 起列表 / 明细 / PDF / 邮件都读本地快照（MyobPayslipSnapshot），由定时任务与「同步」按钮从 MYOB 拉取（方案第 12 节）。
 // 隐私：这里的 DTO 只含展示字段。年薪、生日、雇佣分类在 MyobPayrollAdviceRecord 里就已被丢弃，不可能出现在响应里；
 // 时薪（Hourly Rate）与支票号（Reference Number）只在明细 / PDF 里出现（还原 MYOB 默认 Pay Slip 页头），列表 DTO 不含；
 // 银行账号 / TFN 本功能根本不读取。
@@ -16,6 +17,12 @@ public static class MyobPayslipErrorCodes
     public const string RecipientUnconfirmed = "MYOB_PAYSLIP_RECIPIENT_UNCONFIRMED";
     public const string EmailNotConfigured = "MYOB_PAYSLIP_EMAIL_NOT_CONFIGURED";
     public const string EmailSendFailed = "MYOB_PAYSLIP_EMAIL_SEND_FAILED";
+
+    /// <summary>这家公司的工资单还没有成功同步过（首次回填进行中或失败）：本地没有任何数据可读。</summary>
+    public const string SyncPending = "MYOB_PAYSLIP_SYNC_PENDING";
+
+    /// <summary>MYOB 拉取成功，但保存到本地库失败（本地原有数据保持不变）。</summary>
+    public const string SyncSaveFailed = "MYOB_PAYSLIP_SYNC_SAVE_FAILED";
 }
 
 /// <summary>查看记录（MyobPayslipViewLog.Action）的动作取值。</summary>
@@ -57,7 +64,10 @@ public sealed class MyobPayslipCompanyDto
     public string ConnectionName { get; set; } = string.Empty;
 }
 
-/// <summary>某公司文件这次读取的状态：一家失败不拖垮另一家。</summary>
+/// <summary>
+/// 某公司文件这次读取的状态：一家失败不拖垮另一家。
+/// Ok = 本地库里有这家公司的数据可读（至少成功同步过一次）；从没同步成功过时 Ok=false、ErrorCode=SyncPending。
+/// </summary>
 public sealed class MyobPayslipCompanyStatusDto
 {
     public string ConnectionGuid { get; set; } = string.Empty;
@@ -69,6 +79,18 @@ public sealed class MyobPayslipCompanyStatusDto
 
     public string? ErrorCode { get; set; }
     public string? ErrorMessage { get; set; }
+
+    /// <summary>最近一次同步成功的时间（UTC，ISO 8601）；从没成功过为空。</summary>
+    public string? LastSyncedAt { get; set; }
+
+    /// <summary>此刻有进程正在同步这家公司（租约有效）。</summary>
+    public bool Syncing { get; set; }
+
+    /// <summary>所选日期区间早于本地已完整同步的最早日期：区间前段可能还不全（历史回填还没完成）。</summary>
+    public bool HistoryIncomplete { get; set; }
+
+    /// <summary>最近一次同步失败的原因；本地仍是上一次成功同步的数据。同步成功后为空。</summary>
+    public string? SyncError { get; set; }
 }
 
 public sealed class MyobPayslipRowDto
@@ -130,7 +152,7 @@ public sealed class MyobPayslipListDto
     /// <summary>仅本人口径且本人没有绑定过任何 MYOB 员工卡（含历史绑定）：前端给「还没绑定、暂时看不了工资单」的友好提示。</summary>
     public bool SelfUnbound { get; set; }
 
-    /// <summary>数据读取时间（UTC，ISO 8601）；命中缓存时为首次读取时间。</summary>
+    /// <summary>本地数据最近一次从 MYOB 同步成功的时间（UTC，ISO 8601）；涉及多家公司时取最早的一家。</summary>
     public string FetchedAt { get; set; } = string.Empty;
 }
 
@@ -219,9 +241,34 @@ public sealed class MyobPayslipQuery
 
     /// <summary>只看无法归到分店的工资单（仅「全部分店」权限）。</summary>
     public bool OnlyUnassigned { get; set; }
+}
 
-    /// <summary>绕过 10 分钟缓存重新读 MYOB。</summary>
-    public bool Refresh { get; set; }
+/// <summary>手动同步：connectionGuid 为空 = 当前账号可见的所有公司文件。</summary>
+public sealed class MyobPayslipSyncRequest
+{
+    public string? ConnectionGuid { get; set; }
+}
+
+/// <summary>某家公司文件这次手动同步的结果（Status：Synced / Skipped（刚同步过）/ Busy（别处正在同步）/ Failed）。</summary>
+public sealed class MyobPayslipSyncCompanyResultDto
+{
+    public string ConnectionGuid { get; set; } = string.Empty;
+    public string ConnectionName { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? ErrorCode { get; set; }
+    public string? ErrorMessage { get; set; }
+
+    /// <summary>本次是首次回填（整段 24 个月），不是只对账最近 8 周。</summary>
+    public bool Backfilled { get; set; }
+
+    public int Inserted { get; set; }
+    public int Updated { get; set; }
+    public int Removed { get; set; }
+}
+
+public sealed class MyobPayslipSyncResultDto
+{
+    public List<MyobPayslipSyncCompanyResultDto> Companies { get; set; } = [];
 }
 
 /// <summary>某分店在这张工资单周期里的我方考勤计薪工时（仅供参考，与 MYOB 工资单里的小时数可能不同）。</summary>

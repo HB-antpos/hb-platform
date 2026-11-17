@@ -10,7 +10,6 @@ using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
 using SqlSugar;
 using Xunit;
 
@@ -20,7 +19,7 @@ namespace BlazorApp.Api.Tests;
 /// MYOB 历史工资单：工资单 ↔ 员工 ↔ 分店 的归类规则、权限范围、缓存、查看记录与控制器。
 /// SQLite 临时库 + 假 MYOB + 假考勤源；姓名与金额都是虚构的。
 /// </summary>
-public sealed class MyobPayslipTests : IDisposable
+public sealed partial class MyobPayslipTests : IDisposable
 {
     // 悉尼本地 2026-10-29（UTC+10）：UTC 2026-10-28 20:00。
     private static readonly DateTime Now = new(2026, 10, 28, 20, 0, 0, DateTimeKind.Utc);
@@ -40,7 +39,6 @@ public sealed class MyobPayslipTests : IDisposable
     private readonly FakeScope _scope = new();
     private readonly FakePermissions _permissions = new();
     private readonly FakeSource _source = new();
-    private readonly MemoryCache _cache = new(new MemoryCacheOptions());
 
     public MyobPayslipTests()
     {
@@ -53,13 +51,13 @@ public sealed class MyobPayslipTests : IDisposable
         });
         _db.CodeFirst.InitTables(
             typeof(MyobConnection), typeof(MyobStoreMapping), typeof(EmployeeMyobLink), typeof(EmployeePayrollEmployer),
-            typeof(MyobEmployeeIgnore), typeof(Store), typeof(UserStore), typeof(MyobPayslipViewLog), typeof(User));
+            typeof(MyobEmployeeIgnore), typeof(Store), typeof(UserStore), typeof(MyobPayslipViewLog), typeof(User),
+            typeof(MyobPayslipSnapshot), typeof(MyobPayslipSyncState));
         Seed();
     }
 
     public void Dispose()
     {
-        _cache.Dispose();
         _db.Dispose();
         SqliteTempFileCleanup.DeleteIfExists(_dbPath);
     }
@@ -126,12 +124,35 @@ public sealed class MyobPayslipTests : IDisposable
 
     private readonly FakeEmailSender _email = new();
 
+    private MyobPayslipSyncService SyncService(TimeProvider? time = null) =>
+        new(_db, _api, new FakeTokens(), time ?? new FakeTime(Now));
+
     private MyobPayslipService Service(TimeProvider? time = null) =>
-        new(_db, _api, new FakeTokens(), _scope, _permissions, _source, _cache, time ?? new FakeTime(Now), _email);
+        new(_db, SyncService(time), _scope, _permissions, _source, time ?? new FakeTime(Now), _email);
 
     private static MyobPayslipQuery Q(string? storeCode = null, string? connection = null, string? keyword = null,
-        bool unassigned = false, bool refresh = false, string? from = "2026-08-01", string? to = "2026-10-29") =>
-        new() { StoreCode = storeCode, ConnectionGuid = connection, Keyword = keyword, OnlyUnassigned = unassigned, Refresh = refresh, From = from, To = to };
+        bool unassigned = false, string? from = "2026-08-01", string? to = "2026-10-29") =>
+        new() { StoreCode = storeCode, ConnectionGuid = connection, Keyword = keyword, OnlyUnassigned = unassigned, From = from, To = to };
+
+    // 读取路径只读本地快照：改过假 MYOB（_api）的用例，在读之前必须先同步一次。
+    private int _callsAtSync;
+
+    private async Task<IReadOnlyList<MyobPayslipSyncOutcome>> SyncAllAsync(TimeProvider? time = null)
+    {
+        var connections = await _db.Queryable<MyobConnection>().Where(item => item.Status == MyobConnectionStatuses.Active).ToListAsync();
+        var outcomes = await SyncService(time).SyncAsync(connections, MyobPayslipSyncTrigger.Scheduled, CancellationToken.None);
+        _callsAtSync = _api.Calls;
+        return outcomes;
+    }
+
+    private async Task GivenSyncedSlipsAsync()
+    {
+        GivenSlips();
+        await SyncAllAsync();
+    }
+
+    /// <summary>同步之后读取（列表 / 明细 / 工时 / PDF / 邮件）一次都不请求 MYOB。</summary>
+    private void AssertNoMyobRequestsSinceSync() => Assert.Equal(_callsAtSync, _api.Calls);
 
     private void GivenSlips()
     {
@@ -299,7 +320,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 列表_全部分店权限_看到所有已绑定行加未绑定行_忽略名单不展示_合计与分店标签正确()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
 
         var response = await Service().ListAsync(Q(), CancellationToken.None);
@@ -334,7 +355,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 列表_按分店过滤_跨公司员工在各自公司的分店下出现_未归属行不出现()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
 
         var wallsend = (await Service().ListAsync(Q("1002"), CancellationToken.None)).Data!;
@@ -352,6 +373,7 @@ public sealed class MyobPayslipTests : IDisposable
     public async Task 列表_同公司多店员工_一张单同时出现在两个分店下_金额不拆分()
     {
         _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")];
+        await SyncAllAsync();
         _source.Pairs.AddRange([("u-tom", "1005"), ("u-tom", "1002")]);
         AsAdmin();
 
@@ -367,6 +389,7 @@ public sealed class MyobPayslipTests : IDisposable
     public async Task 列表_没有考勤数据_按当前分店推断并标Inferred()
     {
         _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")]; // 不加 Pairs
+        await SyncAllAsync();
         AsAdmin();
 
         var row = Assert.Single((await Service().ListAsync(Q(), CancellationToken.None)).Data!.Rows);
@@ -380,6 +403,7 @@ public sealed class MyobPayslipTests : IDisposable
         // Tom 没有考勤数据，当前分店 Newcastle 由 Investment 发薪；换成一张 Australian 的单则对不上。
         _db.Insertable(new EmployeeMyobLink { UserGuid = "u-tom", ConnectionGuid = Aus, MyobEmployeeUid = "bbbbbbbb-0000-0000-0000-000000000009", BoundAt = Now }).ExecuteCommand();
         _api.Slips[Aus] = [Slip("bbbbbbbb-0000-0000-0000-000000000009", "Tom Sample", "2026-10-23")];
+        await SyncAllAsync();
         AsAdmin();
 
         var all = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
@@ -394,7 +418,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 列表_只看未归属_只包含未绑定与无法确定的行()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var only = (await Service().ListAsync(Q(unassigned: true), CancellationToken.None)).Data!;
         Assert.Equal([CardStranger], only.Rows.Select(row => row.EmployeeUid).ToArray());
@@ -403,7 +427,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 列表_关键字匹配员工姓名或MYOB编号_不区分大小写()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var byName = (await Service().ListAsync(Q(keyword: "tom"), CancellationToken.None)).Data!;
         Assert.Equal([CardTom], byName.Rows.Select(row => row.EmployeeUid).ToArray());
@@ -412,25 +436,56 @@ public sealed class MyobPayslipTests : IDisposable
     }
 
     [Fact]
-    public async Task 列表_一家公司读取失败_状态单独标出_另一家的数据照常返回()
+    public async Task 列表_一家公司从没同步成功_标SyncPending且不当作没有工资单_另一家的数据照常返回()
     {
         GivenSlips();
         _api.Errors[Aus] = new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB 工资单报表接口返回 401", System.Net.HttpStatusCode.Unauthorized);
         AsAdmin();
+        var outcomes = await SyncAllAsync();
+        Assert.Equal(MyobPayslipSyncStatuses.Failed, outcomes.Single(item => item.ConnectionGuid == Aus).Status);
 
         var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
-        var failed = list.Companies.Single(status => status.ConnectionGuid == Aus);
-        Assert.False(failed.Ok);
-        Assert.Equal(MyobErrorCodes.ApiCallFailed, failed.ErrorCode);
-        Assert.Contains("401", failed.ErrorMessage, StringComparison.Ordinal);
+        var pending = list.Companies.Single(status => status.ConnectionGuid == Aus);
+        Assert.False(pending.Ok); // 本地没有这家公司的任何数据
+        Assert.Equal(MyobPayslipErrorCodes.SyncPending, pending.ErrorCode);
+        Assert.Contains("401", pending.SyncError, StringComparison.Ordinal); // 带出同步失败的原因（只含状态码）
+        Assert.Null(pending.LastSyncedAt);
         Assert.True(list.Companies.Single(status => status.ConnectionGuid == Inv).Ok);
         Assert.Equal(3, list.TotalCount); // 只有 Investment 的 Jane、Tom、Stranger
+        Assert.Equal(list.Companies.Single(status => status.ConnectionGuid == Inv).LastSyncedAt, list.FetchedAt); // 取已同步公司的时间
+
+        // 全部公司都没同步成功：没有「最近同步时间」，不能用当前时间冒充。
+        var onlyPending = (await Service().ListAsync(Q(connection: Aus), CancellationToken.None)).Data!;
+        Assert.Equal(string.Empty, onlyPending.FetchedAt);
+    }
+
+    [Fact]
+    public async Task 列表_同步失败后保留上次成功的数据_状态带出失败原因_恢复后清空()
+    {
+        await GivenSyncedSlipsAsync();
+        AsAdmin();
+        _api.Errors[Inv] = new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB 工资单报表接口返回 503");
+        var failed = await SyncAllAsync();
+        Assert.Equal(MyobPayslipSyncStatuses.Failed, failed.Single(item => item.ConnectionGuid == Inv).Status);
+
+        var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        var inv = list.Companies.Single(status => status.ConnectionGuid == Inv);
+        Assert.True(inv.Ok); // 仍是上次成功的数据
+        Assert.Equal(4, inv.Count); // 未按员工过滤前的张数（含忽略名单里的卡，读取时才排除）
+        Assert.Contains("503", inv.SyncError, StringComparison.Ordinal);
+        Assert.NotNull(inv.LastSyncedAt);
+        Assert.Equal(4, list.TotalCount);
+
+        _api.Errors.Remove(Inv);
+        await SyncAllAsync();
+        var recovered = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
+        Assert.Null(recovered.Companies.Single(status => status.ConnectionGuid == Inv).SyncError);
     }
 
     [Fact]
     public async Task 列表_只列状态Active的连接_可按公司过滤()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var all = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
         Assert.DoesNotContain(all.Companies, status => status.ConnectionGuid == "conn-off");
@@ -440,39 +495,45 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Equal(1, onlyAus.TotalCount);
     }
 
-    // ───────────────────────── 缓存与区间 ─────────────────────────
+    // ───────────────────────── 本地快照与区间 ─────────────────────────
 
     [Fact]
-    public async Task 列表_命中缓存不重复请求MYOB_refresh绕过缓存()
+    public async Task 列表_只读本地快照_读取一次都不请求MYOB_同步之后才看到MYOB里的新变化()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var service = Service();
-        await service.ListAsync(Q(), CancellationToken.None);
-        var callsAfterFirst = _api.Calls;
-        Assert.Equal(2, callsAfterFirst); // 两家公司各一次
+        Assert.Equal(4, (await service.ListAsync(Q(), CancellationToken.None)).Data!.TotalCount);
+        await service.ListAsync(Q(storeCode: "1002", keyword: "jane"), CancellationToken.None);
+        await service.ListAsync(Q(from: "2026-09-01"), CancellationToken.None);
+        AssertNoMyobRequestsSinceSync();
 
-        await service.ListAsync(Q(storeCode: "1002", keyword: "jane"), CancellationToken.None); // 过滤条件不影响缓存键
-        Assert.Equal(callsAfterFirst, _api.Calls);
-
-        await service.ListAsync(Q(refresh: true), CancellationToken.None);
-        Assert.Equal(callsAfterFirst + 2, _api.Calls);
-
-        await service.ListAsync(Q(from: "2026-09-01"), CancellationToken.None); // 区间不同 = 不同缓存键
-        Assert.Equal(callsAfterFirst + 4, _api.Calls);
+        // MYOB 里新增了一张：同步之前本地看不到，同步之后才出现。
+        _api.Slips[Inv] = [.. _api.Slips[Inv], Slip(CardTom, "Tom Sample", "2026-10-09")];
+        Assert.Equal(4, (await service.ListAsync(Q(), CancellationToken.None)).Data!.TotalCount);
+        AssertNoMyobRequestsSinceSync();
+        await SyncAllAsync();
+        Assert.Equal(5, (await service.ListAsync(Q(), CancellationToken.None)).Data!.TotalCount);
     }
 
     [Fact]
-    public async Task 列表_默认最近90天_区间含首尾_传给MYOB的是左闭右开()
+    public async Task 列表_默认最近90天_区间含首尾_边界日期按支付日期取舍()
     {
-        GivenSlips();
+        _api.Slips[Inv] =
+        [
+            Slip(CardTom, "Tom Sample", "2026-07-30"), // 区间前一天：不含
+            Slip(CardTom, "Tom Sample", "2026-07-31"), // 起点：含
+            Slip(CardTom, "Tom Sample", "2026-10-29"), // 终点（今天）：含
+            Slip(CardTom, "Tom Sample", "2026-10-30"), // 终点后一天：不含（已同步进本地，只是这次区间不取）
+        ];
+        await SyncAllAsync();
         AsAdmin();
+
         var list = (await Service().ListAsync(new MyobPayslipQuery { ConnectionGuid = Inv }, CancellationToken.None)).Data!;
         Assert.Equal("2026-07-31", list.From);
         Assert.Equal("2026-10-29", list.To);
-        var query = Assert.Single(_api.Queries);
-        Assert.Equal(new DateTime(2026, 7, 31), query.PaymentFrom);
-        Assert.Equal(new DateTime(2026, 10, 30), query.PaymentToExclusive); // to + 1 天
+        Assert.Equal(["2026-10-29", "2026-07-31"], list.Rows.Select(row => row.PaymentDate).ToArray());
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Theory]
@@ -482,12 +543,12 @@ public sealed class MyobPayslipTests : IDisposable
     [InlineData("2026-10-01", "not-a-date")]
     public async Task 列表_区间不合法_返回InvalidRange_不请求MYOB(string from, string to)
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var response = await Service().ListAsync(Q(from: from, to: to), CancellationToken.None);
         Assert.False(response.Success);
         Assert.Equal(MyobPayslipErrorCodes.InvalidRange, response.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
@@ -506,7 +567,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_没有任何查看权限_仅本人_只看绑定到自己的工资单_他人明细视为不存在()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsEmployee("u-jane");
 
         var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
@@ -538,7 +599,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_仅本人且没有绑定过MYOB员工卡_空列表并标记未绑定_不请求MYOB()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsEmployee("u-nobody");
 
         var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
@@ -549,13 +610,13 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Empty((await Service().GetCompaniesAsync(CancellationToken.None)).Data!);
         var detail = await Service().GetDetailAsync(new MyobPayslipDetailRequest { ConnectionGuid = Inv, EmployeeUid = CardJane, PaymentDate = "2026-10-23" }, CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.NotFound, detail.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
     public async Task 权限_仅本人_已解绑的历史绑定仍能看到历史工资单()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         Bind("u-ex", Inv, CardStranger, unboundAt: Now.AddDays(-1));
         AsEmployee("u-ex");
 
@@ -567,9 +628,10 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_店长本人的工资单归到非管辖分店也能看到_公司列表随之包含该公司()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         const string cardMgr = "bbbbbbbb-0000-0000-0000-000000000002";
         _api.Slips[Aus] = [.. _api.Slips[Aus], Slip(cardMgr, "Mia Manager", "2026-10-23")];
+        await SyncAllAsync();
         Bind("u-mgr", Aus, cardMgr);
         _source.Pairs.Add(("u-mgr", "1003")); // 店长本人在 Bankstown（Australian 发薪）打卡，不在其管辖的 Newcastle
         AsManager("1005");
@@ -583,18 +645,18 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_未登录_拒绝()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = false, Message = "当前账号未登录" };
         var response = await Service().ListAsync(Q(), CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.Forbidden, response.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
     public async Task 权限_有管辖分店权限但范围服务不给任何分店_退回仅本人()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         _permissions.Granted.Add(Permissions.Myob.Payslip.ViewManagedStore);
         _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = false, UserGuid = "u-tom", Message = "当前账号没有店员管理权限" };
         var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
@@ -605,7 +667,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_店长只看到与管辖分店有交集的已绑定员工_看不到未绑定和无法确定_未归属数量恒为0()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsManager("1005"); // 只管 Newcastle
 
         var list = (await Service().ListAsync(Q(), CancellationToken.None)).Data!;
@@ -615,13 +677,14 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.DoesNotContain(list.Rows, row => row.Placement is MyobPayslipPlacements.Unbound or MyobPayslipPlacements.Unknown);
         // 店长不是所有公司都看得到：Newcastle 由 Investment 发薪，Australian 不相关，不读取。
         Assert.Equal([Inv], list.Companies.Select(status => status.ConnectionGuid).ToArray());
-        Assert.DoesNotContain(Aus, _api.Slips.Keys.Where(key => _api.Queried.Contains(key)));
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
     public async Task 权限_店长看到员工的整张工资单_包括别的分店标签_这是约定的取舍()
     {
         _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")];
+        await SyncAllAsync();
         _source.Pairs.AddRange([("u-tom", "1005"), ("u-tom", "1002")]);
         AsManager("1005");
 
@@ -633,14 +696,14 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_店长按管辖范围以外的分店过滤_或只看未归属_拒绝()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsManager("1005");
 
         var otherStore = await Service().ListAsync(Q("1002"), CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.Forbidden, otherStore.ErrorCode);
         var unassigned = await Service().ListAsync(Q(unassigned: true), CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.Forbidden, unassigned.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
 
         var own = await Service().ListAsync(Q("1005"), CancellationToken.None);
         Assert.True(own.Success);
@@ -649,7 +712,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 权限_全部分店权限优先于管辖分店权限_管理员口径不受店长范围限制()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         _permissions.Granted.Add(Permissions.Myob.Payslip.ViewManagedStore);
         AsAdmin();
         _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, UserGuid = "u-boss", StoreCodes = ["1005"] };
@@ -689,7 +752,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 明细_成功_分区块展示_写一条查看记录_记录里没有金额和姓名()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-finance" };
 
@@ -708,11 +771,8 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Empty(detail.Entitlements);
         Assert.Equal(["1002"], detail.Stores.Select(s => s.StoreCode).ToArray());
 
-        // 只查这一名员工、这一天：MYOB 请求带员工筛选与单日窗口。
-        var query = Assert.Single(_api.Queries);
-        Assert.Equal(CardJane, query.EmployeeUid);
-        Assert.Equal(new DateTime(2026, 10, 23), query.PaymentFrom);
-        Assert.Equal(new DateTime(2026, 10, 24), query.PaymentToExclusive);
+        // 明细读本地快照：打开一张单不再请求 MYOB。
+        AssertNoMyobRequestsSinceSync();
 
         var log = Assert.Single(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
         Assert.Equal("u-finance", log.ActorUserGuid);
@@ -739,6 +799,7 @@ public sealed class MyobPayslipTests : IDisposable
                 new MyobPayrollAdviceLine("Union fee", "Deduction", null, null, -5m, -50m),
                 new MyobPayrollAdviceLine("No type", null, null, null, 1m, 1m)),
         ];
+        await SyncAllAsync();
         AsAdmin();
         var detail = (await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None)).Data!;
         Assert.Equal("Annual Leave Accrual", Assert.Single(detail.Entitlements).Description);
@@ -749,7 +810,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 明细_店长看管辖外员工_找不到_不暴露存在_不写查看记录()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsManager("1005");
 
         var other = await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None);
@@ -767,7 +828,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 明细_未绑定员工_只有全部分店权限能看_记录里目标员工为空但留MYOB员工卡UID()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var response = await Service().GetDetailAsync(D(Inv, CardStranger), CancellationToken.None);
         Assert.True(response.Success);
@@ -784,17 +845,17 @@ public sealed class MyobPayslipTests : IDisposable
     [InlineData("x' or 1 eq 1 or 'a' eq 'a", "2026-10-23")]
     public async Task 明细_参数不合法_找不到_不请求MYOB(string card, string date)
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var response = await Service().GetDetailAsync(D(Inv, card, date), CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.NotFound, response.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
     public async Task 明细_公司未启用或不存在_找不到()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         Assert.Equal(MyobPayslipErrorCodes.NotFound, (await Service().GetDetailAsync(D("conn-off", CardJane), CancellationToken.None)).ErrorCode);
         Assert.Equal(MyobPayslipErrorCodes.NotFound, (await Service().GetDetailAsync(D("nope", CardJane), CancellationToken.None)).ErrorCode);
@@ -808,6 +869,7 @@ public sealed class MyobPayslipTests : IDisposable
             Slip(CardJane, "Jane Sample", "2026-10-23", 1000m, 800m, "2026-10-06"),
             Slip(CardJane, "Jane Sample", "2026-10-23", 300m, 250m, "2026-09-29"),
         ];
+        await SyncAllAsync();
         AsAdmin();
         var first = (await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None)).Data!;
         Assert.Equal(2, first.SamePaymentDateCount);
@@ -818,20 +880,21 @@ public sealed class MyobPayslipTests : IDisposable
     }
 
     [Fact]
-    public async Task 明细_MYOB读取失败_返回MYOB错误码_不写查看记录()
+    public async Task 明细_本地没有这张单_找不到_不请求MYOB_不写查看记录()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
-        _api.Errors[Inv] = new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB 工资单报表接口返回 503");
-        var response = await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None);
-        Assert.Equal(MyobErrorCodes.ApiCallFailed, response.ErrorCode);
+        var response = await Service().GetDetailAsync(D(Inv, CardJane, "2026-10-09"), CancellationToken.None);
+        Assert.False(response.Success);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, response.ErrorCode);
         Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
     public async Task 明细_记不下查看记录_拒绝显示_宁可不给看也不无痕地看()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         _db.Ado.ExecuteCommand("DROP TABLE MyobPayslipViewLog");
         var response = await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None);
@@ -846,6 +909,7 @@ public sealed class MyobPayslipTests : IDisposable
     public async Task 工时_按分店汇总计薪工时和带薪假_周期取自工资单_只取这一名员工_不写查看记录()
     {
         _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")];
+        await SyncAllAsync();
         _source.Pairs.AddRange([("u-tom", "1005"), ("u-tom", "1002")]);
         _source.Hours[("1005", "u-tom")] = (WorkMinutes: 38 * 60 + 30, Sick: 2m, Annual: 4m, Holiday: 1.5m);
         _source.Hours[("1002", "u-tom")] = (WorkMinutes: 24 * 60, Sick: 0m, Annual: 0m, Holiday: 0m);
@@ -875,6 +939,7 @@ public sealed class MyobPayslipTests : IDisposable
     public async Task 工时_单个分店读取失败_只标这一行_其它分店照常_不回显异常内容()
     {
         _api.Slips[Inv] = [Slip(CardTom, "Tom Sample", "2026-10-23")];
+        await SyncAllAsync();
         _source.Pairs.AddRange([("u-tom", "1005"), ("u-tom", "1002")]);
         _source.Hours[("1005", "u-tom")] = (600, 0m, 0m, 0m);
         _source.FailStores.Add("1002");
@@ -894,7 +959,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 工时_未绑定或无法确定分店_返回空列表_不是错误_不调用考勤()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var unbound = await Service().GetHoursAsync(D(Inv, CardStranger), CancellationToken.None);
         Assert.True(unbound.Success);
@@ -905,7 +970,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 工时_权限与明细一致_无权限只能看本人则他人404_店长看管辖外员工404_管辖内可看()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         _source.Hours[("1005", "u-tom")] = (480, 0m, 0m, 0m);
 
         AsEmployee("u-jane"); // 没有任何查看权限：别人的工资单一律视为不存在
@@ -929,27 +994,27 @@ public sealed class MyobPayslipTests : IDisposable
     [InlineData("aaaaaaaa-0000-0000-0000-000000000002", "bad-date")]
     public async Task 工时_参数不合法_找不到_不请求MYOB(string card, string date)
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var response = await Service().GetHoursAsync(D(Inv, card, date), CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.NotFound, response.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
-    public async Task 工时_MYOB读取失败_返回MYOB错误码()
+    public async Task 工时_本地没有这张单_找不到_不请求MYOB()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
-        _api.Errors[Inv] = new MyobApiException(MyobErrorCodes.ApiCallFailed, "MYOB 工资单报表接口返回 503");
-        var response = await Service().GetHoursAsync(D(Inv, CardTom), CancellationToken.None);
-        Assert.Equal(MyobErrorCodes.ApiCallFailed, response.ErrorCode);
+        var response = await Service().GetHoursAsync(D(Inv, CardTom, "2026-10-09"), CancellationToken.None);
+        Assert.Equal(MyobPayslipErrorCodes.NotFound, response.ErrorCode);
+        AssertNoMyobRequestsSinceSync();
     }
 
     [Fact]
     public async Task 展示对象_序列化后不含年薪时薪生日支票号银行等字段()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         var list = JsonSerializer.Serialize((await Service().ListAsync(Q(), CancellationToken.None)).Data);
         var detail = JsonSerializer.Serialize((await Service().GetDetailAsync(D(Inv, CardJane), CancellationToken.None)).Data);
@@ -977,12 +1042,14 @@ public sealed class MyobPayslipTests : IDisposable
         Assert.Equal("api/react/v1/myob/payslips", type.GetCustomAttribute<RouteAttribute>()!.Template);
 
         var actions = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly).ToList();
-        // 6 个动作：5 个只读 GET + 1 个邮件发送 POST（唯一一个有外部副作用的，需要 Myob.Payslip.Email）。
-        Assert.Equal(7, actions.Count);
+        // 8 个动作：6 个只读 GET + 2 个 POST：邮件发送（有外部副作用，需要 Myob.Payslip.Email）与手动同步（只读 MYOB、写我方本地快照，服务里再判权限与冷却）。
+        Assert.Equal(8, actions.Count);
         var gets = actions.Where(method => method.GetCustomAttribute<HttpGetAttribute>() is not null).ToList();
         var posts = actions.Where(method => method.GetCustomAttribute<HttpPostAttribute>() is not null).ToList();
         Assert.Equal(6, gets.Count);
-        Assert.Equal("email", Assert.Single(posts).GetCustomAttribute<HttpPostAttribute>()!.Template);
+        Assert.Equal(
+            ["email", "sync"],
+            posts.Select(method => method.GetCustomAttribute<HttpPostAttribute>()!.Template ?? string.Empty).OrderBy(t => t, StringComparer.Ordinal).ToArray());
         Assert.DoesNotContain(actions, method => method.GetCustomAttributes().Any(a =>
             a is HttpPutAttribute or HttpDeleteAttribute or HttpPatchAttribute));
         Assert.Equal(
@@ -1053,6 +1120,7 @@ public sealed class MyobPayslipTests : IDisposable
                 new MyobPayrollAdviceLine("PAYG Withholding", "Tax", null, null, -200m, -2000m),
                 new MyobPayrollAdviceLine("Annual Leave Accrual", "Entitlement", null, null, 4.35m, 51.7m)),
         ];
+        await SyncAllAsync();
         _source.Pairs.Add(("u-jane", "1002"));
         AsAdmin();
 
@@ -1078,21 +1146,21 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 下载PDF_没有Download权限_403_且不去请求MYOB_不写记录()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         GrantExport(download: false);
 
         var response = await Service().DownloadPdfAsync(D(Inv, CardJane), CancellationToken.None);
 
         Assert.Equal(MyobPayslipErrorCodes.Forbidden, response.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
         Assert.Empty(await _db.Queryable<MyobPayslipViewLog>().ToListAsync());
     }
 
     [Fact]
     public async Task 下载PDF_成功_是PDF_文件名按姓名与支付日_写Download记录_内容含MYOB页头字段()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsAdmin();
         GrantExport();
         _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-finance" };
@@ -1125,7 +1193,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 下载PDF_店长只能下载管辖范围内的_越权找不到_且记录里没有金额()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         AsManager("1005");
         GrantExport();
 
@@ -1144,6 +1212,7 @@ public sealed class MyobPayslipTests : IDisposable
             .Select(i => new MyobPayrollAdviceLine($"Category {i}", "Wage", 1m, 10m, 10m, 100m))
             .ToArray();
         _api.Slips[Inv] = [Slip(CardJane, "Jane Sample", "2026-10-23", 1000m, 800m, null, lines)];
+        await SyncAllAsync();
         AsAdmin();
         GrantExport();
 
@@ -1159,7 +1228,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 邮件目标_档案邮箱与当前登录人邮箱_需要Email权限()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         GivenUsers();
         AsAdmin();
         _scope.Scope = new CurrentUserManageableStoreScope { IsAuthenticated = true, IsAllowed = true, IsAdmin = true, UserGuid = "u-finance" };
@@ -1187,7 +1256,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 发邮件_收件人与档案一致_直接发_带PDF附件_正文不含金额_写Email记录含收件邮箱()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         GivenUsers();
         AsAdmin();
         GrantExport();
@@ -1215,7 +1284,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 发邮件_收件人与档案不同_未确认拒绝_确认后发送_档案没有邮箱时手填无需确认()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         GivenUsers();
         AsAdmin();
         GrantExport();
@@ -1241,13 +1310,13 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 发邮件_没有Email权限_邮箱格式不对_附言过长_抄送但自己没邮箱_都不会发送()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         GivenUsers();
         AsAdmin();
 
         var denied = await Service().SendEmailAsync(E("jane@example.com"), CancellationToken.None);
         Assert.Equal(MyobPayslipErrorCodes.Forbidden, denied.ErrorCode);
-        Assert.Equal(0, _api.Calls);
+        AssertNoMyobRequestsSinceSync();
 
         GrantExport();
         foreach (var bad in new[] { "", "not-an-email", "a@b.com, c@d.com", "a@b.com;c@d.com", "Jane <jane@example.com>" })
@@ -1271,7 +1340,7 @@ public sealed class MyobPayslipTests : IDisposable
     [Fact]
     public async Task 发邮件_发送失败_返回发送器的错误码_并把这条记录标成EmailFailed()
     {
-        GivenSlips();
+        await GivenSyncedSlipsAsync();
         GivenUsers();
         AsAdmin();
         GrantExport();
@@ -1352,6 +1421,7 @@ public sealed class MyobPayslipTests : IDisposable
     {
         public Task<ApiResponse<List<MyobPayslipCompanyDto>>> GetCompaniesAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<MyobPayslipListDto>> ListAsync(MyobPayslipQuery query, CancellationToken cancellationToken) => Task.FromResult(list);
+        public Task<ApiResponse<MyobPayslipSyncResultDto>> SyncAsync(MyobPayslipSyncRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<MyobPayslipDetailDto>> GetDetailAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<MyobPayslipHoursDto>> GetHoursAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<ApiResponse<MyobPayslipPdfFile>> DownloadPdfAsync(MyobPayslipDetailRequest request, CancellationToken cancellationToken) => Task.FromResult(pdf);

@@ -1,4 +1,5 @@
 // MYOB 历史工资单（只读）。契约以后端 services/backend/BlazorApp.Api/Services/Myob/MyobPayslipDtos.cs 为准（camelCase）。
+// 2026-11-17 起列表 / 明细读后端本地快照（定时从 MYOB 同步，页面上有「同步」按钮），不再实时请求 MYOB。
 // 隐私：年薪、生日、银行 / TFN 后端从不返回，这里也没有对应字段；时薪与 Reference Number 只在单张明细里返回（用于还原 MYOB 默认 Pay Slip），不进列表、不缓存。
 
 /** 工资单归类：有考勤分店 / 按当前分店推断 / 无法确定分店 / 员工卡未绑定。 */
@@ -14,7 +15,10 @@ export interface MyobPayslipCompany {
   connectionName: string
 }
 
-/** 某公司文件这次读取的状态：一家失败不拖垮另一家。 */
+/**
+ * 某公司文件这次读取的状态：一家失败不拖垮另一家。
+ * ok = 本地有这家公司的数据可读；从没同步成功过时 ok=false、errorCode=MYOB_PAYSLIP_SYNC_PENDING。
+ */
 export interface MyobPayslipCompanyStatus {
   connectionGuid: string
   connectionName: string
@@ -22,6 +26,14 @@ export interface MyobPayslipCompanyStatus {
   count: number
   errorCode: string | null
   errorMessage: string | null
+  /** 最近一次同步成功的时间（UTC ISO 8601）；从没成功过为 null。 */
+  lastSyncedAt: string | null
+  /** 此刻有进程正在同步这家公司。 */
+  syncing: boolean
+  /** 所选区间早于本地已完整同步的最早日期：区间前段可能还不全。 */
+  historyIncomplete: boolean
+  /** 最近一次同步失败的原因（只含状态码级别的描述）；本地仍是上次成功同步的数据。 */
+  syncError: string | null
 }
 
 export interface MyobPayslipRow {
@@ -57,6 +69,7 @@ export interface MyobPayslipList {
   /** 无法归到分店的工资单张数；仅「全部分店」权限才有值，否则恒为 0。 */
   unassignedCount: number
   canViewAllStores: boolean
+  /** 本地数据最近一次从 MYOB 同步成功的时间（多家公司取最早的一家）。 */
   fetchedAt: string | null
 }
 
@@ -138,8 +151,26 @@ export interface MyobPayslipQuery {
   to?: string
   keyword?: string
   onlyUnassigned?: boolean
-  /** 绕过后端 10 分钟缓存重新读 MYOB。 */
-  refresh?: boolean
+}
+
+/** 手动同步每家公司的结果状态：Synced 已同步；Skipped 刚同步过（60 秒冷却内）；Busy 别处正在同步；Failed 失败（本地数据保持不变）。 */
+export type MyobPayslipSyncStatus = 'Synced' | 'Skipped' | 'Busy' | 'Failed'
+
+export interface MyobPayslipSyncCompanyResult {
+  connectionGuid: string
+  connectionName: string
+  status: MyobPayslipSyncStatus
+  errorCode: string | null
+  errorMessage: string | null
+  /** 本次是首次回填（整段 24 个月），不是只对账最近 8 周。 */
+  backfilled: boolean
+  inserted: number
+  updated: number
+  removed: number
+}
+
+export interface MyobPayslipSyncResult {
+  companies: MyobPayslipSyncCompanyResult[]
 }
 
 /** 打开单张工资单所需的键。periodStart 只在同一支付日有多张时用来区分。 */

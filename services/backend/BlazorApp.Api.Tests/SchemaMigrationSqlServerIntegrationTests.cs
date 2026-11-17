@@ -2,6 +2,8 @@ using BlazorApp.Api.Data;
 using BlazorApp.Api.Data.SchemaMigrations;
 using BlazorApp.Api.Services;
 using BlazorApp.Api.Services.HelpFaq;
+using MyobModels = BlazorApp.Api.Models.Myob;
+using MyobSvc = BlazorApp.Api.Services.Myob;
 using BlazorApp.Api.Services.StoreReceiptProfiles;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.POSM;
@@ -4492,6 +4494,187 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         Assert.Equal(54485, dropped.Number);
         await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.ApplySql);
         await ExecuteNonQueryAsync(main, PackBlankCartonsSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资单本地快照两张表_新表_可重复执行_公司加工资单键唯一_识别缺表列漂移和缺索引()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 什么都没建：缺快照表 → 54500。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql));
+        Assert.Equal(54500, missing.Number);
+
+        // 新建、可重复执行。
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql);
+
+        // 同一公司的同一张单（SlipKey 相同）只能有一行；另一家公司可以有同样的 SlipKey。
+        await ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayslipSnapshot
+                (SnapshotGuid, ConnectionGuid, SlipKey, EmployeeUid, PaymentDate, LinesJson, ContentHash, FirstSeenAt, UpdatedAt)
+            VALUES (N's-1', N'conn-a', N'key-1', N'card-1', '2026-11-13', N'[]', N'hash-1', SYSUTCDATETIME(), SYSUTCDATETIME());
+            INSERT dbo.MyobPayslipSnapshot
+                (SnapshotGuid, ConnectionGuid, SlipKey, EmployeeUid, PaymentDate, LinesJson, ContentHash, FirstSeenAt, UpdatedAt)
+            VALUES (N's-2', N'conn-b', N'key-1', N'card-1', '2026-11-13', N'[]', N'hash-1', SYSUTCDATETIME(), SYSUTCDATETIME());
+            """);
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.MyobPayslipSnapshot
+                (SnapshotGuid, ConnectionGuid, SlipKey, EmployeeUid, PaymentDate, LinesJson, ContentHash, FirstSeenAt, UpdatedAt)
+            VALUES (N's-3', N'conn-a', N'key-1', N'card-1', '2026-11-13', N'[]', N'hash-1', SYSUTCDATETIME(), SYSUTCDATETIME());
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 同步状态一家公司一行（主键）。
+        await ExecuteNonQueryAsync(main, "INSERT dbo.MyobPayslipSyncState (ConnectionGuid) VALUES (N'conn-a');");
+        var duplicateState = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, "INSERT dbo.MyobPayslipSyncState (ConnectionGuid) VALUES (N'conn-a');"));
+        Assert.Equal(2627, duplicateState.Number);
+
+        // 列类型漂移 → 54501；改回后通过。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipSnapshot ALTER COLUMN GrossPay float NULL;");
+        var drift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql));
+        Assert.Equal(54501, drift.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.MyobPayslipSnapshot ALTER COLUMN GrossPay decimal(18,2) NULL;");
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql);
+
+        // 缺区间索引 → 54503；重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP INDEX IX_MyobPayslipSnapshot_Connection_PaymentDate ON dbo.MyobPayslipSnapshot;");
+        var noIndex = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql));
+        Assert.Equal(54503, noIndex.Number);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql);
+
+        // 缺同步状态表 → 54504；重跑迁移补回。
+        await ExecuteNonQueryAsync(main, "DROP TABLE dbo.MyobPayslipSyncState;");
+        var noState = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql));
+        Assert.Equal(54504, noState.Number);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task MYOB工资单同步_真实SQLServer_批量落库不超参数上限_类型往返_对账_并发同步只有一个拿到租约()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+        await ExecuteNonQueryAsync(main, MyobPayslipSnapshotSchema.ApplySql);
+
+        static SqlSugar.SqlSugarClient NewClient(string connectionString) =>
+            new(new SqlSugar.ConnectionConfig
+            {
+                ConnectionString = connectionString,
+                DbType = SqlSugar.DbType.SqlServer,
+                IsAutoCloseConnection = true,
+                InitKeyType = SqlSugar.InitKeyType.Attribute,
+            });
+        static string Card(int index) => $"00000000-0000-0000-0000-{index:D12}";
+
+        var paymentDate = new DateTime(2026, 11, 13);
+        MyobSvc.MyobPayrollAdviceRecord Slip(int index, string? name = null) => new(
+            "Integration Pty Ltd", "12345678901", Card(index), name ?? $"Employee {index}", $"E{index}",
+            paymentDate.AddDays(-13), paymentDate.AddDays(-7), paymentDate, "Weekly", 1000.50m + index, 800.25m + index, "Sample Super", 24.5678m, $"R{index}",
+            [
+                new MyobSvc.MyobPayrollAdviceLine("Base Hourly", "Wage", 40.5m, 25.1234m, 1000.50m + index, 10005m),
+                new MyobSvc.MyobPayrollAdviceLine("PAYG Withholding", "Tax", null, null, -200.25m, -2002.5m),
+            ]);
+
+        var connection = new MyobModels.MyobConnection
+        {
+            ConnectionGuid = "conn-it", BusinessId = "biz-it", BusinessName = "Integration Pty Ltd", Status = MyobSvc.MyobConnectionStatuses.Active,
+        };
+        var api = new PayslipSyncApi { Records = Enumerable.Range(1, 130).Select(index => Slip(index)).ToList() }; // 130 条 = 3 个 50 行批次
+        var time = new PayslipSyncTime(new DateTime(2026, 11, 16, 2, 0, 0, DateTimeKind.Utc)); // 悉尼本地 2026-11-16
+        MyobSvc.MyobPayslipSyncService NewService() => new(NewClient(main), api, new PayslipSyncTokens(), time);
+
+        // 首次同步：整段回填，130 行一个事务落库。
+        var first = Assert.Single(await NewService().SyncAsync([connection], MyobSvc.MyobPayslipSyncTrigger.Scheduled, CancellationToken.None));
+        Assert.Equal(MyobSvc.MyobPayslipSyncStatuses.Synced, first.Status);
+        Assert.True(first.Backfilled);
+        Assert.Equal(130, first.Inserted);
+
+        var db = NewClient(main);
+        var rows = await db.Queryable<MyobModels.MyobPayslipSnapshot>().Where(row => row.ConnectionGuid == "conn-it").ToListAsync();
+        Assert.Equal(130, rows.Count);
+        var row7 = rows.Single(row => row.EmployeeUid == Card(7));
+        Assert.Equal(paymentDate, row7.PaymentDate); // date 列往返
+        Assert.Equal(1007.50m, row7.GrossPay);
+        Assert.Equal(807.25m, row7.NetPay);
+        Assert.Equal(24.5678m, row7.HourlyRate); // decimal(18,4)
+        Assert.Equal("R7", row7.ChequeNumber);
+        Assert.Equal(64, row7.SlipKey.Length);
+        Assert.Equal(Slip(7).Lines, MyobSvc.MyobPayslipSnapshotRules.ToRecord(row7).Lines); // nvarchar(max) 明细往返
+        var state = await db.Queryable<MyobModels.MyobPayslipSyncState>().Where(item => item.ConnectionGuid == "conn-it").FirstAsync();
+        Assert.Equal(new DateTime(2026, 11, 16).AddDays(-730), state.CoveredFrom);
+        Assert.NotNull(state.LastSuccessAt);
+        Assert.Null(state.LeaseUntil);
+
+        // 对账：第 1 张被撤销、第 5 张改名、新增第 131 张。
+        api.Records = [.. api.Records.Skip(1).Select((record, offset) => offset == 3 ? Slip(5, "Employee Five Renamed") : record), Slip(131)];
+        var second = Assert.Single(await NewService().SyncAsync([connection], MyobSvc.MyobPayslipSyncTrigger.Scheduled, CancellationToken.None));
+        Assert.False(second.Backfilled);
+        Assert.Equal((1, 1, 1), (second.Inserted, second.Updated, second.Removed));
+        var card1 = Card(1);
+        var card5 = Card(5); // 表达式树里不能直接调用局部函数
+        Assert.NotNull((await db.Queryable<MyobModels.MyobPayslipSnapshot>().Where(row => row.EmployeeUid == card1).FirstAsync()).RemovedAt);
+        Assert.Equal("Employee Five Renamed", (await db.Queryable<MyobModels.MyobPayslipSnapshot>().Where(row => row.EmployeeUid == card5).FirstAsync()).EmployeeName);
+        Assert.Equal(130, await db.Queryable<MyobModels.MyobPayslipSnapshot>().CountAsync(row => row.ConnectionGuid == "conn-it" && row.RemovedAt == null));
+
+        // 两个实例（模拟新旧容器重叠）同时同步同一家公司：原子租约保证只有一个真的去同步。
+        api.Delay = TimeSpan.FromMilliseconds(600);
+        var both = await Task.WhenAll(
+            NewService().SyncAsync([connection], MyobSvc.MyobPayslipSyncTrigger.Scheduled, CancellationToken.None),
+            NewService().SyncAsync([connection], MyobSvc.MyobPayslipSyncTrigger.Scheduled, CancellationToken.None));
+        var statuses = both.Select(result => result.Single().Status).OrderBy(status => status, StringComparer.Ordinal).ToArray();
+        Assert.Equal([MyobSvc.MyobPayslipSyncStatuses.Busy, MyobSvc.MyobPayslipSyncStatuses.Synced], statuses);
+        state = await db.Queryable<MyobModels.MyobPayslipSyncState>().Where(item => item.ConnectionGuid == "conn-it").FirstAsync();
+        Assert.Null(state.LeaseUntil);
+        Assert.Null(state.LeaseOwner);
+    }
+
+    private sealed class PayslipSyncTime(DateTime utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => new(utcNow, TimeSpan.Zero);
+    }
+
+    private sealed class PayslipSyncTokens : MyobSvc.IMyobTokenProvider
+    {
+        public Task<string> GetAccessTokenAsync(string connectionGuid, CancellationToken cancellationToken) => Task.FromResult("token");
+
+        public void Invalidate(string connectionGuid) { }
+    }
+
+    private sealed class PayslipSyncApi : MyobSvc.IMyobApiClient
+    {
+        public IReadOnlyList<MyobSvc.MyobPayrollAdviceRecord> Records { get; set; } = [];
+        public TimeSpan Delay { get; set; }
+
+        public async Task<IReadOnlyList<MyobSvc.MyobPayrollAdviceRecord>> GetPayrollAdvicesAsync(
+            string businessId, string accessToken, MyobSvc.MyobPayrollAdviceQuery query, CancellationToken cancellationToken)
+        {
+            if (Delay > TimeSpan.Zero)
+            {
+                await Task.Delay(Delay, cancellationToken);
+            }
+
+            return Records.Where(record => record.PaymentDate >= query.PaymentFrom && record.PaymentDate < query.PaymentToExclusive).ToList();
+        }
+
+        public Task<MyobSvc.MyobTokenResponse> ExchangeCodeAsync(string code, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MyobSvc.MyobTokenResponse> RefreshAsync(string refreshToken, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MyobSvc.MyobCompanyInfo> GetCompanyAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MyobSvc.MyobEmployeeRecord>> GetEmployeesAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MyobSvc.MyobEmployeePayrollRecord>> GetEmployeePayrollDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MyobSvc.MyobEmployeePaymentRecord>> GetEmployeePaymentDetailsAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<IReadOnlyList<MyobSvc.MyobWageCategoryRecord>> GetWageCategoriesAsync(string businessId, string accessToken, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<MyobSvc.MyobTimesheetStatus> GetTimesheetStatusAsync(string businessId, string accessToken, string employeeUid, DateTime startDate, DateTime endDate, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 
     [SchemaMigrationSqlServerFact]

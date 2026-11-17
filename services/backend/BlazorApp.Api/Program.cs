@@ -863,7 +863,9 @@ builder.Services.AddHttpClient<BlazorApp.Api.Services.Myob.IMyobRawReadClient, B
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobWageProbeService, BlazorApp.Api.Services.Myob.MyobWageProbeService>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipPermissionChecker, BlazorApp.Api.Services.Myob.RoleServicePayslipPermissionChecker>();
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipEmailSender, BlazorApp.Api.Services.Myob.MyobPayslipEmailSender>(); // 工资单 PDF 邮件，复用发票邮箱的公司 SMTP 账号
+builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipSyncService, BlazorApp.Api.Services.Myob.MyobPayslipSyncService>(); // 工资单从 MYOB 同步到本地快照表（租约防并发）
 builder.Services.AddScoped<BlazorApp.Api.Services.Myob.IMyobPayslipService, BlazorApp.Api.Services.Myob.MyobPayslipService>();
+builder.Services.AddHostedService<BlazorApp.Api.Services.Myob.MyobPayslipSyncWorker>(); // 悉尼 0/8/12/15/18/21 点整点自动同步；MYOB 未配置时不启动
 builder.Services.AddScoped<SeedDataService>(); // 种子数据初始化服务
 builder.Services.AddScoped<IDataInitializationService, DataInitializationService>(); // 数据初始化服务
 builder.Services.Configure<InvoiceEmailOptions>(builder.Configuration.GetSection("InvoiceEmail"));

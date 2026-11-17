@@ -518,6 +518,7 @@
     <Compile Include="MyobPayrollAdviceTests.cs" />
     <Compile Include="MyobWageProbeTests.cs" />
     <Compile Include="MyobPayslipTests.cs" />
+    <Compile Include="MyobPayslipSyncTests.cs" />
     <Compile Include="MyobTimesheetTests.cs" />
     <Compile Include="MyobTimesheetPushTests.cs" />
     <Compile Include="AsyncTestWaitSupport.cs" />
