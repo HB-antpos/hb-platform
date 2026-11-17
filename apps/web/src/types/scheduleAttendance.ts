@@ -44,6 +44,11 @@ export interface AttendanceEmployeeDto {
   userGuid: string
   username: string
   fullName?: string | null
+  /** 姓名拆分字段（后端本就返回，旧后端缺省）：排班看板「昵称 / 全名」显示名要用；店长不在员工管理列表里，只有这个接口能拿到他们的昵称。 */
+  givenName?: string | null
+  middleName?: string | null
+  familyName?: string | null
+  nickname?: string | null
   employmentType?: 'fullTime' | 'partTime' | 'casual' | null
   age?: number | null
   isStoreManager?: boolean

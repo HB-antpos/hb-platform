@@ -74,9 +74,15 @@ assert.deepEqual(
     shift('b', '09:00', '17:30'),
     shift('c', '09:00', '17:00', { status: 'Cancelled' }),
   ]),
-  { people: 2, hours: 16, shifts: 3 },
+  // 班次时长 4 + 3.5 + 8.5 = 16；b 的 8.5 小时自动扣 1 次用餐（30 分钟）→ 计薪 4 + 3.5 + 8 = 15.5（看板显示的是计薪）
+  { people: 2, hours: 16, paidHours: 15.5, shifts: 3 },
 )
-assert.deepEqual(summarizeDayList([]), { people: 0, hours: 0, shifts: 0 })
+assert.deepEqual(summarizeDayList([]), { people: 0, hours: 0, paidHours: 0, shifts: 0 })
+// 手动指定「不扣」的班次，计薪等于班次时长；超过 9 小时自动扣 2 次
+assert.deepEqual(
+  summarizeDayList([shift('a', '09:00', '17:30', { mealBreakCount: 0 }), shift('b', '09:00', '19:00')]),
+  { people: 2, hours: 18.5, paidHours: 17.5, shifts: 2 },
+)
 
 // 图例：本周出现过班次的人（含只有已取消班次的），按姓名排；合计不含已取消
 const legend = buildStaffLegend(
@@ -92,6 +98,16 @@ assert.deepEqual(legend.map((item) => item.name), ['Chaise', 'Ruby', 'Zoe'])
 assert.deepEqual(
   legend.map((item) => [item.shifts, item.hours]),
   [[2, 7.5], [0, 0], [1, 4]],
+)
+
+// 图例合计同样给出计薪时长：8.5 小时自动扣 1 次用餐（30 分钟）→ 8；手动指定不扣则不变
+assert.deepEqual(
+  buildStaffLegend([shift('a', '09:00', '17:30')], nameOf).map((item) => [item.hours, item.paidHours]),
+  [[8.5, 8]],
+)
+assert.deepEqual(
+  buildStaffLegend([shift('a', '09:00', '17:30', { mealBreakCount: 0 })], nameOf).map((item) => [item.hours, item.paidHours]),
+  [[8.5, 8.5]],
 )
 
 // 可上班未排：当天上报了可上班、且当天没有未取消班次的人

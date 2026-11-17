@@ -419,6 +419,32 @@ export async function getAttendanceScheduleWeek(params: AttendanceQuery): Promis
   return data.map(normalizeAttendanceSchedule)
 }
 
+/** 可空字符串字段：非字符串（缺省 / null）统一成 null，兼容 camelCase 与 PascalCase。 */
+function readNullableText(source: Record<string, unknown>, camelKey: string, pascalKey: string): string | null {
+  const value = readCompat<unknown>(source, camelKey, pascalKey)
+  return typeof value === 'string' ? value : null
+}
+
+/** 把接口返回的一行员工归一化（兼容 camelCase / PascalCase）；单独导出便于单测。 */
+export function normalizeAttendanceEmployee(item: unknown): AttendanceEmployeeDto {
+  const source = asRecord(item)
+  const age = readCompat<number | null>(source, 'age', 'Age')
+  return {
+    userGuid: String(readCompat<string>(source, 'userGuid', 'UserGuid') ?? ''),
+    username: String(readCompat<string>(source, 'username', 'Username') ?? ''),
+    fullName: readNullableText(source, 'fullName', 'FullName'),
+    // 姓名拆分字段：旧后端缺省为 null，看板取名时按「昵称 → 名 → 全名」顺序兜底
+    givenName: readNullableText(source, 'givenName', 'GivenName'),
+    middleName: readNullableText(source, 'middleName', 'MiddleName'),
+    familyName: readNullableText(source, 'familyName', 'FamilyName'),
+    nickname: readNullableText(source, 'nickname', 'Nickname'),
+    employmentType: readCompat<AttendanceEmployeeDto['employmentType']>(source, 'employmentType', 'EmploymentType') ?? null,
+    age: typeof age === 'number' ? age : null,
+    isStoreManager: Boolean(readCompat<boolean>(source, 'isStoreManager', 'IsStoreManager')),
+    managesStore: Boolean(readCompat<boolean>(source, 'managesStore', 'ManagesStore')),
+  }
+}
+
 /** 排班用的分店员工列表；排班表只用它的 age（21 岁以下才有值）在姓名旁显示年龄角标，用工类型等字段一并归一化备用。 */
 export async function getAttendanceEmployees(storeCode: string): Promise<AttendanceEmployeeDto[]> {
   const response = await request.get<ApiResponse<AttendanceEmployeeDto[]> | AttendanceEmployeeDto[]>(
@@ -426,19 +452,7 @@ export async function getAttendanceEmployees(storeCode: string): Promise<Attenda
     { params: { storeCode } },
   )
   const data = unwrapAttendanceApiData<unknown[]>(response) ?? []
-  return data.map((item) => {
-    const source = asRecord(item)
-    const age = readCompat<number | null>(source, 'age', 'Age')
-    return {
-      userGuid: String(readCompat<string>(source, 'userGuid', 'UserGuid') ?? ''),
-      username: String(readCompat<string>(source, 'username', 'Username') ?? ''),
-      fullName: readCompat<string | null>(source, 'fullName', 'FullName') ?? null,
-      employmentType: readCompat<AttendanceEmployeeDto['employmentType']>(source, 'employmentType', 'EmploymentType') ?? null,
-      age: typeof age === 'number' ? age : null,
-      isStoreManager: Boolean(readCompat<boolean>(source, 'isStoreManager', 'IsStoreManager')),
-      managesStore: Boolean(readCompat<boolean>(source, 'managesStore', 'ManagesStore')),
-    }
-  })
+  return data.map(normalizeAttendanceEmployee)
 }
 
 export async function getAttendanceRecords(params: AttendanceQuery): Promise<AttendancePagedResult<AttendanceScheduleDto>> {

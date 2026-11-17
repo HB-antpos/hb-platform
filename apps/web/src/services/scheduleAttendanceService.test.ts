@@ -1,4 +1,5 @@
 import {
+  normalizeAttendanceEmployee,
   normalizeAttendanceApproval,
   normalizeAttendancePunch,
   normalizeAttendanceSchedule,
@@ -219,5 +220,33 @@ assertEqual(serverPage.page, 2, '分页对象应以服务端 page 为权威')
 assertEqual(serverPage.pageSize, 1, '分页对象应以服务端 pageSize 为权威')
 assertEqual(serverPage.total, 3, '分页对象应以服务端 total 为权威')
 assertEqual(serverPage.totalPages, 3, '分页对象应保留服务端 totalPages')
+
+
+// 可排班员工（attendance/employees）：店长不在员工管理列表里，只有这个接口能给出他们的昵称 / 名 / 姓
+const manager = normalizeAttendanceEmployee({
+  UserGuid: 'manager-1',
+  Username: 'terry',
+  FullName: 'Zhan Chen',
+  GivenName: 'Zhan',
+  MiddleName: '',
+  FamilyName: 'Chen',
+  Nickname: 'Terry',
+  IsStoreManager: true,
+  ManagesStore: true,
+  Age: 31,
+})
+assertEqual(manager.nickname, 'Terry', '应兼容 PascalCase 昵称字段')
+assertEqual(manager.givenName, 'Zhan', '应兼容 PascalCase 名字段')
+assertEqual(manager.familyName, 'Chen', '应兼容 PascalCase 姓字段')
+assertEqual(manager.middleName, '', '空串原样保留，由取名逻辑判空')
+assertEqual(manager.isStoreManager, true, '店长标记要保留')
+const camelEmployee = normalizeAttendanceEmployee({ userGuid: 'staff-1', username: 's1', fullName: 'Cody Johnson', nickname: 'Cody', givenName: 'Cody', familyName: 'Johnson', age: 19 })
+assertEqual(camelEmployee.nickname, 'Cody', '应兼容 camelCase 昵称字段')
+assertEqual(camelEmployee.age, 19, '年龄照旧映射')
+// 旧后端不返回姓名拆分字段：缺省统一为 null，不能是 undefined 或报错
+const legacyEmployee = normalizeAttendanceEmployee({ userGuid: 'old-1', username: 'old', fullName: 'Old Staff' })
+assertEqual(legacyEmployee.nickname, null, '旧后端缺昵称字段时为 null')
+assertEqual(legacyEmployee.givenName, null, '旧后端缺名字段时为 null')
+assertEqual(legacyEmployee.age, null, '没有年龄时为 null')
 
 console.log('scheduleAttendanceService.test.ts: ok')

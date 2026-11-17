@@ -48,12 +48,17 @@ export function groupSchedulesByDay<T extends BoardSchedule>(
   return result
 }
 
-/** 某一天：有（未取消）班次的人数与工时合计；同一人多个班次只算 1 人。 */
-export function summarizeDayList(list: readonly BoardSchedule[]): { people: number; hours: number; shifts: number } {
+/**
+ * 某一天：有（未取消）班次的人数与工时合计；同一人多个班次只算 1 人。
+ * hours＝班次时长合计（不扣用餐）；paidHours＝扣除用餐后的计薪时长合计，看板上显示的是它（与手机端同一口径）。
+ */
+export function summarizeDayList(list: readonly BoardSchedule[]): { people: number; hours: number; paidHours: number; shifts: number } {
   const live = list.filter((item) => item.status !== 'Cancelled')
+  const total = summarizeSchedules(live)
   return {
     people: new Set(live.map((item) => item.userGuid)).size,
-    hours: summarizeSchedules(live).hours,
+    hours: total.hours,
+    paidHours: total.paidHours,
     shifts: live.length,
   }
 }
