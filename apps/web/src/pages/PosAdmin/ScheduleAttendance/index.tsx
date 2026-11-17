@@ -165,12 +165,12 @@ import {
 import type { SidebarPreference } from './storePickerLogic'
 import { FALLBACK_STAFF_COLOR, assignStaffColors } from './staffColorLogic'
 import type { StaffColor } from './staffColorLogic'
-import { readStaffNameMode, resolveStaffNames, writeStaffNameMode } from './staffNameLogic'
+import { mergeStaffNameSources, readStaffNameMode, resolveStaffNames, writeStaffNameMode } from './staffNameLogic'
 import type { StaffNameMode, StaffNameSource } from './staffNameLogic'
 import WeekBoard from './WeekBoard'
 import type { WeekBoardDay, WeekBoardDayDrop, WeekBoardLegendItem } from './WeekBoard'
 import { buildStaffLegend, findAvailableUnscheduled, groupSchedulesByDay, matchStaffKeyword, summarizeDayList } from './weekBoardLogic'
-import { formatHours, getScheduleHours, summarizeSchedules } from './weekSummaryLogic'
+import { formatHours, summarizeSchedules } from './weekSummaryLogic'
 import './scheduleCellEditor.css'
 import {
   buildAvailabilityIndex,
@@ -432,6 +432,8 @@ export default function ScheduleAttendancePage() {
   const [storeUsersLoading, setStoreUsersLoading] = useState(false)
   // 21 岁以下员工的周岁（userGuid → 岁），来自考勤员工接口；排班表姓名旁显示年龄角标（青少年时薪按年龄计，排班也要留意工时）
   const [employeeAges, setEmployeeAges] = useState<Map<string, number>>(new Map())
+  // 可排班员工（店员 + 店长）的姓名原料：员工管理列表不含其他店长，看板上店长的昵称靠它补全
+  const [employeeNameSources, setEmployeeNameSources] = useState<StaffNameSource[]>([])
   const [scheduleHolidays, setScheduleHolidays] = useState<AttendanceStoreHolidayDto[]>([])
   const [scheduleHolidaysLoading, setScheduleHolidaysLoading] = useState(false)
   const [availability, setAvailability] = useState<ListState<AttendanceAvailabilityDto>>(initialListState)
@@ -660,6 +662,7 @@ export default function ScheduleAttendancePage() {
     if (!storeCode || !canViewStoreCode(storeCode)) {
       setStoreUsers([])
       setEmployeeAges(new Map())
+      setEmployeeNameSources([])
       return
     }
 
@@ -678,11 +681,20 @@ export default function ScheduleAttendancePage() {
       ])
       setStoreUsers(result.items)
       setEmployeeAges(new Map(employees.flatMap((employee) => (employee.age == null ? [] : [[employee.userGuid, employee.age] as const]))))
+      setEmployeeNameSources(employees.map((employee) => ({
+        userGuid: employee.userGuid,
+        username: employee.username,
+        fullName: employee.fullName,
+        givenName: employee.givenName,
+        familyName: employee.familyName,
+        nickname: employee.nickname,
+      })))
     } catch (error) {
       console.error(error)
       message.error(t('posAdmin.scheduleAttendance.messages.loadStoreUsersFailed'))
       setStoreUsers([])
       setEmployeeAges(new Map())
+      setEmployeeNameSources([])
     } finally {
       setStoreUsersLoading(false)
     }
@@ -1420,24 +1432,20 @@ export default function ScheduleAttendancePage() {
   }, [storeUsers, weekSchedules])
   // nameOf＝全名：员工颜色、搜索、弹窗 / 选人下拉都用它，保证切换开关不换色、不选错人
   const nameOf = useCallback((userGuid: string) => userNameMap.get(userGuid) ?? userGuid, [userNameMap])
-  // 看板显示名的原料：在职员工带昵称 / 名 / 姓；只有班次、没有员工资料的人（如已离职）只有全名
-  const nameSources = useMemo<StaffNameSource[]>(() => {
-    const list: StaffNameSource[] = storeUsers.map((user) => ({
+  // 看板显示名的原料，按优先级合并：员工管理列表（店员）→ 可排班员工（含店长，员工管理列表会剔除其他店长）
+  // → 只有班次、没有员工资料的人（如已离职）只有全名
+  const nameSources = useMemo<StaffNameSource[]>(() => mergeStaffNameSources(
+    storeUsers.map((user) => ({
       userGuid: user.userGuid,
       username: user.username,
       fullName: user.fullName,
       givenName: user.givenName,
       familyName: user.familyName,
       nickname: user.nickname,
-    }))
-    const known = new Set(storeUsers.map((user) => user.userGuid))
-    weekSchedules.forEach((schedule) => {
-      if (known.has(schedule.userGuid)) return
-      known.add(schedule.userGuid)
-      list.push({ userGuid: schedule.userGuid, fullName: schedule.userName })
-    })
-    return list
-  }, [storeUsers, weekSchedules])
+    })),
+    employeeNameSources,
+    weekSchedules.map((schedule) => ({ userGuid: schedule.userGuid, fullName: schedule.userName })),
+  ), [employeeNameSources, storeUsers, weekSchedules])
   // 昵称模式的显示名（昵称 → 名 → 全名 → 登录名，重名时自动区分）；全名模式直接用 userNameMap
   const nicknameNames = useMemo(() => resolveStaffNames(nameSources, 'nickname'), [nameSources])
   // boardNameOf＝看板（图例、班次卡片、同一天的排序）当前显示的名字
@@ -1532,7 +1540,7 @@ export default function ScheduleAttendancePage() {
       age: employeeAges.get(user.userGuid),
       color: staffColors.get(user.userGuid) ?? FALLBACK_STAFF_COLOR,
       weekShifts: total.shifts,
-      weekHours: total.hours,
+      weekHours: total.paidHours, // 与看板同一口径：扣除用餐后的计薪时长
       availableDays: daysWith('available'),
       unavailableDays: daysWith('unavailable'),
     }
@@ -1995,10 +2003,18 @@ export default function ScheduleAttendancePage() {
     const canDrag = canEditSchedule && schedule.status !== 'Cancelled' && !locked
     const dragging = dragSource?.schedule?.scheduleGuid === schedule.scheduleGuid && !altCopy
     const mealBadge = getMealBadge(schedule.mealBreakCount)
-    const mealPaid = mealBadge
-      ? getMealSummary(normalizeHm(schedule.startTime), normalizeHm(schedule.endTime), toMealChoice(schedule.mealBreakCount))?.paidHours
-      : undefined
-    const shiftHours = getScheduleHours(schedule).hours
+    // 卡片上显示扣除用餐后的计薪时长（与手机端同一口径：满 4.5 小时自动扣 30 分钟，超过 9 小时扣 2 次，手动指定的按手动）；
+    // 班次总时长与扣餐分钟放进悬停提示，避免「时间区间 8.5 小时、卡片写 8 小时」让人以为算错
+    const mealSummary = getMealSummary(normalizeHm(schedule.startTime), normalizeHm(schedule.endTime), toMealChoice(schedule.mealBreakCount))
+    const mealPaid = mealBadge ? mealSummary?.paidHours : undefined
+    const paidHours = mealSummary?.paidHours ?? 0
+    const hoursTip = mealSummary && mealSummary.deductMinutes > 0 && !mealBadge
+      ? t('posAdmin.scheduleAttendance.board.cardHoursTip', {
+        hours: formatHours(mealSummary.hours),
+        minutes: mealSummary.deductMinutes,
+        paid: formatHours(mealSummary.paidHours),
+      })
+      : ''
     const timeText = `${formatTime(schedule.startTime)}–${formatTime(schedule.endTime)}`
     const dim = highlighting && !isHighlighted(schedule.userGuid)
     const hi = highlighting && isHighlighted(schedule.userGuid)
@@ -2007,6 +2023,7 @@ export default function ScheduleAttendancePage() {
       name,
       otherNameTip,
       statusLabel('schedule', schedule.status),
+      hoursTip,
       conflict ? t(`posAdmin.scheduleAttendance.weekAvailability.${conflict === 'unavailable' ? 'conflictUnavailable' : 'conflictOutside'}`) : '',
       mealBadge && mealPaid !== undefined ? t('posAdmin.scheduleAttendance.cellEditor.meal.badgeTip', { hours: mealPaid }) : '',
       schedule.remark ?? '',
@@ -2054,7 +2071,7 @@ export default function ScheduleAttendancePage() {
           {conflict ? <WarningOutlined className="sce-card-warn" /> : null}
           {locked || publishedWeekLocked ? <LockOutlined className="sce-card-lock" /> : null}
           {/* 手动指定过用餐次数的班次：工时加点状下划线，具体扣餐说明在悬停提示里 */}
-          {shiftHours > 0 ? <span className={`sce-card-hours${mealBadge ? ' sce-card-hours--meal' : ''}`}>{formatHours(shiftHours)}</span> : null}
+          {paidHours > 0 ? <span className={`sce-card-hours${mealBadge ? ' sce-card-hours--meal' : ''}`}>{formatHours(paidHours)}</span> : null}
         </div>
         {/* 手机上不放「×」：误触风险大，删除走编辑弹窗里的删除按钮 */}
         {canEditSchedule && !phoneEnv.phone ? (
@@ -2140,7 +2157,8 @@ export default function ScheduleAttendancePage() {
     const list = daySchedules.get(dateKey) ?? []
     const stat = summarizeDayList(list)
     const dayHolidays = holidaysByDate.get(dateKey) ?? []
-    const params = { people: stat.people, hours: formatHours(stat.hours) }
+    // 每天列头的合计也是扣餐后的计薪时长
+    const params = { people: stat.people, hours: formatHours(stat.paidHours) }
     return {
       dateKey,
       dateLabel: day.format('MM-DD'),
@@ -2158,7 +2176,7 @@ export default function ScheduleAttendancePage() {
     userGuid: entry.userGuid,
     name: entry.name,
     color: staffColors.get(entry.userGuid) ?? FALLBACK_STAFF_COLOR,
-    summary: t('posAdmin.scheduleAttendance.board.legendSummary', { hours: formatHours(entry.hours), shifts: entry.shifts }),
+    summary: t('posAdmin.scheduleAttendance.board.legendSummary', { hours: formatHours(entry.paidHours), shifts: entry.shifts }),
     active: legendSelected.has(entry.userGuid),
     dimmed: highlighting && !isHighlighted(entry.userGuid),
   }))

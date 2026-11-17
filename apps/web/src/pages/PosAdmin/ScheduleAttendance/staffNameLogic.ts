@@ -33,6 +33,25 @@ export function resolveStaffName(source: StaffNameSource, mode: StaffNameMode): 
   return clean(source.nickname) ?? clean(source.givenName) ?? fullName ?? username ?? source.userGuid
 }
 
+/**
+ * 合并多份取名原料：同一个 userGuid 只保留最先出现的那份，先传的优先。
+ * 约定的顺序：员工管理列表 → 可排班员工 → 只有班次记录的人（如已离职，只有全名）。
+ * 为什么要合并：员工管理列表（store-users/grid）只有店员，会把其他店长整体剔除，
+ * 被排了班的店长只能从可排班员工接口（attendance/employees）拿到昵称和名，否则看板上永远是全名。
+ */
+export function mergeStaffNameSources(...lists: readonly (readonly StaffNameSource[])[]): StaffNameSource[] {
+  const seen = new Set<string>()
+  const merged: StaffNameSource[] = []
+  lists.forEach((list) => {
+    list.forEach((source) => {
+      if (seen.has(source.userGuid)) return
+      seen.add(source.userGuid)
+      merged.push(source)
+    })
+  })
+  return merged
+}
+
 /** 姓的首字母：拉丁字母补「X.」，其它文字（中文等）直接用完整的姓。 */
 function familyTag(familyName: string | null | undefined): string | undefined {
   const family = clean(familyName)

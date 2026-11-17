@@ -244,12 +244,22 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('assignStaffColors(Array.from(userNameMap'), '员工颜色仍按全名分配，切换开关不能换色')
   assert(pageSource.includes('name: displayStoreUserName(user)') && pageSource.includes('label: displayStoreUserName(user)'), '批量排班弹窗、换人下拉仍用全名，避免选错人')
   assert(pageSource.includes('...Array.from(nicknameNames'), '搜索要同时匹配全名和昵称')
+  // 员工管理列表（store-users/grid）会剔除其他店长：店长的昵称 / 名只能从可排班员工接口取，不能只拿它的年龄
+  assert(pageSource.includes('mergeStaffNameSources('), '看板显示名的原料要合并员工管理列表与可排班员工（店长只在后者里）')
+  assert(pageSource.includes('setEmployeeNameSources(employees.map('), '可排班员工的姓名字段要保留下来，不能只取年龄')
   assert((pageSource.match(/<Switch (size="small" )?\{\.\.\.staffNameSwitchProps\}/g) ?? []).length === 2, '工具栏和手机横屏顶栏各有一个员工名开关')
+  // 看板工时一律显示扣除用餐后的计薪时长（与手机端同一口径：满 4.5 小时自动扣 30 分钟）；总时长 / 扣餐分钟放进悬停提示
+  assert(pageSource.includes('formatHours(paidHours)'), '班次卡片显示扣除用餐后的计薪时长')
+  assert(pageSource.includes('formatHours(stat.paidHours)'), '每天列头合计显示计薪时长')
+  assert(pageSource.includes('formatHours(entry.paidHours)'), '图例合计显示计薪时长')
+  assert(pageSource.includes('weekHours: total.paidHours'), '批量排班弹窗里「本周已排」也用计薪时长')
+  assert(!pageSource.includes('getScheduleHours('), '看板不再用不扣用餐的班次时长')
+  assert(pageSource.includes("board.cardHoursTip'"), '卡片悬停要写明「班次 − 用餐 = 计薪」')
   {
     const boardKeys = (file: string) => Object.keys(JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')).posAdmin.scheduleAttendance.board)
     const zhBoard = boardKeys('scheduleAttendanceMessages.zh.json')
     const enBoard = boardKeys('scheduleAttendanceMessages.en.json')
-    for (const key of ['nameModeLabel', 'nameModeNickname', 'nameModeFull', 'nameModeTipNickname', 'nameModeTipFull', 'nameModeTipRemember', 'nameAltFull', 'nameAltNickname']) {
+    for (const key of ['nameModeLabel', 'nameModeNickname', 'nameModeFull', 'nameModeTipNickname', 'nameModeTipFull', 'nameModeTipRemember', 'nameAltFull', 'nameAltNickname', 'cardHoursTip']) {
       assert(zhBoard.includes(key) && enBoard.includes(key), `员工名切换文案 ${key} 中英文都要有`)
     }
   }
