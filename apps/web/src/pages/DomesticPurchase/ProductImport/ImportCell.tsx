@@ -18,6 +18,15 @@ interface ImportCellProps {
   invalidMessage?: string
   /** 非阻断提示（如非 EAN13 条码）：输入框黄色警示 + 图标 tooltip。 */
   warning?: string
+  /**
+   * 库内已有值（已按币种 / 小数位格式化）：本格没填时以灰字占位显示，值本身仍为空，所以不影响检测与提交。
+   * 与 existingEmpty 二选一；都不传表示不显示（检测前、新商品行、开关关闭等）。
+   */
+  existingLabel?: string
+  /** 库里这一项本来就是空：占位显示「—」。 */
+  existingEmpty?: boolean
+  /** 屏幕阅读器说明（灰字不是已填的值）；已按当前语言拼好。 */
+  existingHint?: string
   precision?: number
   step?: string
   mono?: boolean
@@ -38,20 +47,27 @@ export const ImportCell = memo(function ImportCell({
   oldLabel,
   invalidMessage,
   warning,
+  existingLabel,
+  existingEmpty,
+  existingHint,
   precision,
   step,
   mono,
   onCommit,
 }: ImportCellProps) {
+  // 库内已有值只用 placeholder 展示：输入框的 value 仍为空，打字即覆盖，清空即恢复灰字（= 这一项不改）
+  const placeholder = existingLabel ?? (existingEmpty ? '—' : undefined)
   const className = [
     'pi-cell',
     mono ? 'pi-cell-mono' : '',
     changed ? 'is-changed' : '',
     invalidMessage ? 'is-invalid' : '',
+    existingLabel !== undefined ? 'is-existing' : existingEmpty ? 'is-existing-empty' : '',
   ].filter(Boolean).join(' ')
 
   return (
-    <div className={className} data-field={field} title={invalidMessage}>
+    // 灰字在窄屏会被省略号截断：悬停时用原生 title 看完整的库内值（错误提示优先）
+    <div className={className} data-field={field} title={invalidMessage ?? existingLabel}>
       {kind === 'number' ? (
         <InputNumber
           value={value as number | undefined}
@@ -64,6 +80,8 @@ export const ImportCell = memo(function ImportCell({
           disabled={disabled}
           status={invalidMessage ? 'error' : undefined}
           aria-invalid={invalidMessage ? true : undefined}
+          placeholder={placeholder}
+          aria-description={placeholder ? existingHint : undefined}
         />
       ) : (
         <Input
@@ -73,6 +91,8 @@ export const ImportCell = memo(function ImportCell({
           disabled={disabled}
           status={invalidMessage ? 'error' : warning ? 'warning' : undefined}
           aria-invalid={invalidMessage ? true : undefined}
+          placeholder={placeholder}
+          aria-description={placeholder ? existingHint : undefined}
           suffix={warning ? (
             <Tooltip title={warning}>
               <WarningOutlined className="pi-cell-warning-icon" />

@@ -18,13 +18,14 @@ import { formatDomesticSupplierLabel } from '../../../utils/domesticSupplierLabe
 import { createLatestRequestGuard } from '../../../utils/latestRequestGuard'
 import type { ProductImportItem, DuplicateGroup } from './types'
 import { buildAssignContainerItems, buildHbwebProductNameSyncNotificationDecision, buildHbwebProductNameUpdates, calculateStatistics, createEmptyProduct, detectDuplicates, findInvalidAssignContainerItems, generateImageUrl, getHbwebProductNameSyncConfirmationKeys, mergeDuplicateProducts, parseProductImportPasteText, stripAssignContainerItemsForRequest, summarizeAssignProductsResult, summarizeHbwebProductNameSyncResponse, updateCalculatedFields } from './utils'
-import { buildConflictRows, buildDuplicateRowIndex, collectImportErrors, computeImportSteps, countImportRows, getChangedImportFields, getDuplicatePartnerRowNumbers, getImportCellDiff, getImportRowClassName, getImportRowErrors, IMPORT_FILLER_MIN_WIDTH, isBlankImportRow, isImportDiffField, matchesImportFilter, mergeEnglishNamesById, resolveImportColumnWidths, resolveImportRowKind, snapshotTranslationTargets, splitProductsByResolution } from './importGridLogic'
+import { buildConflictRows, buildDuplicateRowIndex, collectImportErrors, computeImportSteps, countImportRows, getChangedImportFields, getDuplicatePartnerRowNumbers, getImportCellDiff, getImportExistingMissingFields, getImportExistingValue, getImportRowClassName, getImportRowErrors, IMPORT_FILLER_MIN_WIDTH, isBlankImportRow, isImportDiffField, matchesImportFilter, mergeEnglishNamesById, resolveImportColumnWidths, resolveImportRowKind, snapshotTranslationTargets, splitProductsByResolution } from './importGridLogic'
 import type { ConflictSelection, ContainerConflictRow, ImportDiffField, ImportStatusFilter } from './importGridLogic'
 import { applyImportPaste, clearImportColumn, findRowIndexById, toEditableColumn } from './importPasteLogic'
 import type { ImportEditableColumn } from './importPasteLogic'
 import { ConflictResolutionDialog } from './ConflictResolutionDialog'
 import { DuplicateDialog } from './DuplicateDialog'
 import { ImportCell } from './ImportCell'
+import { ExistingValuesToggle } from './ExistingValuesToggle'
 import { ImportStatusChips } from './ImportStatusChips'
 import { ImportStepper } from './ImportStepper'
 import './productImport.css'
@@ -104,6 +105,8 @@ export default function ProductImportPage() {
   // 最近一次检测覆盖到的行：之后新增的行没有检测结果，不能被算成「无变化」
   const [detectedRowIds, setDetectedRowIds] = useState<ReadonlySet<string> | null>(null)
   const [detectedAt, setDetectedAt] = useState<number | null>(null)
+  // 检测后没填的格子是否显示库内已有值（灰字）；只影响展示，不动数据，默认打开
+  const [showExistingValues, setShowExistingValues] = useState(true)
   const [committedCount, setCommittedCount] = useState(0)
   const [statusFilter, setStatusFilter] = useState<ImportStatusFilter>('all')
   const [suppliers, setSuppliers] = useState<Array<{ supplierCode: string; supplierName: string; shopNumber?: string }>>([])
@@ -1025,7 +1028,10 @@ export default function ProductImportPage() {
       extra?: { precision?: number; step?: string; mono?: boolean; warning?: string },
     ) => {
       const diff = isImportDiffField(field) ? getImportCellDiff(record, field) : null
-      const isCodeError = field === 'productCode' && resolveImportRowKind(record, detectedRowIds) === 'error'
+      const rowKind = resolveImportRowKind(record, detectedRowIds)
+      const isCodeError = field === 'productCode' && rowKind === 'error'
+      // 库内已有值：只在检测后、库里有对应商品、本格没填时有结果；值本身不写入行数据，空格仍表示「这一项不改」
+      const existing = showExistingValues && isImportDiffField(field) ? getImportExistingValue(record, field, rowKind) : null
       return (
         <ImportCell
           rowId={record.id}
@@ -1037,6 +1043,11 @@ export default function ProductImportPage() {
           oldLabel={diff ? (diff.oldDisplay === null ? t('productImport.oldValueEmpty', '原：空') : t('productImport.oldValue', '原 {{value}}', { value: diff.oldDisplay })) : undefined}
           invalidMessage={isCodeError ? t('productImport.cellItemNoRequired', '货号不能为空') : undefined}
           warning={extra?.warning}
+          existingLabel={existing?.display ?? undefined}
+          existingEmpty={existing !== null && existing.display === null}
+          existingHint={existing ? (existing.display === null
+            ? t('productImport.existingValueEmptyHint', '库里这一项也是空的')
+            : t('productImport.existingValueHint', '库内已有的值；不填写则保持不变')) : undefined}
           precision={extra?.precision}
           step={extra?.step}
           mono={extra?.mono}
@@ -1181,6 +1192,7 @@ export default function ProductImportPage() {
           const kind = resolveImportRowKind(record, detectedRowIds)
           let tag: React.ReactNode = null
           let note: string | null = null
+          let noteWarn = false
           switch (kind) {
             case 'new':
               tag = <span className="pi-tag pi-tag-new">{t('productImport.rowNew', '新')}</span>
@@ -1195,9 +1207,18 @@ export default function ProductImportPage() {
               }
               break
             }
-            case 'unchanged':
+            case 'unchanged': {
               tag = <span className="pi-tag pi-tag-unchanged">{t('productImport.rowUnchanged', '无变化')}</span>
+              // 本次没填、库里也没有的字段：提示「库内缺 …」，方便导入时顺手补（开关关闭时与现状一致，不提示）
+              const missing = showExistingValues ? getImportExistingMissingFields(record, kind) : []
+              if (missing.length > 0) {
+                noteWarn = true
+                note = missing.length > 2
+                  ? t('productImport.rowMissingMore', '库内缺 {{first}} 等 {{count}} 项', { first: fieldLabels[missing[0]], count: missing.length })
+                  : t('productImport.rowMissing', '库内缺 {{fields}}', { fields: missing.map((field) => fieldLabels[field]).join(t('productImport.fieldSeparator', '、')) })
+              }
               break
+            }
             case 'duplicate': {
               tag = <span className="pi-tag pi-tag-duplicate">{t('productImport.rowDuplicate', '重复')}</span>
               const partners = getDuplicatePartnerRowNumbers(duplicateIndex, record, rowNumberById.get(record.id) ?? 0)
@@ -1220,7 +1241,7 @@ export default function ProductImportPage() {
           return (
             <div className="pi-status">
               {tag}
-              {note ? <span className="pi-status-note" title={note}>{note}</span> : null}
+              {note ? <span className={noteWarn ? 'pi-status-note is-warn' : 'pi-status-note'} title={note}>{note}</span> : null}
               {record.sentToContainer ? <span className="pi-tag pi-tag-sent">{t('productImport.rowSent', '已发货柜')}</span> : null}
               {renderDeleteButton(record)}
             </div>
@@ -1248,7 +1269,7 @@ export default function ProductImportPage() {
       })
     }
     return base
-  }, [t, showStatistics, showFillerColumn, colWidths, detectedRowIds, duplicateIndex, rowNumberById, selectedColumnKey, tableLocked, handleHeaderClick, updateProduct, removeRows])
+  }, [t, showStatistics, showFillerColumn, showExistingValues, colWidths, detectedRowIds, duplicateIndex, rowNumberById, selectedColumnKey, tableLocked, handleHeaderClick, updateProduct, removeRows])
 
   const getRowClassName = (row: ProductImportItem) => getImportRowClassName(resolveImportRowKind(row, detectedRowIds), row.sentToContainer === true)
 
@@ -1414,7 +1435,14 @@ export default function ProductImportPage() {
             </div>
           </div>
 
-          {showChips ? <ImportStatusChips counts={counts} active={statusFilter} onChange={setStatusFilter} /> : null}
+          {showChips ? (
+            <ImportStatusChips
+              counts={counts}
+              active={statusFilter}
+              onChange={setStatusFilter}
+              trailing={<ExistingValuesToggle checked={showExistingValues} onChange={setShowExistingValues} />}
+            />
+          ) : null}
         </div>
 
         <div className="pi-table-wrap" ref={productImportTableRef} data-testid="product-import-table">
