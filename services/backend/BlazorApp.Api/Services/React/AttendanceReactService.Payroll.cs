@@ -320,7 +320,8 @@ namespace BlazorApp.Api.Services.React
             DateTime periodStart,
             int weeks,
             bool includePending,
-            bool mergeStores)
+            bool mergeStores,
+            bool onlyWithHours = false)
         {
             var settings = await GetOrCreateSettingsModelAsync();
             var store = await _db.Queryable<Store>().FirstAsync(item => !item.IsDeleted && item.StoreCode == storeCode);
@@ -631,10 +632,14 @@ namespace BlazorApp.Api.Services.React
                 }
             }
 
-            snapshot.Employees.AddRange(employeeMap.Values
+            var roster = employeeMap.Values
                 .Where(item => item.HasAnyData || boundUsers.ContainsKey(item.UserGuid) && item.EmploymentType != null)
                 .OrderByDescending(item => item.IsManager)
-                .ThenBy(item => item.UserName, StringComparer.OrdinalIgnoreCase));
+                .ThenBy(item => item.UserName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            // 工时统计页只列「本期有工时」的人（含带薪假工时；有待处理项的也列，否则店长找不到要处理的人）。
+            // 只有工时统计页传 true；工资表、提交锁定、MYOB 推送仍用完整名单（零工时的人可能有固定转账工时 / 津贴，不能漏）。
+            snapshot.Employees.AddRange(onlyWithHours ? roster.Where(HasHoursOrPending) : roster);
 
             var otherStoreItems = snapshot.Employees
                 .SelectMany(employee => employee.Days.Values.SelectMany(day => day.OtherStores.Select(other => new AttendancePayrollOtherStoreItemDto
@@ -656,7 +661,8 @@ namespace BlazorApp.Api.Services.React
             var storeToday = ConvertUtcToStoreLocal(
                 _timeProvider.GetUtcNow().UtcDateTime,
                 await ResolveStoreTimeZoneAsync(storeCode, null)).Date;
-            foreach (var employee in snapshot.Employees.Where(item => item.Birthday.HasValue))
+            // 按完整名单出：这是提前提醒核对时薪，不能因为这一期没工时就不提醒。
+            foreach (var employee in roster.Where(item => item.Birthday.HasValue))
             {
                 var birthdayDate = employee.Days.Values.FirstOrDefault(item => item.IsBirthday)?.Date
                     ?? NextBirthday(employee.Birthday!.Value, storeToday, Math.Max(0, settings.BirthdayRemindDays));
@@ -677,6 +683,10 @@ namespace BlazorApp.Api.Services.React
             }
             return snapshot;
         }
+
+        /// <summary>本期有工时（含病假 / 年假 / 带薪公假工时，与工时表合计同口径），或有待处理项。</summary>
+        private static bool HasHoursOrPending(PayrollEmployeeSnapshot employee) =>
+            employee.PendingCount > 0 || BuildTotals(employee).Total > 0;
 
         private static DateTime? NextBirthday(DateTime birthday, DateTime today, int withinDays)
         {
@@ -811,7 +821,8 @@ namespace BlazorApp.Api.Services.React
             }
             // 带薪公假确认在店长打开工时统计时生成；失败只记日志，不阻断统计。
             await GeneratePublicHolidayPayApprovalsAsync(storeCode, periodStart, periodStart.AddDays(weeks * 7 - 1));
-            var snapshot = await BuildPayrollSnapshotAsync(storeCode, periodStart, weeks, query.IncludePending, query.MergeStores);
+            var snapshot = await BuildPayrollSnapshotAsync(
+                storeCode, periodStart, weeks, query.IncludePending, query.MergeStores, onlyWithHours: true);
             var result = new AttendancePayrollHoursDto
             {
                 StoreCode = storeCode,
