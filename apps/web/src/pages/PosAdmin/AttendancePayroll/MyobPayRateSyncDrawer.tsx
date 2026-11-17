@@ -1,9 +1,10 @@
 import { ReloadOutlined } from '@ant-design/icons'
-import { Alert, Button, Checkbox, DatePicker, Drawer, Empty, Modal, Select, Skeleton, Table, Tag, Tooltip, message } from 'antd'
+import { Alert, Button, Checkbox, DatePicker, Drawer, Empty, Modal, Select, Skeleton, Tag, Tooltip, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { MeasuredTable } from '../../../components/MeasuredTable'
 import { applyMyobPayRateSync, previewMyobPayRateSync } from '../../../services/myobPayRateSyncService'
 import { getMyobPayrollEmployers } from '../../../services/myobService'
 import type { MyobPayrollCompanyOption } from '../../../types/myob'
@@ -351,7 +352,8 @@ export default function MyobPayRateSyncDrawer({ open, storeCode, onClose, onAppl
               </span>
             </div>
             {rows.length ? (
-              <Table<MyobPayRateSyncRow>
+              <MeasuredTable<MyobPayRateSyncRow>
+                metricId="pos-admin.attendance-payroll.myob-rate-sync"
                 className="atp-sync-table"
                 rowKey="userGuid"
                 size="small"
