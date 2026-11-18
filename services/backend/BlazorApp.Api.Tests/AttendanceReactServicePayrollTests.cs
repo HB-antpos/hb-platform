@@ -156,7 +156,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task 工时统计_只列本期有工时或有待处理的人_工资表与生日提醒不受影响()
+        public async Task 工时统计_只列本期有工时或有待处理的人_工资表只列有记录的人_生日提醒不受影响()
         {
             await SeedPayrollStoreAsync();
             // staff-user：本期有 4 小时工时 → 列。
@@ -193,11 +193,56 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(4m, hours.Data.Totals.Total);
             Assert.Contains(hours.Data.Alerts, item => item.Type == "Birthday" && item.UserGuid == "idle-teen");
 
-            // 只收紧工时统计页：工资表仍用完整名单（零工时的人可能有固定转账工时 / 津贴，不能漏人）。
+            // 工资表也只列有记录的人：manager-user / idle-teen / pending-staff 没工时、没津贴、没年假申请、没备注 → 整行全是「—」，不列；
+            // 待处理项只影响顶部「待处理」计数（pendingCount），不靠留一行空行来提示。
             var pay = await Manager().GetPayrollPayAsync(PayrollQuery());
             Assert.True(pay.Success, pay.Message);
-            Assert.Contains(pay.Data!.Rows, row => row.UserGuid == "manager-user");
-            Assert.Contains(pay.Data.Rows, row => row.UserGuid == "idle-teen");
+            Assert.Equal(new[] { "staff-user" }, pay.Data!.Rows.Select(row => row.UserGuid).ToArray());
+            Assert.Equal(1, pay.Data.PendingCount);
+        }
+
+        [Fact]
+        public async Task 工资表_零工时但有津贴或备注或年假申请的人仍要列_固定转账工时不算记录()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedWorkedScheduleAsync("hours-tue", new DateTime(2026, 10, 6), "09:00-13:00", "09:00-13:00");
+            await SeedTransferRateAsync(30m, 35m, 40m, 60m);
+            // allowance-user：本期没工时，但每期现金津贴 50 → 应发 50，必须列（否则漏发）。
+            await SeedBoundStaffAsync("allowance-user", EmployeeType.PartTime);
+            await _db.Insertable(new EmployeePayRate
+            {
+                RateGuid = "rate-allowance", UserGuid = "allowance-user", PayMode = "Cash", CashRate = 25m,
+                CashAllowancePerPeriod = 50m, EffectiveFrom = new DateTime(2026, 7, 1), CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            // fixed-user：只有每周固定转账工时、没有任何工时 → 转账工时装不出来，不算记录，不列。
+            await SeedBoundStaffAsync("fixed-user", EmployeeType.PartTime);
+            await _db.Insertable(new EmployeePayRate
+            {
+                RateGuid = "rate-fixed", UserGuid = "fixed-user", PayMode = "Mixed", FixedTransferHoursPerWeek = 10m,
+                TransferWeekdayRate = 30m, TransferSaturdayRate = 35m, TransferSundayRate = 40m, TransferPublicHolidayRate = 30m,
+                CashRate = 25m, EffectiveFrom = new DateTime(2026, 7, 1), CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            // note-user：没工时、没津贴，但财务写过备注 → 列。
+            await SeedBoundStaffAsync("note-user", EmployeeType.PartTime);
+            var note = await Manager().UpsertPayPeriodNoteAsync(new UpsertAttendancePayPeriodNoteDto
+            {
+                StoreCode = "BRI",
+                PeriodStart = PayrollPeriodStart,
+                Weeks = 2,
+                UserGuid = "note-user",
+                Note = "补发上期",
+            });
+            Assert.True(note.Success, note.Message);
+
+            var pay = await Manager().GetPayrollPayAsync(PayrollQuery());
+
+            Assert.True(pay.Success, pay.Message);
+            Assert.Equal(
+                new[] { "allowance-user", "note-user", "staff-user" },
+                pay.Data!.Rows.Select(row => row.UserGuid).OrderBy(item => item).ToArray());
+            Assert.Equal(50m, pay.Data.Rows.Single(row => row.UserGuid == "allowance-user").GrossPay);
+            // 合计只来自列出的行；被隐藏的行本来就是 0，不会改变应发合计。
+            Assert.Equal(pay.Data.Rows.Sum(row => row.GrossPay), pay.Data.TotalGrossPay);
         }
 
         [Fact]

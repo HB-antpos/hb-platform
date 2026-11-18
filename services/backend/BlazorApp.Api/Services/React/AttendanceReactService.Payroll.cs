@@ -894,7 +894,9 @@ namespace BlazorApp.Api.Services.React
             }
             // 工资表永远只计已审核（忽略 includePending）。
             var snapshot = await BuildPayrollSnapshotAsync(storeCode, periodStart, weeks, includePending: false, query.MergeStores);
-            var rows = await BuildPayRowsAsync(snapshot);
+            // 工资表只列本期「有记录」的人：整行全是「—」的账号（没工时、没津贴、没年假申请、没备注）没有信息量，
+            // 反而把真正要看的人挤到下面。只在这里过滤：提交锁定、MYOB 推送走 snapshot，仍用完整名单，不会漏人。
+            var rows = (await BuildPayRowsAsync(snapshot)).Where(HasPayRecord).ToList();
             var submittedByName = snapshot.Period?.SubmittedBy == null
                 ? null
                 : (await ResolveUserDisplayNamesAsync(new[] { snapshot.Period.SubmittedBy })).GetValueOrDefault(snapshot.Period.SubmittedBy);
@@ -912,6 +914,21 @@ namespace BlazorApp.Api.Services.React
                 TotalGrossPay = PayrollCalculator.Round2(rows.Sum(item => item.GrossPay)),
             });
         }
+
+        /// <summary>
+        /// 这一行在工资表里是否「有记录」：有工时，或算出了转账 / 现金金额，或有每期津贴（可正可负，与工时无关，
+        /// 零工时也要发 / 扣），或有年假 / 年假折现申请待财务核定，或财务写过备注。固定转账工时不算——它只是转账容量上限，
+        /// 实际转账工时仍从工时里装填，零工时时就是 0。
+        /// </summary>
+        private static bool HasPayRecord(AttendancePayrollPayRowDto row) =>
+            row.Hours.Total != 0
+            || row.Transfer.Hours != 0 || row.Transfer.Amount != 0
+            || row.Cash.Hours != 0 || row.Cash.Amount != 0
+            || row.Allowance != 0
+            || row.GrossPay != 0
+            || row.LeaveDetail.Annual.RequestedHours > 0
+            || row.LeaveDetail.CashOut.RequestedHours > 0
+            || !string.IsNullOrWhiteSpace(row.Note);
 
         private async Task<List<AttendancePayrollPayRowDto>> BuildPayRowsAsync(PayrollPeriodSnapshot snapshot)
         {
