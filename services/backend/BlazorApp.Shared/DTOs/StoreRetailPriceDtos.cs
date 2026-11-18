@@ -153,6 +153,12 @@ namespace BlazorApp.Shared.DTOs
         /// 否则其它分店扫码仍会因与仓库价不一致而提示「是否同步仓库价格」。
         /// </summary>
         public bool SyncWarehouse { get; set; }
+
+        /// <summary>
+        /// 是否为价格变化的分店创建「待换标签 / 需改价」任务。默认 true（Web 入口行为不变）；
+        /// false 时分店价照改，只刷新 / 取消已有的未完成任务，不新建。
+        /// </summary>
+        public bool CreatePriceTasks { get; set; } = true;
     }
 
     /// <summary>

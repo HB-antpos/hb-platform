@@ -218,6 +218,8 @@ namespace BlazorApp.Api.Controllers.React
                     SyncRetailPrice = request.SyncRetailPrice,
                     SyncDiscountRate = request.SyncDiscountRate,
                     SyncPurchasePrice = request.SyncPurchasePrice,
+                    SyncIsSpecialProduct = request.SyncIsSpecialProduct,
+                    CreatePriceTasks = request.CreatePriceTasks,
                     Mode = SyncModeConstants.Overwrite,
                     // 仓库商品同步其它分店时必须一并更新仓库价，否则其它分店扫码仍提示「是否同步仓库价格」。
                     SyncWarehouse = true,

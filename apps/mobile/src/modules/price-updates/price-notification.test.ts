@@ -94,6 +94,15 @@ assert.equal(
   'notification.syncedStores|{"count":5}',
   "仓库未更新（非仓库商品 / 旧后端）时提示不变"
 );
+assert.equal(
+  buildSyncToOtherStoresMessage(5, { ...expected, labelOnlyStores: 4 }, t, false, false),
+  'notification.syncedStoresNoTasks|{"count":5}',
+  "关闭创建任务时明确写「未创建任务」，不再报已有任务刷新带出的待换标签数"
+);
+assert.equal(
+  buildSyncToOtherStoresMessage(5, null, t, true, false),
+  'notification.syncedStoresNoTasks|{"count":5}notification.warehouseUpdatedSuffix'
+);
 
 assert.equal(buildPriceNotificationPreviewMessage(null, true, t), null);
 assert.equal(

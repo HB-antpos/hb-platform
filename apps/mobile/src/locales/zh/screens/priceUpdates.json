@@ -205,6 +205,7 @@
     "savedNoNotification": "已保存。各分店价格已一致，未产生通知",
     "syncedStores": "已同步 {{count}} 家分店",
     "syncedStoresWithLabels": "已同步 {{count}} 家分店，{{labelCount}} 家已收到待换标签通知",
+    "syncedStoresNoTasks": "已同步 {{count}} 家分店 · 未创建价格和标签任务",
     "warehouseUpdatedSuffix": "；仓库价已同步更新",
     "previewAutoSync": "保存后，{{count}} 家分店的价格会自动更新，并收到『待换标签』通知",
     "previewNeedsUpdate": "保存后，{{count}} 家价格不同的分店会收到『需改价』通知",
@@ -221,7 +222,13 @@
     "fields": {
       "retailPrice": "零售价",
       "discountRate": "折扣",
-      "purchasePrice": "进价"
+      "purchasePrice": "进价",
+      "specialProduct": "特殊商品"
+    },
+    "createTasks": {
+      "title": "创建价格和标签更改任务",
+      "hintOn": "价格有变化的分店会在「价格和标签」收到待换标签任务，提醒店员换货架标签",
+      "hintOff": "不创建任务：分店价格会直接改，但不会提醒店员换标签，货架标签可能和收银价不一致。已有的未完成任务仍会按新价格自动更新或取消。"
     },
     "targets": "目标分店 {{selected}}/{{total}}",
     "selectAll": "全选",
@@ -234,8 +241,10 @@
     "loadFailed": "目标分店加载失败",
     "failed": "同步失败，请重试",
     "footerHint": "被同步的分店会收到一条待换标签通知",
+    "footerHintNoTasks": "本次不会创建价格和标签更改任务",
     "submit": "同步到 {{count}} 家分店",
     "warehouseNotice": "仓库商品：同步后仓库零售价、建议折扣也会更新为本店的值（零售价 {{price}}）；未同步且价格不同的分店会收到『需改价』通知",
+    "warehouseNoticeNoTasks": "仓库商品：同步后仓库零售价、建议折扣也会更新为本店的值（零售价 {{price}}）",
     "inlineEntry": "同步其它分店 · 零售价、折扣",
     "inlineSaveAndSync": "保存并同步其它分店"
   },
