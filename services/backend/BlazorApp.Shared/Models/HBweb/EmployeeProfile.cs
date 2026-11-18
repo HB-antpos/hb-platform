@@ -36,6 +36,10 @@ namespace BlazorApp.Shared.Models
         [SugarColumn(IsNullable = true)]
         public DateTime? Birthday { get; set; }
 
+        /// <summary>入职日期（在本雇主处开始工作的日期，只有日期）。空 = 还没确认；零售 Award 青少年「满 6 个月」按它算。</summary>
+        [SugarColumn(IsNullable = true, ColumnDataType = "date")]
+        public DateTime? HireDate { get; set; }
+
         [SugarColumn(IsNullable = true)]
         public EmployeeGender? Gender { get; set; }
 

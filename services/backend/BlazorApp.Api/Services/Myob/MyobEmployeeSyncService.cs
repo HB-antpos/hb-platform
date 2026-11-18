@@ -533,6 +533,13 @@ public sealed class MyobEmployeeSyncService : IMyobEmployeeSyncService
             case MyobSyncFields.EmploymentType:
                 dto.EmploymentType = Get("employmentType");
                 break;
+            case MyobSyncFields.HireDate:
+                // 给属性赋值即标记 HasHireDate，保存时才会写入；null（撤销到空）= 清空。其他字段的同步不会碰入职日期。
+                dto.HireDate = DateTime.TryParseExact(
+                    Get("hireDate"), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var hireDate)
+                    ? hireDate
+                    : null;
+                break;
             case MyobSyncFields.Bank:
                 dto.BankBsb = Get("bsb");
                 dto.BankAccountNumber = Get("account");
@@ -762,7 +769,8 @@ public sealed class MyobEmployeeSyncService : IMyobEmployeeSyncService
                 bank?.Bsb,
                 bank?.AccountNumber,
                 card.Extras?.SuperFundName,
-                card.Extras?.SuperMembershipNumber);
+                card.Extras?.SuperMembershipNumber,
+                card.Extras?.StartDate);
         }
 
         public SyncOurValues EmptyOur(string userGuid) => new(
@@ -889,7 +897,8 @@ public sealed class MyobEmployeeSyncService : IMyobEmployeeSyncService
                     profile?.SuperannuationCompanyName,
                     profile?.SuperannuationAccount,
                     profile?.SensitiveRevision ?? 0,
-                    pending.Contains(user.UserGUID));
+                    pending.Contains(user.UserGUID),
+                    profile?.HireDate);
             }
         }
 

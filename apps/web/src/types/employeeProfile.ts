@@ -68,6 +68,8 @@ export interface EmployeeProfileSummaryDto {
   superannuationCompanyCode?: string
   superannuationAccountNumber?: string
   birthday?: string
+  /** 入职日期（YYYY-MM-DD）：在本雇主处开始工作的日期，零售 Award 青少年「满 6 个月」按它算；没填为空。 */
+  hireDate?: string
   gender?: EmployeeProfileGender
   employmentType?: EmployeeEmploymentType
   avatarUrl?: string
@@ -99,6 +101,8 @@ export interface SaveEmployeeProfilePayload {
   superannuationCompanyCode?: string
   superannuationAccountNumber?: string
   birthday?: string
+  /** 入职日期：不带 = 后端不动；null = 清空；只有管理员保存才会写入。 */
+  hireDate?: string | null
   gender?: EmployeeProfileGender
   employmentType?: EmployeeEmploymentType
   avatarUrl?: string

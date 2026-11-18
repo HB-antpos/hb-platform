@@ -1,3 +1,4 @@
+import type { Dayjs } from 'dayjs'
 import { RequestError } from '../../../utils/request'
 import type {
   EmployeeEmploymentType,
@@ -314,4 +315,18 @@ export function buildManagedProfilePayload(
 /** 从请求异常里取后端 ApiResponse 的 errorCode，用于区分越权 / 职位类型无权等业务错误。 */
 export function getRequestErrorCode(error: unknown) {
   return error instanceof RequestError ? readErrorCode(error.payload) : undefined
+}
+
+/**
+ * 入职日期的保存补丁：和打开抽屉时的初始值比较，没改就什么都不带（后端「没传就不动」），改了才发，清空发 null。
+ * 不能「空就发 null」：后端把显式 null 当成清空，万一表单没拿到已有的入职日期（比如详情没返回），
+ * 管理员只改个电话保存也会把已填的入职日期悄悄清掉。
+ */
+export function hireDatePatch(
+  current: Dayjs | null | undefined,
+  initial: Dayjs | null | undefined,
+): { hireDate?: string | null } {
+  const next = current ? current.format('YYYY-MM-DD') : null
+  const before = initial ? initial.format('YYYY-MM-DD') : null
+  return next === before ? {} : { hireDate: next }
 }

@@ -2,6 +2,9 @@
   "system": {
     "employeeProfiles": {
       "minorTab": "未成年用工合规",
+      "hireDate": "入职日期",
+      "hireDateHint": "在本雇主处开始工作的日期，零售 Award 青少年「满 6 个月」按它算；可从 MYOB 同步资料带入，也可手动填写",
+      "hireDatePlaceholder": "请选择入职日期",
       "totalCount": "共 {{count}} 名员工",
       "pendingEntry": "{{count}} 条敏感资料待审核",
       "maskedHint": "银行 / 公积金账号已脱敏，完整值仅在编辑中查看",

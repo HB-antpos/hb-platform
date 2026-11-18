@@ -1165,6 +1165,7 @@
         "gender": "性别",
         "address": "住址",
         "employmentType": "用工类型",
+        "hireDate": "入职日期",
         "bank": "银行账户",
         "super": "退休金"
       },
@@ -1176,6 +1177,7 @@
         "gender": "MYOB 薪资详情 → 男 / 女",
         "address": "街道、城市、州、邮编拼成一行",
         "employmentType": "全职→全职 · 兼职→兼职 · Casual→临时工 · Other 不同步",
+        "hireDate": "MYOB 薪资详情的开始工作日期；零售 Award 青少年「满 6 个月」按它算，MYOB 没填就不比",
         "bank": "BSB + 账号（预览里账号只显示末 4 位）",
         "super": "基金名称 + 代码 + 会员号"
       }

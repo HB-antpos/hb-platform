@@ -1,5 +1,6 @@
 import { RequestError } from '../../../utils/request'
 import { readFileSync } from 'node:fs'
+import dayjs from 'dayjs'
 import {
   buildManagedProfilePayload,
   countChangedFormFields,
@@ -11,6 +12,7 @@ import {
   getRequestErrorCode,
   getReviewChangedFields,
   getStablePaletteIndex,
+  hireDatePatch,
   shortenIdentifier,
   handleSensitiveReviewFailure,
   isRejectReasonValid,
@@ -324,5 +326,16 @@ assert(
   managedPageSource.includes('if (!canEditProfiles) {\n      return\n    }'),
   '非管理员不得请求管理员专用的待审核数量接口',
 )
+
+// 入职日期保存补丁：没改就不带（后端「没传就不动」）；改了才发；清空发 null。
+// 关键是「表单没拿到已有值时，只改别的字段也不会把入职日期清掉」。
+assert(JSON.stringify(hireDatePatch(dayjs('2026-01-12'), dayjs('2026-01-12'))) === '{}', '没改入职日期：不带这个字段')
+assert(JSON.stringify(hireDatePatch(null, null)) === '{}', '本来就空、还是空：不带')
+assert(JSON.stringify(hireDatePatch(undefined, undefined)) === '{}', 'undefined 与 undefined 同样不带')
+assert(hireDatePatch(dayjs('2026-02-02'), dayjs('2026-01-12')).hireDate === '2026-02-02', '改了日期：发新日期')
+assert(hireDatePatch(dayjs('2026-02-02'), null).hireDate === '2026-02-02', '原来是空、新填：发新日期')
+assert(hireDatePatch(null, dayjs('2026-01-12')).hireDate === null, '管理员主动清空：发 null')
+assert('hireDate' in hireDatePatch(null, dayjs('2026-01-12')), '清空时 hireDate 键必须存在（值为 null），不能被当成没改')
+assert(hireDatePatch(dayjs('2026-01-12T15:30:00'), dayjs('2026-01-12')).hireDate === undefined, '只是时间部分不同：按日期比较，仍算没改')
 
 console.log('employeeProfiles.logic.test: ok')

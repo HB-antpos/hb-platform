@@ -2,6 +2,9 @@
   "system": {
     "employeeProfiles": {
       "minorTab": "Minor employment",
+      "hireDate": "Hire date",
+      "hireDateHint": "The date the employee started with this employer. Retail Award junior rates depend on 6 months of service. Can be filled from MYOB sync or entered manually",
+      "hireDatePlaceholder": "Select hire date",
       "totalCount": "{{count}} employees",
       "pendingEntry": "{{count}} sensitive change request(s) pending review",
       "maskedHint": "Bank and super account numbers are masked; open Edit to view the full values",

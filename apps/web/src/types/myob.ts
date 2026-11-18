@@ -706,7 +706,8 @@ export interface MyobUndoResult {
 // 只读 MYOB、只写我方员工资料；必须先预览再写入，写入前留快照，7 天内可整批撤销。
 
 /** 可同步的字段键；birthday / bank / super 为敏感字段。 */
-export type MyobSyncField = 'name' | 'phone' | 'email' | 'birthday' | 'gender' | 'address' | 'employmentType' | 'bank' | 'super'
+export type MyobSyncField =
+  | 'name' | 'phone' | 'email' | 'birthday' | 'gender' | 'address' | 'employmentType' | 'hireDate' | 'bank' | 'super'
 
 /** FillEmpty 只补空；Overwrite 以 MYOB 为准（有差异的也默认勾上）。 */
 export type MyobSyncMode = 'FillEmpty' | 'Overwrite'

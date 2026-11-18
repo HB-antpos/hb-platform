@@ -45,6 +45,7 @@ function mapEmployeeProfile<T extends EmployeeProfileSummaryDto>(raw: BackendEmp
     superannuationAccountNumber:
       asString(raw.superannuationAccountNumber) ?? asString(raw.superannuationAccount) ?? asString(raw.SuperannuationAccount),
     birthday: asString(raw.birthday) ?? asString(raw.Birthday),
+    hireDate: (asString(raw.hireDate) ?? asString(raw.HireDate))?.slice(0, 10),
     gender: (asString(raw.gender) ?? asString(raw.Gender)) as T['gender'],
     employmentType: (asString(raw.employmentType) ?? asString(raw.employeeType) ?? asString(raw.EmployeeType)) as T['employmentType'],
     avatarUrl: asString(raw.avatarUrl) ?? asString(raw.AvatarUrl),
@@ -68,6 +69,8 @@ function toBackendPayload(payload: SaveEmployeeProfilePayload) {
     superannuationCompanyCode: payload.superannuationCompanyCode,
     superannuationAccountNumber: payload.superannuationAccountNumber,
     birthday: payload.birthday,
+    // 不带（undefined）= 后端不动；null = 清空。JSON 序列化会丢掉 undefined、保留 null。
+    hireDate: payload.hireDate,
     gender: payload.gender,
     employmentType: payload.employmentType,
     avatarUrl: payload.avatarUrl,

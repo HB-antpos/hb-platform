@@ -340,6 +340,94 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task UpsertAdminAsync_HireDate_只在请求显式带了才写_旧客户端整份保存不会清掉_显式null才清空()
+        {
+            await SeedUsersAsync();
+            var admin = CreateService("admin-user", "admin");
+
+            // 第一次保存：资料还不存在，走插入路径；带时间的值只保留日期。
+            var created = await admin.UpsertAdminAsync("user-self", new EmployeeProfileUpsertDto
+            {
+                Phone = "0400000000",
+                HireDate = new DateTime(2026, 1, 12, 13, 30, 0),
+            });
+            Assert.True(created.Success, created.Message);
+            Assert.Equal(new DateTime(2026, 1, 12), created.Data!.HireDate);
+            Assert.Equal(new DateTime(2026, 1, 12), (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).HireDate);
+
+            // 旧版客户端（手机 App / 旧页面）不认识 HireDate：用真实 JSON 反序列化，请求里没有这个字段 → HasHireDate=false。
+            var oldClient = JsonSerializer.Deserialize<EmployeeProfileUpsertDto>("{\"Phone\":\"0499999999\"}")!;
+            Assert.False(oldClient.HasHireDate);
+            var preserved = await admin.UpsertAdminAsync("user-self", oldClient);
+            Assert.True(preserved.Success, preserved.Message);
+            var afterOldClient = await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self");
+            Assert.Equal("0499999999", afterOldClient.Phone);
+            Assert.Equal(new DateTime(2026, 1, 12), afterOldClient.HireDate);
+
+            // 更新路径用的是显式列清单：改一个新日期必须真的落库（漏加列的话这里会读回旧值）。
+            var changed = await admin.UpsertAdminAsync("user-self", new EmployeeProfileUpsertDto { Phone = "0499999999", HireDate = new DateTime(2025, 11, 3) });
+            Assert.True(changed.Success, changed.Message);
+            Assert.Equal(new DateTime(2025, 11, 3), (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).HireDate);
+
+            // 显式传 null 才是清空
+            var explicitNull = JsonSerializer.Deserialize<EmployeeProfileUpsertDto>("{\"Phone\":\"0499999999\",\"HireDate\":null}")!;
+            Assert.True(explicitNull.HasHireDate);
+            var cleared = await admin.UpsertAdminAsync("user-self", explicitNull);
+            Assert.True(cleared.Success, cleared.Message);
+            Assert.Null((await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).HireDate);
+        }
+
+        [Fact]
+        public async Task UpsertSelfAsync_员工自助保存不能改自己的入职日期_也不会清掉管理员填的()
+        {
+            await SeedUsersAsync();
+            await _db.Insertable(new EmployeeProfile
+            {
+                UserGUID = "user-self",
+                Phone = "0400000000",
+                HireDate = new DateTime(2026, 1, 12),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            // 想把自己的入职日期改晚（让自己的「满 6 个月」提前或延后）：被忽略
+            var tampered = await CreateService("user-self", "self_user").UpsertSelfAsync(new()
+            {
+                Phone = "0411111111",
+                HireDate = new DateTime(2020, 1, 1),
+            });
+            Assert.True(tampered.Success, tampered.Message);
+            var profile = await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self");
+            Assert.Equal("0411111111", profile.Phone);
+            Assert.Equal(new DateTime(2026, 1, 12), profile.HireDate);
+
+            // 显式传 null 同样不能清掉
+            var nullTry = JsonSerializer.Deserialize<EmployeeProfileUpsertDto>("{\"Phone\":\"0422222222\",\"HireDate\":null}")!;
+            var cleared = await CreateService("user-self", "self_user").UpsertSelfAsync(nullTry);
+            Assert.True(cleared.Success, cleared.Message);
+            Assert.Equal(new DateTime(2026, 1, 12), (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-self")).HireDate);
+        }
+
+        [Fact]
+        public async Task UpsertSelfAsync_资料行还不存在时_自助保存同样写不进入职日期()
+        {
+            // 插入路径是整行写入：没有「只有管理路径可写」的限制，员工第一次保存就能把自己填的入职日期写进库。
+            await SeedUsersAsync();
+            Assert.Null(await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-other"));
+
+            var created = await CreateService("user-other", "other_user").UpsertSelfAsync(new()
+            {
+                Phone = "0433333333",
+                HireDate = new DateTime(2020, 1, 1),
+            });
+
+            Assert.True(created.Success, created.Message);
+            var profile = await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "user-other");
+            Assert.Equal("0433333333", profile.Phone);
+            Assert.Null(profile.HireDate);
+        }
+
+        [Fact]
         public void EmployeeProfileUpsertDto_TracksJsonFieldPresence()
         {
             var omitted = JsonSerializer.Deserialize<EmployeeProfileUpsertDto>("{}");
