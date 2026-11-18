@@ -708,6 +708,23 @@ namespace BlazorApp.Api.Services.React
 
                     if (dto.Mode == SyncModeConstants.Overwrite)
                     {
+                        // 进价写入在 08-25 套装成本加锁重构时被误删，导致「同步进价」开关无效；
+                        // 父商品进价必须先在本条 UPDATE 落库，下方套装子项成本重算才能读到新值。
+                        if (dto.SyncPurchasePrice)
+                        {
+                            updateable.SetColumns(x =>
+                                x.PurchasePrice
+                                == SqlFunc
+                                    .Subqueryable<StoreRetailPrice>()
+                                    .Where(s =>
+                                        s.StoreCode == dto.SourceStoreCode
+                                        && s.ProductCode == x.ProductCode
+                                        && s.IsDeleted == false
+                                    )
+                                    .Select(s => s.PurchasePrice)
+                            );
+                        }
+
                         if (dto.SyncRetailPrice)
                         {
                             updateable.SetColumns(x =>
@@ -770,6 +787,22 @@ namespace BlazorApp.Api.Services.React
                     }
                     else if (dto.Mode == SyncModeConstants.OnlyUpdateNull)
                     {
+                        if (dto.SyncPurchasePrice)
+                        {
+                            updateable.SetColumns(x =>
+                                x.PurchasePrice
+                                == SqlFunc
+                                    .Subqueryable<StoreRetailPrice>()
+                                    .Where(s =>
+                                        s.StoreCode == dto.SourceStoreCode
+                                        && s.ProductCode == x.ProductCode
+                                        && s.IsDeleted == false
+                                    )
+                                    .Select(s => s.PurchasePrice)
+                            );
+                            updateable.Where(x => x.PurchasePrice == null);
+                        }
+
                         if (dto.SyncRetailPrice)
                         {
                             updateable.SetColumns(x =>

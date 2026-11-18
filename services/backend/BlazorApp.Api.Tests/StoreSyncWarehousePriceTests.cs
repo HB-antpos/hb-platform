@@ -50,6 +50,8 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
             typeof(DomesticProduct),
             typeof(Store),
             typeof(StoreRetailPrice),
+            typeof(ProductSetCode),
+            typeof(StoreMultiCodeProduct),
             typeof(ProductHqSyncOutbox)
         );
         SqliteWarehouseProductChangeHistoryTable.Create(_db);
@@ -78,10 +80,10 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
             InsertStore(store);
         }
 
-        InsertStorePrice("1001", 12m, 0.1m);
-        InsertStorePrice("1002", 10m, null);
-        InsertStorePrice("1003", 10m, null);
-        InsertStorePrice("1004", 10m, null);
+        InsertStorePrice("1001", 12m, 0.1m, purchase: 0.2m);
+        InsertStorePrice("1002", 10m, null, purchase: 75m);
+        InsertStorePrice("1003", 10m, null, purchase: null);
+        InsertStorePrice("1004", 10m, null, purchase: 75m);
     }
 
     public void Dispose()
@@ -413,6 +415,37 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
         Assert.True(new SyncToOtherStoresDto().CreatePriceTasks); // Web 入口默认也照旧建任务
     }
 
+    [Fact]
+    public async Task 同步进价_覆盖模式把来源分店进价写到勾选的分店()
+    {
+        // 回归：手机端「同步到其他分店」打开进价开关后，目标分店进价没有任何变化。
+        var dto = NewDto();
+        dto.SyncPurchasePrice = true;
+
+        var result = await CreateService().SyncToOtherStoresAsync(dto, "店长小王");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(0.2m, await StorePurchaseAsync("1002"));
+        Assert.Equal(0.2m, await StorePurchaseAsync("1003"));
+        Assert.Equal(75m, await StorePurchaseAsync("1004")); // 没勾选的分店不动
+        Assert.Equal(10m, await StoreRetailAsync("1002")); // 没勾零售价就不动零售价
+        Assert.Equal(10m, await WarehouseRetailAsync()); // 只同步进价不改仓库价
+    }
+
+    [Fact]
+    public async Task 同步进价_只补空值模式只填进价为空的分店()
+    {
+        var dto = NewDto();
+        dto.SyncPurchasePrice = true;
+        dto.Mode = SyncModeConstants.OnlyUpdateNull;
+
+        var result = await CreateService().SyncToOtherStoresAsync(dto, "店长小王");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(75m, await StorePurchaseAsync("1002")); // 已有进价保留
+        Assert.Equal(0.2m, await StorePurchaseAsync("1003")); // 空值补上
+    }
+
     // ---------------------------------------------------------------- 夹具
 
     private SyncToOtherStoresDto NewDto(bool retail = false, bool discount = false) =>
@@ -483,7 +516,7 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
         _db.Insertable(new Store { StoreCode = storeCode, StoreName = $"分店{storeCode}", IsActive = true })
             .ExecuteCommand();
 
-    private void InsertStorePrice(string storeCode, decimal retail, decimal? discount) =>
+    private void InsertStorePrice(string storeCode, decimal retail, decimal? discount, decimal? purchase = null) =>
         _db.Insertable(
                 new StoreRetailPrice
                 {
@@ -492,6 +525,7 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
                     StoreProductCode = storeCode + ProductCode,
                     StoreRetailPriceValue = retail,
                     DiscountRate = discount,
+                    PurchasePrice = purchase,
                     IsActive = true,
                 }
             )
@@ -507,6 +541,10 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
     private async Task<bool> StoreSpecialAsync(string storeCode) =>
         (await _db.Queryable<StoreRetailPrice>().FirstAsync(p => p.StoreCode == storeCode && p.ProductCode == ProductCode))
             .IsSpecialProduct;
+
+    private async Task<decimal?> StorePurchaseAsync(string storeCode) =>
+        (await _db.Queryable<StoreRetailPrice>().FirstAsync(p => p.StoreCode == storeCode && p.ProductCode == ProductCode))
+            .PurchasePrice;
 
     private async Task<decimal?> SuggestedDiscountAsync() =>
         (await _db.Queryable<ProductSuggestedDiscount>().FirstAsync(d => d.ProductCode == ProductCode))
