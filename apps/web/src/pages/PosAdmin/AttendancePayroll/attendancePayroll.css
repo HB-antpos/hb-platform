@@ -678,3 +678,40 @@
   flex-direction: column;
   gap: 6px;
 }
+
+/* ---------- 左侧分店列表（组件与样式来自排班考勤页的 StorePicker） ---------- */
+.atp-layout {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+}
+.atp-layout-main {
+  flex: 1;
+  min-width: 0;
+}
+.atp-store-aside {
+  width: 212px;
+  flex: none;
+  border-right: 1px solid #f0f0f0;
+  background: #fcfcfd;
+  border-radius: 8px 0 0 8px;
+}
+/* 列表跟着页面滚动吸顶，自己内部滚动 */
+.atp-store-aside .ssp {
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 140px);
+}
+.atp-store-locked {
+  color: #389e0d;
+  font-size: 12px;
+}
+.atp-store-open {
+  color: rgba(0, 0, 0, 0.45);
+}
+.atp-store-single {
+  margin: 0;
+  line-height: 30px;
+  padding-inline: 10px;
+  font-weight: 500;
+}

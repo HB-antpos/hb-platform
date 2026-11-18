@@ -509,6 +509,14 @@
       "period": "Pay period",
       "periodPlaceholder": "Choose a pay period",
       "weeksSuffix": " ({{count}} wk)",
+      "quick": {
+        "previousWeek": "Last week",
+        "currentWeek": "This week",
+        "nextWeek": "Next week",
+        "previousPeriod": "Previous period",
+        "currentPeriod": "This period",
+        "nextPeriod": "Next period"
+      },
       "loadFailed": "Failed to load the push preview",
       "retry": "Retry",
       "reload": "Refresh preview",

@@ -509,6 +509,14 @@
       "period": "工资周期",
       "periodPlaceholder": "选择工资周期",
       "weeksSuffix": "（{{count}} 周）",
+      "quick": {
+        "previousWeek": "上周",
+        "currentWeek": "本周",
+        "nextWeek": "下周",
+        "previousPeriod": "上一周期",
+        "currentPeriod": "本周期",
+        "nextPeriod": "下一周期"
+      },
       "loadFailed": "加载推送预览失败",
       "retry": "重试",
       "reload": "刷新预览",

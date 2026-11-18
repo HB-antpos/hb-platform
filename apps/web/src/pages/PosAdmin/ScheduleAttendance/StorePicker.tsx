@@ -1,12 +1,14 @@
 import { DoubleLeftOutlined, PushpinOutlined, SearchOutlined } from '@ant-design/icons'
 import { Input, Tooltip } from 'antd'
 import type { InputRef } from 'antd'
-import type { KeyboardEvent } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { buildStoreSections, moveActiveIndex } from './storePickerLogic'
+import { ALL_STORES_TOKEN, buildStoreSections, moveActiveIndex } from './storePickerLogic'
 import type { StorePickerOption } from './storePickerLogic'
+import './storePicker.css'
+import './registerScheduleAttendanceMessages'
 
 /**
  * 分店列表：侧栏（docked）和工具栏按钮弹出的弹层（floating）共用。
@@ -24,6 +26,11 @@ interface StorePickerProps {
   onToggleDock: () => void
   /** 弹层打开时自动聚焦搜索框。 */
   autoFocus?: boolean
+  /**
+   * 每家分店右侧的当期状态（键为分店代码，'*' 表示「全部分店」那一项）：
+   * 考勤审核 = 本期待审数，工时 / 工资表 = 是否已锁定。没有就不显示。
+   */
+  badges?: Readonly<Record<string, ReactNode>>
 }
 
 interface FlatItem {
@@ -35,7 +42,7 @@ interface FlatItem {
 
 const ALL_KEY = '__all__'
 
-export default function StorePicker({ variant, options, value, recent, allowAll, onSelect, onToggleDock, autoFocus }: StorePickerProps) {
+export default function StorePicker({ variant, options, value, recent, allowAll, onSelect, onToggleDock, autoFocus, badges }: StorePickerProps) {
   const { t } = useTranslation()
   const [keyword, setKeyword] = useState('')
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -86,6 +93,7 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
 
   const renderItem = (item: FlatItem, index: number) => {
     const selected = item.value === value
+    const badge = badges?.[item.value ?? ALL_STORES_TOKEN]
     return (
       <button
         key={item.key}
@@ -99,6 +107,7 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
       >
         <span className="ssp-item-name">{item.label}</span>
         {item.code ? <span className="ssp-item-code">{item.code}</span> : null}
+        {badge ? <span className="ssp-item-badge">{badge}</span> : null}
       </button>
     )
   }

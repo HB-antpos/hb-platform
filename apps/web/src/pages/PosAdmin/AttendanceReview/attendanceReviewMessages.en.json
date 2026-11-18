@@ -2,6 +2,8 @@
   "attendanceReview": {
     "title": "Attendance review",
     "reconciledHint": "Schedules for the last 14 days were reconciled on open; missed clock-outs and overtime added · {{time}}",
+    "outsidePending": "{{count}} more pending outside the selected dates",
+    "outsidePendingShow": "Show them",
     "allStores": "All managed stores",
     "searchPlaceholder": "Staff name",
     "tabs": {

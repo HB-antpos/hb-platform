@@ -55,7 +55,7 @@ import dayjs from 'dayjs'
 import 'dayjs/locale/en-gb'
 import isoWeek from 'dayjs/plugin/isoWeek'
 import { cloneElement, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, DragEvent, ReactElement } from 'react'
+import type { CSSProperties, DragEvent, ReactElement, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { useAttendancePendingCount } from '../../../layout/attendancePendingBadge'
@@ -150,6 +150,7 @@ import type { DragSource, DropVerdict } from './scheduleDragLogic'
 import LandscapeShell, { releaseLandscape, tryLockLandscape, usePhoneEnvironment } from './LandscapeShell'
 import { getShellMode, nextAutoDismissed } from './phoneShellLogic'
 import StorePicker from './StorePicker'
+import WeekPresetButtons from './WeekPresetButtons'
 import {
   ALL_STORES_TOKEN,
   STORAGE_KEYS,
@@ -492,6 +493,8 @@ export default function ScheduleAttendancePage() {
   const [syncingHolidays, setSyncingHolidays] = useState(false)
   const [deletedSchedulesOpen, setDeletedSchedulesOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  // 考勤审核：各店在所选周内的待审数（审核面板算好后回传），只在审核页签显示在分店侧栏上
+  const [reviewStoreCounts, setReviewStoreCounts] = useState<Readonly<Record<string, number>>>({})
   const [holidayForm] = Form.useForm<HolidayFormValues>()
   const [batchHolidayForm] = Form.useForm<BatchHolidayFormValues>()
   const [adjustmentForm] = Form.useForm<PunchAdjustmentFormValues>()
@@ -940,8 +943,8 @@ export default function ScheduleAttendancePage() {
     return () => observer.disconnect()
   }, [])
 
-  // 考勤审核页签自带分店筛选，不显示分店侧栏 / 按钮
-  const storeSidebarDocked = activeTab !== 'review' && shouldDockSidebar({
+  // 分店侧栏作用于所有页签（含考勤审核：审核面板改由侧栏选店，不再自带分店下拉）
+  const storeSidebarDocked = shouldDockSidebar({
     phone: phoneEnv.phone,
     storeCount: storeOptions.length,
     containerWidth: cardWidth,
@@ -995,6 +998,25 @@ export default function ScheduleAttendancePage() {
   }
 
   // 子标签上的待审数（侧栏「排班考勤」角标同源）；只在本页处于前台时拉取，避免保活缓存期间重复请求。
+  // 考勤审核与考勤记录共用一个日期范围；范围被清空时审核按本周看（审核面板必须有范围）
+  const reviewRange = useMemo<[Dayjs, Dayjs]>(
+    () => dateRange ?? [getIsoWeekStart(dayjs()), getIsoWeekEnd(dayjs())],
+    [dateRange],
+  )
+  // 侧栏角标只在考勤审核页签出现：各店本期待审数，「全部分店」一项是合计
+  const storeBadges = useMemo<Record<string, ReactNode> | undefined>(() => {
+    if (activeTab !== 'review') return undefined
+    const badges: Record<string, ReactNode> = {}
+    let total = 0
+    Object.entries(reviewStoreCounts).forEach(([code, count]) => {
+      if (count <= 0) return
+      total += count
+      badges[code] = <Badge count={count} overflowCount={99} size="small" />
+    })
+    if (total > 0) badges[ALL_STORES_TOKEN] = <Badge count={total} overflowCount={99} size="small" />
+    return badges
+  }, [activeTab, reviewStoreCounts])
+
   const pendingReviewCount = useAttendancePendingCount(
     canReviewTab && location.pathname === SCHEDULE_ATTENDANCE_PATH,
     location.pathname,
@@ -2717,7 +2739,7 @@ export default function ScheduleAttendancePage() {
   })
 
   // 侧栏收起时（13 寸屏、手机）：分店按钮放在卡片标题位置，点开是同一份列表；只有 1 家分店时只显示店名
-  const storeSwitcher = !storeSidebarDocked && storeOptions.length > 1 && activeTab !== 'review' ? (
+  const storeSwitcher = !storeSidebarDocked && storeOptions.length > 1 ? (
     <Popover
       trigger="click"
       placement="bottomLeft"
@@ -2734,6 +2756,7 @@ export default function ScheduleAttendancePage() {
           value={storeCode}
           recent={recentStores}
           allowAll
+          badges={storeBadges}
           onSelect={selectStore}
           onToggleDock={() => setSidebarDock('docked')}
         />
@@ -2831,10 +2854,14 @@ export default function ScheduleAttendancePage() {
           </span>
         </>
       ) : (
-        <DatePicker.RangePicker
-          value={dateRange}
-          onChange={(value) => setDateRange(value as [Dayjs, Dayjs] | null)}
-        />
+        <>
+          {/* 上周 / 本周 / 下周：与考勤审核共用同一个日期范围（切页签不丢） */}
+          <WeekPresetButtons value={dateRange} onChange={setDateRange} />
+          <DatePicker.RangePicker
+            value={dateRange}
+            onChange={(value) => setDateRange(value as [Dayjs, Dayjs] | null)}
+          />
+        </>
       )}
       <Tooltip title={t('common.search')}>
         <Button icon={<ReloadOutlined />} aria-label={t('common.search')} onClick={() => loadActiveTab(1)} />
@@ -3079,7 +3106,15 @@ export default function ScheduleAttendancePage() {
     ),
     children: (
       <Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', padding: 48 }}><Spin /></div>}>
-        <AttendanceReviewPanel embedded />
+        <AttendanceReviewPanel
+          embedded
+          shared={{
+            storeCode,
+            range: reviewRange,
+            onRangeChange: setDateRange,
+            onStorePendingCounts: setReviewStoreCounts,
+          }}
+        />
       </Suspense>
     ),
   } : null
@@ -3176,6 +3211,7 @@ export default function ScheduleAttendancePage() {
               value={storeCode}
               recent={recentStores}
               allowAll
+              badges={storeBadges}
               onSelect={selectStore}
               onToggleDock={() => setSidebarDock('floating')}
             />

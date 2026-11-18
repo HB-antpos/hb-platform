@@ -13,6 +13,7 @@ import {
   initialsOf,
   isBatchableCategory,
   pickNextApprovalGuid,
+  summarizePending,
   tierOfWorkDate,
 } from './reviewLogic'
 
@@ -144,3 +145,25 @@ assert.equal(initialsOf('Jack Nguyen'), 'JN')
 assert.equal(initialsOf(''), '?')
 
 console.log('reviewLogic.test.ts: ok')
+
+// ───── 待审概览：侧栏各店角标 + 范围外提示 ─────
+{
+  const pending = [
+    { storeCode: '1002', workDate: '2026-11-17' },
+    { storeCode: '1002', workDate: '2026-11-22T00:00:00' },
+    { storeCode: '1013', workDate: '2026-11-16' },
+    { storeCode: '1002', workDate: '2026-11-10' },
+    { storeCode: '1013', workDate: '2026-11-03' },
+    { storeCode: '1013', workDate: undefined },
+  ]
+  const all = summarizePending(pending, '2026-11-16', '2026-11-22')
+  assert.deepEqual(all.byStore, { '1002': 2, '1013': 2 }, '首尾日都算在内；没有工作日的算在范围内')
+  assert.equal(all.outside, 2)
+  assert.equal(all.outsideFrom, '2026-11-03')
+  assert.equal(all.outsideTo, '2026-11-10')
+  const one = summarizePending(pending, '2026-11-16', '2026-11-22', '1002')
+  assert.deepEqual(one.byStore, { '1002': 2, '1013': 2 }, '角标始终是各店的数，不受当前选店影响')
+  assert.equal(one.outside, 1, '范围外只数当前选的店')
+  assert.equal(one.outsideFrom, '2026-11-10')
+  assert.deepEqual(summarizePending([], '2026-11-16', '2026-11-22'), { byStore: {}, outside: 0, outsideFrom: undefined, outsideTo: undefined })
+}

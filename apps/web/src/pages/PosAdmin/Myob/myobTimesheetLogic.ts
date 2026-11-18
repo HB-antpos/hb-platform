@@ -362,6 +362,68 @@ export function buildPeriodOptions(
   return options
 }
 
+/** 纯日期加减天数（UTC 计算，不受本地时区影响）；日期非法返回 null。 */
+export function addIsoDays(value: string, days: number): string | null {
+  const parsed = parseIsoDate(value)
+  if (!parsed) {
+    return null
+  }
+  const moved = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day + days))
+  const month = String(moved.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(moved.getUTCDate()).padStart(2, '0')
+  return `${moved.getUTCFullYear()}-${month}-${day}`
+}
+
+export type QuickPeriodKind = 'previous' | 'current' | 'next'
+
+export interface QuickPeriod {
+  kind: QuickPeriodKind
+  /** 周期起始日 yyyy-MM-dd，可直接作为预览的 periodStart。 */
+  start: string
+  end: string
+  /** 按钮文案键（字面量，供页面文案契约测试扫描）：一周一期叫「上周 / 本周 / 下周」，否则叫「上一周期…」。 */
+  labelKey: string
+}
+
+const QUICK_PERIOD_LABEL_KEYS: Readonly<Record<'week' | 'period', Readonly<Record<QuickPeriodKind, string>>>> = {
+  week: {
+    previous: 'myob.push.quick.previousWeek',
+    current: 'myob.push.quick.currentWeek',
+    next: 'myob.push.quick.nextWeek',
+  },
+  period: {
+    previous: 'myob.push.quick.previousPeriod',
+    current: 'myob.push.quick.currentPeriod',
+    next: 'myob.push.quick.nextPeriod',
+  },
+}
+
+/**
+ * 「上周 / 本周 / 下周」快捷周期。
+ * 后端 periods 是「当前期在前」的最近几期，所以第一项就是本周期；上一期 / 下一期按周期长度（weeks × 7 天）前后推。
+ * 下一期还没开始、不在 periods 里，但后端接受任何合法的周期起始日，预览里只会是空数据 / 未锁定。
+ */
+export function buildQuickPeriods(preview: Pick<MyobTimesheetPreview, 'periods' | 'weeks'> | null): QuickPeriod[] {
+  const current = preview?.periods[0]
+  if (!preview || !current) {
+    return []
+  }
+  const weeks = preview.weeks > 0 ? preview.weeks : getPeriodWeeks(current)
+  const span = weeks * 7
+  const previousStart = addIsoDays(current.start, -span)
+  const nextStart = addIsoDays(current.start, span)
+  const currentEnd = addIsoDays(current.start, span - 1)
+  if (!previousStart || !nextStart || !currentEnd) {
+    return []
+  }
+  const labels = QUICK_PERIOD_LABEL_KEYS[weeks === 1 ? 'week' : 'period']
+  return [
+    { kind: 'previous', start: previousStart, end: addIsoDays(previousStart, span - 1) ?? current.start, labelKey: labels.previous },
+    { kind: 'current', start: current.start, end: currentEnd, labelKey: labels.current },
+    { kind: 'next', start: nextStart, end: addIsoDays(nextStart, span - 1) ?? nextStart, labelKey: labels.next },
+  ]
+}
+
 // ───────────────────────── 推送预览：行状态 / 拦截原因 ─────────────────────────
 
 /** 拦截码 → 状态列短标签（字面量键）。 */

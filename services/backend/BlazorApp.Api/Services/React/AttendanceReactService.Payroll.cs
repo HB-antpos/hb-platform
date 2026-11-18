@@ -1109,16 +1109,29 @@ namespace BlazorApp.Api.Services.React
             var storeToday = ConvertUtcToStoreLocal(
                 _timeProvider.GetUtcNow().UtcDateTime,
                 await ResolveStoreTimeZoneAsync(storeCode, null)).Date;
+            // 按周期看时薪：AsOf = 所选工资周期的起始日，取那天适用的记录；不传仍按今天（MYOB 同步等调用方不受影响）。
+            var asOf = query.AsOf?.Date ?? storeToday;
             var rates = userGuids.Count == 0
                 ? new List<EmployeePayRate>()
                 : await _db.Queryable<EmployeePayRate>().Where(item => userGuids.Contains(item.UserGuid)).ToListAsync();
             var result = await BuildPayRateDtosAsync(userGuids, names, storeToday, userGuid =>
             {
                 var own = rates.Where(item => item.UserGuid.Equals(userGuid, StringComparison.OrdinalIgnoreCase)).ToList();
-                // 当前有效记录；还没生效的未来记录不显示为当前。
-                return own.Where(item => item.EffectiveFrom.Date <= storeToday).OrderByDescending(item => item.EffectiveFrom).FirstOrDefault()
+                // asOf 当天有效的记录；还没生效的未来记录不显示为当前（都在未来时退回最早一条，便于看到已录入的价）。
+                return own.Where(item => item.EffectiveFrom.Date <= asOf).OrderByDescending(item => item.EffectiveFrom).FirstOrDefault()
                     ?? own.OrderBy(item => item.EffectiveFrom).FirstOrDefault();
             });
+            foreach (var dto in result)
+            {
+                // 「即将变化」：所显示那条之后最近的一条已录入记录（周期内或之后生效）
+                var shownFrom = dto.EffectiveFrom?.Date ?? asOf;
+                dto.NextEffectiveFrom = rates
+                    .Where(item => item.UserGuid.Equals(dto.UserGuid, StringComparison.OrdinalIgnoreCase)
+                        && item.EffectiveFrom.Date > asOf && item.EffectiveFrom.Date > shownFrom)
+                    .OrderBy(item => item.EffectiveFrom)
+                    .Select(item => (DateTime?)item.EffectiveFrom.Date)
+                    .FirstOrDefault();
+            }
             if (query.PublicHolidayMismatchOnly)
             {
                 result = result.Where(item => item.PublicHolidayRateMismatch).ToList();
@@ -1126,6 +1139,46 @@ namespace BlazorApp.Api.Services.React
             return ApiResponse<List<AttendancePayRateDto>>.OK(result
                 .OrderByDescending(item => item.IsManager)
                 .ThenBy(item => item.UserName, StringComparer.OrdinalIgnoreCase)
+                .ToList());
+        }
+
+        /// <summary>
+        /// 分店侧栏用：一批分店在所选工资周期是否已提交锁定（与 IsPayPeriodLockedAsync 同一判断：已提交的期与周期有重叠即算锁定）。
+        /// 没有权限的分店直接略过，不整批报错——侧栏只是提示，不能因为一家店没权限就全部不显示。
+        /// </summary>
+        public async Task<ApiResponse<List<AttendancePayPeriodStoreStatusDto>>> GetPayPeriodStatusesAsync(AttendancePayPeriodStatusQueryDto query)
+        {
+            if (query.PeriodStart is null)
+            {
+                return ApiResponse<List<AttendancePayPeriodStoreStatusDto>>.Error("周期起始日不能为空", "PERIOD_REQUIRED");
+            }
+            var scope = await _scopeService.GetScopeAsync();
+            if (!scope.IsAllowed)
+            {
+                return ApiResponse<List<AttendancePayPeriodStoreStatusDto>>.Error(scope.Message, "FORBIDDEN");
+            }
+            var codes = (query.StoreCodes ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(scope.CanAccessStoreCode)
+                .Take(200)
+                .ToList();
+            if (codes.Count == 0)
+            {
+                return ApiResponse<List<AttendancePayPeriodStoreStatusDto>>.OK(new List<AttendancePayPeriodStoreStatusDto>());
+            }
+            var from = query.PeriodStart.Value.Date;
+            var weeks = query.Weeks is 2 ? 2 : 1;
+            var to = from.AddDays(weeks * 7 - 1);
+            var submitted = await _db.Queryable<AttendancePayPeriod>()
+                .Where(item => codes.Contains(item.StoreCode) && item.Status == PayPeriodStatusSubmitted && item.PeriodStart <= to)
+                .ToListAsync();
+            var locked = submitted
+                .Where(item => item.PeriodStart.Date.AddDays(Math.Max(1, item.Weeks) * 7) > from)
+                .Select(item => item.StoreCode)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return ApiResponse<List<AttendancePayPeriodStoreStatusDto>>.OK(codes
+                .Select(code => new AttendancePayPeriodStoreStatusDto { StoreCode = code, Locked = locked.Contains(code) })
                 .ToList());
         }
 

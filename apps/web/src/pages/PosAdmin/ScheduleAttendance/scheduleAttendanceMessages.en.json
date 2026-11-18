@@ -300,6 +300,9 @@
       },
       "weekNav": {
         "thisWeek": "This week",
+        "lastWeek": "Last week",
+        "nextWeek": "Next week",
+        "presetsAria": "Quick weeks",
         "range": "Week {{week}}, {{year}} · {{start}} – {{end}}",
         "later": "{{count}} wk ahead",
         "earlier": "{{count}} wk ago"

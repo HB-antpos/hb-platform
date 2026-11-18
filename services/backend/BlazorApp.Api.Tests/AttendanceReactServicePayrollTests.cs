@@ -455,6 +455,73 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task 时薪表_按周期取适用时薪_并给出下一条生效日()
+        {
+            await SeedPayrollStoreAsync();
+            Assert.True((await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 7, 1)))).Success);
+            Assert.True((await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 10, 19), weekday: 31m))).Success);
+            Assert.True((await Manager().CreatePayRateAsync(TransferRateRequest(new DateTime(2026, 12, 1), weekday: 33m))).Success);
+
+            // 10-05 那一周：适用 07-01 的记录，下一条是 10-19
+            var early = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", AsOf = new DateTime(2026, 10, 5) });
+            var earlyRow = early.Data!.Single(item => item.UserGuid == "staff-user");
+            Assert.Equal(new DateTime(2026, 7, 1), earlyRow.EffectiveFrom);
+            Assert.Equal(30m, earlyRow.TransferWeekdayRate);
+            Assert.Equal(new DateTime(2026, 10, 19), earlyRow.NextEffectiveFrom);
+
+            // 生效日当天起算适用；之后最近的是 12-01
+            var onDay = (await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", AsOf = new DateTime(2026, 10, 19) }))
+                .Data!.Single(item => item.UserGuid == "staff-user");
+            Assert.Equal(31m, onDay.TransferWeekdayRate);
+            Assert.Equal(new DateTime(2026, 12, 1), onDay.NextEffectiveFrom);
+
+            // 不传 AsOf 仍按今天（10-20），与原行为一致
+            var today = (await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI" }))
+                .Data!.Single(item => item.UserGuid == "staff-user");
+            Assert.Equal(31m, today.TransferWeekdayRate);
+
+            // 最后一条之后没有下一条
+            var late = (await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI", AsOf = new DateTime(2026, 12, 7) }))
+                .Data!.Single(item => item.UserGuid == "staff-user");
+            Assert.Equal(33m, late.TransferWeekdayRate);
+            Assert.Null(late.NextEffectiveFrom);
+        }
+
+        [Fact]
+        public async Task 分店锁定状态_与周期重叠的已提交期算锁定_没权限的分店略过()
+        {
+            await SeedPayrollStoreAsync();
+            await _db.Insertable(new[]
+            {
+                // 两周期 10-05 ~ 10-18 已提交
+                new AttendancePayPeriod { StoreCode = "BRI", PeriodStart = new DateTime(2026, 10, 5), Weeks = 2, Status = "Submitted" },
+                // 已解锁的期不算
+                new AttendancePayPeriod { StoreCode = "BRI", PeriodStart = new DateTime(2026, 10, 19), Weeks = 1, Status = "Open" },
+            }).ExecuteCommandAsync();
+
+            async Task<bool?> LockedAsync(DateTime start, int weeks)
+            {
+                var result = await Manager().GetPayPeriodStatusesAsync(new AttendancePayPeriodStatusQueryDto
+                {
+                    StoreCodes = "BRI,NOT-MINE",
+                    PeriodStart = start,
+                    Weeks = weeks,
+                });
+                Assert.True(result.Success, result.Message);
+                Assert.DoesNotContain(result.Data!, item => item.StoreCode == "NOT-MINE");
+                return result.Data!.SingleOrDefault(item => item.StoreCode == "BRI")?.Locked;
+            }
+
+            Assert.True(await LockedAsync(new DateTime(2026, 10, 12), 1), "一周期落在已提交的两周期后半段");
+            Assert.False(await LockedAsync(new DateTime(2026, 10, 19), 1), "Open 的期不算锁定");
+            Assert.True(await LockedAsync(new DateTime(2026, 9, 28), 2), "两周期与已提交期有重叠");
+            Assert.False(await LockedAsync(new DateTime(2026, 9, 21), 2), "9-21 ~ 10-04 与 10-05 起的期不重叠");
+
+            var missing = await Manager().GetPayPeriodStatusesAsync(new AttendancePayPeriodStatusQueryDto { StoreCodes = "BRI" });
+            Assert.Equal("PERIOD_REQUIRED", missing.ErrorCode);
+        }
+
+        [Fact]
         public async Task 时薪表_公假转账价请求带了就按带的值保存_没带默认等于平日价_全现金存空()
         {
             await SeedPayrollStoreAsync();

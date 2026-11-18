@@ -3,6 +3,10 @@
     "title": "工时与工资",
     "selectStore": "选择分店",
     "searchPlaceholder": "员工姓名",
+    "storeList": {
+      "locked": "本期已锁定",
+      "open": "未锁"
+    },
     "exportExcel": "导出 Excel",
     "reviewedOnly": "只计已审核",
     "includePending": "含待审",
@@ -192,9 +196,11 @@
         "cash": "现金时薪 $",
         "allowance": "补贴 / 期",
         "minimum": "最低时薪（自填）",
-        "effective": "生效"
+        "effective": "生效",
+        "next": "之后变更"
       },
       "notFilled": "未填",
+      "nextFrom": "{{date}} 起",
       "minorMissing": "{{age}} 岁未填",
       "belowMinimum": "偏低",
       "birthdayHint": "{{name}} {{date}} 已满 {{age}} 岁，时薪还是 {{previous}} 岁时设的，请核对后填新的生效记录。",

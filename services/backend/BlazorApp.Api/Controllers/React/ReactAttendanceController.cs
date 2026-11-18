@@ -326,6 +326,12 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> GetPayrollPay([FromQuery] AttendancePayrollQueryDto query) =>
             Ok(await _service.GetPayrollPayAsync(query));
 
+        // 分店侧栏的「🔒 / 未锁」：与工时页同一权限（看得到工时页就看得到锁定状态）
+        [HttpGet("payroll/period-statuses")]
+        [Authorize(Policy = Permissions.Attendance.Punch.ViewManagedStore)]
+        public async Task<IActionResult> GetPayPeriodStatuses([FromQuery] AttendancePayPeriodStatusQueryDto query) =>
+            Ok(await _service.GetPayPeriodStatusesAsync(query));
+
         [HttpGet("payroll/rates")]
         [Authorize(Policy = Permissions.Attendance.Payroll.View)]
         public async Task<IActionResult> GetPayRates([FromQuery] AttendancePayRateQueryDto query) =>

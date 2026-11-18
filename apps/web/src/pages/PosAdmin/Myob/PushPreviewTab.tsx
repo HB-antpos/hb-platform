@@ -1,5 +1,5 @@
 import { DownloadOutlined, HistoryOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
-import { Alert, Button, Checkbox, Empty, Grid, Select, Skeleton, Tag, Tooltip } from 'antd'
+import { Alert, Button, Checkbox, Empty, Grid, Radio, Select, Skeleton, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -14,6 +14,7 @@ import PushDetailDrawer from './PushDetailDrawer'
 import { canOpenPushConfirm, getPushableUserGuids, getPushStateView, isPushableRow, reconcileSelection } from './myobPushLogic'
 import {
   buildPeriodOptions,
+  buildQuickPeriods,
   buildPreviewCsv,
   buildPreviewCsvFileName,
   buildReadinessCards,
@@ -216,6 +217,8 @@ export default function PushPreviewTab({
     value: period.start,
     label: `${formatPeriodRange(period.start, period.end)}${t('myob.push.weeksSuffix', { count: getPeriodWeeks(period) })}`,
   }))
+  // 上周 / 本周 / 下周：当前显示的周期恰好是其中之一时高亮；选了更早的周期则都不亮
+  const quickPeriods = useMemo(() => buildQuickPeriods(preview), [preview])
   const hintGroups = useMemo(() => groupHints(preview?.hints ?? []), [preview])
   const readinessCards = useMemo(() => (preview ? buildReadinessCards(preview) : []), [preview])
   const checkedAlready = preview?.readiness.myobChecked === true
@@ -389,6 +392,21 @@ export default function PushPreviewTab({
             <label htmlFor="myob-push-period-select" className="myob-muted">
               {t('myob.push.period')}
             </label>
+            {quickPeriods.length > 0 ? (
+              <Radio.Group
+                optionType="button"
+                buttonStyle="solid"
+                size="small"
+                aria-label={t('myob.push.period')}
+                value={quickPeriods.some((item) => item.start === preview?.periodStart) ? preview?.periodStart : null}
+                disabled={!selectedGuid}
+                onChange={(event) => handlePeriodChange(String(event.target.value))}
+                options={quickPeriods.map((item) => ({
+                  value: item.start,
+                  label: t(item.labelKey),
+                }))}
+              />
+            ) : null}
             <Select
               id="myob-push-period-select"
               className="myob-push-period-select"

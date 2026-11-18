@@ -42,6 +42,7 @@ import {
   createManagedAttendancePunchAdjustment,
   getAttendanceRecords,
   previewManagedAttendancePunchAdjustment,
+  getAttendanceApprovals,
 } from '../../../services/scheduleAttendanceService'
 import { useAuthStore } from '../../../store/auth'
 import type { AttendanceApprovalDayPreviewDto } from '../../../types/attendancePayroll'
@@ -53,6 +54,8 @@ import type {
 import { formatHours } from '../AttendancePayroll/payrollLogic'
 import { useAttendanceStores } from '../AttendancePayroll/useAttendanceStores'
 import { validateOvertimeApproval } from '../ScheduleAttendance/attendanceRecordLogic'
+import WeekPresetButtons from '../ScheduleAttendance/WeekPresetButtons'
+import { weekPresetRange } from '../ScheduleAttendance/weekPresetLogic'
 import messagesEn from './attendanceReviewMessages.en.json'
 import messagesZh from './attendanceReviewMessages.zh.json'
 import {
@@ -70,7 +73,9 @@ import {
   isSelfRequest,
   isSystemGenerated,
   pickNextApprovalGuid,
+  summarizePending,
   tierOfWorkDate,
+  type PendingOverview,
   type ReviewCategory,
 } from './reviewLogic'
 import './attendanceReview.css'
@@ -96,20 +101,40 @@ const timeOf = (value?: string) => (value ? dayjs(value).format('HH:mm') : '--')
 /** 需要看当天打卡的审批类型：详情里画时间线、推算批准后工时。 */
 const DAY_RECORD_SOURCES = new Set(['PunchAdjustment', 'MissingClockOut', 'Overtime', 'MealBreak', 'Punch'])
 
+/** 嵌在排班考勤页时由外层统一提供的筛选：分店来自左侧分店列表，日期范围与「考勤记录」共用。 */
+export interface AttendanceReviewSharedFilters {
+  /** undefined = 全部管理分店。 */
+  storeCode?: string
+  range: [Dayjs, Dayjs]
+  onRangeChange: (range: [Dayjs, Dayjs]) => void
+  /** 各店在所选范围内的待审数，外层显示在分店侧栏上。 */
+  onStorePendingCounts?: (counts: Record<string, number>) => void
+}
+
 interface AttendanceReviewPageProps {
   /** 嵌在排班考勤页的子标签里时为 true：外层已有页面标题，这里不再重复渲染大标题。 */
   embedded?: boolean
+  /** 有值时分店与日期由外层控制，不再显示本页自带的分店下拉。 */
+  shared?: AttendanceReviewSharedFilters
 }
 
-export default function AttendanceReviewPage({ embedded = false }: AttendanceReviewPageProps = {}) {
+export default function AttendanceReviewPage({ embedded = false, shared }: AttendanceReviewPageProps = {}) {
   const { t } = useTranslation()
   const access = useAuthStore((state) => state.access)
   const currentUser = useAuthStore((state) => state.currentUser)
   const currentUserGuid = currentUser?.userGUID
   const canReviewOwn = access.canReviewOwnAttendance
-  const { storeOptions, storeCode, setStoreCode } = useAttendanceStores(false)
+  const { storeOptions, storeCode: ownStoreCode, setStoreCode } = useAttendanceStores(false)
   const [view, setView] = useState<AttendanceReviewView>('pending')
-  const [range, setRange] = useState<[Dayjs, Dayjs]>([dayjs().subtract(14, 'day'), dayjs().add(7, 'day')])
+  // 默认看本周（周一到周日），与考勤记录、工时、工资表的「本周」一致；范围外的待审单独提示
+  const [ownRange, setOwnRange] = useState<[Dayjs, Dayjs]>(() => {
+    const week = weekPresetRange('current', dayjs().format('YYYY-MM-DD'))
+    return week ? [dayjs(week[0]), dayjs(week[1])] : [dayjs().subtract(14, 'day'), dayjs().add(7, 'day')]
+  })
+  const storeCode = shared ? shared.storeCode : ownStoreCode
+  const range = shared ? shared.range : ownRange
+  const setRange = shared ? shared.onRangeChange : setOwnRange
+  const [pendingOverview, setPendingOverview] = useState<PendingOverview | null>(null)
   const [keywordInput, setKeywordInput] = useState('')
   const [keyword, setKeyword] = useState('')
   const [items, setItems] = useState<AttendanceApprovalDto[]>([])
@@ -161,6 +186,29 @@ export default function AttendanceReviewPage({ embedded = false }: AttendanceRev
   useEffect(() => {
     void load()
   }, [load])
+
+  // 全部待审（不限日期、不限分店）：算侧栏各店角标与「范围外还有 N 条」。走普通列表接口，不触发对账。
+  const rangeFrom = range[0].format('YYYY-MM-DD')
+  const rangeTo = range[1].format('YYYY-MM-DD')
+  const onStorePendingCounts = shared?.onStorePendingCounts
+  useEffect(() => {
+    if (view !== 'pending') return undefined
+    let cancelled = false
+    void getAttendanceApprovals({ reviewStatus: 'Pending', page: 1, pageSize: 500 } as Parameters<typeof getAttendanceApprovals>[0])
+      .then((result) => {
+        if (cancelled) return
+        const overview = summarizePending(result.items, rangeFrom, rangeTo, storeCode)
+        setPendingOverview(overview)
+        onStorePendingCounts?.(overview.byStore)
+      })
+      .catch(() => {
+        // 只是提示，失败不打扰审核
+        if (!cancelled) setPendingOverview(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [onStorePendingCounts, pendingTotal, rangeFrom, rangeTo, storeCode, view])
 
   useEffect(() => {
     // 本人审批记录页签只给持 ReviewSelf 的人
@@ -879,16 +927,19 @@ export default function AttendanceReviewPage({ embedded = false }: AttendanceRev
           ) : null}
         </div>
         <Space wrap>
-          <Select
-            allowClear
-            showSearch
-            optionFilterProp="label"
-            style={{ minWidth: 180 }}
-            placeholder={t('attendanceReview.allStores')}
-            options={storeOptions}
-            value={storeCode}
-            onChange={setStoreCode}
-          />
+          {shared ? null : (
+            <Select
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              style={{ minWidth: 180 }}
+              placeholder={t('attendanceReview.allStores')}
+              options={storeOptions}
+              value={storeCode}
+              onChange={setStoreCode}
+            />
+          )}
+          <WeekPresetButtons value={range} onChange={setRange} />
           <DatePicker.RangePicker
             allowClear={false}
             value={range}
@@ -910,6 +961,28 @@ export default function AttendanceReviewPage({ embedded = false }: AttendanceRev
           />
         </Space>
       </div>
+
+      {view === 'pending' && pendingOverview && pendingOverview.outside > 0 && pendingOverview.outsideFrom ? (
+        <Alert
+          type="warning"
+          showIcon
+          className="atr-outside-alert"
+          message={t('attendanceReview.outsidePending', { count: pendingOverview.outside })}
+          action={(
+            <Button
+              size="small"
+              onClick={() => {
+                // 把范围扩到能看见所有待审：从最早一条到「当前范围末 / 最晚一条」中较晚者
+                const from = dayjs(pendingOverview.outsideFrom)
+                const toCandidate = pendingOverview.outsideTo ? dayjs(pendingOverview.outsideTo) : range[1]
+                setRange([from.isBefore(range[0]) ? from : range[0], toCandidate.isAfter(range[1]) ? toCandidate : range[1]])
+              }}
+            >
+              {t('attendanceReview.outsidePendingShow')}
+            </Button>
+          )}
+        />
+      ) : null}
 
       <Tabs activeKey={view} items={tabItems} onChange={(key) => {
         setView(key as AttendanceReviewView)

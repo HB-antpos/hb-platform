@@ -61,6 +61,7 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendancePayrollHoursDto>> GetPayrollHoursAsync(AttendancePayrollQueryDto query);
         Task<ApiResponse<AttendancePayrollPayDto>> GetPayrollPayAsync(AttendancePayrollQueryDto query);
         Task<ApiResponse<List<AttendancePayRateDto>>> GetPayRatesAsync(AttendancePayRateQueryDto query);
+        Task<ApiResponse<List<AttendancePayPeriodStoreStatusDto>>> GetPayPeriodStatusesAsync(AttendancePayPeriodStatusQueryDto query);
         Task<ApiResponse<List<AttendancePayRateDto>>> GetPayRateHistoryAsync(string userGuid, string? storeCode);
         Task<ApiResponse<AttendancePayRateDto>> CreatePayRateAsync(CreateEmployeePayRateDto request);
         Task<ApiResponse<AttendancePayPeriodNoteDto>> UpsertPayPeriodNoteAsync(UpsertAttendancePayPeriodNoteDto request);
