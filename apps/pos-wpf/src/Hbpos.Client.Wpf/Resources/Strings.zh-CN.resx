@@ -2339,6 +2339,18 @@
   <data name="history.held.deletePending" xml:space="preserve">
     <value>删除尚未完成，请再次点击“删除”重试。</value>
   </data>
+  <data name="history.keywordFilterLabel" xml:space="preserve">
+    <value>订单查询 · 筛选中</value>
+  </data>
+  <data name="history.keywordFilterBanner" xml:space="preserve">
+    <value>已按「{0}」筛选，共 {1} 条</value>
+  </data>
+  <data name="history.keywordFilterEmpty" xml:space="preserve">
+    <value>没有匹配「{0}」的记录</value>
+  </data>
+  <data name="history.keywordFilterClear" xml:space="preserve">
+    <value>清除筛选</value>
+  </data>
   <data name="history.held.remoteUnavailable" xml:space="preserve">
     <value>远程共享挂单暂不可用：{0}</value>
   </data>

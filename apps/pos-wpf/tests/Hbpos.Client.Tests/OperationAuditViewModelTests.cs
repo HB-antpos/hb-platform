@@ -184,7 +184,7 @@ public sealed class OperationAuditViewModelTests
             operationAuditLogger: logger);
 
         await viewModel.HoldOrderCommand.ExecuteAsync(null);
-        await viewModel.RecallOrderCommand.ExecuteAsync(null);
+        await viewModel.OpenHistoryCommand.ExecuteAsync(null);
         await viewModel.PrintLastReceiptCommand.ExecuteAsync(null);
         await viewModel.OpenCashDrawerCommand.ExecuteAsync(null);
 

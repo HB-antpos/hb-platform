@@ -123,7 +123,8 @@ public sealed class PosTerminalRemoteLookupViewModelTests
     [InlineData("returns")]
     public async Task Leaving_for_hold_recall_or_returns_while_pending_discards_result(string navigation)
     {
-        using var harness = new TerminalHarness();
+        // 「recall」= 今天有挂单时点「历史」会进挂单页换单，须丢弃在途补查；挂单数给 1 让它走这条路径。
+        using var harness = new TerminalHarness(heldOrderCount: 1);
         harness.Cart.AddItem(CreateItem("SKU-C4-V11", "Existing Tea", "9305011", 2m));
 
         harness.Scan("9305012");
@@ -134,7 +135,7 @@ public sealed class PosTerminalRemoteLookupViewModelTests
                 await ((IAsyncRelayCommand)harness.ViewModel.HoldOrderCommand).ExecuteAsync(null);
                 break;
             case "recall":
-                await ((IAsyncRelayCommand)harness.ViewModel.RecallOrderCommand).ExecuteAsync(null);
+                await ((IAsyncRelayCommand)harness.ViewModel.OpenHistoryCommand).ExecuteAsync(null);
                 break;
             default:
                 await ((IAsyncRelayCommand)harness.ViewModel.OpenReturnsCommand).ExecuteAsync(null);

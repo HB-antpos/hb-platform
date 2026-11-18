@@ -60,10 +60,12 @@ public sealed class TransactionHistoryViewLayoutTests
             "TransactionHistoryView.xaml"));
         XNamespace presentation = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
 
-        var orderIdRun = Assert.Single(view.Descendants(presentation + "Run").Where(element =>
-            ((string?)element.Attribute("Text"))?.Contains("Binding DisplayOrderId", StringComparison.Ordinal) == true));
+        // 订单号现在经 KeywordHighlight 附加属性显示（关键词命中时标黄）；只读属性仍必须是 OneWay 绑定。
+        var orderIdBinding = Assert.Single(view.Descendants().Attributes().Where(attribute =>
+            attribute.Name.LocalName == "KeywordHighlight.Text" &&
+            attribute.Value.Contains("Binding DisplayOrderId", StringComparison.Ordinal)));
 
-        Assert.Equal("{Binding DisplayOrderId, Mode=OneWay}", (string?)orderIdRun.Attribute("Text"));
+        Assert.Equal("{Binding DisplayOrderId, Mode=OneWay, StringFormat='#{0}'}", orderIdBinding.Value);
     }
 
     [Fact]
@@ -469,7 +471,8 @@ public sealed class TransactionHistoryViewLayoutTests
         var header = Assert.Single(view.Descendants(presentation + "Grid").Where(element =>
             (string?)element.Attribute(x + "Name") == "HistoryHeaderRegion"));
         var headerRows = Assert.Single(header.Elements(presentation + "Grid.RowDefinitions"));
-        Assert.Equal(2, headerRows.Elements(presentation + "RowDefinition").Count());
+        // 第 3 行是关键词筛选条（仅上一次查询带关键词时显示）。
+        Assert.Equal(3, headerRows.Elements(presentation + "RowDefinition").Count());
 
         var sourceNavigation = Assert.Single(header.Descendants(presentation + "Border").Where(element =>
             (string?)element.Attribute(x + "Name") == "HistorySourceNavigation"));

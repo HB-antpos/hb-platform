@@ -1948,7 +1948,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _screenNavigator.ShowSpecialProductsAsync,
             onHoldOrderAsync: _screenNavigator.SuspendCurrentOrderAsync,
             onRecallOrderAsync: _screenNavigator.ShowSuspendedHistoryAsync,
-            onOpenHistoryAsync: _screenNavigator.ShowHistoryAsync,
+            onOpenHistoryAsync: _screenNavigator.ShowLocalHistoryAsync,
             onOpenDailyCloseAsync: _screenNavigator.ShowDailyCloseAsync,
             onOpenSettingsAsync: _screenNavigator.ShowSettingsAsync,
             onOpenCustomerDisplay: _screenNavigator.ShowCustomerDisplay,

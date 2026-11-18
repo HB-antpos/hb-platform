@@ -810,6 +810,10 @@
   <data name="history.held.deleteFailed" xml:space="preserve"><value>The held sale was not deleted.</value></data>
   <data name="history.held.deleteOnlineRequired" xml:space="preserve"><value>This shared held sale must be cancelled while online.</value></data>
   <data name="history.held.deletePending" xml:space="preserve"><value>Deletion is pending; choose Delete to retry.</value></data>
+  <data name="history.keywordFilterLabel" xml:space="preserve"><value>ORDER LOOKUP · FILTERING</value></data>
+  <data name="history.keywordFilterBanner" xml:space="preserve"><value>Filtered by "{0}" · {1} found</value></data>
+  <data name="history.keywordFilterEmpty" xml:space="preserve"><value>No records match "{0}"</value></data>
+  <data name="history.keywordFilterClear" xml:space="preserve"><value>Clear filter</value></data>
   <data name="history.held.remoteUnavailable" xml:space="preserve"><value>Remote held orders unavailable: {0}</value></data>
   <data name="history.held.unavailable" xml:space="preserve"><value>Shared held orders are not configured on this terminal.</value></data>
   <data name="history.installment.paid" xml:space="preserve"><value>Paid</value></data>

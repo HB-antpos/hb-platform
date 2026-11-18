@@ -527,7 +527,7 @@ public sealed class PosTerminalViewLayoutTests
                 "{Binding OpenSpecialProductsCommand}",
                 "{Binding OpenReturnsCommand}",
                 "{Binding HoldOrderCommand}",
-                "{Binding RecallOrderCommand}",
+                "{Binding OpenHistoryCommand}",
                 // 钱箱格：开启现金进出且已接入时打开钱箱面板，否则退回「开钱箱」。
                 "{Binding CashDrawerTileCommand}",
                 "{Binding PrintLastReceiptCommand}",
@@ -729,7 +729,7 @@ public sealed class PosTerminalViewLayoutTests
 
         // Recall Order：圆形数量角标绑定 HeldOrderBadgeText / IsHeldOrderBadgeVisible，缺失时折叠不显示。
         var recall = Assert.Single(view.Descendants(presentation + "Button").Where(button =>
-            (string?)button.Attribute("Command") == "{Binding RecallOrderCommand}"));
+            (string?)button.Attribute("Command") == "{Binding OpenHistoryCommand}"));
         Assert.Equal("Stretch", (string?)recall.Attribute("HorizontalContentAlignment"));
         Assert.Equal("Stretch", (string?)recall.Attribute("VerticalContentAlignment"));
         var recallBadge = Assert.Single(recall.Descendants(presentation + "Border").Where(border =>

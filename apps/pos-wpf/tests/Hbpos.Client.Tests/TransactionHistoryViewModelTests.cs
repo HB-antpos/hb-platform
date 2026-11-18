@@ -1446,6 +1446,98 @@ public sealed class TransactionHistoryViewModelTests
     }
 
     [Fact]
+    public async Task Show_local_orders_leaves_held_tab_and_clears_keyword()
+    {
+        // 视图模型常驻复用：上次离开时停在挂单页签且留着关键词，从「历史」入口再进来必须回到本地、关键词清空。
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession());
+        await viewModel.ShowSuspendedOrdersAsync();
+        viewModel.SearchText = "Amy";
+        Assert.True(viewModel.IsHeldSourceSelected);
+
+        await viewModel.ShowLocalOrdersAsync();
+
+        Assert.True(viewModel.IsLocalSourceSelected);
+        Assert.False(viewModel.IsHeldSourceSelected);
+        Assert.Equal(string.Empty, viewModel.SearchText);
+        Assert.False(viewModel.HasSearchKeyword);
+        Assert.False(viewModel.IsKeywordFilterBannerVisible);
+    }
+
+    [Fact]
+    public async Task Show_suspended_orders_clears_stale_keyword()
+    {
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession())
+        {
+            SearchText = "stale-keyword"
+        };
+
+        await viewModel.ShowSuspendedOrdersAsync();
+
+        Assert.Equal(string.Empty, viewModel.SearchText);
+        Assert.Null(viewModel.AppliedKeyword);
+    }
+
+    [Fact]
+    public async Task Show_suspended_orders_falls_back_to_other_scope_only_when_local_is_empty_and_requested()
+    {
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession());
+
+        // 不要求回退：本机为空也停在「本机」。
+        await viewModel.ShowSuspendedOrdersAsync();
+        Assert.True(viewModel.IsHeldLocalScopeSelected);
+
+        // 要求回退且本机确实为空：切到「非本机」。
+        await viewModel.ShowSuspendedOrdersAsync(fallbackToOtherScopeWhenLocalEmpty: true);
+        Assert.True(viewModel.IsHeldOtherScopeSelected);
+
+        // 再次进入时范围回到本机，重新判断一次。
+        await viewModel.ShowSuspendedOrdersAsync();
+        Assert.True(viewModel.IsHeldLocalScopeSelected);
+    }
+
+    [Fact]
+    public async Task Keyword_filter_banner_follows_the_applied_keyword_and_result_count()
+    {
+        var viewModel = new TransactionHistoryViewModel(
+            new CapturingReceiptQueryService(),
+            new CapturingSuspendedOrderService(),
+            new CapturingRemoteOrderHistoryService(),
+            CreateSession());
+        await viewModel.ShowLocalOrdersAsync();
+        Assert.False(viewModel.IsKeywordFilterBannerVisible);
+
+        // 输入但还没查询：查询框高亮，筛选条不出现（条数要等查询生效后才有意义）。
+        viewModel.SearchText = "  Amy  ";
+        Assert.True(viewModel.HasSearchKeyword);
+        Assert.False(viewModel.IsKeywordFilterBannerVisible);
+
+        await viewModel.LoadAsync();
+
+        Assert.Equal("Amy", viewModel.AppliedKeyword);
+        Assert.True(viewModel.IsKeywordFilterBannerVisible);
+        Assert.Contains("Amy", viewModel.KeywordFilterBannerText, StringComparison.Ordinal);
+
+        // 一键清除：关键词清空并立即重查，筛选条消失。
+        await viewModel.ClearKeywordFilterCommand.ExecuteAsync(null);
+
+        Assert.Equal(string.Empty, viewModel.SearchText);
+        Assert.Null(viewModel.AppliedKeyword);
+        Assert.False(viewModel.IsKeywordFilterBannerVisible);
+    }
+
+    [Fact]
     public async Task Entering_history_resets_stale_date_range_to_today()
     {
         // 视图模型常驻复用：模拟收银机前一天打开过历史页、次日未重启再次进入。

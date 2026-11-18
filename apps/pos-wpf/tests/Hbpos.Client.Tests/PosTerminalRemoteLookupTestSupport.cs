@@ -108,7 +108,8 @@ internal sealed class TerminalHarness : IDisposable
     public TerminalHarness(
         TimeProvider? timeProvider = null,
         TimeProvider? viewModelTimeProvider = null,
-        bool remoteIgnoresCancellation = false)
+        bool remoteIgnoresCancellation = false,
+        int heldOrderCount = 0)
     {
         Cart = new PosCartService();
         Index = new LocalSellableItemIndex();
@@ -133,7 +134,8 @@ internal sealed class TerminalHarness : IDisposable
             onHoldOrderAsync: () => Task.FromResult<Guid?>(null),
             onRecallOrderAsync: () => Task.CompletedTask,
             onOpenReturns: () => { },
-            timeProvider: viewModelTimeProvider);
+            timeProvider: viewModelTimeProvider,
+            heldOrderTodayCountService: new FakeHeldOrderTodayCountService { Count = heldOrderCount });
     }
 
     public PosCartService Cart { get; }

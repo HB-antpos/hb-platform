@@ -433,6 +433,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         RefreshSourceOptions(TransactionHistorySource.LocalOrders);
 
         LoadCommand = new AsyncRelayCommand(ExecuteLoadCommandAsync);
+        ClearKeywordFilterCommand = new AsyncRelayCommand(ClearKeywordFilterAsync);
+        // 列表条数变了，筛选条上的「共 N 条」要跟着变。
+        Orders.CollectionChanged += (_, _) => OnPropertyChanged(nameof(KeywordFilterBannerText));
         ReturnToPosCommand = new RelayCommand(ReturnToPos, CanReturnToPos);
         RecallSelectedCommand = new AsyncRelayCommand(RecallSelectedAsync, CanRecallSelected);
         RecallOrderCommand = new AsyncRelayCommand<HistoryOrderListItem>(RecallOrderAsync, CanRecallOrder);
@@ -971,6 +974,52 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
 
     public string SearchHintText => T("history.search");
 
+    // ---- 关键词筛选提示 ----
+    // 收银员忘了查询框里还留着关键词时，会把「列表变少 / 变空」当成故障；这里提供三层可见提示：
+    // ① 查询框本身（输入框里有字就高亮）；② 列表上方的筛选条（按「上一次实际生效」的关键词显示条数）；③ 行内命中文字。
+
+    /// <summary>查询框里当前有输入（含尚未回车生效的）：用于查询框高亮。</summary>
+    public bool HasSearchKeyword => !string.IsNullOrWhiteSpace(SearchText);
+
+    /// <summary>上一次查询真正用的关键词（已 Trim）；没有关键词为 null。筛选条与行内高亮都以它为准。</summary>
+    [ObservableProperty]
+    private string? _appliedKeyword;
+
+    public bool IsKeywordFilterBannerVisible => !string.IsNullOrEmpty(AppliedKeyword);
+
+    public string KeywordFilterLabel => T("history.keywordFilterLabel");
+
+    public string KeywordFilterClearLabel => T("history.keywordFilterClear");
+
+    /// <summary>筛选条文字：有结果显示条数，结果为空时改成「没有匹配」。</summary>
+    public string KeywordFilterBannerText => string.IsNullOrEmpty(AppliedKeyword)
+        ? string.Empty
+        : Orders.Count == 0
+            ? string.Format(CultureInfo.CurrentCulture, T("history.keywordFilterEmpty"), AppliedKeyword)
+            : string.Format(CultureInfo.CurrentCulture, T("history.keywordFilterBanner"), AppliedKeyword, Orders.Count);
+
+    partial void OnSearchTextChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasSearchKeyword));
+    }
+
+    partial void OnAppliedKeywordChanged(string? value)
+    {
+        OnPropertyChanged(nameof(IsKeywordFilterBannerVisible));
+        OnPropertyChanged(nameof(KeywordFilterBannerText));
+    }
+
+    /// <summary>
+    /// 清掉关键词并立即重查。不走 LoadCommand：它的扫码去重以查询框文字为键，清空不是扫码。
+    /// </summary>
+    public IAsyncRelayCommand ClearKeywordFilterCommand { get; private set; } = null!;
+
+    private Task ClearKeywordFilterAsync()
+    {
+        SearchText = string.Empty;
+        return LoadAsync();
+    }
+
     public string ReceiptPreviewLabel => T("success.receiptPreview");
 
     public string ReprintLabel => T("history.reprint");
@@ -993,6 +1042,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         try
         {
             StatusMessage = string.Empty;
+            // 记下本次查询实际使用的关键词：筛选条 / 行内高亮跟着「已生效」的关键词走，而不是还在输入的文字。
+            AppliedKeyword = NormalizeKeyword(SearchText);
             if (SelectedSource == TransactionHistorySource.HeldOrders)
             {
                 // 挂单列表由本地/远端分阶段更新，不能在远端完成后再用旧返回值整表覆盖。
@@ -1062,17 +1113,57 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     }
 
     /// <summary>
-    /// 收银页“取回”入口：直接落在挂单（Held）页签的本机范围，日期回到当天。
+    /// 收银页「历史」入口（今天有挂单时）：直接落在挂单（Held）页签的本机范围，日期回到当天，关键词清空。
     /// </summary>
-    public Task ShowSuspendedOrdersAsync(CancellationToken cancellationToken = default)
+    /// <param name="fallbackToOtherScopeWhenLocalEmpty">
+    /// 本机范围没有挂单（挂单都在别的收银机上）时，自动切到「非本机」，免得收银员看到空列表却看得到角标数字。
+    /// 只切一次，且只在本机范围真的为空时才切。
+    /// </param>
+    public async Task ShowSuspendedOrdersAsync(
+        CancellationToken cancellationToken = default,
+        bool fallbackToOtherScopeWhenLocalEmpty = false)
     {
         ResetDateRangeToToday();
+        ClearKeywordForEntry();
         _suppressSourceAutoLoad = true;
         SelectedSourceOption = SourceOptions.First(x => x.Source == TransactionHistorySource.HeldOrders);
         _suppressSourceAutoLoad = false;
         // 上次离开时已停在挂单页签则不会触发来源变更回调，这里显式回到本机范围。
         ResetHeldScopeToLocal();
+        await LoadAsync(cancellationToken);
+
+        if (fallbackToOtherScopeWhenLocalEmpty &&
+            !cancellationToken.IsCancellationRequested &&
+            SelectedHeldScope == HeldOrderViewScope.Local &&
+            SelectedSource == TransactionHistorySource.HeldOrders &&
+            Orders.Count == 0)
+        {
+            // SetHeldScope 会自行取消旧加载并重新加载「非本机」。
+            SetHeldScope(HeldOrderViewScope.Other);
+        }
+    }
+
+    /// <summary>
+    /// 收银页「历史」入口（今天没有挂单时）：落在「本地」订单页签，日期回到当天，关键词清空。
+    /// 历史页视图模型常驻复用，上次离开时可能停在别的页签，这里显式切回本地。
+    /// </summary>
+    public Task ShowLocalOrdersAsync(CancellationToken cancellationToken = default)
+    {
+        ResetDateRangeToToday();
+        ClearKeywordForEntry();
+        _suppressSourceAutoLoad = true;
+        SelectedSourceOption = SourceOptions.First(x => x.Source == TransactionHistorySource.LocalOrders);
+        _suppressSourceAutoLoad = false;
         return LoadAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// 每次进入历史页都清空订单查询关键词（视图模型常驻，不清会把上次的筛选带进来）。
+    /// 只在「导航进入」时调用；扫码把条码填进查询框走的是页内路径，不经过这里。
+    /// </summary>
+    public void ClearKeywordForEntry()
+    {
+        SearchText = string.Empty;
     }
 
     /// <summary>
@@ -4620,6 +4711,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         OnPropertyChanged(nameof(PageLabel));
         OnPropertyChanged(nameof(TitleText));
         OnPropertyChanged(nameof(SearchHintText));
+        OnPropertyChanged(nameof(KeywordFilterLabel));
+        OnPropertyChanged(nameof(KeywordFilterClearLabel));
+        OnPropertyChanged(nameof(KeywordFilterBannerText));
         OnPropertyChanged(nameof(ReceiptPreviewLabel));
         OnPropertyChanged(nameof(ReprintLabel));
         OnPropertyChanged(nameof(RefundLabel));
@@ -4760,6 +4854,10 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
             "history.held.deletePending" => "Deletion is pending; choose Delete to retry.",
             "history.held.remoteUnavailable" => "Remote held orders unavailable: {0}",
             "history.held.unavailable" => "Shared held orders are not configured on this terminal.",
+            "history.keywordFilterLabel" => "ORDER LOOKUP · FILTERING",
+            "history.keywordFilterBanner" => "Filtered by \"{0}\" · {1} found",
+            "history.keywordFilterEmpty" => "No records match \"{0}\"",
+            "history.keywordFilterClear" => "Clear filter",
             "Customer" => "Customer",
             "Phone" => "Phone",
             "Total" => "Total",
