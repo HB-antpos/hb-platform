@@ -269,6 +269,15 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
       width: 90,
       render: (_, rate) => (rate.effectiveFrom ? dayjs(rate.effectiveFrom).format('MM-DD') : t('attendancePayroll.rates.notFilled')),
     },
+    {
+      // 按所看周期取的时薪之后，已录入、还没生效的下一条（例如生日调价、12-01 新费率）
+      title: t('attendancePayroll.rates.columns.next'),
+      key: 'next',
+      width: 100,
+      render: (_, rate) => (rate.nextEffectiveFrom
+        ? <Tag color="orange" className="atp-tag">{t('attendancePayroll.rates.nextFrom', { date: dayjs(rate.nextEffectiveFrom).format('MM-DD') })}</Tag>
+        : <span className="atp-muted">—</span>),
+    },
   ]
 
   const rateInput = (key: keyof PayRates, placeholderKey?: string) => (

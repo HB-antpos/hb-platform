@@ -3,6 +3,10 @@
     "title": "Hours & pay",
     "selectStore": "Select store",
     "searchPlaceholder": "Staff name",
+    "storeList": {
+      "locked": "Locked this period",
+      "open": "Open"
+    },
     "exportExcel": "Export Excel",
     "reviewedOnly": "Reviewed only",
     "includePending": "Include pending",
@@ -192,9 +196,11 @@
         "cash": "Cash rate $",
         "allowance": "Allowance / period",
         "minimum": "Minimum rate (yours)",
-        "effective": "From"
+        "effective": "From",
+        "next": "Next change"
       },
       "notFilled": "Not set",
+      "nextFrom": "From {{date}}",
       "minorMissing": "Age {{age}} not set",
       "belowMinimum": "Low",
       "birthdayHint": "{{name}} turned {{age}} on {{date}} but the rate was set at age {{previous}}; check it and add a new effective record.",

@@ -274,6 +274,28 @@ namespace BlazorApp.Shared.DTOs
         public string? Keyword { get; set; }
         /// <summary>true 时只返回「公假转账价与平日转账价不一致」的员工（财务据此给他们新建时薪记录）。</summary>
         public bool PublicHolidayMismatchOnly { get; set; }
+        /// <summary>
+        /// 按哪一天取「适用的时薪」（工资周期起始日）；为空时按分店本地今天。
+        /// 只影响每人取哪条记录与 NextEffectiveFrom，生日提醒仍按今天判断。
+        /// </summary>
+        public DateTime? AsOf { get; set; }
+    }
+
+    /// <summary>侧栏用：一批分店在某个工资周期是否已提交锁定。</summary>
+    public class AttendancePayPeriodStatusQueryDto
+    {
+        /// <summary>逗号分隔的分店代码；没有权限的分店会被忽略，不报错。</summary>
+        public string? StoreCodes { get; set; }
+        public DateTime? PeriodStart { get; set; }
+        /// <summary>1 或 2；为空按 1。</summary>
+        public int? Weeks { get; set; }
+    }
+
+    public class AttendancePayPeriodStoreStatusDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        /// <summary>该店有已提交的期与所选周期重叠。</summary>
+        public bool Locked { get; set; }
     }
 
     public class AttendancePayRateDto
@@ -309,6 +331,8 @@ namespace BlazorApp.Shared.DTOs
         public decimal CashAllowancePerPeriod { get; set; }
         public decimal? MinimumRate { get; set; }
         public DateTime? EffectiveFrom { get; set; }
+        /// <summary>列表接口：AsOf（或今天）之后最近一条已录入、还没生效的时薪记录的生效日；没有为空。</summary>
+        public DateTime? NextEffectiveFrom { get; set; }
         public string? Remark { get; set; }
         public DateTime? CreatedAt { get; set; }
         public string? CreatedBy { get; set; }

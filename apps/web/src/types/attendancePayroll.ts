@@ -209,6 +209,12 @@ export interface AttendancePayResultDto {
 
 // ===== 个人时薪表（GET / POST payroll/rates）=====
 
+/** 分店侧栏：该店在所看工资周期是否已提交锁定。 */
+export interface AttendancePayPeriodStoreStatusDto {
+  storeCode: string
+  locked: boolean
+}
+
 export interface AttendancePayRateDto {
   rateGuid?: string | null
   userGuid: string
@@ -229,6 +235,8 @@ export interface AttendancePayRateDto {
   cashAllowancePerPeriod: number
   minimumRate?: number | null
   effectiveFrom?: string | null
+  /** 列表接口：所看周期（或今天）之后最近一条已录入、还没生效的时薪记录的生效日。 */
+  nextEffectiveFrom?: string | null
   remark?: string | null
   createdAt?: string | null
   createdBy?: string | null

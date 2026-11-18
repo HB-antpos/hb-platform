@@ -2,6 +2,8 @@
   "attendanceReview": {
     "title": "考勤审核",
     "reconciledHint": "打开时已核对近 14 天排班，生成漏下班与加班待处理 · {{time}}",
+    "outsidePending": "所选日期以外还有 {{count}} 条待审核",
+    "outsidePendingShow": "一起显示",
     "allStores": "全部管理分店",
     "searchPlaceholder": "员工姓名",
     "tabs": {

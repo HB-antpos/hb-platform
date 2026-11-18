@@ -17,7 +17,9 @@ import {
   buildDrawerSubtitle,
   buildExplanation,
   buildPayCategoryMappingRequest,
+  addIsoDays,
   buildPeriodOptions,
+  buildQuickPeriods,
   buildPreviewCsv,
   buildPreviewCsvFileName,
   buildReadinessCards,
@@ -495,6 +497,31 @@ assert.equal(canPushPreview(enabledWithHints, true), true)
 assert.equal(canPushPreview(previewOf([], { totals: { readyCount: 0 }, pushEnabled: true }), true), false, '没有可推送的人时禁用')
 
 // ───────────── 周期选项 ─────────────
+
+// 上周 / 本周 / 下周：periods[0] 是本周期，前后各推 weeks × 7 天（含跨月、跨年、闰年）
+assert.deepEqual(buildQuickPeriods(null), [])
+assert.deepEqual(buildQuickPeriods(previewOf([], { periods: [] })), [], '没有周期列表时不显示快捷按钮')
+assert.deepEqual(
+  buildQuickPeriods(okPreview).map((item) => [item.kind, item.start, item.end, item.labelKey]),
+  [
+    ['previous', '2026-10-19', '2026-10-25', 'myob.push.quick.previousWeek'],
+    ['current', '2026-10-26', '2026-11-01', 'myob.push.quick.currentWeek'],
+    ['next', '2026-11-02', '2026-11-08', 'myob.push.quick.nextWeek'],
+  ],
+)
+const fortnight = previewOf([], { weeks: 2, periods: [{ start: '2026-12-21', end: '2027-01-03' }] })
+assert.deepEqual(
+  buildQuickPeriods(fortnight).map((item) => [item.start, item.end, item.labelKey]),
+  [
+    ['2026-12-07', '2026-12-20', 'myob.push.quick.previousPeriod'],
+    ['2026-12-21', '2027-01-03', 'myob.push.quick.currentPeriod'],
+    ['2027-01-04', '2027-01-17', 'myob.push.quick.nextPeriod'],
+  ],
+  '两周一期：按两周前后推，文案改叫「周期」，跨年也对',
+)
+assert.equal(addIsoDays('2028-02-28', 2), '2028-03-01', '闰年 2 月有 29 天')
+assert.equal(addIsoDays('2026-03-01', -1), '2026-02-28')
+assert.equal(addIsoDays('nope', 1), null)
 
 assert.deepEqual(buildPeriodOptions(null), [])
 assert.deepEqual(buildPeriodOptions(okPreview).map((item) => item.start), ['2026-10-26', '2026-10-19'])

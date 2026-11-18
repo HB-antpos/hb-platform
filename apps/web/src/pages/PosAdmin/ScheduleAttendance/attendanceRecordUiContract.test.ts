@@ -310,7 +310,11 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('<StorePicker\n              variant="docked"'), '宽屏应有常驻左侧的分店列表')
   assert(pageSource.includes('<StorePicker\n          variant="floating"'), '侧栏收起后分店按钮应弹出同一份分店列表')
   assert(pageSource.includes('title={storeSwitcher ?? ('), '侧栏收起时分店按钮放在卡片标题位置')
-  assert(pageSource.includes("const storeSidebarDocked = activeTab !== 'review' && shouldDockSidebar({"), '侧栏是否展开由 shouldDockSidebar 决定，考勤审核页签不显示')
+  assert(pageSource.includes('const storeSidebarDocked = shouldDockSidebar({'), '侧栏是否展开由 shouldDockSidebar 决定，所有页签（含考勤审核）都显示')
+  // 考勤审核改由左侧分店列表选店、与考勤记录共用日期范围（上周 / 本周 / 下周）
+  assert(pageSource.includes('storeCode,\n            range: reviewRange,\n            onRangeChange: setDateRange,'), '审核面板的分店与日期来自外层')
+  assert(pageSource.includes('<WeekPresetButtons value={dateRange} onChange={setDateRange} />'), '考勤记录等页签有上周 / 本周 / 下周')
+  assert(pageSource.includes('badges={storeBadges}'), '侧栏显示各店本期待审数')
   assert(pageSource.includes('onSelect={selectStore}'), '选分店要经过 selectStore（记住上次分店与最近使用）')
   assert(pageSource.includes('resolveInitialStore(storeOptions, safeStorageGet(storage, STORAGE_KEYS.lastStore))'), '进入页面要恢复上次选的分店')
   assert(pageSource.includes("t('posAdmin.scheduleAttendance.weekNav.thisWeek')"), '周切换应有「本周」按钮')

@@ -313,3 +313,42 @@ export function avatarColorOf(seed?: string | null): string {
   for (const char of seed ?? '') hash = (hash * 31 + char.charCodeAt(0)) >>> 0
   return AVATAR_COLORS[hash % AVATAR_COLORS.length]
 }
+
+export interface PendingOverview {
+  /** 各店在所选范围内的待审数（侧栏角标）。 */
+  byStore: Record<string, number>
+  /** 当前分店筛选（没选 = 全部）下、所选范围以外的待审数。 */
+  outside: number
+  /** 范围外待审里最早 / 最晚的工作日（「看全部待审」按钮把范围扩到这里）。 */
+  outsideFrom?: string
+  outsideTo?: string
+}
+
+/**
+ * 全部待审（不限日期）→ 侧栏各店角标 + 「这一周以外还有 N 条」提示。
+ * 默认范围从「近 14 天 ~ 未来 7 天」改成「本周」后，上周没处理的漏下班等会被藏起来，所以要单独提示。
+ * 没有工作日的审批（极少）不计入范围外，避免提示一个点了也看不到的数。
+ */
+export function summarizePending(
+  items: readonly Pick<AttendanceApprovalDto, 'storeCode' | 'workDate'>[],
+  from: string,
+  to: string,
+  storeCode?: string,
+): PendingOverview {
+  const byStore: Record<string, number> = {}
+  let outside = 0
+  let outsideFrom: string | undefined
+  let outsideTo: string | undefined
+  for (const item of items) {
+    const day = item.workDate?.slice(0, 10)
+    if (!day || (day >= from && day <= to)) {
+      byStore[item.storeCode] = (byStore[item.storeCode] ?? 0) + 1
+      continue
+    }
+    if (storeCode && item.storeCode !== storeCode) continue
+    outside += 1
+    if (!outsideFrom || day < outsideFrom) outsideFrom = day
+    if (!outsideTo || day > outsideTo) outsideTo = day
+  }
+  return { byStore, outside, outsideFrom, outsideTo }
+}

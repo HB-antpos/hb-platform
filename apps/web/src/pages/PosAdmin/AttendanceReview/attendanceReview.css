@@ -298,3 +298,8 @@
   font-size: 12px;
   color: rgba(0, 0, 0, 0.45);
 }
+
+/* 所选日期以外还有待审核：提示条 */
+.atr-outside-alert {
+  margin-bottom: 8px;
+}

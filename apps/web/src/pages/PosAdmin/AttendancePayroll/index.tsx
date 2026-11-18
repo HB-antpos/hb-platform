@@ -1,18 +1,21 @@
 import {
+  DownOutlined,
   DownloadOutlined,
   LeftOutlined,
   LockOutlined,
   RightOutlined,
   SearchOutlined,
+  ShopOutlined,
   SyncOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
-import { Badge, Button, Input, Modal, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Grid, Input, Modal, Popover, Segmented, Space, Tabs, Tag, Tooltip, Typography, message } from 'antd'
 import dayjs from 'dayjs'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import {
+  getAttendancePayPeriodStatuses,
   getAttendancePayrollHours,
   getAttendancePayrollPay,
   getAttendancePayRates,
@@ -25,6 +28,18 @@ import type {
   AttendancePayRateDto,
   AttendancePayResultDto,
 } from '../../../types/attendancePayroll'
+import StorePicker from '../ScheduleAttendance/StorePicker'
+import {
+  ALL_STORES_TOKEN,
+  STORAGE_KEYS,
+  getBrowserStorage,
+  parseRecentStores,
+  parseSidebarPreference,
+  pushRecentStore,
+  safeStorageGet,
+  safeStorageSet,
+  type SidebarPreference,
+} from '../ScheduleAttendance/storePickerLogic'
 import messagesEn from './attendancePayrollMessages.en.json'
 import messagesZh from './attendancePayrollMessages.zh.json'
 import HoursTab from './HoursTab'
@@ -85,6 +100,47 @@ export default function AttendancePayrollPage() {
   const [submitting, setSubmitting] = useState(false)
   const [unlockOpen, setUnlockOpen] = useState(false)
   const [unlockReason, setUnlockReason] = useState('')
+  // 分店列表在左侧（与排班考勤页同一个组件、同一份「最近使用 / 上次所选 / 侧栏收起」记忆，两页切换时分店不丢）
+  const storage = useMemo(() => getBrowserStorage(), [])
+  const screens = Grid.useBreakpoint()
+  const [recentStores, setRecentStores] = useState<string[]>(() => parseRecentStores(safeStorageGet(getBrowserStorage(), STORAGE_KEYS.recentStores)))
+  const [sidebarPreference, setSidebarPreference] = useState<SidebarPreference>(() => parseSidebarPreference(safeStorageGet(getBrowserStorage(), STORAGE_KEYS.sidebarDock)))
+  const [storePopoverOpen, setStorePopoverOpen] = useState(false)
+  // 侧栏「🔒 / 未锁」：各店在所看周期是否已提交；提交 / 解锁后 lockVersion + 1 重取
+  const [lockedStores, setLockedStores] = useState<Readonly<Record<string, boolean>>>({})
+  const [lockVersion, setLockVersion] = useState(0)
+  const rememberedApplied = useRef(false)
+
+  // 首次拿到分店列表时，沿用排班考勤页上次选的分店（「全部分店」在这里不适用，工资按店算）
+  useEffect(() => {
+    if (rememberedApplied.current || storeOptions.length === 0) return
+    rememberedApplied.current = true
+    const remembered = safeStorageGet(storage, STORAGE_KEYS.lastStore)
+    if (remembered && remembered !== ALL_STORES_TOKEN && storeOptions.some((option) => option.value === remembered)) {
+      setStoreCode(remembered)
+    }
+  }, [setStoreCode, storage, storeOptions])
+
+  const selectStore = useCallback((code: string | undefined) => {
+    setStorePopoverOpen(false)
+    if (!code) return
+    setStoreCode(code)
+    safeStorageSet(storage, STORAGE_KEYS.lastStore, code)
+    setRecentStores((previous) => {
+      const next = pushRecentStore(previous, code)
+      safeStorageSet(storage, STORAGE_KEYS.recentStores, JSON.stringify(next))
+      return next
+    })
+  }, [setStoreCode, storage])
+
+  const setSidebarDock = useCallback((next: Exclude<SidebarPreference, null>) => {
+    setSidebarPreference(next)
+    setStorePopoverOpen(false)
+    safeStorageSet(storage, STORAGE_KEYS.sidebarDock, next)
+  }, [storage])
+
+  // 宽屏（≥ 992px）默认停靠在左侧；用户点过「收起 / 固定」就按用户的；只有 1 家店时不需要列表
+  const storeSidebarDocked = storeOptions.length > 1 && (sidebarPreference ? sidebarPreference === 'docked' : screens.lg === true)
 
   const periodQuery = useMemo(
     () => (storeCode ? { storeCode, ...requested, includePending, mergeStores } : null),
@@ -119,17 +175,20 @@ export default function AttendancePayrollPage() {
     }
   }, [canViewPay, periodQuery, t])
 
+  // 以刚点选的周期为准（resolvedPeriod 要等工资数据回来才更新，会让时薪表先按旧周期请求一次）
+  const ratesAsOf = requested.periodStart ?? resolvedPeriod?.periodStart
   const loadRates = useCallback(async () => {
     if (!storeCode || !canViewPay) return
     setLoading(true)
     try {
-      setRates(await getAttendancePayRates({ storeCode, keyword: rateKeyword || undefined }))
+      // 按所看周期的起始日取「这一期适用的时薪」；期还没解析出来时按今天
+      setRates(await getAttendancePayRates({ storeCode, keyword: rateKeyword || undefined, asOf: ratesAsOf }))
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [canViewPay, rateKeyword, storeCode, t])
+  }, [canViewPay, rateKeyword, ratesAsOf, storeCode, t])
 
   useEffect(() => {
     if (activeTab === 'hours') void loadHours()
@@ -162,6 +221,7 @@ export default function AttendancePayrollPage() {
     if (activeTab === 'hours') void loadHours()
     else void loadPay()
     if (activeTab === 'rates') void loadRates()
+    setLockVersion((value) => value + 1)
   }, [activeTab, loadHours, loadPay, loadRates])
 
   const weeks = resolvedPeriod?.weeks ?? requested.weeks ?? 1
@@ -180,6 +240,33 @@ export default function AttendancePayrollPage() {
     const target = presetStartOf(preset)
     if (target) setRequested({ periodStart: target, weeks })
   }
+
+  // 各店在所看周期是否已锁定（侧栏提示用，取不到就不显示，不打扰主流程）
+  const storeCodesKey = storeOptions.map((option) => option.value).join(',')
+  useEffect(() => {
+    if (!periodStart || !storeCodesKey) return undefined
+    let cancelled = false
+    getAttendancePayPeriodStatuses({ storeCodes: storeCodesKey.split(','), periodStart, weeks })
+      .then((list) => {
+        if (!cancelled) setLockedStores(Object.fromEntries(list.map((item) => [item.storeCode, item.locked])))
+      })
+      .catch(() => {
+        if (!cancelled) setLockedStores({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [lockVersion, periodStart, storeCodesKey, weeks])
+
+  const storeBadges = useMemo<Record<string, ReactNode>>(() => {
+    const badges: Record<string, ReactNode> = {}
+    Object.entries(lockedStores).forEach(([code, locked]) => {
+      badges[code] = locked
+        ? <LockOutlined className="atp-store-locked" aria-label={t('attendancePayroll.storeList.locked')} />
+        : <span className="atp-store-open">{t('attendancePayroll.storeList.open')}</span>
+    })
+    return badges
+  }, [lockedStores, t])
 
   const status = (activeTab === 'hours' ? hours : pay) ?? hours ?? pay
   const pendingCount = status?.pendingCount ?? 0
@@ -249,7 +336,8 @@ export default function AttendancePayrollPage() {
     }
   }
 
-  const periodControls = activeTab !== 'rates' ? (
+  // 三个页签都按同一个周期看（时薪表 = 这一期适用的时薪）
+  const periodControls = (
     <>
       <Segmented
         value={weeks}
@@ -278,7 +366,7 @@ export default function AttendancePayrollPage() {
         ))}
       </Space.Compact>
     </>
-  ) : null
+  )
 
   const lockControl = activeTab !== 'rates' && canViewPay ? (
     isSubmitted ? (
@@ -368,53 +456,95 @@ export default function AttendancePayrollPage() {
     ] : []),
   ]
 
+  // 侧栏收起（窄屏 / 用户点了收起）时：标题旁一个分店按钮，点开是同一份列表
+  const storeName = storeOptions.find((option) => option.value === storeCode)?.label ?? storeCode
+  const storeSwitcher = !storeSidebarDocked && storeOptions.length > 1 ? (
+    <Popover
+      trigger="click"
+      placement="bottomLeft"
+      arrow={false}
+      destroyOnHidden
+      open={storePopoverOpen}
+      onOpenChange={setStorePopoverOpen}
+      styles={{ body: { padding: 0 } }}
+      content={(
+        <StorePicker
+          variant="floating"
+          autoFocus
+          options={storeOptions}
+          value={storeCode}
+          recent={recentStores}
+          allowAll={false}
+          badges={storeBadges}
+          onSelect={selectStore}
+          onToggleDock={() => setSidebarDock('docked')}
+        />
+      )}
+    >
+      <Button className="sce-store-button" icon={<ShopOutlined />}>
+        <span className="sce-store-button-name">{storeName ?? t('attendancePayroll.selectStore')}</span>
+        <DownOutlined className="sce-store-button-caret" />
+      </Button>
+    </Popover>
+  ) : storeOptions.length === 1 ? (
+    <Tag icon={<ShopOutlined />} className="atp-store-single">{storeOptions[0].label}</Tag>
+  ) : null
+
   return (
-    <div className="atp-page">
-      <div className="atp-header">
-        <Space wrap size={12}>
-          <Typography.Title level={4} className="atp-title">{t('attendancePayroll.title')}</Typography.Title>
-          {periodControls}
-          <Select
-            showSearch
-            optionFilterProp="label"
-            style={{ minWidth: 160 }}
+    <div className={`atp-page atp-layout${storeSidebarDocked ? ' has-sidebar' : ''}`}>
+      {storeSidebarDocked ? (
+        <aside className="atp-store-aside">
+          <StorePicker
+            variant="docked"
             options={storeOptions}
             value={storeCode}
-            onChange={setStoreCode}
-            placeholder={t('attendancePayroll.selectStore')}
+            recent={recentStores}
+            allowAll={false}
+            badges={storeBadges}
+            onSelect={selectStore}
+            onToggleDock={() => setSidebarDock('floating')}
           />
-          {activeTab === 'hours' ? (
-            <Segmented
-              value={includePending ? 'all' : 'reviewed'}
-              options={[
-                { label: t('attendancePayroll.reviewedOnly'), value: 'reviewed' },
-                { label: t('attendancePayroll.includePending'), value: 'all' },
-              ]}
-              onChange={(value) => setIncludePending(value === 'all')}
-            />
-          ) : null}
-          {activeTab === 'rates' ? (
-            <Input
-              allowClear
-              prefix={<SearchOutlined />}
-              placeholder={t('attendancePayroll.searchPlaceholder')}
-              style={{ width: 180 }}
-              onPressEnter={(event) => setRateKeyword((event.target as HTMLInputElement).value.trim())}
-              onChange={(event) => {
-                if (!event.target.value) setRateKeyword('')
-              }}
-            />
-          ) : null}
-        </Space>
-        <Space wrap>
-          {activeTab === 'rates' && canEdit && access.canBindMyobEmployees ? (
-            <Button icon={<SyncOutlined />} disabled={!storeCode} onClick={() => setSyncOpen(true)}>{t('attendancePayroll.rates.sync.open')}</Button>
-          ) : null}
-          <Button icon={<DownloadOutlined />} onClick={() => void handleExport()}>{t('attendancePayroll.exportExcel')}</Button>
-          {lockControl}
-        </Space>
+        </aside>
+      ) : null}
+      <div className="atp-layout-main">
+        <div className="atp-header">
+          <Space wrap size={12}>
+            <Typography.Title level={4} className="atp-title">{t('attendancePayroll.title')}</Typography.Title>
+            {storeSwitcher}
+            {periodControls}
+            {activeTab === 'hours' ? (
+              <Segmented
+                value={includePending ? 'all' : 'reviewed'}
+                options={[
+                  { label: t('attendancePayroll.reviewedOnly'), value: 'reviewed' },
+                  { label: t('attendancePayroll.includePending'), value: 'all' },
+                ]}
+                onChange={(value) => setIncludePending(value === 'all')}
+              />
+            ) : null}
+            {activeTab === 'rates' ? (
+              <Input
+                allowClear
+                prefix={<SearchOutlined />}
+                placeholder={t('attendancePayroll.searchPlaceholder')}
+                style={{ width: 180 }}
+                onPressEnter={(event) => setRateKeyword((event.target as HTMLInputElement).value.trim())}
+                onChange={(event) => {
+                  if (!event.target.value) setRateKeyword('')
+                }}
+              />
+            ) : null}
+          </Space>
+          <Space wrap>
+            {activeTab === 'rates' && canEdit && access.canBindMyobEmployees ? (
+              <Button icon={<SyncOutlined />} disabled={!storeCode} onClick={() => setSyncOpen(true)}>{t('attendancePayroll.rates.sync.open')}</Button>
+            ) : null}
+            <Button icon={<DownloadOutlined />} onClick={() => void handleExport()}>{t('attendancePayroll.exportExcel')}</Button>
+            {lockControl}
+          </Space>
+        </div>
+        <Tabs activeKey={activeTab} items={tabItems} onChange={(key) => setActiveTab(key as PayrollTabKey)} />
       </div>
-      <Tabs activeKey={activeTab} items={tabItems} onChange={(key) => setActiveTab(key as PayrollTabKey)} />
 
       <MyobPayRateSyncDrawer
         open={syncOpen}

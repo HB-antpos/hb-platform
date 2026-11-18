@@ -300,6 +300,9 @@
       },
       "weekNav": {
         "thisWeek": "本周",
+        "lastWeek": "上周",
+        "nextWeek": "下周",
+        "presetsAria": "快捷周",
         "range": "{{year}} 第 {{week}} 周 · {{start}} – {{end}}",
         "later": "下 {{count}} 周",
         "earlier": "上 {{count}} 周"

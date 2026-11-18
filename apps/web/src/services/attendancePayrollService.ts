@@ -3,6 +3,7 @@ import type {
   AttendanceDeletedScheduleDto,
   AttendanceHoursResultDto,
   AttendanceLeaveApprovalDto,
+  AttendancePayPeriodStoreStatusDto,
   AttendancePayRateDto,
   AttendancePayResultDto,
   AttendancePeriodKey,
@@ -104,6 +105,7 @@ export function normalizePayRate(value: unknown): AttendancePayRateDto {
     birthday: optionalDate(rate.birthday),
     birthdayReviewDate: optionalDate(rate.birthdayReviewDate),
     effectiveFrom: optionalDate(rate.effectiveFrom),
+    nextEffectiveFrom: optionalDate(rate.nextEffectiveFrom),
     cashAllowancePerPeriod: rate.cashAllowancePerPeriod ?? 0,
   }
 }
@@ -126,12 +128,29 @@ export async function getAttendancePayrollPay(query: AttendancePeriodQuery): Pro
 
 // ===== 个人时薪表 =====
 
+/** 按哪一天取适用时薪：传所看工资周期的起始日；不传按分店今天。 */
 export async function getAttendancePayRates(params: {
   storeCode: string
   keyword?: string
+  asOf?: string
 }): Promise<AttendancePayRateDto[]> {
   const response = await request.get<ApiResponse<AttendancePayRateDto[]>>(`${API_BASE}/payroll/rates`, { params })
   return (unwrapAttendanceApiData<unknown[]>(response) ?? []).map(normalizePayRate)
+}
+
+/** 分店侧栏的「🔒 / 未锁」：没有权限的分店后端会略过。 */
+export async function getAttendancePayPeriodStatuses(params: {
+  storeCodes: readonly string[]
+  periodStart: string
+  weeks: 1 | 2
+}): Promise<AttendancePayPeriodStoreStatusDto[]> {
+  const response = await request.get<ApiResponse<AttendancePayPeriodStoreStatusDto[]>>(`${API_BASE}/payroll/period-statuses`, {
+    params: { storeCodes: params.storeCodes.join(','), periodStart: params.periodStart, weeks: params.weeks },
+  })
+  return (unwrapAttendanceApiData<unknown[]>(response) ?? []).map((item) => {
+    const row = asRecord(item)
+    return { storeCode: String(row.storeCode ?? ''), locked: row.locked === true }
+  })
 }
 
 export async function getAttendancePayRateHistory(userGuid: string, storeCode: string): Promise<AttendancePayRateDto[]> {
