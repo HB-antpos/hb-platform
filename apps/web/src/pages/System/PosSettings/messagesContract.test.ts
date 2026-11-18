@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 // 收银端设置的文案全部在页面级消息文件里（随页面懒加载，不进首屏 i18n 包），全局 zh.json / en.json 只有菜单键。
 // 拆开后键名写错不会报错，界面会直接显示原始键名，所以这里静态核对：
 // 源码里出现的每个字面量键中英文都必须存在；两份消息文件键集合一致；没有无人使用的孤立键；
-// 页面注册了页面级消息；源码里没有硬编码中文；目录里的 9 个设置项都补齐了名称与说明。
+// 页面注册了页面级消息；源码里没有硬编码中文；目录里的 10 个设置项都补齐了名称与说明。
 
 type Json = { [key: string]: Json | string }
 
@@ -100,13 +100,13 @@ for (const { name, text } of sources) {
   if (literal) throw new Error(`${name} 含有硬编码中文文案「${literal[0]}」，请移入 messages.zh.json`)
 }
 
-// 7) 后端目录里的 9 个设置项键：每个都要在 parts.tsx 的名称 / 说明映射里出现，且中英文名称与说明都非空。
+// 7) 后端目录里的 10 个设置项键：每个都要在 parts.tsx 的名称 / 说明映射里出现，且中英文名称与说明都非空。
 //    （页面按接口返回的 definitions 渲染；未知键回退显示键名，但已知键不能缺文案。）
 const catalogSource = readFileSync(resolve('../../services/backend/BlazorApp.Shared/Constants/PosSettingCatalog.cs'), 'utf8')
 const catalogKeys = [...catalogSource.matchAll(/public const string \w+ = "([A-Za-z]+\.[A-Za-z]+)";/g)]
   .map((match) => match[1])
-  .filter((key) => /^(cashMovement|cashDrawer|returns|receipt|payment|maintenance|zeller)\./.test(key))
-if (catalogKeys.length !== 9) throw new Error(`后端目录应有 9 个设置项键，实际扫描到 ${catalogKeys.length} 个：${catalogKeys.join(',')}`)
+  .filter((key) => /^(cashMovement|cashDrawer|returns|receipt|payment|maintenance|zeller|customerDisplay)\./.test(key))
+if (catalogKeys.length !== 10) throw new Error(`后端目录应有 10 个设置项键，实际扫描到 ${catalogKeys.length} 个：${catalogKeys.join(',')}`)
 const partsSource = sources.find((source) => source.name === 'parts.tsx')?.text ?? ''
 for (const key of catalogKeys) {
   if (!partsSource.includes(`case '${key}': return tr('settings.`)) throw new Error(`parts.tsx 没有为设置项 ${key} 映射名称文案`)
