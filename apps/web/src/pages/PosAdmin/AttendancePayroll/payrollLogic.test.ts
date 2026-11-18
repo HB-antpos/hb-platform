@@ -3,6 +3,7 @@ import {
   EMPLOYMENT_TYPE_TAG_COLORS,
   MANAGER_TAG_COLOR,
   PERIOD_PRESETS,
+  birthdayRateReviews,
   calculatePay,
   cellHoursText,
   findRatesBelowMinimum,
@@ -183,5 +184,24 @@ const typeColors = [...Object.values(EMPLOYMENT_TYPE_TAG_COLORS), MANAGER_TAG_CO
 assert.equal(new Set(typeColors).size, typeColors.length, '员工类型与店长的标签颜色不得重复')
 for (const reserved of ['gold', 'cyan', 'orange', 'red']) assert.ok(!typeColors.includes(reserved), `类型颜色不得占用语义色 ${reserved}`)
 assert.deepEqual(Object.keys(EMPLOYMENT_TYPE_TAG_COLORS).sort(), ['Casual', 'FullTime', 'PartTime'])
+
+// 生日后时薪待办：只留 hint 为 true 且带生日日期 / 岁数的人；传了期末就只留生日 ≤ 期末的（生日之前的旧期不提示）；按生日先后、再按姓名排
+{
+  const rate = (userGuid: string, userName: string, extra: Record<string, unknown>) => ({ userGuid, userName, ...extra }) as unknown as Parameters<typeof birthdayRateReviews>[0][number]
+  const rates = [
+    rate('a', 'Zed', { birthdayReviewHint: true, birthdayReviewDate: '2026-11-12', birthdayReviewAge: 17 }),
+    rate('b', 'Amy', { birthdayReviewHint: true, birthdayReviewDate: '2026-11-12', birthdayReviewAge: 21 }), // 刚满 21 岁：AgeYears 已是 null，岁数只靠 birthdayReviewAge
+    rate('c', 'Bob', { birthdayReviewHint: true, birthdayReviewDate: '2026-11-03', birthdayReviewAge: 18 }),
+    rate('d', 'Cat', { birthdayReviewHint: false, birthdayReviewDate: '2026-11-05', birthdayReviewAge: 19 }), // 已处理
+    rate('e', 'Dan', { birthdayReviewHint: true }), // 缺日期 / 岁数：不算
+    rate('f', 'Eve', { birthdayReviewHint: true, birthdayReviewDate: '2026-11-20', birthdayReviewAge: 20 }),
+  ]
+  assert.deepEqual(birthdayRateReviews(rates).map((item) => item.userGuid), ['c', 'b', 'a', 'f'], '不传期末：全部待办，按生日先后再按姓名')
+  assert.deepEqual(birthdayRateReviews(rates, '2026-11-15').map((item) => item.userGuid), ['c', 'b', 'a'], '期末 11-15：生日在 11-20 的还没到，不提示')
+  assert.deepEqual(birthdayRateReviews(rates, '2026-11-12').map((item) => item.userGuid), ['c', 'b', 'a'], '生日正好是期末当天也要提示')
+  assert.deepEqual(birthdayRateReviews(rates, '2026-11-02'), [], '生日之前的旧期一个都不提示')
+  assert.equal(birthdayRateReviews(rates)[1].age, 21)
+  assert.equal(birthdayRateReviews([rate('x', undefined as unknown as string, { birthdayReviewHint: true, birthdayReviewDate: '2026-11-01', birthdayReviewAge: 16 })])[0].userName, 'x', '没有姓名时退回账号 ID')
+}
 
 console.log('payrollLogic.test.ts: ok')

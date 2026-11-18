@@ -676,8 +676,10 @@ namespace BlazorApp.Api.Services.React
                         UserName = employee.UserName,
                         Date = birthdayDate,
                         AgeYears = ageOnBirthday,
-                        // 21 岁以下的生日都提示核对时薪（青少年时薪按年龄逐年变），与排班 / 工时显示年龄同一门槛。
+                        // 生日当天未满 21 岁 = 未成年（合规文案用）。
                         IsMinor = ageOnBirthday < JuniorAgeLimit,
+                        // 青少年时薪按年龄逐年变，到满 21 岁那天转成人档：所以满 21 岁也要提示核对时薪（IsMinor 此时已是 false）。
+                        RateReview = ageOnBirthday <= JuniorAgeLimit,
                     });
                 }
             }
@@ -687,6 +689,42 @@ namespace BlazorApp.Api.Services.React
         /// <summary>本期有工时（含病假 / 年假 / 带薪公假工时，与工时表合计同口径），或有待处理项。</summary>
         private static bool HasHoursOrPending(PayrollEmployeeSnapshot employee) =>
             employee.PendingCount > 0 || BuildTotals(employee).Total > 0;
+
+        /// <summary>生日已过多少天内仍提示「时薪没按新年龄更新」；超过就不再提示（避免历史生日永远挂着）。</summary>
+        internal const int BirthdayRateReviewLookbackDays = 60;
+
+        /// <summary>
+        /// 生日后「该核对时薪」的判定（纯规则，便于单测）：
+        /// 最近一次已过的生日，生日当天年龄 ≤ <see cref="JuniorAgeLimit"/>（含刚满 21 岁——青少年档转成人档就在这天），
+        /// 且在 <see cref="BirthdayRateReviewLookbackDays"/> 天内，而当前生效的时薪记录早于那次生日（= 还没按新年龄更新）。
+        /// 生日是 2 月 29 日时，非闰年按 2 月 28 日算。返回那次生日的日期与当天年龄；不需要核对返回 null。
+        /// </summary>
+        internal static (DateTime Date, int Age)? ResolveBirthdayRateReview(DateTime birthday, DateTime today, DateTime currentRateEffectiveFrom)
+        {
+            if (birthday.Date > today.Date)
+            {
+                return null;
+            }
+            DateTime OnYear(int year) =>
+                new(year, birthday.Month, Math.Min(birthday.Day, DateTime.DaysInMonth(year, birthday.Month)));
+
+            var last = OnYear(today.Year);
+            if (last > today.Date)
+            {
+                last = OnYear(today.Year - 1);
+            }
+            var age = last.Year - birthday.Year;
+            if (age <= 0 || age > JuniorAgeLimit)
+            {
+                return null;
+            }
+            if (last <= today.Date.AddDays(-BirthdayRateReviewLookbackDays))
+            {
+                return null;
+            }
+            // 已有生效日 ≥ 这次生日的记录 = 已按新年龄更新过
+            return currentRateEffectiveFrom.Date < last ? (last, age) : null;
+        }
 
         private static DateTime? NextBirthday(DateTime birthday, DateTime today, int withinDays)
         {
@@ -1288,15 +1326,17 @@ namespace BlazorApp.Api.Services.React
                 dto.IsManager = managerLimit != employeeLimit && limits.GetValueOrDefault(userGuid) == managerLimit;
                 dto.AgeYears = ResolveMinorAge(birthday, storeToday);
                 dto.Birthday = birthday?.Date;
-                // 未成年人：最近一次生日已过、而当前时薪记录生效早于那次生日 → 提示核对按年龄计的时薪。
-                if (birthday.HasValue && dto.AgeYears.HasValue && rate != null)
+                // 最近一次生日已过、生日当天年龄 ≤ 21、而当前时薪记录生效早于那次生日 → 提示核对按年龄计的时薪。
+                // 不能再要求「现在还未满 21 岁」：刚满 21 岁那天 AgeYears 已是 null，但那正是青少年档转成人档的一天。
+                if (birthday.HasValue && rate != null)
                 {
-                    var lastBirthday = new DateTime(storeToday.Year, birthday.Value.Month, Math.Min(birthday.Value.Day, DateTime.DaysInMonth(storeToday.Year, birthday.Value.Month)));
-                    if (lastBirthday > storeToday)
+                    var review = ResolveBirthdayRateReview(birthday.Value, storeToday, rate.EffectiveFrom);
+                    if (review != null)
                     {
-                        lastBirthday = lastBirthday.AddYears(-1);
+                        dto.BirthdayReviewHint = true;
+                        dto.BirthdayReviewDate = review.Value.Date;
+                        dto.BirthdayReviewAge = review.Value.Age;
                     }
-                    dto.BirthdayReviewHint = rate.EffectiveFrom.Date < lastBirthday && lastBirthday > storeToday.AddDays(-60);
                 }
                 result.Add(dto);
             }

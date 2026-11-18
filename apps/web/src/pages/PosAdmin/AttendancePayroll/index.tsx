@@ -7,7 +7,7 @@ import {
   SyncOutlined,
   UnlockOutlined,
 } from '@ant-design/icons'
-import { Button, Input, Modal, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Input, Modal, Segmented, Select, Space, Tabs, Tag, Tooltip, Typography, message } from 'antd'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -32,7 +32,7 @@ import MyobPayRateSyncDrawer from './MyobPayRateSyncDrawer'
 import PayTab from './PayTab'
 import RatesTab from './RatesTab'
 import { exportPayrollWorkbook } from './payrollExport'
-import { PERIOD_PRESETS, isoWeekNumber, periodEnd, presetPeriodStart, shiftPeriod, type PeriodPreset } from './payrollLogic'
+import { PERIOD_PRESETS, birthdayRateReviews, isoWeekNumber, periodEnd, presetPeriodStart, shiftPeriod, type PeriodPreset } from './payrollLogic'
 import { useAttendanceStores } from './useAttendanceStores'
 import './attendancePayroll.css'
 
@@ -75,6 +75,10 @@ export default function AttendancePayrollPage() {
   const [pay, setPay] = useState<AttendancePayResultDto | null>(null)
   const [rates, setRates] = useState<AttendancePayRateDto[]>([])
   const [rateKeyword, setRateKeyword] = useState('')
+  // 「生日后时薪还没更新」的待办：个人时薪表标签上的红点、工时统计 / 工资表顶部的待办条共用。
+  // 单独取一份、不带搜索关键字，红点数和待办条不会因为在时薪表里搜人而变；时薪保存 / 同步后 reviewVersion + 1 重取。
+  const [reviewRates, setReviewRates] = useState<AttendancePayRateDto[]>([])
+  const [reviewVersion, setReviewVersion] = useState(0)
   // 从 MYOB 同步时薪的抽屉（需要同时有「工资编辑」与「MYOB 员工绑定」权限，后端也是两个策略取「且」）
   const [syncOpen, setSyncOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -136,6 +140,23 @@ export default function AttendancePayrollPage() {
       void loadPay()
     }
   }, [activeTab, loadHours, loadPay, loadRates])
+
+  useEffect(() => {
+    if (!storeCode || !canViewPay) {
+      setReviewRates([])
+      return undefined
+    }
+    let cancelled = false
+    getAttendancePayRates({ storeCode })
+      .then((list) => {
+        if (!cancelled) setReviewRates(list.filter((rate) => rate.birthdayReviewHint))
+      })
+      // 待办只是附加提示：取不到就不显示，不弹错误打扰主流程
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [canViewPay, reviewVersion, storeCode])
 
   const reloadAll = useCallback(() => {
     if (activeTab === 'hours') void loadHours()
@@ -276,6 +297,16 @@ export default function AttendancePayrollPage() {
     ) : null
   ) : null
 
+  // 待办：红点数 = 全部未处理；工时统计 / 工资表的待办条只在「生日之后最近的一期」起出现（生日 ≤ 本期末），生日之前的旧期不提示。
+  // 期起点还没加载出来时先不显示，避免首屏闪出一堆旧期不该有的条。
+  const viewPeriodEnd = periodStart ? periodEnd(periodStart, weeks) : undefined
+  const allRateReviews = useMemo(() => birthdayRateReviews(reviewRates), [reviewRates])
+  const periodRateReviews = useMemo(
+    () => (viewPeriodEnd ? birthdayRateReviews(reviewRates, viewPeriodEnd) : []),
+    [reviewRates, viewPeriodEnd],
+  )
+  const refreshRateReviews = () => setReviewVersion((version) => version + 1)
+
   const tabItems = [
     ...(canViewHours ? [{
       key: 'hours',
@@ -291,6 +322,7 @@ export default function AttendancePayrollPage() {
           onMergeStoresChange={setMergeStores}
           onReload={() => void loadHours()}
           onOpenRates={canViewPay ? () => setActiveTab('rates') : undefined}
+          rateReviews={periodRateReviews}
         />
       ),
     }] : []),
@@ -305,12 +337,19 @@ export default function AttendancePayrollPage() {
             weeks={weeks}
             canEdit={canEdit && !isSubmitted}
             onReload={() => void loadPay()}
+            rateReviews={periodRateReviews}
+            onOpenRates={() => setActiveTab('rates')}
           />
         ),
       },
       {
         key: 'rates',
-        label: t('attendancePayroll.tabs.rates'),
+        // 红点数字 = 生日后时薪还没更新的人数（全部，不看当前期）
+        label: (
+          <Badge count={allRateReviews.length} size="small" offset={[10, -2]}>
+            {t('attendancePayroll.tabs.rates')}
+          </Badge>
+        ),
         children: (
           <RatesTab
             rates={rates}
@@ -321,6 +360,7 @@ export default function AttendancePayrollPage() {
             onSaved={() => {
               void loadRates()
               void loadPay()
+              refreshRateReviews()
             }}
           />
         ),
@@ -383,6 +423,7 @@ export default function AttendancePayrollPage() {
         onApplied={() => {
           void loadRates()
           void loadPay()
+          refreshRateReviews()
         }}
       />
 

@@ -295,9 +295,10 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
               <strong>
                 {t('attendancePayroll.rates.birthdayHint', {
                   name: rate.userName,
-                  date: rate.birthday ? dayjs(rate.birthday).format('MM-DD') : '',
-                  age: rate.ageYears,
-                  previous: (rate.ageYears ?? 1) - 1,
+                  // 用后端给的「那次生日」与当天岁数：刚满 21 岁时 ageYears 已是 null，不能再用它
+                  date: dayjs(rate.birthdayReviewDate ?? rate.birthday).format('MM-DD'),
+                  age: rate.birthdayReviewAge ?? rate.ageYears,
+                  previous: (rate.birthdayReviewAge ?? rate.ageYears ?? 1) - 1,
                 })}
               </strong>
             </div>

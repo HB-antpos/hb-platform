@@ -95,6 +95,14 @@ const rate = normalizePayRate({ userGuid: 'u1', payMode: 'Mixed', effectiveFrom:
 assert.equal(rate.effectiveFrom, '2026-10-05')
 assert.equal(rate.birthday, undefined)
 assert.equal(rate.cashAllowancePerPeriod, -20)
+// 生日后时薪待办：那次生日的日期同样截成 YYYY-MM-DD，岁数原样保留（刚满 21 岁时 ageYears 为 null，岁数只在 birthdayReviewAge 里）
+const reviewRate = normalizePayRate({
+  userGuid: 'u2', birthdayReviewHint: true, birthdayReviewDate: '2026-11-10T00:00:00', birthdayReviewAge: 21, ageYears: null,
+})
+assert.equal(reviewRate.birthdayReviewDate, '2026-11-10')
+assert.equal(reviewRate.birthdayReviewAge, 21)
+assert.equal(reviewRate.ageYears, null)
+assert.equal(normalizePayRate({ userGuid: 'u3' }).birthdayReviewDate, undefined)
 
 // 审批：请假 / 带薪公假结构化字段（DateTime、TimeSpan 规整）
 const approval = normalizeAttendanceApproval({
@@ -152,7 +160,7 @@ for (const field of [
   'OtherStoreItems', 'OrdinaryCount', 'LookbackWeeks', 'MinCount', 'IsMinor', 'PeriodStatus', 'PendingCount',
   'LeaveDetail', 'RequestedHours', 'ApprovedHours', 'FixedTransferHoursPerWeek', 'Allowance', 'GrossPay', 'Warnings',
   'TransferWeekdayRate', 'TransferSaturdayRate', 'TransferSundayRate', 'TransferPublicHolidayRate', 'CashRate',
-  'CashAllowancePerPeriod', 'MinimumRate', 'EffectiveFrom', 'BirthdayReviewHint',
+  'CashAllowancePerPeriod', 'MinimumRate', 'EffectiveFrom', 'BirthdayReviewHint', 'BirthdayReviewDate', 'BirthdayReviewAge', 'RateReview',
 ]) {
   assert.ok(new RegExp(`public [^\\n]* ${field} \\{`).test(backendPayroll), `后端 AttendancePayrollDtos 缺字段 ${field}`)
 }

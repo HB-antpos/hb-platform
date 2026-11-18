@@ -102,6 +102,7 @@ export function normalizePayRate(value: unknown): AttendancePayRateDto {
   return {
     ...rate,
     birthday: optionalDate(rate.birthday),
+    birthdayReviewDate: optionalDate(rate.birthdayReviewDate),
     effectiveFrom: optionalDate(rate.effectiveFrom),
     cashAllowancePerPeriod: rate.cashAllowancePerPeriod ?? 0,
   }

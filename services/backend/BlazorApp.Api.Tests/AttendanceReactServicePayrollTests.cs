@@ -245,6 +245,92 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(pay.Data.Rows.Sum(row => row.GrossPay), pay.Data.TotalGrossPay);
         }
 
+        [Theory]
+        // 刚满 21 岁（青少年档转成人档那天）也要提示：以前因为「现在已不是 21 岁以下」被漏掉
+        [InlineData("2005-10-15", "2026-10-20", "2026-07-01", "2026-10-15", 21)]
+        // 17 岁生日刚过、时薪还是之前设的
+        [InlineData("2009-10-10", "2026-10-20", "2026-07-01", "2026-10-10", 17)]
+        // 生日当天生效的新记录 = 已更新，不再提示
+        [InlineData("2008-10-12", "2026-10-20", "2026-10-12", null, 0)]
+        // 生日之后才生效的新记录同样算已更新
+        [InlineData("2008-10-12", "2026-10-20", "2026-10-18", null, 0)]
+        // 22 岁：已是成人档，不提示
+        [InlineData("2004-10-14", "2026-10-20", "2026-07-01", null, 0)]
+        // 超过 60 天的旧生日不再挂着：恰好 60 天（10-20 往前数 60 天 = 8-21）不提示，晚一天（8-22）提示
+        [InlineData("2009-08-21", "2026-10-20", "2026-07-01", null, 0)]
+        [InlineData("2009-08-22", "2026-10-20", "2026-07-01", "2026-08-22", 17)]
+        // 还没出生（脏数据）：不提示
+        [InlineData("2027-01-01", "2026-10-20", "2026-07-01", null, 0)]
+        // 2 月 29 日出生：非闰年按 2 月 28 日算
+        [InlineData("2008-02-29", "2026-03-10", "2025-01-01", "2026-02-28", 18)]
+        public void 生日后时薪提醒_按生日当天年龄判断_含满21岁_并带上生日日期与岁数(
+            string birthday, string today, string rateEffectiveFrom, string? expectedDate, int expectedAge)
+        {
+            var result = AttendanceReactService.ResolveBirthdayRateReview(
+                DateTime.Parse(birthday), DateTime.Parse(today), DateTime.Parse(rateEffectiveFrom));
+
+            if (expectedDate == null)
+            {
+                Assert.Null(result);
+                return;
+            }
+            Assert.NotNull(result);
+            Assert.Equal(DateTime.Parse(expectedDate), result!.Value.Date);
+            Assert.Equal(expectedAge, result.Value.Age);
+        }
+
+        [Fact]
+        public async Task 生日后时薪提醒_时薪接口返回待核对的人与岁数_工时页提醒满21岁也要核对时薪()
+        {
+            await SeedPayrollStoreAsync();
+            // 今天 10-20。turn21：10-15 刚满 21 岁；teen17：10-10 满 17 岁；done18：10-12 满 18 岁但新时薪已按生日生效；adult22：22 岁。
+            var birthdays = new (string Guid, DateTime Birthday, DateTime RateFrom)[]
+            {
+                ("turn21-user", new DateTime(2005, 10, 15), new DateTime(2026, 7, 1)),
+                ("teen17-user", new DateTime(2009, 10, 10), new DateTime(2026, 7, 1)),
+                ("done18-user", new DateTime(2008, 10, 12), new DateTime(2026, 10, 12)),
+                ("adult22-user", new DateTime(2004, 10, 14), new DateTime(2026, 7, 1)),
+            };
+            foreach (var (guid, birthday, rateFrom) in birthdays)
+            {
+                await SeedBoundStaffAsync(guid, EmployeeType.Temporary, birthday);
+                await _db.Insertable(new EmployeePayRate
+                {
+                    RateGuid = $"rate-{guid}", UserGuid = guid, PayMode = "Transfer",
+                    TransferWeekdayRate = 20m, TransferSaturdayRate = 24m, TransferSundayRate = 28m, TransferPublicHolidayRate = 40m,
+                    EffectiveFrom = rateFrom, CreatedAt = DateTime.UtcNow,
+                }).ExecuteCommandAsync();
+            }
+
+            var rates = await Manager().GetPayRatesAsync(new AttendancePayRateQueryDto { StoreCode = "BRI" });
+
+            Assert.True(rates.Success, rates.Message);
+            var flagged = rates.Data!.Where(item => item.BirthdayReviewHint).ToList();
+            Assert.Equal(new[] { "teen17-user", "turn21-user" }, flagged.Select(item => item.UserGuid).OrderBy(item => item).ToArray());
+            var turn21 = flagged.Single(item => item.UserGuid == "turn21-user");
+            Assert.Equal(new DateTime(2026, 10, 15), turn21.BirthdayReviewDate);
+            Assert.Equal(21, turn21.BirthdayReviewAge);
+            // 刚满 21 岁时 AgeYears 已是 null（不再显示年龄角标），所以岁数必须靠 BirthdayReviewAge 给
+            Assert.Null(turn21.AgeYears);
+            Assert.Equal(17, flagged.Single(item => item.UserGuid == "teen17-user").BirthdayReviewAge);
+            Assert.All(rates.Data.Where(item => !item.BirthdayReviewHint), item =>
+            {
+                Assert.Null(item.BirthdayReviewDate);
+                Assert.Null(item.BirthdayReviewAge);
+            });
+
+            // 工时页的生日提醒：10-15 刚满 21 岁落在本期内，IsMinor=false（不是未成年）但 RateReview=true（要核对时薪）
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+            Assert.True(hours.Success, hours.Message);
+            var alert21 = Assert.Single(hours.Data!.Alerts, item => item.Type == "Birthday" && item.UserGuid == "turn21-user");
+            Assert.Equal(21, alert21.AgeYears);
+            Assert.False(alert21.IsMinor);
+            Assert.True(alert21.RateReview);
+            var alert22 = Assert.Single(hours.Data.Alerts, item => item.Type == "Birthday" && item.UserGuid == "adult22-user");
+            Assert.False(alert22.RateReview);
+            Assert.True(Assert.Single(hours.Data.Alerts, item => item.Type == "Birthday" && item.UserGuid == "teen17-user").RateReview);
+        }
+
         [Fact]
         public async Task 工资周期_待处理清零才能提交_锁定后写接口返回PERIOD_LOCKED_解锁后恢复()
         {
