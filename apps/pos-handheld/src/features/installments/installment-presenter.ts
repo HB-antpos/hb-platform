@@ -26,6 +26,15 @@ import type { PaymentProviderAvailability } from "@/features/payments/runtime/pa
 
 export const INSTALLMENT_MINIMUM_TOTAL_CENTS = 5_000;
 export const INSTALLMENT_MINIMUM_DOWN_PAYMENT_CENTS = 2_000;
+/**
+ * 以下长度与服务端 InstallmentOrder / InstallmentOrderLine 的列宽一致（InstallmentService.cs）。
+ * 服务端开单没有逐字段长度校验，超长内容要到落库时才被 SQL Server 截断报错；
+ * 而首付在提交服务端之前就已扣下，被拒后分期单会永久停在待提交状态并拦住整机收银，
+ * 所以必须在扣款之前就对齐这些上限。
+ */
+export const INSTALLMENT_CUSTOMER_NAME_MAX_LENGTH = 100;
+export const INSTALLMENT_CUSTOMER_PHONE_MAX_LENGTH = 40;
+export const INSTALLMENT_NOTE_MAX_LENGTH = 500;
 const INSTALLMENT_HISTORY_PAGE_SIZE = 50;
 const INSTALLMENT_HISTORY_REQUEST_SIZE = 51;
 const DEFAULT_DATE_FILTER = Object.freeze({
@@ -174,6 +183,8 @@ export type InstallmentWorkflowErrorCode =
   | "claim-review-required"
   | "cash-confirmation-required"
   | "conflict"
+  /** 开单内容（客户信息 / 备注 / 商品行）不会被服务端接受；扣款之前拒绝，本次未收款。 */
+  | "invalid-create-input"
   | "online-required"
   | "payment-method-unsupported"
   | "payment-recovery-required"
@@ -499,15 +510,15 @@ export class InstallmentPresenter {
   }
 
   public setCustomerName(value: string): void {
-    this.patchText("customerName", value, 256);
+    this.patchText("customerName", value, INSTALLMENT_CUSTOMER_NAME_MAX_LENGTH);
   }
 
   public setCustomerPhone(value: string): void {
-    this.patchText("customerPhone", value, 128);
+    this.patchText("customerPhone", value, INSTALLMENT_CUSTOMER_PHONE_MAX_LENGTH);
   }
 
   public setCreateNote(value: string): void {
-    this.patchText("createNote", value, 2_000);
+    this.patchText("createNote", value, INSTALLMENT_NOTE_MAX_LENGTH);
   }
 
   public setCreateDownPayment(value: string): void {
@@ -922,6 +933,7 @@ export class InstallmentPresenter {
       downPaymentCents === null ||
       downPaymentCents < INSTALLMENT_MINIMUM_DOWN_PAYMENT_CENTS ||
       downPaymentCents > draft.totalCents ||
+      draft.lines.some((line) => line.actualAmountCents <= 0) ||
       !customerName ||
       !customerPhone ||
       (this.state.createPaymentMethod === "voucher" && !voucherReference)
@@ -1504,6 +1516,7 @@ function workflowFailureCode(error: unknown): InstallmentStatusCode {
       return "authorization-declined";
     }
     if (error.code === "conflict") return "conflict";
+    if (error.code === "invalid-create-input") return "invalid-create";
     if (error.code === "claim-busy") return "claim-busy";
     if (error.code === "payment-method-unsupported") {
       return "payment-method-unsupported";

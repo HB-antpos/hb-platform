@@ -535,9 +535,28 @@ export class ReturnWorkflow {
       lastErrorCode: null,
     };
     try {
-      const online = await this.options.connectivity.isOnline();
-      this.assertSession();
-      const plan = this.buildPlan(online);
+      let plan: ReturnRefundPlan;
+      try {
+        const online = await this.options.connectivity.isOnline();
+        this.assertSession();
+        plan = this.buildPlan(online);
+      } catch (error) {
+        // 计划都还没生成就失败（需联网 / 额度不足 / 退款方式不可用 / 无小票只能现金等校验类错误）：
+        // 此时没有创建 actionId、没有写账本，页面应回到草稿让收银员改选（例如改选现金）后重试，
+        // 而不是冻结成 failed——那会让「请改选现金」的提示根本点不动。
+        // 会话失效不在此列，仍按原逻辑冻结。
+        if (
+          error instanceof ReturnFeatureError &&
+          error.code !== "RETURN_SESSION_EXPIRED"
+        ) {
+          this.snapshot = {
+            ...this.snapshot,
+            status: "draft",
+            lastErrorCode: error.code,
+          };
+        }
+        throw error;
+      }
       const actionId = this.actionId ?? this.options.createActionId();
       if (!actionId.trim()) {
         throw new ReturnFeatureError("RETURN_EXECUTION_FAILED");

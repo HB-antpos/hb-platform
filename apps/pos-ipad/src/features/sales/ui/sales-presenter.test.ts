@@ -1251,6 +1251,64 @@ test("OPENITEM 只接受正整数分币，并透传给独立商品工作流", as
   presenter.destroy();
 });
 
+test("手点添加 / 确认在上一次加购完成前不重复进入工作流：连点只加一条开价行，完成后可再次添加", async () => {
+  const openItemCalls: number[] = [];
+  const productCalls: string[] = [];
+  // 收集每一次进入工作流的释放函数：即使将来防重入失效，也能全部放行并让断言干净失败，而不是挂死。
+  const releaseOpenItem: Array<() => void> = [];
+  const { presenter } = createPresenter({
+    workflow: {
+      ...createWorkflow(async () => ({
+        completed: true,
+        canClearCart: true,
+        orderGuid: "order-open-item-double-tap",
+        cashDueCents: 995,
+        changeCents: 5,
+        postCommit: { drawerDisposition: "queued" },
+      })),
+      async addOpenItem(unitPriceCents) {
+        openItemCalls.push(unitPriceCents);
+        // 弹窗要等这个异步加购完成才会关闭：模拟收银员在这段时间里连点「确认」。
+        await new Promise<void>((resolve) => {
+          releaseOpenItem.push(resolve);
+        });
+      },
+      async addProduct(product) {
+        productCalls.push(product.productCode);
+      },
+    },
+  });
+  const product = {
+    productCode: "P-DOUBLE",
+    itemNumber: "I-DOUBLE",
+    barcode: "930000000077",
+    lookupCode: "930000000077",
+    displayName: "连点商品",
+    unitPriceCents: 500,
+    discountRate: null,
+  };
+
+  const first = presenter.addOpenItem(300);
+  const second = presenter.addOpenItem(300);
+  // 搜索结果的「添加」与开价「确认」共用同一道闸：加购未完成时也不能再叠加搜索添加。
+  const third = presenter.addProduct(product);
+  // 重复触发应立即被拒（不等第一次加购完成）；先取最早落定的结果，再放行所有已进入工作流的调用。
+  const earliest = await Promise.race([second, third]);
+  for (const release of releaseOpenItem) release();
+  assert.equal(await first, true);
+  assert.equal(earliest, false);
+  assert.equal(await second, false);
+  assert.equal(await third, false);
+  assert.deepEqual(openItemCalls, [300]);
+  assert.deepEqual(productCalls, []);
+
+  // 上一次完成后闸门复位：正常的下一次添加照常进入工作流。
+  assert.equal(await presenter.addProduct(product), true);
+  assert.deepEqual(productCalls, ["P-DOUBLE"]);
+
+  presenter.destroy();
+});
+
 test("OPENITEM 单价上限 9999（含）：超限拒绝并提示，不进工作流", async () => {
   const openItemCalls: number[] = [];
   const feedback: SalesFeedbackEvent[] = [];

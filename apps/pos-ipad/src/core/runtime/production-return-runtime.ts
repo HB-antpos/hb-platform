@@ -536,17 +536,32 @@ class AuthorizedReturnWorkflow extends ReturnWorkflow {
         () => true,
       );
     }
-    return this.requirePermission(
-      this.confirmActionId ??
-        (this.confirmActionId =
-          requiredOpaque(this.dependencies.createId())),
-      POS_RETURN_PERMISSIONS.confirm,
-      "confirm-return",
-      () => {
-        this.dependencies.assertActive();
-        return super.confirm();
-      },
-    );
+    // 只有「授权已通过、super.confirm() 真的跑过」才可能是计划阶段的校验失败。
+    // 主管拒绝 / 取消授权时 super.confirm() 根本没执行，必须沿用稳定 id，不能换 id 绕过拒绝结论。
+    let workflowConfirmRan = false;
+    try {
+      return await this.requirePermission(
+        this.confirmActionId ??
+          (this.confirmActionId =
+            requiredOpaque(this.dependencies.createId())),
+        POS_RETURN_PERMISSIONS.confirm,
+        "confirm-return",
+        () => {
+          this.dependencies.assertActive();
+          workflowConfirmRan = true;
+          return super.confirm();
+        },
+      );
+    } catch (error) {
+      // 计划阶段的校验类失败（需联网 / 无小票只能现金 / 额度不足等）：工作流已回到草稿，
+      // 没有创建退款 actionId、没有写账本。授权服务对同一 actionId 只执行一次并复用原结果，
+      // 不换新 id 的话，收银员按提示改选后重试会被原样重放同一个错误。
+      // 只换 Confirm 的 id：AddReceiptLine 授权已成功，保持原 id 不必重复授权。
+      if (workflowConfirmRan && this.getSnapshot().status === "draft") {
+        this.confirmActionId = null;
+      }
+      throw error;
+    }
   }
 
   private async authorizeAndRecover(): Promise<ReturnExecutionOutcome> {

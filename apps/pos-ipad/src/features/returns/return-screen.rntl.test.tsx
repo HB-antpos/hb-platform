@@ -130,8 +130,12 @@ test("无小票 OPENITEM 走在线主管路径并提供中英文一致的 44pt �
     screen.getByTestId("return-confirm").props.accessibilityState.disabled,
   ).toBe(false);
   expect(screen.queryByTestId("return-method-installment")).toBeNull();
-  await fireEvent.press(screen.getByTestId("return-method-voucher"));
-  expect(presenter.getState().preferredMethod).toBe("voucher");
+  // 无小票没有原支付可追溯：银行卡 / 礼券一旦提交会在账本写入后才报缺原额度，
+  // 把退货卡成 Unknown，所以界面只提供现金。
+  expect(screen.getByTestId("return-method-cash")).toBeTruthy();
+  expect(screen.queryByTestId("return-method-card")).toBeNull();
+  expect(screen.queryByTestId("return-method-voucher")).toBeNull();
+  expect(presenter.getState().preferredMethod).toBe("cash");
 });
 
 test("OPENITEM 金额只接受正数且最多两位小数", () => {

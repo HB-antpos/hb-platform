@@ -221,12 +221,12 @@ export function ReturnScreen({
     );
   }
 
-  // 无单退货可自由选择现金/银行卡/礼券；
+  // 无小票退货没有原支付可追溯，银行卡无从原路退回、礼券代替也需绑定原额度，只能退现金；
   // 有单退货默认按原支付方式退回，同时开放现金、礼券作为代替选项。
   // 不能原路退回的额度（如手工刷卡）不提供原方式按钮，只能现金或礼券代替。
   const methods: readonly ReturnTenderMethod[] =
     state.mode === "no-receipt"
-      ? ["cash", "card", "voucher"]
+      ? ["cash"]
       : Array.from(
           new Set<ReturnTenderMethod>([
             ...state.capacities

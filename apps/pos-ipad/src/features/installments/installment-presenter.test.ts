@@ -733,6 +733,43 @@ test("创建严格对齐 WPF 的客户、AUD 50 总额和 AUD 20 首付规则", 
   assert.equal(subject.getState().pane, "history");
 });
 
+test("创建表单拒绝服务端必拒的内容：0 元商品行不提交，姓名 / 电话 / 备注按列宽截断", async () => {
+  const workflow = new FakeWorkflow();
+  const drafts = new MutableDraftPort({
+    revision: 3,
+    totalCents: 6_000,
+    lines: [
+      {
+        lineKey: "L1",
+        displayName: "Tea",
+        quantity: "1",
+        actualAmountCents: 6_000,
+      },
+      {
+        lineKey: "L2",
+        displayName: "Free gift",
+        quantity: "1",
+        actualAmountCents: 0,
+      },
+    ],
+  });
+  const subject = presenter(workflow, { drafts });
+  subject.showCreate();
+  fillValidCreateForm(subject);
+
+  await subject.create();
+  assert.equal(subject.getState().statusCode, "invalid-create");
+  assert.deepEqual(workflow.writeCalls, []);
+
+  // 姓名 / 电话 / 备注的输入上限与服务端列宽（100 / 40 / 500）一致，超出部分在输入时就被截断。
+  subject.setCustomerName("n".repeat(300));
+  subject.setCustomerPhone("1".repeat(300));
+  subject.setCreateNote("x".repeat(900));
+  assert.equal(subject.getState().customerName.length, 100);
+  assert.equal(subject.getState().customerPhone.length, 40);
+  assert.equal(subject.getState().createNote.length, 500);
+});
+
 test("券首付和补款只接收券码，workflow token 固定为 null 且公开状态没有 token 字段", async () => {
   const workflow = new FakeWorkflow();
   const subject = presenter(workflow);

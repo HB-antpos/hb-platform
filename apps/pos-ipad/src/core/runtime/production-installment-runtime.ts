@@ -57,6 +57,9 @@ import type {
   InstallmentVoidCommand,
 } from "@/features/installments/installment-models";
 import {
+  INSTALLMENT_CUSTOMER_NAME_MAX_LENGTH,
+  INSTALLMENT_CUSTOMER_PHONE_MAX_LENGTH,
+  INSTALLMENT_NOTE_MAX_LENGTH,
   InstallmentPresenter,
   InstallmentWorkflowError,
   type InstallmentCreateDraft,
@@ -922,6 +925,9 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       ) {
         throw workflowError("conflict", "Installment cart revision changed.");
       }
+      // 首付在提交服务端之前就会扣下：开单内容必须先过服务端同样的拒收规则，
+      // 否则被拒的分期单会永久停在待提交状态，并拦住整机收银。
+      assertCreateAcceptedByServer(input, cart.cart);
 
       const candidate = await this.createCreateAction(input, cart.cart);
       const persisted = await this.persistCandidate(candidate);
@@ -3693,6 +3699,69 @@ function createDraft(
     ),
   });
 }
+
+/**
+ * 对齐服务端 InstallmentService.NormalizeCreateRequest 与实体列宽，在扣首付前拦住
+ * 服务端必然拒收 / 截断的开单内容：商品行数量、单价、行金额必须为正，行金额合计必须等于总额，
+ * 客户姓名 / 电话 / 备注与商品行文本不得超过列宽。
+ * 只读校验，不产生任何持久化副作用；失败时本次未收款、没有 action。
+ */
+function assertCreateAcceptedByServer(
+  input: InstallmentWorkflowCreateInput,
+  cart: CartSnapshot,
+): void {
+  const reject = (reason: string): never => {
+    throw workflowError(
+      "invalid-create-input",
+      `Installment create input would be rejected by the server (${reason}).`,
+    );
+  };
+  const textWithin = (value: string | null, max: number): boolean =>
+    (value?.trim().length ?? 0) <= max;
+  const requiredWithin = (value: string | null, max: number): boolean => {
+    const length = value?.trim().length ?? 0;
+    return length > 0 && length <= max;
+  };
+
+  if (
+    !requiredWithin(input.customerName, INSTALLMENT_CUSTOMER_NAME_MAX_LENGTH) ||
+    !requiredWithin(input.customerPhone, INSTALLMENT_CUSTOMER_PHONE_MAX_LENGTH) ||
+    !textWithin(input.note, INSTALLMENT_NOTE_MAX_LENGTH)
+  ) {
+    reject("customer fields");
+  }
+  let lineTotalCents = 0;
+  for (const line of cart.lines) {
+    // 数量在购物车里是十进制字符串；服务端要求 > 0。
+    const quantity = Number(line.quantity);
+    if (
+      !Number.isFinite(quantity) ||
+      quantity <= 0 ||
+      line.unitPrice.cents <= 0 ||
+      line.actualAmount.cents <= 0
+    ) {
+      reject("line amount");
+    }
+    if (
+      !requiredWithin(line.productCode, SERVER_LINE_CODE_MAX_LENGTH) ||
+      !requiredWithin(line.lookupCode, SERVER_LINE_CODE_MAX_LENGTH) ||
+      !requiredWithin(line.displayName, SERVER_LINE_NAME_MAX_LENGTH) ||
+      !textWithin(line.itemNumber, SERVER_LINE_CODE_MAX_LENGTH) ||
+      !textWithin(
+        line.syncProvenance?.referenceCode ?? null,
+        SERVER_LINE_CODE_MAX_LENGTH,
+      )
+    ) {
+      reject("line text");
+    }
+    lineTotalCents += line.actualAmount.cents;
+  }
+  if (lineTotalCents !== cart.actualAmount.cents) reject("line total");
+}
+
+// InstallmentOrderLine 列宽（ProductCode / LookupCode / ReferenceCode / ItemNumber 50，DisplayName 255）。
+const SERVER_LINE_CODE_MAX_LENGTH = 50;
+const SERVER_LINE_NAME_MAX_LENGTH = 255;
 
 function createLines(
   cart: CartSnapshot,

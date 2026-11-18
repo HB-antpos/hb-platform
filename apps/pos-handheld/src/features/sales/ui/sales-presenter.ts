@@ -347,6 +347,7 @@ export class SalesPresenter {
   private searchGeneration = 0;
   private nextPresenterAttemptId = 0;
   private nextScanTimingId = 0;
+  private manualProductAddInFlight = false;
   private mergeSelectionInProgress = false;
   private destroyed = false;
 
@@ -598,7 +599,7 @@ export class SalesPresenter {
       this.publishBlockedAddAttempt("manual");
       return Promise.resolve(false);
     }
-    return this.runProductMutation(() =>
+    return this.runManualProductAdd(() =>
       this.dependencies.workflow.addProduct(product),
     );
   }
@@ -769,7 +770,7 @@ export class SalesPresenter {
       this.publishBlockedAddAttempt("manual");
       return Promise.resolve(false);
     }
-    return this.runProductMutation(() =>
+    return this.runManualProductAdd(() =>
       this.dependencies.workflow.addOpenItem(unitPriceCents),
     );
   }
@@ -1237,6 +1238,26 @@ export class SalesPresenter {
         this.patchState({ errorCode: "lock-failed" });
         return false;
       });
+  }
+
+  /**
+   * 手点「添加 / 确认」：弹窗要等异步加购完成才关闭，期间连点会把同一次输入重复加购
+   * （开价商品每次都是一条独立新行）。加购完成前忽略重复触发；扫码入口不走这里，不受影响。
+   */
+  private runManualProductAdd(operation: () => Promise<void>): Promise<boolean> {
+    if (this.manualProductAddInFlight) return Promise.resolve(false);
+    this.manualProductAddInFlight = true;
+    let pending: Promise<boolean>;
+    try {
+      pending = this.runProductMutation(operation);
+    } catch (error) {
+      // operation 同步抛错时不能把防重入标记留在 true，否则之后所有手点添加都被吞掉。
+      this.manualProductAddInFlight = false;
+      throw error;
+    }
+    return pending.finally(() => {
+      this.manualProductAddInFlight = false;
+    });
   }
 
   private runProductMutation(operation: () => Promise<void>): Promise<boolean> {

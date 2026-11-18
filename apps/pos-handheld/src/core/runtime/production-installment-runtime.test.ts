@@ -1244,6 +1244,78 @@ test("手动刷卡只用于续付：创建分期的首付不接受 manual-card",
   assert.equal(harness.payments.authorizeCalls, 0);
 });
 
+test("分期开单扣首付前先过服务端拒收规则：0 元行 / 超长文本 / 行合计不符一律不扣款、不建 action", async () => {
+  const baseInput = {
+    draftRevision: 1,
+    customerName: "Customer",
+    customerPhone: "0400000000",
+    note: null,
+    downPaymentCents: 2_000,
+    method: "voucher" as const,
+    voucherReference: "VOUCHER-CODE-ONLY",
+    voucherReservationToken: null,
+  };
+  const zero = { currency: "AUD", cents: 0 };
+  const cases: ReadonlyArray<
+    Readonly<{
+      name: string;
+      linePatch?: Record<string, unknown>;
+      input?: Record<string, unknown>;
+    }>
+  > = [
+    { name: "0 元行（服务端 line amount must be greater than zero）", linePatch: { unitPrice: zero, actualAmount: zero } },
+    { name: "行金额为 0（整行 100% 折扣）", linePatch: { actualAmount: zero } },
+    { name: "数量为 0", linePatch: { quantity: "0" } },
+    { name: "行合计与总额不符", linePatch: { actualAmount: { currency: "AUD", cents: 4_000 } } },
+    { name: "商品编码超过 50", linePatch: { productCode: "P".repeat(51) } },
+    { name: "商品名超过 255", linePatch: { displayName: "N".repeat(256) } },
+    { name: "客户姓名超过 100", input: { customerName: "C".repeat(101) } },
+    { name: "客户电话超过 40", input: { customerPhone: "0".repeat(41) } },
+    { name: "备注超过 500", input: { note: "x".repeat(501) } },
+  ];
+  for (const testCase of cases) {
+    const harness = createHarness();
+    harness.cart.linePatch = testCase.linePatch ?? {};
+    const workflow = workflowOf(harness.runtime.createPresenter());
+    await assert.rejects(
+      workflow.create({ ...baseInput, ...testCase.input }),
+      (error: unknown) =>
+        error instanceof InstallmentWorkflowError &&
+        error.code === "invalid-create-input",
+      testCase.name,
+    );
+    // 一定发生在扣款之前：没有 action、没有券 / 通道调用、没有提交服务端。
+    assert.equal(harness.actionStore.getCurrent(), null, testCase.name);
+    assert.equal(harness.actionStore.createdCandidates.length, 0, testCase.name);
+    assert.equal(harness.voucherIntents.calls.length, 0, testCase.name);
+    assert.equal(harness.payments.beginCalls, 0, testCase.name);
+  }
+});
+
+test("分期开单：正好在服务端列宽上限的内容照常通过（不误伤）", async () => {
+  const harness = createHarness();
+  harness.cart.linePatch = {
+    productCode: "P".repeat(50),
+    lookupCode: "L".repeat(50),
+    itemNumber: "I".repeat(50),
+    displayName: "N".repeat(255),
+  };
+  const workflow = workflowOf(harness.runtime.createPresenter());
+
+  await workflow.create({
+    draftRevision: 1,
+    customerName: "C".repeat(100),
+    customerPhone: "0".repeat(40),
+    note: "x".repeat(500),
+    downPaymentCents: 2_000,
+    method: "voucher",
+    voucherReference: "VOUCHER-CODE-ONLY",
+    voucherReservationToken: null,
+  });
+
+  assert.equal(harness.actionStore.createdCandidates.length, 1);
+});
+
 test("原设备主管明确未收现后安全释放 ProviderPending/Unknown，且不批准、不 commit、不生成新身份", async () => {
   for (const remoteStatus of ["ProviderPending", "Unknown"] as const) {
     const harness = createHarness({ repaymentClaimPrepareProviderV1: true });
@@ -4078,6 +4150,9 @@ class FakeCart {
     this.revision += 1;
   }
 
+  /** 测试用：覆盖默认商品行的字段（数量 / 单价 / 行金额 / 编码文本等），用来构造服务端会拒收的开单内容。 */
+  public linePatch: Readonly<Record<string, unknown>> = {};
+
   private snapshot() {
     const cart = {
       revision: this.revision,
@@ -4098,6 +4173,7 @@ class FakeCart {
           returnSourceKey: null,
           originalOrderGuid: null,
           originalOrderDetailGuid: null,
+          ...this.linePatch,
         },
       ],
       subtotal: { currency: "AUD", cents: 5_000 },
