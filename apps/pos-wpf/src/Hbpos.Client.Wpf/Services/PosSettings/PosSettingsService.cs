@@ -440,7 +440,9 @@ public sealed class PosSettingsService : IPosSettingsService
         ClearFailureState();
         if (sync.Changed)
         {
-            ConsoleLog.Write(LogCategory, $"applied store={storeCode} managedKeys={applied.Values.Count}");
+            ConsoleLog.Write(
+                LogCategory,
+                $"applied store={storeCode} managedKeys={applied.Values.Count} values=[{FormatAppliedValues(applied.Values, actualAfter)}]");
         }
 
         var ackPending = false;
@@ -854,6 +856,27 @@ public sealed class PosSettingsService : IPosSettingsService
     }
 
     private static string Flag(bool value) => value ? "true" : "false";
+
+    /// <summary>
+    /// 把本次应用的总部下发项格式化成「键=总部值(src=来源层级,local=本机实际值)」，按键名排序后用分号连接，
+    /// 方便在中心日志里直接核对「下发的是什么、本机最终是什么」。
+    /// 总部值与本机实际值不一致（例如某个开关写入失败）时两者会同时可见；本机读不到时 local 记为 ?。
+    /// 只含开关的键名、布尔值和来源层级，不含门店之外的任何业务数据。
+    /// </summary>
+    internal static string FormatAppliedValues(
+        IReadOnlyDictionary<string, PosSettingStoredValue> managed,
+        IReadOnlyDictionary<string, bool> actual)
+    {
+        return string.Join(
+            "; ",
+            managed
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair =>
+                {
+                    var local = actual.TryGetValue(pair.Key, out var actualValue) ? Flag(actualValue) : "?";
+                    return $"{pair.Key}={Flag(pair.Value.Value)}(src={pair.Value.Source},local={local})";
+                }));
+    }
 
     private string? CurrentStoreCode()
     {

@@ -52,6 +52,53 @@ public sealed class PosSettingsServiceTests
     }
 
     [Fact]
+    public async Task Applied_log_line_lists_keys_values_sources_and_local_actual_values()
+    {
+        using var harness = new Harness();
+        harness.Api.Server(("payment.manualCard", true, "store"), ("receipt.bankReceipt", false, "global"));
+        var lines = new List<string>();
+        void OnLine(string line) => lines.Add(line);
+        ConsoleLog.LineWritten += OnLine;
+        try
+        {
+            await harness.Service.SyncNowAsync();
+        }
+        finally
+        {
+            ConsoleLog.LineWritten -= OnLine;
+        }
+
+        // 一行日志里同时能看到：总部值、来源层级、本机最终实际值；按键名排序。
+        var applied = Assert.Single(lines, line => line.Contains("applied store=S001", StringComparison.Ordinal));
+        Assert.Contains("managedKeys=2", applied, StringComparison.Ordinal);
+        Assert.Contains(
+            "values=[payment.manualCard=true(src=store,local=true); receipt.bankReceipt=false(src=global,local=false)]",
+            applied,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Format_applied_values_orders_by_key_and_marks_missing_local_value()
+    {
+        var managed = new Dictionary<string, PosSettingStoredValue>
+        {
+            ["receipt.bankReceipt"] = new(false, "global"),
+            ["customerDisplay.advertisements"] = new(false, "store"),
+        };
+        var actual = new Dictionary<string, bool> { ["receipt.bankReceipt"] = true };
+
+        var text = PosSettingsService.FormatAppliedValues(managed, actual);
+
+        // 总部值与本机实际值不一致时两者同时可见；本机读不到的项记为 local=?。
+        Assert.Equal(
+            "customerDisplay.advertisements=false(src=store,local=?); receipt.bankReceipt=false(src=global,local=true)",
+            text);
+        Assert.Equal(string.Empty, PosSettingsService.FormatAppliedValues(
+            new Dictionary<string, PosSettingStoredValue>(),
+            actual));
+    }
+
+    [Fact]
     public async Task Unchanged_hash_makes_no_writes_and_no_second_ack()
     {
         using var harness = new Harness();
