@@ -125,9 +125,11 @@ export interface AttendanceHoursAlertDto {
   minCount?: number
   hours?: number | null
   approvalGuid?: string
-  /** 生日：满几岁、是否 21 岁以下（是则提示核对按年龄计的时薪）。 */
+  /** 生日：满几岁、是否 21 岁以下（合规文案用）。 */
   ageYears?: number | null
   isMinor?: boolean | null
+  /** 生日当天年龄 ≤ 21（含刚满 21 岁转成人档）→ 要核对按年龄计的时薪；旧后端没有这个字段时退回 isMinor。 */
+  rateReview?: boolean | null
 }
 
 export interface AttendanceHoursResultDto {
@@ -230,8 +232,11 @@ export interface AttendancePayRateDto {
   remark?: string | null
   createdAt?: string | null
   createdBy?: string | null
-  /** 21 岁以下员工过了生日、时薪还是生日前设的：提示核对。 */
+  /** 生日已过 60 天内（生日当天年龄 ≤ 21，含刚满 21 岁）、时薪还是生日前设的：提示核对。 */
   birthdayReviewHint?: boolean
+  /** 需要核对时薪的那次生日（YYYY-MM-DD）与当天满的岁数；birthdayReviewHint 为 true 时才有值。 */
+  birthdayReviewDate?: string | null
+  birthdayReviewAge?: number | null
 }
 
 /** POST payroll/rates：只新增一条生效记录，不改历史（重复生效日返回 RATE_EFFECTIVE_DATE_EXISTS）。 */

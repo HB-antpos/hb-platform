@@ -307,3 +307,35 @@ export function summarizeEmployeeHours(employee: AttendanceHoursEmployeeDto): At
   result.total = round2(result.weekday + result.saturday + result.sunday + result.publicHoliday + result.leave)
   return result
 }
+
+/** 「生日后时薪还没按新年龄更新」待办的一项（来自个人时薪表接口的 birthdayReviewHint）。 */
+export interface BirthdayRateReview {
+  userGuid: string
+  userName: string
+  /** 那次生日（YYYY-MM-DD）。 */
+  date: string
+  /** 生日当天满的岁数。 */
+  age: number
+}
+
+/**
+ * 从时薪列表里挑出「生日后时薪没更新」的待办。
+ * - periodEnd 不传：全部（个人时薪表标签上的红点计数用）；
+ * - 传了：只留生日 ≤ 该期最后一天的人——工时表 / 工资表从「生日之后最近的一期」起才提示，生日之前的旧期不提示；
+ *   此后每一期都会继续出现，直到有人把时薪改好（后端不再返回 hint）。
+ * 按生日先后、再按姓名排序，展示顺序稳定。
+ */
+export function birthdayRateReviews(rates: readonly AttendancePayRateDto[], periodEnd?: string | null): BirthdayRateReview[] {
+  const reviews: BirthdayRateReview[] = []
+  for (const rate of rates) {
+    if (!rate.birthdayReviewHint || !rate.birthdayReviewDate || rate.birthdayReviewAge == null) continue
+    if (periodEnd && rate.birthdayReviewDate > periodEnd) continue
+    reviews.push({
+      userGuid: rate.userGuid,
+      userName: rate.userName ?? rate.userGuid,
+      date: rate.birthdayReviewDate,
+      age: rate.birthdayReviewAge,
+    })
+  }
+  return reviews.sort((a, b) => a.date.localeCompare(b.date) || a.userName.localeCompare(b.userName))
+}

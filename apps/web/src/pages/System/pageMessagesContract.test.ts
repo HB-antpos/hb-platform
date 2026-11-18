@@ -153,6 +153,7 @@ const pages = [
       'src/pages/PosAdmin/AttendancePayroll/HoursTab.tsx',
       'src/pages/PosAdmin/AttendancePayroll/PayTab.tsx',
       'src/pages/PosAdmin/AttendancePayroll/RatesTab.tsx',
+      'src/pages/PosAdmin/AttendancePayroll/BirthdayRateReviewBanner.tsx',
       'src/pages/PosAdmin/AttendancePayroll/payrollExport.ts',
     ],
     messages: {

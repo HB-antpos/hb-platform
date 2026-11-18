@@ -16,6 +16,10 @@
       "pay": "Pay sheet",
       "rates": "Pay rates"
     },
+    "birthdayTodo": {
+      "text": "{{name}} turned {{age}} on {{date}} but the age-based pay rate has not been updated: change the base hourly rate in MYOB first, then use “Sync from MYOB” on the pay rates tab with effective date {{date}}.",
+      "open": "Review rates"
+    },
     "period": {
       "oneWeek": "1 week",
       "twoWeeks": "2 weeks",
@@ -97,6 +101,7 @@
       "holidayDone": "Paid public holiday handled",
       "birthdayTitle": "{{name}} turns {{age}} on {{date}}",
       "minorSuffix": " (under 21): ",
+      "rateReviewSuffix": " (turned {{age}}): ",
       "birthdayMinorBody": "Age-based pay rates may need updating; check the pay rates tab.",
       "gotIt": "Got it",
       "openRates": "Open pay rates"

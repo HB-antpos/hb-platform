@@ -16,6 +16,10 @@
       "pay": "工资表",
       "rates": "个人时薪表"
     },
+    "birthdayTodo": {
+      "text": "{{name}} {{date}} 已满 {{age}} 岁，按年龄计的时薪还没更新：先在 MYOB 改基础时薪，再到个人时薪表「从 MYOB 同步时薪」，生效日选 {{date}}。",
+      "open": "去核对"
+    },
     "period": {
       "oneWeek": "1 周",
       "twoWeeks": "2 周",
@@ -97,6 +101,7 @@
       "holidayDone": "已处理带薪公假",
       "birthdayTitle": "{{name}} {{date}} 生日，满 {{age}} 岁",
       "minorSuffix": "（21 岁以下）：",
+      "rateReviewSuffix": "（满 {{age}} 岁）：",
       "birthdayMinorBody": "按年龄计的时薪可能要调整，去个人时薪表核对。",
       "gotIt": "知道了",
       "openRates": "打开时薪表"

@@ -153,6 +153,11 @@ namespace BlazorApp.Shared.DTOs
         public string? ApprovalGuid { get; set; }
         public int? AgeYears { get; set; }
         public bool? IsMinor { get; set; }
+        /// <summary>
+        /// 生日提醒：这次生日当天年龄 ≤ 21（含刚满 21 岁）→ 要核对按年龄计的时薪。
+        /// IsMinor 仍表示「生日当天未满 21 岁」，只用于合规文案；满 21 岁那天 IsMinor 为 false，但 RateReview 为 true。
+        /// </summary>
+        public bool? RateReview { get; set; }
     }
 
     public class AttendancePayrollHoursDto
@@ -280,8 +285,15 @@ namespace BlazorApp.Shared.DTOs
         public bool IsManager { get; set; }
         public int? AgeYears { get; set; }
         public DateTime? Birthday { get; set; }
-        /// <summary>21 岁以下员工生日已过、而当前时薪记录生效早于这次生日：提示核对时薪。</summary>
+        /// <summary>
+        /// 生日已过（60 天内）、生日当天年龄 ≤ 21（含刚满 21 岁转成人档那天），而当前时薪记录生效早于这次生日：提示核对时薪。
+        /// 为 true 时 BirthdayReviewDate / BirthdayReviewAge 一定有值。
+        /// </summary>
         public bool BirthdayReviewHint { get; set; }
+        /// <summary>需要核对时薪的那次生日（当年的生日日期）。</summary>
+        public DateTime? BirthdayReviewDate { get; set; }
+        /// <summary>那次生日当天满的岁数（刚满 21 岁时 AgeYears 已是 null，所以要单独给）。</summary>
+        public int? BirthdayReviewAge { get; set; }
         public string? PayMode { get; set; }
         public decimal FixedTransferHoursPerWeek { get; set; }
         public decimal? TransferWeekdayRate { get; set; }

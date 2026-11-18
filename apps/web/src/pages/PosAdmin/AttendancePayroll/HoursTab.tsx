@@ -13,7 +13,8 @@ import type {
   AttendanceHoursResultDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
-import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours } from './payrollLogic'
+import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
+import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours, type BirthdayRateReview } from './payrollLogic'
 
 interface HoursTabProps {
   data: AttendanceHoursResultDto | null
@@ -25,6 +26,8 @@ interface HoursTabProps {
   onMergeStoresChange: (value: boolean) => void
   onReload: () => void
   onOpenRates?: () => void
+  /** 生日后时薪还没更新的待办（已按本期筛过：生日 ≤ 本期末）；没有查看时薪权限时不传。 */
+  rateReviews?: readonly BirthdayRateReview[]
 }
 
 const TOTAL_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday', 'leave', 'total'] as const
@@ -107,6 +110,14 @@ export default function HoursTab(props: HoursTabProps) {
   const alertKey = (alert: AttendanceHoursAlertDto) => `${alert.type}|${alert.userGuid ?? ''}|${alert.date ?? ''}`
   const visibleAlerts = (data?.alerts ?? []).filter((alert) => !dismissed.includes(alertKey(alert)))
   const dismiss = (alert: AttendanceHoursAlertDto) => setDismissed((current) => [...current, alertKey(alert)])
+  // 生日提醒是否要核对时薪：后端新字段 rateReview（含刚满 21 岁）；旧后端没有时退回 isMinor
+  const needsRateReview = (alert: AttendanceHoursAlertDto) => alert.rateReview ?? alert.isMinor ?? false
+  // 待办条：本期内已有一条还没关掉的生日提醒（它自带「打开时薪表」）的人不再重复出一条；
+  // 提醒被点「知道了」之后待办仍在，直到时薪改好 —— 这正是待办要保证的事。
+  const alertedBirthdayUsers = new Set(
+    visibleAlerts.filter((alert) => alert.type === 'Birthday' && needsRateReview(alert)).map((alert) => alert.userGuid),
+  )
+  const pendingRateReviews = (props.rateReviews ?? []).filter((review) => !alertedBirthdayUsers.has(review.userGuid))
 
   const renderAlert = (alert: AttendanceHoursAlertDto) => {
     const key = alertKey(alert)
@@ -166,13 +177,15 @@ export default function HoursTab(props: HoursTabProps) {
         <div className="atp-alert-text">
           <strong>
             {t('attendancePayroll.alerts.birthdayTitle', { name: alert.userName, date: dayjs(alert.date).format('MM-DD'), age: alert.ageYears })}
-            {alert.isMinor ? t('attendancePayroll.alerts.minorSuffix') : ''}
+            {alert.isMinor
+              ? t('attendancePayroll.alerts.minorSuffix')
+              : needsRateReview(alert) ? t('attendancePayroll.alerts.rateReviewSuffix', { age: alert.ageYears }) : ''}
           </strong>
-          {alert.isMinor ? t('attendancePayroll.alerts.birthdayMinorBody') : ''}
+          {needsRateReview(alert) ? t('attendancePayroll.alerts.birthdayMinorBody') : ''}
         </div>
         <Space>
           <Button size="small" onClick={() => dismiss(alert)}>{t('attendancePayroll.alerts.gotIt')}</Button>
-          {props.onOpenRates && alert.isMinor ? (
+          {props.onOpenRates && needsRateReview(alert) ? (
             <Button size="small" type="primary" onClick={props.onOpenRates}>{t('attendancePayroll.alerts.openRates')}</Button>
           ) : null}
         </Space>
@@ -242,6 +255,7 @@ export default function HoursTab(props: HoursTabProps) {
     <Spin spinning={loading}>
       <div className="atp-stack">
         {visibleAlerts.map(renderAlert)}
+        <BirthdayRateReviewBanner reviews={pendingRateReviews} onOpenRates={props.onOpenRates} />
         {mergeStores ? (
           <div className="atp-alert atp-alert-store">
             <div className="atp-alert-text">{t('attendancePayroll.alerts.merged')}</div>

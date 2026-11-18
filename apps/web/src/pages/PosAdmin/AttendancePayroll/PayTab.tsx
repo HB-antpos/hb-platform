@@ -9,7 +9,8 @@ import type {
   AttendancePayRowDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
-import { TRANSFER_FILL_ORDER, formatHours, formatMoney, formatSignedMoney, round2, showsAgeBadge } from './payrollLogic'
+import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
+import { TRANSFER_FILL_ORDER, formatHours, formatMoney, formatSignedMoney, round2, showsAgeBadge, type BirthdayRateReview } from './payrollLogic'
 
 interface PayTabProps {
   data: AttendancePayResultDto | null
@@ -17,6 +18,10 @@ interface PayTabProps {
   weeks: 1 | 2
   canEdit: boolean
   onReload: () => void
+  /** 生日后时薪还没更新的待办（已按本期筛过：生日 ≤ 本期末）。 */
+  rateReviews?: readonly BirthdayRateReview[]
+  /** 点待办条上的「去核对」跳到个人时薪表。 */
+  onOpenRates?: () => void
 }
 
 const HOUR_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday'] as const
@@ -71,7 +76,7 @@ function NoteInput(props: { value?: string; disabled: boolean; placeholder: stri
   )
 }
 
-export default function PayTab({ data, loading, weeks, canEdit, onReload }: PayTabProps) {
+export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates }: PayTabProps) {
   const { t } = useTranslation()
   const rows = data?.rows ?? []
 
@@ -157,6 +162,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload }: PayT
   return (
     <Spin spinning={loading}>
       <div className="atp-stack">
+        <BirthdayRateReviewBanner reviews={rateReviews ?? []} onOpenRates={onOpenRates} />
         <div className="atp-formula">
           <span><strong>{t('attendancePayroll.pay.formulaPayableLabel')}</strong><span className="atp-formula-chip">{t('attendancePayroll.pay.formulaPayable')}</span></span>
           <span><strong className="atp-transfer-text">{t('attendancePayroll.pay.transfer')}</strong><span className="atp-formula-chip">{t('attendancePayroll.pay.formulaTransfer')}</span></span>
