@@ -320,6 +320,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyMyobPayslipSnapshotAsync(CancellationToken cancellationToken);
 
+    Task ApplyEmployeeProfileHireDateAsync(CancellationToken cancellationToken);
+
+    Task VerifyEmployeeProfileHireDateAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -2044,6 +2048,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             MyobPayslipSnapshotSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyEmployeeProfileHireDateAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            EmployeeProfileHireDateSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 列签名（date、可空）通过后协调器才登记账本，已有同名但类型不对的列不会被误标为完成。
+        await VerifyEmployeeProfileHireDateAsync(cancellationToken);
+    }
+
+    public async Task VerifyEmployeeProfileHireDateAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            EmployeeProfileHireDateSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

@@ -1165,6 +1165,7 @@
         "gender": "Gender",
         "address": "Address",
         "employmentType": "Employment type",
+        "hireDate": "Hire date",
         "bank": "Bank account",
         "super": "Super"
       },
@@ -1176,6 +1177,7 @@
         "gender": "MYOB payroll details → male / female",
         "address": "Street, city, state and postcode joined on one line",
         "employmentType": "Full-time→Full-time · Part-time→Part-time · Casual→Temporary · Other is not synced",
+        "hireDate": "Start date in MYOB payroll details; the Retail Award junior rates depend on 6 months of service. Not compared when MYOB has none",
         "bank": "BSB + account number (the preview shows only the last 4 digits)",
         "super": "Fund name + code + member number"
       }

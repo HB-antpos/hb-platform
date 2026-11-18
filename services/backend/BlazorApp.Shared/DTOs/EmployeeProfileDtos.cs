@@ -63,6 +63,8 @@ namespace BlazorApp.Shared.DTOs
         public string? SuperannuationCompanyCode { get; set; }
         public string? SuperannuationAccountNumber { get; set; }
         public DateTime? Birthday { get; set; }
+        /// <summary>入职日期（在本雇主处开始工作的日期）；空 = 还没确认。</summary>
+        public DateTime? HireDate { get; set; }
         public string? Gender { get; set; }
         public string? EmploymentType { get; set; }
         public string? AvatarUrl { get; set; }
@@ -134,6 +136,24 @@ namespace BlazorApp.Shared.DTOs
 
         [System.Text.Json.Serialization.JsonIgnore]
         public bool HasBirthday { get; private set; }
+
+        private DateTime? _hireDate;
+        /// <summary>
+        /// 入职日期。只有请求里显式带了这个字段才会写入（HasHireDate）：旧版手机 App / 旧页面不认识它，整份保存时不能把它清掉；
+        /// 显式传 null 才是清空。
+        /// </summary>
+        public DateTime? HireDate
+        {
+            get => _hireDate;
+            set
+            {
+                _hireDate = value;
+                HasHireDate = true;
+            }
+        }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool HasHireDate { get; private set; }
 
         public string? Gender { get; set; }
 

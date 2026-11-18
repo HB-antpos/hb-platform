@@ -49,7 +49,10 @@ public sealed record MyobEmployeePayrollRecord(
     string? PayBasis = null,
     decimal? HourlyRate = null,
     IReadOnlyList<string>? WageCategoryUids = null,
-    DateTime? TerminationDate = null);
+    DateTime? TerminationDate = null,
+    // EmployeePayrollDetails.StartDate：员工开始工作的日期（MYOB 官方字段）。资料同步把它补进我方「入职日期」，
+    // 零售 Award 青少年「满 6 个月」按它算。MYOB 里没填就是 null，绝不拿空值去清我方数据。
+    DateTime? StartDate = null);
 
 /// <summary>EmployeePaymentDetails.BankAccounts 的一条。</summary>
 public sealed record MyobBankAccountRecord(string? Bsb, string? AccountNumber);
@@ -339,7 +342,8 @@ public sealed class MyobApiClient : IMyobApiClient
                     .Where(category => !string.IsNullOrWhiteSpace(category.Uid))
                     .Select(category => category.Uid!)
                     .ToList(),
-                item.TerminationDate))
+                item.TerminationDate,
+                item.StartDate))
             .ToList();
     }
 
@@ -995,6 +999,7 @@ public sealed class MyobApiClient : IMyobApiClient
         public string? EmploymentStatus { get; set; }
         public string? Gender { get; set; }
         public DateTime? TerminationDate { get; set; }
+        public DateTime? StartDate { get; set; }
         public WagePayload? Wage { get; set; }
         public SuperannuationPayload? Superannuation { get; set; }
         public List<EntitlementPayload>? Entitlements { get; set; }

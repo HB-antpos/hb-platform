@@ -24,7 +24,9 @@ internal sealed record SyncOurValues(
     string? SuperName,
     string? SuperAccount,
     int SensitiveRevision,
-    bool HasPendingSensitiveRequest);
+    bool HasPendingSensitiveRequest,
+    // 入职日期（员工资料 HireDate）；放在末位并带默认值，不影响现有构造调用。
+    DateTime? HireDate = null);
 
 /// <summary>MYOB 员工卡里与资料同步有关的值（名册 + 付款详情合并后的原值）。</summary>
 internal sealed record SyncMyobValues(
@@ -41,7 +43,9 @@ internal sealed record SyncMyobValues(
     string? Bsb,
     string? AccountNumber,
     string? SuperFundName,
-    string? SuperMembershipNumber);
+    string? SuperMembershipNumber,
+    // MYOB EmployeePayrollDetails.StartDate；同样放末位带默认值。
+    DateTime? StartDate = null);
 
 /// <summary>
 /// 一项差异。Norm 是规范化后的值（比较与哈希用）；After 是要写入我方的目标值（键因字段而异，见 <see cref="MyobEmployeeSyncRules.CurrentValues"/>）。
@@ -87,6 +91,7 @@ internal static class MyobEmployeeSyncRules
         MyobSyncFields.Gender => GenderDiff(our, myob),
         MyobSyncFields.Address => AddressDiff(our, myob),
         MyobSyncFields.EmploymentType => EmploymentTypeDiff(our, myob),
+        MyobSyncFields.HireDate => HireDateDiff(our, myob),
         MyobSyncFields.Bank => BankDiff(our, myob),
         MyobSyncFields.Superannuation => SuperDiff(our, myob),
         _ => null,
@@ -185,6 +190,33 @@ internal static class MyobEmployeeSyncRules
             myobDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             null,
             ("birthday", myobDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+    }
+
+    /// <summary>MYOB 里早于这个年份的「入职日期」当作没填（MYOB 对没填的日期可能给 0001 / 1900 之类的占位值），不拿它覆盖我方。</summary>
+    internal const int MinPlausibleHireYear = 1990;
+
+    private static SyncDiff? HireDateDiff(SyncOurValues our, SyncMyobValues myob)
+    {
+        if (myob.StartDate is null || myob.StartDate.Value.Year < MinPlausibleHireYear)
+        {
+            return null;
+        }
+
+        var myobDate = myob.StartDate.Value.Date;
+        var ourDate = our.HireDate?.Date;
+        if (ourDate == myobDate)
+        {
+            return null;
+        }
+
+        return Build(
+            MyobSyncFields.HireDate,
+            ourDate is null ? null : FormatDate(ourDate.Value),
+            FormatDate(myobDate),
+            ourDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
+            myobDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            null,
+            ("hireDate", myobDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
     }
 
     private static SyncDiff? GenderDiff(SyncOurValues our, SyncMyobValues myob)
@@ -348,6 +380,7 @@ internal static class MyobEmployeeSyncRules
         MyobSyncFields.Gender => new() { ["gender"] = our.Gender is null or EmployeeGender.Unknown ? null : our.Gender.Value.ToString().ToLowerInvariant() },
         MyobSyncFields.Address => new() { ["address"] = Blank(our.Address) },
         MyobSyncFields.EmploymentType => new() { ["employmentType"] = our.EmployeeType is null ? null : EmployeeTypeKey(our.EmployeeType.Value) },
+        MyobSyncFields.HireDate => new() { ["hireDate"] = our.HireDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) },
         MyobSyncFields.Bank => new() { ["bsb"] = Blank(our.BankBsb), ["account"] = Blank(our.BankAccount) },
         MyobSyncFields.Superannuation => new() { ["name"] = Blank(our.SuperName), ["account"] = Blank(our.SuperAccount) },
         _ => new(),

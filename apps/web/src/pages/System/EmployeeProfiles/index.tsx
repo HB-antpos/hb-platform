@@ -63,6 +63,7 @@ import {
   getProfileCompletion,
   getProfileInitials,
   getStablePaletteIndex,
+  hireDatePatch,
   maskSensitiveSummary,
   saveAdminProfileWithPendingConfirmation,
   shortenIdentifier,
@@ -87,6 +88,7 @@ interface EmployeeProfileFormValues {
   superannuationCompanyCode?: string
   superannuationAccountNumber?: string
   birthday?: Dayjs | null
+  hireDate?: Dayjs | null
   gender?: EmployeeProfileGender
   employmentType?: EmployeeEmploymentType
   avatarUrl?: string
@@ -119,6 +121,7 @@ const PROFILE_FORM_FIELDS = [
   'superannuationCompanyCode',
   'superannuationAccountNumber',
   'birthday',
+  'hireDate',
   'identityType',
   'identityId',
   'identityPhotoUrl',
@@ -181,6 +184,7 @@ function mapProfileToFormValues(profile: EmployeeProfileDetailDto): EmployeeProf
     superannuationCompanyCode: profile.superannuationCompanyCode,
     superannuationAccountNumber: profile.superannuationAccountNumber,
     birthday: profile.birthday ? dayjs(profile.birthday) : null,
+    hireDate: profile.hireDate ? dayjs(profile.hireDate) : null,
     gender: profile.gender,
     employmentType: profile.employmentType,
     avatarUrl: profile.avatarUrl,
@@ -499,6 +503,7 @@ export default function SystemEmployeeProfilesPage() {
         superannuationCompanyCode: values.superannuationCompanyCode?.trim() || undefined,
         superannuationAccountNumber: values.superannuationAccountNumber?.trim() || undefined,
         birthday: values.birthday ? values.birthday.format('YYYY-MM-DD') : undefined,
+        ...hireDatePatch(values.hireDate, initialFormValuesRef.current?.hireDate),
         gender: values.gender,
         employmentType: values.employmentType,
         avatarUrl: values.avatarUrl?.trim() || undefined,
@@ -1069,6 +1074,13 @@ export default function SystemEmployeeProfilesPage() {
                   </Form.Item>
                   <Form.Item name="gender" label={t('system.employeeProfiles.gender')}>
                     <Select allowClear options={genderOptions} placeholder={t('system.employeeProfiles.placeholders.gender')} />
+                  </Form.Item>
+                  <Form.Item
+                    name="hireDate"
+                    label={t('system.employeeProfiles.hireDate')}
+                    extra={t('system.employeeProfiles.hireDateHint')}
+                  >
+                    <DatePicker style={{ width: '100%' }} placeholder={t('system.employeeProfiles.hireDatePlaceholder')} />
                   </Form.Item>
                   <Form.Item className="sys-emp-span-all" name="address" label={t('system.employeeProfiles.address')}>
                     <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t('system.employeeProfiles.placeholders.address')} />

@@ -592,6 +592,8 @@ namespace BlazorApp.Api.Services
                                 .SetColumns(item => item.SuperannuationCompanyCode == profile.SuperannuationCompanyCode)
                                 .SetColumns(item => item.SuperannuationAccount == profile.SuperannuationAccount)
                                 .SetColumns(item => item.Birthday == profile.Birthday)
+                                // 更新走显式列清单，新列不加进来就不会被保存；没传 HireDate 时这里写回的是读出来的原值。
+                                .SetColumns(item => item.HireDate == profile.HireDate)
                                 .SetColumns(item => item.Gender == profile.Gender)
                                 .SetColumns(item => item.EmployeeType == profile.EmployeeType)
                                 .SetColumns(item => item.AvatarUrl == profile.AvatarUrl)
@@ -838,6 +840,12 @@ namespace BlazorApp.Api.Services
             {
                 profile.Birthday = dto.Birthday?.Date;
             }
+            // 入职日期决定零售 Award 青少年费率（满 6 个月），只有管理路径可写，员工自助保存不能改自己的；
+            // 且只在请求显式带了这个字段时才写：旧版客户端不认识它，整份保存不能把它清掉（显式 null 才是清空）。
+            if (allowSensitiveChanges && dto.HasHireDate)
+            {
+                profile.HireDate = dto.HireDate?.Date;
+            }
             profile.Gender = ParseGender(dto.Gender);
             if (dto.HasEmploymentType)
             {
@@ -893,6 +901,7 @@ namespace BlazorApp.Api.Services
                 SuperannuationCompanyCode = profile?.SuperannuationCompanyCode,
                 SuperannuationAccountNumber = profile?.SuperannuationAccount,
                 Birthday = profile?.Birthday,
+                HireDate = profile?.HireDate,
                 Gender = FormatGender(profile?.Gender),
                 EmploymentType = FormatEmployeeType(profile?.EmployeeType),
                 AvatarUrl = profile?.AvatarUrl,

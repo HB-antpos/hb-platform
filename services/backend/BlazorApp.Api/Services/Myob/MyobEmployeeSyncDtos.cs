@@ -20,13 +20,15 @@ public static class MyobSyncFields
     public const string Gender = "gender";
     public const string Address = "address";
     public const string EmploymentType = "employmentType";
+    /// <summary>入职日期：MYOB EmployeePayrollDetails.StartDate → 我方员工资料 HireDate。</summary>
+    public const string HireDate = "hireDate";
     public const string Bank = "bank";
     public const string Superannuation = "super";
 
     /// <summary>展示顺序（也是预览里每个员工内部的字段顺序）。</summary>
     public static readonly string[] All =
     [
-        Name, Phone, Email, Birthday, Gender, Address, EmploymentType, Bank, Superannuation,
+        Name, Phone, Email, Birthday, Gender, Address, EmploymentType, HireDate, Bank, Superannuation,
     ];
 
     public static bool IsSensitive(string field) =>
@@ -34,7 +36,7 @@ public static class MyobSyncFields
 
     /// <summary>设计稿里默认勾选的字段：邮箱（绑定匹配依据）和三个敏感字段默认不勾。</summary>
     public static bool IsDefaultSelected(string field) =>
-        field is Name or Phone or Gender or Address or EmploymentType;
+        field is Name or Phone or Gender or Address or EmploymentType or HireDate;
 }
 
 public static class MyobSyncModes

@@ -19,7 +19,8 @@ public sealed record MyobSyncExtras(
     MyobAddressRecord? Address,
     string? Gender,
     string? SuperFundName,
-    string? SuperMembershipNumber);
+    string? SuperMembershipNumber,
+    DateTime? StartDate = null);
 
 /// <summary>名册里的一张员工卡：匹配用字段 + 给前端看的 DTO + 用工 / 假期累计信息 + 资料同步用的额外字段。</summary>
 public sealed record MyobDirectoryCard(MyobMatchCard Match, MyobEmployeeCardDto Dto, MyobSyncExtras? Extras = null);
@@ -147,7 +148,8 @@ internal sealed class MyobEmployeeDirectory : IMyobEmployeeDirectory
                     employee.Addresses?.FirstOrDefault(),
                     detail?.Gender,
                     detail?.SuperFundName,
-                    detail?.SuperMembershipNumber);
+                    detail?.SuperMembershipNumber,
+                    detail?.StartDate);
                 return new MyobDirectoryCard(match, dto, extras);
             })
             .ToList();

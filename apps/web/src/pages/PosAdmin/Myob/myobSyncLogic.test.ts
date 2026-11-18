@@ -169,7 +169,7 @@ function stat(field: MyobSyncField, fillable: number, differs: number): MyobSync
   return {
     field,
     sensitive: SENSITIVE.has(field),
-    defaultSelected: ['name', 'phone', 'gender', 'address', 'employmentType'].includes(field),
+    defaultSelected: ['name', 'phone', 'gender', 'address', 'employmentType', 'hireDate'].includes(field),
     myobHasValue: fillable + differs,
     fillable,
     differs,
@@ -184,11 +184,12 @@ const stats: MyobSyncFieldStat[] = [
   stat('gender', 5, 0),
   stat('address', 4, 0),
   stat('employmentType', 0, 1),
+  stat('hireDate', 2, 0),
   stat('bank', 2, 0),
   stat('super', 2, 0),
 ]
-assert.deepEqual(getDefaultSelectedFields(stats), ['name', 'phone', 'gender', 'address', 'employmentType'])
-assert.equal(selectAllFields(stats).length, 9)
+assert.deepEqual(getDefaultSelectedFields(stats), ['name', 'phone', 'gender', 'address', 'employmentType', 'hireDate'])
+assert.equal(selectAllFields(stats).length, 10)
 assert.deepEqual(selectDiffFields([stat('name', 0, 0), stat('phone', 1, 0), stat('email', 0, 2)]), ['phone', 'email'])
 // 底栏：「已选 8 个字段（含 3 个敏感）」
 assert.deepEqual(
@@ -197,8 +198,8 @@ assert.deepEqual(
 )
 assert.deepEqual(countSelectedFields(stats, new Set()), { fieldCount: 0, sensitiveCount: 0 })
 // MYOB 读不到的字段（如银行）：不在默认勾选 / 全选 / 只选有差异 / 计数 / 请求字段里
-assert.deepEqual(getDefaultSelectedFields(stats, ['name']), ['phone', 'gender', 'address', 'employmentType'])
-assert.equal(selectAllFields(stats, ['bank', 'super']).length, 7)
+assert.deepEqual(getDefaultSelectedFields(stats, ['name']), ['phone', 'gender', 'address', 'employmentType', 'hireDate'])
+assert.equal(selectAllFields(stats, ['bank', 'super']).length, 8)
 assert.deepEqual(selectDiffFields([stat('phone', 1, 0), stat('bank', 2, 0)], ['bank']), ['phone'])
 const withBank = new Set<MyobSyncField>(['phone', 'bank'])
 assert.deepEqual(countSelectedFields(stats, withBank, ['bank']), { fieldCount: 1, sensitiveCount: 0 })
@@ -208,11 +209,11 @@ assert.equal(isFieldUnavailable('phone', ['bank']), false)
 // 请求里的字段顺序跟 stats 一致，而不是点选顺序
 assert.deepEqual(listSelectedFields(stats, new Set<MyobSyncField>(['super', 'name'])), ['name', 'super'])
 const groups = groupFieldStats(stats)
-assert.deepEqual(groups.map((group) => [group.key, group.stats.length]), [['basic', 6], ['employment', 3]])
+assert.deepEqual(groups.map((group) => [group.key, group.stats.length]), [['basic', 6], ['employment', 4]])
 // 后端新增的未知字段并入最后一组，不丢
 const withUnknown = groupFieldStats([...stats, { ...stat('name', 0, 0), field: 'newField' as MyobSyncField }])
-assert.equal(withUnknown[1].stats.length, 4)
-assert.equal(SYNC_FIELD_GROUPS.flatMap((group) => group.fields).length, 9)
+assert.equal(withUnknown[1].stats.length, 5)
+assert.equal(SYNC_FIELD_GROUPS.flatMap((group) => group.fields).length, 10)
 
 // ───── 范围 ─────
 assert.deepEqual(getScopeOptions(0, false), ['all'])

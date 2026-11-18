@@ -68,17 +68,18 @@ public sealed class MyobEmployeeSyncTests : IDisposable
     private static SyncOurValues Our(
         string? full = null, string? email = null, string? phone = null, DateTime? birthday = null,
         EmployeeGender? gender = null, string? address = null, EmployeeType? type = null,
-        string? bsb = null, string? account = null, string? superName = null, string? superAccount = null) =>
+        string? bsb = null, string? account = null, string? superName = null, string? superAccount = null,
+        DateTime? hire = null) =>
         new("u", full ?? "Someone", full, null, null, null, email, phone, birthday, gender, address, type,
-            bsb, account, superName, superAccount, 0, false);
+            bsb, account, superName, superAccount, 0, false, hire);
 
     private static SyncMyobValues Myob(
         string? first = null, string? last = null, string[]? emails = null, string[]? phones = null,
         DateTime? birthday = null, string? gender = null, MyobAddressRecord? address = null,
         string? status = null, bool entitlement = false, string? bsb = null, string? account = null,
-        string? fund = null, string? member = null, bool individual = true) =>
+        string? fund = null, string? member = null, bool individual = true, DateTime? startDate = null) =>
         new(individual, first, last, emails ?? [], phones ?? [], birthday, gender, address, status, entitlement,
-            bsb, account, fund, member);
+            bsb, account, fund, member, startDate);
 
     private static SyncDiff? Field(string field, SyncOurValues our, SyncMyobValues myob) =>
         MyobEmployeeSyncRules.ComputeField(field, our, myob);
@@ -435,6 +436,62 @@ public sealed class MyobEmployeeSyncTests : IDisposable
         Assert.Equal(1, batch.ChangeCount);
         Assert.Equal(Actor, batch.ActorUserGuid);
         Assert.Contains("14 Bay St", batch.ChangesJson);
+    }
+
+    [Fact]
+    public void 规则_入职日期_我方空则补空_相同无差异_不同算覆盖_MYOB没填或占位年份不比()
+    {
+        var day = new DateTime(2025, 3, 17);
+        // 我方没填 → 补空，目标值是 MYOB 的 StartDate
+        var fill = Field(MyobSyncFields.HireDate, Our(), Myob(startDate: day));
+        Assert.NotNull(fill);
+        Assert.Equal(MyobSyncChangeKinds.Fill, fill!.Kind);
+        Assert.Equal("2025-03-17", fill.After["hireDate"]);
+        // 相同 → 无差异（带时间部分也只比日期）
+        Assert.Null(Field(MyobSyncFields.HireDate, Our(hire: day), Myob(startDate: day.AddHours(9))));
+        // 两边都有且不同 → 覆盖
+        var overwrite = Field(MyobSyncFields.HireDate, Our(hire: new DateTime(2025, 6, 1)), Myob(startDate: day));
+        Assert.Equal(MyobSyncChangeKinds.Overwrite, overwrite!.Kind);
+        // MYOB 没填 / 占位年份（0001、1900）→ 不比，绝不拿它清掉或覆盖我方
+        Assert.Null(Field(MyobSyncFields.HireDate, Our(hire: day), Myob()));
+        Assert.Null(Field(MyobSyncFields.HireDate, Our(), Myob(startDate: new DateTime(1, 1, 1))));
+        Assert.Null(Field(MyobSyncFields.HireDate, Our(), Myob(startDate: new DateTime(1900, 1, 1))));
+        // 字段登记：在展示顺序里、不是敏感字段、补空时默认勾选；快照键与 After 键一致（撤销要用）
+        Assert.Contains(MyobSyncFields.HireDate, MyobSyncFields.All);
+        Assert.False(MyobSyncFields.IsSensitive(MyobSyncFields.HireDate));
+        Assert.True(MyobSyncFields.IsDefaultSelected(MyobSyncFields.HireDate));
+        Assert.Equal("2025-03-17", MyobEmployeeSyncRules.CurrentValues(MyobSyncFields.HireDate, Our(hire: day))["hireDate"]);
+        Assert.Null(MyobEmployeeSyncRules.CurrentValues(MyobSyncFields.HireDate, Our())["hireDate"]);
+    }
+
+    [Fact]
+    public async Task 写入_入职日期_补空写进员工资料_其他字段同步不碰它_撤销还原为空()
+    {
+        await SeedAsync();
+        await SetDirectoryAsync(
+            [new MyobEmployeeRecord("c-aidan", null, "AIDAN", "FORDE", null, true, true, ["aidan@example.com"], ["+61412345881"])],
+            [new MyobEmployeePayrollRecord("c-aidan", new DateTime(2009, 7, 5), "Casual", [], StartDate: new DateTime(2025, 3, 17))]);
+
+        var preview = await PreviewAsync(fields: [MyobSyncFields.HireDate], users: ["u-aidan"]);
+        var result = (await Service().ApplyAsync(ApplyFrom(preview, pick: _ => true), Actor, CancellationToken.None)).Data!;
+
+        Assert.Equal(1, result.WrittenChangeCount);
+        Assert.Equal(0, result.WrittenSensitiveCount); // 入职日期不是敏感字段，不走敏感资料版本号
+        var profile = await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "u-aidan");
+        Assert.Equal(new DateTime(2025, 3, 17), profile.HireDate);
+        Assert.Equal(0, profile.SensitiveRevision);
+
+        // 之后同步别的字段（手机）：这次保存请求根本不带入职日期（HasHireDate=false），库里的值保持不变
+        var phonePreview = await PreviewAsync(fields: [MyobSyncFields.Phone], users: ["u-aidan"]);
+        var phoneResult = (await Service().ApplyAsync(ApplyFrom(phonePreview, pick: _ => true), Actor, CancellationToken.None)).Data!;
+        Assert.Equal(1, phoneResult.WrittenChangeCount);
+        Assert.False(_profiles.Upserts.Last().HasHireDate);
+        Assert.Equal(new DateTime(2025, 3, 17), (await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "u-aidan")).HireDate);
+
+        // 撤销第一批：入职日期还原为原来的空值（撤销值 null = 清空），手机那批不受影响
+        var undo = (await Service().UndoAsync(result.BatchGuid!, Actor, CancellationToken.None)).Data!;
+        Assert.Equal(1, undo.RestoredChangeCount);
+        Assert.Null((await _db.Queryable<EmployeeProfile>().FirstAsync(item => item.UserGUID == "u-aidan")).HireDate);
     }
 
     [Fact]
@@ -880,6 +937,7 @@ public sealed class MyobEmployeeSyncTests : IDisposable
                 SuperannuationCompanyCode = profile?.SuperannuationCompanyCode,
                 SuperannuationAccountNumber = profile?.SuperannuationAccount,
                 Birthday = profile?.Birthday,
+                HireDate = profile?.HireDate,
                 Gender = profile?.Gender?.ToString().ToLowerInvariant(),
                 EmploymentType = profile?.EmployeeType is { } type ? MyobEmployeeSyncRules.EmployeeTypeKey(type) : null,
                 Address = profile?.Address,
@@ -941,6 +999,11 @@ public sealed class MyobEmployeeSyncTests : IDisposable
                 _ => null,
             };
             profile.Address = dto.Address;
+            // 与真实 EmployeeProfileService 一致：只有请求显式带了入职日期才写，其他字段的同步不能碰它。
+            if (dto.HasHireDate)
+            {
+                profile.HireDate = dto.HireDate?.Date;
+            }
             if (sensitiveChanged)
             {
                 profile.SensitiveRevision++;

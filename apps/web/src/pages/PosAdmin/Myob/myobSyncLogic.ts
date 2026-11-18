@@ -19,7 +19,7 @@ import type {
 /** 设计稿里的两个字段组；组内顺序与后端 MyobSyncFields.All 一致。 */
 export const SYNC_FIELD_GROUPS: readonly { key: 'basic' | 'employment'; fields: readonly MyobSyncField[] }[] = [
   { key: 'basic', fields: ['name', 'phone', 'email', 'birthday', 'gender', 'address'] },
-  { key: 'employment', fields: ['employmentType', 'bank', 'super'] },
+  { key: 'employment', fields: ['employmentType', 'hireDate', 'bank', 'super'] },
 ]
 
 /** 敏感字段（走「敏感资料直改」）：与后端 MyobSyncFields.IsSensitive 一致。 */
