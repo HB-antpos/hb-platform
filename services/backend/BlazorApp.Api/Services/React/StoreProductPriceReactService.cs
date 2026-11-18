@@ -837,7 +837,11 @@ namespace BlazorApp.Api.Services.React
 
                     // 目标分店被覆盖前的零售价/折扣就是其货架标签上的价格，覆盖后无从推断，必须先留存。
                     var overwrittenPrices = new List<StorePriceOverwrite>();
-                    if (_priceTaskService != null && (dto.SyncRetailPrice || dto.SyncDiscountRate))
+                    // 特殊商品标记也影响任务：取消标记后价格与仓库不一致要提醒，设为特殊则已有任务失效。
+                    if (
+                        _priceTaskService != null
+                        && (dto.SyncRetailPrice || dto.SyncDiscountRate || dto.SyncIsSpecialProduct)
+                    )
                     {
                         var targetRows = await db.Queryable<StoreRetailPrice>()
                             .Where(x =>
@@ -875,7 +879,27 @@ namespace BlazorApp.Api.Services.React
                         )
                         .ExecuteCommandAsync();
 
-                    if (_priceTaskService != null && overwrittenPrices.Count > 0)
+                    if (
+                        _priceTaskService != null
+                        && !dto.CreatePriceTasks
+                        && (overwrittenPrices.Count > 0 || warehouseOutcome.ChangedProductCodes.Count > 0)
+                    )
+                    {
+                        // 用户关闭了「创建价格和标签更改任务」：分店价照改，只让已有的未完成任务按新价格流转或取消，
+                        // 不新建「待换标签 / 需改价」。评估范围是全部分店，覆盖仓库价变化影响到的未选中分店。
+                        try
+                        {
+                            await _priceTaskService.RefreshPendingForProductsAsync(
+                                dto.ProductCodes,
+                                new PriceTaskInitiator(updatedBy, "StoreSync", dto.SourceStoreCode)
+                            );
+                        }
+                        catch (Exception notifyEx)
+                        {
+                            _logger.LogError(notifyEx, "同步其它分店后刷新已有价格任务失败");
+                        }
+                    }
+                    else if (_priceTaskService != null && overwrittenPrices.Count > 0)
                     {
                         try
                         {

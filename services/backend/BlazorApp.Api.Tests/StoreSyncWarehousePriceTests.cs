@@ -337,6 +337,82 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
         Assert.Equal(10m, await StoreRetailAsync("1003"));
     }
 
+    [Fact]
+    public async Task 关闭创建任务_价格照改但不新建待换标签与需改价()
+    {
+        var dto = NewDto(retail: true);
+        dto.CreatePriceTasks = false;
+
+        var result = await CreateService().SyncToOtherStoresAsync(dto, "店长小王");
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(12m, await StoreRetailAsync("1002"));
+        Assert.Equal(12m, await StoreRetailAsync("1003"));
+        Assert.Equal(12m, await WarehouseRetailAsync()); // 仓库价照常更新
+        // 被同步的 1002/1003 不收待换标签；未选中且价格不同的 1004 也不收需改价。
+        Assert.Empty(await _db.Queryable<StorePriceUpdateTask>().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 关闭创建任务_已有未完成任务仍按新价格流转而不是新建()
+    {
+        // 第一次正常同步到 1002：未选中的 1003 / 1004 按新仓库价 12 收到「需改价」。
+        var first = NewDto(retail: true);
+        first.TargetStoreCodes = new List<string> { "1002" };
+        Assert.True((await CreateService().SyncToOtherStoresAsync(first, "店长小王")).Success);
+        var before = await _db.Queryable<StorePriceUpdateTask>().ToListAsync();
+        Assert.Equal(
+            StorePriceUpdateTaskKinds.PriceUpdate,
+            Assert.Single(before, t => t.StoreCode == "1003").Kind
+        );
+
+        // 第二次关闭开关同步到 1003：价格已对齐，但货架仍是旧价 → 原任务转为待换标签，任务总数不变。
+        var second = NewDto(retail: true);
+        second.TargetStoreCodes = new List<string> { "1003" };
+        second.CreatePriceTasks = false;
+        var result = await CreateService().SyncToOtherStoresAsync(second, "店长小王");
+
+        Assert.True(result.Success, result.Message);
+        var after = await _db.Queryable<StorePriceUpdateTask>().ToListAsync();
+        Assert.Equal(before.Count, after.Count);
+        var task1003 = Assert.Single(after, t => t.StoreCode == "1003");
+        Assert.Equal(StorePriceUpdateTaskKinds.LabelOnly, task1003.Kind);
+        Assert.Equal(StorePriceUpdateTaskStatuses.Pending, task1003.Status);
+    }
+
+    [Fact]
+    public async Task 同步特殊商品标记_写到目标分店且不动价格()
+    {
+        await _db.Updateable<StoreRetailPrice>()
+            .SetColumns(p => p.IsSpecialProduct == true)
+            .Where(p => p.StoreCode == "1001")
+            .ExecuteCommandAsync();
+        var dto = NewDto();
+        dto.SyncIsSpecialProduct = true;
+
+        var result = await CreateService().SyncToOtherStoresAsync(dto, "店长小王");
+
+        Assert.True(result.Success, result.Message);
+        Assert.True(await StoreSpecialAsync("1002"));
+        Assert.True(await StoreSpecialAsync("1003"));
+        Assert.False(await StoreSpecialAsync("1004"));
+        Assert.Equal(10m, await StoreRetailAsync("1002"));
+        Assert.Equal(10m, await WarehouseRetailAsync());
+    }
+
+    [Fact]
+    public void 手机端请求不带新字段时_默认创建任务且不同步特殊商品()
+    {
+        var request = System.Text.Json.JsonSerializer.Deserialize<MobileSyncStoreProductToOtherStoresRequestDto>(
+            """{"productCode":"P001","sourceStoreCode":"1001","targetStoreCodes":["1002"]}""",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)
+        )!;
+
+        Assert.True(request.CreatePriceTasks);
+        Assert.False(request.SyncIsSpecialProduct);
+        Assert.True(new SyncToOtherStoresDto().CreatePriceTasks); // Web 入口默认也照旧建任务
+    }
+
     // ---------------------------------------------------------------- 夹具
 
     private SyncToOtherStoresDto NewDto(bool retail = false, bool discount = false) =>
@@ -427,6 +503,10 @@ public sealed class StoreSyncWarehousePriceTests : IDisposable
     private async Task<decimal?> StoreRetailAsync(string storeCode) =>
         (await _db.Queryable<StoreRetailPrice>().FirstAsync(p => p.StoreCode == storeCode && p.ProductCode == ProductCode))
             .StoreRetailPriceValue;
+
+    private async Task<bool> StoreSpecialAsync(string storeCode) =>
+        (await _db.Queryable<StoreRetailPrice>().FirstAsync(p => p.StoreCode == storeCode && p.ProductCode == ProductCode))
+            .IsSpecialProduct;
 
     private async Task<decimal?> SuggestedDiscountAsync() =>
         (await _db.Queryable<ProductSuggestedDiscount>().FirstAsync(d => d.ProductCode == ProductCode))
