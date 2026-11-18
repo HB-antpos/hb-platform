@@ -77,6 +77,10 @@
       "zellerUnmatchedRefund": {
         "name": "Zeller unmatched refund",
         "desc": "Allow refunds that are not linked to the original transaction"
+      },
+      "customerDisplayAdvertisements": {
+        "name": "Customer display ads",
+        "desc": "When off, the customer display shows only the cart and the register stops fetching ads; older POS versions ignore this setting"
       }
     },
     "readOnlyNote": "You have view-only access and cannot change settings.",

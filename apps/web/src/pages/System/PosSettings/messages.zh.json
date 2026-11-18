@@ -77,6 +77,10 @@
       "zellerUnmatchedRefund": {
         "name": "Zeller 无关联退款",
         "desc": "允许不关联原交易直接退款"
+      },
+      "customerDisplayAdvertisements": {
+        "name": "客显广告",
+        "desc": "关闭后客显只显示购物车，收银机不再请求广告、不下载素材；旧版收银端不识别此项"
       }
     },
     "readOnlyNote": "你只有查看权限，不能修改设置。",

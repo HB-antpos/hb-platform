@@ -20,6 +20,7 @@ export function settingName(key: string, tr: Tr): string {
     case 'payment.orderList': return tr('settings.orderList.name')
     case 'maintenance.autoRestart': return tr('settings.autoRestart.name')
     case 'zeller.unmatchedRefund': return tr('settings.zellerUnmatchedRefund.name')
+    case 'customerDisplay.advertisements': return tr('settings.customerDisplayAdvertisements.name')
     default: return key
   }
 }
@@ -36,6 +37,7 @@ export function settingDescription(key: string, tr: Tr): string | null {
     case 'payment.orderList': return tr('settings.orderList.desc')
     case 'maintenance.autoRestart': return tr('settings.autoRestart.desc')
     case 'zeller.unmatchedRefund': return tr('settings.zellerUnmatchedRefund.desc')
+    case 'customerDisplay.advertisements': return tr('settings.customerDisplayAdvertisements.desc')
     default: return null
   }
 }
