@@ -831,7 +831,7 @@ export class HbposInstallmentsApi implements InstallmentsRemotePort {
       ),
       pickupInfo: mapPickupInfo(details.pickupInfo),
       cancellationInfo: mapCancellationInfo(details.cancellationInfo),
-      note: responseOptionalText(details.note, "details.note", 2_000),
+      note: responseOptionalMultilineText(details.note, "details.note", 2_000),
     });
   }
 
@@ -1182,7 +1182,7 @@ function mapPickupInfo(
       "pickup.pickedUpBy",
       256,
     ),
-    note: responseOptionalText(pickup.note, "pickup.note", 1_000),
+    note: responseOptionalMultilineText(pickup.note, "pickup.note", 1_000),
   });
 }
 
@@ -1211,7 +1211,7 @@ function mapCancellationInfo(
       "cancellation.cancelledBy",
       256,
     ),
-    reason: responseOptionalText(
+    reason: responseOptionalMultilineText(
       cancellation.reason,
       "cancellation.reason",
       1_000,
@@ -1564,6 +1564,28 @@ function responseOptionalText(
 ): string | null {
   if (value === null || value === undefined || value === "") return null;
   return responseText(value, field, maxLength);
+}
+
+/**
+ * 备注 / 原因这类顾客可见的多行自由文本：WPF 开单页备注框允许回车换行，
+ * 所以服务端回包里会带 \t \n \r。单行字段的解析（responseText）会把它们当控制字符拒收，
+ * 导致这类分期单在本机打不开，续付 / 提货 / 取消都做不了；这里只放行这三种空白，
+ * 其余控制字符（含 NUL）仍然拒收，长度上限不变。
+ */
+function responseOptionalMultilineText(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (
+    typeof value !== "string" ||
+    value.length > maxLength ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
+  ) {
+    throw invalidResponse(field);
+  }
+  return value;
 }
 
 function responseIso(value: unknown, field: string): string {

@@ -57,6 +57,15 @@ type PromotionLineAllocation = {
   promotionIds: string[];
 };
 
+/**
+ * 自动促销计算预算，与 WPF PromotionComputationBudget 同口径：
+ * 按「实际会消费的展开单位」计费（已应用每单最大次数），单条规则 / 整单任一超限就整单不算自动促销，
+ * 购物车照常可售（手工折扣和目录折扣不受影响）。没有这个预算时，误输入超大数量会让促销展开
+ * 按件数逐件建对象，卡死或内存耗尽，而且购物车已持久化，重启恢复时还会再算一遍。
+ */
+const MAX_PROMOTION_WORK_UNITS_PER_RULE = 100_000;
+const MAX_PROMOTION_WORK_UNITS_PER_ORDER = 500_000;
+
 const MAX_SAFE_INTEGER_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const MIN_SAFE_INTEGER_BIGINT = BigInt(Number.MIN_SAFE_INTEGER);
 const NONE_DISCOUNT: PricingDiscountState = { kind: "none" };
@@ -1729,6 +1738,11 @@ export class PricingCart {
     const rulesToEvaluate = exclusive
       ? [exclusive]
       : applicableRules.filter((promotion) => !promotion.isExclusive);
+    // 旧的促销折扣已在方法入口清掉；超预算就直接不算自动促销。
+    if (this.exceedsPromotionBudget(rulesToEvaluate, eligibleLines)) {
+      return;
+    }
+
     const allocations = new Map<
       MutablePricingLine,
       PromotionLineAllocation
@@ -1750,11 +1764,9 @@ export class PricingCart {
     }
   }
 
-  private evaluatePromotion(
+  private promotionProductWeights(
     promotion: PromotionDefinition,
-    eligibleLines: readonly MutablePricingLine[],
-    allocations: Map<MutablePricingLine, PromotionLineAllocation>,
-  ): void {
+  ): Map<string, number> {
     const productWeights = new Map<string, number>();
     for (const product of promotion.products) {
       const productCode = normalizeProductCode(product.productCode);
@@ -1765,12 +1777,91 @@ export class PricingCart {
         );
       }
     }
+    return productWeights;
+  }
+
+  /**
+   * 展开前先按数量估算「实际会消费的展开单位」（不建任何对象）：
+   * 展开单位 = Σ ceil(数量) × 权重，再按每单最大次数换算；与 evaluatePromotion 的展开口径一致。
+   * 任何一步超出安全整数返回 +Infinity（视为超预算）。
+   */
+  private promotionWorkUnits(
+    promotion: PromotionDefinition,
+    productWeights: ReadonlyMap<string, number>,
+    eligibleLines: readonly MutablePricingLine[],
+  ): number {
+    let expandedUnits = 0;
+    for (const line of eligibleLines) {
+      const unitWeight = productWeights.get(
+        normalizeProductCode(line.productCode),
+      );
+      if (unitWeight === undefined) {
+        continue;
+      }
+      expandedUnits += Math.ceil(line.quantity) * unitWeight;
+      if (!Number.isSafeInteger(expandedUnits)) {
+        return Number.POSITIVE_INFINITY;
+      }
+    }
+
+    let applicationCount = Math.floor(expandedUnits / promotion.applyQuantity);
+    if (promotion.maxApplicationsPerOrder !== null) {
+      applicationCount = Math.min(
+        applicationCount,
+        promotion.maxApplicationsPerOrder,
+      );
+    }
+    const workUnits = Math.max(0, applicationCount) * promotion.applyQuantity;
+    return Number.isSafeInteger(workUnits)
+      ? workUnits
+      : Number.POSITIVE_INFINITY;
+  }
+
+  private exceedsPromotionBudget(
+    rules: readonly PromotionDefinition[],
+    eligibleLines: readonly MutablePricingLine[],
+  ): boolean {
+    let orderWorkUnits = 0;
+    for (const promotion of rules) {
+      const productWeights = this.promotionProductWeights(promotion);
+      if (productWeights.size === 0) {
+        continue;
+      }
+      const workUnits = this.promotionWorkUnits(
+        promotion,
+        productWeights,
+        eligibleLines,
+      );
+      if (workUnits > MAX_PROMOTION_WORK_UNITS_PER_RULE) {
+        return true;
+      }
+      orderWorkUnits += workUnits;
+      if (orderWorkUnits > MAX_PROMOTION_WORK_UNITS_PER_ORDER) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private evaluatePromotion(
+    promotion: PromotionDefinition,
+    eligibleLines: readonly MutablePricingLine[],
+    allocations: Map<MutablePricingLine, PromotionLineAllocation>,
+  ): void {
+    const productWeights = this.promotionProductWeights(promotion);
     if (productWeights.size === 0) {
       return;
     }
 
+    // 后面只会按「每单最大次数 × 每次数量」取前缀分组，超出的展开单位本来就被丢弃；
+    // 所以只展开到这个上限，不再按总件数逐件建对象。
+    const workUnits = this.promotionWorkUnits(
+      promotion,
+      productWeights,
+      eligibleLines,
+    );
     const units: PromotionUnit[] = [];
-    for (const line of eligibleLines) {
+    expand: for (const line of eligibleLines) {
       const unitWeight = productWeights.get(
         normalizeProductCode(line.productCode),
       );
@@ -1788,6 +1879,9 @@ export class PricingCart {
           weightIndex < unitWeight;
           weightIndex += 1
         ) {
+          if (units.length >= workUnits) {
+            break expand;
+          }
           units.push({
             line,
             quantityIndex,

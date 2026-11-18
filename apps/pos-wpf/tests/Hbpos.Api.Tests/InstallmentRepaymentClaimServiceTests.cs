@@ -465,6 +465,51 @@ public sealed class InstallmentRepaymentClaimServiceTests
         Assert.Equal(InstallmentRepaymentClaimErrorCodes.Mismatch, mismatch.Code);
     }
 
+    // 续付已入账后的重试：分期余额已扣减（付清时余额为 0），重放必须返回已入账的 claim，
+    // 不能被「新 claim」的余额 / 状态校验误报成 Mismatch（客户端会当确定失败清草稿）。
+    [Theory]
+    [InlineData(50)] // 部分续付：入账后余额 30，小于本笔金额 50
+    [InlineData(80)] // 付清：入账后余额 0
+    public async Task Create_replay_after_the_repayment_was_committed_returns_the_committed_claim(int amount)
+    {
+        var harness = CreateHarness();
+        var request = CreateRequest(amount: amount, method: PaymentMethodKind.Cash);
+        await harness.Service.CreateAsync(harness.InstallmentGuid, request, Identity(), CancellationToken.None);
+        await harness.Service.BeginProviderAsync(
+            harness.InstallmentGuid,
+            request.OperationGuid,
+            new InstallmentRepaymentClaimBeginProviderRequest("cash", "attempt-create-replay-after-commit"),
+            Identity(),
+            CancellationToken.None);
+        var committed = await harness.Service.CommitAsync(
+            harness.InstallmentGuid,
+            request.OperationGuid,
+            new InstallmentRepaymentClaimCommitRequest(),
+            Identity(),
+            CancellationToken.None);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, committed.Status);
+
+        var replay = await harness.Service.CreateAsync(
+            harness.InstallmentGuid,
+            request,
+            Identity(),
+            CancellationToken.None);
+
+        Assert.True(replay.AlreadyExists);
+        Assert.Equal(InstallmentRepaymentClaimStatus.Committed, replay.Status);
+        Assert.Equal(1, harness.Installments.AppendCount);
+
+        // 重放只放行「同一 operation、同一事实」：换金额仍是 Mismatch，不会因此多记一笔。
+        var changed = await Assert.ThrowsAsync<InstallmentRepaymentClaimException>(() =>
+            harness.Service.CreateAsync(
+                harness.InstallmentGuid,
+                request with { Amount = request.Amount - 1m },
+                Identity(),
+                CancellationToken.None));
+        Assert.Equal(InstallmentRepaymentClaimErrorCodes.Mismatch, changed.Code);
+        Assert.Equal(1, harness.Installments.AppendCount);
+    }
+
     [Fact]
     public async Task Card_create_fails_closed_before_claim_order_or_payment_state_changes()
     {

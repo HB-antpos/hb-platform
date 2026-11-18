@@ -442,3 +442,58 @@ test("带时钟：时钟越过生效边界后，合并兼容行会拒绝（不�
   assert.equal(cart.snapshot().discount.cents, 500);
   assert.equal(cart.stateSnapshot().asOfIso, now);
 });
+
+test("自动促销计算预算：超大数量整单不算自动促销且不卡死，预算边界与恢复（与 WPF 同口径）", () => {
+  const cart = new PricingCart({
+    asOfIso,
+    promotions: [promotion("PROMO-BUDGET")],
+  });
+  cart.addItem(item("line-a"));
+
+  // 边界：每条规则最多 100,000 个实际消费的展开单位，刚好等于上限仍照常计算。
+  assert.equal(cart.setLineQuantity("line-a", 100_000), true);
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 50_000 * 500);
+
+  // 超出上限：整单不算自动促销，购物车照常可改、金额按原价。
+  assert.equal(cart.setLineQuantity("line-a", 100_002), true);
+  const overBudget = cart.snapshot().lines[0]!;
+  assert.equal(overBudget.discount.cents, 0);
+  assert.equal(overBudget.priceSource, "catalog");
+  assert.equal(overBudget.actualAmount.cents, 100_002 * 1_000);
+
+  // 误输入的超大数量：不按件数逐件展开，立即返回。
+  const startedAt = Date.now();
+  assert.equal(cart.setLineQuantity("line-a", 99_999_999), true);
+  assert.ok(Date.now() - startedAt < 2_000);
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 0);
+
+  // 数量回到预算内后促销恢复。
+  assert.equal(cart.setLineQuantity("line-a", 2), true);
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 500);
+});
+
+test("自动促销：每单最大次数很小而数量极大时只展开会被消费的单位，结果不变且不卡死", () => {
+  const cart = new PricingCart({
+    asOfIso,
+    promotions: [promotion("PROMO-CAPPED", { maxApplicationsPerOrder: 3 })],
+  });
+  cart.addItem(item("line-a"));
+
+  const startedAt = Date.now();
+  assert.equal(cart.setLineQuantity("line-a", 99_999_999), true);
+  assert.ok(Date.now() - startedAt < 2_000);
+  // 只应用 3 次，每次 2 件 15.00 的固定价，折扣 3 × 5.00。
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 3 * 500);
+});
+
+test("自动促销预算：多条规则合计超过整单预算时整单不算自动促销", () => {
+  const rules = Array.from({ length: 6 }, (_, index) =>
+    promotion(`PROMO-ORDER-${index}`, { priority: 10 + index }),
+  );
+  const cart = new PricingCart({ asOfIso, promotions: rules });
+  cart.addItem(item("line-a"));
+
+  // 每条规则 90,000 个单位都在单规则上限内，但 6 条合计 540,000 超过整单 500,000。
+  assert.equal(cart.setLineQuantity("line-a", 90_000), true);
+  assert.equal(cart.snapshot().lines[0]!.discount.cents, 0);
+});
