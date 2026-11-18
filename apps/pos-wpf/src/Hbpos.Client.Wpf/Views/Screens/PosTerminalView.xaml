@@ -2295,18 +2295,19 @@
                         <TextBlock Text="{Binding HoldOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                     </StackPanel>
                 </Button>
-                <!-- Recall Order：右上角圆形角标显示今天仍挂着的单数（HeldOrderBadgeText 0 单时为空、超过 99 为 99+；
+                <!-- History（原 Recall Order）：今天有挂单进挂单页，否则进本地订单历史。
+                     右上角圆形角标显示今天仍挂着的单数（HeldOrderBadgeText 0 单时为空、超过 99 为 99+；
                      IsHeldOrderBadgeVisible 为假或属性缺失时折叠）。内容放进 Grid 并让按钮内容撑满，角标才能贴到右上角。 -->
-                <Button Background="{DynamicResource PosSidebarTileRecallBrush}" Command="{Binding RecallOrderCommand}"
+                <Button Background="{DynamicResource PosSidebarTileRecallBrush}" Command="{Binding OpenHistoryCommand}"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch"
                         Style="{StaticResource PosSidebarActionButtonStyle}">
                     <Grid>
                         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                             <Border Style="{StaticResource PosSidebarActionIconHostStyle}">
-                                <materialDesign:PackIcon Kind="FileDocumentOutline" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                <materialDesign:PackIcon Kind="History" Width="{DynamicResource PosHomeSidebarIconSize}" Height="{DynamicResource PosHomeSidebarIconSize}" Foreground="{DynamicResource PosSidebarIconBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
-                            <TextBlock Text="{Binding RecallOrderText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
+                            <TextBlock Text="{Binding HistoryText}" Style="{StaticResource PosSidebarActionLabelStyle}" />
                         </StackPanel>
                         <Border x:Name="RecallOrderCountBadge"
                                 Style="{StaticResource PosSidebarBadgeStyle}"

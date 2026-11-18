@@ -373,7 +373,20 @@ internal sealed class ScreenNavigator
     {
         TransactionHistory ??= CreateTransactionHistoryViewModel();
         TransactionHistory.ResetDateRangeToToday();
+        // 历史页视图模型常驻复用：每次进入都清掉上次留下的关键词（页签沿用上次选择）。
+        TransactionHistory.ClearKeywordForEntry();
         await TransactionHistory.LoadAsync();
+        SetCurrentScreen(TransactionHistory);
+    }
+
+    /// <summary>
+    /// 收银页功能栏「历史」入口（今天没有挂单时）：固定落在「本地」订单页签、日期为今天、关键词清空。
+    /// 与 <see cref="ShowHistoryAsync"/> 不同，不沿用上次离开时停的页签。
+    /// </summary>
+    public async Task ShowLocalHistoryAsync()
+    {
+        TransactionHistory ??= CreateTransactionHistoryViewModel();
+        await TransactionHistory.ShowLocalOrdersAsync();
         SetCurrentScreen(TransactionHistory);
     }
 
@@ -434,7 +447,8 @@ internal sealed class ScreenNavigator
     public async Task ShowSuspendedHistoryAsync()
     {
         TransactionHistory ??= CreateTransactionHistoryViewModel();
-        await TransactionHistory.ShowSuspendedOrdersAsync();
+        // 进到这里说明今天有挂单：本机没有时自动看非本机，避免角标有数字、列表却是空的。
+        await TransactionHistory.ShowSuspendedOrdersAsync(fallbackToOtherScopeWhenLocalEmpty: true);
         SetCurrentScreen(TransactionHistory);
     }
 

@@ -277,7 +277,6 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         OpenReturnsCommand = new AsyncRelayCommand(OpenReturnsAsync);
         OpenSpecialProductsCommand = new AsyncRelayCommand(OpenSpecialProductsAsync);
         HoldOrderCommand = new AsyncRelayCommand(HoldOrderAsync, () => !_cart.IsEmpty);
-        RecallOrderCommand = new AsyncRelayCommand(RecallOrderAsync);
         OpenHistoryCommand = new AsyncRelayCommand(OpenHistoryAsync);
         OpenDailyCloseCommand = new AsyncRelayCommand(OpenDailyCloseAsync);
         OpenSettingsCommand = new AsyncRelayCommand(OpenSettingsAsync);
@@ -346,8 +345,9 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
 
     public IAsyncRelayCommand HoldOrderCommand { get; }
 
-    public IAsyncRelayCommand RecallOrderCommand { get; }
-
+    /// <summary>
+    /// 功能栏「历史」入口（原「取单」格）：今天有挂单进挂单页，否则进本地订单历史。
+    /// </summary>
     public IAsyncRelayCommand OpenHistoryCommand { get; }
 
     public IAsyncRelayCommand OpenDailyCloseCommand { get; }
@@ -391,8 +391,6 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
     public string ClearCartText => T("pos.terminal.actions.clearCart");
 
     public string HoldOrderText => T("pos.terminal.actions.holdOrder");
-
-    public string RecallOrderText => T("pos.terminal.actions.recallOrder");
 
     public string HistoryText => T("pos.terminal.actions.history");
 
@@ -1797,34 +1795,25 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
     }
 
-    private async Task RecallOrderAsync()
-    {
-        // 取单会换成另一单：待选商品属于当前这位顾客，不能悄悄带到别人的订单上。
-        if (PendingChoices.TryBlock(PendingChoiceReasons.Recall, RecallOrderAsync))
-        {
-            return;
-        }
+    /// <summary>点击「历史」时，等待最新挂单数的最长时间；超时直接用角标上已有的数，不让收银员干等。</summary>
+    private static readonly TimeSpan HistoryEntryHeldCountWait = TimeSpan.FromSeconds(2);
 
-        using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.Sales.RecallOrder, "recall-order");
-        if (permissionGrant is null)
-        {
-            return;
-        }
-
-        using var authorizationActivation = permissionGrant.Activate();
-        // 取单会把另一单恢复进购物车，属于换单：作废取单前发起的在途补查。
-        _workflowService.AdvanceCartGeneration("recall-order");
-        // 换单也要复位一次性整单开关，别让取单前点亮的「整单」落到恢复出来的那一单上。
-        IsWholeOrderOperation = false;
-        if (_actions.RecallOrderAsync is not null)
-        {
-            // 这里仅导航到暂存订单列表，真实取单成功由 TransactionHistoryViewModel 记录。
-            await _actions.RecallOrderAsync();
-        }
-    }
-
+    /// <summary>
+    /// 「历史」入口：今天有挂单 → 进挂单页（可取单）；没有 → 进本地订单历史。
+    /// 权限统一按「查看历史」校验；页内「取回」按钮自带 History.Recall 校验，不会因此放宽取单权限。
+    /// </summary>
     private async Task OpenHistoryAsync()
     {
+        var hasHeldOrders = await HasHeldOrdersForHistoryEntryAsync();
+        var goToHeldOrders = hasHeldOrders && _actions.RecallOrderAsync is not null;
+
+        // 进挂单页意味着可能取单换单：待选商品属于当前这位顾客，不能悄悄带到别人的订单上。
+        // 只在真的去挂单页时才拦，纯看本地历史不影响当前顾客。
+        if (goToHeldOrders && PendingChoices.TryBlock(PendingChoiceReasons.Recall, OpenHistoryAsync))
+        {
+            return;
+        }
+
         using var permissionGrant = await AuthorizeAsync(Permissions.PosTerminal.History.View, "open-history");
         if (permissionGrant is null)
         {
@@ -1832,10 +1821,39 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         }
 
         using var authorizationActivation = permissionGrant.Activate();
+        if (goToHeldOrders)
+        {
+            // 挂单页取单会把另一单恢复进购物车，属于换单：作废之前发起的在途补查。
+            _workflowService.AdvanceCartGeneration("recall-order");
+            // 换单也要复位一次性整单开关，别让点亮的「整单」落到恢复出来的那一单上。
+            IsWholeOrderOperation = false;
+            // 这里仅导航到挂单列表，真实取单成功由 TransactionHistoryViewModel 记录。
+            await _actions.RecallOrderAsync!();
+            return;
+        }
+
         if (_actions.OpenHistoryAsync is not null)
         {
             await _actions.OpenHistoryAsync();
         }
+    }
+
+    /// <summary>
+    /// 重新统计今天可取的挂单数（口径与角标一致：本机 + 本店共享、去重）并判断是否有挂单。
+    /// 统计服务本身会在远端失败 / 超时时降级为本机计数；这里再给个等待上限，慢网络下直接沿用角标当前值。
+    /// </summary>
+    private async Task<bool> HasHeldOrdersForHistoryEntryAsync()
+    {
+        if (_heldOrderTodayCountService is not null)
+        {
+            var refresh = RefreshHeldOrderTodayCountAsync();
+            using var waitCancellation = new CancellationTokenSource();
+            await Task.WhenAny(refresh, Task.Delay(HistoryEntryHeldCountWait, _timeProvider, waitCancellation.Token));
+            // 统计先返回时撤掉等待计时器，别留一个悬空定时器。
+            waitCancellation.Cancel();
+        }
+
+        return HeldOrderTodayCount > 0;
     }
 
     private async Task OpenCardRecoveryCenterAsync()
@@ -2791,7 +2809,6 @@ public sealed partial class PosTerminalViewModel : ObservableObject, IScannerInp
         OnPropertyChanged(nameof(PayNowText));
         OnPropertyChanged(nameof(ClearCartText));
         OnPropertyChanged(nameof(HoldOrderText));
-        OnPropertyChanged(nameof(RecallOrderText));
         OnPropertyChanged(nameof(HistoryText));
         OnPropertyChanged(nameof(DailyCloseText));
         OnPropertyChanged(nameof(SettingsText));

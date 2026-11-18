@@ -186,17 +186,18 @@ public sealed class WholeOrderOneShotSwitchTests
     }
 
     [Fact]
-    public async Task Recall_order_turns_the_switch_off()
+    public async Task Open_history_with_held_orders_turns_the_switch_off()
     {
         var recalled = false;
-        using var harness = new Harness(onRecallOrderAsync: () =>
+        // 今天有挂单：「历史」入口会进挂单页（可能取单换单），所以要像原来的取单一样复位整单开关。
+        using var harness = new Harness(heldOrderCount: 1, onRecallOrderAsync: () =>
         {
             recalled = true;
             return Task.CompletedTask;
         });
         harness.ViewModel.IsWholeOrderOperation = true;
 
-        await ((IAsyncRelayCommand)harness.ViewModel.RecallOrderCommand).ExecuteAsync(null);
+        await ((IAsyncRelayCommand)harness.ViewModel.OpenHistoryCommand).ExecuteAsync(null);
 
         Assert.True(recalled);
         Assert.False(harness.ViewModel.IsWholeOrderOperation);
@@ -262,7 +263,8 @@ public sealed class WholeOrderOneShotSwitchTests
             bool approveAuthorization = true,
             Func<Task<Guid?>>? onHoldOrderAsync = null,
             Func<Task>? onRecallOrderAsync = null,
-            Func<Task>? onLockCashierAsync = null)
+            Func<Task>? onLockCashierAsync = null,
+            int heldOrderCount = 0)
         {
             Cart = new PosCartService();
             Authorization = new ScriptedAuthorizationService(approveAuthorization);
@@ -276,7 +278,8 @@ public sealed class WholeOrderOneShotSwitchTests
                 onRecallOrderAsync: onRecallOrderAsync,
                 operationAuditLogger: Audit,
                 onLockCashierAsync: onLockCashierAsync,
-                operationAuthorizationService: Authorization);
+                operationAuthorizationService: Authorization,
+                heldOrderTodayCountService: new FakeHeldOrderTodayCountService { Count = heldOrderCount });
 
             // ViewModel 先建好再加行（购物车变更事件驱动列表刷新），与既有收银页测试一致。
             Line = Cart.AddItem(CreateItem(30m));

@@ -369,7 +369,44 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
+
+                <!-- 关键词筛选条：上一次查询带着关键词时显示「已按「xxx」筛选，共 N 条」；结果为空时改成「没有匹配」，
+                     并给一个一键清除，免得收银员看到空列表却不知道是被关键词筛掉了。 -->
+                <Border x:Name="HistoryKeywordFilterBanner"
+                        Grid.Row="2"
+                        Margin="0,10,0,0"
+                        Padding="14,8"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        Background="{DynamicResource PosWarningSoftBrush}"
+                        BorderBrush="{DynamicResource PosWarningBrush}"
+                        Visibility="{Binding IsKeywordFilterBannerVisible, Converter={StaticResource BoolToVis}}">
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right"
+                                Command="{Binding ClearKeywordFilterCommand}"
+                                Content="{Binding KeywordFilterClearLabel}"
+                                Height="34"
+                                Padding="14,0"
+                                FontSize="13"
+                                AutomationProperties.AutomationId="TransactionHistoryKeywordFilterClear"
+                                Style="{StaticResource PosSecondaryButtonStyle}" />
+                        <materialDesign:PackIcon DockPanel.Dock="Left"
+                                                 Kind="FilterVariant"
+                                                 Width="18"
+                                                 Height="18"
+                                                 Margin="0,0,8,0"
+                                                 VerticalAlignment="Center"
+                                                 Foreground="{DynamicResource PosWarningTextBrush}" />
+                        <TextBlock Text="{Binding KeywordFilterBannerText}"
+                                   VerticalAlignment="Center"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource PosWarningTextBrush}"
+                                   TextTrimming="CharacterEllipsis" />
+                    </DockPanel>
+                </Border>
 
                 <Grid Grid.Row="0">
                     <Grid.ColumnDefinitions>
@@ -553,8 +590,35 @@
                                     Grid.Column="2"
                                     Margin="12,0,0,0"
                                     MinWidth="220">
-                            <TextBlock Text="{loc:Loc history.searchLabel}"
-                                       Style="{StaticResource HistoryFilterLabelStyle}" />
+                            <!-- 查询框里有关键词时：标签改成「筛选中」并用警示色，输入框换警示底色 + 加粗边框，
+                                 防止收银员忘了关键词、把筛选后的短列表当成故障。 -->
+                            <!-- 两个标签互斥显示（本地值会盖过样式触发器，所以不能在同一个 TextBlock 上切 Text）。 -->
+                            <TextBlock x:Name="HistorySearchLabel"
+                                       Text="{loc:Loc history.searchLabel}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource HistoryFilterLabelStyle}">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasSearchKeyword}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <TextBlock x:Name="HistorySearchActiveLabel"
+                                       Text="{Binding KeywordFilterLabel}"
+                                       Foreground="{DynamicResource PosWarningTextBrush}">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock" BasedOn="{StaticResource HistoryFilterLabelStyle}">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding HasSearchKeyword}" Value="True">
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
                             <Grid>
                                 <TextBox x:Name="HistorySearchTextBox"
                                          Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}"
@@ -563,8 +627,18 @@
                                          InputMethod.PreferredImeState="Off"
                                          Height="44"
                                          FontSize="13"
-                                         Padding="38,0,48,0"
-                                         Style="{StaticResource PosSearchTextBoxStyle}">
+                                         Padding="38,0,48,0">
+                                    <TextBox.Style>
+                                        <Style TargetType="TextBox" BasedOn="{StaticResource PosSearchTextBoxStyle}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding HasSearchKeyword}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource PosWarningSoftBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource PosWarningBrush}" />
+                                                    <Setter Property="BorderThickness" Value="2" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBox.Style>
                                     <!-- 查询框获得焦点后仍隔离中文输入法，Enter 与扫码统一走当前筛选的 LoadCommand。 -->
                                     <TextBox.InputBindings>
                                         <KeyBinding Key="Enter"
@@ -687,11 +761,10 @@
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <TextBlock Grid.Row="0"
+                                                   controls:KeywordHighlight.Text="{Binding DisplayOrderId, Mode=OneWay, StringFormat='#{0}'}"
+                                                   controls:KeywordHighlight.Keyword="{Binding DataContext.AppliedKeyword, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                    Style="{StaticResource HistoryPrimaryTextStyle}"
-                                                   ToolTip="{Binding DisplayOrderId}">
-                                            <Run Text="#" />
-                                            <Run Text="{Binding DisplayOrderId, Mode=OneWay}" />
-                                        </TextBlock>
+                                                   ToolTip="{Binding DisplayOrderId}" />
                                         <TextBlock Grid.Row="1"
                                                    Text="{Binding SoldAtDisplay}"
                                                    ToolTip="{Binding SoldAtDisplay}"
@@ -713,7 +786,8 @@
                                             <RowDefinition Height="Auto" />
                                         </Grid.RowDefinitions>
                                         <TextBlock Grid.Row="0"
-                                                   Text="{Binding CashierName}"
+                                                   controls:KeywordHighlight.Text="{Binding CashierName}"
+                                                   controls:KeywordHighlight.Keyword="{Binding DataContext.AppliedKeyword, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                    ToolTip="{Binding CashierName}"
                                                    Style="{StaticResource HistoryPrimaryTextStyle}" />
                                         <DockPanel Grid.Row="1" Margin="0,4,0,0" LastChildFill="True">
@@ -723,7 +797,8 @@
                                                                      Height="14"
                                                                      Margin="0,0,6,0"
                                                                      Foreground="{DynamicResource PosMutedForegroundBrush}" />
-                                            <TextBlock Text="{Binding DeviceCode}"
+                                            <TextBlock controls:KeywordHighlight.Text="{Binding DeviceCode}"
+                                                       controls:KeywordHighlight.Keyword="{Binding DataContext.AppliedKeyword, RelativeSource={RelativeSource AncestorType=DataGrid}}"
                                                        ToolTip="{Binding DeviceCode}"
                                                        Style="{StaticResource HistorySecondaryTextStyle}" />
                                         </DockPanel>
