@@ -87,7 +87,7 @@ for (const code of ["PosSettings.View", "PosSettings.Manage"]) {
   const source = readFileSync(catalogPath, "utf8");
   const keysBlock = source.slice(source.indexOf("class PosSettingKeys"), source.indexOf("record PosSettingDefinition"));
   const keys = [...keysBlock.matchAll(/public const string \w+ = "([^"]+)";/g)].map((match) => match[1]);
-  assert.equal(keys.length, 9, "后端目录应有 9 个设置键");
+  assert.equal(keys.length, 10, "后端目录应有 10 个设置键");
   for (const language of ["zh", "en"] as const) {
     const copy = readJson(`src/locales/${language}/screens/posSettings.json`).settings as Record<string, { name?: string; hint?: string }>;
     for (const key of keys) {

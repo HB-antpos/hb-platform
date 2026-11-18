@@ -78,6 +78,15 @@ internal sealed class CustomerDisplayShellController
             $"viewmodel set-mode completed requestedMode={mode} resultMode={result.Mode} open={result.Mode != CustomerDisplayWindowMode.Closed} elapsedMs={stopwatch.ElapsedMilliseconds}");
     }
 
+    /// <summary>本机当前是否播放客显广告（启动加载偏好完成后才是真实值，之前为默认开启）。</summary>
+    public bool AdvertisementsEnabled => _orchestrator.AdvertisementsEnabled;
+
+    /// <summary>广告开关变化（总部下发或离线修改）后，让已打开的客显立即生效；开关值已由设置绑定写进偏好。</summary>
+    public void ApplyAdvertisementsSetting()
+    {
+        _orchestrator.ApplyAdvertisementsSetting(_getCustomerDisplay(), _getSession(), _getCart());
+    }
+
     /// <summary>主窗口与客显互换屏幕；客显模式不变，只更新状态提示。</summary>
     public void SwapScreens(Window owner)
     {

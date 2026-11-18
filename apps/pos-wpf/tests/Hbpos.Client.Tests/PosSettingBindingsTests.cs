@@ -38,6 +38,8 @@ public sealed class PosSettingBindingsTests
                 [PosSettingKeys.OrderList] = true,
                 [PosSettingKeys.AutoRestart] = true,
                 [PosSettingKeys.ZellerUnmatchedRefund] = false,
+                // 客显广告本机默认播放：从未设置过就是开，升级后不能因为新增这一项而把广告关掉。
+                [PosSettingKeys.CustomerDisplayAdvertisements] = true,
             },
             await ReadAllAsync(bindings));
     }
@@ -52,6 +54,7 @@ public sealed class PosSettingBindingsTests
     [InlineData(PosSettingKeys.OrderList)]
     [InlineData(PosSettingKeys.AutoRestart)]
     [InlineData(PosSettingKeys.ZellerUnmatchedRefund)]
+    [InlineData(PosSettingKeys.CustomerDisplayAdvertisements)]
     public async Task Writing_one_key_flips_only_that_key_and_round_trips_both_ways(string key)
     {
         var bindings = CreateBindings(new MemoryRepository(), out _);
@@ -132,6 +135,47 @@ public sealed class PosSettingBindingsTests
         Assert.Equal(expected, await binding.ReadAsync());
     }
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("true", true)]
+    [InlineData("false", false)]
+    [InlineData("False", false)]
+    [InlineData("garbage", true)]
+    [InlineData("", true)]
+    public async Task Customer_display_advertisements_read_only_an_explicit_false_as_off(string? stored, bool expected)
+    {
+        var repository = new MemoryRepository();
+        if (stored is not null)
+        {
+            await repository.SetValueAsync(CustomerDisplayWindowPreferenceStore.AdvertisementsEnabledKey, stored);
+        }
+
+        var binding = CreateBindings(repository, out _).Single(item => item.Key == PosSettingKeys.CustomerDisplayAdvertisements);
+
+        Assert.Equal(expected, await binding.ReadAsync());
+    }
+
+    [Fact]
+    public async Task Customer_display_advertisements_are_stored_in_the_window_preference_and_update_its_memory_value()
+    {
+        var repository = new MemoryRepository();
+        var bindings = CreateBindings(repository, out var stores);
+        var binding = bindings.Single(item => item.Key == PosSettingKeys.CustomerDisplayAdvertisements);
+
+        await binding.WriteAsync(false);
+
+        // 落在客显偏好自己的键里，窗口模式 / 位置键不受影响。
+        Assert.Equal("false", repository.Values[CustomerDisplayWindowPreferenceStore.AdvertisementsEnabledKey]);
+        Assert.False(repository.Values.ContainsKey(CustomerDisplayWindowPreferenceStore.ModeKey));
+        // 编排器读的是偏好的内存值：下发写入后它必须立刻是新值，否则下一次刷新还会去请求广告接口。
+        Assert.False(stores.CustomerDisplay.Current.AdvertisementsEnabled);
+        Assert.False(await binding.ReadAsync());
+
+        await binding.WriteAsync(true);
+        Assert.True(stores.CustomerDisplay.Current.AdvertisementsEnabled);
+        Assert.True((await new CustomerDisplayWindowPreferenceStore(repository).LoadAsync()).AdvertisementsEnabled);
+    }
+
     private static async Task<Dictionary<string, bool>> ReadAllAsync(IReadOnlyList<IPosSettingBinding> bindings)
     {
         var result = new Dictionary<string, bool>(StringComparer.Ordinal);
@@ -149,11 +193,15 @@ public sealed class PosSettingBindingsTests
         var payment = new PaymentMethodSettingsService(repository);
         var cardTerminal = new CardTerminalSettingsStore(repository, new PassthroughProtector());
         var restart = new SystemRestartSettingsStore(repository);
-        stores = new Stores(receipt, payment);
-        return PosSettingBindings.Create(repository, receipt, payment, cardTerminal, restart);
+        var customerDisplay = new CustomerDisplayWindowPreferenceStore(repository);
+        stores = new Stores(receipt, payment, customerDisplay);
+        return PosSettingBindings.Create(repository, receipt, payment, cardTerminal, restart, customerDisplay);
     }
 
-    private sealed record Stores(ReceiptPrinterSettingsStore Receipt, PaymentMethodSettingsService Payment);
+    private sealed record Stores(
+        ReceiptPrinterSettingsStore Receipt,
+        PaymentMethodSettingsService Payment,
+        CustomerDisplayWindowPreferenceStore CustomerDisplay);
 
     private sealed class PassthroughProtector : IDeviceAuthorizationProtector
     {
@@ -167,6 +215,8 @@ public sealed class PosSettingBindingsTests
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
 
         public int WriteCount { get; private set; }
+
+        public IReadOnlyDictionary<string, string> Values => _values;
 
         public Task<string?> GetValueAsync(string key, CancellationToken cancellationToken = default) =>
             Task.FromResult(_values.TryGetValue(key, out var value) ? value : null);

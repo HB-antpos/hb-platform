@@ -89,6 +89,41 @@ public sealed class PosSettingsSyncServiceTests
     }
 
     [Fact]
+    public async Task GetSync_客显广告开关_只下发给WPF_设备层可单独关闭某一台()
+    {
+        var repository = new FakeRepository
+        {
+            Layers = new PosSettingLayers(
+                Layer((PosSettingKeys.CustomerDisplayAdvertisements, true)),
+                Layer(),
+                Layer((PosSettingKeys.CustomerDisplayAdvertisements, false)))
+        };
+        var service = CreateService(repository);
+
+        var wpf = (await service.GetSyncAsync("S001", "ORI-01", "Windows", null, CancellationToken.None)).Sync!;
+        var ipad = (await service.GetSyncAsync("S001", "IPAD-02", "iPadOS", null, CancellationToken.None)).Sync!;
+        var handheld = (await service.GetSyncAsync("S001", "PDA-03", "Android", null, CancellationToken.None)).Sync!;
+
+        // 全局开、本设备关：设备层优先，来源标为 device，其余设备不受影响。
+        Assert.Equal(
+            new PosSettingValueDto(false, PosSettingScopes.Device),
+            wpf.Settings![PosSettingKeys.CustomerDisplayAdvertisements]);
+        Assert.DoesNotContain(PosSettingKeys.CustomerDisplayAdvertisements, ipad.Settings!.Keys);
+        Assert.DoesNotContain(PosSettingKeys.CustomerDisplayAdvertisements, handheld.Settings!.Keys);
+    }
+
+    [Fact]
+    public async Task GetSync_客显广告开关没设置时不下发_收银机沿用本机值()
+    {
+        var service = CreateService(new FakeRepository());
+
+        var wpf = (await service.GetSyncAsync("S001", "ORI-01", "Windows", null, CancellationToken.None)).Sync!;
+
+        // 三层都没设置且该项没有服务端缺省值：不出现在下发里，收银机保持自己的值（默认播放广告）。
+        Assert.DoesNotContain(PosSettingKeys.CustomerDisplayAdvertisements, wpf.Settings!.Keys);
+    }
+
+    [Fact]
     public async Task GetSync_缺少门店或设备声明时拒绝()
     {
         var service = CreateService(new FakeRepository());

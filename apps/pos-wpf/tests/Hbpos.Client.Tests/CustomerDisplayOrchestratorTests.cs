@@ -349,6 +349,150 @@ public sealed class CustomerDisplayOrchestratorTests
         Assert.Equal(1, Volatile.Read(ref callCount));
     }
 
+    [Fact]
+    public void Advertisements_are_enabled_when_no_preference_store_is_configured()
+    {
+        var orchestrator = new CustomerDisplayOrchestrator(new FakeCustomerDisplayWindowService());
+
+        Assert.True(orchestrator.AdvertisementsEnabled);
+    }
+
+    [Fact]
+    public async Task RefreshAdvertisementsAsync_when_advertisements_disabled_skips_api_and_clears_playlist()
+    {
+        var callCount = 0;
+        var orchestrator = new CustomerDisplayOrchestrator(
+            new FakeCustomerDisplayWindowService(),
+            new FakeAdvertisementApiClient(_ =>
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromResult(CreateResponse(CreateImageAdvertisement("ad-1")));
+            }),
+            TimeSpan.FromHours(1),
+            windowPreferences: new FakeAdvertisementPreferenceStore(enabled: false));
+        var customerDisplay = new CustomerDisplayViewModel();
+        customerDisplay.LoadAdvertisements([CreateImageAdvertisement("stale-ad")]);
+        Assert.True(customerDisplay.IsAdvertisementAvailable);
+
+        // force 也不能绕过关闭：定时刷新用的就是 force=true。
+        await orchestrator.RefreshAdvertisementsAsync(customerDisplay, "S001");
+
+        Assert.Equal(0, Volatile.Read(ref callCount));
+        Assert.False(customerDisplay.IsAdvertisementAvailable);
+        Assert.Null(customerDisplay.CurrentAdvertisement);
+    }
+
+    [Fact]
+    public async Task ApplyAdvertisementsSetting_after_switching_off_on_an_open_display_clears_advertisements_without_requests()
+    {
+        var callCount = 0;
+        var preferences = new FakeAdvertisementPreferenceStore(enabled: true);
+        var orchestrator = new CustomerDisplayOrchestrator(
+            new FakeCustomerDisplayWindowService { Mode = CustomerDisplayWindowMode.Normal },
+            new FakeAdvertisementApiClient(_ =>
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromResult(CreateResponse(CreateImageAdvertisement("ad-1")));
+            }),
+            TimeSpan.FromHours(1),
+            windowPreferences: preferences);
+        var customerDisplay = new CustomerDisplayViewModel();
+        await orchestrator.RefreshAdvertisementsAsync(customerDisplay, "S001");
+        Assert.Equal("ad-1", customerDisplay.CurrentAdvertisement?.Id);
+        var callsBeforeDisable = Volatile.Read(ref callCount);
+
+        // 总部下发「关闭广告」：设置绑定先把值写进偏好，再通知编排器应用。
+        await preferences.RememberAdvertisementsEnabledAsync(false);
+        orchestrator.ApplyAdvertisementsSetting(customerDisplay, CreateSession(), new PosCartService());
+
+        await WaitUntilAsync(
+            () => !customerDisplay.IsAdvertisementAvailable,
+            diagnostics: () => $"available={customerDisplay.IsAdvertisementAvailable}");
+        Assert.False(orchestrator.AdvertisementsEnabled);
+        Assert.Equal(callsBeforeDisable, Volatile.Read(ref callCount));
+    }
+
+    [Fact]
+    public async Task ApplyAdvertisementsSetting_after_switching_on_on_an_open_display_fetches_advertisements_again()
+    {
+        var callCount = 0;
+        var preferences = new FakeAdvertisementPreferenceStore(enabled: false);
+        var orchestrator = new CustomerDisplayOrchestrator(
+            new FakeCustomerDisplayWindowService { Mode = CustomerDisplayWindowMode.Fullscreen },
+            new FakeAdvertisementApiClient(_ =>
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromResult(CreateResponse(CreateImageAdvertisement("ad-1")));
+            }),
+            TimeSpan.FromHours(1),
+            windowPreferences: preferences);
+        var customerDisplay = new CustomerDisplayViewModel();
+
+        await preferences.RememberAdvertisementsEnabledAsync(true);
+        orchestrator.ApplyAdvertisementsSetting(customerDisplay, CreateSession(), new PosCartService());
+
+        await WaitForCallCountAsync(() => Volatile.Read(ref callCount), 1);
+        await WaitUntilAsync(
+            () => customerDisplay.CurrentAdvertisement?.Id == "ad-1",
+            diagnostics: () => $"current={customerDisplay.CurrentAdvertisement?.Id}");
+        Assert.True(orchestrator.AdvertisementsEnabled);
+    }
+
+    [Fact]
+    public async Task ApplyAdvertisementsSetting_while_display_is_closed_sends_no_requests()
+    {
+        var callCount = 0;
+        var preferences = new FakeAdvertisementPreferenceStore(enabled: true);
+        var orchestrator = new CustomerDisplayOrchestrator(
+            new FakeCustomerDisplayWindowService { Mode = CustomerDisplayWindowMode.Closed },
+            new FakeAdvertisementApiClient(_ =>
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromResult(CreateResponse(CreateImageAdvertisement("ad-1")));
+            }),
+            TimeSpan.FromHours(1),
+            windowPreferences: preferences);
+
+        await preferences.RememberAdvertisementsEnabledAsync(false);
+        orchestrator.ApplyAdvertisementsSetting(new CustomerDisplayViewModel(), CreateSession(), new PosCartService());
+        await preferences.RememberAdvertisementsEnabledAsync(true);
+        orchestrator.ApplyAdvertisementsSetting(new CustomerDisplayViewModel(), CreateSession(), new PosCartService());
+        await Task.Delay(100);
+
+        // 客显没开着不发请求：下次从关闭状态打开本来就会强制刷新，那时按新设置决定播不播。
+        Assert.Equal(0, Volatile.Read(ref callCount));
+    }
+
+    [Fact]
+    public async Task Refresh_that_finishes_after_advertisements_were_disabled_is_discarded()
+    {
+        var preferences = new FakeAdvertisementPreferenceStore(enabled: true);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var requested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var orchestrator = new CustomerDisplayOrchestrator(
+            new FakeCustomerDisplayWindowService { Mode = CustomerDisplayWindowMode.Normal },
+            new FakeAdvertisementApiClient(async _ =>
+            {
+                requested.TrySetResult();
+                await release.Task;
+                return CreateResponse(CreateImageAdvertisement("ad-late"));
+            }),
+            TimeSpan.FromHours(1),
+            windowPreferences: preferences);
+        var customerDisplay = new CustomerDisplayViewModel();
+
+        var refreshing = orchestrator.RefreshAdvertisementsAsync(customerDisplay, "S001");
+        await requested.Task.WaitAsync(AsyncTestWaitSupport.DefaultTimeout);
+        // 刷新进行到一半，收银员把广告关了。
+        await preferences.RememberAdvertisementsEnabledAsync(false);
+        release.SetResult();
+        await refreshing;
+
+        // 迟到的结果不能把广告又塞回客显。
+        Assert.False(customerDisplay.IsAdvertisementAvailable);
+        Assert.Null(customerDisplay.CurrentAdvertisement);
+    }
+
     // 复用共享等待：原私有副本只有 2 秒预算，超时时只抛无上下文的 TaskCanceledException。
     private static Task WaitForCallCountAsync(Func<int> getCallCount, int expectedCallCount) =>
         WaitUntilAsync(
@@ -446,6 +590,42 @@ public sealed class CustomerDisplayOrchestratorTests
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(handler(advertisements));
+        }
+    }
+
+    // 只关心广告开关的内存偏好存储：和真实存储一样，Remember 在返回任务之前同步更新 Current。
+    private sealed class FakeAdvertisementPreferenceStore(bool enabled) : ICustomerDisplayWindowPreferenceStore
+    {
+        private readonly object _sync = new();
+        private CustomerDisplayWindowPreference _current =
+            CustomerDisplayWindowPreference.Default with { AdvertisementsEnabled = enabled };
+
+        public CustomerDisplayWindowPreference Current
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _current;
+                }
+            }
+        }
+
+        public Task<CustomerDisplayWindowPreference> LoadAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(Current);
+
+        public Task RememberModeAsync(CustomerDisplayWindowMode mode) => Task.CompletedTask;
+
+        public Task RememberNormalBoundsAsync(CustomerDisplayNormalBounds bounds) => Task.CompletedTask;
+
+        public Task RememberAdvertisementsEnabledAsync(bool value)
+        {
+            lock (_sync)
+            {
+                _current = _current with { AdvertisementsEnabled = value };
+            }
+
+            return Task.CompletedTask;
         }
     }
 

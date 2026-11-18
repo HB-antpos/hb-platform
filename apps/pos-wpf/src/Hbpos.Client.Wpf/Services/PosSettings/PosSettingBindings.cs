@@ -116,6 +116,29 @@ internal sealed class CashMovementEnabledBinding(ILocalAppSettingsRepository rep
     }
 }
 
+/// <summary>
+/// 客显广告：读写客显窗口偏好里的广告开关。本机默认开（从未设置过 / 乱值都按开），只有显式存成关才算关，
+/// 与服务端「三层都没设置沿用本机值」一致。写入走偏好存储，会同步更新它的内存值，编排器下一次刷新广告就按新值决定要不要请求接口。
+/// </summary>
+internal sealed class CustomerDisplayAdvertisementsBinding(ICustomerDisplayWindowPreferenceStore store) : IPosSettingBinding
+{
+    public string Key => PosSettingKeys.CustomerDisplayAdvertisements;
+
+    // LoadAsync 会以库里的值为准，同时尊重加载期间已在内存里改过的值，所以读到的就是「实际生效值」。
+    public async Task<bool> ReadAsync(CancellationToken cancellationToken = default) =>
+        (await store.LoadAsync(cancellationToken)).AdvertisementsEnabled;
+
+    public async Task WriteAsync(bool value, CancellationToken cancellationToken = default)
+    {
+        if (await ReadAsync(cancellationToken) == value)
+        {
+            return;
+        }
+
+        await store.RememberAdvertisementsEnabledAsync(value);
+    }
+}
+
 /// <summary>按 <see cref="PosSettingCatalog"/> 里 WPF 支持的项，创建全部本机存储适配。</summary>
 public static class PosSettingBindings
 {
@@ -124,7 +147,8 @@ public static class PosSettingBindings
         IReceiptPrinterSettingsStore receiptStore,
         IPaymentMethodSettingsService paymentMethods,
         ICardTerminalSettingsStore cardTerminalStore,
-        ISystemRestartSettingsStore restartStore)
+        ISystemRestartSettingsStore restartStore,
+        ICustomerDisplayWindowPreferenceStore customerDisplayPreferences)
     {
         // 顺序同 PosSettingCatalog.All，也是「业务开关」页的显示顺序。
         return
@@ -156,6 +180,7 @@ public static class PosSettingBindings
                 (settings, value) => settings with { ShowOrderList = value }),
             new AutoRestartBinding(restartStore),
             new ZellerUnmatchedRefundBinding(cardTerminalStore),
+            new CustomerDisplayAdvertisementsBinding(customerDisplayPreferences),
         ];
     }
 }

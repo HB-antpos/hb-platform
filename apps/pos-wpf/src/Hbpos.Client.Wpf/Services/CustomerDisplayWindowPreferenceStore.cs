@@ -5,10 +5,13 @@ namespace Hbpos.Client.Wpf.Services;
 /// <summary>普通窗口模式下客显窗口的位置与大小（WPF 逻辑单位 DIP，虚拟屏幕坐标）。</summary>
 public readonly record struct CustomerDisplayNormalBounds(double Left, double Top, double Width, double Height);
 
-/// <summary>本机记住的客显窗口上次设置：模式（关闭/窗口/全屏）与普通窗口位置大小。</summary>
+/// <summary>
+/// 本机记住的客显窗口上次设置：模式（关闭/窗口/全屏）、普通窗口位置大小，以及是否播放广告（默认播放）。
+/// </summary>
 public sealed record CustomerDisplayWindowPreference(
     CustomerDisplayWindowMode Mode,
-    CustomerDisplayNormalBounds? NormalBounds)
+    CustomerDisplayNormalBounds? NormalBounds,
+    bool AdvertisementsEnabled = true)
 {
     public static CustomerDisplayWindowPreference Default { get; } = new(CustomerDisplayWindowMode.Closed, null);
 }
@@ -25,6 +28,12 @@ public interface ICustomerDisplayWindowPreferenceStore
 
     /// <summary>记住收银员拖动或缩放后的普通窗口位置大小；写库失败只记日志不抛出。</summary>
     Task RememberNormalBoundsAsync(CustomerDisplayNormalBounds bounds);
+
+    /// <summary>
+    /// 记住收银员是否开启客显广告；写库失败只记日志不抛出。
+    /// 默认实现什么都不做（只有真正落库的存储才需要实现），避免打断只关心窗口模式的测试替身。
+    /// </summary>
+    Task RememberAdvertisementsEnabledAsync(bool enabled) => Task.CompletedTask;
 }
 
 /// <summary>
@@ -34,6 +43,7 @@ public sealed class CustomerDisplayWindowPreferenceStore : ICustomerDisplayWindo
 {
     internal const string ModeKey = "CustomerDisplay:LastMode";
     internal const string NormalBoundsKey = "CustomerDisplay:NormalBounds";
+    internal const string AdvertisementsEnabledKey = "CustomerDisplay:AdvertisementsEnabled";
 
     private readonly ILocalAppSettingsRepository _settingsRepository;
     private readonly SemaphoreSlim _persistGate = new(1, 1);
@@ -41,6 +51,7 @@ public sealed class CustomerDisplayWindowPreferenceStore : ICustomerDisplayWindo
     private CustomerDisplayWindowPreference _current = CustomerDisplayWindowPreference.Default;
     private bool _modeChanged;
     private bool _boundsChanged;
+    private bool _advertisementsChanged;
 
     public CustomerDisplayWindowPreferenceStore(ILocalAppSettingsRepository settingsRepository)
     {
@@ -62,14 +73,28 @@ public sealed class CustomerDisplayWindowPreferenceStore : ICustomerDisplayWindo
     {
         var mode = ParseMode(await _settingsRepository.GetValueAsync(ModeKey, cancellationToken));
         var bounds = ParseBounds(await _settingsRepository.GetValueAsync(NormalBoundsKey, cancellationToken));
+        var advertisementsEnabled = ParseAdvertisementsEnabled(
+            await _settingsRepository.GetValueAsync(AdvertisementsEnabledKey, cancellationToken));
         lock (_sync)
         {
             // 关键逻辑：加载期间收银员若已手动改过，以内存中的新值为准，避免库里的旧值把它覆盖回去。
             _current = new CustomerDisplayWindowPreference(
                 _modeChanged ? _current.Mode : mode,
-                _boundsChanged ? _current.NormalBounds : bounds);
+                _boundsChanged ? _current.NormalBounds : bounds,
+                _advertisementsChanged ? _current.AdvertisementsEnabled : advertisementsEnabled);
             return _current;
         }
+    }
+
+    public Task RememberAdvertisementsEnabledAsync(bool enabled)
+    {
+        lock (_sync)
+        {
+            _current = _current with { AdvertisementsEnabled = enabled };
+            _advertisementsChanged = true;
+        }
+
+        return PersistAsync();
     }
 
     public Task RememberModeAsync(CustomerDisplayWindowMode mode)
@@ -170,6 +195,10 @@ public sealed class CustomerDisplayWindowPreferenceStore : ICustomerDisplayWindo
             ? mode
             : CustomerDisplayWindowMode.Closed;
 
+    /// <summary>只有明确存成 false 才关闭广告；从未设置过或库里是乱值都按默认开启，保持升级前的行为。</summary>
+    internal static bool ParseAdvertisementsEnabled(string? value) =>
+        !bool.TryParse(value, out var enabled) || enabled;
+
     private static bool IsUsable(CustomerDisplayNormalBounds bounds) =>
         double.IsFinite(bounds.Left)
         && double.IsFinite(bounds.Top)
@@ -198,6 +227,11 @@ public sealed class CustomerDisplayWindowPreferenceStore : ICustomerDisplayWindo
                     if (_boundsChanged && _current.NormalBounds is { } bounds)
                     {
                         values[NormalBoundsKey] = FormatBounds(bounds);
+                    }
+
+                    if (_advertisementsChanged)
+                    {
+                        values[AdvertisementsEnabledKey] = _current.AdvertisementsEnabled ? "true" : "false";
                     }
                 }
 

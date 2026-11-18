@@ -164,6 +164,10 @@
     "zeller_unmatchedRefund": {
       "name": "Zeller 无关联退款",
       "hint": "允许处理没有原交易可关联的 Zeller 退款"
+    },
+    "customerDisplay_advertisements": {
+      "name": "客显广告",
+      "hint": "关闭后客显只显示购物车，收银机不再请求广告、不下载素材；旧版收银端不识别此项"
     }
   }
 }

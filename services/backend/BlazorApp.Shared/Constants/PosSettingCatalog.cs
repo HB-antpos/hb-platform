@@ -44,6 +44,9 @@ public static class PosSettingKeys
     public const string OrderList = "payment.orderList";
     public const string AutoRestart = "maintenance.autoRestart";
     public const string ZellerUnmatchedRefund = "zeller.unmatchedRefund";
+
+    /// <summary>客显广告：关闭后客显只显示购物车，收银机不再请求广告接口、不下载素材（弱机上广告视频会拖慢收银）。</summary>
+    public const string CustomerDisplayAdvertisements = "customerDisplay.advertisements";
 }
 
 /// <summary>一个可下发的设置项。DefaultWhenUnset 为 null 表示三层都没设置时收银机沿用本机值。</summary>
@@ -77,6 +80,8 @@ public static class PosSettingCatalog
         new(PosSettingKeys.OrderList, WpfOnly, null, false),
         new(PosSettingKeys.AutoRestart, WpfOnly, null, false),
         new(PosSettingKeys.ZellerUnmatchedRefund, WpfOnly, null, false),
+        // 本机原本没有对应设置时默认就是播放广告；三层都没设置沿用本机值（null），升级后行为不变。只有 WPF 有客显广告。
+        new(PosSettingKeys.CustomerDisplayAdvertisements, WpfOnly, null, false),
     ];
 
     private static readonly Dictionary<string, PosSettingDefinition> ByKey =
