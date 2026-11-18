@@ -177,6 +177,40 @@ public sealed class MainViewModelScannerTests
     }
 
     [Fact]
+    public async Task Update_install_guard_waits_while_daily_close_is_counting_or_busy()
+    {
+        var cart = new PosCartService();
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            cart: cart);
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        var guard = new ShellAppUpdateInstallSafetyGuard(cart, viewModel);
+        var dailyClose = new DailyCloseViewModel(
+            new StubDailyCloseService(),
+            new StubDailyClosePrintService(),
+            viewModel.Session);
+        viewModel.DailyClose = dailyClose;
+
+        // 刚打开日结页、没有点钞草稿也没在保存：可以安装。
+        Assert.True(guard.CanInstallUpdate(out _, out _));
+
+        // 点钞草稿只存在内存里，安装器退出收银端会丢掉已录入的数量，夜间无人值守安装必须等它结束。
+        dailyClose.HasDailyCloseDraft = true;
+        Assert.False(guard.CanInstallUpdate(out var statusKey, out _));
+        Assert.Equal("appUpdate.install.activeTransaction", statusKey);
+        Assert.False(guard.CanInterruptForUpdatePrompt(out _, out _));
+
+        // 保存 / 打印 / 日结后自动 Linkly 结算期间 IsBusy 为 true，同样不能安装。
+        dailyClose.HasDailyCloseDraft = false;
+        dailyClose.IsBusy = true;
+        Assert.False(guard.CanInstallUpdate(out statusKey, out _));
+        Assert.Equal("appUpdate.install.activeTransaction", statusKey);
+
+        dailyClose.IsBusy = false;
+        Assert.True(guard.CanInstallUpdate(out _, out _));
+    }
+
+    [Fact]
     public async Task Api_server_switch_freezes_scanner_and_common_navigation()
     {
         var scanner = new FakeRawScannerService();
@@ -8814,6 +8848,42 @@ public sealed class MainViewModelScannerTests
         public bool ProcessScannerBarcode(string barcode) => false;
         public void Cancel() { }
         public void RevokeAll() { }
+    }
+
+    // 只用于构造 DailyCloseViewModel（构造函数会读币种列表）；守卫测试不会触发任何保存 / 打印。
+    private sealed class StubDailyCloseService : IDailyCloseService
+    {
+        public IReadOnlyList<CashDenomination> Denominations => DailyCloseService.AustralianDenominations;
+
+        public Task<DailyCloseReport> LoadReportAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<DailyCloseArchive> SaveAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            IReadOnlyList<CashDenominationCount> cashCounts,
+            DailyCloseReport? expectedReport = null,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<IReadOnlyList<DailyCloseArchive>> GetArchivesAsync(
+            PosSessionState session,
+            DateTime businessDate,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class StubDailyClosePrintService : IDailyClosePrintService
+    {
+        public Task<ReceiptPrintDocument> BuildDocumentAsync(
+            DailyCloseArchive archive,
+            ReceiptPrintReason reason = ReceiptPrintReason.Manual,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<ReceiptPrintResult> PrintAsync(
+            DailyCloseArchive archive,
+            ReceiptPrintReason reason = ReceiptPrintReason.Manual,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class FakeOperationAuthorizationService : IOperationAuthorizationService

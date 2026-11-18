@@ -202,6 +202,25 @@ public sealed class NetworkDiagnosticsViewModelTests
     }
 
     [Fact]
+    public async Task A_re_check_that_cannot_run_after_the_change_is_reported_without_throwing_and_keeps_the_undo_option()
+    {
+        var h = new Harness(ReportOf(Healthy() with { SystemDnsMs = 4200 }));
+        await h.Vm.DiagnoseCommand.ExecuteAsync(null);
+        h.Vm.FixCommand.Execute(null);
+        // 修改生效后复测抛异常（例如确认期间地址框被改成无效地址）：不能让异常从命令里冒出去。
+        h.Diagnostics.Throw = new ArgumentException("invalid address");
+
+        await h.Vm.ConfirmFixCommand.ExecuteAsync(null);
+
+        Assert.Equal(1, h.Fixes.ApplyCalls);
+        Assert.Equal("warn", h.Vm.ResultSeverity);
+        Assert.StartsWith("Changed, but the re-check could not be run", h.Vm.ResultMessage);
+        Assert.False(h.Vm.IsRunning);
+        Assert.False(h.Vm.IsConfirming);
+        Assert.True(h.Vm.CanUndo);
+    }
+
+    [Fact]
     public async Task Declining_the_windows_permission_prompt_leaves_everything_unchanged()
     {
         var h = new Harness(ReportOf(Healthy() with { SystemDnsMs = 4200 }));
