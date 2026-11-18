@@ -56,6 +56,44 @@ public sealed class PosSettingMergerTests
     }
 
     [Fact]
+    public void 客显广告开关_只有WPF有_三层都没设置时沿用本机值()
+    {
+        var definition = PosSettingCatalog.Find(PosSettingKeys.CustomerDisplayAdvertisements);
+
+        Assert.NotNull(definition);
+        Assert.Equal([PosSettingClientKinds.Wpf], definition.ClientKinds);
+        // null = 三层都没设置时收银机沿用本机值（本机默认播放广告），服务端绝不能当成「关」覆盖掉。
+        Assert.Null(definition.DefaultWhenUnset);
+        Assert.False(definition.IsNew);
+        Assert.Equal("customerDisplay.advertisements", PosSettingKeys.CustomerDisplayAdvertisements);
+
+        var global = Layer((PosSettingKeys.CustomerDisplayAdvertisements, false));
+        var store = Layer((PosSettingKeys.CustomerDisplayAdvertisements, true));
+        var device = Layer((PosSettingKeys.CustomerDisplayAdvertisements, false));
+
+        Assert.Equal(
+            new PosSettingEffective(null, PosSettingSources.None),
+            PosSettingMerger.Merge(null, null, null, PosSettingClientKinds.Wpf)[PosSettingKeys.CustomerDisplayAdvertisements]);
+        Assert.Equal(
+            new PosSettingEffective(false, PosSettingScopes.Global),
+            PosSettingMerger.Merge(global, null, null, PosSettingClientKinds.Wpf)[PosSettingKeys.CustomerDisplayAdvertisements]);
+        // 设备层优先于门店层，可以单独给某一台弱机关闭广告。
+        Assert.Equal(
+            new PosSettingEffective(false, PosSettingScopes.Device),
+            PosSettingMerger.Merge(global, store, device, PosSettingClientKinds.Wpf)[PosSettingKeys.CustomerDisplayAdvertisements]);
+        Assert.Equal(
+            new PosSettingEffective(true, PosSettingScopes.Store),
+            PosSettingMerger.Merge(global, store, null, PosSettingClientKinds.Wpf)[PosSettingKeys.CustomerDisplayAdvertisements]);
+
+        foreach (var kind in new[] { PosSettingClientKinds.Ipad, PosSettingClientKinds.Handheld, PosSettingClientKinds.Other })
+        {
+            Assert.DoesNotContain(
+                PosSettingKeys.CustomerDisplayAdvertisements,
+                PosSettingMerger.Merge(global, store, device, kind).Keys);
+        }
+    }
+
+    [Fact]
     public void Merge_忽略清单里没有的键()
     {
         var merged = PosSettingMerger.Merge(Layer(("removed.setting", true)), null, null);

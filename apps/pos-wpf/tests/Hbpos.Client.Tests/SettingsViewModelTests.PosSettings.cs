@@ -50,7 +50,7 @@ public sealed partial class SettingsViewModelTests
         await viewModel.LoadAsync();
 
         Assert.True(viewModel.IsPosSettingsAvailable);
-        Assert.Equal(9, viewModel.PosSettingRows.Count);
+        Assert.Equal(10, viewModel.PosSettingRows.Count);
         Assert.Equal(PosSettingCatalog.All.Select(item => item.Key), viewModel.PosSettingRows.Select(row => row.Key).Where(PosSettingCatalog.IsKnownKey));
 
         var cash = viewModel.PosSettingRows.Single(row => row.Key == PosSettingKeys.CashMovementEnabled);
@@ -344,7 +344,7 @@ public sealed partial class SettingsViewModelTests
             cashierSessionContext: cashierSessionContext,
             posSettingsService: service);
 
-    /// <summary>按目录顺序造出 9 项状态；没列出的项视为总部未下发。</summary>
+    /// <summary>按目录顺序造出每个 WPF 项的状态；没列出的项视为总部未下发。</summary>
     private static PosSettingsView PosView(bool online, params ManagedItem[] managed)
     {
         var items = PosSettingCatalog.All

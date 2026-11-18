@@ -62,6 +62,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private readonly IStoreReceiptProfileApiClient? _storeReceiptProfileApiClient;
     private readonly IReceiptProfileSyncService? _receiptProfileSyncService;
     private IPosSettingsService? _posSettingsService;
+
+    // 客显广告开关上一次已应用到客显的值；null = 还没应用过（第一次收到设置变化时无条件刷新一次）。只在 UI 线程读写。
+    private bool? _customerDisplayAdvertisementsApplied;
     private readonly IMobileAppDownloadService? _mobileAppDownloadService;
     private readonly IHeldOrderTodayCountService? _heldOrderTodayCountService;
     private readonly ICashMovementService? _cashMovementService;
@@ -893,6 +896,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// </summary>
     internal void ConfigurePosSettings(IPosSettingsService? service)
     {
+        if (_posSettingsService is not null)
+        {
+            _posSettingsService.Changed -= OnPosSettingsChangedForCustomerDisplay;
+        }
+
         _posSettingsService = service;
         _mainChildViewModelFactory.PosSettingsService = service;
         if (service is null)
@@ -900,7 +908,49 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // 总部下发（或离线修改）了客显广告开关后，已打开的客显要立即跟着变，不用等下一次 5 分钟刷新。
+        service.Changed += OnPosSettingsChangedForCustomerDisplay;
         _ = RefreshPosSettingsAtStartupAsync(service);
+    }
+
+    // 设置变化事件来自线程池（同步轮询线程）：客显的购物车与广告集合只能在 UI 线程改，先切回去再处理。
+    private void OnPosSettingsChangedForCustomerDisplay(object? sender, EventArgs e)
+    {
+        var dispatcher = _uiDispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            _ = dispatcher.InvokeAsync(ApplyCustomerDisplayAdvertisementsSetting, DispatcherPriority.Background);
+            return;
+        }
+
+        ApplyCustomerDisplayAdvertisementsSetting();
+    }
+
+    private void ApplyCustomerDisplayAdvertisementsSetting()
+    {
+        if (IsLifetimeEnding)
+        {
+            return;
+        }
+
+        try
+        {
+            // 以设置视图里的实际生效值为准；还没有视图（启动早期）时退回偏好里的值。
+            var enabled = _posSettingsService?.Current.Find(PosSettingKeys.CustomerDisplayAdvertisements)?.Value
+                ?? _customerDisplayShellController.AdvertisementsEnabled;
+            if (_customerDisplayAdvertisementsApplied == enabled)
+            {
+                return;
+            }
+
+            _customerDisplayAdvertisementsApplied = enabled;
+            _customerDisplayShellController.ApplyAdvertisementsSetting();
+        }
+        catch (Exception ex)
+        {
+            // 设置事件不能让异常逃逸到 WPF Dispatcher，否则整个 POS 会退出；广告没刷新最多等下一次定时刷新。
+            ConsoleLog.WriteError("CustomerDisplay", "应用客显广告开关失败。", exception: ex);
+        }
     }
 
     private static async Task RefreshPosSettingsAtStartupAsync(IPosSettingsService service)
@@ -1245,6 +1295,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _cart.CartChanged -= OnCartChanged;
         _localization.CultureChanged -= OnCultureChanged;
+        if (_posSettingsService is not null)
+        {
+            _posSettingsService.Changed -= OnPosSettingsChangedForCustomerDisplay;
+        }
+
         _customerDisplayOrchestrator.Closed -= OnCustomerDisplayClosed;
         _customerDisplayOrchestrator.FullscreenRequested -= OnCustomerDisplayFullscreenRequested;
         _customerDisplayOrchestrator.SwapScreensRequested -= OnCustomerDisplaySwapScreensRequested;

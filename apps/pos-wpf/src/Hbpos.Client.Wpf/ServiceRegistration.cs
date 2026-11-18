@@ -551,7 +551,8 @@ public static class ServiceRegistration
                 sp.GetRequiredService<IReceiptPrinterSettingsStore>(),
                 sp.GetRequiredService<IPaymentMethodSettingsService>(),
                 sp.GetRequiredService<ICardTerminalSettingsStore>(),
-                sp.GetRequiredService<ISystemRestartSettingsStore>()),
+                sp.GetRequiredService<ISystemRestartSettingsStore>(),
+                sp.GetRequiredService<ICustomerDisplayWindowPreferenceStore>()),
             sp.GetRequiredService<DeviceAuthorizationState>(),
             sp.GetRequiredService<IOperationAuditLogger>(),
             sp.GetRequiredService<IAppVersionProvider>()));

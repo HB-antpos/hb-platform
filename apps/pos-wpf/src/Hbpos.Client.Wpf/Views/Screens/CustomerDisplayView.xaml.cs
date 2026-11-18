@@ -30,7 +30,12 @@ public partial class CustomerDisplayView : UserControl
     private int _activeGifFrameIndex;
     private readonly DispatcherTimer _videoTimeoutTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     // 打开耗时超过这个值的视频即使不是首次播放也记日志，用来发现解码器卡顿。
-    private static readonly TimeSpan SlowVideoOpenThreshold = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan SlowVideoOpenThreshold = AdvertisementVideoHealthGuard.DefaultSlowOpenThreshold;
+    // 视频连续打开很慢说明这台机器扛不住客显视频（软件渲染 + 解码会把整机拖慢，收银随之变慢），
+    // 此时暂停视频广告一段时间，只播图片 / GIF，保证收银不受影响。
+    // 用 static：副屏插拔会销毁并重建客显窗口 / 视图，暂停状态要跟着进程走，否则弱机每次重开都要再被拖慢几个视频才触发。
+    // 客显与收银窗口同在 UI 线程，不需要额外同步。
+    private static readonly AdvertisementVideoHealthGuard VideoHealthGuard = new();
     private const int MaxLoggedOpenedVideoKeys = 200;
     private const string LogCategory = "CustomerDisplay";
     // 空闲客显每几秒就切一条视频，MediaOpened 每次都记会刷爆中心日志；只记每个素材第一次打开（以及打开慢的）。
@@ -355,6 +360,21 @@ public partial class CustomerDisplayView : UserControl
         StopAdvertisementPlayback();
         var advertisement = _viewModel?.CurrentAdvertisement;
 
+        switch (VideoHealthGuard.Check())
+        {
+            case VideoPlaybackPermission.Suspended:
+                // 暂停期间不新建播放器、不切软件渲染：把这条视频移出本轮，图片 / GIF 照常轮播；
+                // 下次定时刷新（5 分钟）重新加载列表时视频会回来，再被这里挡掉，直到暂停到期。
+                RestoreHardwareVideoRendering();
+                SkipCurrentAdvertisementPlayback();
+                return;
+            case VideoPlaybackPermission.Resumed:
+                ConsoleLog.Write(
+                    LogCategory,
+                    $"advertisement video resumed after suspension {DescribeAdvertisement(advertisement, null)}");
+                break;
+        }
+
         if (!Uri.TryCreate(mediaUrl, UriKind.Absolute, out var mediaUri))
         {
             ConsoleLog.WriteWarning(
@@ -559,6 +579,20 @@ public partial class CustomerDisplayView : UserControl
         if (_loggedOpenedVideoKeys.Count > MaxLoggedOpenedVideoKeys)
         {
             _loggedOpenedVideoKeys.Clear();
+        }
+
+        // 无论是否记日志都要统计打开耗时：连续几次都很慢就暂停视频广告，保护收银不被拖慢。
+        if (VideoHealthGuard.RecordOpen(openElapsed))
+        {
+            ConsoleLog.WriteWarning(
+                LogCategory,
+                $"advertisement video suspended reason=slow-open consecutive={VideoHealthGuard.ConsecutiveSlowLimit} "
+                + $"thresholdMs={VideoHealthGuard.SlowOpenThreshold.TotalMilliseconds:0} lastOpenMs={openElapsed.TotalMilliseconds:0} "
+                + $"suspendMinutes={VideoHealthGuard.SuspendDuration.TotalMinutes:0} "
+                + DescribeAdvertisement(_activeVideoAdvertisement, _activeVideoUri));
+            // 这一条虽然已打开，但机器正被拖慢：延后到事件处理完再移出本轮并停掉，后续视频由 ShowVideoAdvertisement 的暂停检查挡掉。
+            RunAfterCurrentVideoEvent(SkipCurrentAdvertisementPlayback);
+            return;
         }
 
         if (!isFirstOpen && openElapsed < SlowVideoOpenThreshold)

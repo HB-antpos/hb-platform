@@ -164,6 +164,10 @@
     "zeller_unmatchedRefund": {
       "name": "Zeller unlinked refunds",
       "hint": "Allow Zeller refunds that have no original transaction to link to"
+    },
+    "customerDisplay_advertisements": {
+      "name": "Customer display ads",
+      "hint": "When off, the customer display shows only the cart and the register stops fetching ads; older POS versions ignore this setting"
     }
   }
 }

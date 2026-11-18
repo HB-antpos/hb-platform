@@ -26,7 +26,8 @@ public sealed partial class SettingsViewModel
         [PosSettingKeys.Voucher] = "voucher",
         [PosSettingKeys.OrderList] = "orderList",
         [PosSettingKeys.AutoRestart] = "autoRestart",
-        [PosSettingKeys.ZellerUnmatchedRefund] = "zellerUnmatchedRefund"
+        [PosSettingKeys.ZellerUnmatchedRefund] = "zellerUnmatchedRefund",
+        [PosSettingKeys.CustomerDisplayAdvertisements] = "customerDisplayAdvertisements"
     };
 
     private readonly Dictionary<string, PosSettingRowViewModel> _posSettingRowsByKey = new(StringComparer.Ordinal);

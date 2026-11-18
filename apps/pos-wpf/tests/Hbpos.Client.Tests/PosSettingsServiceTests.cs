@@ -45,7 +45,7 @@ public sealed class PosSettingsServiceTests
         var ack = Assert.Single(harness.Api.Acks);
         Assert.Equal(harness.Api.Hash, ack.Hash);
         Assert.Equal(0, ack.OfflineOverrideCount);
-        // 回执报的是「实际生效值」，且覆盖本端全部 9 项，不只是总部设置了的。
+        // 回执报的是「实际生效值」，且覆盖本端全部项（按目录数量断言），不只是总部设置了的。
         Assert.Equal(PosSettingCatalog.All.Count, ack.Applied!.Count);
         Assert.True(ack.Applied![PosSettingKeys.ManualCard]);
         Assert.Equal(harness.Api.Hash, (await harness.Store.LoadAsync()).AckedHash);

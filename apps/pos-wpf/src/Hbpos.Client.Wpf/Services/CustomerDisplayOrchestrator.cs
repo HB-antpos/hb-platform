@@ -50,6 +50,23 @@ public interface ICustomerDisplayOrchestrator
     CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel customerDisplay, Window owner) =>
         new(CustomerDisplayWindowMode.Closed, null);
 
+    /// <summary>
+    /// 本机是否播放客显广告（默认播放）；关闭后客显只显示购物车，不再请求广告接口、不下载素材。
+    /// 开关值来自总部下发的设置「customerDisplay.advertisements」，由设置绑定写进客显偏好，这里只读。
+    /// </summary>
+    bool AdvertisementsEnabled => true;
+
+    /// <summary>
+    /// 广告开关变化后让已打开的客显立即生效：关闭时清空广告，开启时重新拉取。
+    /// 开关值本身已经由设置绑定写进偏好，这里不负责保存。
+    /// </summary>
+    void ApplyAdvertisementsSetting(
+        CustomerDisplayViewModel customerDisplay,
+        PosSessionState session,
+        PosCartService cart)
+    {
+    }
+
     CustomerDisplayWindowResult SetMode(
         CustomerDisplayWindowMode mode,
         CustomerDisplayViewModel customerDisplay,
@@ -207,6 +224,28 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
     public CustomerDisplayWindowResult SwapDisplays(CustomerDisplayViewModel customerDisplay, Window owner) =>
         customerDisplayWindowService.SwapDisplays(customerDisplay, owner);
 
+    // 以偏好存储为唯一来源；没有存储（旧构造路径 / 测试）时一律按开启处理，保持原有行为。
+    public bool AdvertisementsEnabled => windowPreferences?.Current.AdvertisementsEnabled ?? true;
+
+    public void ApplyAdvertisementsSetting(
+        CustomerDisplayViewModel customerDisplay,
+        PosSessionState session,
+        PosCartService cart)
+    {
+        ConsoleLog.Write(
+            "CustomerDisplay",
+            $"advertisements setting applied enabled={AdvertisementsEnabled} store={session.StoreCode} device={session.DeviceCode} windowMode={customerDisplayWindowService.Mode}");
+
+        // 客显没开着时不用处理：下次从关闭状态打开会强制刷新广告，那时会按新设置决定播不播。
+        if (customerDisplayWindowService.Mode == CustomerDisplayWindowMode.Closed)
+        {
+            return;
+        }
+
+        // 已经开着：强制刷新一次。关闭 → 走 RefreshAdvertisementsAsync 的关闭分支立即清空广告；开启 → 重新拉取并播放。
+        LoadFromCart(customerDisplay, session, cart, forceAdvertisementRefresh: true, refreshAdvertisements: true);
+    }
+
     public CustomerDisplayWindowMode GetNextMode(CustomerDisplayWindowMode currentMode)
     {
         return currentMode switch
@@ -271,6 +310,14 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
         var normalizedStoreCode = NormalizeStoreCode(storeCode);
         if (string.IsNullOrWhiteSpace(normalizedStoreCode))
         {
+            return;
+        }
+
+        if (!AdvertisementsEnabled)
+        {
+            // 本机已关闭广告：不请求广告接口、不下载素材（省网络和磁盘），直接把播放列表清空。
+            // 清空是幂等的；放在节流判断之前，保证关闭后任何一次刷新（含 5 分钟定时刷新）都不会让广告回来。
+            await ApplyAdvertisementSnapshotAsync(customerDisplay, []).ConfigureAwait(false);
             return;
         }
 
@@ -341,6 +388,13 @@ public sealed class CustomerDisplayOrchestrator : ICustomerDisplayOrchestrator
             _hasAdvertisementSnapshot = true;
             _lastAdvertisementStoreCode = normalizedStoreCode;
             _lastAdvertisementRefreshUtc = DateTimeOffset.UtcNow;
+
+            if (!AdvertisementsEnabled)
+            {
+                // 这次刷新进行期间收银员刚把广告关了：结果作废，不能再把广告塞回客显。
+                ConsoleLog.Write("CustomerDisplay", $"advertisement refresh discarded reason=disabled store={normalizedStoreCode}");
+                return;
+            }
 
             await ApplyAdvertisementSnapshotAsync(customerDisplay, _cachedAdvertisements).ConfigureAwait(false);
             stopwatch.Stop();

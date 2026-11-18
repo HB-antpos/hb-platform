@@ -708,4 +708,6 @@
   <data name="settings.posSettings.item.autoRestart.description" xml:space="preserve"><value>日结后提示并在凌晨重启收银机</value></data>
   <data name="settings.posSettings.item.zellerUnmatchedRefund.title" xml:space="preserve"><value>Zeller 无关联退款</value></data>
   <data name="settings.posSettings.item.zellerUnmatchedRefund.description" xml:space="preserve"><value>允许不关联原交易直接退款</value></data>
+  <data name="settings.posSettings.item.customerDisplayAdvertisements.title" xml:space="preserve"><value>客显广告</value></data>
+  <data name="settings.posSettings.item.customerDisplayAdvertisements.description" xml:space="preserve"><value>关闭后客显只显示购物车，不再获取广告</value></data>
 </root>

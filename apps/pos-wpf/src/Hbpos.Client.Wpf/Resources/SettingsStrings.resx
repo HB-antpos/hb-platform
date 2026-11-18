@@ -708,4 +708,6 @@
   <data name="settings.posSettings.item.autoRestart.description" xml:space="preserve"><value>Prompt after daily close and restart this register overnight</value></data>
   <data name="settings.posSettings.item.zellerUnmatchedRefund.title" xml:space="preserve"><value>Zeller unmatched refunds</value></data>
   <data name="settings.posSettings.item.zellerUnmatchedRefund.description" xml:space="preserve"><value>Allow refunds that are not linked to the original transaction</value></data>
+  <data name="settings.posSettings.item.customerDisplayAdvertisements.title" xml:space="preserve"><value>Customer display ads</value></data>
+  <data name="settings.posSettings.item.customerDisplayAdvertisements.description" xml:space="preserve"><value>When off, the customer display shows only the cart and ads are not fetched</value></data>
 </root>

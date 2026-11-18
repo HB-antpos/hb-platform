@@ -96,6 +96,104 @@ public sealed class CustomerDisplayWindowPreferenceStoreTests
     }
 
     [Fact]
+    public async Task Advertisements_are_enabled_by_default_so_upgrading_keeps_existing_behaviour()
+    {
+        var store = new CustomerDisplayWindowPreferenceStore(new InMemorySettingsRepository());
+
+        Assert.True(store.Current.AdvertisementsEnabled);
+        Assert.True((await store.LoadAsync()).AdvertisementsEnabled);
+        Assert.True(CustomerDisplayWindowPreference.Default.AdvertisementsEnabled);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Remembered_advertisement_switch_round_trips_through_settings(bool enabled)
+    {
+        var repository = new InMemorySettingsRepository();
+
+        await new CustomerDisplayWindowPreferenceStore(repository).RememberAdvertisementsEnabledAsync(enabled);
+        var preference = await new CustomerDisplayWindowPreferenceStore(repository).LoadAsync();
+
+        Assert.Equal(enabled, preference.AdvertisementsEnabled);
+    }
+
+    [Fact]
+    public async Task Remembering_advertisement_switch_only_writes_its_own_key()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new CustomerDisplayWindowPreferenceStore(repository);
+
+        await store.RememberAdvertisementsEnabledAsync(false);
+
+        Assert.Equal("false", repository.Values[CustomerDisplayWindowPreferenceStore.AdvertisementsEnabledKey]);
+        Assert.False(repository.Values.ContainsKey(CustomerDisplayWindowPreferenceStore.ModeKey));
+        Assert.False(repository.Values.ContainsKey(CustomerDisplayWindowPreferenceStore.NormalBoundsKey));
+    }
+
+    [Fact]
+    public async Task Remembering_mode_does_not_touch_the_advertisement_switch()
+    {
+        var repository = new InMemorySettingsRepository();
+        var store = new CustomerDisplayWindowPreferenceStore(repository);
+        await store.RememberAdvertisementsEnabledAsync(false);
+
+        await store.RememberModeAsync(CustomerDisplayWindowMode.Fullscreen);
+        var preference = await new CustomerDisplayWindowPreferenceStore(repository).LoadAsync();
+
+        Assert.False(preference.AdvertisementsEnabled);
+        Assert.Equal(CustomerDisplayWindowMode.Fullscreen, preference.Mode);
+    }
+
+    [Theory]
+    [InlineData("false", false)]
+    [InlineData("False", false)]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData("", true)]
+    [InlineData("0", true)]
+    [InlineData("garbage", true)]
+    [InlineData(null, true)]
+    public void ParseAdvertisementsEnabled_only_turns_off_on_an_explicit_false(string? stored, bool expected)
+    {
+        // 库里没有 / 乱值都按开启，宁可多播广告也不能因为脏数据把广告悄悄关掉。
+        Assert.Equal(expected, CustomerDisplayWindowPreferenceStore.ParseAdvertisementsEnabled(stored));
+    }
+
+    [Fact]
+    public async Task Advertisement_switch_changed_while_loading_is_not_overwritten_by_stale_saved_value()
+    {
+        // 写库失败 → 库里始终是旧值 false：只有 LoadAsync 里「以内存中的新选择为准」的逻辑能让结果保持 true。
+        // （写库成功时，广告键是在写库之后才被读到的，读到的本来就是新值，测不出覆盖问题。）
+        var repository = new InMemorySettingsRepository
+        {
+            HoldReads = true,
+            WriteException = new IOException("disk full"),
+        };
+        repository.Values[CustomerDisplayWindowPreferenceStore.AdvertisementsEnabledKey] = "false";
+        var store = new CustomerDisplayWindowPreferenceStore(repository);
+
+        var loading = store.LoadAsync();
+        await store.RememberAdvertisementsEnabledAsync(true);
+        repository.ReleaseReads();
+        var preference = await loading;
+
+        Assert.True(preference.AdvertisementsEnabled);
+        Assert.True(store.Current.AdvertisementsEnabled);
+    }
+
+    [Fact]
+    public async Task Advertisement_switch_persist_failure_keeps_in_memory_value()
+    {
+        var repository = new InMemorySettingsRepository { WriteException = new IOException("disk full") };
+        var store = new CustomerDisplayWindowPreferenceStore(repository);
+
+        await store.RememberAdvertisementsEnabledAsync(false);
+
+        Assert.False(store.Current.AdvertisementsEnabled);
+    }
+
+    [Fact]
     public void ResolveRestoredBounds_keeps_bounds_fully_inside_work_area()
     {
         var saved = new CustomerDisplayNormalBounds(300, 360, 820, 560);
