@@ -382,6 +382,39 @@ public sealed class ReceiptReturnsViewModelTests
     }
 
     [Fact]
+    public async Task Lookup_subtracts_return_quantity_already_in_the_cart_from_the_available_quantity()
+    {
+        var cart = new PosCartService();
+        var workflow = new FakeReceiptReturnsWorkflowService
+        {
+            LookupResult = CreateLookupResult(),
+            Cart = cart
+        };
+        var viewModel = new ReceiptReturnsViewModel(
+            workflow,
+            CreateSession(),
+            () => { },
+            cart: cart);
+
+        viewModel.ScanText = "ORDER-001";
+        await viewModel.LookupCommand.ExecuteAsync(null);
+        Assert.Equal(1m, viewModel.OrderLines.Single().AvailableRemaining);
+        viewModel.AddReceiptLineCommand.Execute(viewModel.OrderLines.Single());
+        viewModel.ConfirmToCartCommand.Execute(null);
+        Assert.Single(cart.Lines);
+
+        // 回到退货页再查同一张小票：原单行只有 1 件，已经在购物车里的那 1 件不能再退，
+        // 否则同一件商品能分两次确认退出去，上传时才被服务端拒收（款已退）。
+        viewModel.ScanText = "ORDER-001";
+        await viewModel.LookupCommand.ExecuteAsync(null);
+
+        var orderLine = viewModel.OrderLines.Single();
+        Assert.Equal(1m, orderLine.InCartQuantity);
+        Assert.Equal(0m, orderLine.AvailableRemaining);
+        Assert.False(viewModel.AddReceiptLineCommand.CanExecute(orderLine));
+    }
+
+    [Fact]
     public void OpenNoReceiptOpenItemDialogCommand_opens_only_in_no_receipt_mode()
     {
         var viewModel = new ReceiptReturnsViewModel(

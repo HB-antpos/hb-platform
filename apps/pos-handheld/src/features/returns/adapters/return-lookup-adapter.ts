@@ -402,10 +402,13 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
       originalOrderGuid,
       context.paymentCapacities ?? [],
     );
+    // 读不到本机未同步的退货时，其中可能已有退到同一张卡的记录；
+    // 此时只允许现金 / 代金券代替退款，不再原路退卡（与 WPF MergeLocalReturnsOrFailClosedAsync 同口径）。
     const tenderCapacities = await this.protectCapacities(
       originalOrderGuid,
       "remote",
       materials,
+      localRecords === null,
     );
 
     return {
@@ -461,10 +464,13 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
         throw new ReturnFeatureError("RETURN_SOURCE_MISMATCH");
       }
     }
+    // 本地降级看不到服务端与其它设备的退货记录，同一笔卡付款可能已被退过：
+    // 卡额度只能现金 / 代金券代替退款，等联网读到完整记录后才能原路退卡（与 WPF DisableCardRefunds 同口径）。
     const tenderCapacities = await this.protectCapacities(
       originalOrderGuid,
       "local",
       snapshot.capacities,
+      true,
     );
     return {
       originalOrderGuid,
@@ -513,6 +519,7 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
     originalOrderGuid: string,
     loadedFrom: "remote" | "local",
     materials: readonly ProtectedTenderCapacityMaterial[],
+    cardRefundsDisabled = false,
   ): Promise<readonly OriginalReturnTenderCapacity[]> {
     if (materials.length === 0) return [];
     for (const material of materials) {
@@ -576,7 +583,8 @@ export class ReturnLookupAdapter implements ReturnLookupPort {
               }
             : null,
         // 手工刷卡没有集成刷卡机退款凭据，Zeller 原付款本机无法原路退回，都只能现金或代金券代替退款。
-        ...(isManualCardReturnMaterial(material) ||
+        ...((cardRefundsDisabled && material.method === "card") ||
+        isManualCardReturnMaterial(material) ||
         isZellerCardReturnMaterial(material)
           ? { substituteOnly: true }
           : {}),
