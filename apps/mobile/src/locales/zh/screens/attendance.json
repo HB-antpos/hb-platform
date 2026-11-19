@@ -187,11 +187,7 @@
   "locationNotice": {
     "title": "定位使用说明",
     "scanLabel": "扫码打卡时",
-    "scanBody": "只在你扫码上班、下班时获取当前位置，用于记录打卡地点，打卡完成后即停止。",
-    "foregroundLabel": "上班期间",
-    "foregroundBody": "打开 App 或从后台回到 App 时，会在前台获取一次当前位置并上传，用于考勤记录；不会持续获取，下班后不再获取。",
-    "otherLabel": "后台",
-    "otherBody": "App 不会在后台使用你的位置，也不会持续跟踪你。",
+    "scanBody": "会在你扫码上班、下班时获取当前位置，用于记录打卡地点，打卡完成后即停止。",
     "details": "了解详情",
     "sheet": {
       "infoTitle": "定位使用说明",
