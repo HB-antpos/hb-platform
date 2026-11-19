@@ -715,3 +715,8 @@
   padding-inline: 10px;
   font-weight: 500;
 }
+
+/* 工资表「MYOB 推送」列 */
+.atp-myob-col {
+  white-space: nowrap;
+}

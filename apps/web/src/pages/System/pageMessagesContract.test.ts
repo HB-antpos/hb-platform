@@ -192,6 +192,9 @@ const pages = [
       'src/pages/PosAdmin/Myob/PushDetailDrawer.tsx',
       'src/pages/PosAdmin/Myob/myobPushLogic.ts',
       'src/pages/PosAdmin/Myob/PushConfirmModal.tsx',
+      // 考勤工资页的推送弹窗共用的小部件与可勾选面板
+      'src/pages/PosAdmin/Myob/PushReadiness.tsx',
+      'src/pages/PosAdmin/Myob/PushSelectionPanel.tsx',
       'src/pages/PosAdmin/Myob/PushBatchesDrawer.tsx',
     ],
     messages: {

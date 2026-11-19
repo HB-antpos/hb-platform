@@ -747,6 +747,8 @@
         "close": "Done",
         "lead": "Push the transfer hours of {{company}} for {{range}} to the MYOB Timesheet: {{count}} employees, {{hours}} hours in total.",
         "notice": "Pushing only writes the Timesheet; it does not pay anyone. Run Process Payroll in MYOB to pay. Processed entries are never changed.",
+        "notCheckedInline": "MYOB has not been checked yet: staff who already have unprocessed hours in MYOB will be skipped (not overwritten). Check first if you want to overwrite.",
+        "checkNow": "Check MYOB status",
         "notChecked": "MYOB has not been checked yet: employees who already have unprocessed hours in MYOB will be skipped (not overwritten). To overwrite, click \"Check MYOB\" on the page first.",
         "overwriteAria": "Employees that need an overwrite confirmation",
         "overwriteTitle": "{{count}} employees already have unprocessed hours in MYOB",

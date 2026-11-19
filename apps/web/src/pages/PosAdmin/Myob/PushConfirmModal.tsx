@@ -27,6 +27,7 @@ import {
   type PushRunProgress,
 } from './myobPushLogic'
 import { formatHours, formatPeriodRange } from './myobTimesheetLogic'
+import PushSelectionPanel from './PushSelectionPanel'
 
 interface PushConfirmModalProps {
   open: boolean
@@ -39,6 +40,16 @@ interface PushConfirmModalProps {
   onClose: (changed: boolean) => void
   /** 去看推送记录（含撤销）。 */
   onOpenBatches: () => void
+  /**
+   * 可选模式（考勤工资页的推送弹窗）：确认页里直接列出员工、就绪卡和提示项，弹窗里勾选 / 取消勾选，
+   * 不再需要先在别处挑好人。此时 selectedUserGuids / hintsAcknowledged 只是初始值。
+   */
+  selectable?: boolean
+  onGoBind?: () => void
+  onGoMapping?: () => void
+  /** 可选模式下没有「检查 MYOB 状态」的页面按钮，由弹窗提供；点击后上层带 checkMyob 重读预览。 */
+  onCheckMyob?: () => void
+  checkingMyob?: boolean
 }
 
 type Phase = 'confirm' | 'running' | 'paused' | 'done'
@@ -52,11 +63,14 @@ const NAME_PREVIEW_LIMIT = 8
  * - 推送中不能关闭弹窗；「停止」只在块与块之间生效，已处理的不会回滚（可在推送记录里撤销）；
  * - 某一块请求失败时可「继续」（沿用同一批次号），遇到总闸 / 授权 / 周期被占用这类整次都无法继续的错误则只能先解决原因。
  */
-export default function PushConfirmModal({ open, preview, selectedUserGuids, hintsAcknowledged, onClose, onOpenBatches }: PushConfirmModalProps) {
+export default function PushConfirmModal({ open, preview, selectedUserGuids, hintsAcknowledged: initialAcknowledged, onClose, onOpenBatches, selectable = false, onGoBind, onGoMapping, onCheckMyob, checkingMyob }: PushConfirmModalProps) {
   const { t } = useTranslation()
   const [phase, setPhase] = useState<Phase>('confirm')
   // 这次弹窗处理的人（首次 = 预览页勾选；「覆盖并重推」会改成服务端告诉我们有记录的那些人）
   const [candidates, setCandidates] = useState<string[]>(selectedUserGuids)
+  // 可选模式下「我已知晓提示项」在弹窗里勾；非可选模式沿用预览页传进来的值
+  const [acked, setAcked] = useState(initialAcknowledged)
+  const hintsAcknowledged = selectable ? acked : initialAcknowledged
   const [forcedOverwrite, setForcedOverwrite] = useState<string[]>([])
   const [overwrite, setOverwrite] = useState(false)
   const [progress, setProgress] = useState<PushRunProgress>({ done: 0, total: 0, chunk: 0, chunks: 0 })
@@ -84,6 +98,7 @@ export default function PushConfirmModal({ open, preview, selectedUserGuids, hin
     if (open) {
       setPhase('confirm')
       setCandidates(selectedUserGuids)
+      setAcked(initialAcknowledged)
       setForcedOverwrite([])
       setOverwrite(false)
       setResults([])
@@ -248,7 +263,7 @@ export default function PushConfirmModal({ open, preview, selectedUserGuids, hin
     <Modal
       open={open}
       title={t('myob.push.run.title')}
-      width={680}
+      width={selectable && phase === 'confirm' ? 880 : 680}
       footer={footer}
       // 推送中 / 暂停时不能随手关掉：关掉就看不到哪些人已经写进 MYOB 了
       closable={phase === 'confirm' || phase === 'done'}
@@ -263,7 +278,30 @@ export default function PushConfirmModal({ open, preview, selectedUserGuids, hin
             {t('myob.push.run.lead', { company: preview.connectionName, range, count: plan.userGuids.length, hours: formatHours(sumPlanHours(preview, plan)) })}
           </p>
           <Alert type="info" showIcon className="myob-run-alert" message={t('myob.push.run.notice')} />
-          {!summary.myobChecked ? <Alert type="warning" showIcon className="myob-run-alert" message={t('myob.push.run.notChecked')} /> : null}
+          {selectable ? (
+            <PushSelectionPanel
+              preview={preview}
+              selected={selectedSet}
+              onSelectedChange={(next) => setCandidates([...next])}
+              acknowledged={acked}
+              onAcknowledgedChange={setAcked}
+              onGoBind={onGoBind}
+              onGoMapping={onGoMapping}
+            />
+          ) : null}
+          {!summary.myobChecked ? (
+            <Alert
+              type="warning"
+              showIcon
+              className="myob-run-alert"
+              message={onCheckMyob ? t('myob.push.run.notCheckedInline') : t('myob.push.run.notChecked')}
+              action={onCheckMyob ? (
+                <Button size="small" loading={checkingMyob} onClick={onCheckMyob}>
+                  {t('myob.push.run.checkNow')}
+                </Button>
+              ) : undefined}
+            />
+          ) : null}
           {summary.overwriteGuids.length > 0 ? (
             <div className="myob-run-overwrite" role="group" aria-label={t('myob.push.run.overwriteAria')}>
               <b>{t('myob.push.run.overwriteTitle', { count: summary.overwriteGuids.length })}</b>
@@ -277,7 +315,7 @@ export default function PushConfirmModal({ open, preview, selectedUserGuids, hin
               {!overwrite ? <div className="myob-run-excluded">{t('myob.push.run.overwriteExcluded', { count: plan.excludedGuids.length })}</div> : null}
             </div>
           ) : null}
-          {summary.hintCodes.length > 0 ? (
+          {summary.hintCodes.length > 0 && !selectable ? (
             <Alert
               type={hintsAcknowledged ? 'success' : 'warning'}
               showIcon

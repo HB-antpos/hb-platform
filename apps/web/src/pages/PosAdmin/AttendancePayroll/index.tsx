@@ -1,5 +1,6 @@
 import {
   DownOutlined,
+  CloudUploadOutlined,
   DownloadOutlined,
   LeftOutlined,
   LockOutlined,
@@ -49,6 +50,7 @@ import RatesTab from './RatesTab'
 import { exportPayrollWorkbook } from './payrollExport'
 import { PERIOD_PRESETS, birthdayRateReviews, isoWeekNumber, periodEnd, presetPeriodStart, shiftPeriod, type PeriodPreset } from './payrollLogic'
 import { useAttendanceStores } from './useAttendanceStores'
+import { usePayrollMyobPush } from './usePayrollMyobPush'
 import './attendancePayroll.css'
 
 registerPageMessages({ zh: messagesZh, en: messagesEn })
@@ -271,6 +273,15 @@ export default function AttendancePayrollPage() {
   const status = (activeTab === 'hours' ? hours : pay) ?? hours ?? pay
   const pendingCount = status?.pendingCount ?? 0
   const isSubmitted = status?.periodStatus === 'Submitted'
+  // 工资表「推送到 MYOB」：预览接口要工资编辑权限，推送要 Myob.Timesheet.Push；只在工资表页签、按所看分店 / 周期
+  const myobPush = usePayrollMyobPush({
+    allowed: activeTab === 'pay' && canEdit && access.canPushMyobTimesheet,
+    storeCode,
+    periodStart,
+    locked: isSubmitted,
+    canGoBind: access.canBindMyobEmployees,
+    canGoMapping: access.canManageMyobConnections,
+  })
   const periodLabel = useMemo(() => {
     if (!periodStart) return '…'
     const firstWeek = isoWeekNumber(periodStart)
@@ -395,6 +406,29 @@ export default function AttendancePayrollPage() {
   )
   const refreshRateReviews = () => setReviewVersion((version) => version + 1)
 
+  // 推送按钮：规则见 getPayrollPushButton（未锁定灰色提示、没映射 / 读取失败灰色说明、服务器没开放则不显示）
+  const myobPushTips: Record<'needLock' | 'unmapped' | 'error', string> = {
+    needLock: t('attendancePayroll.myobPush.needLock'),
+    unmapped: t('attendancePayroll.myobPush.unmapped'),
+    error: t('attendancePayroll.myobPush.error'),
+  }
+  const pushKind = myobPush.button.kind
+  const myobPushButton = pushKind === 'hidden' ? null : (
+    <Tooltip title={pushKind === 'needLock' || pushKind === 'unmapped' || pushKind === 'error' ? myobPushTips[pushKind] : undefined}>
+      {/* 禁用按钮收不到鼠标事件，Tooltip 套在外层 span 上 */}
+      <span>
+        <Button
+          icon={<CloudUploadOutlined />}
+          loading={pushKind === 'loading'}
+          disabled={pushKind !== 'ready'}
+          onClick={myobPush.open}
+        >
+          {t('attendancePayroll.myobPush.button')}
+        </Button>
+      </span>
+    </Tooltip>
+  )
+
   const tabItems = [
     ...(canViewHours ? [{
       key: 'hours',
@@ -427,6 +461,7 @@ export default function AttendancePayrollPage() {
             onReload={() => void loadPay()}
             rateReviews={periodRateReviews}
             onOpenRates={() => setActiveTab('rates')}
+            myobPush={myobPush.cells}
           />
         ),
       },
@@ -540,11 +575,14 @@ export default function AttendancePayrollPage() {
               <Button icon={<SyncOutlined />} disabled={!storeCode} onClick={() => setSyncOpen(true)}>{t('attendancePayroll.rates.sync.open')}</Button>
             ) : null}
             <Button icon={<DownloadOutlined />} onClick={() => void handleExport()}>{t('attendancePayroll.exportExcel')}</Button>
+            {myobPushButton}
             {lockControl}
           </Space>
         </div>
         <Tabs activeKey={activeTab} items={tabItems} onChange={(key) => setActiveTab(key as PayrollTabKey)} />
       </div>
+
+      {myobPush.modals}
 
       <MyobPayRateSyncDrawer
         open={syncOpen}

@@ -1,6 +1,7 @@
 import { Avatar, Empty, Input, InputNumber, Spin, Tag, Tooltip, message } from 'antd'
 import { useEffect, useMemo, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
+
 import { saveAttendanceLeaveApproval, saveAttendancePayNote } from '../../../services/attendancePayrollService'
 import type {
   AttendanceLeaveApprovalDto,
@@ -9,8 +10,11 @@ import type {
   AttendancePayRowDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
+import { formatMyobTime } from '../Myob/myobLogic'
+
 import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
 import { TRANSFER_FILL_ORDER, formatHours, formatMoney, formatSignedMoney, round2, showsAgeBadge, type BirthdayRateReview } from './payrollLogic'
+import type { PayrollPushCell } from './payrollMyobPushLogic'
 
 interface PayTabProps {
   data: AttendancePayResultDto | null
@@ -22,6 +26,8 @@ interface PayTabProps {
   rateReviews?: readonly BirthdayRateReview[]
   /** 点待办条上的「去核对」跳到个人时薪表。 */
   onOpenRates?: () => void
+  /** 每人的 MYOB 推送状态；有值才显示「MYOB 推送」这一列（没权限 / 服务器没开放 / 本期未锁定时为空）。 */
+  myobPush?: Readonly<Record<string, PayrollPushCell>> | null
 }
 
 const HOUR_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday'] as const
@@ -76,7 +82,7 @@ function NoteInput(props: { value?: string; disabled: boolean; placeholder: stri
   )
 }
 
-export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates }: PayTabProps) {
+export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates, myobPush }: PayTabProps) {
   const { t } = useTranslation()
   const rows = data?.rows ?? []
 
@@ -216,6 +222,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <th colSpan={2} className="atp-week-divider atp-head-transfer">{t('attendancePayroll.pay.transfer')}</th>
                   <th colSpan={3} className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.cash')}</th>
                   <th rowSpan={2} className="atp-week-divider">{t('attendancePayroll.pay.gross')}</th>
+                  {myobPush ? <th rowSpan={2}>{t('attendancePayroll.pay.myobPush')}</th> : null}
                   <th rowSpan={2}>{t('attendancePayroll.pay.note')}</th>
                 </tr>
                 <tr>
@@ -284,6 +291,16 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                     </td>
                     <td className="atp-num atp-col-cash">{row.cash.amount || row.allowance ? formatMoney(round2(row.cash.amount + row.allowance)) : '—'}</td>
                     <td className="atp-num atp-num-strong atp-week-divider">{formatMoney(row.grossPay)}</td>
+                    {myobPush ? (
+                      <td className="atp-myob-col">
+                        {myobPush[row.userGuid] ? (
+                          <>
+                            <Tag color={myobPush[row.userGuid].view.tone} className="atp-tag">{t(myobPush[row.userGuid].view.labelKey)}</Tag>
+                            {myobPush[row.userGuid].view.lastAt ? <div className="atp-muted atp-small">{formatMyobTime(myobPush[row.userGuid].view.lastAt)}</div> : null}
+                          </>
+                        ) : '—'}
+                      </td>
+                    ) : null}
                     <td className="atp-note-col">
                       <NoteInput
                         value={row.note ?? undefined}
@@ -307,6 +324,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <td className="atp-num">{formatMoney(totals.allowance)}</td>
                   <td className="atp-num">{formatMoney(totals.cashAmount)}</td>
                   <td className="atp-num atp-num-strong atp-week-divider">{formatMoney(totals.gross)}</td>
+                  {myobPush ? <td /> : null}
                   <td />
                 </tr>
               </tfoot>

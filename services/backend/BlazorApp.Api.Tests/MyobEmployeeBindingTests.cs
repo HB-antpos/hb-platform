@@ -943,6 +943,10 @@ public sealed class MyobEmployeeBindingTests : IDisposable
         Assert.Equal([Aus, Inv], body.Data!.Select(item => item.ConnectionGuid).OrderBy(item => item).ToArray());
         Assert.Equal("51824753556", body.Data!.Single(item => item.ConnectionGuid == Inv).Abn);
         Assert.DoesNotContain(body.Data!, item => item.ConnectionGuid == "conn-old");
+        // 每家公司带上映射到它名下的分店（考勤工资页据此知道当前分店的工时推到哪家公司）；没映射的 1042 不出现在任何公司下
+        Assert.Equal(["1014"], body.Data!.Single(item => item.ConnectionGuid == Inv).StoreCodes);
+        Assert.Contains("1013", body.Data!.Single(item => item.ConnectionGuid == Aus).StoreCodes);
+        Assert.DoesNotContain(body.Data!, item => item.StoreCodes.Contains("1042"));
         Assert.Null(typeof(MyobCompanyOptionsController).GetCustomAttribute<AuthorizeAttribute>()!.Policy); // 类上只要求已登录，权限在动作里按「任一」判断
     }
 

@@ -684,7 +684,7 @@ export function normalizeMyobCompanies(payload: unknown): MyobCompanyOption[] {
     const connectionGuid = text(item.connectionGuid)
     // 没有 connectionGuid 的行无法选中，丢弃；ABN 只保留数字，空串 / 非字符串按未填写
     return connectionGuid
-      ? { connectionGuid, name: text(item.name), abn: nullableText(item.abn)?.replace(/\s+/g, '') ?? null }
+      ? { connectionGuid, name: text(item.name), abn: nullableText(item.abn)?.replace(/\s+/g, '') ?? null, storeCodes: textList(item.storeCodes) }
       : null
   })
 }

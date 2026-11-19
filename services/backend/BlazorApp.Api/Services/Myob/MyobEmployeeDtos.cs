@@ -348,6 +348,9 @@ public sealed class MyobPayrollCompanyOptionDto
 
     /// <summary>公司 ABN（只含数字）；没有为 null。</summary>
     public string? Abn { get; set; }
+
+    /// <summary>映射到该公司的分店代码（来自分店映射）。考勤工资页据此知道「这家店的工时推到哪家公司」；没有映射为空。</summary>
+    public List<string> StoreCodes { get; set; } = new();
 }
 
 /// <summary>一个员工的发薪公司详情（抽屉）。</summary>

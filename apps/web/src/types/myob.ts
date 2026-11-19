@@ -318,7 +318,11 @@ export interface MyobPayrollCompanyOption {
  * GET /myob/companies 返回的公司选项（只含 Active 连接，只读）。
  * 员工绑定 / 发薪公司页签用它代替 /myob/connections：后者只认 Myob.Connection.Manage，只有绑定或发薪权限的人会 403。
  */
-export type MyobCompanyOption = MyobPayrollCompanyOption & { abn: string | null }
+export type MyobCompanyOption = MyobPayrollCompanyOption & {
+  abn: string | null
+  /** 映射到该公司的分店代码；考勤工资页据此知道当前分店的工时推到哪家公司。 */
+  storeCodes: string[]
+}
 
 /** 列表一行：员工 × 上班分店。 */
 export interface MyobPayrollEmployerRow {
