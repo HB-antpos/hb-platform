@@ -6,12 +6,10 @@ import {
   parseSuggestedDiscountInput,
 } from "./suggested-discount";
 import {
-  DEFAULT_CREATE_PRICE_TASKS,
   DEFAULT_SYNC_FIELDS,
   describeSyncTargetChange,
   getDefaultSelectedSyncTargets,
   getSelectableSyncTargetCodes,
-  hasAnySyncField,
   resolveEffectiveSyncFields,
   willSyncWarehousePrice,
 } from "./sync-targets";
@@ -28,16 +26,7 @@ const targets = [
   target({ storeCode: "1004", hasRecord: false }),
   target({ storeCode: "1005", hasRecord: false, isSpecialProduct: true }),
 ];
-assert.deepEqual(DEFAULT_SYNC_FIELDS, {
-  syncRetailPrice: true,
-  syncDiscountRate: true,
-  syncPurchasePrice: false,
-  syncIsSpecialProduct: false,
-});
-assert.equal(DEFAULT_CREATE_PRICE_TASKS, true, "「创建价格和标签更改任务」默认开启");
-const noneSelected = { syncRetailPrice: false, syncDiscountRate: false, syncPurchasePrice: false, syncIsSpecialProduct: false };
-assert.equal(hasAnySyncField(noneSelected), false, "一个字段都没勾不能提交");
-assert.equal(hasAnySyncField({ ...noneSelected, syncIsSpecialProduct: true }), true, "只同步特殊商品标记也算勾了字段");
+assert.deepEqual(DEFAULT_SYNC_FIELDS, { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: false });
 assert.deepEqual([...getDefaultSelectedSyncTargets(targets)], ["1002"], "默认全选，但特殊商品与无记录分店不选");
 assert.deepEqual(getSelectableSyncTargetCodes(targets), ["1002", "1003"], "特殊商品仍可手动勾选，无记录分店不可选");
 
@@ -116,10 +105,10 @@ assert.deepEqual(discountJob.payload, {
 });
 
 // 仓库商品：进货价由仓库统一管理（分店扫码对账会按仓库进货价静默覆盖），强制不同步进货价。
-const withPurchase = { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: true, syncIsSpecialProduct: true };
+const withPurchase = { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: true };
 assert.deepEqual(
   resolveEffectiveSyncFields(withPurchase, true),
-  { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: false, syncIsSpecialProduct: true },
+  { syncRetailPrice: true, syncDiscountRate: true, syncPurchasePrice: false },
   "仓库商品强制关闭进货价同步"
 );
 assert.equal(resolveEffectiveSyncFields(withPurchase, false), withPurchase, "非仓库商品保持用户的勾选");

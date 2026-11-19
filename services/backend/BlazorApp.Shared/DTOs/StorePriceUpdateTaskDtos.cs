@@ -443,12 +443,6 @@ public sealed class MobileSyncStoreProductToOtherStoresRequestDto
     public bool SyncRetailPrice { get; set; } = true;
     public bool SyncDiscountRate { get; set; } = true;
     public bool SyncPurchasePrice { get; set; }
-
-    /// <summary>同步来源分店的「是否特殊商品」标记；默认不同步（特殊商品是分店刻意维护的）。</summary>
-    public bool SyncIsSpecialProduct { get; set; }
-
-    /// <summary>是否创建价格和标签更改任务；旧客户端不传时为 true，保持原行为。</summary>
-    public bool CreatePriceTasks { get; set; } = true;
 }
 
 public sealed class MobileSyncStoreProductToOtherStoresResultDto

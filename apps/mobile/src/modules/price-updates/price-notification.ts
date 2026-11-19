@@ -128,13 +128,9 @@ export function buildSyncToOtherStoresMessage(
   summary: PriceNotificationSummary | null | undefined,
   t: PriceNotificationTranslate,
   /** 仓库商品同步时后端一并更新了仓库价：提示末尾补一句，让店长知道仓库价也跟着变了。 */
-  warehouseUpdated = false,
-  /** 本次关闭了「创建价格和标签更改任务」：明确写出未建任务，方便事后追溯。 */
-  createPriceTasks = true
+  warehouseUpdated = false
 ): string {
-  const base = !createPriceTasks
-    ? t("notification.syncedStoresNoTasks", { count: updatedStoreCount })
-    : summary
+  const base = summary
     ? t("notification.syncedStoresWithLabels", {
         count: updatedStoreCount,
         labelCount: summary.labelOnlyStores,
