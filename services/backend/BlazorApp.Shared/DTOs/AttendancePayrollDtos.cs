@@ -89,6 +89,13 @@ namespace BlazorApp.Shared.DTOs
         public List<AttendancePayrollOtherStoreHoursDto> OtherStores { get; set; } = new();
         public bool IsBirthday { get; set; }
         public List<AttendancePayrollSegmentDto> Segments { get; set; } = new();
+        /// <summary>有排班、排班窗口已过去、却一次打卡都没有（目前按 0 工时计）；可在页面上补录。</summary>
+        public bool MissingPunch { get; set; }
+        /// <summary>未打卡班的排班窗口（HH:mm），补录表单预填用；只在 MissingPunch 时返回。</summary>
+        public string? ScheduleStart { get; set; }
+        public string? ScheduleEnd { get; set; }
+        /// <summary>这一天有手动补录的打卡时返回留痕（补录人 / 时间 / 原因）。</summary>
+        public AttendancePayrollDayManualEntryDto? ManualEntry { get; set; }
     }
 
     public class AttendancePayrollHoursTotalsDto

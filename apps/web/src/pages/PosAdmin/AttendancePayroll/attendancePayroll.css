@@ -826,3 +826,276 @@
 .atp-myob-col {
   white-space: nowrap;
 }
+
+/* ===== 手动补录工时 ===== */
+
+/* 未打卡班：琥珀色虚线格，整格可点 */
+.atp-cell-missing,
+.atp-cell-addable {
+  cursor: pointer;
+}
+
+.atp-cell-missing {
+  border: 1.5px dashed #f79009;
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.atp-cell-missing:hover {
+  background: #fef0c7;
+}
+
+.atp-cell-missing-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.atp-cell-missing-text small {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* 没排班也没打卡的休息格：悬停才出现「＋ 补录」，平时与普通休息格一样 */
+.atp-cell-add-text {
+  display: none;
+  font-size: 13px;
+  color: #1677ff;
+}
+
+.atp-cell-addable:hover {
+  border: 1.5px dashed #1677ff;
+  background: #fff;
+}
+
+.atp-cell-addable:hover .atp-cell-rest-text {
+  display: none;
+}
+
+.atp-cell-addable:hover .atp-cell-add-text {
+  display: inline;
+}
+
+.atp-cell-manual {
+  border-color: #d9d6fe;
+  background: #f4f3ff;
+}
+
+.atp-badge-manual {
+  color: #fff;
+  background: #5925dc;
+  border-color: #5925dc;
+  cursor: default;
+}
+
+.atp-alert-missing {
+  background: #fffaeb;
+  border-color: #fedf89;
+  color: #93370d;
+}
+
+.atp-me-banner-chip {
+  margin-left: 6px;
+}
+
+.atp-me-add-row {
+  margin: 12px 0 4px;
+}
+
+.atp-me-row-btn {
+  padding: 0 4px;
+  height: auto;
+  font-size: 12px;
+}
+
+.atp-me-trace {
+  max-width: 280px;
+  line-height: 1.6;
+}
+
+.atp-me-trace-sub {
+  color: #8a919f;
+  font-size: 12px;
+}
+
+/* 抽屉 */
+.atp-me-subtitle {
+  margin-bottom: 14px;
+  color: #8a919f;
+}
+
+.atp-me-field {
+  margin-bottom: 16px;
+}
+
+.atp-me-field-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #8a919f;
+}
+
+.atp-me-required {
+  color: #d92d20;
+}
+
+.atp-me-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #8a919f;
+}
+
+.atp-me-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.atp-me-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.atp-me-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 56px;
+  padding: 4px 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.atp-me-chip.is-on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.atp-me-chip.is-has {
+  border-color: #abefc6;
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.atp-me-chip.is-off {
+  background: #f7f7f8;
+  color: #c0c5cf;
+  text-decoration: line-through;
+}
+
+.atp-me-chip:disabled {
+  cursor: not-allowed;
+}
+
+.atp-me-day {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  background: #fcfcfd;
+}
+
+.atp-me-day-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.atp-me-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.atp-me-label {
+  width: 36px;
+  flex: none;
+  font-size: 12px;
+  color: #8a919f;
+}
+
+.atp-me-meal-label {
+  margin-left: 12px;
+}
+
+.atp-me-to {
+  color: #8a919f;
+}
+
+.atp-me-preview {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.atp-me-preview-ok {
+  border-color: #abefc6;
+  background: #ecfdf3;
+  color: #067647;
+}
+
+.atp-me-preview-warn {
+  border-color: #fedf89;
+  background: #fffaeb;
+  color: #b54708;
+}
+
+.atp-me-preview-error {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #d92d20;
+}
+
+.atp-me-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.atp-me-total {
+  margin-right: auto;
+  font-weight: 600;
+}
+
+/* 键盘聚焦休息格时同样显示补录入口（触屏没有悬停） */
+.atp-cell-addable:focus-visible {
+  border: 1.5px dashed #1677ff;
+  background: #fff;
+  outline: none;
+}
+
+.atp-cell-addable:focus-visible .atp-cell-rest-text {
+  display: none;
+}
+
+.atp-cell-addable:focus-visible .atp-cell-add-text {
+  display: inline;
+}
+
+.atp-me-hint-top {
+  margin: 0 0 4px;
+}
+
+.atp-me-footer {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 480px) {
+  .atp-me-total {
+    flex-basis: 100%;
+  }
+}

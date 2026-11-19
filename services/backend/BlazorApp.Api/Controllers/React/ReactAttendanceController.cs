@@ -167,6 +167,25 @@ namespace BlazorApp.Api.Controllers.React
             [FromBody] CreateManagedAttendancePunchAdjustmentDto request
         ) => Ok(await _service.CreateManagedPunchAdjustmentAsync(request));
 
+        // 店长 / Admin 为「当天没有任何打卡」的员工补录整天工时：预览 → 保存 → 撤销（权限同代员工补卡）。
+        [HttpPost("managed/manual-entries/preview")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> PreviewManagedManualEntry(
+            [FromBody] CreateAttendanceManualEntryDto request
+        ) => Ok(await _service.PreviewManagedManualEntryAsync(request));
+
+        [HttpPost("managed/manual-entries")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> CreateManagedManualEntry(
+            [FromBody] CreateAttendanceManualEntryDto request
+        ) => Ok(await _service.CreateManagedManualEntryAsync(request));
+
+        [HttpPost("managed/manual-entries/revoke")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> RevokeManagedManualEntry(
+            [FromBody] RevokeAttendanceManualEntryDto request
+        ) => Ok(await _service.RevokeManagedManualEntryAsync(request));
+
         [HttpPost("qr/resolve")]
         [Authorize(Policy = Permissions.Attendance.Punch.Self)]
         public async Task<IActionResult> ResolveQr([FromBody] AttendanceQrResolveRequestDto request) =>

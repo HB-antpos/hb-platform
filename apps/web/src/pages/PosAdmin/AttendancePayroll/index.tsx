@@ -20,6 +20,7 @@ import {
   getAttendancePayrollHours,
   getAttendancePayrollPay,
   getAttendancePayRates,
+  revokeAttendanceManualEntry,
   submitAttendancePayPeriod,
   unlockAttendancePayPeriod,
 } from '../../../services/attendancePayrollService'
@@ -44,6 +45,8 @@ import {
 import messagesEn from './attendancePayrollMessages.en.json'
 import messagesZh from './attendancePayrollMessages.zh.json'
 import HoursTab from './HoursTab'
+import ManualEntryDrawer, { type ManualEntryPreset } from './ManualEntryDrawer'
+import { manualEntryErrorText } from './manualEntryLogic'
 import MyobPayRateSyncDrawer from './MyobPayRateSyncDrawer'
 import PayTab from './PayTab'
 import RatesTab from './RatesTab'
@@ -273,6 +276,31 @@ export default function AttendancePayrollPage() {
   const status = (activeTab === 'hours' ? hours : pay) ?? hours ?? pay
   const pendingCount = status?.pendingCount ?? 0
   const isSubmitted = status?.periodStatus === 'Submitted'
+  // 手动补录工时：要「补卡与修改管理分店打卡」权限；本期已锁定时页面上不出现任何入口（后端同样拒绝）
+  const manualEntryEnabled = access.canAdjustAttendancePunches && canViewHours && !isSubmitted && Boolean(storeCode)
+  const [manualEntryOpen, setManualEntryOpen] = useState(false)
+  const [manualEntryPreset, setManualEntryPreset] = useState<ManualEntryPreset | null>(null)
+  const openManualEntry = (preset?: ManualEntryPreset) => {
+    setManualEntryPreset(preset ?? null)
+    setManualEntryOpen(true)
+    // 在工资表页签进来时工时数据可能还没加载（抽屉要用它判断每天的状态）
+    if (!hours) void loadHours()
+  }
+  /** 补录 / 撤销后：工时统计与工资表都要重算，两边一起重载。 */
+  const reloadAfterManualEntry = () => {
+    void loadHours()
+    void loadPay()
+  }
+  const revokeManualEntry = async (userGuid: string, date: string) => {
+    if (!storeCode) return
+    try {
+      await revokeAttendanceManualEntry({ storeCode, userGuid, workDate: date })
+      message.success(t('attendancePayroll.manualEntry.revoked'))
+      reloadAfterManualEntry()
+    } catch (error) {
+      message.error(manualEntryErrorText(error, t('attendancePayroll.manualEntry.revokeFailed')))
+    }
+  }
   // 工资表「推送到 MYOB」：预览接口要工资编辑权限，推送要 Myob.Timesheet.Push；只在工资表页签、按所看分店 / 周期
   const myobPush = usePayrollMyobPush({
     allowed: activeTab === 'pay' && canEdit && access.canPushMyobTimesheet,
@@ -445,6 +473,7 @@ export default function AttendancePayrollPage() {
           onReload={() => void loadHours()}
           onOpenRates={canViewPay ? () => setActiveTab('rates') : undefined}
           rateReviews={periodRateReviews}
+          manualEntry={manualEntryEnabled ? { onOpen: openManualEntry, onRevoke: revokeManualEntry } : undefined}
         />
       ),
     }] : []),
@@ -462,6 +491,7 @@ export default function AttendancePayrollPage() {
             rateReviews={periodRateReviews}
             onOpenRates={() => setActiveTab('rates')}
             myobPush={myobPush.cells}
+            onManualEntry={manualEntryEnabled ? (userGuid) => openManualEntry({ userGuid }) : undefined}
           />
         ),
       },
@@ -583,6 +613,19 @@ export default function AttendancePayrollPage() {
       </div>
 
       {myobPush.modals}
+
+      {manualEntryEnabled && storeCode ? (
+        <ManualEntryDrawer
+          open={manualEntryOpen}
+          storeCode={storeCode}
+          storeName={storeOptions.find((option) => option.value === storeCode)?.label}
+          days={hours?.days ?? []}
+          employees={hours?.employees ?? []}
+          preset={manualEntryPreset}
+          onClose={() => setManualEntryOpen(false)}
+          onSaved={reloadAfterManualEntry}
+        />
+      ) : null}
 
       <MyobPayRateSyncDrawer
         open={syncOpen}

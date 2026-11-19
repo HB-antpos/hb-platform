@@ -185,7 +185,9 @@ namespace BlazorApp.Api.Services.React
         private sealed record SchedulePayResult(
             AttendanceSchedule Schedule,
             PayrollDayResult Pay,
-            List<AttendancePayrollSegmentDto> Segments);
+            List<AttendancePayrollSegmentDto> Segments,
+            bool MissingPunch = false,
+            AttendancePayrollDayManualEntryDto? ManualEntry = null);
 
         /// <summary>门店本地日期的公共假期（IsPaidHoliday 或自动同步来的公共假期）：日期 → 名称。</summary>
         private async Task<Dictionary<DateTime, string>> LoadStorePublicHolidaysAsync(
@@ -301,7 +303,21 @@ namespace BlazorApp.Api.Services.React
                         IsAutoClockOut = item.ClockOut?.IsSystemAutoClockOut == true,
                     })
                     .ToList();
-                result[schedule.ScheduleGuid] = new SchedulePayResult(schedule, pay, segmentDtos);
+                // 未打卡班：排班窗口已过去却一次打卡都没有（目前按 0 工时计），页面据此提示并可补录。
+                var schedulePunches = punches.Where(item => item.ScheduleGuid == schedule.ScheduleGuid).ToList();
+                var missingPunch = schedulePunches.Count == 0 && windowEnd <= nowLocal;
+                // 手动补录留痕：补录打卡的 Source 是 ManualEntry，原因在打卡备注里。
+                var manualPunches = schedulePunches.Where(item => item.Source == ManualEntryPunchSource).ToList();
+                var manualEntry = manualPunches.Count == 0
+                    ? null
+                    : new AttendancePayrollDayManualEntryDto
+                    {
+                        Reason = manualPunches[0].Remark,
+                        CreatedBy = manualPunches[0].CreatedBy,
+                        CreatedAt = manualPunches.Min(item => item.CreatedAt),
+                        CreatedSchedule = schedule.Remark?.StartsWith(ManualEntryScheduleRemarkPrefix, StringComparison.Ordinal) == true,
+                    };
+                result[schedule.ScheduleGuid] = new SchedulePayResult(schedule, pay, segmentDtos, missingPunch, manualEntry);
             }
             return result;
         }
@@ -453,6 +469,13 @@ namespace BlazorApp.Api.Services.React
                 day.HasSchedule = true;
                 day.IsScheduled = true;
                 day.Segments.AddRange(pay.Segments);
+                if (pay.MissingPunch)
+                {
+                    day.MissingPunch = true;
+                    day.ScheduleStart = pay.Schedule.StartTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+                    day.ScheduleEnd = pay.Schedule.EndTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture);
+                }
+                day.ManualEntry ??= pay.ManualEntry;
                 employee.WorkItems.Add(new PayrollWorkItem(day.Date, bucket, pay.Pay.PaidMinutes));
             }
 
@@ -688,7 +711,10 @@ namespace BlazorApp.Api.Services.React
 
         /// <summary>本期有工时（含病假 / 年假 / 带薪公假工时，与工时表合计同口径），或有待处理项。</summary>
         private static bool HasHoursOrPending(PayrollEmployeeSnapshot employee) =>
-            employee.PendingCount > 0 || BuildTotals(employee).Total > 0;
+            employee.PendingCount > 0
+            || BuildTotals(employee).Total > 0
+            // 只有「未打卡班」的人也要列出来，否则店长看不到该补录的人。
+            || employee.Days.Values.Any(day => day.MissingPunch);
 
         /// <summary>生日已过多少天内仍提示「时薪没按新年龄更新」；超过就不再提示（避免历史生日永远挂着）。</summary>
         internal const int BirthdayRateReviewLookbackDays = 60;

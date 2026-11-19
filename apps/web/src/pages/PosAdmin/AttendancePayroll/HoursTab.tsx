@@ -1,7 +1,7 @@
 import { CheckOutlined, PaperClipOutlined } from '@ant-design/icons'
-import { Avatar, Button, Empty, Space, Spin, Tag, message } from 'antd'
+import { Avatar, Button, Empty, Popconfirm, Popover, Space, Spin, Tag, message } from 'antd'
 import dayjs from 'dayjs'
-import { useMemo, useState, type ReactElement } from 'react'
+import { useMemo, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { reviewAttendanceApproval } from '../../../services/attendancePayrollService'
@@ -14,6 +14,8 @@ import type {
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
 import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
+import type { ManualEntryPreset } from './ManualEntryDrawer'
+import { collectMissingPunches, manualEntryCellKind } from './manualEntryLogic'
 import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours, type BirthdayRateReview } from './payrollLogic'
 
 interface HoursTabProps {
@@ -28,6 +30,11 @@ interface HoursTabProps {
   onOpenRates?: () => void
   /** 生日后时薪还没更新的待办（已按本期筛过：生日 ≤ 本期末）；没有查看时薪权限时不传。 */
   rateReviews?: readonly BirthdayRateReview[]
+  /** 手动补录工时：没权限 / 本期已锁定时不传（页面上就没有任何补录入口）。 */
+  manualEntry?: {
+    onOpen: (preset?: ManualEntryPreset) => void
+    onRevoke: (userGuid: string, date: string) => Promise<void>
+  }
 }
 
 const TOTAL_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday', 'leave', 'total'] as const
@@ -46,6 +53,8 @@ export default function HoursTab(props: HoursTabProps) {
   const navigate = useNavigate()
   const [dismissed, setDismissed] = useState<string[]>([])
   const [acting, setActing] = useState<string>()
+  const manualEntry = props.manualEntry
+  const today = dayjs().format('YYYY-MM-DD')
 
   const employees = data?.employees ?? []
   const days = data?.days ?? []
@@ -65,6 +74,7 @@ export default function HoursTab(props: HoursTabProps) {
     (sum, employee) => sum + (employee.days[index]?.paidHours ?? 0),
     0,
   ))), [days, employees])
+  const missingPunches = useMemo(() => collectMissingPunches(employees), [employees])
   const publicHolidayPending = useMemo(
     () => employees.reduce((count, employee) => count + employee.days.filter((day) => day.publicHolidayPay?.state === 'Pending').length, 0),
     [employees],
@@ -194,7 +204,7 @@ export default function HoursTab(props: HoursTabProps) {
   }
 
   /** 单元格：数字 + 角标；休息、不能上班、待审用不同底色。 */
-  const renderCell = (day: AttendanceHoursDayDto, header: AttendanceHoursDayHeaderDto, weekStart: boolean) => {
+  const renderCell = (employee: AttendanceHoursEmployeeDto, day: AttendanceHoursDayDto, header: AttendanceHoursDayHeaderDto, weekStart: boolean) => {
     // 带薪公假待确认单独用「公 待确认」角标，不再叠「待审」
     const pending = day.pending.some((type) => type !== 'PublicHolidayPay')
     const holidayPay = day.publicHolidayPay
@@ -210,6 +220,12 @@ export default function HoursTab(props: HoursTabProps) {
     else if (value === null && day.isUnavailable) classes.push('atp-cell-unavailable')
     else if (value === null) classes.push('atp-cell-rest')
     if (header.isPublicHoliday && value === null) classes.push('atp-cell-holiday')
+    // 手动补录：未打卡班 = 琥珀色「未打卡 ＋」；没排班也没打卡 = 休息格悬停出现「＋ 补录」
+    const entryKind = manualEntry ? manualEntryCellKind(day, { enabled: true, today }) : 'none'
+    const openEntry = () => manualEntry?.onOpen({ userGuid: employee.userGuid, dates: [day.date] })
+    if (entryKind === 'missing') classes.push('atp-cell-missing')
+    if (entryKind === 'addable') classes.push('atp-cell-addable')
+    if (day.manualEntry) classes.push('atp-cell-manual')
 
     const badges: ReactElement[] = []
     if (header.isPublicHoliday && (day.paidHours ?? 0) > 0) badges.push(<span key="ph" className="atp-badge atp-badge-holiday">{t('attendancePayroll.badges.publicHoliday')}</span>)
@@ -230,17 +246,71 @@ export default function HoursTab(props: HoursTabProps) {
     if (day.isBirthday) badges.push(<span key="bday" className="atp-badge atp-badge-birthday" role="img" aria-label={t('attendancePayroll.legend.birthday')}>🎂</span>)
     if (pending) badges.push(<span key="pend" className="atp-badge atp-badge-pending">{t('attendancePayroll.badges.pending')}</span>)
     if (!pending && day.approvedMarks.length) badges.push(<span key="ok" className="atp-badge atp-badge-ok"><CheckOutlined /></span>)
+    if (day.manualEntry) {
+      const trace = day.manualEntry
+      badges.push(
+        <Popover
+          key="manual"
+          trigger="hover"
+          title={t('attendancePayroll.manualEntry.traceTitle')}
+          content={(
+            <div className="atp-me-trace">
+              <div>{t('attendancePayroll.manualEntry.traceReason', { reason: trace.reason ?? '—' })}</div>
+              <div>{t('attendancePayroll.manualEntry.traceBy', { by: trace.createdBy ?? '—', at: trace.createdAt ? dayjs(trace.createdAt).format('MM-DD HH:mm') : '—' })}</div>
+              {trace.createdSchedule ? <div className="atp-me-trace-sub">{t('attendancePayroll.manualEntry.traceSchedule')}</div> : null}
+              {manualEntry ? (
+                <Popconfirm
+                  title={t('attendancePayroll.manualEntry.revokeConfirm')}
+                  okText={t('attendancePayroll.manualEntry.revoke')}
+                  cancelText={t('attendancePayroll.manualEntry.cancel')}
+                  onConfirm={() => manualEntry.onRevoke(employee.userGuid, day.date)}
+                >
+                  <Button type="link" size="small" danger>{t('attendancePayroll.manualEntry.revoke')}</Button>
+                </Popconfirm>
+              ) : null}
+            </div>
+          )}
+        >
+          <span className="atp-badge atp-badge-manual">{t('attendancePayroll.manualEntry.badge')}</span>
+        </Popover>,
+      )
+    }
 
     const restText = day.isUnavailable ? t('attendancePayroll.hours.unavailable') : t('attendancePayroll.hours.rest')
     return (
       <td key={day.date} className={[weekStart ? 'atp-week-divider' : '', header.isPublicHoliday ? 'atp-col-holiday' : ''].join(' ')}>
-        <div className={classes.join(' ')}>
-          {value !== null ? <span className="atp-cell-value">{value}</span> : <span className="atp-cell-rest-text">{restText}</span>}
+        <div
+          className={classes.join(' ')}
+          {...(entryKind !== 'none'
+            ? {
+              role: 'button',
+              tabIndex: 0,
+              onClick: openEntry,
+              onKeyDown: (event: KeyboardEvent) => { if (event.key === 'Enter') openEntry() },
+            }
+            : {})}
+        >
+          {entryKind === 'missing' ? (
+            <span className="atp-cell-missing-text">
+              {t('attendancePayroll.manualEntry.cellMissing')}
+              {day.scheduleStart && day.scheduleEnd ? <small>{t('attendancePayroll.manualEntry.cellScheduled', { start: day.scheduleStart, end: day.scheduleEnd })}</small> : null}
+            </span>
+          ) : value !== null ? <span className="atp-cell-value">{value}</span> : <span className="atp-cell-rest-text">{restText}</span>}
+          {entryKind === 'addable' ? <span className="atp-cell-add-text">{t('attendancePayroll.manualEntry.cellAdd')}</span> : null}
           {badges.length ? <span className="atp-cell-badges">{badges}</span> : null}
         </div>
       </td>
     )
   }
+
+  // 工时统计只列「本期有工时」的人：一个工时都没有的人不在表里，要从这里选人补录
+  const addEmployeeButton = manualEntry ? (
+    <div className="atp-me-add-row">
+      <Button type="dashed" onClick={() => manualEntry.onOpen()}>
+        {t('attendancePayroll.manualEntry.addEmployee')}
+      </Button>
+    </div>
+  ) : null
 
   if (!data && loading) return <div className="atp-loading"><Spin /></div>
   if (!data) return <Empty description={t('attendancePayroll.empty')} />
@@ -256,6 +326,27 @@ export default function HoursTab(props: HoursTabProps) {
       <div className="atp-stack">
         {visibleAlerts.map(renderAlert)}
         <BirthdayRateReviewBanner reviews={pendingRateReviews} onOpenRates={props.onOpenRates} />
+        {manualEntry && missingPunches.length > 0 ? (
+          <div className="atp-alert atp-alert-missing">
+            <div className="atp-alert-text">
+              <strong>{t('attendancePayroll.manualEntry.bannerTitle', { count: missingPunches.length })}</strong>
+              {t('attendancePayroll.manualEntry.bannerNote')}
+              {missingPunches.map((item) => (
+                <Button
+                  key={`${item.userGuid}|${item.date}`}
+                  size="small"
+                  className="atp-me-banner-chip"
+                  onClick={() => manualEntry.onOpen({ userGuid: item.userGuid, dates: [item.date] })}
+                >
+                  {t('attendancePayroll.manualEntry.bannerItem', { name: item.userName, date: dayjs(item.date).format('MM-DD') })}
+                </Button>
+              ))}
+            </div>
+            <Button size="small" type="primary" onClick={() => manualEntry.onOpen({ userGuid: missingPunches[0].userGuid, dates: [missingPunches[0].date] })}>
+              {t('attendancePayroll.manualEntry.bannerGo')}
+            </Button>
+          </div>
+        ) : null}
         {mergeStores ? (
           <div className="atp-alert atp-alert-store">
             <div className="atp-alert-text">{t('attendancePayroll.alerts.merged')}</div>
@@ -372,7 +463,7 @@ export default function HoursTab(props: HoursTabProps) {
                           </div>
                         </div>
                       </td>
-                      {employee.days.map((day, index) => renderCell(day, days[index], index > 0 && index % 7 === 0))}
+                      {employee.days.map((day, index) => renderCell(employee, day, days[index], index > 0 && index % 7 === 0))}
                       {TOTAL_KEYS.map((key, index) => (
                         <td
                           key={key}
@@ -410,9 +501,13 @@ export default function HoursTab(props: HoursTabProps) {
               <span><span className="atp-badge atp-badge-pending">{t('attendancePayroll.badges.pending')}</span> {t('attendancePayroll.legend.pending')}</span>
             </div>
             <div className="atp-legend-note">{t('attendancePayroll.legend.note')}</div>
+            {addEmployeeButton}
           </div>
         ) : (
-          <Empty description={t('attendancePayroll.empty')} />
+          <>
+            <Empty description={t('attendancePayroll.empty')} />
+            {addEmployeeButton}
+          </>
         )}
       </div>
     </Spin>
