@@ -129,9 +129,74 @@ test("不改动用户主检出里有未提交改动的文件：新代码不依�
     "location-tracking.ts",
     "location-tracking-control.ts",
     "use-legacy-location-cleanup.ts",
+    "foreground-shift-location.ts",
+    "foreground-shift-location-runtime.ts",
+    "use-foreground-shift-location.ts",
   ]) {
     const source = read(`src/modules/attendance/${file}`);
     assert.doesNotMatch(source, /@\/modules\/attendance\/api"/, `${file} 不应依赖 attendance/api.ts`);
     assert.doesNotMatch(source, /@\/modules\/attendance\/types"/, `${file} 不应依赖 attendance/types.ts`);
   }
+});
+
+// ———— 班中「回前台取一次位置」 ————
+
+const foregroundRuntime = read("src/modules/attendance/foreground-shift-location-runtime.ts");
+const foregroundHook = read("src/modules/attendance/use-foreground-shift-location.ts");
+const attendanceScreen = read("src/components/attendance/AttendanceScreen.tsx");
+
+test("回前台取位置：只读权限状态 + 前台取一次，不弹权限框、不持续监听、不启动后台定位", () => {
+  for (const [name, source] of [["runtime", foregroundRuntime], ["hook", foregroundHook]] as const) {
+    assert.doesNotMatch(
+      source,
+      /requestForegroundPermissionsAsync|requestPermissionsAsync|watchPositionAsync|startLocationUpdatesAsync|requestBackgroundPermissionsAsync/,
+      `${name} 不得弹权限框、持续监听或启动后台定位`,
+    );
+  }
+  // 取位置走与登录同一条「只读权限、已授予才取、有总时限」的实现。
+  assert.match(foregroundRuntime, /collectOptionalLoginLocationAttempt\(/);
+  assert.match(foregroundRuntime, /getForegroundPermissionsAsync/);
+  assert.match(foregroundRuntime, /getCurrentPositionAsync\(\{ accuracy: Location\.Accuracy\.High \}\)/);
+  assert.match(foregroundRuntime, /timeoutMs: FOREGROUND_SHIFT_LOCATION_TIMEOUT_MS/);
+});
+
+test("回前台取位置：审核会话与未登录直接跳过，单飞，永不抛错", () => {
+  const run = sliceBetween(foregroundRuntime, "export function runForegroundShiftLocationSample", "\n}\n");
+  assert.match(run, /isIosReviewSessionActive\(\) \|\| !useAuthStore\.getState\(\)\.isAuthenticated/);
+  assert.match(run, /if \(inFlight\) \{\s*return inFlight;/);
+  assert.match(run, /\.catch\(\(error: unknown\): ForegroundShiftLocationOutcome => \{/);
+  const sync = sliceBetween(foregroundRuntime, "export async function syncForegroundShiftLocationContext", "\n}\n");
+  assert.match(sync, /if \(isIosReviewSessionActive\(\)\) \{\s*return;/);
+  assert.match(sync, /\} catch \(error\) \{\s*console\.warn/);
+});
+
+test("回前台取位置：先记「已尝试」再取位置，失败也不补传、不入本地队列", () => {
+  const capture = sliceBetween(foregroundRuntime, "async function captureAndUpload", "\n}\n");
+  const markIndex = capture.indexOf("markForegroundShiftLocationAttempt(");
+  const collectIndex = capture.indexOf("collectOptionalLoginLocationAttempt(");
+  const uploadIndex = capture.indexOf("postAttendanceLocationSamplesBatch(");
+  assert.ok(markIndex >= 0 && markIndex < collectIndex && collectIndex < uploadIndex, "必须先写已尝试，再取位置，最后上传");
+  assert.doesNotMatch(foregroundRuntime, /locationSampleQueue|enqueue\(/, "不在手机上留队列");
+  // 服务端明确说没有有效班次时清标记。
+  assert.match(capture, /isShiftEndedByUploadResult\(result, clientSampleId\)/);
+});
+
+test("回前台取位置：根布局挂载（受 sideEffectsEnabled 控制），hook 监听回前台", () => {
+  assert.match(rootLayout, /useForegroundShiftLocationSample\(\{ enabled: sideEffectsEnabled \}\)/);
+  assert.match(foregroundHook, /AppState\.addEventListener\("change"/);
+  assert.match(foregroundHook, /state === "active"/);
+  assert.match(foregroundHook, /runForegroundShiftLocationSample\(\)/);
+});
+
+test("回前台取位置：打卡保存后写 / 删标记，登出类强制停止路径清标记", () => {
+  const track = sliceBetween(attendanceScreen, "track: () => timing.measure(\"tracking\"", "\n        }),");
+  assert.ok(
+    track.indexOf("applyAttendanceTrackingLifecycle(") < track.indexOf("syncForegroundShiftLocationContext(result)"),
+    "旧任务收尾之后再同步上班标记",
+  );
+  const stopTask = sliceBetween(control, "async function stopTrackingTask", "\n}\n");
+  assert.match(stopTask, /if \(options\.clearPendingSamples\) \{[\s\S]*FOREGROUND_SHIFT_LOCATION_STORAGE_KEY/);
+  // 正常下班走「保留队列」变体：标记由打卡收尾显式删除，不放在这条路径里。
+  const keeping = sliceBetween(control, "export async function stopAttendanceLocationTrackingKeepingPendingSamples", "\n}\n");
+  assert.doesNotMatch(keeping, /FOREGROUND_SHIFT_LOCATION_STORAGE_KEY/);
 });

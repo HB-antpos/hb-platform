@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// 班中后台定位已取消：App 只在扫码上班 / 下班时读取位置。
+// 班中后台定位已取消：App 只在前台读取位置——扫码上班 / 下班、登录，以及上班期间打开 App / 回前台时取一次。
 // 本契约守住两件事：打卡页不再有任何后台定位相关的披露 / 申请 / 状态条；说明文案如实、不夸大也不留旧口径。
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -82,6 +82,18 @@ assert.match(zh.locationNotice.scanBody, /扫码/, "中文说明必须写清只�
 assert.match(zh.locationNotice.otherBody, /不会在后台/, "中文说明必须写清不会在后台使用位置");
 assert.match(en.locationNotice.scanBody, /scan/i, "英文说明必须写清只在扫码打卡时使用位置");
 assert.match(en.locationNotice.otherBody, /not use your location in the background/i, "英文说明必须写清不会在后台使用位置");
+// 上班期间「打开 App / 回前台时在前台取一次」：必须如实写出（不能再说「只在扫码时」），且要写清只在前台、不持续、下班后停止。
+assert.match(zh.locationNotice.foregroundBody, /打开 App 或从后台回到 App/, "中文说明必须写清上班期间打开 App / 回前台会取一次位置");
+assert.match(zh.locationNotice.foregroundBody, /不会持续获取/, "中文说明必须写清不会持续获取");
+assert.match(zh.locationNotice.foregroundBody, /下班后不再获取/, "中文说明必须写清下班后不再获取");
+assert.match(zh.locationNotice.sheet.foregroundBody, /不会弹出权限请求/, "详情必须写清不会弹权限请求");
+assert.match(en.locationNotice.foregroundBody, /open the app or return to it/i, "英文说明必须写清上班期间打开 App / 回前台会取一次位置");
+assert.match(en.locationNotice.foregroundBody, /not run continuously/i, "英文说明必须写清不会持续获取");
+assert.match(en.locationNotice.foregroundBody, /stops after you clock out/i, "英文说明必须写清下班后停止");
+assert.match(en.locationNotice.sheet.foregroundBody, /no permission prompt/i, "英文详情必须写清不会弹权限请求");
+// 说明卡与弹层必须实际渲染这一项，避免只改了文案、界面却没显示。
+assert.match(notice, /locationNotice\.foregroundLabel/);
+assert.match(sheet, /locationNotice\.sheet\.foregroundTitle/);
 // 权限提示不得再要求「始终允许」。
 assert.doesNotMatch(zh.locationPermission.description, /后台/, "权限提示不得再要求后台定位");
 assert.doesNotMatch(en.locationPermission.description, /background/i, "权限提示不得再要求后台定位");

@@ -107,6 +107,7 @@ import {
 } from "@/modules/attendance/attendance-meal-break";
 import { createAttendanceQrPerformance } from "@/modules/attendance/attendance-qr-performance";
 import { stopAttendanceLocationTracking } from "@/modules/attendance/location-tracking";
+import { syncForegroundShiftLocationContext } from "@/modules/attendance/foreground-shift-location-runtime";
 import { readHttpStatus, type PunchDiagnosticEvent } from "@/modules/attendance/punch-diagnostics";
 import {
   flushPunchDiagnostics,
@@ -1361,11 +1362,15 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         onRefreshError: () => console.warn("[attendance] saved punch refresh failed"),
         // 班中后台定位已取消：上班不再启动任何后台任务；下班时兜底停掉旧版本可能留下的任务。
         // 服务端成功后必须跑完，不受 UI 会话失效影响；失败不影响已保存的打卡，也无需员工处理。
-        track: () => timing.measure("tracking", () => applyAttendanceTrackingLifecycle(result, {
-          stop: () => stopAttendanceLocationTracking().catch((error) => {
-            console.warn("[attendance] 下班停止旧版班中定位失败", error);
-          }),
-        })),
+        track: () => timing.measure("tracking", async () => {
+          await applyAttendanceTrackingLifecycle(result, {
+            stop: () => stopAttendanceLocationTracking().catch((error) => {
+              console.warn("[attendance] 下班停止旧版班中定位失败", error);
+            }),
+          });
+          // 上班记下「正在上班」标记（之后每次回前台在前台取一次位置）；下班删除标记。永不抛错。
+          await syncForegroundShiftLocationContext(result);
+        }),
       });
     } catch (error) {
       // 打卡已保存成功；保存后的展示 / 清理环节出错只记日志，不再向员工报「定位启动失败」类提示。
