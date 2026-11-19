@@ -41,7 +41,7 @@ assert.doesNotMatch(todayCardSource, /today\.info\.location|openLocationInSystem
 const validateIndex = source.indexOf("validateAttendanceQrToken(normalizedQrToken)");
 const hideScannerIndex = source.indexOf("hideAttendanceScannerForProcessing();", validateIndex);
 const resolveIndex = source.indexOf("resolveAttendanceQr(normalizedQrToken)");
-const preparationIndex = source.indexOf("prepareAttendanceQrPunch(qrToday.nextPunchType");
+const preparationIndex = source.indexOf("prepareAttendanceQrPunch({");
 // 普通打卡与二维码打卡共存时，只验证二维码准备完成后的 punch 调用顺序。
 const punchIndex = source.indexOf("punchMutation.mutateAsync(", preparationIndex);
 const successSoundIndex = source.indexOf("playAttendancePunchSuccessSound();", punchIndex);

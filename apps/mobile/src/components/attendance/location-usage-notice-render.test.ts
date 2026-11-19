@@ -5,8 +5,8 @@ import { resolve } from "node:path";
 import React, { act } from "react";
 
 // 打卡页「定位使用说明」的渲染测试：真实组件 + 真实中文文案，只把 react-native / paper / 翻译换成桩。
-// 钉住：上班前说明卡、上班中「已开启」条、下班后「已停止」条的内容与交互；
-// 上班扫码前披露弹层（consent）与只读详情弹层（info）的内容、按钮回调；
+// 班中后台定位已取消，这里钉住：说明卡只讲「扫码打卡时使用、其他时间不在后台使用」，
+// 详情弹层只读（没有「同意并继续」），也不再出现「已开启 / 已停止 / 补传 / 自动停止」这些旧口径；
 // 所有渲染出的文字都不含「每隔几分钟记录」类的采集频率表述。
 const bundles = new Map<string, Record<string, unknown>>();
 function bundle(namespace: string) {
@@ -83,8 +83,10 @@ async function run() {
   const { LocationUsageNotice } = await import("./LocationUsageNotice");
   const { LocationUsageSheet } = await import("./LocationUsageSheet");
 
-  // 采集频率表述（中文 / 英文）：用户明确要求界面文案里不出现。
+  // 采集频率表述（中文）：用户明确要求界面文案里不出现。
   const frequencyWording = /每隔|定期|每\s*\d+\s*(分钟|秒)|几分钟|分钟记录/;
+  // 旧口径：班中持续 / 后台使用位置、已开启 / 已停止状态、补传、自动停止——取消后台定位后都不成立。
+  const staleWording = /持续使用你的位置|含 App 在后台时|班中定位已开启|班中定位已停止|补传|自动停止|同意并扫码打卡/;
 
   async function mount(element: React.ReactElement) {
     const root = createRoot();
@@ -104,15 +106,16 @@ async function run() {
   {
     let opened = 0;
     const page = await mount(
-      React.createElement(LocationUsageNotice, { variant: "notice", onOpenDetails: () => { opened += 1; } }),
+      React.createElement(LocationUsageNotice, { onOpenDetails: () => { opened += 1; } }),
     );
     const text = page.allText().join("\n");
     assert.match(text, /定位使用说明/);
-    assert.match(text, /上班期间/);
-    assert.match(text, /打卡上班后，App 会持续使用你的位置（含 App 在后台时），仅用于考勤核对。/);
-    assert.match(text, /下班之后/);
-    assert.match(text, /扫码下班打卡后立即停止，不再使用你的位置。/);
+    assert.match(text, /扫码打卡时/);
+    assert.match(text, /只在你扫码上班、下班时获取当前位置，用于记录打卡地点，打卡完成后即停止。/);
+    assert.match(text, /其他时间/);
+    assert.match(text, /App 不会在后台使用你的位置，也不会持续跟踪你。/);
     assert.doesNotMatch(text, frequencyWording, "说明卡文案不得出现采集频率");
+    assert.doesNotMatch(text, staleWording, "说明卡不得残留旧口径");
     const details = page.link("了解详情 ›");
     assert.ok(details, "说明卡必须有「了解详情」入口");
     await act(async () => details!.props.onPress());
@@ -120,79 +123,21 @@ async function run() {
     await page.unmount();
   }
 
-  // ───────────── B. 上班中「已开启」条：有「说明」入口 ─────────────
-  {
-    let opened = 0;
-    const page = await mount(
-      React.createElement(LocationUsageNotice, { variant: "active", onOpenDetails: () => { opened += 1; } }),
-    );
-    const text = page.allText().join("\n");
-    assert.match(text, /班中定位已开启/);
-    assert.match(text, /扫码下班打卡后将自动停止/);
-    const explain = page.link("说明");
-    assert.ok(explain, "已开启状态条必须有「说明」入口");
-    await act(async () => explain!.props.onPress());
-    assert.equal(opened, 1);
-    await page.unmount();
-  }
-
-  // ───────────── C. 下班后「已停止」条：只读，没有入口 ─────────────
-  {
-    const page = await mount(
-      React.createElement(LocationUsageNotice, { variant: "stopped", onOpenDetails: () => { throw new Error("不应触发"); } }),
-    );
-    const text = page.allText().join("\n");
-    assert.match(text, /班中定位已停止/);
-    assert.match(text, /下班打卡后，App 不再使用你的位置/);
-    assert.equal(page.all("Pressable").length, 0, "已停止状态条只读，没有可点入口");
-    await page.unmount();
-  }
-
-  // ───────────── D. 上班扫码前披露弹层（consent） ─────────────
-  {
-    let confirmed = 0;
-    let dismissed = 0;
-    const page = await mount(
-      React.createElement(LocationUsageSheet, {
-        visible: true,
-        mode: "consent",
-        onConfirm: () => { confirmed += 1; },
-        onDismiss: () => { dismissed += 1; },
-      }),
-    );
-    const text = page.allText().join("\n");
-    assert.match(text, /班中定位说明/);
-    for (const title of ["扫码时", "上班期间", "下班打卡后"]) assert.ok(text.includes(title), `三段式说明缺少「${title}」`);
-    assert.match(text, /立即停止，不再使用你的位置。/);
-    assert.match(text, /始终允许/, "必须提示后台定位要选择「始终允许」");
-    assert.doesNotMatch(text, frequencyWording, "披露弹层文案不得出现采集频率");
-    // 披露弹层是上班前的同意步骤，不应出现只在详情里的「自动停止 / 补传」两项。
-    assert.ok(!text.includes("补传说明"));
-    const confirmButton = page.button("同意并扫码打卡");
-    const cancelButton = page.button("取消");
-    assert.ok(confirmButton && cancelButton, "披露弹层必须有「取消」和「同意并扫码打卡」");
-    await act(async () => confirmButton!.props.onPress());
-    assert.equal(confirmed, 1);
-    assert.equal(dismissed, 0, "点同意不应同时触发取消");
-    await act(async () => cancelButton!.props.onPress());
-    assert.equal(dismissed, 1);
-    await page.unmount();
-  }
-
-  // ───────────── E. 详情弹层（info）：只读，含自动停止与补传说明 ─────────────
+  // ───────────── B. 详情弹层：只读，讲清何时使用、何时不用、需要什么权限 ─────────────
   {
     let dismissed = 0;
     const page = await mount(
-      React.createElement(LocationUsageSheet, { visible: true, mode: "info", onDismiss: () => { dismissed += 1; } }),
+      React.createElement(LocationUsageSheet, { visible: true, onDismiss: () => { dismissed += 1; } }),
     );
     const text = page.allText().join("\n");
-    for (const title of ["扫码时", "上班期间", "下班打卡后", "自动停止", "补传说明"]) {
+    for (const title of ["扫码上班 / 下班时", "其他时间", "需要的权限"]) {
       assert.ok(text.includes(title), `详情弹层缺少「${title}」`);
     }
-    assert.match(text, /超过 10 小时、跨过门店当天 24:00 或退出登录，也会自动停止。/);
-    assert.match(text, /可能在下班后补传；不会再新增记录。/, "必须如实说明下班前未上传的位置可能补传");
+    assert.match(text, /不使用你的位置，也不会在后台运行定位，手机上不会出现常驻的定位提示。/);
+    assert.match(text, /只需要.使用 App 期间.允许定位，不需要.始终允许./, "必须告诉员工不需要「始终允许」");
     assert.doesNotMatch(text, frequencyWording, "详情弹层文案不得出现采集频率");
-    assert.equal(page.button("同意并扫码打卡"), undefined, "详情弹层是只读的，不能有同意按钮");
+    assert.doesNotMatch(text, staleWording, "详情弹层不得残留旧口径");
+    assert.equal(page.button("取消"), undefined, "详情弹层是只读的，不能有取消 / 同意按钮");
     const gotIt = page.button("知道了");
     assert.ok(gotIt);
     await act(async () => gotIt!.props.onPress());
@@ -200,10 +145,10 @@ async function run() {
     await page.unmount();
   }
 
-  // ───────────── F. 不可见时不渲染任何内容 ─────────────
+  // ───────────── C. 不可见时不渲染任何内容 ─────────────
   {
     const page = await mount(
-      React.createElement(LocationUsageSheet, { visible: false, mode: "consent", onConfirm: () => undefined, onDismiss: () => undefined }),
+      React.createElement(LocationUsageSheet, { visible: false, onDismiss: () => undefined }),
     );
     assert.equal(page.all("Modal").length, 0, "visible=false 必须卸载弹层内容");
     await page.unmount();

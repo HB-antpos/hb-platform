@@ -46,7 +46,6 @@ import type { PlacementTargetCell } from "@/modules/attendance/schedule-placemen
 import type { PlacementSource } from "@/modules/attendance/schedule-placement";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { StorePickerModal } from "@/components/ui/StorePickerModal";
-import { LocationUsageSheet } from "./LocationUsageSheet";
 import {
   approveAttendanceApproval,
   cancelAvailability,
@@ -107,26 +106,18 @@ import {
   type AttendanceMealCheckAnswer,
 } from "@/modules/attendance/attendance-meal-break";
 import { createAttendanceQrPerformance } from "@/modules/attendance/attendance-qr-performance";
-import {
-  ensureAttendanceBackgroundLocationPermission,
-  hasAttendanceBackgroundLocationPermission,
-  startAttendanceLocationTracking,
-  stopAttendanceLocationTracking,
-} from "@/modules/attendance/location-tracking";
+import { stopAttendanceLocationTracking } from "@/modules/attendance/location-tracking";
 import { readHttpStatus, type PunchDiagnosticEvent } from "@/modules/attendance/punch-diagnostics";
 import {
   flushPunchDiagnostics,
   readLocationPermissionSnapshot,
   reportPunchDiagnostic,
 } from "@/modules/attendance/punch-diagnostics-runtime";
-import { useShiftLocationTrackingState } from "@/modules/attendance/use-shift-location-tracking-state";
-import { resolveAttendanceTodayStatus } from "@/modules/attendance/attendance-today-status";
 import {
   PUBLIC_HOLIDAY_SYNC_DAYS_AHEAD,
   normalizeAustralianHolidayJurisdiction,
   resolveAustralianHolidayJurisdiction,
 } from "@/modules/attendance/public-holiday-sync";
-import { getAttendanceDeviceContext } from "@/modules/attendance/required-location";
 import { runSequentialBatch } from "@/modules/attendance/schedule-grid";
 import type {
   AttendanceAvailability,
@@ -294,14 +285,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   const [attendanceScannerSubmitting, setAttendanceScannerSubmitting] = useState(false);
   const [punchStage, setPunchStage] = useState<"validating" | "locating" | "saving" | "tracking">();
   const [lastQrPunch, setLastQrPunch] = useState<AttendancePunch>();
-  const [lastQrTrackingWarning, setLastQrTrackingWarning] = useState("");
-  // 定位使用说明弹层：上班扫码前披露，Promise 化后嵌入扫码流程；resolver 保证每次只会结算一次。
-  const [locationConsentVisible, setLocationConsentVisible] = useState(false);
-  const locationConsentResolverRef = useRef<((accepted: boolean) => void) | null>(null);
-  // 本次扫码前员工是否已在说明弹层里同意；同意过就不在扫码后重复弹。
-  const locationUsageConsentedRef = useRef(false);
-  // 上 / 下班后的定位生命周期（启动 / 停止原生任务）完成时加一，通知打卡页重新读取真实采集状态。
-  const [trackingStateVersion, setTrackingStateVersion] = useState(0);
   // 扫码下班前核对用餐期间（刷新今日状态 + 等员工回答）禁用打卡按钮，防止重复点。
   const [isPreparingScan, setIsPreparingScan] = useState(false);
   // 员工在扫码前对「吃饭休息了吗」的回答；随本次扫码的打卡请求提交，关闭扫码器或打卡成功后清空。
@@ -419,11 +402,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     enabled: Boolean(isAuthenticated && user && isPunchRecordsTab
       && (!attendanceScannerSubmitting || punchStage === "tracking")),
   });
-  // 班中定位的真实状态：今日数据刷新、上下班后的定位生命周期完成、App 回前台时重新读取；只关心当天。
-  const locationTrackingState = useShiftLocationTrackingState(
-    `${todayQuery.dataUpdatedAt}:${trackingStateVersion}`,
-    selectedDate === todayDate && isPunchRecordsTab,
-  );
   const weekQuery = useQuery({
     queryKey: attendanceKeys.week(selectedStoreCode, employeeWeekStartDate),
     queryFn: () =>
@@ -1059,30 +1037,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     storeCode: payload.storeCode || selectedStoreCode,
   });
 
-  const confirmBackgroundLocationUsage = useCallback(
-    () =>
-      new Promise<boolean>((resolve) => {
-        // 扫码流程是串行的，正常不会并发；万一已有未决弹层，先按取消结算，避免 Promise 泄漏。
-        locationConsentResolverRef.current?.(false);
-        locationConsentResolverRef.current = resolve;
-        setLocationConsentVisible(true);
-      }),
-    [],
-  );
-
-  const settleLocationConsent = useCallback((accepted: boolean) => {
-    const resolve = locationConsentResolverRef.current;
-    locationConsentResolverRef.current = null;
-    setLocationConsentVisible(false);
-    resolve?.(accepted);
-  }, []);
-
-  // 页面卸载时若弹层还没结算，按取消结算，避免扫码流程永远挂起。
-  useEffect(() => () => {
-    locationConsentResolverRef.current?.(false);
-    locationConsentResolverRef.current = null;
-  }, []);
-
   // 进入打卡页时补传本机暂存的扫码打卡诊断（上次离线或未登录时没传出去的）；失败静默。
   useEffect(() => {
     void flushPunchDiagnostics();
@@ -1149,53 +1103,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       ],
     );
   }, [openLocationSettings, t]);
-
-  const ensureQrPunchBackgroundLocationPermission = async (
-    isActive = () => true,
-  ) => {
-    const alreadyAllowed = await hasAttendanceBackgroundLocationPermission();
-    if (!isActive()) return false;
-    if (alreadyAllowed) {
-      return true;
-    }
-    // 诊断：App 判定「后台定位未授权」是异常路径（11-19 iOS 员工系统设置已是 Always 仍走到这里），
-    // 先记下系统此刻给出的前后台权限原始读数，之后与申请结果一起上报；只读、不弹窗、不阻塞。
-    const permissionBefore = await readLocationPermissionSnapshot();
-    const consentedBeforeScan = locationUsageConsentedRef.current;
-    // 扫码前已经在说明弹层里同意过就不再重复弹；只有扫码前没能判断出是上班（如状态过期）才在这里补弹。
-    const confirmed = locationUsageConsentedRef.current || await confirmBackgroundLocationUsage();
-    if (!isActive() || !confirmed) {
-      if (isActive()) {
-        reportPunchDiagnostic({
-          stage: "permission",
-          outcome: "cancelled",
-          reason: "consentDeclined",
-          consentedBeforeScan,
-          permissionBefore,
-        });
-      }
-      return false;
-    }
-    const allowed = await ensureAttendanceBackgroundLocationPermission();
-    if (!isActive()) {
-      return false;
-    }
-    reportPunchDiagnostic({
-      stage: "permission",
-      outcome: allowed ? "granted" : "denied",
-      reason: allowed ? "requestGranted" : "requestDenied",
-      consentedBeforeScan,
-      permissionBefore,
-      permissionAfter: await readLocationPermissionSnapshot(),
-    });
-    if (!allowed) {
-      // 系统权限被拒绝后提供明确的设置入口，避免用户停留在不可恢复状态。
-      showLocationPermissionSettingsPrompt();
-      return false;
-    }
-    prewarmLocation();
-    return true;
-  };
 
   const pauseAttendanceScanner = (message: string) => {
     setAttendanceScannerError(message);
@@ -1273,7 +1180,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       errorCode: getAttendancePunchErrorCode(error),
       httpStatus: readHttpStatus(error),
       errorMessage: error instanceof Error ? error.message : undefined,
-      consentedBeforeScan: locationUsageConsentedRef.current,
       elapsedMs: Date.now() - scanStartedAtMs,
       ...extra,
     });
@@ -1360,11 +1266,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     if (!attendanceScannerSessionGate.isActive(session)) return;
     setPunchStage("locating");
     let latestVerification: AttendancePunchVerificationState | undefined;
-    const preparation = await prepareAttendanceQrPunch(qrToday.nextPunchType, {
+    const preparation = await prepareAttendanceQrPunch({
       isActive: () => attendanceScannerSessionGate.isActive(session),
-      ensureBackgroundPermission: () => ensureQrPunchBackgroundLocationPermission(
-        () => attendanceScannerSessionGate.isActive(session),
-      ),
       refreshVerification: async () => {
         // resolve 和 today 的成功响应已证明联网，直接复用本次会话的新鲜定位。
         latestVerification = await timing.measure("location", () => refreshVerification({ networkVerified: true }));
@@ -1373,14 +1276,13 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     });
     if (preparation.status === "stale") return;
     if (preparation.status !== "ready") {
-      // 诊断：定位准备没通过（后台权限 / GPS / 网络），连同当时系统给出的权限读数一起上报。
+      // 诊断：定位准备没通过（GPS / 网络），连同当时系统给出的权限读数一起上报。
       const failedVerification = latestVerification;
       void readLocationPermissionSnapshot().then((permissionAfter) => reportPunchDiagnostic({
         stage: "locating",
         outcome: "failed",
         reason: preparation.status,
         punchType: qrToday.nextPunchType,
-        consentedBeforeScan: locationUsageConsentedRef.current,
         elapsedMs: Date.now() - scanStartedAtMs,
         permissionAfter,
         ...(failedVerification
@@ -1400,13 +1302,11 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         // 前台定位被拒绝时，同样引导用户前往系统设置恢复授权。
         showLocationPermissionSettingsPrompt();
       }
-      const messageKey = preparation.status === "backgroundRequired"
-        ? "messages.backgroundLocationRequiredForClockIn"
-        : preparation.status === "gpsRequired"
-          ? latestVerification?.location.reason === "timeout"
-            ? "messages.qrGpsTimeout"
-            : "messages.qrGpsRequired"
-          : "messages.qrNetworkRequired";
+      const messageKey = preparation.status === "gpsRequired"
+        ? latestVerification?.location.reason === "timeout"
+          ? "messages.qrGpsTimeout"
+          : "messages.qrGpsRequired"
+        : "messages.qrNetworkRequired";
       failAttendanceQrProcessing(session, t(messageKey));
       return;
     }
@@ -1438,7 +1338,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       return;
     }
 
-    let trackingWarning = "";
     try {
       await completeAttendancePostSave({
         notifySaved: () => {
@@ -1446,7 +1345,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
           timing.saved();
           if (!attendanceScannerSessionGate.isActive(session)) return;
           setLastQrPunch(result);
-          setLastQrTrackingWarning("");
           setPunchStage("tracking");
           pendingMealDeclarationRef.current = undefined;
           const punchTypeLabel = t(`punchTypes.${result.punchType}`, result.punchType);
@@ -1461,35 +1359,21 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         },
         refresh: () => timing.measure("refresh", invalidateEmployeeData),
         onRefreshError: () => console.warn("[attendance] saved punch refresh failed"),
-        // 服务端成功后必须完成定位生命周期，不受 UI 会话失效影响。
-        track: () => timing.measure("tracking", () => applyAttendanceTrackingLifecycle(result, qrStore.storeCode, {
-          start: async (storeCode) => {
-            await startAttendanceLocationTracking({
-              storeCode,
-              startedAtUtc: result.serverTimeUtc,
-              workDate: result.workDate,
-              storeTimeZone: result.storeTimeZone,
-              ...(await getAttendanceDeviceContext()),
-            });
-          },
-          stop: stopAttendanceLocationTracking,
+        // 班中后台定位已取消：上班不再启动任何后台任务；下班时兜底停掉旧版本可能留下的任务。
+        // 服务端成功后必须跑完，不受 UI 会话失效影响；失败不影响已保存的打卡，也无需员工处理。
+        track: () => timing.measure("tracking", () => applyAttendanceTrackingLifecycle(result, {
+          stop: () => stopAttendanceLocationTracking().catch((error) => {
+            console.warn("[attendance] 下班停止旧版班中定位失败", error);
+          }),
         })),
       });
     } catch (error) {
-      trackingWarning = getErrorMessage(
-        error,
-        result.punchType === "ClockOut"
-          ? "messages.locationTrackingFailed"
-          : "messages.qrTrackingWarning",
-      );
+      // 打卡已保存成功；保存后的展示 / 清理环节出错只记日志，不再向员工报「定位启动失败」类提示。
+      console.warn("[attendance] 打卡保存后的收尾步骤失败", error);
     }
-    // 定位生命周期（启动 / 停止）已经跑完，不受 UI 会话是否失效影响：通知打卡页重新读取真实状态。
-    setTrackingStateVersion((version) => version + 1);
     if (!attendanceScannerSessionGate.isActive(session)) return;
 
     closeAttendanceScanner(true);
-    setLastQrTrackingWarning(trackingWarning);
-    if (trackingWarning) showMessage(trackingWarning);
   };
 
   const attendanceCameraScan = useCameraScan({
@@ -1579,28 +1463,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     return buildAttendanceMealDeclaration(answer, meal.missingCountIfClockOutNow);
   };
 
-  /**
-   * 上班扫码前的定位使用说明。放在打开扫码器之前：二维码与打卡授权都有有效期，扫完再读说明会过期。
-   * 只在「当天、状态是待上班、后台定位权限还没授权」时出现；已授权的员工靠打卡页常驻的说明卡了解。
-   * 返回 false 表示员工取消，本次不打开扫码器。
-   */
-  const confirmLocationUsageBeforeClockIn = async (): Promise<boolean> => {
-    locationUsageConsentedRef.current = false;
-    if (selectedDate !== todayDate) return true;
-    if (resolveAttendanceTodayStatus(todayQuery.data, true) !== "readyToClockIn") return true;
-    if (await hasAttendanceBackgroundLocationPermission()) return true;
-    const confirmed = await confirmBackgroundLocationUsage();
-    locationUsageConsentedRef.current = confirmed;
-    return confirmed;
-  };
-
   const openAttendanceScanner = async () => {
     if (isPreparingScan) return;
     setIsPreparingScan(true);
     let declaration: AttendanceMealDeclaration | undefined | "cancelled";
     try {
       declaration = await resolveClockOutMealDeclaration();
-      if (declaration !== "cancelled" && !(await confirmLocationUsageBeforeClockIn())) declaration = "cancelled";
     } finally {
       setIsPreparingScan(false);
     }
@@ -1840,8 +1708,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
                 hasAuthorizedStores={stores.length > 0}
                 verification={verification}
                 lastQrPunch={lastQrPunch}
-                trackingWarning={lastQrTrackingWarning}
-                locationTrackingState={locationTrackingState}
                 onScan={() => void openAttendanceScanner()}
                 isMealBreakBusy={mealBreakMutation.isPending}
                 onStartMealBreak={(storeCode) => mealBreakMutation.mutate({ action: "start", storeCode })}
@@ -2288,12 +2154,6 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       >
         {snackbarMessage}
       </Snackbar>
-      <LocationUsageSheet
-        visible={locationConsentVisible}
-        mode="consent"
-        onConfirm={() => settleLocationConsent(true)}
-        onDismiss={() => settleLocationConsent(false)}
-      />
       <StorePickerModal
         visible={storePickerVisible}
         presentation="sheet"

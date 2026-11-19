@@ -231,59 +231,39 @@ export function shouldEnableAttendanceQrScanning(options: {
   return options.isVisible && !options.isSubmitting && !options.isPaused;
 }
 
+// 班中后台定位已取消：上班不再启动任何后台任务，只有下班时兜底停掉旧版本可能留下的任务。
 export function getAttendanceTrackingAction(punchType: string) {
-  if (punchType === "ClockIn") return "start";
   if (punchType === "ClockOut") return "stop";
   return "none";
-}
-
-export function requiresBackgroundPermissionBeforePunch(punchType: string) {
-  return punchType === "ClockIn";
 }
 
 type AttendanceQrPunchPreparation =
   | {
       status: "ready";
       verification: AttendancePunchVerificationState;
-      backgroundLocationAllowed: boolean;
     }
-  | { status: "stale" | "backgroundRequired" | "gpsRequired" | "networkRequired" };
+  | { status: "stale" | "gpsRequired" | "networkRequired" };
 
-export async function prepareAttendanceQrPunch(
-  expectedPunchType: string,
-  options: {
-    isActive: () => boolean;
-    ensureBackgroundPermission: () => Promise<boolean>;
-    refreshVerification: () => Promise<AttendancePunchVerificationState>;
-  },
-): Promise<AttendanceQrPunchPreparation> {
-  let backgroundLocationAllowed = false;
-  if (requiresBackgroundPermissionBeforePunch(expectedPunchType)) {
-    backgroundLocationAllowed = await options.ensureBackgroundPermission();
-    if (!options.isActive()) return { status: "stale" };
-    if (!backgroundLocationAllowed) return { status: "backgroundRequired" };
-  }
-
-  // 权限交互可能耗时，提交前必须重新采集最新 GPS 与网络状态。
+// 上班 / 下班都只需要「使用 App 期间」的前台定位，不再有后台权限这一关。
+export async function prepareAttendanceQrPunch(options: {
+  isActive: () => boolean;
+  refreshVerification: () => Promise<AttendancePunchVerificationState>;
+}): Promise<AttendanceQrPunchPreparation> {
+  // 提交前必须重新采集最新 GPS 与网络状态（系统定位权限弹窗可能耗时）。
   const verification = await options.refreshVerification();
   if (!options.isActive()) return { status: "stale" };
   if (verification.location.status !== "available") return { status: "gpsRequired" };
   if (verification.network.status !== "available") return { status: "networkRequired" };
-  return { status: "ready", verification, backgroundLocationAllowed };
+  return { status: "ready", verification };
 }
 
 export async function applyAttendanceTrackingLifecycle(
-  result: { punchType: string; storeCode?: string },
-  fallbackStoreCode: string,
+  result: { punchType: string },
   handlers: {
-    start: (storeCode: string) => Promise<void>;
     stop: () => Promise<void>;
   },
 ) {
-  const action = getAttendanceTrackingAction(result.punchType);
-  if (action === "start") {
-    await handlers.start(result.storeCode || fallbackStoreCode);
-  } else if (action === "stop") {
+  if (getAttendanceTrackingAction(result.punchType) === "stop") {
     await handlers.stop();
   }
 }

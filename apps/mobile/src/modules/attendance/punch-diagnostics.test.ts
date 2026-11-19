@@ -225,9 +225,9 @@ test("源码契约：扫码打卡每个失败阶段都有上报点，且不把�
   for (const stage of ["format", "resolve", "store", "today", "punch"]) {
     assert.ok(source.includes(`reportQrFailure("${stage}"`), `缺少 ${stage} 阶段的上报`);
   }
-  for (const stage of ["locating", "permission"]) {
-    assert.ok(source.includes(`stage: "${stage}"`), `缺少 ${stage} 阶段的上报`);
-  }
+  // 班中后台定位取消后不再有「后台定位权限」这一阶段，只剩定位准备（GPS / 网络）。
+  assert.ok(source.includes(`stage: "locating"`), "缺少 locating 阶段的上报");
+  assert.equal(source.includes(`stage: "permission"`), false, "后台权限阶段已取消，不应再有上报点");
   // 所有 reportPunchDiagnostic / reportQrFailure 调用的实参里不得出现二维码 token 与打卡授权凭证。
   const calls = source.match(/report(?:PunchDiagnostic|QrFailure)\([\s\S]*?\n\s*\}?\)\;?/g) ?? [];
   assert.ok(calls.length >= 6);

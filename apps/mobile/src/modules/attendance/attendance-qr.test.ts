@@ -14,7 +14,6 @@ import {
   normalizeAttendanceQrResolveResult,
   normalizeAttendancePunchMutationResult,
   prepareAttendanceQrPunch,
-  requiresBackgroundPermissionBeforePunch,
   resolveAttendanceQrStore,
   shouldEnableAttendanceQrScanning,
   validateAttendanceQrToken,
@@ -135,11 +134,10 @@ assert.equal(canSubmitAttendanceQrPunch({ hasCurrentLocation: true, isOnline: tr
 assert.equal(shouldEnableAttendanceQrScanning({ isVisible: true, isSubmitting: false, isPaused: true }), false);
 assert.equal(shouldEnableAttendanceQrScanning({ isVisible: true, isSubmitting: false, isPaused: false }), true);
 
-assert.equal(getAttendanceTrackingAction("ClockIn"), "start");
+// 班中后台定位已取消：上班不再启动任何任务，只有下班兜底停掉旧版本可能留下的任务。
+assert.equal(getAttendanceTrackingAction("ClockIn"), "none");
 assert.equal(getAttendanceTrackingAction("ClockOut"), "stop");
 assert.equal(getAttendanceTrackingAction("Unknown"), "none");
-assert.equal(requiresBackgroundPermissionBeforePunch("ClockIn"), true);
-assert.equal(requiresBackgroundPermissionBeforePunch("ClockOut"), false);
 
 const errorCases: Record<string, string> = {
   ATTENDANCE_QR_DECRYPT_FAILED: "messages.qrDecryptFailed",
@@ -327,23 +325,15 @@ assert.deepEqual(
 async function runAsyncTests() {
   const trackingEvents: string[] = [];
   await applyAttendanceTrackingLifecycle(
-    { punchType: "ClockIn", storeCode: "STORE-02" },
-    "STORE-01",
-    {
-      start: async (storeCode) => { trackingEvents.push(`start:${storeCode}`); },
-      stop: async () => { trackingEvents.push("stop"); },
-    },
+    { punchType: "ClockIn" },
+    { stop: async () => { trackingEvents.push("stop"); } },
   );
   await applyAttendanceTrackingLifecycle(
     { punchType: "ClockOut" },
-    "STORE-01",
-    {
-      start: async (storeCode) => { trackingEvents.push(`start:${storeCode}`); },
-      stop: async () => { trackingEvents.push("stop"); },
-    },
+    { stop: async () => { trackingEvents.push("stop"); } },
   );
-  assert.deepEqual(trackingEvents, ["start:STORE-02", "stop"],
-    "tracking 生命周期只依赖服务端 punch 结果，不依赖 UI session");
+  assert.deepEqual(trackingEvents, ["stop"],
+    "上班不触发任何后台定位动作；下班只停止，且只依赖服务端 punch 结果，不依赖 UI session");
 
   const readyVerification = {
     checkedAt: "2026-07-16T00:00:00Z",
@@ -364,36 +354,41 @@ async function runAsyncTests() {
       networkVerificationStatus: "online" as const,
     },
   };
-  const clockInOrder: string[] = [];
-  const clockInPreparation = await prepareAttendanceQrPunch("ClockIn", {
+  // 上班 / 下班都只需要前台定位：准备阶段只刷新一次最新 GPS 与网络，没有后台权限这一关。
+  const order: string[] = [];
+  const ready = await prepareAttendanceQrPunch({
     isActive: () => true,
-    ensureBackgroundPermission: async () => {
-      clockInOrder.push("background");
-      return true;
-    },
     refreshVerification: async () => {
-      clockInOrder.push("refresh");
+      order.push("refresh");
       return readyVerification;
     },
   });
-  assert.deepEqual(clockInOrder, ["background", "refresh"],
-    "预计 ClockIn 必须先完成后台定位授权，再紧邻 punch 刷新 GPS/network");
-  assert.equal(clockInPreparation.status, "ready");
+  assert.deepEqual(order, ["refresh"], "准备阶段只刷新 GPS/network，不再申请后台定位");
+  assert.equal(ready.status, "ready");
 
-  const clockOutOrder: string[] = [];
-  const clockOutPreparation = await prepareAttendanceQrPunch("ClockOut", {
-    isActive: () => true,
-    ensureBackgroundPermission: async () => {
-      clockOutOrder.push("background");
-      return false;
-    },
-    refreshVerification: async () => {
-      clockOutOrder.push("refresh");
-      return readyVerification;
-    },
+  const stale = await prepareAttendanceQrPunch({
+    isActive: () => false,
+    refreshVerification: async () => readyVerification,
   });
-  assert.deepEqual(clockOutOrder, ["refresh"], "ClockOut 不得要求后台定位权限");
-  assert.equal(clockOutPreparation.status, "ready");
+  assert.equal(stale.status, "stale", "扫码会话失效后不得继续提交");
+
+  const noGps = await prepareAttendanceQrPunch({
+    isActive: () => true,
+    refreshVerification: async () => ({
+      ...readyVerification,
+      location: { status: "permissionDenied" as const, reason: "permissionDenied" as const, permissionStatus: "denied" as const },
+    }),
+  });
+  assert.equal(noGps.status, "gpsRequired");
+
+  const offline = await prepareAttendanceQrPunch({
+    isActive: () => true,
+    refreshVerification: async () => ({
+      ...readyVerification,
+      network: { status: "unavailable" as const, reason: "networkUnreachable" as const, verificationStatus: "offline" as const },
+    }),
+  });
+  assert.equal(offline.status, "networkRequired");
 }
 
 void runAsyncTests().then(() => console.log("attendance-qr.test.ts: ok"));
