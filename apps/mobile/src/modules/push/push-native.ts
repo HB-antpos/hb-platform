@@ -8,6 +8,7 @@
 import {
   PUSH_ANDROID_CHANNEL_ID,
   PUSH_FOREGROUND_BEHAVIOR,
+  type PushForegroundNotification,
   type PushNative,
   type PushPermissionStatus,
   type PushResponse,
@@ -50,6 +51,13 @@ function toPushResponse(raw: import("expo-notifications").NotificationResponse, 
   };
 }
 
+/** 前台收到的通知归一化：只取 data.type。 */
+function toForegroundNotification(raw: import("expo-notifications").Notification | undefined): PushForegroundNotification {
+  const rawData = raw?.request?.content?.data;
+  const type = isRecord(rawData) && typeof rawData.type === "string" ? rawData.type : null;
+  return { type };
+}
+
 export function createPushNative(notifications: NotificationsModule, device: DeviceModule, options: PushNativeOptions): PushNative {
   const defaultAction = notifications.DEFAULT_ACTION_IDENTIFIER;
   return {
@@ -79,9 +87,9 @@ export function createPushNative(notifications: NotificationsModule, device: Dev
 
     installForegroundHandler(onForeground) {
       notifications.setNotificationHandler({
-        handleNotification: async () => {
+        handleNotification: async (notification) => {
           try {
-            onForeground();
+            onForeground(toForegroundNotification(notification));
           } catch {
             // 刷新失败不影响展示策略
           }

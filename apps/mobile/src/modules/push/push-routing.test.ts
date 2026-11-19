@@ -1,9 +1,10 @@
 // 点击推送的去向映射：全部分支。
 import assert from "node:assert/strict";
 import { buildFaceHubRoute, parseFaceHubParams, resolveFaceHubActiveTab, type FaceHubTabKey } from "../navigation/face-hub";
-import { resolveNotificationTarget } from "../notifications/logic";
+import { NOTIFICATION_TYPE_ATTENDANCE_LOCATION_REQUEST, resolveNotificationTarget } from "../notifications/logic";
 import {
   FACE_HIT_PUSH_PARAMS,
+  PUSH_TYPE_ATTENDANCE_LOCATION_REQUEST,
   PUSH_TYPE_FACE_UNWELCOME_EXPIRING,
   PUSH_TYPE_FACE_UNWELCOME_HIT,
   resolvePushTarget,
@@ -21,6 +22,24 @@ assert.deepEqual(FACE_HIT_PUSH_PARAMS, HIT_PARAMS);
 assert.notEqual(FACE_HIT_PUSH_PARAMS.tab, "list", "不能再直接落到「命中复核 · 待复核」：高相似度命中被自动确认后那里是空的");
 assert.equal(PUSH_TYPE_FACE_UNWELCOME_HIT, "face.unwelcome-hit", "与后端 AppNotificationTypes.FaceUnwelcomeHit 一致");
 assert.equal(PUSH_TYPE_FACE_UNWELCOME_EXPIRING, "face.unwelcome-expiring", "与后端 AppNotificationTypes.FaceUnwelcomeExpiring 一致");
+
+// 位置请求 → 先交互式消费一次待办再落到收件箱（落点常量与后端通知类型一致）
+assert.equal(PUSH_TYPE_ATTENDANCE_LOCATION_REQUEST, "attendance.location-request", "与后端位置请求通知类型一致");
+assert.equal(NOTIFICATION_TYPE_ATTENDANCE_LOCATION_REQUEST, PUSH_TYPE_ATTENDANCE_LOCATION_REQUEST, "推送与收件箱用同一个类型");
+const REQUEST_PUSH_DATA = {
+  notificationId: "n1",
+  type: "attendance.location-request",
+  requestGuid: "r1",
+  storeCode: "1042",
+  expiresAtUtc: "2026-11-19T01:15:00Z",
+};
+assert.deepEqual(resolvePushTarget("attendance.location-request", REQUEST_PUSH_DATA), { kind: "location-request" });
+assert.deepEqual(resolvePushTarget("  attendance.location-request  ", REQUEST_PUSH_DATA), { kind: "location-request" }, "前后空白容忍");
+assert.deepEqual(resolvePushTarget("attendance.location-request"), { kind: "location-request" }, "data 省略也可以");
+// 只认精确类型：其它 attendance.*（含将来新增、大小写不同、带后缀）不会触发取位置，落到收件箱
+for (const type of ["attendance.punch", "attendance.", "attendance.location-request.v2", "Attendance.Location-Request", "attendance.location-requests"]) {
+  assert.deepEqual(resolvePushTarget(type, {}), INBOX, `${type} 落到收件箱`);
+}
 
 // 名单条目将到期 → 「名单」页签 · 名单条目
 assert.deepEqual(resolvePushTarget("face.unwelcome-expiring", {}), { kind: "face-hub", params: { tab: "list", sub: "entries" } });
@@ -46,6 +65,21 @@ for (const type of [undefined, null, "", "   ", 42, {}, [], true]) {
 }
 assert.deepEqual(resolvePushTarget("approval.decided"), INBOX, "data 省略也可以");
 assert.deepEqual(resolvePushTarget("approval.decided", null), INBOX);
+
+// 推送与通知收件箱点同一条位置请求通知：去向一致（都是「交互式消费待办」，推送再落到收件箱；收件箱里点就是原地）。
+// 不论权限组合都一样（位置请求不看人脸页签权限）
+{
+  const pushTarget = resolvePushTarget("attendance.location-request", REQUEST_PUSH_DATA);
+  for (const access of [
+    { canViewCapture: true, canViewList: true },
+    { canViewCapture: false, canViewList: false },
+    { canViewCapture: false, canViewList: true },
+  ]) {
+    const inboxTarget = resolveNotificationTarget({ type: "attendance.location-request" }, access);
+    assert.equal(pushTarget.kind, "location-request");
+    assert.equal(inboxTarget.kind, "location-request", `${JSON.stringify(access)}：收件箱点同一条通知也是消费待办`);
+  }
+}
 
 // 路由目标能被合并页接受：生成的路由经 parseFaceHubParams 往返不丢参数
 {

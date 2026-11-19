@@ -21,6 +21,12 @@ export interface PushResponse {
   data: Record<string, unknown>;
 }
 
+/** 前台收到的推送（已归一化）：只保留 data.type，用于决定要不要触发额外动作；标题 / 正文 / 其它 data 不越过适配层。 */
+export interface PushForegroundNotification {
+  /** 推送 data.type；缺失或非字符串为 null。 */
+  type: string | null;
+}
+
 /** 原生推送能力的最小接口。生产实现在 push-native.ts（动态加载 expo-notifications），测试用假实现。 */
 export interface PushNative {
   /** 是否真机（模拟器 / 模拟机取不到有效令牌，直接跳过）。 */
@@ -32,8 +38,8 @@ export interface PushNative {
   requestPermission(): Promise<PushPermissionStatus>;
   /** 取 Expo 推送令牌；无 Google Play 服务等情况会 reject。 */
   getExpoPushToken(projectId: string): Promise<string>;
-  /** 前台策略：不弹横幅、不响铃、不改角标；每收到一条前台推送回调一次 onForeground（用于刷新未读数）。 */
-  installForegroundHandler(onForeground: () => void): void;
+  /** 前台策略：不弹横幅、不响铃、不改角标；每收到一条前台推送回调一次 onForeground（用于刷新未读数、按 type 触发待办消费）。 */
+  installForegroundHandler(onForeground: (notification: PushForegroundNotification) => void): void;
   addResponseListener(listener: (response: PushResponse) => void): { remove(): void };
   /** 本次进程内最近一次被点击的推送（冷启动点击进入 App 时可取到）。 */
   getLastResponse(): PushResponse | null;

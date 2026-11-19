@@ -4,7 +4,8 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 /**
- * 打卡页的「定位使用说明」卡：上班前显示，告诉员工位置只在扫码打卡时使用、不会在后台使用。
+ * 打卡页的「定位使用说明」卡：上班前显示，告诉员工位置只在使用 App 期间获取——扫码打卡 / 登录，
+ * 以及上班期间收到店长 / 管理员的位置请求并打开 App 响应时（每次请求都会通知并留记录）；不会在后台使用。
  * 班中后台定位已取消，所以不再有「定位已开启 / 已停止」这类状态条。
  */
 export function LocationUsageNotice({ onOpenDetails }: { onOpenDetails: () => void }) {
@@ -23,6 +24,15 @@ export function LocationUsageNotice({ onOpenDetails }: { onOpenDetails: () => vo
         <Text variant="bodySmall" style={styles.rowText}>
           <Text variant="labelMedium" style={styles.rowLabel}>{t("locationNotice.scanLabel")}</Text>
           {`：${t("locationNotice.scanBody")}`}
+        </Text>
+      </View>
+      <View style={styles.row}>
+        <View style={[styles.iconBox, styles.iconOn]}>
+          <Icon source="bell-ring-outline" size={16} color={HB_COLORS.action} />
+        </View>
+        <Text variant="bodySmall" style={styles.rowText}>
+          <Text variant="labelMedium" style={styles.rowLabel}>{t("locationNotice.requestLabel")}</Text>
+          {`：${t("locationNotice.requestBody")}`}
         </Text>
       </View>
       <View style={styles.row}>

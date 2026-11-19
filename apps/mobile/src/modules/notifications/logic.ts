@@ -6,6 +6,8 @@ import type { NotificationItem, NotificationPage } from "./types";
 export const NOTIFICATION_PAGE_SIZE = 20;
 /** 后端 AppNotificationTypes.FaceUnwelcomeHit：不受欢迎人员名单疑似命中（需人工复核）。 */
 export const NOTIFICATION_TYPE_FACE_UNWELCOME_HIT = "face.unwelcome-hit";
+/** 后端 AppNotificationTypes：店长 / 管理员请求已上班员工上报一次位置（通知保留在收件箱，是员工可查的留痕）。 */
+export const NOTIFICATION_TYPE_ATTENDANCE_LOCATION_REQUEST = "attendance.location-request";
 /** 后端 AppNotificationPriorities.High：需要立即注意。 */
 export const NOTIFICATION_PRIORITY_HIGH = 1;
 
@@ -17,9 +19,15 @@ export function isHighPriority(item: Pick<NotificationItem, "priority">): boolea
   return item.priority >= NOTIFICATION_PRIORITY_HIGH;
 }
 
-/** 点开通知后的去向：只有「人脸比对」合并页（face-hub），页签与筛选由 tab / sub / filter / hitStatus 指定。 */
+/**
+ * 点开通知后的去向：
+ * - 「人脸比对」合并页（face-hub），页签与筛选由 tab / sub / filter / hitStatus 指定；
+ * - 位置请求（location-request）：不跳转（已经在收件箱里），而是交互式消费一次待办——
+ *   与点同一条推送一致（推送先消费再落到收件箱，见 push/push-routing.ts，有测试守着）。
+ */
 export type NotificationTarget =
   | { kind: "route"; routeName: "face-hub"; params: FaceHubParams }
+  | { kind: "location-request" }
   | { kind: "none" };
 
 /** 打开合并页所需的页签权限：抓拍页签（FaceCapture.Images.View）与名单页签（名单 Manage / Approve / Review 任一）。 */
@@ -33,9 +41,11 @@ export interface NotificationTargetAccess {
  * - 有 FaceCapture.Images.View：「抓拍」页签，选中「黑名单」并只看未读（命中通知只发给持 Review 的人，数字也是这类通知的未读数）；
  * - 否则有名单页签权限：「名单」页签的「命中复核」；
  * - 两者都没有（权限被收回）就不跳转，只标已读。
+ * 位置请求通知：不看权限（账号本来就持有 Attendance.Punch.Self 才会收到），去向是「交互式消费待办」；
  * 其他类型（含将来新增的）一律是未知类型，只标已读、不跳转。
  */
 export function resolveNotificationTarget(item: Pick<NotificationItem, "type">, access: NotificationTargetAccess): NotificationTarget {
+  if (item.type === NOTIFICATION_TYPE_ATTENDANCE_LOCATION_REQUEST) return { kind: "location-request" };
   if (item.type !== NOTIFICATION_TYPE_FACE_UNWELCOME_HIT) return { kind: "none" };
   if (access.canViewCapture) {
     return { kind: "route", routeName: "face-hub", params: { tab: "capture", filter: "blacklist", hitStatus: "unread" } };

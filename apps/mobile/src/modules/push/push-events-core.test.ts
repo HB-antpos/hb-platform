@@ -15,7 +15,7 @@ import { makeResponse } from "./test-support";
 function harness(initial: PushSessionPhase = "ready") {
   const clock = { nowMs: 1_000_000 };
   const state = { phase: initial };
-  const log = { refresh: 0, navigations: [] as PushTarget[], clears: 0 };
+  const log = { refresh: 0, navigations: [] as PushTarget[], clears: 0, locationRequestReceived: 0 };
   const controller = createPushEventController({
     getPhase: () => state.phase,
     refreshUnreadCounts: () => {
@@ -23,6 +23,9 @@ function harness(initial: PushSessionPhase = "ready") {
     },
     navigate: (target) => {
       log.navigations.push(target);
+    },
+    onLocationRequestReceived: () => {
+      log.locationRequestReceived += 1;
     },
     clearLastResponse: () => {
       log.clears += 1;
@@ -70,11 +73,73 @@ assert.equal(resolvePushSessionPhase({ eligible: true, ready: true }), "ready");
       throw new Error("boom");
     },
     navigate: () => undefined,
+    onLocationRequestReceived: () => undefined,
     clearLastResponse: () => undefined,
     now: () => 0,
   });
   assert.doesNotThrow(() => controller.onForegroundNotification());
   void h;
+}
+
+// ───────── 前台收到「位置请求」推送：非交互消费一次待办（其它类型不触发）─────────
+{
+  const h = harness("ready");
+  h.controller.onForegroundNotification({ type: "attendance.location-request" });
+  assert.equal(h.log.locationRequestReceived, 1);
+  assert.equal(h.log.refresh, 1, "仍然刷新未读数（收件箱里会出现这条通知）");
+  h.controller.onForegroundNotification({ type: "  attendance.location-request " });
+  assert.equal(h.log.locationRequestReceived, 2, "前后空白容忍");
+  for (const type of ["face.unwelcome-hit", "attendance.punch", "approval.decided", "", null]) {
+    h.controller.onForegroundNotification({ type });
+  }
+  h.controller.onForegroundNotification();
+  assert.equal(h.log.locationRequestReceived, 2, "其它类型 / 缺 type 不触发消费");
+  h.state.phase = "busy";
+  h.controller.onForegroundNotification({ type: "attendance.location-request" });
+  assert.equal(h.log.locationRequestReceived, 3, "已登录但主界面未就绪也触发（消费器自己判断资格，只是非交互）");
+  h.state.phase = "signed-out";
+  h.controller.onForegroundNotification({ type: "attendance.location-request" });
+  assert.equal(h.log.locationRequestReceived, 3, "未登录不触发");
+  assert.equal(h.log.navigations.length, 0, "前台收到推送不导航");
+}
+{
+  // 消费触发抛错不能影响调用方（原生回调里），刷新照常
+  let refreshed = 0;
+  const controller = createPushEventController({
+    getPhase: () => "ready",
+    refreshUnreadCounts: () => {
+      refreshed += 1;
+    },
+    navigate: () => undefined,
+    onLocationRequestReceived: () => {
+      throw new Error("boom");
+    },
+    clearLastResponse: () => undefined,
+    now: () => 0,
+  });
+  assert.doesNotThrow(() => controller.onForegroundNotification({ type: "attendance.location-request" }));
+  assert.equal(refreshed, 1);
+}
+
+// ───────── 点击「位置请求」推送：落点是 location-request（先交互消费再落收件箱），就绪前暂存、就绪后补上 ─────────
+{
+  const h = harness("ready");
+  h.controller.handleResponse(makeResponse({ id: "lr1", type: "attendance.location-request", data: { type: "attendance.location-request", requestGuid: "r1" } }));
+  assert.deepEqual(h.log.navigations, [{ kind: "location-request" }]);
+  assert.equal(h.log.locationRequestReceived, 0, "点击走导航落点，不走前台接收回调");
+}
+{
+  const h = harness("busy");
+  h.controller.handleResponse(makeResponse({ id: "lr2", type: "attendance.location-request" }));
+  assert.equal(h.log.navigations.length, 0, "主界面未就绪先暂存");
+  h.state.phase = "ready";
+  h.controller.flushPending();
+  assert.deepEqual(h.log.navigations, [{ kind: "location-request" }], "就绪后补上");
+}
+{
+  const h = harness("signed-out");
+  h.controller.handleResponse(makeResponse({ id: "lr3", type: "attendance.location-request" }));
+  assert.equal(h.log.navigations.length, 0, "未登录点到旧的位置请求推送：丢弃，不会取位置");
 }
 
 // ───────── 点击：会话就绪才导航 ─────────
@@ -189,6 +254,7 @@ assert.equal(resolvePushSessionPhase({ eligible: true, ready: true }), "ready");
     navigate: () => {
       throw new Error("router not ready");
     },
+    onLocationRequestReceived: () => undefined,
     clearLastResponse: () => {
       throw new Error("native");
     },

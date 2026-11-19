@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import React, { act } from "react";
 
 // 打卡页「定位使用说明」的渲染测试：真实组件 + 真实中文文案，只把 react-native / paper / 翻译换成桩。
-// 班中后台定位已取消，这里钉住：说明卡只讲「扫码打卡时使用、其他时间不在后台使用」，
+// 班中后台定位已取消，这里钉住：说明卡讲「使用 App 期间才获取位置：扫码打卡 / 登录、上班期间的位置请求（会通知并留记录），不在后台使用」，
 // 详情弹层只读（没有「同意并继续」），也不再出现「已开启 / 已停止 / 补传 / 自动停止」这些旧口径；
 // 所有渲染出的文字都不含「每隔几分钟记录」类的采集频率表述。
 const bundles = new Map<string, Record<string, unknown>>();
@@ -110,8 +110,11 @@ async function run() {
     );
     const text = page.allText().join("\n");
     assert.match(text, /定位使用说明/);
-    assert.match(text, /扫码打卡时/);
-    assert.match(text, /只在你扫码上班、下班时获取当前位置，用于记录打卡地点，打卡完成后即停止。/);
+    assert.match(text, /扫码打卡与登录时/);
+    assert.match(text, /只在使用 App 期间获取当前位置：扫码上班、下班和登录时，用于记录打卡与登录地点，完成后即停止。/);
+    // 服务端位置请求：员工能从说明里知道「会先通知、打开 App 后才取、每次留记录」。
+    assert.match(text, /上班期间的位置请求/);
+    assert.match(text, /店长或管理员可以请求你上报一次位置：你会先收到通知，打开 App 后才会获取并上报，每次请求都会通知你，并在通知里留下记录。/);
     assert.match(text, /其他时间/);
     assert.match(text, /App 不会在后台使用你的位置，也不会持续跟踪你。/);
     assert.doesNotMatch(text, frequencyWording, "说明卡文案不得出现采集频率");
@@ -130,10 +133,12 @@ async function run() {
       React.createElement(LocationUsageSheet, { visible: true, onDismiss: () => { dismissed += 1; } }),
     );
     const text = page.allText().join("\n");
-    for (const title of ["扫码上班 / 下班时", "其他时间", "需要的权限"]) {
+    for (const title of ["扫码上班 / 下班时", "收到位置请求时", "其他时间", "需要的权限"]) {
       assert.ok(text.includes(title), `详情弹层缺少「${title}」`);
     }
-    assert.match(text, /不使用你的位置，也不会在后台运行定位，手机上不会出现常驻的定位提示。/);
+    assert.match(text, /只有你点开通知或打开 App 后，App 才会获取一次当前位置并上报，不会在后台获取。/);
+    assert.match(text, /每次请求都会通知你并留下记录/);
+    assert.match(text, /除上述情况外，不使用你的位置，也不会在后台运行定位，手机上不会出现常驻的定位提示。/);
     assert.match(text, /只需要.使用 App 期间.允许定位，不需要.始终允许./, "必须告诉员工不需要「始终允许」");
     assert.doesNotMatch(text, frequencyWording, "详情弹层文案不得出现采集频率");
     assert.doesNotMatch(text, staleWording, "详情弹层不得残留旧口径");

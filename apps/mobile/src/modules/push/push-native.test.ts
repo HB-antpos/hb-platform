@@ -13,7 +13,7 @@ function fakeNotifications(overrides: Record<string, unknown> = {}) {
     calls.push({ name, args });
     return result;
   };
-  let handler: { handleNotification: () => Promise<unknown> } | null = null;
+  let handler: { handleNotification: (notification?: unknown) => Promise<unknown> } | null = null;
   let responseListener: ((raw: unknown) => void) | null = null;
   const module = {
     DEFAULT_ACTION_IDENTIFIER: DEFAULT_ACTION,
@@ -119,6 +119,34 @@ async function run() {
       throw new Error("boom");
     });
     assert.deepEqual(await f.handler()?.handleNotification(), { ...PUSH_FOREGROUND_BEHAVIOR });
+  }
+
+  // ───────── 前台处理器：只把 data.type 交给回调（标题 / 正文不越过适配层），展示策略不变 ─────────
+  {
+    const f = fakeNotifications();
+    const native = createPushNative(f.module, { isDevice: true }, { platformOS: "ios", getChannelName: () => "x" });
+    const received: unknown[] = [];
+    native.installForegroundHandler((notification) => {
+      received.push(notification);
+    });
+    const withType = (data: unknown) => ({ request: { identifier: "n", content: { title: "SECRET TITLE", body: "SECRET BODY", data } } });
+    const behaviors = [
+      await f.handler()?.handleNotification(withType({ type: "attendance.location-request", requestGuid: "r1", notificationId: "n1" })),
+      await f.handler()?.handleNotification(withType({ notificationId: "n1" })),
+      await f.handler()?.handleNotification(withType({ type: 42 })),
+      await f.handler()?.handleNotification(withType("not-an-object")),
+      await f.handler()?.handleNotification(undefined),
+    ];
+    assert.deepEqual(received, [
+      { type: "attendance.location-request" },
+      { type: null },
+      { type: null },
+      { type: null },
+      { type: null },
+    ]);
+    for (const behavior of behaviors) {
+      assert.deepEqual(behavior, { ...PUSH_FOREGROUND_BEHAVIOR }, "位置请求类型也不改前台展示策略");
+    }
   }
 
   // ───────── 点击：归一化，原始标题 / 正文不越过适配层 ─────────

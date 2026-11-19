@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  NOTIFICATION_TYPE_ATTENDANCE_LOCATION_REQUEST,
   NOTIFICATION_TYPE_FACE_UNWELCOME_HIT,
   applyMarkAllRead,
   applyMarkRead,
@@ -56,6 +57,17 @@ assert.deepEqual(
 assert.deepEqual(resolveNotificationTarget(hit, { canViewCapture: false, canViewList: false }), { kind: "none" }, "两个页签都打不开的账号不跳转");
 for (const type of ["system.test", "face.unwelcome-expiring", "approval.submitted", "", "FACE.UNWELCOME-HIT", "face.unwelcome-hit.v2"]) {
   assert.deepEqual(resolveNotificationTarget({ type }, { canViewCapture: true, canViewList: true }), { kind: "none" }, `${type || "(空)"} 按未知类型兜底`);
+}
+// 位置请求通知：不跳转，去向是「交互式消费待办」（与点同一条推送一致）；不看人脸页签权限，只认精确类型
+assert.equal(NOTIFICATION_TYPE_ATTENDANCE_LOCATION_REQUEST, "attendance.location-request");
+for (const access of [
+  { canViewCapture: true, canViewList: true },
+  { canViewCapture: false, canViewList: false },
+]) {
+  assert.deepEqual(resolveNotificationTarget({ type: "attendance.location-request" }, access), { kind: "location-request" });
+}
+for (const type of ["attendance.punch", "attendance.location-request.v2", "ATTENDANCE.LOCATION-REQUEST", "attendance.location-requests"]) {
+  assert.deepEqual(resolveNotificationTarget({ type }, { canViewCapture: true, canViewList: true }), { kind: "none" }, `${type} 按未知类型兜底`);
 }
 // 跳转参数能被合并页原样解析（页签 / 筛选 / 状态都在白名单内）
 {

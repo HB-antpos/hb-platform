@@ -9,6 +9,7 @@ import * as Application from "expo-application";
 import Constants from "expo-constants";
 import { router } from "expo-router";
 import { Platform } from "react-native";
+import { consumeLocationRequests } from "@/modules/attendance/location-request/location-request-runtime";
 import { faceHitUnreadQueryKey } from "@/modules/face-match/hit-unread";
 import { buildFaceHubRoute } from "@/modules/navigation/face-hub";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
@@ -117,14 +118,24 @@ function refreshUnreadCounts(): void {
 }
 
 function navigateToPushTarget(target: PushTarget): void {
-  if (target.kind === "face-hub") router.push(buildFaceHubRoute(target.params));
-  else router.push("/(shell)/notifications");
+  if (target.kind === "face-hub") {
+    router.push(buildFaceHubRoute(target.params));
+    return;
+  }
+  if (target.kind === "location-request") {
+    // 点位置请求推送 = 交互式消费一次待办：员工主动点了通知，允许弹系统定位权限框；
+    // 然后落到通知收件箱，让员工看到是谁、什么时候请求的。消费永不抛错、不阻塞导航。
+    consumeLocationRequests({ trigger: "push-tap" });
+  }
+  router.push("/(shell)/notifications");
 }
 
 const eventController = createPushEventController({
   getPhase: () => phase,
   refreshUnreadCounts,
   navigate: navigateToPushTarget,
+  // App 在前台时收到位置请求推送：非交互消费（只有定位权限已授予才取位置，不弹系统权限框）。
+  onLocationRequestReceived: () => consumeLocationRequests({ trigger: "push-received" }),
   clearLastResponse: () => {
     void loadNative().then((native) => native?.clearLastResponse());
   },
@@ -156,7 +167,7 @@ export function startPushEvents(): Promise<void> {
   startPromise ??= (async () => {
     const native = await loadNative();
     if (!native || !native.isPhysicalDevice) return;
-    native.installForegroundHandler(() => eventController.onForegroundNotification());
+    native.installForegroundHandler((notification) => eventController.onForegroundNotification(notification));
     native.addResponseListener((response) => eventController.handleResponse(response));
     const last = native.getLastResponse();
     if (last) eventController.handleColdStartResponse(last, msSinceProcessStart());

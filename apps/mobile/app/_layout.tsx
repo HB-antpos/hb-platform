@@ -43,6 +43,8 @@ import { IosReviewBanner } from "@/modules/ios-review/IosReviewBanner";
 import { hbLightTheme } from "@/shared/theme/theme";
 import "@/modules/attendance/location-tracking";
 import { useLegacyLocationTrackingCleanup } from "@/modules/attendance/use-legacy-location-cleanup";
+import { LocationRequestNotice } from "@/modules/attendance/location-request/LocationRequestNotice";
+import { useLocationRequestConsumer } from "@/modules/attendance/location-request/use-location-request-consumer";
 
 const MIN_SPLASH_VISIBLE_MS = 900;
 
@@ -133,6 +135,9 @@ export default function RootLayout() {
   usePrinterAutoConnect({ enabled: sideEffectsEnabled });
   // 班中后台定位已取消：启动就绪与每次回前台时，收掉旧版本留下的后台定位任务与本地残留（没有就什么都不做）。
   useLegacyLocationTrackingCleanup({ enabled: sideEffectsEnabled });
+  // 服务端位置请求：启动就绪 / 登录完成 / 回前台时检查待办，只在「使用 App 期间」前台权限已授予时取一次位置上报；
+  // 权限没授予就静默跳过，不弹系统权限框（点推送 / 点收件箱通知才是可交互的路径）。不请求后台权限、不启动后台任务。
+  useLocationRequestConsumer({ enabled: sideEffectsEnabled });
   // Android 原生包检查先注册 effect；共享互斥会让 APK 提示优先于 OTA optional。
   const nativeAppUpdate = useAutomaticNativeAppUpdate({
     enabled: automaticUpdatesEnabled,
@@ -298,6 +303,8 @@ export default function RootLayout() {
                       <Stack.Screen name="(shell)" />
                     </Stack>
                     {isIosReviewSession ? <IosReviewBanner /> : null}
+                    {/* 位置请求的轻量提示（已按请求上报位置 / 点通知时没取到位置） */}
+                    <LocationRequestNotice />
                   </View>
                 </MobileOtaUpdateBoundary>
                 </AndroidNativeUpdateBoundary>

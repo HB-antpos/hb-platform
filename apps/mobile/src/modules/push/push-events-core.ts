@@ -1,13 +1,14 @@
 // 收到 / 点击推送后的处理（依赖全部由外部注入）。不依赖 React Native。
 //
 // - 前台收到推送：不弹横幅（策略见 PUSH_FOREGROUND_BEHAVIOR，由适配层落实），只触发未读数刷新；
+//   若是「位置请求」类型，再触发一次非交互的待办消费（只有定位权限已授予才会真正取位置，绝不弹系统权限框）；
 // - 点击推送：只有「已登录且会话就绪」才导航；
 //     · 未登录（signed-out）→ 直接丢弃，不暂存、不落盘；
 //     · 已登录但主界面还没就绪（busy，如启动恢复会话、菜单加载中）→ 仅在内存里暂存最近一次，就绪后再导航，超时作废；
 // - 同一次点击可能同时被监听器与冷启动读取交付，按通知标识在短时间窗内去重（仅内存）；
 // - 本文件只读推送的 type 与 data 用于选路由，不记录、不上报其内容。
-import { resolvePushTarget, type PushTarget } from "./push-routing";
-import type { PushResponse } from "./push-types";
+import { PUSH_TYPE_ATTENDANCE_LOCATION_REQUEST, resolvePushTarget, type PushTarget } from "./push-routing";
+import type { PushForegroundNotification, PushResponse } from "./push-types";
 
 /** signed-out：没有可用的个人账号会话；busy：已登录但主界面未就绪；ready：可以导航。 */
 export type PushSessionPhase = "signed-out" | "busy" | "ready";
@@ -31,6 +32,8 @@ export interface PushEventsDeps {
   /** 刷新未读数（命中未读数 + 通知收件箱）；只标记 / 重取，不读推送内容。 */
   refreshUnreadCounts(): void;
   navigate(target: PushTarget): void;
+  /** App 在前台时收到「位置请求」推送：触发一次非交互的待办消费（权限未授予就静默跳过）。 */
+  onLocationRequestReceived(): void;
   /** 清掉原生侧「最近一次点击」，避免之后重新挂载时再次处理。 */
   clearLastResponse(): void;
   now(): number;
@@ -57,10 +60,13 @@ export function createPushEventController(deps: PushEventsDeps) {
     }
   };
 
-  /** 前台收到一条推送：已登录才刷新未读数。 */
-  const onForegroundNotification = (): void => {
+  /** 前台收到一条推送：已登录才刷新未读数；位置请求类型再触发一次非交互消费。 */
+  const onForegroundNotification = (notification?: PushForegroundNotification): void => {
     if (deps.getPhase() === "signed-out") return;
     safe(() => deps.refreshUnreadCounts());
+    if (notification?.type?.trim() === PUSH_TYPE_ATTENDANCE_LOCATION_REQUEST) {
+      safe(() => deps.onLocationRequestReceived());
+    }
   };
 
   /** 用户点击了推送。 */

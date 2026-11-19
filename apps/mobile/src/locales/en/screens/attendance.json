@@ -186,21 +186,31 @@
   },
   "locationNotice": {
     "title": "Location use",
-    "scanLabel": "When you scan",
-    "scanBody": "Your location is used only when you scan to clock in or out, to record where you clocked in. It stops as soon as the punch is done.",
+    "scanLabel": "When you scan or sign in",
+    "scanBody": "Only while you are using the app: your location is used when you scan to clock in or out and when you sign in, to record where it happened. It stops as soon as that is done.",
+    "requestLabel": "Location requests while you are clocked in",
+    "requestBody": "A manager or admin can ask you to share your location once. You get a notification first, and the app only gets and sends your location after you open the app. Every request notifies you and is recorded in your notifications.",
     "otherLabel": "At other times",
     "otherBody": "The app does not use your location in the background and does not track you.",
     "details": "Learn more",
     "sheet": {
       "infoTitle": "Location use",
       "scanTitle": "When you clock in or out",
-      "scanBody": "The app gets your current precise location to record where you clocked in. It gets ready while the scan screen is open and stops as soon as the punch is done.",
+      "scanBody": "The app gets your current precise location to record where you clocked in. It gets ready while the scan screen is open and stops as soon as the punch is done. It also gets your location when you sign in.",
+      "requestTitle": "When you get a location request",
+      "requestBody": "While you are clocked in, a manager or admin can ask you to share your location once. You get a notification. Only after you tap it or open the app does the app get your current location once and send it; nothing is collected in the background. Every request notifies you and is recorded, so you can see who asked and when in Notifications. The request ends when you clock out.",
       "otherTitle": "At other times",
-      "otherBody": "Your location is not used and nothing runs in the background, so your phone shows no ongoing location indicator.",
+      "otherBody": "Apart from the cases above, your location is not used and nothing runs in the background, so your phone shows no ongoing location indicator.",
       "permissionTitle": "Permission needed",
       "permissionBody": "Only \"While Using the App\" location access is needed, not \"Always\". If you chose \"Always\" before, you can change it back in Settings.",
       "gotIt": "Got it"
     }
+  },
+  "locationRequest": {
+    "reported": "Location shared at {{name}}'s request",
+    "reportedGeneric": "Location shared at your manager's request",
+    "reportedMany": "Location shared for {{count}} requests",
+    "locationUnavailable": "Couldn't get your location. Allow location access for HB, then tap the notification again."
   },
   "locationPermission": {
     "title": "Location access required",

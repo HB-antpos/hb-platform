@@ -1,11 +1,13 @@
 // 通知收件箱：按时间倒序的站内消息，下拉刷新、无限滚动、回到前台刷新；点击即标已读，右上「全部已读」。
 // 标题与正文是后端固定的英文文案，中英文界面都原样展示；只有界面文字（已读、优先级、门店、时间）走 i18n。
-// 点击疑似命中通知进「人脸比对」合并页（有抓拍权限进抓拍的黑名单未读，否则进名单的命中复核），其他类型按未知类型兜底（只标已读，不跳转）。本期不做 SignalR 与系统推送。
+// 点击疑似命中通知进「人脸比对」合并页（有抓拍权限进抓拍的黑名单未读，否则进名单的命中复核）；
+// 点击位置请求通知不跳转，而是交互式消费一次位置请求待办；其他类型按未知类型兜底（只标已读，不跳转）。本期不做 SignalR 与系统推送。
 import { useEffect, useState } from "react";
 import { AppState, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 import { ActivityIndicator, Button, Snackbar, Text } from "react-native-paper";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { consumeLocationRequests } from "@/modules/attendance/location-request/location-request-runtime";
 import { FACE_SOFT, FaceCard, FaceScreenFrame, FaceScreenMessage, Tag, faceStyles } from "@/modules/face-match/ui";
 import { buildFaceHubRoute, resolveFaceHubTabs } from "@/modules/navigation/face-hub";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
@@ -74,6 +76,8 @@ function NotificationsContent({ onBack }: { onBack: () => void }) {
     }
     const target = resolveNotificationTarget(item, targetAccess);
     if (target.kind === "route") router.push(buildFaceHubRoute(target.params));
+    // 位置请求通知：已经在收件箱里，不跳转；员工主动点了它，交互式消费一次待办（与点推送一致，可弹系统定位权限框）。
+    else if (target.kind === "location-request") consumeLocationRequests({ trigger: "inbox-tap" });
   };
 
   const onMarkAll = () => {

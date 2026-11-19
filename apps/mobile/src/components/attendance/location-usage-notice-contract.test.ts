@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// 班中后台定位已取消：App 只在扫码上班 / 下班时读取位置。
+// 班中后台定位已取消：App 只在「使用 App 期间」读取位置——扫码上班 / 下班、登录，
+// 以及上班期间收到店长 / 管理员的位置请求并打开 App 响应时（每次请求都会通知并留记录）；不在后台获取。
 // 本契约守住两件事：打卡页不再有任何后台定位相关的披露 / 申请 / 状态条；说明文案如实、不夸大也不留旧口径。
 
 const directory = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +53,7 @@ assert.doesNotMatch(card + notice + sheet, /today\.info\.location|openLocationIn
 assert.match(sheet, /BusinessSheet/, "弹层统一使用 BusinessSheet，保持和其他业务弹层一致");
 assert.doesNotMatch(sheet, /mode: "consent"|onConfirm|consent/i, "弹层只读，不再有「同意并继续」模式");
 
-// ── 文案：不得出现采集频率表述，不得再说「持续 / 后台使用位置」，要写清只在扫码时使用 ──
+// ── 文案：不得出现采集频率表述，不得再说「持续 / 后台使用位置」，要写清使用位置的几种场景且不在后台 ──
 const frequencyWording = /每隔|定期|每\s*\d+\s*(分钟|秒)|几分钟|分钟记录|every (few )?(minutes?|seconds?)|periodic|per minute|\d+\s*minutes? interval/i;
 const flatten = (value: unknown): string[] =>
   typeof value === "string" ? [value] : Object.values(value as object).flatMap(flatten);
@@ -78,9 +79,22 @@ for (const key of ["qrTrackingWarning", "backgroundLocationRequiredForClockIn", 
   assert.equal(key in zh.messages, false, `zh messages.${key} 应已删除`);
   assert.equal(key in en.messages, false, `en messages.${key} 应已删除`);
 }
-assert.match(zh.locationNotice.scanBody, /扫码/, "中文说明必须写清只在扫码打卡时使用位置");
+assert.match(zh.locationNotice.scanBody, /扫码/, "中文说明必须写清扫码打卡时使用位置");
+assert.match(zh.locationNotice.scanBody, /使用 App 期间/, "中文说明必须写清只在使用 App 期间获取位置");
+// 位置请求：必须写清「先通知、打开 App 后才取、每次留记录」，两个位置（说明卡 / 详情弹层）、中英文都要有。
+assert.match(zh.locationNotice.requestBody, /通知/, "中文说明必须写清位置请求会先通知员工");
+assert.match(zh.locationNotice.requestBody, /打开 App/, "中文说明必须写清打开 App 后才会获取");
+assert.match(zh.locationNotice.requestBody, /记录/, "中文说明必须写清每次请求都留记录");
+assert.match(zh.locationNotice.sheet.requestBody, /不会在后台获取/, "中文弹层必须写清不会在后台获取");
+assert.match(en.locationNotice.requestBody, /notification/i, "英文说明必须写清位置请求会先通知员工");
+assert.match(en.locationNotice.requestBody, /open the app/i, "英文说明必须写清打开 App 后才会获取");
+assert.match(en.locationNotice.requestBody, /recorded/i, "英文说明必须写清每次请求都留记录");
+assert.match(en.locationNotice.sheet.requestBody, /nothing is collected in the background/i, "英文弹层必须写清不会在后台获取");
+assert.equal(en.locationRequest.reported.includes("{{name}}"), true, "提示文案带请求人姓名");
+assert.equal(zh.locationRequest.reported.includes("{{name}}"), true, "提示文案带请求人姓名");
 assert.match(zh.locationNotice.otherBody, /不会在后台/, "中文说明必须写清不会在后台使用位置");
-assert.match(en.locationNotice.scanBody, /scan/i, "英文说明必须写清只在扫码打卡时使用位置");
+assert.match(en.locationNotice.scanBody, /scan/i, "英文说明必须写清扫码打卡时使用位置");
+assert.match(en.locationNotice.scanBody, /while you are using the app/i, "英文说明必须写清只在使用 App 期间获取位置");
 assert.match(en.locationNotice.otherBody, /not use your location in the background/i, "英文说明必须写清不会在后台使用位置");
 // 权限提示不得再要求「始终允许」。
 assert.doesNotMatch(zh.locationPermission.description, /后台/, "权限提示不得再要求后台定位");

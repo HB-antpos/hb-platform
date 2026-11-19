@@ -19,6 +19,7 @@ export function LocationUsageSheet({
 
   const steps = [
     { icon: "qrcode-scan", off: false, title: t("locationNotice.sheet.scanTitle"), body: t("locationNotice.sheet.scanBody") },
+    { icon: "bell-ring-outline", off: false, title: t("locationNotice.sheet.requestTitle"), body: t("locationNotice.sheet.requestBody") },
     { icon: "stop-circle-outline", off: true, title: t("locationNotice.sheet.otherTitle"), body: t("locationNotice.sheet.otherBody") },
     { icon: "shield-check-outline", off: true, title: t("locationNotice.sheet.permissionTitle"), body: t("locationNotice.sheet.permissionBody") },
   ];
