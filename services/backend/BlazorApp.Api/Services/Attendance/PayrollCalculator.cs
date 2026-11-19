@@ -74,6 +74,15 @@ public sealed class PayrollPayInput
     public IReadOnlyList<PayrollRate> Rates { get; init; } = Array.Empty<PayrollRate>();
     public IReadOnlyList<PayrollWorkItem> WorkItems { get; init; } = Array.Empty<PayrollWorkItem>();
     public IReadOnlyList<PayrollLeaveItem> LeaveItems { get; init; } = Array.Empty<PayrollLeaveItem>();
+
+    /// <summary>
+    /// 手填的「公假」现金金额：**覆盖**该档的系统现金金额（现金工时 × 现金时薪），不是叠加；null = 不覆盖。
+    /// 只在该档确实有现金工时时生效（工时已全部在转账里的档位没有现金部分，忽略并给出 CASH_OVERRIDE_IGNORED 警告）。
+    /// </summary>
+    public decimal? PublicHolidayCashOverride { get; init; }
+
+    /// <summary>手填的「带薪假」现金金额，规则同 <see cref="PublicHolidayCashOverride"/>。</summary>
+    public decimal? LeaveCashOverride { get; init; }
 }
 
 /// <summary>按档位汇总的小时数（转账 / 现金桶用同一形状）。</summary>
@@ -110,7 +119,16 @@ public sealed class PayrollPayResult
     public PayrollBucketHours TransferHours { get; init; } = new();
     public PayrollBucketHours CashHours { get; init; } = new();
     public decimal TransferAmount { get; init; }
+    /// <summary>现金金额（含手填覆盖，不含补贴）。</summary>
     public decimal CashAmount { get; init; }
+    /// <summary>「公假」档的系统现金金额（现金工时 × 现金时薪，不含手填）；展示与留痕用。</summary>
+    public decimal PublicHolidayCashSystemAmount { get; init; }
+    /// <summary>「带薪假」档的系统现金金额，规则同上。</summary>
+    public decimal LeaveCashSystemAmount { get; init; }
+    /// <summary>「公假」档的手填金额是否已生效（有手填且该档有现金工时）。</summary>
+    public bool PublicHolidayCashOverridden { get; init; }
+    /// <summary>「带薪假」档的手填金额是否已生效。</summary>
+    public bool LeaveCashOverridden { get; init; }
     /// <summary>现金单一时薪（主记录）；仅展示，计算按每天有效记录。</summary>
     public decimal? CashRate { get; init; }
     public decimal Allowance { get; init; }
@@ -140,6 +158,8 @@ public static class PayrollCalculator
     public const string WarningMissingTransferRate = "MISSING_TRANSFER_RATE";
     public const string WarningMissingCashRate = "MISSING_CASH_RATE";
     public const string WarningBelowMinimumRate = "BELOW_MINIMUM_RATE";
+    /// <summary>有手填的公假 / 带薪假现金金额，但该档已没有现金工时（例如工时后来改过），手填值不生效。</summary>
+    public const string WarningCashOverrideIgnored = "CASH_OVERRIDE_IGNORED";
 
     /// <summary>转账装填顺序（10-26 定）。</summary>
     public static readonly IReadOnlyList<PayrollBucket> TransferFillOrder = new[]
@@ -306,7 +326,8 @@ public static class PayrollCalculator
         var transferHours = new PayrollBucketHours();
         var cashHours = new PayrollBucketHours();
         var transferAmount = 0m;
-        var cashHoursByRate = new Dictionary<string, (PayrollRate? Rate, decimal Hours)>();
+        // 现金工时按（档位，时薪记录）记下来：先全部记录，装填结束后再决定哪些档位被手填金额覆盖。
+        var cashByBucketAndRate = new Dictionary<(PayrollBucket Bucket, string RateKey), (PayrollRate? Rate, decimal Hours)>();
         foreach (var bucket in TransferFillOrder)
         {
             // 同一档内按时薪记录的生效先后装入（多条记录时早的先进转账）。
@@ -333,14 +354,46 @@ public static class PayrollCalculator
                 }
                 if (cash > 0)
                 {
-                    var key = group.RateKey;
-                    var existingHours = cashHoursByRate.TryGetValue(key, out var existing) ? existing.Hours : 0m;
-                    cashHoursByRate[key] = (group.Rate, existingHours + cash);
+                    // 同一（档位，时薪记录）只会出现一个分组，直接记录即可。
+                    cashByBucketAndRate[(bucket, group.RateKey)] = (group.Rate, cash);
                 }
             }
         }
 
-        // 现金单一时薪：同一条时薪记录下的现金工时先合计（舍 2 位）再乘现金时薪。
+        // 手填的公假 / 带薪假现金金额：只在该档确实有现金工时时生效；否则忽略并提示（例如工时后来改成全在转账里）。
+        var publicHolidayOverridden = input.PublicHolidayCashOverride.HasValue && cashHours.PublicHoliday > 0;
+        var leaveOverridden = input.LeaveCashOverride.HasValue && cashHours.Leave > 0;
+        if ((input.PublicHolidayCashOverride.HasValue && !publicHolidayOverridden)
+            || (input.LeaveCashOverride.HasValue && !leaveOverridden))
+        {
+            AddWarning(warnings, WarningCashOverrideIgnored);
+        }
+
+        // 现金单一时薪：同一条时薪记录下的现金工时先合计（舍 2 位）再乘现金时薪。被手填覆盖的档位不参与这里的合计，
+        // 它的金额改由手填值给出；没有手填时所有档位都进来，结果与引入手填前完全一致。
+        var cashHoursByRate = new Dictionary<string, (PayrollRate? Rate, decimal Hours)>();
+        var publicHolidaySystemAmount = 0m;
+        var leaveSystemAmount = 0m;
+        foreach (var ((bucket, key), (rate, groupHours)) in cashByBucketAndRate)
+        {
+            // 「系统值」= 该档自己的现金工时 × 现金时薪（展示 / 留痕用）；没有现金时薪就是 0，缺时薪的警告由下面的合计统一给出。
+            if (bucket is PayrollBucket.PublicHoliday or PayrollBucket.Leave && rate?.CashRate is { } bucketRate)
+            {
+                var bucketAmount = Round2(Round2(groupHours) * bucketRate);
+                if (bucket == PayrollBucket.PublicHoliday) publicHolidaySystemAmount += bucketAmount;
+                else leaveSystemAmount += bucketAmount;
+            }
+
+            var overridden = bucket == PayrollBucket.PublicHoliday ? publicHolidayOverridden
+                : bucket == PayrollBucket.Leave && leaveOverridden;
+            if (overridden)
+            {
+                continue;
+            }
+            var existingHours = cashHoursByRate.TryGetValue(key, out var existing) ? existing.Hours : 0m;
+            cashHoursByRate[key] = (rate, existingHours + groupHours);
+        }
+
         var cashAmount = 0m;
         foreach (var (rate, cashTotal) in cashHoursByRate.Values)
         {
@@ -352,6 +405,14 @@ public static class PayrollCalculator
             {
                 AddWarning(warnings, rate == null ? WarningNoRate : WarningMissingCashRate);
             }
+        }
+        if (publicHolidayOverridden)
+        {
+            cashAmount += Round2(input.PublicHolidayCashOverride!.Value);
+        }
+        if (leaveOverridden)
+        {
+            cashAmount += Round2(input.LeaveCashOverride!.Value);
         }
 
         var usedRates = groups.Values
@@ -379,6 +440,10 @@ public static class PayrollCalculator
             CashHours = cashHours,
             TransferAmount = transferAmount,
             CashAmount = cashAmount,
+            PublicHolidayCashSystemAmount = Round2(publicHolidaySystemAmount),
+            LeaveCashSystemAmount = Round2(leaveSystemAmount),
+            PublicHolidayCashOverridden = publicHolidayOverridden,
+            LeaveCashOverridden = leaveOverridden,
             CashRate = primary.CashRate,
             Allowance = allowance,
             GrossPay = Round2(transferAmount + cashAmount + allowance),

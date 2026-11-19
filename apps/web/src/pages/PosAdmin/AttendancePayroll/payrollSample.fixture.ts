@@ -13,6 +13,7 @@ import type {
   AttendanceHoursEmployeeDto,
   AttendanceHoursResultDto,
   AttendanceHoursTotalsDto,
+  AttendancePayCashBucketDto,
   AttendancePayRateDto,
   AttendancePayResultDto,
   AttendancePayRowDto,
@@ -225,6 +226,8 @@ const leaveApprovals = new Map<string, number>([
   // Emma 年假申请 24 h，财务按累计带薪小时只核定 20 h（设计样例）
   ['mock-emma|PaidAnnual', 20],
 ])
+// 公假 / 带薪假现金金额手填：键 `${userGuid}|PublicHoliday | Leave`，值为手填金额；默认没有任何手填。
+const cashOverrides = new Map<string, number>()
 const notes = new Map<string, string>([
   ['mock-sarah', '补贴：开关店 $50'],
   ['mock-emma', '年假申请 24 h，累计只够 20 h'],
@@ -430,6 +433,26 @@ export async function buildSamplePay(input: AttendancePeriodQuery): Promise<Atte
       rates: rate ?? {},
       allowance: rate?.cashAllowancePerPeriod ?? 0,
     })
+    // 公假 / 带薪假的现金金额：系统值 = 该档现金工时 × 现金时薪；有手填（且该档有现金工时）就取代系统值，其余不动。
+    const cashRate = rate?.cashRate ?? 0
+    const cashBucket = (hours: number, apiBucket: 'PublicHoliday' | 'Leave'): AttendancePayCashBucketDto => {
+      const stored = cashOverrides.get(`${employee.userGuid}|${apiBucket}`)
+      const systemAmount = round2(hours * cashRate)
+      const isManual = stored !== undefined && hours > 0
+      return {
+        hours,
+        systemAmount,
+        amount: isManual ? stored : systemAmount,
+        isManual,
+        manualAmount: stored ?? null,
+        editable: hours > 0,
+        updatedBy: stored === undefined ? null : 'Sarah Kim',
+        updatedAt: stored === undefined ? null : '2026-10-19T00:12:00Z',
+      }
+    }
+    const publicHolidayCash = cashBucket(result.cash.buckets.publicHoliday, 'PublicHoliday')
+    const leaveCash = cashBucket(result.cash.buckets.leave, 'Leave')
+    const overrideDelta = [publicHolidayCash, leaveCash].reduce((sum, item) => sum + (item.isManual ? item.amount - item.systemAmount : 0), 0)
     return {
       userGuid: employee.userGuid,
       userName: employee.userName,
@@ -447,9 +470,15 @@ export async function buildSamplePay(input: AttendancePeriodQuery): Promise<Atte
       },
       leaveDetail: { sick: totals.sick, publicHolidayPay: totals.publicHolidayPay, annual, cashOut },
       transfer: result.transfer,
-      cash: { ...result.cash, rate: rate?.cashRate },
+      cash: {
+        ...result.cash,
+        rate: rate?.cashRate,
+        amount: round2(result.cash.amount + overrideDelta),
+        publicHoliday: publicHolidayCash,
+        leave: leaveCash,
+      },
       allowance: result.allowance,
-      grossPay: result.grossPay,
+      grossPay: round2(result.grossPay + overrideDelta),
       note: notes.get(employee.userGuid),
       warnings: result.missingRates.length ? ['RATE_MISSING'] : undefined,
     }
@@ -468,4 +497,12 @@ export async function buildSamplePay(input: AttendancePeriodQuery): Promise<Atte
 
 export function setSampleLeaveApproval(userGuid: string, leaveType: 'PaidAnnual' | 'AnnualCashOut', approvedHours: number) {
   leaveApprovals.set(`${userGuid}|${leaveType}`, approvedHours)
+}
+
+// ===== 公假 / 带薪假现金金额手填（测试用：改手填后重算）=====
+
+/** amount 为 null = 清除手填、恢复系统值。 */
+export function setSampleCashOverride(userGuid: string, bucket: 'PublicHoliday' | 'Leave', amount: number | null) {
+  if (amount === null) cashOverrides.delete(`${userGuid}|${bucket}`)
+  else cashOverrides.set(`${userGuid}|${bucket}`, amount)
 }

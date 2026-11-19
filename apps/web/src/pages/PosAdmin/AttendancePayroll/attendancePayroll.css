@@ -495,6 +495,112 @@
   font-size: 12px;
 }
 
+/* ===== 公假 / 带薪假「现金金额」手填：沿用年假核定的虚线框，手填后变橙色并留着系统值 ===== */
+.atp-pay-grid .atp-cash-bucket-col {
+  min-width: 112px;
+}
+
+.atp-cash-bucket {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.atp-cash-bucket-muted {
+  color: #c3c7cf;
+}
+
+.atp-cash-bucket-sub {
+  font-size: 11px;
+  line-height: 1.3;
+  color: rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+}
+
+.atp-cash-bucket-sub-warn {
+  color: #c4320a;
+}
+
+/* 带 prefix="$" 的 InputNumber：antd 把 className 挂在外层 .ant-input-number-affix-wrapper 上（不是 .ant-input-number），
+   所以边框 / 底色 / 宽度都要写在这一层，否则选择器落空。 */
+.atp-cash-input.ant-input-number-affix-wrapper {
+  width: 100px;
+  border-style: dashed;
+  border-color: #d0d5dd;
+  background: #fff;
+}
+
+.atp-cash-input .ant-input-number-input {
+  padding: 0 4px;
+  height: 22px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 手填：橙色虚线框 + 右上角小圆点；本期锁定（输入框置灰）时仍保持橙色，让人一眼看出哪些是手填的 */
+.atp-cash-input.ant-input-number-affix-wrapper.is-manual,
+.atp-cash-input.ant-input-number-affix-wrapper.is-manual.ant-input-number-affix-wrapper-disabled {
+  position: relative;
+  border-color: #f79009;
+  background: #fffaeb;
+  color: #b54708;
+  font-weight: 600;
+}
+
+.atp-cash-input.is-manual .ant-input-number-prefix,
+.atp-cash-input.is-manual .ant-input-number-input,
+.atp-cash-input.is-manual.ant-input-number-affix-wrapper-disabled .ant-input-number-input {
+  color: #b54708;
+}
+
+.atp-cash-input.ant-input-number-affix-wrapper.is-manual::after {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #f79009;
+}
+
+.atp-cash-restore.ant-btn {
+  width: 18px;
+  height: 18px;
+  min-width: 0;
+  margin-left: 2px;
+  padding: 0;
+  color: #c4320a;
+}
+
+.atp-cash-tip {
+  min-width: 190px;
+  font-size: 12px;
+}
+
+.atp-cash-tip > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.atp-cash-tip-muted {
+  opacity: 0.75;
+}
+
+.atp-manual-chip {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid #fedf89;
+  border-radius: 10px;
+  background: #fffaeb;
+  color: #c4320a;
+  font-size: 12px;
+}
+
 /* ===== 个人时薪表 ===== */
 .atp-rates-table .ant-table-row {
   cursor: pointer;

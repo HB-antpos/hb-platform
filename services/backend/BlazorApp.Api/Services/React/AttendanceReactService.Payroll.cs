@@ -983,10 +983,17 @@ namespace BlazorApp.Api.Services.React
             var approvals = await _db.Queryable<AttendancePayPeriodLeaveApproval>()
                 .Where(item => item.StoreCode == snapshot.StoreCode && item.PeriodStart == snapshot.PeriodStart && item.Weeks == snapshot.Weeks)
                 .ToListAsync();
+            // 公假 / 带薪假现金金额手填：每人每期每档一条，覆盖该档的系统现金金额（只在该档有现金工时时生效）。
+            var cashOverrides = await _db.Queryable<AttendancePayPeriodCashOverride>()
+                .Where(item => item.StoreCode == snapshot.StoreCode && item.PeriodStart == snapshot.PeriodStart && item.Weeks == snapshot.Weeks)
+                .ToListAsync();
+            var cashOverrideEditors = await ResolveUsernamesToDisplayAsync(cashOverrides.Select(item => item.UpdatedBy));
 
             var rows = new List<AttendancePayrollPayRowDto>();
             foreach (var employee in snapshot.Employees)
             {
+                var publicHolidayOverride = FindCashOverride(cashOverrides, employee.UserGuid, PayrollBucket.PublicHoliday);
+                var leaveCashOverride = FindCashOverride(cashOverrides, employee.UserGuid, PayrollBucket.Leave);
                 var annual = BuildAnnualDetail(employee, approvals, PaidAnnualLeaveType);
                 var cashOut = BuildAnnualDetail(employee, approvals, AnnualCashOutLeaveType);
                 var leaveItems = employee.SickItems
@@ -1010,6 +1017,8 @@ namespace BlazorApp.Api.Services.React
                         .ToList(),
                     WorkItems = employee.WorkItems,
                     LeaveItems = leaveItems,
+                    PublicHolidayCashOverride = publicHolidayOverride?.Amount,
+                    LeaveCashOverride = leaveCashOverride?.Amount,
                 });
                 rows.Add(new AttendancePayrollPayRowDto
                 {
@@ -1047,6 +1056,12 @@ namespace BlazorApp.Api.Services.React
                         Hours = PayrollCalculator.Round2(pay.CashHours.Total),
                         Rate = pay.CashRate,
                         Amount = pay.CashAmount,
+                        PublicHoliday = BuildCashBucketAmount(
+                            pay.CashHours.PublicHoliday, pay.PublicHolidayCashSystemAmount, pay.PublicHolidayCashOverridden,
+                            publicHolidayOverride, cashOverrideEditors),
+                        Leave = BuildCashBucketAmount(
+                            pay.CashHours.Leave, pay.LeaveCashSystemAmount, pay.LeaveCashOverridden,
+                            leaveCashOverride, cashOverrideEditors),
                     },
                     Allowance = pay.Allowance,
                     GrossPay = pay.GrossPay,
@@ -1056,6 +1071,34 @@ namespace BlazorApp.Api.Services.React
             }
             return rows;
         }
+
+        private static AttendancePayPeriodCashOverride? FindCashOverride(
+            IEnumerable<AttendancePayPeriodCashOverride> overrides, string userGuid, PayrollBucket bucket) =>
+            overrides.FirstOrDefault(item =>
+                item.UserGuid.Equals(userGuid, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Bucket, bucket.ToString(), StringComparison.Ordinal));
+
+        /// <summary>
+        /// 公假 / 带薪假某一档的现金金额明细。手填是否生效由计算器决定（该档有现金工时才生效），这里只如实带出：
+        /// Amount = 生效则手填值，否则系统值；有手填但没生效时 ManualAmount 仍带出，前端据此提示。
+        /// </summary>
+        private static AttendancePayrollCashBucketAmountDto BuildCashBucketAmount(
+            decimal cashHours,
+            decimal systemAmount,
+            bool applied,
+            AttendancePayPeriodCashOverride? stored,
+            IReadOnlyDictionary<string, string> editors) => new()
+        {
+            Hours = PayrollCalculator.Round2(cashHours),
+            SystemAmount = systemAmount,
+            IsManual = applied,
+            ManualAmount = stored?.Amount,
+            Amount = applied && stored != null ? stored.Amount : systemAmount,
+            // 只有该档有现金工时才允许手填（工时全在转账里的档位没有现金部分，避免同一笔钱付两次）。
+            Editable = cashHours > 0,
+            UpdatedBy = stored?.UpdatedBy == null ? null : editors.GetValueOrDefault(stored.UpdatedBy) ?? stored.UpdatedBy,
+            UpdatedAt = stored?.UpdatedAt,
+        };
 
         /// <summary>年假核定：没有财务记录时等于申请工时；有记录时取 min(核定, 申请)，申请变少时不会多发。</summary>
         private static AttendancePayrollAnnualDetailDto BuildAnnualDetail(
@@ -1505,6 +1548,129 @@ namespace BlazorApp.Api.Services.React
                 UserGuid = userGuid,
                 Note = note,
             }, "备注已保存");
+        }
+
+        /// <summary>允许手填现金金额的档位：只有公假与带薪假（与 PayrollBucket 枚举名一致，也是库里 Bucket 列的取值）。</summary>
+        private static readonly HashSet<string> CashOverrideBuckets = new(StringComparer.Ordinal)
+        {
+            nameof(PayrollBucket.PublicHoliday),
+            nameof(PayrollBucket.Leave),
+        };
+
+        /// <summary>手填现金金额的上限，防止多敲一位数；远低于 decimal(10,2) 的物理上限。</summary>
+        private const decimal MaxCashOverrideAmount = 100000m;
+
+        /// <summary>
+        /// 手填 / 清除某人某期「公假」或「带薪假」的现金金额。手填值覆盖该档的系统现金金额，不是叠加；
+        /// Amount 为 null = 清除、恢复系统值。与备注、年假核定同一套规则：周期锁定后拒绝；权限在控制器上（编辑工资）。
+        /// 设置时服务端重算一遍工资，确认这一档确实有现金工时（工时全在转账里的档位没有现金部分，不允许手填，避免同一笔钱付两次），
+        /// 并把当时的系统值存下来留痕。
+        /// </summary>
+        public async Task<ApiResponse<AttendancePayPeriodCashOverrideDto>> UpsertPayPeriodCashOverrideAsync(
+            UpsertAttendancePayPeriodCashOverrideDto request)
+        {
+            var (error, storeCode) = await ValidatePayPeriodKeyAsync<AttendancePayPeriodCashOverrideDto>(request);
+            if (error != null)
+            {
+                return error;
+            }
+            var userGuid = request.UserGuid?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(userGuid))
+            {
+                return ApiResponse<AttendancePayPeriodCashOverrideDto>.Error("员工不能为空", "USER_REQUIRED");
+            }
+            var bucketName = request.Bucket?.Trim() ?? string.Empty;
+            if (!CashOverrideBuckets.Contains(bucketName))
+            {
+                return ApiResponse<AttendancePayPeriodCashOverrideDto>.Error("只能手填公假或带薪假的现金金额", "INVALID_CASH_OVERRIDE_BUCKET");
+            }
+            var periodStart = request.PeriodStart.Date;
+            if (await IsPayPeriodLockedAsync(storeCode, periodStart, periodStart.AddDays(request.Weeks * 7 - 1)))
+            {
+                return PayPeriodLocked<AttendancePayPeriodCashOverrideDto>();
+            }
+            if (request.Amount is { } rawAmount
+                && (rawAmount < 0 || rawAmount > MaxCashOverrideAmount || PayrollCalculator.Round2(rawAmount) != rawAmount))
+            {
+                return ApiResponse<AttendancePayPeriodCashOverrideDto>.Error(
+                    $"金额必须在 0 到 {MaxCashOverrideAmount:0} 之间，最多两位小数",
+                    "INVALID_CASH_OVERRIDE_AMOUNT");
+            }
+
+            var existing = await _db.Queryable<AttendancePayPeriodCashOverride>().FirstAsync(item =>
+                item.StoreCode == storeCode && item.PeriodStart == periodStart && item.Weeks == request.Weeks
+                && item.UserGuid == userGuid && item.Bucket == bucketName);
+
+            // 清除：恢复系统值。幂等——本来就没有手填也算成功；不需要重算工资。
+            if (request.Amount is null)
+            {
+                if (existing != null)
+                {
+                    await _db.Deleteable<AttendancePayPeriodCashOverride>().Where(item => item.OverrideGuid == existing.OverrideGuid).ExecuteCommandAsync();
+                }
+                return ApiResponse<AttendancePayPeriodCashOverrideDto>.OK(new AttendancePayPeriodCashOverrideDto
+                {
+                    StoreCode = storeCode,
+                    PeriodStart = periodStart,
+                    Weeks = request.Weeks,
+                    UserGuid = userGuid,
+                    Bucket = bucketName,
+                    Amount = null,
+                    SystemAmount = existing?.SystemAmount ?? 0m,
+                }, "已恢复系统值");
+            }
+
+            // 设置：重算工资，确认这一档有现金工时，并取当时的系统值留痕。
+            var snapshot = await BuildPayrollSnapshotAsync(storeCode, periodStart, request.Weeks, includePending: false, mergeStores: false);
+            var row = (await BuildPayRowsAsync(snapshot))
+                .FirstOrDefault(item => item.UserGuid.Equals(userGuid, StringComparison.OrdinalIgnoreCase));
+            var bucket = row == null
+                ? null
+                : bucketName == nameof(PayrollBucket.PublicHoliday) ? row.Cash.PublicHoliday : row.Cash.Leave;
+            if (bucket == null || !bucket.Editable)
+            {
+                return ApiResponse<AttendancePayPeriodCashOverrideDto>.Error(
+                    "该员工这一档本期没有现金工时（工时已全部在转账里），不能手填现金金额",
+                    "NO_CASH_HOURS_IN_BUCKET");
+            }
+
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
+            var username = _currentUserService.GetCurrentUsername();
+            var amount = request.Amount.Value;
+            if (existing == null)
+            {
+                await _db.Insertable(new AttendancePayPeriodCashOverride
+                {
+                    OverrideGuid = Guid.NewGuid().ToString(),
+                    StoreCode = storeCode,
+                    PeriodStart = periodStart,
+                    Weeks = request.Weeks,
+                    UserGuid = userGuid,
+                    Bucket = bucketName,
+                    Amount = amount,
+                    SystemAmount = bucket.SystemAmount,
+                    UpdatedAt = now,
+                    UpdatedBy = username,
+                }).ExecuteCommandAsync();
+            }
+            else
+            {
+                existing.Amount = amount;
+                existing.SystemAmount = bucket.SystemAmount;
+                existing.UpdatedAt = now;
+                existing.UpdatedBy = username;
+                await _db.Updateable(existing).ExecuteCommandAsync();
+            }
+            return ApiResponse<AttendancePayPeriodCashOverrideDto>.OK(new AttendancePayPeriodCashOverrideDto
+            {
+                StoreCode = storeCode,
+                PeriodStart = periodStart,
+                Weeks = request.Weeks,
+                UserGuid = userGuid,
+                Bucket = bucketName,
+                Amount = amount,
+                SystemAmount = bucket.SystemAmount,
+            }, "现金金额已保存");
         }
 
         public async Task<ApiResponse<AttendancePayPeriodLeaveApprovalDto>> UpsertPayPeriodLeaveApprovalAsync(

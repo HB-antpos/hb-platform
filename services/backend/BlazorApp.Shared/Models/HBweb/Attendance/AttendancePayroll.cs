@@ -142,6 +142,49 @@ public sealed class AttendancePayPeriodNote
 }
 
 /// <summary>
+/// 工资表「公假 / 带薪假」现金金额手填：每人每期每档一条，(StoreCode, PeriodStart, Weeks, UserGuid, Bucket) 唯一。
+/// 手填值**覆盖**该档的系统现金金额（现金工时 × 现金时薪），不是叠加；没有记录时按系统值。
+/// 只影响现金金额与应发，不影响转账与 MYOB 推送。表由迁移 20261120.001-attendance-pay-cash-override 创建，
+/// 刻意不登记进 SqlSugarContext 的 tableTypes（避免基线 CodeFirst 先建出类型不一致的表）。
+/// </summary>
+[SugarTable("AttendancePayPeriodCashOverride")]
+public sealed class AttendancePayPeriodCashOverride
+{
+    [SugarColumn(IsPrimaryKey = true, IsNullable = false, Length = 50)]
+    public string OverrideGuid { get; set; } = Guid.NewGuid().ToString();
+
+    [SugarColumn(IsNullable = false, Length = 50)]
+    public string StoreCode { get; set; } = string.Empty;
+
+    [SugarColumn(IsNullable = false, ColumnDataType = "date")]
+    public DateTime PeriodStart { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public int Weeks { get; set; } = 1;
+
+    [SugarColumn(IsNullable = false, Length = 50)]
+    public string UserGuid { get; set; } = string.Empty;
+
+    /// <summary>只能是 PublicHoliday / Leave（与 PayrollBucket 枚举名一致）。</summary>
+    [SugarColumn(IsNullable = false, Length = 20)]
+    public string Bucket { get; set; } = string.Empty;
+
+    /// <summary>手填的现金金额（≥ 0，两位小数）。</summary>
+    [SugarColumn(IsNullable = false, ColumnDataType = "decimal(10,2)")]
+    public decimal Amount { get; set; }
+
+    /// <summary>保存那一刻的系统值，留痕用：事后能看出手填比系统多 / 少多少。</summary>
+    [SugarColumn(IsNullable = false, ColumnDataType = "decimal(10,2)")]
+    public decimal SystemAmount { get; set; }
+
+    [SugarColumn(IsNullable = false, ColumnDataType = "datetime2")]
+    public DateTime UpdatedAt { get; set; }
+
+    [SugarColumn(IsNullable = true, Length = 100)]
+    public string? UpdatedBy { get; set; }
+}
+
+/// <summary>
 /// 年假（休息 PaidAnnual / 发放 AnnualCashOut）财务核定工时：每人每期每类一条，
 /// (StoreCode, PeriodStart, Weeks, UserGuid, LeaveType) 唯一；没有记录时工资按申请工时算。
 /// </summary>

@@ -1,11 +1,14 @@
-import { Avatar, Empty, Input, InputNumber, Spin, Tag, Tooltip, message } from 'antd'
-import { useEffect, useMemo, useState, type ReactElement } from 'react'
+import { UndoOutlined } from '@ant-design/icons'
+import { Avatar, Button, Empty, Input, InputNumber, Spin, Tag, Tooltip, message } from 'antd'
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { saveAttendanceLeaveApproval, saveAttendancePayNote } from '../../../services/attendancePayrollService'
+import { saveAttendanceCashOverride, saveAttendanceLeaveApproval, saveAttendancePayNote } from '../../../services/attendancePayrollService'
 import type {
+  AttendanceCashOverrideBucket,
   AttendanceLeaveApprovalDto,
   AttendancePayBuckets,
+  AttendancePayCashBucketDto,
   AttendancePayResultDto,
   AttendancePayRowDto,
 } from '../../../types/attendancePayroll'
@@ -13,7 +16,18 @@ import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
 import { formatMyobTime } from '../Myob/myobLogic'
 
 import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
-import { TRANSFER_FILL_ORDER, formatHours, formatMoney, formatSignedMoney, round2, showsAgeBadge, type BirthdayRateReview } from './payrollLogic'
+import {
+  CASH_OVERRIDE_BUCKETS,
+  TRANSFER_FILL_ORDER,
+  formatHours,
+  formatMoney,
+  formatSignedMoney,
+  resolveCashOverrideCommit,
+  round2,
+  showsAgeBadge,
+  summarizeCashOverrides,
+  type BirthdayRateReview,
+} from './payrollLogic'
 import type { PayrollPushCell } from './payrollMyobPushLogic'
 
 interface PayTabProps {
@@ -82,6 +96,137 @@ function NoteInput(props: { value?: string; disabled: boolean; placeholder: stri
   )
 }
 
+/**
+ * 公假 / 带薪假的现金金额（虚线框）。默认显示系统算的值；改了就是手填，**取代**这一档的系统现金金额（不是叠加）。
+ * 清空或点「恢复系统值」回到系统算的；Esc 取消本次修改。这一档没有现金工时（工时全在转账里）时只读，避免同一笔钱付两次。
+ */
+function CashBucketInput(props: {
+  bucket: AttendancePayCashBucketDto
+  /** 这一档本期有没有工时（哪怕全在转账里）：只用来决定没有现金部分时要不要解释一句。 */
+  hasHours: boolean
+  disabled: boolean
+  ariaLabel: string
+  onSave: (amount: number | null) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const { bucket } = props
+  const [value, setValue] = useState<number | null>(bucket.amount)
+  // Esc 取消：随后的失焦不能再提交（失焦时 state 还没更新，不能靠 value 判断）。
+  const skipCommit = useRef(false)
+  // 回车保存后紧接着的失焦、或连点，只发一次请求。
+  const saving = useRef(false)
+  useEffect(() => setValue(bucket.amount), [bucket.amount, bucket.isManual])
+
+  if (!bucket.editable) {
+    // 有手填但这一档已没有现金工时（例如后来改了时薪成全转账）：手填没生效，如实说明，行上另有告警。
+    if (bucket.manualAmount !== null && bucket.manualAmount !== undefined) {
+      return (
+        <Tooltip title={t('attendancePayroll.pay.cashOverride.ignored', { amount: formatMoney(bucket.manualAmount) })}>
+          <span className="atp-cash-bucket atp-cash-bucket-muted" tabIndex={0}>
+            —
+            <span className="atp-cash-bucket-sub atp-cash-bucket-sub-warn">{t('attendancePayroll.pay.cashOverride.ignoredShort')}</span>
+          </span>
+        </Tooltip>
+      )
+    }
+    if (props.hasHours) {
+      return (
+        <Tooltip title={t('attendancePayroll.pay.cashOverride.noCashHours')}>
+          <span className="atp-cash-bucket atp-cash-bucket-muted" tabIndex={0}>
+            —
+            <span className="atp-cash-bucket-sub">{t('attendancePayroll.pay.cashOverride.inTransfer')}</span>
+          </span>
+        </Tooltip>
+      )
+    }
+    return <span className="atp-cash-bucket atp-cash-bucket-muted">—</span>
+  }
+
+  const commit = () => {
+    if (skipCommit.current) {
+      skipCommit.current = false
+      setValue(bucket.amount)
+      return
+    }
+    if (saving.current) return
+    const action = resolveCashOverrideCommit(bucket, value)
+    if (action.kind === 'none') {
+      setValue(bucket.amount)
+      return
+    }
+    saving.current = true
+    // 先把输入框显示成钳制后的值（负数 → 0、超上限 → 上限），不让未钳制的原始输入在等后端返回期间一直挂着。
+    if (action.kind === 'save') setValue(action.amount)
+    void props.onSave(action.kind === 'clear' ? null : action.amount)
+      .catch(() => setValue(bucket.amount))
+      .finally(() => {
+        saving.current = false
+      })
+  }
+
+  const delta = round2(bucket.amount - bucket.systemAmount)
+  const detail = bucket.isManual ? (
+    <div className="atp-cash-tip">
+      <div><span>{t('attendancePayroll.pay.cashOverride.manual')}</span><b>{formatMoney(bucket.amount)}</b></div>
+      <div><span>{t('attendancePayroll.pay.cashOverride.systemLabel')}</span><span>{formatMoney(bucket.systemAmount)}</span></div>
+      <div>
+        <span>{t('attendancePayroll.pay.cashOverride.diffLabel')}</span>
+        <span className={delta < 0 ? 'atp-negative' : 'atp-positive'}>{formatSignedMoney(delta, formatMoney(0))}</span>
+      </div>
+      {bucket.updatedBy ? (
+        <div className="atp-cash-tip-muted">
+          <span>{t('attendancePayroll.pay.cashOverride.editorLabel')}</span>
+          <span>{bucket.updatedBy} · {formatMyobTime(bucket.updatedAt)}</span>
+        </div>
+      ) : null}
+    </div>
+  ) : undefined
+
+  return (
+    <div className="atp-cash-bucket">
+      <Tooltip title={detail}>
+        <InputNumber
+          className={`atp-dashed-input atp-cash-input${bucket.isManual ? ' is-manual' : ''}`}
+          size="small"
+          // 不设 min / max：antd 对越界输入会在失焦时自己改显示值，却不先触发 onChange，
+          // 导致「框里显示 0.00、实际没保存」。上下限统一交给 resolveCashOverrideCommit 钳制。
+          precision={2}
+          controls={false}
+          prefix="$"
+          value={value}
+          disabled={props.disabled}
+          aria-label={props.ariaLabel}
+          onChange={setValue}
+          onBlur={commit}
+          onPressEnter={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              skipCommit.current = true
+              event.currentTarget.blur()
+            }
+          }}
+        />
+      </Tooltip>
+      {bucket.isManual ? (
+        <span className="atp-cash-bucket-sub atp-cash-bucket-sub-warn">
+          {t('attendancePayroll.pay.cashOverride.systemShort', { amount: formatMoney(bucket.systemAmount) })}
+          {!props.disabled ? (
+            <Button
+              type="text"
+              size="small"
+              className="atp-cash-restore"
+              icon={<UndoOutlined />}
+              title={t('attendancePayroll.pay.cashOverride.restore')}
+              aria-label={t('attendancePayroll.pay.cashOverride.restore')}
+              onClick={() => void props.onSave(null).catch(() => undefined)}
+            />
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates, myobPush }: PayTabProps) {
   const { t } = useTranslation()
   const rows = data?.rows ?? []
@@ -101,9 +246,13 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
       allowance: sum((row) => row.allowance),
       cashAmount: sum((row) => row.cash.amount + row.allowance),
       cashOnly: sum((row) => row.cash.amount),
+      publicHolidayCash: sum((row) => row.cash.publicHoliday.amount),
+      leaveCash: sum((row) => row.cash.leave.amount),
       gross: sum((row) => row.grossPay),
     }
   }, [rows])
+  // 本页手填了几项、比系统值多（少）多少：显示在「现金合计」卡上，方便财务核对差额。
+  const overrides = useMemo(() => summarizeCashOverrides(rows), [rows])
 
   const periodKey = data ? { storeCode: data.storeCode, periodStart: data.periodStart, weeks: data.weeks } : null
 
@@ -112,6 +261,19 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
     try {
       await saveAttendanceLeaveApproval({ ...periodKey, userGuid: row.userGuid, leaveType: approval.leaveType, approvedHours })
       message.success(t('attendancePayroll.pay.approvalSaved'))
+      onReload()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.actionFailed'))
+      throw error
+    }
+  }
+
+  /** 手填 / 清除（amount 为 null）某人公假或带薪假的现金金额；后端重算工资，成功后整表重新取。 */
+  const saveCashOverride = async (row: AttendancePayRowDto, bucket: AttendanceCashOverrideBucket, amount: number | null) => {
+    if (!periodKey) return
+    try {
+      await saveAttendanceCashOverride({ ...periodKey, userGuid: row.userGuid, bucket, amount })
+      message.success(t(amount === null ? 'attendancePayroll.pay.cashOverride.restored' : 'attendancePayroll.pay.cashOverride.saved'))
       onReload()
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.actionFailed'))
@@ -197,7 +359,14 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
           <div className="atp-stat">
             <span className="atp-stat-label">{t('attendancePayroll.pay.statCash')}</span>
             <strong className="atp-stat-value atp-cash-text">{formatMoney(totals.cashAmount)}</strong>
-            <span className="atp-stat-sub">{t('attendancePayroll.pay.statCashSub', { hours: formatHours(totals.cashHours, '0'), allowance: formatMoney(totals.allowance) })}</span>
+            <span className="atp-stat-sub">
+              {t('attendancePayroll.pay.statCashSub', { hours: formatHours(totals.cashHours, '0'), allowance: formatMoney(totals.allowance) })}
+              {overrides.count > 0 ? (
+                <span className="atp-manual-chip">
+                  {t('attendancePayroll.pay.cashOverride.chip', { count: overrides.count, delta: formatSignedMoney(overrides.delta, formatMoney(0)) })}
+                </span>
+              ) : null}
+            </span>
           </div>
           <div className={`atp-stat ${data.pendingCount > 0 ? 'atp-stat-warn' : ''}`}>
             <span className="atp-stat-label">{t('attendancePayroll.pay.statGross')}</span>
@@ -220,7 +389,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <th rowSpan={2} className="atp-sticky atp-employee-col">{t('attendancePayroll.pay.employeeMode')}</th>
                   <th colSpan={6}>{t('attendancePayroll.pay.payableHours')}</th>
                   <th colSpan={2} className="atp-week-divider atp-head-transfer">{t('attendancePayroll.pay.transfer')}</th>
-                  <th colSpan={3} className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.cash')}</th>
+                  <th colSpan={5} className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.cash')}</th>
                   <th rowSpan={2} className="atp-week-divider">{t('attendancePayroll.pay.gross')}</th>
                   {myobPush ? <th rowSpan={2}>{t('attendancePayroll.pay.myobPush')}</th> : null}
                   <th rowSpan={2}>{t('attendancePayroll.pay.note')}</th>
@@ -232,6 +401,8 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <th className="atp-week-divider atp-head-transfer">{t('attendancePayroll.pay.hoursByTier')}</th>
                   <th className="atp-head-transfer">{t('attendancePayroll.pay.amount')}</th>
                   <th className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.hoursByTier')}</th>
+                  <th className="atp-head-cash">{t('attendancePayroll.pay.cashPublicHoliday')}</th>
+                  <th className="atp-head-cash">{t('attendancePayroll.pay.cashLeave')}</th>
                   <th className="atp-head-cash">{t('attendancePayroll.pay.allowance')}</th>
                   <th className="atp-head-cash">{t('attendancePayroll.pay.amount')}</th>
                 </tr>
@@ -286,6 +457,20 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                         {row.cash.hours > 0 ? <span className="atp-pay-sub">{bucketText(row.cash.buckets)}</span> : null}
                       </div>
                     </td>
+                    {CASH_OVERRIDE_BUCKETS.map(({ key, apiBucket }) => (
+                      <td key={key} className="atp-num atp-col-cash atp-cash-bucket-col">
+                        <CashBucketInput
+                          bucket={row.cash[key]}
+                          hasHours={row.hours[key] > 0}
+                          disabled={!canEdit}
+                          ariaLabel={t('attendancePayroll.pay.cashOverride.aria', {
+                            name: row.userName,
+                            bucket: t(`attendancePayroll.tierLong.${key}`),
+                          })}
+                          onSave={(amount) => saveCashOverride(row, apiBucket, amount)}
+                        />
+                      </td>
+                    ))}
                     <td className={`atp-num atp-col-cash ${row.allowance < 0 ? 'atp-negative' : row.allowance > 0 ? 'atp-positive' : ''}`}>
                       {formatSignedMoney(row.allowance)}
                     </td>
@@ -321,6 +506,8 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <td className="atp-num atp-week-divider">{formatHours(totals.transferHours)}</td>
                   <td className="atp-num">{formatMoney(totals.transferAmount)}</td>
                   <td className="atp-num atp-week-divider">{formatHours(totals.cashHours)}</td>
+                  <td className="atp-num">{formatMoney(totals.publicHolidayCash)}</td>
+                  <td className="atp-num">{formatMoney(totals.leaveCash)}</td>
                   <td className="atp-num">{formatMoney(totals.allowance)}</td>
                   <td className="atp-num">{formatMoney(totals.cashAmount)}</td>
                   <td className="atp-num atp-num-strong atp-week-divider">{formatMoney(totals.gross)}</td>

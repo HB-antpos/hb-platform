@@ -132,6 +132,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.MainHistoryTable,
             SchemaMigrationCoordinator.PosIpadOtaAssignmentMigrationId
         );
+        // 工资表公假 / 带薪假现金金额手填新表：全新库经显式迁移建表并登记账本。
+        await AssertHistoryTableAsync(
+            databases.MainConnectionString,
+            SqlServerSchemaMigrationRuntime.MainHistoryTable,
+            SchemaMigrationCoordinator.AttendancePayCashOverrideMigrationId
+        );
     }
 
     [SchemaMigrationSqlServerFact]
@@ -982,6 +988,59 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         await ExecuteNonQueryAsync(conn, "DROP INDEX UX_PosIpadOtaAssignment_Store ON dbo.PosIpadOtaAssignment;");
         await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.ApplySql);
         await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task 工资手填现金金额表_缺前置表报54800_可重复执行不丢数据_唯一索引拦重复_签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var conn = databases.MainConnectionString;
+
+        // 前置：工资周期表（由考勤工资迁移创建）不存在时，Apply 明确报 54800，而不是建出一张孤立的表。
+        var noPrerequisite = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.ApplySql));
+        Assert.Equal(54800, noPrerequisite.Number);
+        await ExecuteNonQueryAsync(conn, "CREATE TABLE dbo.AttendancePayPeriod (PeriodGuid nvarchar(50) NOT NULL PRIMARY KEY);");
+
+        // 表不存在：Verify 抛 54801；Apply 建表后 Verify 通过。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.VerifySql));
+        Assert.Equal(54801, missing.Number);
+        await ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.ApplySql);
+        await ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.VerifySql);
+
+        const string insertPrefix = """
+            INSERT dbo.AttendancePayPeriodCashOverride
+                (OverrideGuid, StoreCode, PeriodStart, Weeks, UserGuid, Bucket, Amount, SystemAmount, UpdatedAt)
+            VALUES
+            """;
+        await ExecuteNonQueryAsync(conn, insertPrefix + " (N'o-1', N'1002', '2026-11-16', 1, N'u-1', N'PublicHoliday', 240.00, 212.80, SYSUTCDATETIME());");
+
+        // 重复执行不得丢失已有手填记录。
+        await ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.ApplySql);
+        await ExecuteNonQueryAsync(conn, """
+            IF (SELECT COUNT(*) FROM dbo.AttendancePayPeriodCashOverride) <> 1
+                THROW 51880, 'Existing cash override row was lost.', 1;
+            """);
+
+        // 同一人同一期同一档只能有一条；换一档（Leave）可以。
+        await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(conn, insertPrefix + " (N'o-2', N'1002', '2026-11-16', 1, N'u-1', N'PublicHoliday', 1.00, 1.00, SYSUTCDATETIME());"));
+        await ExecuteNonQueryAsync(conn, insertPrefix + " (N'o-3', N'1002', '2026-11-16', 1, N'u-1', N'Leave', 250.00, 224.00, SYSUTCDATETIME());");
+
+        // 签名门禁：金额列精度漂移 → 54802；还原后通过。
+        await ExecuteNonQueryAsync(conn, "ALTER TABLE dbo.AttendancePayPeriodCashOverride ALTER COLUMN Amount decimal(8,2) NOT NULL;");
+        var column = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.VerifySql));
+        Assert.Equal(54802, column.Number);
+        await ExecuteNonQueryAsync(conn, "ALTER TABLE dbo.AttendancePayPeriodCashOverride ALTER COLUMN Amount decimal(10,2) NOT NULL;");
+        await ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.VerifySql);
+
+        // 签名门禁：唯一索引被删 → 54803；Apply 补回后通过。
+        await ExecuteNonQueryAsync(conn, "DROP INDEX UX_AttendancePayPeriodCashOverride_Store_Period_User_Bucket ON dbo.AttendancePayPeriodCashOverride;");
+        var index = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.VerifySql));
+        Assert.Equal(54803, index.Number);
+        await ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.ApplySql);
+        await ExecuteNonQueryAsync(conn, AttendancePayCashOverrideSchema.VerifySql);
     }
 
     [SchemaMigrationSqlServerFact]

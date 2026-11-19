@@ -230,8 +230,31 @@ namespace BlazorApp.Shared.DTOs
         public AttendancePayrollBucketHoursDto Buckets { get; set; } = new();
         public decimal Hours { get; set; }
         public decimal? Rate { get; set; }
-        /// <summary>现金工时 × 现金时薪，不含补贴。</summary>
+        /// <summary>现金金额，不含补贴：现金工时 × 现金时薪；「公假」「带薪假」两档若有手填金额，则用手填值取代该档的系统值。</summary>
         public decimal Amount { get; set; }
+        /// <summary>「公假」档的现金金额明细（系统值 / 手填值 / 是否可改）。</summary>
+        public AttendancePayrollCashBucketAmountDto PublicHoliday { get; set; } = new();
+        /// <summary>「带薪假」档的现金金额明细。</summary>
+        public AttendancePayrollCashBucketAmountDto Leave { get; set; } = new();
+    }
+
+    /// <summary>公假 / 带薪假某一档的现金金额：默认是系统算的，财务可以手填覆盖。</summary>
+    public class AttendancePayrollCashBucketAmountDto
+    {
+        /// <summary>这一档现金工时（转账装不下、落到现金的部分）。</summary>
+        public decimal Hours { get; set; }
+        /// <summary>最终现金金额：已手填则为手填值，否则等于 SystemAmount。</summary>
+        public decimal Amount { get; set; }
+        /// <summary>系统算的现金金额（现金工时 × 现金时薪），不含手填。</summary>
+        public decimal SystemAmount { get; set; }
+        /// <summary>手填值是否已生效。</summary>
+        public bool IsManual { get; set; }
+        /// <summary>库里存着的手填值（即使因为这一档已没有现金工时而不生效也会带出，便于提示）；没有手填为 null。</summary>
+        public decimal? ManualAmount { get; set; }
+        /// <summary>这一档有没有现金工时：只有有现金工时的档位才允许手填（工时全在转账里的档位没有现金部分，避免重复付）。</summary>
+        public bool Editable { get; set; }
+        public string? UpdatedBy { get; set; }
+        public DateTime? UpdatedAt { get; set; }
     }
 
     public class AttendancePayrollPayRowDto
@@ -250,7 +273,7 @@ namespace BlazorApp.Shared.DTOs
         public decimal Allowance { get; set; }
         public decimal GrossPay { get; set; }
         public string? Note { get; set; }
-        /// <summary>NO_RATE / MISSING_TRANSFER_RATE / MISSING_CASH_RATE / BELOW_MINIMUM_RATE。</summary>
+        /// <summary>NO_RATE / MISSING_TRANSFER_RATE / MISSING_CASH_RATE / BELOW_MINIMUM_RATE / CASH_OVERRIDE_IGNORED（有手填现金金额但该档已没有现金工时，未生效）。</summary>
         public List<string> Warnings { get; set; } = new();
     }
 
@@ -370,6 +393,15 @@ namespace BlazorApp.Shared.DTOs
         public string? Note { get; set; }
     }
 
+    public class UpsertAttendancePayPeriodCashOverrideDto : AttendancePayPeriodKeyDto
+    {
+        public string UserGuid { get; set; } = string.Empty;
+        /// <summary>只能是 PublicHoliday / Leave。</summary>
+        public string Bucket { get; set; } = string.Empty;
+        /// <summary>手填的现金金额（≥ 0，最多两位小数）；null＝清除手填、恢复系统值。</summary>
+        public decimal? Amount { get; set; }
+    }
+
     public class UpsertAttendancePayPeriodLeaveApprovalDto : AttendancePayPeriodKeyDto
     {
         public string UserGuid { get; set; } = string.Empty;
@@ -403,6 +435,19 @@ namespace BlazorApp.Shared.DTOs
         public int Weeks { get; set; }
         public string UserGuid { get; set; } = string.Empty;
         public string Note { get; set; } = string.Empty;
+    }
+
+    public class AttendancePayPeriodCashOverrideDto
+    {
+        public string StoreCode { get; set; } = string.Empty;
+        public DateTime PeriodStart { get; set; }
+        public int Weeks { get; set; }
+        public string UserGuid { get; set; } = string.Empty;
+        public string Bucket { get; set; } = string.Empty;
+        /// <summary>保存后的手填金额；已清除（恢复系统值）时为 null。</summary>
+        public decimal? Amount { get; set; }
+        /// <summary>保存时系统算的这一档现金金额。</summary>
+        public decimal SystemAmount { get; set; }
     }
 
     public class AttendancePayPeriodLeaveApprovalDto

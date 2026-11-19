@@ -352,6 +352,12 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> UpsertPayPeriodNote([FromBody] UpsertAttendancePayPeriodNoteDto request) =>
             Ok(await _service.UpsertPayPeriodNoteAsync(request));
 
+        /// <summary>手填 / 清除某人某期「公假」「带薪假」的现金金额（覆盖该档系统值）；权限与备注、年假核定一致。</summary>
+        [HttpPut("payroll/periods/cash-overrides")]
+        [Authorize(Policy = Permissions.Attendance.Payroll.Edit)]
+        public async Task<IActionResult> UpsertPayPeriodCashOverride([FromBody] UpsertAttendancePayPeriodCashOverrideDto request) =>
+            Ok(await _service.UpsertPayPeriodCashOverrideAsync(request));
+
         [HttpPut("payroll/periods/leave-approvals")]
         [Authorize(Policy = Permissions.Attendance.Payroll.Edit)]
         public async Task<IActionResult> UpsertPayPeriodLeaveApproval(
