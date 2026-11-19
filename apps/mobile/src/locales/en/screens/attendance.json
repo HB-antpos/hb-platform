@@ -187,11 +187,7 @@
   "locationNotice": {
     "title": "Location use",
     "scanLabel": "When you scan",
-    "scanBody": "Your location is used only when you scan to clock in or out, to record where you clocked in. It stops as soon as the punch is done.",
-    "foregroundLabel": "While on shift",
-    "foregroundBody": "When you open the app or return to it, it gets your current location once while the app is open and uploads it for attendance records. It does not run continuously and stops after you clock out.",
-    "otherLabel": "In the background",
-    "otherBody": "The app does not use your location in the background and does not track you.",
+    "scanBody": "Your location is used when you scan to clock in or out, to record where you clocked in. It stops as soon as the punch is done.",
     "details": "Learn more",
     "sheet": {
       "infoTitle": "Location use",
