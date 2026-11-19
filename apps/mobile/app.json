@@ -30,8 +30,6 @@
         "NSBluetoothAlwaysUsageDescription": "Used to scan and connect Bluetooth receipt and label printers",
         "NSBluetoothPeripheralUsageDescription": "Used to scan and connect Bluetooth receipt and label printers",
         "NSLocationWhenInUseUsageDescription": "Used to verify sign-in and attendance punches with your current precise location",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Used during an active shift, including when the app is in the background, for attendance verification",
-        "NSLocationAlwaysUsageDescription": "Used during an active shift, including when the app is in the background, for attendance verification",
         "ITSAppUsesNonExemptEncryption": false
       },
       "privacyManifests": {
@@ -182,7 +180,6 @@
         "android.permission.BLUETOOTH_SCAN",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
         "android.permission.CAMERA",
         "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.POST_NOTIFICATIONS"
@@ -210,11 +207,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Used during an active shift, including when the app is in the background, for attendance verification",
-          "locationAlwaysPermission": "Used during an active shift, including when the app is in the background, for attendance verification",
-          "locationWhenInUsePermission": "Used to verify sign-in and attendance punches with your current precise location",
-          "isIosBackgroundLocationEnabled": true,
-          "isAndroidBackgroundLocationEnabled": true
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "locationWhenInUsePermission": "Used to verify sign-in and attendance punches with your current precise location"
         }
       ],
       [
