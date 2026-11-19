@@ -166,6 +166,16 @@ export function countDevicesByStatus(items: DeviceRegistrationItem[]): Record<De
   return counts
 }
 
+/** 按分店统计设备台数（没有分店的设备不计入任何一家）。 */
+export function countDevicesByStore(items: readonly Pick<DeviceRegistrationItem, 'storeCode'>[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const item of items) {
+    if (!item.storeCode) continue
+    counts[item.storeCode] = (counts[item.storeCode] ?? 0) + 1
+  }
+  return counts
+}
+
 /**
  * 下拉选项取已加载设备里实际出现的值（生产里有 StorePDA、WarehousePDA、Android 11 等历史值），
  * 再并入固定候选并保留当前选中值，避免选中值因换分店而从选项里消失。

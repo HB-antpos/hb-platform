@@ -135,40 +135,6 @@ export function RangeFilter({ from, to, today, disabled, tr, onChange }: {
   )
 }
 
-export function storeOptionLabel(store: Pick<CashStoreOption, 'storeCode' | 'storeName'>): string {
-  return store.storeName && store.storeName !== store.storeCode ? `${store.storeName} (${store.storeCode})` : store.storeCode
-}
-
-function matchStore(input: string, option?: { label?: unknown; value?: unknown }) {
-  const keyword = input.trim().toLowerCase()
-  return `${String(option?.label ?? '')} ${String(option?.value ?? '')}`.toLowerCase().includes(keyword)
-}
-
-/** 单店选择（按日明细 / 存款 / 支出）。 */
-export function StoreSelect({ stores, value, disabled, tr, onChange }: {
-  stores: readonly CashStoreOption[]
-  value: string | null
-  disabled?: boolean
-  tr: Tr
-  onChange: (storeCode: string) => void
-}) {
-  return (
-    <label className="store-cash-field">
-      <span className="store-cash-field-label">{tr('filters.store')}</span>
-      <Select
-        className="store-cash-store-select"
-        value={value ?? undefined}
-        disabled={disabled}
-        showSearch
-        aria-label={tr('filters.store')}
-        filterOption={matchStore}
-        options={stores.map((store) => ({ value: store.storeCode, label: storeOptionLabel(store) }))}
-        onChange={onChange}
-      />
-    </label>
-  )
-}
-
 /** 收银系统筛选（所有页签共用）：缺省只看启用收银系统的分店。 */
 export function RegisterSelect({ value, tr, onChange }: {
   value: CashRegisterFilter | undefined

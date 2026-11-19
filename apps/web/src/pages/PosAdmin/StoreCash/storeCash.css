@@ -59,16 +59,6 @@
   max-width: 100%;
 }
 
-.store-cash-store-select {
-  width: 240px;
-  max-width: 100%;
-}
-
-.store-cash-stores-select {
-  width: 320px;
-  max-width: 100%;
-}
-
 .store-cash-small-select {
   width: 150px;
   max-width: 100%;
@@ -542,8 +532,6 @@
   }
 
   .store-cash-range,
-  .store-cash-store-select,
-  .store-cash-stores-select,
   .store-cash-small-select {
     width: 100%;
   }
@@ -569,4 +557,16 @@
   .store-cash-skeleton {
     animation: none;
   }
+}
+
+/* 左侧分店列表收起（窄屏 / 用户点了收起）时，页签上方的分店按钮；只有 1 家店时是一枚标签 */
+.store-cash-store-switch {
+  margin-bottom: 12px;
+}
+
+.store-cash-store-single {
+  margin: 0;
+  padding-inline: 10px;
+  line-height: 30px;
+  font-weight: 500;
 }

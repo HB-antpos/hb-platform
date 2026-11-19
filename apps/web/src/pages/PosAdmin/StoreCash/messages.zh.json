@@ -17,9 +17,7 @@
     "filters": {
       "range": "日期范围",
       "rangeHint": "最多 {{days}} 天，不能晚于门店今天",
-      "store": "分店",
-      "stores": "分店",
-      "allStores": "全部分店",
+      "storesSelected": "已选 {{count}} 家分店",
       "category": "类别",
       "allCategories": "全部类别",
       "review": "核对状态",

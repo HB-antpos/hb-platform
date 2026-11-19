@@ -23,6 +23,8 @@ import type {
 } from '../../../types/dailyClose'
 import { buildStoreOptionsFromUserStores } from '../../../utils/managedStoreScope'
 import { formatSydneyIsoDate } from '../../../utils/sydneyDate'
+import StoreSidebarLayout from '../ScheduleAttendance/StoreSidebarLayout'
+import { useStoreSidebar } from '../ScheduleAttendance/useStoreSidebar'
 
 import DailyCloseDrawer from './DailyCloseDrawer'
 import { BackfillChip, DifferenceTag, SaveSequenceChip, useSourceLabel } from './DailyCloseTags'
@@ -314,15 +316,23 @@ export default function DailyClosesPage() {
     ? items.find((item) => item.dailyCloseGuid.toLowerCase() === selectedId) ?? null
     : null
 
-  const storeSelectOptions = useMemo(
-    () =>
-      storeOptions.map((option) => ({
-        value: option.value,
-        label: option.label && option.label !== option.value ? `${option.value} · ${option.label}` : option.value,
-        short: option.label || option.value,
-      })),
+  // 左侧分店列表：单选，点一下立即生效（不用再点「查询」）；「全部分店」= 不限分店（storeCodes 为空）。
+  // 只改分店这一项：草稿里还没点「查询」的日期 / 终端等条件保持原样，不会被连带应用。
+  const sidebarStoreOptions = useMemo(
+    () => storeOptions.map((option) => ({ value: option.value, label: option.label || option.value })),
     [storeOptions],
   )
+  const selectStore = useCallback((code: string | undefined) => {
+    const storeCodes = code ? [code] : []
+    setDraft((current) => ({ ...current, storeCodes }))
+    setApplied((current) => ({ ...current, filters: { ...current.filters, storeCodes }, page: 1 }))
+  }, [])
+  const storeSidebar = useStoreSidebar({
+    options: sidebarStoreOptions,
+    value: applied.filters.storeCodes.length === 1 ? applied.filters.storeCodes[0] : undefined,
+    onSelect: selectStore,
+    allowAll: true,
+  })
 
   // 终端候选：见过的终端；已选分店时只列这些分店的终端。
   const deviceOptions = useMemo(() => {
@@ -496,6 +506,7 @@ export default function DailyClosesPage() {
         </Tooltip>
       }
     >
+      <StoreSidebarLayout docked={storeSidebar.docked} sidebar={storeSidebar.sidebar}>
       <form className="daily-closes-card daily-closes-filter" onSubmit={submitFilters}>
         <div className="daily-closes-field is-range">
           <label htmlFor={`${idPrefix}-range`}>{t('dailyCloses.filters.businessDate')}</label>
@@ -519,22 +530,12 @@ export default function DailyClosesPage() {
             }}
           />
         </div>
-        <div className="daily-closes-field is-store">
-          <label htmlFor={`${idPrefix}-store`}>{t('dailyCloses.filters.store')}</label>
-          <Select
-            id={`${idPrefix}-store`}
-            mode="multiple"
-            allowClear
-            showSearch
-            maxTagCount="responsive"
-            optionFilterProp="label"
-            optionLabelProp="short"
-            placeholder={t('dailyCloses.filters.storePlaceholder')}
-            options={storeSelectOptions}
-            value={draft.storeCodes}
-            onChange={(codes: string[]) => setDraft((current) => ({ ...current, storeCodes: codes }))}
-          />
-        </div>
+        {storeSidebar.switcher ? (
+          <div className="daily-closes-field is-store">
+            <label>{t('dailyCloses.filters.store')}</label>
+            {storeSidebar.switcher}
+          </div>
+        ) : null}
         <div className="daily-closes-field is-device">
           <label htmlFor={`${idPrefix}-device`}>{t('dailyCloses.filters.device')}</label>
           <AutoComplete
@@ -652,6 +653,7 @@ export default function DailyClosesPage() {
           />
         </div>
       </div>
+      </StoreSidebarLayout>
 
       <DailyCloseDrawer
         // 页面被缓存（切到别的标签页）时抽屉必须收起，否则它挂在 body 上会盖住别的页面。
