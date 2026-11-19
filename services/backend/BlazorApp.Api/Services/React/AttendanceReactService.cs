@@ -1144,7 +1144,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     punchLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 if (!existingSession.HasOpenSegment
                     && existingSession.Segments.Count >= segmentLimit)
                 {
@@ -1265,7 +1266,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     punchLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 // 打卡恢复漏下班、覆盖早退边界等状态时，派生审批必须在本次员工锁内同步撤销或更新。
                 await ReconcileOvertimeApprovalAsync(schedule, updatedSession);
                 await ReconcileFinalPunchApprovalsAsync(schedule, updatedSession, settings);
@@ -1313,7 +1315,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     punchLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 var segment = updatedSession.Segments.FirstOrDefault(item =>
                     item.ClockIn?.PunchGuid == punch.PunchGuid
                     || item.ClockOut?.PunchGuid == punch.PunchGuid);
@@ -2747,6 +2750,15 @@ namespace BlazorApp.Api.Services.React
             {
                 settings.BirthdayRemindDays = Math.Clamp(request.BirthdayRemindDays.Value, 0, 60);
             }
+            if (request.OvertimeThresholdMinutes.HasValue)
+            {
+                var threshold = request.OvertimeThresholdMinutes.Value;
+                if (threshold < 0 || threshold > 120)
+                {
+                    return ApiResponse<AttendanceSettingsDto>.Error("加班候选门槛须为 0–120 分钟的整数", "INVALID_OVERTIME_THRESHOLD");
+                }
+                settings.OvertimeThresholdMinutes = threshold;
+            }
             settings.UpdatedAt = DateTime.UtcNow;
             settings.UpdatedBy = _currentUserService.GetCurrentUsername();
             await _db.Updateable(settings).ExecuteCommandAsync();
@@ -3487,7 +3499,8 @@ namespace BlazorApp.Api.Services.React
                 segmentLimit,
                 ConvertUtcToStoreLocal(_timeProvider.GetUtcNow().UtcDateTime, timeZone),
                 settings.EarlyLeaveGraceMinutes,
-                settings.LateGraceMinutes);
+                settings.LateGraceMinutes,
+                settings.OvertimeThresholdMinutes);
         }
 
         private async Task ReconcileFinalPunchApprovalsAsync(
@@ -3783,14 +3796,16 @@ namespace BlazorApp.Api.Services.React
                 segmentLimit,
                 nowLocal,
                 settings.EarlyLeaveGraceMinutes,
-                settings.LateGraceMinutes);
+                settings.LateGraceMinutes,
+                settings.OvertimeThresholdMinutes);
             var proposedSession = AttendanceWorkSessionCalculator.Calculate(
                 schedule,
                 proposedPunches,
                 segmentLimit,
                 nowLocal,
                 settings.EarlyLeaveGraceMinutes,
-                settings.LateGraceMinutes);
+                settings.LateGraceMinutes,
+                settings.OvertimeThresholdMinutes);
             return PunchAdjustmentContext.OK(
                 schedule,
                 proposedPunch,
@@ -4818,7 +4833,8 @@ namespace BlazorApp.Api.Services.React
                                     ResolveEmployeeSegmentLimit(settings)),
                                 ConvertUtcToStoreLocal(_timeProvider.GetUtcNow().UtcDateTime, timeZone),
                                 settings.EarlyLeaveGraceMinutes,
-                                settings.LateGraceMinutes);
+                                settings.LateGraceMinutes,
+                                settings.OvertimeThresholdMinutes);
                             await ReconcileOvertimeApprovalAsync(schedule, session);
                             await ReconcileFinalPunchApprovalsAsync(schedule, session, settings);
                             await ReconcileMissingClockOutApprovalAsync(schedule, session);
@@ -4919,7 +4935,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     nowLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 dto.ScheduleState = session.ScheduleState;
                 dto.SegmentLimit = session.SegmentLimit;
                 dto.CompletedSegmentCount = session.CompletedSegmentCount;
@@ -6119,6 +6136,7 @@ namespace BlazorApp.Api.Services.React
             AnnualCashOutLeadDays = item.AnnualCashOutLeadDays,
             AnnualCashOutMaxWeeks = item.AnnualCashOutMaxWeeks,
             BirthdayRemindDays = item.BirthdayRemindDays,
+            OvertimeThresholdMinutes = item.OvertimeThresholdMinutes,
         };
 
         private sealed class StoreAccessResult

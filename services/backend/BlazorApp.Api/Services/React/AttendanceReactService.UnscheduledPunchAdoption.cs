@@ -40,7 +40,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     nowLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes),
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes),
             }).ToList();
 
             var open = sessions
@@ -279,7 +280,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     orphan.PunchTimeLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 if (!session.HasOpenSegment
                     && (session.Segments.Count >= segmentLimit || session.ScheduleState == "Completed"))
                 {

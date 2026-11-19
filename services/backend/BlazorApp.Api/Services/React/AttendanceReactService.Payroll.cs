@@ -252,7 +252,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimitMap.GetValueOrDefault(schedule.UserGuid, ResolveEmployeeSegmentLimit(settings)),
                     nowLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 var segments = session.Segments
                     .Where(item => item.ClockIn != null && item.ClockOut != null)
                     .Select(item => new PayrollSegment(

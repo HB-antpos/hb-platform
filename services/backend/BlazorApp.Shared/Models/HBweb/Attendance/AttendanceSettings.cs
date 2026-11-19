@@ -81,5 +81,12 @@ namespace BlazorApp.Shared.Models
         /// <summary>生日提前几天提醒（默认 3）。</summary>
         [SugarColumn(IsNullable = false)]
         public int BirthdayRemindDays { get; set; } = 3;
+
+        /// <summary>
+        /// 早到或晚走满多少分钟才产生加班候选（默认 15，与旧的硬编码一致；线上按需调为 30）。
+        /// 由迁移 20261120.002-attendance-overtime-threshold 添加。
+        /// </summary>
+        [SugarColumn(IsNullable = false)]
+        public int OvertimeThresholdMinutes { get; set; } = 15;
     }
 }
