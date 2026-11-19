@@ -3,6 +3,12 @@
     "title": "Hours & pay",
     "selectStore": "Select store",
     "searchPlaceholder": "Staff name",
+    "myobPush": {
+      "button": "Push to MYOB",
+      "needLock": "Submit and lock this pay period before pushing",
+      "unmapped": "This store is not mapped to a MYOB company yet. Set it on the MYOB page (Store mappings)",
+      "error": "Could not load the MYOB push preview. Refresh the page and try again"
+    },
     "storeList": {
       "locked": "Locked this period",
       "open": "Open"
@@ -168,6 +174,7 @@
       "amount": "Amount",
       "allowance": "Allowance ±",
       "gross": "Gross",
+      "myobPush": "MYOB push",
       "note": "Note",
       "notePlaceholder": "Add a note",
       "noteSaved": "Note saved",

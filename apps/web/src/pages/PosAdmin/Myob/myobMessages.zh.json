@@ -747,6 +747,8 @@
         "close": "完成",
         "lead": "将把 {{company}} {{range}} 的转账工时推送到 MYOB Timesheet：{{count}} 人，合计 {{hours}} 小时。",
         "notice": "推送只写 Timesheet，不会发薪；发薪请在 MYOB 里 Process Payroll。已发薪的记录不会被改动。",
+        "notCheckedInline": "还没有检查 MYOB 现状：MYOB 里已有未发薪工时的员工推送时会被跳过（不会覆盖）。想覆盖请先检查。",
+        "checkNow": "检查 MYOB 状态",
         "notChecked": "还没有检查 MYOB 现状：MYOB 里已有未发薪工时的员工推送时会被跳过（不会覆盖）。想覆盖请先点页面上的「检查 MYOB 现状」。",
         "overwriteAria": "需要确认覆盖的员工",
         "overwriteTitle": "MYOB 里已有未发薪工时的 {{count}} 位员工",

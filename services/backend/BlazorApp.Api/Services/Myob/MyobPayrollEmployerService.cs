@@ -326,13 +326,27 @@ public sealed class MyobPayrollEmployerService : IMyobPayrollEmployerService
 
     public async Task<List<MyobPayrollCompanyOptionDto>> ListCompaniesAsync() => await LoadCompaniesAsync();
 
-    private async Task<List<MyobPayrollCompanyOptionDto>> LoadCompaniesAsync() =>
-        (await _db.Queryable<MyobConnection>()
+    private async Task<List<MyobPayrollCompanyOptionDto>> LoadCompaniesAsync()
+    {
+        var connections = await _db.Queryable<MyobConnection>()
             .Where(item => item.Status == MyobConnectionStatuses.Active)
             .OrderBy(item => item.BusinessName)
-            .ToListAsync())
-        .Select(item => new MyobPayrollCompanyOptionDto { ConnectionGuid = item.ConnectionGuid, Name = item.BusinessName, Abn = item.Abn })
-        .ToList();
+            .ToListAsync();
+        var mappings = await _db.Queryable<MyobStoreMapping>().ToListAsync();
+        return connections
+            .Select(item => new MyobPayrollCompanyOptionDto
+            {
+                ConnectionGuid = item.ConnectionGuid,
+                Name = item.BusinessName,
+                Abn = item.Abn,
+                StoreCodes = mappings
+                    .Where(map => string.Equals(map.ConnectionGuid, item.ConnectionGuid, StringComparison.OrdinalIgnoreCase))
+                    .Select(map => map.StoreCode)
+                    .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
+                    .ToList(),
+            })
+            .ToList();
+    }
 
     /// <summary>当前周期起始日及之后几期的起始日（升序）。周期长度与双周锚点取考勤设置。</summary>
     private async Task<List<DateTime>> ResolveAllowedPeriodStartsAsync(DateTime today)

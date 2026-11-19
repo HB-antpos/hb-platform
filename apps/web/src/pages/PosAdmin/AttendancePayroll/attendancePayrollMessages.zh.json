@@ -3,6 +3,12 @@
     "title": "工时与工资",
     "selectStore": "选择分店",
     "searchPlaceholder": "员工姓名",
+    "myobPush": {
+      "button": "推送到 MYOB",
+      "needLock": "先提交锁定本期工资表，才能推送",
+      "unmapped": "这家店还没有映射到 MYOB 公司，先在 MYOB 页「分店映射」里设置",
+      "error": "读取 MYOB 推送预览失败，请刷新页面重试"
+    },
     "storeList": {
       "locked": "本期已锁定",
       "open": "未锁"
@@ -168,6 +174,7 @@
       "amount": "金额",
       "allowance": "补贴 ±",
       "gross": "应发",
+      "myobPush": "MYOB 推送",
       "note": "备注",
       "notePlaceholder": "添加备注",
       "noteSaved": "备注已保存",

@@ -1,5 +1,5 @@
 import { DownloadOutlined, HistoryOutlined, ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
-import { Alert, Button, Checkbox, Empty, Grid, Radio, Select, Skeleton, Tag, Tooltip } from 'antd'
+import { Alert, Button, Empty, Grid, Radio, Select, Skeleton, Tag, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -11,6 +11,7 @@ import { formatAbnDisplay, extractMyobError, formatMyobTime } from './myobLogic'
 import PushBatchesDrawer from './PushBatchesDrawer'
 import PushConfirmModal from './PushConfirmModal'
 import PushDetailDrawer from './PushDetailDrawer'
+import { HOUR_COLUMNS, HoursCell, PushHints, ReadinessItem } from './PushReadiness'
 import { canOpenPushConfirm, getPushableUserGuids, getPushStateView, isPushableRow, reconcileSelection } from './myobPushLogic'
 import {
   buildPeriodOptions,
@@ -26,30 +27,9 @@ import {
   getRowClassName,
   getRowNotes,
   getRowStatusView,
-  groupHints,
-  splitHintMessage,
-  type ReadinessCard,
 } from './myobTimesheetLogic'
 
 const PAGE_SIZE = 50
-
-// 就绪卡状态的读屏文字（键写成字面量，供页面文案契约测试扫描）
-const READINESS_STATE_KEYS: Record<ReadinessCard['tone'], string> = {
-  ok: 'myob.push.readiness.state.ok',
-  bad: 'myob.push.readiness.state.bad',
-  warn: 'myob.push.readiness.state.warn',
-  muted: 'myob.push.readiness.state.muted',
-}
-
-// 6 个口径的工时列（键写成字面量，供页面文案契约测试扫描）
-const HOUR_COLUMNS = [
-  { key: 'weekday', titleKey: 'myob.push.columns.weekday' },
-  { key: 'saturday', titleKey: 'myob.push.columns.saturday' },
-  { key: 'sunday', titleKey: 'myob.push.columns.sunday' },
-  { key: 'publicHoliday', titleKey: 'myob.push.columns.publicHoliday' },
-  { key: 'personalLeave', titleKey: 'myob.push.columns.personalLeave' },
-  { key: 'holidayLeave', titleKey: 'myob.push.columns.holidayLeave' },
-] as const
 
 interface PushPreviewTabProps {
   /** 可选公司文件（GET /myob/companies，只含 Active）；只读。 */
@@ -219,7 +199,6 @@ export default function PushPreviewTab({
   }))
   // 上周 / 本周 / 下周：当前显示的周期恰好是其中之一时高亮；选了更早的周期则都不亮
   const quickPeriods = useMemo(() => buildQuickPeriods(preview), [preview])
-  const hintGroups = useMemo(() => groupHints(preview?.hints ?? []), [preview])
   const readinessCards = useMemo(() => (preview ? buildReadinessCards(preview) : []), [preview])
   const checkedAlready = preview?.readiness.myobChecked === true
   const effectiveSelected = useMemo(() => reconcileSelection(preview, selected), [preview, selected])
@@ -487,32 +466,7 @@ export default function PushPreviewTab({
                   ))}
                 </ul>
 
-                {preview.hints.length > 0 ? (
-                  <div className="myob-push-hints" role="note">
-                    <b>{t('myob.push.hints.title', { count: preview.hints.length })}</b>
-                    {hintGroups.map((group) => (
-                      <div key={group.code} className="myob-push-hint-group">
-                        <div className="myob-push-hint-group-title">{t(group.labelKey)}</div>
-                        <ul>
-                          {group.items.map((hint, index) => {
-                            const parts = splitHintMessage(hint)
-                            return (
-                              <li key={`${hint.userGuid}-${hint.code}-${index}`}>
-                                {parts.before}
-                                {parts.name ? <b>{parts.name}</b> : null}
-                                {parts.separated ? t('myob.push.hints.nameSep') : null}
-                                {parts.after}
-                              </li>
-                            )
-                          })}
-                        </ul>
-                      </div>
-                    ))}
-                    <Checkbox checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)}>
-                      {t('myob.push.hints.ack')}
-                    </Checkbox>
-                  </div>
-                ) : null}
+                <PushHints hints={preview.hints} acknowledged={acknowledged} onAcknowledgedChange={setAcknowledged} />
 
                 <MeasuredTable<MyobPreviewRow>
                   metricId="pos-admin.myob.push-preview"
@@ -638,35 +592,4 @@ export default function PushPreviewTab({
 }
 
 /** 工时单元格：0 显示灰色「—」，其余两位小数，右对齐等宽数字。 */
-function HoursCell({ value }: { value: number }) {
-  const zero = Math.abs(value) < 0.005
-  return <span className={`myob-push-hours${zero ? ' myob-muted' : ''}`}>{formatHoursCell(value)}</span>
-}
 
-function ReadinessItem({ card, canGoMapping, onGoMapping }: { card: ReadinessCard; canGoMapping: boolean; onGoMapping: () => void }) {
-  const { t } = useTranslation()
-  return (
-    <li className={`myob-step myob-step-${card.tone}`} data-step={card.id}>
-      <span className="myob-step-symbol" aria-hidden="true">
-        {card.symbol}
-      </span>
-      <div className="myob-step-body">
-        {/* 符号对读屏不可见，用隐藏文字把状态读出来 */}
-        <span className="myob-sr-only">{t(READINESS_STATE_KEYS[card.tone])}</span>
-        <b>{t(card.titleKey, card.titleValues)}</b>
-        {card.subKey ? <span className="myob-step-sub">{t(card.subKey, card.subValues)}</span> : null}
-        {card.subText ? <span className="myob-step-sub">{card.subText}</span> : null}
-        {card.subItems?.map((item) => (
-          <span className="myob-step-sub" key={item.label}>
-            {t('myob.push.readiness.unlocked.item', { label: item.label, count: item.count })}
-          </span>
-        ))}
-        {card.action === 'goMapping' && canGoMapping ? (
-          <Button type="link" size="small" className="myob-step-action" onClick={onGoMapping}>
-            {t('myob.push.readiness.category.go')}
-          </Button>
-        ) : null}
-      </div>
-    </li>
-  )
-}

@@ -1672,3 +1672,16 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* 考勤工资页推送弹窗里的「挑人」区：就绪卡、提示项、员工表和底部全选 / 全不选 */
+.myob-push-selection {
+  margin: 8px 0 4px;
+}
+.myob-push-selection .myob-push-steps {
+  margin-bottom: 10px;
+}
+.myob-push-selection-foot {
+  display: flex;
+  gap: 4px;
+  padding-top: 4px;
+}

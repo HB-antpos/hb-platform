@@ -100,7 +100,7 @@ assert.deepEqual(normalizeMyobStoreMappings(undefined), { stores: [], connection
 // 公司选项（GET /myob/companies，只读、只含 Active）：缺字段 / null / 类型异常给安全默认，没有 connectionGuid 的行丢弃
 assert.deepEqual(
   normalizeMyobCompanies([
-    { connectionGuid: 'c1', name: 'Investment', abn: '00 000 000 000' },
+    { connectionGuid: 'c1', name: 'Investment', abn: '00 000 000 000', storeCodes: ['1014', 5, '', '1013'] },
     { connectionGuid: 'c2', name: 'Australian', abn: null },
     { connectionGuid: 'c3' },
     { connectionGuid: 'c4', name: 5, abn: 123 },
@@ -109,10 +109,10 @@ assert.deepEqual(
     'x',
   ]),
   [
-    { connectionGuid: 'c1', name: 'Investment', abn: '00000000000' },
-    { connectionGuid: 'c2', name: 'Australian', abn: null },
-    { connectionGuid: 'c3', name: '', abn: null },
-    { connectionGuid: 'c4', name: '', abn: null },
+    { connectionGuid: 'c1', name: 'Investment', abn: '00000000000', storeCodes: ['1014', '1013'] },
+    { connectionGuid: 'c2', name: 'Australian', abn: null, storeCodes: [] },
+    { connectionGuid: 'c3', name: '', abn: null, storeCodes: [] },
+    { connectionGuid: 'c4', name: '', abn: null, storeCodes: [] },
   ],
 )
 assert.deepEqual(normalizeMyobCompanies(null), [])
@@ -129,8 +129,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   return new Response(JSON.stringify(fetchBody), { status: 200, headers: { 'content-type': 'application/json' } })
 }) as typeof fetch
 try {
-  fetchBody = { success: true, data: [{ connectionGuid: 'c1', name: 'Investment', abn: '00000000000' }, {}] }
-  assert.deepEqual(await getMyobCompanies(), [{ connectionGuid: 'c1', name: 'Investment', abn: '00000000000' }])
+  fetchBody = { success: true, data: [{ connectionGuid: 'c1', name: 'Investment', abn: '00000000000', storeCodes: ['1002'] }, {}] }
+  assert.deepEqual(await getMyobCompanies(), [{ connectionGuid: 'c1', name: 'Investment', abn: '00000000000', storeCodes: ['1002'] }])
   assert.equal(fetchCalls.length, 1)
   assert.equal(fetchCalls[0].method, 'GET')
   assert.ok(fetchCalls[0].url.endsWith('/api/react/v1/myob/companies'), fetchCalls[0].url)
