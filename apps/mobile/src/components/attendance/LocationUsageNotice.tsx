@@ -4,8 +4,9 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 
 /**
- * 打卡页的「定位使用说明」卡：上班前显示，告诉员工位置在哪些时机使用：
- * 扫码上班 / 下班、上班期间打开 App 或回到前台（间隔 ≥10 分钟），以及不会在后台使用。
+ * 打卡页的「定位使用说明」卡：上班前显示。默认只展示「扫码打卡时」这一项；
+ * 其余说明（上班期间打开 App / 回到前台、后台、所需权限）都放在「了解详情」弹层里，
+ * 由 LocationUsageSheet 完整列出。
  * 班中后台定位已取消，所以不再有「定位已开启 / 已停止」这类状态条。
  */
 export function LocationUsageNotice({ onOpenDetails }: { onOpenDetails: () => void }) {
@@ -24,24 +25,6 @@ export function LocationUsageNotice({ onOpenDetails }: { onOpenDetails: () => vo
         <Text variant="bodySmall" style={styles.rowText}>
           <Text variant="labelMedium" style={styles.rowLabel}>{t("locationNotice.scanLabel")}</Text>
           {`：${t("locationNotice.scanBody")}`}
-        </Text>
-      </View>
-      <View style={styles.row}>
-        <View style={[styles.iconBox, styles.iconOn]}>
-          <Icon source="map-marker-outline" size={16} color={HB_COLORS.action} />
-        </View>
-        <Text variant="bodySmall" style={styles.rowText}>
-          <Text variant="labelMedium" style={styles.rowLabel}>{t("locationNotice.foregroundLabel")}</Text>
-          {`：${t("locationNotice.foregroundBody")}`}
-        </Text>
-      </View>
-      <View style={styles.row}>
-        <View style={[styles.iconBox, styles.iconOff]}>
-          <Icon source="stop-circle-outline" size={16} color={HB_COLORS.textSecondary} />
-        </View>
-        <Text variant="bodySmall" style={styles.rowText}>
-          <Text variant="labelMedium" style={styles.rowLabel}>{t("locationNotice.otherLabel")}</Text>
-          {`：${t("locationNotice.otherBody")}`}
         </Text>
       </View>
       <Pressable
@@ -70,7 +53,6 @@ const styles = StyleSheet.create({
   row: { alignItems: "flex-start", flexDirection: "row", gap: HB_SPACING.xs },
   iconBox: { alignItems: "center", borderRadius: 8, height: 26, justifyContent: "center", width: 26 },
   iconOn: { backgroundColor: "#D1E9FF" },
-  iconOff: { backgroundColor: "#EAECF0" },
   rowText: { color: HB_COLORS.textPrimary, flex: 1, lineHeight: 20 },
   rowLabel: { fontWeight: "700" },
   link: { color: HB_COLORS.action, fontWeight: "700" },

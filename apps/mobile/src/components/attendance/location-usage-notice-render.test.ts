@@ -111,12 +111,14 @@ async function run() {
     const text = page.allText().join("\n");
     assert.match(text, /定位使用说明/);
     assert.match(text, /扫码打卡时/);
-    assert.match(text, /只在你扫码上班、下班时获取当前位置，用于记录打卡地点，打卡完成后即停止。/);
-    // 上班期间回前台取一次：如实写出，但不写采集间隔 / 频率。
-    assert.match(text, /上班期间/);
-    assert.match(text, /打开 App 或从后台回到 App 时，会在前台获取一次当前位置并上传，用于考勤记录；不会持续获取，下班后不再获取。/);
-    assert.match(text, /后台/);
-    assert.match(text, /App 不会在后台使用你的位置，也不会持续跟踪你。/);
+    // 说明卡只剩这一项，不能再用「只在」：上班期间回前台取位置的说明在详情弹层里，卡上说「只」就不完整了。
+    assert.match(text, /会在你扫码上班、下班时获取当前位置，用于记录打卡地点，打卡完成后即停止。/);
+    assert.doesNotMatch(text, /只在/, "说明卡不得再说「只在」，其他时机在详情弹层里");
+    // 说明卡默认只显示「扫码打卡时」一项；上班期间、后台这两项只在「了解详情」弹层里，卡上不能再出现。
+    assert.doesNotMatch(text, /上班期间/, "上班期间一项已挪进详情弹层");
+    assert.doesNotMatch(text, /回到 App/, "回前台取位置的说明已挪进详情弹层");
+    assert.doesNotMatch(text, /不会在后台使用你的位置/, "后台一项已挪进详情弹层");
+    assert.equal(page.all("Icon").length, 2, "说明卡只剩标题图标和扫码图标");
     assert.doesNotMatch(text, frequencyWording, "说明卡文案不得出现采集频率");
     assert.doesNotMatch(text, staleWording, "说明卡不得残留旧口径");
     const details = page.link("了解详情 ›");
