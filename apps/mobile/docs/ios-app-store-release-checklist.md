@@ -10,7 +10,7 @@
 - [ ] App Store Connect 的 Privacy Policy URL 和 Support URL 已填写并可访问。
 - [ ] App Privacy 数据类型、关联用户、追踪状态和用途与生成的 `PrivacyInfo.xcprivacy` 一致。
 - [ ] 年龄分级问卷已按当前功能重新完成。
-- [ ] Review Information 已填写审核账号口令、离线演示模式说明、样例 QR 和定位说明（仅在扫码上班/下班时取一次前台位置，不使用后台定位）。
+- [ ] Review Information 已填写审核账号口令、离线演示模式说明、样例 QR 和定位说明（只在使用 App 期间取前台位置：扫码上班/下班、登录；不使用后台定位）。
 - [ ] 截图、描述、关键词、版权和出口合规答案已复核。
 
 ## 二进制验证
@@ -20,7 +20,7 @@
 - [ ] 生成的 `Info.plist` 没有 `NSLocationAlwaysAndWhenInUseUsageDescription` / `NSLocationAlwaysUsageDescription`，`UIBackgroundModes` 不含 `location`（`npm run test:ios-app-config` 已覆盖，fresh prebuild 后仍需肉眼复核）。
 - [ ] 生成的 `PrivacyInfo.xcprivacy` 包含第一方数据收集声明和 Required Reason API 声明。
 - [ ] 真机确认现场广告视频没有音轨；相册中的既有视频可保留音轨并正常上传。
-- [ ] 真机覆盖相机、受限照片库、定位允许/拒绝（系统弹窗只出现「使用 App 期间」，没有「始终允许」，状态栏无蓝色定位标识）、扫码打卡以及设备登录路径。
+- [ ] 真机覆盖相机、受限照片库、定位允许/拒绝（系统弹窗只出现「使用 App 期间」，没有「始终允许」，状态栏无蓝色定位标识）、扫码打卡、账号登录以及设备登录路径。
 - [ ] 设备日志不包含条码、QR token 或其前缀片段。
 
 ## 发布
