@@ -1231,6 +1231,24 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     stopLocationCapture();
   };
 
+  /**
+   * 扫码解析 / 门店匹配 / 读取今日状态失败：此时还没走到定位和提交，什么都没保存，
+   * 失败后必须让员工看见原因并能继续扫码。相机界面在处理期间已卸载，这里重新打开它，
+   * 保持当前 session 与暂停态，在扫码界面上显示可复制的错误和「重试」按钮，
+   * 而不是只弹一个页面底部的 Snackbar 就结束（员工看不到提示也回不到扫码）。
+   */
+  const failAttendanceQrReturnToScanner = (
+    session: AttendanceQrScanSession,
+    message: string,
+  ) => {
+    if (!attendanceScannerSessionGate.isActive(session)) return;
+    // 暂停相机 + 显示错误 + 释放提交锁；点「重试」会开新 session 并恢复扫码。
+    failAttendanceQrScan(session, message);
+    setPunchStage(undefined);
+    stopLocationCapture();
+    setAttendanceScannerVisible(true);
+  };
+
   const handleAttendanceQrScan = async (qrToken: string) => {
     const session = attendanceScannerSessionRef.current;
     const normalizedQrToken = normalizeAttendanceQrTokenInput(qrToken);
@@ -1293,7 +1311,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       console.warn("[attendance] qr request failed", { stage: "resolve", code });
       reportQrFailure("resolve", error);
       const errorKey = getAttendancePunchErrorKey(code);
-      failAttendanceQrProcessing(
+      failAttendanceQrReturnToScanner(
         session,
         errorKey ? t(errorKey) : getErrorMessage(error, "messages.punchFailed"),
       );
@@ -1307,7 +1325,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     } catch (error) {
       const code = error instanceof Error ? error.message : undefined;
       reportQrFailure("store", error, { errorCode: code });
-      failAttendanceQrProcessing(
+      failAttendanceQrReturnToScanner(
         session,
         t(getAttendancePunchErrorKey(code) ?? "messages.qrStoreForbidden"),
       );
@@ -1332,7 +1350,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     } catch (error) {
       if (attendanceScannerSessionGate.isActive(session)) {
         reportQrFailure("today", error);
-        failAttendanceQrProcessing(
+        failAttendanceQrReturnToScanner(
           session,
           getErrorMessage(error, "messages.qrNetworkRequired"),
         );

@@ -114,4 +114,29 @@ assert.equal(
   "一次打卡流程只能触发一次成功音",
 );
 
+// 解析 / 门店匹配 / 读取今日状态失败：相机在处理期间已卸载，失败必须重新打开扫码界面，
+// 暂停并显示错误与「重试」，不能只弹页面 Snackbar 就结束（员工看不到提示、也回不到扫码）。
+assert.match(
+  source,
+  /const failAttendanceQrReturnToScanner = \([\s\S]{0,400}failAttendanceQrScan\(session, message\)[\s\S]{0,200}setAttendanceScannerVisible\(true\)/,
+  "早期失败必须复用暂停逻辑并重新打开扫码界面",
+);
+const earlyStages = source.slice(resolveIndex, preparationIndex);
+assert.equal(
+  earlyStages.match(/failAttendanceQrReturnToScanner\(/g)?.length,
+  3,
+  "resolve / 门店匹配 / today 三处失败都必须回到扫码器",
+);
+assert.doesNotMatch(
+  earlyStages,
+  /failAttendanceQrProcessing\(/,
+  "解析阶段的失败不得再走「只弹 Snackbar 并结束会话」的路径",
+);
+// 定位准备与提交失败的语义不同（可能已向服务端提交），仍沿用原有失败处理。
+assert.match(
+  source.slice(preparationIndex),
+  /failAttendanceQrProcessing\(/,
+  "定位准备与提交阶段的失败处理保持不变",
+);
+
 console.log("attendance-qr-ui-contract.test.ts: ok");
