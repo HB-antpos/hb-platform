@@ -17,9 +17,7 @@
     "filters": {
       "range": "Date range",
       "rangeHint": "Up to {{days}} days, no later than the store's today",
-      "store": "Store",
-      "stores": "Stores",
-      "allStores": "All stores",
+      "storesSelected": "{{count}} stores selected",
       "category": "Category",
       "allCategories": "All categories",
       "review": "Review status",

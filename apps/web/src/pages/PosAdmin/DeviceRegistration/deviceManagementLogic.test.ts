@@ -6,6 +6,7 @@ import {
   collectDistinctOptions,
   compareDottedVersion,
   countDevicesByStatus,
+  countDevicesByStore,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
   getBatchActionTargets,
@@ -325,5 +326,16 @@ assertEqual(buildVersionFilterOptions(['1.0.88'], '1.0.70').versions.some((o) =>
   '选中的版本换分店后仍保留')
 assertEqual(buildVersionFilterOptions(['1.0.88'], VERSION_FILTER_NONE).versions.length, 1, '特殊选项不混进版本列表')
 assertEqual(buildVersionFilterOptions(['1.4.4'], undefined, null).outdatedCount, 0, '没有最新版本时不统计低于最新版')
+
+// 左侧分店列表的台数：按分店计数，没有分店的设备不计入任何一家，也不会冒出 undefined / 空串这类键
+const storeCounts = countDevicesByStore([
+  device({ id: 101, storeCode: '1002' }),
+  device({ id: 102, storeCode: '1002' }),
+  device({ id: 103, storeCode: '1012' }),
+  device({ id: 104, storeCode: null }),
+  device({ id: 105, storeCode: '' }),
+])
+assertEqual(JSON.stringify(storeCounts), JSON.stringify({ '1002': 2, '1012': 1 }), '按分店统计台数')
+assertEqual(Object.keys(countDevicesByStore([])).length, 0, '没有设备时为空')
 
 console.log('deviceManagementLogic.test: ok')

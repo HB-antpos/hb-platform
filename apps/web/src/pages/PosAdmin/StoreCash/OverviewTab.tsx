@@ -1,5 +1,5 @@
 import { InfoCircleOutlined } from '@ant-design/icons'
-import { Empty, Select, Tooltip } from 'antd'
+import { Empty, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMemo } from 'react'
 import { MeasuredTable } from '../../../components/MeasuredTable'
@@ -15,7 +15,7 @@ import {
   EMPTY_CELL,
   formatCount,
 } from './logic'
-import { Amount, ExportButton, KpiTile, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, storeOptionLabel, VarianceAmount } from './parts'
+import { Amount, ExportButton, KpiTile, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, VarianceAmount } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -241,23 +241,6 @@ export default function OverviewTab({ context, filters, query, active, tr, tf, e
         />
         {showStorePicker ? (
           <RegisterSelect value={query.register} tr={tr} onChange={(register) => onQueryChange({ register })} />
-        ) : null}
-        {showStorePicker ? (
-          <label className="store-cash-field">
-            <span className="store-cash-field-label">{tr('filters.stores')}</span>
-            <Select
-              className="store-cash-stores-select"
-              mode="multiple"
-              allowClear
-              maxTagCount="responsive"
-              aria-label={tr('filters.stores')}
-              placeholder={tr('filters.allStores')}
-              value={filters.selectedStoreCodes}
-              optionFilterProp="label"
-              options={filters.storeOptions.map((store) => ({ value: store.storeCode, label: storeOptionLabel(store) }))}
-              onChange={(codes: string[]) => onQueryChange({ stores: codes })}
-            />
-          </label>
         ) : null}
         <div className="store-cash-toolbar-actions">
           <RefreshButton loading={loading} tr={tr} onClick={overviewRequest.reload} />

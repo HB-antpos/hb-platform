@@ -18,7 +18,7 @@ import {
   timeZoneOf,
   weekdayKeyOf,
 } from './logic'
-import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, StoreSelect, VarianceAmount, type Tr } from './parts'
+import { Amount, ExportButton, LoadErrorAlert, RangeFilter, RefreshButton, RegisterSelect, VarianceAmount, type Tr } from './parts'
 import type { CashTabProps } from './tabProps'
 import { useCashRequest } from './useCashRequest'
 import { useCsvExport } from './useCsvExport'
@@ -133,7 +133,6 @@ export default function DailyTab({ context, filters, query, active, tr, tf, erro
         {context.stores.length > 1 ? (
           <RegisterSelect value={query.register} tr={tr} onChange={(register) => onQueryChange({ register })} />
         ) : null}
-        <StoreSelect stores={filters.storeOptions} value={storeCode} tr={tr} onChange={(code) => onQueryChange({ store: code })} />
         <RangeFilter from={filters.from} to={filters.to} today={filters.today} tr={tr} onChange={(range) => onQueryChange(range)} />
         <div className="store-cash-toolbar-actions">
           <RefreshButton loading={loading} tr={tr} onClick={dailyRequest.reload} />

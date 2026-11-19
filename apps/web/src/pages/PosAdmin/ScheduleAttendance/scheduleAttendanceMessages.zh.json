@@ -296,6 +296,7 @@
         "collapse": "收起到工具栏",
         "pin": "固定在左侧",
         "footHint": "↑↓ 选择 · 回车切换 · 记住上次分店",
+        "footHintNoMemory": "↑↓ 选择 · 回车切换",
         "empty": "没有匹配的分店"
       },
       "weekNav": {

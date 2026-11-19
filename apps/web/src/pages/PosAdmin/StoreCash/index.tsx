@@ -1,4 +1,5 @@
-import { Alert, Empty, Skeleton, Tabs } from 'antd'
+import { ShopOutlined } from '@ant-design/icons'
+import { Alert, Empty, Skeleton, Tabs, Tag } from 'antd'
 import { useKeepAliveContext } from 'keepalive-for-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +9,8 @@ import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import { getCashContext } from '../../../services/storeCashService'
 import type { CashContext } from '../../../types/storeCash'
 import { formatSydneyIsoDate } from '../../../utils/sydneyDate'
+import StoreSidebarLayout from '../ScheduleAttendance/StoreSidebarLayout'
+import { useStoreSidebar } from '../ScheduleAttendance/useStoreSidebar'
 import DailyTab from './DailyTab'
 import DepositsTab from './DepositsTab'
 import ExpensesTab from './ExpensesTab'
@@ -97,6 +100,29 @@ export default function StoreCashPage() {
   const contextError = contextRequest.error ? errorText(contextRequest.error) : null
   const hasStores = Boolean(context && context.stores.length > 0)
 
+  // 左侧分店列表（四个页签共用）。选一家店时同时写入总览的 stores 和按日 / 存款 / 支出共用的 store，
+  // 这样切页签看到的是同一家店；「全部分店」只在总览可用，且只清空 stores（其余页签必须按单店看，保留原来的店）。
+  const isOverview = query.tab === 'overview'
+  const picked = filters.selectedStoreCodes
+  const sidebarOptions = useMemo(
+    () => filters.storeOptions.map((store) => ({ value: store.storeCode, label: store.storeName || store.storeCode })),
+    [filters.storeOptions],
+  )
+  const selectStore = useCallback((code: string | undefined) => {
+    updateQuery(code ? { stores: [code], store: code } : { stores: [] })
+  }, [updateQuery])
+  // 总览里选了不止一家（老的分享链接可能带多家）：列表里不高亮任何一家，按钮上写明「已选 N 家」
+  const multiPicked = isOverview && picked.length > 1
+  const storeSidebar = useStoreSidebar({
+    options: sidebarOptions,
+    value: multiPicked ? '' : isOverview ? picked[0] : filters.storeCode ?? undefined,
+    onSelect: selectStore,
+    allowAll: isOverview,
+    valueLabel: multiPicked ? tr('filters.storesSelected', { count: picked.length }) : undefined,
+  })
+  // 只有 1 家店（店长）时没有列表，用一枚标签告诉用户当前看的是哪家
+  const singleStore = filters.storeOptions.length === 1 ? filters.storeOptions[0] : null
+
   const tabProps = (tab: CashTab): CashTabProps | null => (context ? {
     context,
     filters,
@@ -130,17 +156,28 @@ export default function StoreCashPage() {
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={tr('noStores')} />
         ) : null}
         {hasStores && overviewProps && dailyProps && depositsProps && expensesProps ? (
-          <Tabs
-            className="store-cash-tabs"
-            activeKey={query.tab}
-            onChange={(key) => updateQuery({ tab: key as CashTab })}
-            items={[
-              { key: 'overview', label: tr('tabs.overview'), children: <OverviewTab {...overviewProps} /> },
-              { key: 'daily', label: tr('tabs.daily'), children: <DailyTab {...dailyProps} /> },
-              { key: 'deposits', label: tr('tabs.deposits'), children: <DepositsTab {...depositsProps} /> },
-              { key: 'expenses', label: tr('tabs.expenses'), children: <ExpensesTab {...expensesProps} /> },
-            ]}
-          />
+          <StoreSidebarLayout docked={storeSidebar.docked} sidebar={storeSidebar.sidebar}>
+            {storeSidebar.switcher || singleStore ? (
+              <div className="store-cash-store-switch">
+                {storeSidebar.switcher ?? (
+                  <Tag icon={<ShopOutlined />} className="store-cash-store-single">
+                    {singleStore?.storeName || singleStore?.storeCode}
+                  </Tag>
+                )}
+              </div>
+            ) : null}
+            <Tabs
+              className="store-cash-tabs"
+              activeKey={query.tab}
+              onChange={(key) => updateQuery({ tab: key as CashTab })}
+              items={[
+                { key: 'overview', label: tr('tabs.overview'), children: <OverviewTab {...overviewProps} /> },
+                { key: 'daily', label: tr('tabs.daily'), children: <DailyTab {...dailyProps} /> },
+                { key: 'deposits', label: tr('tabs.deposits'), children: <DepositsTab {...depositsProps} /> },
+                { key: 'expenses', label: tr('tabs.expenses'), children: <ExpensesTab {...expensesProps} /> },
+              ]}
+            />
+          </StoreSidebarLayout>
         ) : null}
       </div>
     </PageContainer>

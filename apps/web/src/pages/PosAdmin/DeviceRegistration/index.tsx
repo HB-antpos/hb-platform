@@ -30,6 +30,8 @@ import type { DeviceRegistrationItem, StoreOption } from '../../../types/deviceR
 import type { PosApiEntryStoreItem } from '../../../types/posApiEntry'
 import { P } from '../../../types/permissions'
 import { createLatestRequestGuard, runLatestGuardedRequest } from '../../../utils/latestRequestGuard'
+import StoreSidebarLayout from '../ScheduleAttendance/StoreSidebarLayout'
+import { useStoreSidebar } from '../ScheduleAttendance/useStoreSidebar'
 
 import AppUsagePanel from './AppUsagePanel'
 import DeviceActivationCodePanel from './DeviceActivationCodePanel'
@@ -55,6 +57,7 @@ import {
   compareDateDesc,
   compareDottedVersion,
   countDevicesByStatus,
+  countDevicesByStore,
   filterDevicesByStatus,
   filterDevicesExceptStatus,
   formatDateOnly,
@@ -88,8 +91,8 @@ import deviceManagementMessagesZh from './deviceManagementMessages.zh.json'
 registerPageMessages({ zh: deviceManagementMessagesZh, en: deviceManagementMessagesEn })
 
 /**
- * 生产全部门店约 220 台设备：一次拉全量（只把分店交给后端筛选），
- * 状态页签计数、类型/系统/在线/关键字筛选都在本地完成，计数才准确。
+ * 生产全部门店约 280 台设备：一次拉全量，分店、状态页签计数、类型/系统/在线/关键字筛选都在本地完成，
+ * 计数才准确——左侧分店列表每家店的台数也靠这份全量算出来（若交给后端按分店筛选，选中一家后其余店的台数就没了）。
  * 旧版固定取 200 条，不选分店时已经在截断。
  */
 const REGISTERED_FETCH_SIZE = 1000
@@ -184,7 +187,8 @@ export default function DeviceRegistrationPage() {
   const [stores, setStores] = useState<StoreOption[]>([])
   const [selectedStoreCode, setSelectedStoreCode] = useState<string>()
 
-  const [items, setItems] = useState<DeviceRegistrationItem[]>([])
+  // 服务器返回的全部设备；页面里的 items 是它按左侧所选分店过滤后的结果
+  const [allItems, setAllItems] = useState<DeviceRegistrationItem[]>([])
   const [serverTotal, setServerTotal] = useState(0)
   // 远程维护下发的 RustDesk 版本：「远程版本」列低于它时标橙。
   const [rustDeskLatestVersion, setRustDeskLatestVersion] = useState<string | null>(null)
@@ -208,10 +212,11 @@ export default function DeviceRegistrationPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [batchAction, setBatchAction] = useState<DeviceStatusAction | null>(null)
   const listRequestGuardRef = useRef(createLatestRequestGuard())
-  // 列定义被 useMemo 缓存，里面的操作按钮闭包可能是旧渲染的；刷新列表时从 ref 读当前分店，
-  // 否则切换分店后点「启用」会按旧分店重新拉取并覆盖列表。
-  const selectedStoreCodeRef = useRef(selectedStoreCode)
-  selectedStoreCodeRef.current = selectedStoreCode
+  // 注意：必须声明在下面所有读取 items 的 effect / memo 之前
+  const items = useMemo(
+    () => (selectedStoreCode ? allItems.filter((item) => item.storeCode === selectedStoreCode) : allItems),
+    [allItems, selectedStoreCode],
+  )
 
   async function loadStores() {
     try {
@@ -229,7 +234,6 @@ export default function DeviceRegistrationPage() {
         getDeviceRegistrations({
           page: 1,
           pageSize: REGISTERED_FETCH_SIZE,
-          storeCode: selectedStoreCodeRef.current,
         }),
       {
         onStart: () => {
@@ -238,7 +242,7 @@ export default function DeviceRegistrationPage() {
           }
         },
         onSuccess: (result) => {
-          setItems(result.devices)
+          setAllItems(result.devices)
           setServerTotal(result.total)
           setRustDeskLatestVersion(result.rustDeskLatestVersion ?? null)
         },
@@ -301,7 +305,7 @@ export default function DeviceRegistrationPage() {
     }, POLL_INTERVAL_MS)
 
     return () => window.clearInterval(intervalId)
-  }, [viewMode, selectedStoreCode])
+  }, [viewMode])
 
   useEffect(() => () => listRequestGuardRef.current.invalidate(), [])
 
@@ -765,21 +769,27 @@ export default function DeviceRegistrationPage() {
     ]
   }, [canManage, actionDeviceId, rustDeskLatestVersion, storeNameMap, preferredModeMap, t])
 
-  const storeOptions = stores.map((store) => ({
-    label: `${store.storeCode} / ${store.storeName}`,
-    value: store.storeCode,
-  }))
+  // 左侧分店列表：每家店右侧显示台数（取自全量设备，不受当前所选分店影响），「全部分店」显示总台数
+  const sidebarStoreOptions = useMemo(
+    () => stores.map((store) => ({ label: store.storeName || store.storeCode, value: store.storeCode })),
+    [stores],
+  )
+  const storeBadges = useMemo(() => {
+    const counts = countDevicesByStore(allItems)
+    const badges: Record<string, number> = { '*': allItems.length }
+    for (const store of stores) badges[store.storeCode] = counts[store.storeCode] ?? 0
+    return badges
+  }, [allItems, stores])
+  const storeSidebar = useStoreSidebar({
+    options: sidebarStoreOptions,
+    value: selectedStoreCode,
+    onSelect: setSelectedStoreCode,
+    allowAll: true,
+    badges: storeBadges,
+  })
 
+  // 所选分店不放进这里：左侧分店列表（或收起后的分店按钮）已经高亮显示，再来一枚芯片是重复信息
   const activeFilterItems: ActiveFilterItem[] = [
-    ...(selectedStoreCode
-      ? [{
-          key: 'store',
-          label: t('column.store'),
-          value: formatStoreLabel(selectedStoreCode, getStoreName(selectedStoreCode)),
-          source: 'toolbar' as const,
-          onRemove: () => setSelectedStoreCode(undefined),
-        }]
-      : []),
     ...(keyword.trim()
       ? [{
           key: 'keyword',
@@ -923,6 +933,7 @@ export default function DeviceRegistrationPage() {
           onStoreChange={setSelectedStoreCode}
         />
       ) : (
+        <StoreSidebarLayout docked={storeSidebar.docked} sidebar={storeSidebar.sidebar}>
         <div className="dev-mgmt-card">
           <div className="dev-mgmt-toolbar">
             <Input
@@ -933,16 +944,7 @@ export default function DeviceRegistrationPage() {
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
             />
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              placeholder={t('posAdmin.devices.filterByStore')}
-              style={{ width: 220 }}
-              value={selectedStoreCode}
-              onChange={(value) => setSelectedStoreCode(value)}
-              options={storeOptions}
-            />
+            {storeSidebar.switcher}
             <Select
               allowClear
               placeholder={t('posAdmin.devices.filterByDeviceType')}
@@ -1082,13 +1084,13 @@ export default function DeviceRegistrationPage() {
             </div>
           ) : null}
 
-          {serverTotal > items.length || activeFilterItems.length || selectedIds.length ? (
+          {serverTotal > allItems.length || activeFilterItems.length || selectedIds.length ? (
             <div className="dev-mgmt-bars">
-              {serverTotal > items.length ? (
+              {serverTotal > allItems.length ? (
                 <Alert
                   type="warning"
                   showIcon
-                  message={t('posAdmin.devices.mgmt.truncated', { loaded: items.length, total: serverTotal })}
+                  message={t('posAdmin.devices.mgmt.truncated', { loaded: allItems.length, total: serverTotal })}
                 />
               ) : null}
               {activeFilterItems.length ? (
@@ -1148,7 +1150,7 @@ export default function DeviceRegistrationPage() {
               },
             })}
             locale={{
-              emptyText: activeFilterItems.length || statusTab !== 'all' ? (
+              emptyText: activeFilterItems.length || statusTab !== 'all' || selectedStoreCode ? (
                 <div style={{ padding: '24px 0' }}>
                   <div className="dev-mgmt-sub">{t('posAdmin.devices.mgmt.emptyFiltered')}</div>
                   <Button type="link" onClick={clearFilters}>{t('posAdmin.devices.mgmt.clearFilters')}</Button>
@@ -1166,6 +1168,7 @@ export default function DeviceRegistrationPage() {
             }}
           />
         </div>
+        </StoreSidebarLayout>
       )}
 
       <DeviceDetailDrawer

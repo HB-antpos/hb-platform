@@ -296,6 +296,7 @@
         "collapse": "Collapse to toolbar",
         "pin": "Pin to left",
         "footHint": "↑↓ to move · Enter to switch · last store remembered",
+        "footHintNoMemory": "↑↓ to move · Enter to switch",
         "empty": "No matching store"
       },
       "weekNav": {

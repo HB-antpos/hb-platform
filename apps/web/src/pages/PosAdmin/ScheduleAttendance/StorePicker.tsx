@@ -31,6 +31,8 @@ interface StorePickerProps {
    * 考勤审核 = 本期待审数，工时 / 工资表 = 是否已锁定。没有就不显示。
    */
   badges?: Readonly<Record<string, ReactNode>>
+  /** 是否记住「上次所选分店」：排班考勤类页面会记，底部提示才写「记住上次分店」；设备管理等页面不记，传 false。 */
+  remembersLastStore?: boolean
 }
 
 interface FlatItem {
@@ -42,7 +44,7 @@ interface FlatItem {
 
 const ALL_KEY = '__all__'
 
-export default function StorePicker({ variant, options, value, recent, allowAll, onSelect, onToggleDock, autoFocus, badges }: StorePickerProps) {
+export default function StorePicker({ variant, options, value, recent, allowAll, onSelect, onToggleDock, autoFocus, badges, remembersLastStore = true }: StorePickerProps) {
   const { t } = useTranslation()
   const [keyword, setKeyword] = useState('')
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -107,7 +109,8 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
       >
         <span className="ssp-item-name">{item.label}</span>
         {item.code ? <span className="ssp-item-code">{item.code}</span> : null}
-        {badge ? <span className="ssp-item-badge">{badge}</span> : null}
+        {/* 数字 0 也要显示（某家店 0 台 / 0 条）：只排除没给、null、false */}
+        {badge !== undefined && badge !== null && badge !== false ? <span className="ssp-item-badge">{badge}</span> : null}
       </button>
     )
   }
@@ -162,7 +165,7 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
           keyword.trim() ? <div className="ssp-empty">{t('posAdmin.scheduleAttendance.storePicker.empty')}</div> : null
         )}
       </div>
-      {variant === 'docked' ? <div className="ssp-foot">{t('posAdmin.scheduleAttendance.storePicker.footHint')}</div> : null}
+      {variant === 'docked' ? <div className="ssp-foot">{t(remembersLastStore ? 'posAdmin.scheduleAttendance.storePicker.footHint' : 'posAdmin.scheduleAttendance.storePicker.footHintNoMemory')}</div> : null}
     </div>
   )
 }

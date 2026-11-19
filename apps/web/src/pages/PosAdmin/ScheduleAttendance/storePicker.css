@@ -177,3 +177,28 @@
   font-size: 11px;
   line-height: 1;
 }
+
+/* ---------- 非排班考勤页（设备管理 / 日结记录 / 现金管理）的两栏布局：左侧分店列表 + 右侧内容 ---------- */
+.ssl-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.ssl-main {
+  flex: 1;
+  min-width: 0;
+}
+.ssl-aside {
+  position: sticky;
+  top: 0;
+  flex: none;
+  width: 212px;
+  border: 1px solid var(--ant-color-border-secondary, #eef0f4);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container, #fff);
+  overflow: hidden;
+}
+/* 列表吸顶，自己内部滚动，长列表不撑高页面 */
+.ssl-aside .ssp {
+  max-height: calc(100vh - 140px);
+}

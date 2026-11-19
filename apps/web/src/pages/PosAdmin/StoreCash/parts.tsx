@@ -2,7 +2,6 @@ import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import { Alert, Button, DatePicker, Select, Tooltip } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ReactNode } from 'react'
-import type { CashStoreOption } from '../../../types/storeCash'
 import {
   formatAud,
   classifyVariance,
@@ -131,40 +130,6 @@ export function RangeFilter({ from, to, today, disabled, tr, onChange }: {
         }}
       />
       <span className="store-cash-sr-only">{tr('filters.rangeHint', { days: MAX_RANGE_DAYS })}</span>
-    </label>
-  )
-}
-
-export function storeOptionLabel(store: Pick<CashStoreOption, 'storeCode' | 'storeName'>): string {
-  return store.storeName && store.storeName !== store.storeCode ? `${store.storeName} (${store.storeCode})` : store.storeCode
-}
-
-function matchStore(input: string, option?: { label?: unknown; value?: unknown }) {
-  const keyword = input.trim().toLowerCase()
-  return `${String(option?.label ?? '')} ${String(option?.value ?? '')}`.toLowerCase().includes(keyword)
-}
-
-/** 单店选择（按日明细 / 存款 / 支出）。 */
-export function StoreSelect({ stores, value, disabled, tr, onChange }: {
-  stores: readonly CashStoreOption[]
-  value: string | null
-  disabled?: boolean
-  tr: Tr
-  onChange: (storeCode: string) => void
-}) {
-  return (
-    <label className="store-cash-field">
-      <span className="store-cash-field-label">{tr('filters.store')}</span>
-      <Select
-        className="store-cash-store-select"
-        value={value ?? undefined}
-        disabled={disabled}
-        showSearch
-        aria-label={tr('filters.store')}
-        filterOption={matchStore}
-        options={stores.map((store) => ({ value: store.storeCode, label: storeOptionLabel(store) }))}
-        onChange={onChange}
-      />
     </label>
   )
 }
