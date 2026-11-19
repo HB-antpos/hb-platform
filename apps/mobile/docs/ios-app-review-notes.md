@@ -30,7 +30,7 @@ Permission use is limited to the feature the reviewer opens:
 
 - Camera: barcode scanning, inventory/leave/employee photos, and silent advertisement video recording.
 - Photo Library: employee profile media, business attachments, and advertisement photos or videos.
-- Precise and background location: attendance verification during an active shift only.
+- Precise location: attendance verification only at the moment an employee scans the store QR code to clock in or out, while the app is open. The app never requests background location or "Always" location access.
 
 The persistent banner **App Review Demo / Local sample data / Resets on restart or sign-out** identifies the demo session throughout the app.
 
