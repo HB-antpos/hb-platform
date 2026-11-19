@@ -78,6 +78,23 @@ export interface AttendanceHoursDayDto {
   isBirthday?: boolean
   /** 当天班段（HH:mm；系统午夜自动下班 end = 24:00）。 */
   segments?: { start: string; end?: string | null; isAutoClockOut?: boolean }[]
+  /** 有排班、排班窗口已过去、却一次打卡都没有（目前按 0 工时计）：可补录。 */
+  missingPunch?: boolean
+  /** 未打卡班的排班窗口（HH:mm），补录表单预填用；只在 missingPunch 时有值。 */
+  scheduleStart?: string | null
+  scheduleEnd?: string | null
+  /** 这一天有手动补录的打卡：补录人 / 时间 / 原因（「补」角标与撤销用）。 */
+  manualEntry?: AttendanceManualEntryTrace | null
+}
+
+/** 工时统计格子上「补」角标的留痕。 */
+export interface AttendanceManualEntryTrace {
+  reason?: string | null
+  /** 补录人账号名。 */
+  createdBy?: string | null
+  createdAt?: string | null
+  /** 这次补录同时新建了当天排班（撤销时一并取消）。 */
+  createdSchedule?: boolean
 }
 
 export interface AttendanceHoursTotalsDto extends AttendanceTierHours {
@@ -387,4 +404,53 @@ export interface AttendanceApprovalPublicHolidayDto {
   suggestedHours?: number | null
   hours?: number | null
   status?: string
+}
+
+// ===== 手动补录工时（POST /managed/manual-entries/preview | / | /revoke）=====
+
+export interface AttendanceManualEntrySegmentPayload {
+  /** 门店本地时间 YYYY-MM-DDTHH:mm:ss，必须在所选工作日当天。 */
+  startLocal: string
+  endLocal: string
+}
+
+export interface AttendanceManualEntryPayload {
+  storeCode: string
+  userGuid: string
+  workDate: string
+  segments: AttendanceManualEntrySegmentPayload[]
+  /** 用餐次数覆盖值（0–3）；null = 按时长自动。只在需要新建排班时生效。 */
+  mealBreakCount?: number | null
+  reason: string
+  /** 保存必须带回预览返回的版本号。 */
+  previewRevision?: string
+}
+
+export interface AttendanceManualEntryPreview {
+  previewRevision: string
+  /** true = 当天没有排班，保存时会同时新建一条。 */
+  willCreateSchedule: boolean
+  scheduleGuid?: string | null
+  scheduleStart: string
+  scheduleEnd: string
+  effectiveMealBreakCount: number
+  workedMinutes: number
+  paidMinutes: number
+  paidHours: number
+  /** 超出排班窗口的加班候选分钟数；保存后进「待审批」，批准前不计薪。 */
+  candidateOvertimeMinutes: number
+}
+
+export interface AttendanceManualEntryResult {
+  scheduleGuid: string
+  createdSchedule: boolean
+  punchCount: number
+  paidHours: number
+  candidateOvertimeMinutes: number
+}
+
+export interface RevokeAttendanceManualEntryPayload {
+  storeCode: string
+  userGuid: string
+  workDate: string
 }

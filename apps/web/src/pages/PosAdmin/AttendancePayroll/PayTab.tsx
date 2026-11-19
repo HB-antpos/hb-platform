@@ -42,6 +42,8 @@ interface PayTabProps {
   onOpenRates?: () => void
   /** 每人的 MYOB 推送状态；有值才显示「MYOB 推送」这一列（没权限 / 服务器没开放 / 本期未锁定时为空）。 */
   myobPush?: Readonly<Record<string, PayrollPushCell>> | null
+  /** 手动补录工时入口：没权限 / 本期已锁定时不传（行上就没有「补录」按钮）。 */
+  onManualEntry?: (userGuid: string) => void
 }
 
 const HOUR_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday'] as const
@@ -227,7 +229,7 @@ function CashBucketInput(props: {
   )
 }
 
-export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates, myobPush }: PayTabProps) {
+export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates, myobPush, onManualEntry }: PayTabProps) {
   const { t } = useTranslation()
   const rows = data?.rows ?? []
 
@@ -431,6 +433,11 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                             )}
                             {row.payMode === 'Mixed' && row.fixedTransferHoursPerWeek ? (
                               <span className="atp-muted atp-small">{t('attendancePayroll.pay.fixedPerWeek', { hours: formatHours(row.fixedTransferHoursPerWeek) })}</span>
+                            ) : null}
+                            {onManualEntry ? (
+                              <Button type="link" size="small" className="atp-me-row-btn" onClick={() => onManualEntry(row.userGuid)}>
+                                {t('attendancePayroll.manualEntry.rowAction')}
+                              </Button>
                             ) : null}
                             {row.warnings?.filter((code) => code !== 'NO_RATE').length ? (
                               <Tooltip title={row.warnings.filter((code) => code !== 'NO_RATE').map((code) => t(`attendancePayroll.pay.warnings.${code}`, { defaultValue: code })).join('；')}>

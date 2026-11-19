@@ -1,6 +1,10 @@
 import type { ApiResponse } from '../types/api'
 import type {
   AttendanceDeletedScheduleDto,
+  AttendanceManualEntryPayload,
+  AttendanceManualEntryPreview,
+  AttendanceManualEntryResult,
+  RevokeAttendanceManualEntryPayload,
   AttendanceHoursResultDto,
   AttendanceLeaveApprovalDto,
   AttendancePayCashBucketDto,
@@ -63,6 +67,8 @@ export function normalizePayrollHours(value: unknown): AttendanceHoursResultDto 
         pending: day.pending ?? [],
         approvedMarks: day.approvedMarks ?? [],
         otherStores: day.otherStores ?? [],
+        missingPunch: day.missingPunch ?? false,
+        manualEntry: day.manualEntry ?? null,
       })),
     })),
     alerts: (data.alerts ?? []).map((alert) => ({
@@ -204,6 +210,27 @@ export async function saveAttendanceLeaveApproval(payload: SaveAttendanceLeaveAp
 /** 手填 / 清除某人某期「公假」「带薪假」的现金金额（覆盖该档系统值）；amount 为 null = 恢复系统值。 */
 export async function saveAttendanceCashOverride(payload: SaveAttendanceCashOverridePayload): Promise<void> {
   unwrapAttendanceApiData(await request.put<ApiResponse<unknown>>(`${API_BASE}/payroll/periods/cash-overrides`, payload))
+}
+
+// ===== 手动补录工时（店长 / Admin 为「当天没有任何打卡」的员工补整天）=====
+
+/** 预览：不写库，返回工时、是否会新建排班与版本号；校验失败时抛出带后端提示的错误。 */
+export async function previewAttendanceManualEntry(payload: AttendanceManualEntryPayload): Promise<AttendanceManualEntryPreview> {
+  return unwrapAttendanceApiData<AttendanceManualEntryPreview>(
+    await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-entries/preview`, payload),
+  )
+}
+
+/** 保存：payload.previewRevision 必须是刚预览返回的值，否则后端要求重新预览。 */
+export async function createAttendanceManualEntry(payload: AttendanceManualEntryPayload): Promise<AttendanceManualEntryResult> {
+  return unwrapAttendanceApiData<AttendanceManualEntryResult>(
+    await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-entries`, payload),
+  )
+}
+
+/** 撤销某员工某天的补录（补录新建的排班一并取消）。 */
+export async function revokeAttendanceManualEntry(payload: RevokeAttendanceManualEntryPayload): Promise<void> {
+  unwrapAttendanceApiData(await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-entries/revoke`, payload))
 }
 
 /** 提交并锁定：后端校验本期待处理为 0（PERIOD_HAS_PENDING），锁定后各写接口返回 PERIOD_LOCKED。 */
