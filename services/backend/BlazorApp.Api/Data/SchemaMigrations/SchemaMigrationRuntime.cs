@@ -328,6 +328,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyPosIpadOtaAssignmentAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendancePayCashOverrideAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendancePayCashOverrideAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -2096,6 +2100,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             PosIpadOtaAssignmentSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendancePayCashOverrideAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendancePayCashOverrideSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 列签名与唯一索引通过后协调器才登记账本，已有同名但结构不对的表不会被误标为完成。
+        await VerifyAttendancePayCashOverrideAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendancePayCashOverrideAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendancePayCashOverrideSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

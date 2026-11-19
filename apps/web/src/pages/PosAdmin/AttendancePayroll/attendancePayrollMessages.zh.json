@@ -171,6 +171,8 @@
       "employeeMode": "员工 / 方式",
       "payableHours": "应付工时（h）",
       "hoursByTier": "工时（按档）",
+      "cashPublicHoliday": "公假 $",
+      "cashLeave": "假 $",
       "amount": "金额",
       "allowance": "补贴 ±",
       "gross": "应发",
@@ -187,11 +189,28 @@
       "approved": "核定",
       "rateMissing": "有工时的档缺时薪，这部分没算钱，请先补时薪表",
       "footnote": "带薪假期按平日转账时薪；全现金员工所有工时（含带薪假）按现金时薪。工时先舍到 2 位小数再乘时薪，金额舍到分。",
+      "cashOverride": {
+        "manual": "手填",
+        "systemShort": "系统 {{amount}}",
+        "systemLabel": "系统算",
+        "diffLabel": "差额",
+        "editorLabel": "修改人",
+        "restore": "恢复系统值",
+        "saved": "现金金额已保存，工资已重算",
+        "restored": "已恢复系统值，工资已重算",
+        "noCashHours": "该档工时已全部在转账内，没有现金部分，不能手填",
+        "inTransfer": "转账内",
+        "ignoredShort": "手填未生效",
+        "ignored": "手填的 {{amount}} 没有生效：这一档已没有现金工时",
+        "aria": "手填 {{name}} 的{{bucket}}现金金额",
+        "chip": "含手填 {{count}} 项 {{delta}}"
+      },
       "warnings": {
         "NO_RATE": "还没有时薪记录",
         "MISSING_TRANSFER_RATE": "有工时的档缺转账时薪，这部分没算钱",
         "MISSING_CASH_RATE": "缺现金时薪，现金部分没算钱",
-        "BELOW_MINIMUM_RATE": "有时薪低于自填的最低时薪"
+        "BELOW_MINIMUM_RATE": "有时薪低于自填的最低时薪",
+        "CASH_OVERRIDE_IGNORED": "有手填的公假 / 带薪假现金金额没有生效：这一档已没有现金工时"
       }
     },
     "rates": {
@@ -322,7 +341,11 @@
       "transferHours": "转账工时",
       "transferAmount": "转账金额",
       "cashHours": "现金工时",
-      "cashAmount": "现金金额（含补贴）"
+      "cashPublicHoliday": "公假现金",
+      "cashLeave": "带薪假现金",
+      "cashAmount": "现金金额（含补贴）",
+      "cashManualNote": "现金手填说明",
+      "cashManualItem": "{{bucket}}手填（系统 {{system}}）"
     },
     "messages": {
       "loadFailed": "加载失败",

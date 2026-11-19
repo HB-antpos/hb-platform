@@ -1,11 +1,14 @@
 import dayjs from 'dayjs'
 import type {
+  AttendanceCashOverrideBucket,
   AttendanceEmploymentType,
   AttendanceHoursEmployeeDto,
   AttendanceHoursTotalsDto,
   AttendancePayBuckets,
+  AttendancePayCashBucketDto,
   AttendancePayMode,
   AttendancePayRateDto,
+  AttendancePayRowDto,
 } from '../../../types/attendancePayroll'
 
 // 工资口径（规格第 0.2、3 节）：后端为准，前端只用于时薪抽屉的实时试算与 mock。
@@ -281,6 +284,58 @@ export function formatMoney(value: number | null | undefined, empty = '—'): st
 export function formatSignedMoney(value: number | null | undefined, empty = '—'): string {
   if (!value) return empty
   return `${value > 0 ? '+' : ''}${formatMoney(value)}`
+}
+
+// ===== 公假 / 带薪假「现金金额」手填 =====
+
+/** 手填金额上限，与后端 MaxCashOverrideAmount 一致（防止多敲一位数）。 */
+export const CASH_OVERRIDE_MAX = 100000
+
+/** 可以手填现金金额的两档：前端键、后端档位名（PayrollBucket 枚举名）与表格列。 */
+export const CASH_OVERRIDE_BUCKETS = [
+  { key: 'publicHoliday', apiBucket: 'PublicHoliday' },
+  { key: 'leave', apiBucket: 'Leave' },
+] as const satisfies readonly { key: 'publicHoliday' | 'leave'; apiBucket: AttendanceCashOverrideBucket }[]
+
+export type CashOverrideBucketKey = (typeof CASH_OVERRIDE_BUCKETS)[number]['key']
+
+/**
+ * 本页手填汇总：手填了几项，手填合计比系统值多（正）或少（负）多少。
+ * 只数「已生效」的手填（isManual）；有手填但这一档已没有现金工时而没生效的不数，那种情况行上另有告警。
+ */
+export function summarizeCashOverrides(rows: readonly Pick<AttendancePayRowDto, 'cash'>[]): { count: number; delta: number } {
+  let count = 0
+  let cents = 0
+  for (const row of rows) {
+    for (const { key } of CASH_OVERRIDE_BUCKETS) {
+      const bucket = row.cash[key]
+      if (!bucket.isManual) continue
+      count += 1
+      cents += Math.round((bucket.amount - bucket.systemAmount) * 100)
+    }
+  }
+  return { count, delta: cents / 100 }
+}
+
+/** 输入框提交时该做什么：不用请求 / 保存手填金额 / 清除手填（恢复系统值）。 */
+export type CashOverrideCommit = { kind: 'none' } | { kind: 'save'; amount: number } | { kind: 'clear' }
+
+/**
+ * 失焦或回车时的判定。
+ * - 清空输入：已有手填 → 清除（恢复系统值）；没有手填 → 什么都不做（输入框回到系统值）；
+ * - 值没变（与当前显示的金额相同）→ 不发请求，免得失焦就产生一条手填；
+ * - 其余 → 保存，金额舍到 2 位小数、不低于 0、不超过上限。
+ */
+export function resolveCashOverrideCommit(
+  bucket: Pick<AttendancePayCashBucketDto, 'amount' | 'isManual'>,
+  input: number | null | undefined,
+): CashOverrideCommit {
+  if (input === null || input === undefined || Number.isNaN(input)) {
+    return bucket.isManual ? { kind: 'clear' } : { kind: 'none' }
+  }
+  const amount = Math.min(CASH_OVERRIDE_MAX, Math.max(0, round2(input)))
+  if (amount === bucket.amount) return { kind: 'none' }
+  return { kind: 'save', amount }
 }
 
 /** 后端没给合计时，按各天相加兜底（各天已是 2 位小数）。 */

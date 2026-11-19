@@ -5,7 +5,7 @@ import type {
   AttendancePayRateDto,
   AttendancePayResultDto,
 } from '../../../types/attendancePayroll'
-import { periodEnd, round2, summarizeEmployeeHours } from './payrollLogic'
+import { CASH_OVERRIDE_BUCKETS, formatMoney, periodEnd, round2, summarizeEmployeeHours } from './payrollLogic'
 
 // 导出 Excel：exceljs 只在点击导出时动态加载，页面包里只有类型。
 // 工时一律十进制小时、最多 2 位小数；金额保留 2 位。
@@ -61,10 +61,13 @@ export function buildPayrollExportRows(input: PayrollExportInput): Row[] {
       text('attendancePayroll.export.transferHours'),
       text('attendancePayroll.export.transferAmount'),
       text('attendancePayroll.export.cashHours'),
+      text('attendancePayroll.export.cashPublicHoliday'),
+      text('attendancePayroll.export.cashLeave'),
       text('attendancePayroll.pay.allowance'),
       text('attendancePayroll.export.cashAmount'),
       text('attendancePayroll.pay.gross'),
       text('attendancePayroll.pay.note'),
+      text('attendancePayroll.export.cashManualNote'),
     ]
     const rows = input.pay.rows.map((row) => [
       row.userName,
@@ -78,10 +81,20 @@ export function buildPayrollExportRows(input: PayrollExportInput): Row[] {
       hourValue(row.transfer.hours),
       row.transfer.amount,
       hourValue(row.cash.hours),
+      row.cash.publicHoliday.amount,
+      row.cash.leave.amount,
       row.allowance,
       round2(row.cash.amount + row.allowance),
       row.grossPay,
       row.note ?? '',
+      // 手填的格子在金额列里看不出来，所以单独一列写明「哪一档手填、系统算的是多少」。
+      CASH_OVERRIDE_BUCKETS
+        .filter(({ key }) => row.cash[key].isManual)
+        .map(({ key }) => text('attendancePayroll.export.cashManualItem', {
+          bucket: text(`attendancePayroll.tierLong.${key}`),
+          system: formatMoney(row.cash[key].systemAmount),
+        }))
+        .join(text('attendancePayroll.listSeparator')),
     ])
     return [header, ...rows]
   }

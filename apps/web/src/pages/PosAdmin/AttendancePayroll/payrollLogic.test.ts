@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { buildPayrollExportRows } from './payrollExport'
 import {
+  CASH_OVERRIDE_MAX,
   EMPLOYMENT_TYPE_TAG_COLORS,
   MANAGER_TAG_COLOR,
   PERIOD_PRESETS,
@@ -16,12 +18,14 @@ import {
   multiplyToCents,
   periodEnd,
   presetPeriodStart,
+  resolveCashOverrideCommit,
   resolvePeriodStart,
   shiftPeriod,
+  summarizeCashOverrides,
   summarizeEmployeeHours,
   resolvePublicHolidayRate,
 } from './payrollLogic'
-import { buildSampleHours, buildSamplePay, setSampleLeaveApproval } from './payrollSample.fixture'
+import { buildSampleHours, buildSamplePay, setSampleCashOverride, setSampleLeaveApproval } from './payrollSample.fixture'
 
 // 十进制小时：7:59 → 7.98，最多 2 位
 assert.equal(minutesToHours(479), 7.98)
@@ -202,6 +206,82 @@ assert.deepEqual(Object.keys(EMPLOYMENT_TYPE_TAG_COLORS).sort(), ['Casual', 'Ful
   assert.deepEqual(birthdayRateReviews(rates, '2026-11-02'), [], '生日之前的旧期一个都不提示')
   assert.equal(birthdayRateReviews(rates)[1].age, 21)
   assert.equal(birthdayRateReviews([rate('x', undefined as unknown as string, { birthdayReviewHint: true, birthdayReviewDate: '2026-11-01', birthdayReviewAge: 16 })])[0].userName, 'x', '没有姓名时退回账号 ID')
+}
+
+// 公假 / 带薪假「现金金额」手填：提交判定（失焦 / 回车时该不该发请求、发什么）
+{
+  const system = { amount: 148.5, isManual: false }
+  assert.deepEqual(resolveCashOverrideCommit(system, 200), { kind: 'save', amount: 200 }, '改了值：保存')
+  assert.deepEqual(resolveCashOverrideCommit(system, 148.5), { kind: 'none' }, '值没变：不发请求，免得失焦就产生一条手填')
+  assert.deepEqual(resolveCashOverrideCommit(system, null), { kind: 'none' }, '没有手填时清空：什么都不做')
+  assert.deepEqual(resolveCashOverrideCommit(system, undefined), { kind: 'none' })
+  assert.deepEqual(resolveCashOverrideCommit(system, 0), { kind: 'save', amount: 0 }, '填 0 是明确填写：这一档不付现金')
+  const manual = { amount: 200, isManual: true }
+  assert.deepEqual(resolveCashOverrideCommit(manual, null), { kind: 'clear' }, '已手填时清空：恢复系统值')
+  assert.deepEqual(resolveCashOverrideCommit(manual, 200), { kind: 'none' })
+  assert.deepEqual(resolveCashOverrideCommit(manual, 148.5), { kind: 'save', amount: 148.5 }, '手填成与系统值相同也算明确手填')
+  assert.deepEqual(resolveCashOverrideCommit(system, 10.005), { kind: 'save', amount: 10.01 }, '舍到 2 位小数')
+  assert.deepEqual(resolveCashOverrideCommit(system, -5), { kind: 'save', amount: 0 }, '负数按 0')
+  assert.deepEqual(resolveCashOverrideCommit(system, 999999), { kind: 'save', amount: CASH_OVERRIDE_MAX }, '超过上限按上限')
+}
+
+// 手填后工资重算：Liam（混合）公假 5.5 h 全在现金，系统值 5.5 × 27 = 148.50；手填 200 取代它（不是叠加）
+{
+  const query = { storeCode: 'CHERMSIDE', periodStart: '2026-10-05', weeks: 2 } as const
+  const find = (rows: typeof pay.rows, userGuid: string) => rows.find((row) => row.userGuid === userGuid)!
+  const base = find((await buildSamplePay(query)).rows, 'mock-liam')
+  assert.equal(base.cash.publicHoliday.systemAmount, 148.5)
+  assert.equal(base.cash.publicHoliday.editable, true)
+  assert.equal(base.cash.publicHoliday.isManual, false)
+  assert.equal(base.cash.leave.editable, false, 'Liam 没有带薪假现金工时')
+
+  setSampleCashOverride('mock-liam', 'PublicHoliday', 200)
+  const manualPay = await buildSamplePay(query)
+  const manual = find(manualPay.rows, 'mock-liam')
+  assert.equal(manual.cash.publicHoliday.isManual, true)
+  assert.equal(manual.cash.publicHoliday.amount, 200)
+  assert.equal(manual.cash.publicHoliday.systemAmount, 148.5)
+  assert.equal(manual.cash.amount, Math.round((base.cash.amount - 148.5 + 200) * 100) / 100, '现金金额：手填取代系统值')
+  assert.equal(manual.grossPay, Math.round((base.grossPay + 51.5) * 100) / 100, '应发随之多 51.50')
+  assert.equal(manual.transfer.amount, base.transfer.amount, '转账不变')
+  assert.deepEqual(summarizeCashOverrides(manualPay.rows), { count: 1, delta: 51.5 })
+  assert.deepEqual(summarizeCashOverrides([]), { count: 0, delta: 0 })
+
+  // 少付也算：手填 100 → 比系统值少 48.50
+  setSampleCashOverride('mock-liam', 'PublicHoliday', 100)
+  assert.deepEqual(summarizeCashOverrides((await buildSamplePay(query)).rows), { count: 1, delta: -48.5 })
+
+  // Jack 的带薪假 15.6 h 全在转账里：没有现金部分，手填不生效（库里的值仍带出，界面据此提示）
+  setSampleCashOverride('mock-jack', 'Leave', 100)
+  const jack = find((await buildSamplePay(query)).rows, 'mock-jack')
+  assert.equal(jack.cash.leave.editable, false)
+  assert.equal(jack.cash.leave.isManual, false)
+  assert.equal(jack.cash.leave.manualAmount, 100)
+  assert.equal(jack.cash.amount, 167.58, '没生效，现金金额照旧')
+
+  // 导出：金额两列 + 末尾「手填说明」（只有手填的格子写明系统值）
+  const exportPay = await buildSamplePay(query)
+  const labels = (key: string, values?: Record<string, unknown>) => (values ? `${key}|${JSON.stringify(values)}` : key)
+  const [header, ...exportRows] = buildPayrollExportRows({
+    tab: 'pay', storeName: 'Chermside', periodStart: query.periodStart, weeks: 2, hours: null, pay: exportPay, rates: [], text: labels,
+  })
+  assert.ok(header.includes('attendancePayroll.export.cashPublicHoliday'))
+  assert.ok(header.includes('attendancePayroll.export.cashLeave'))
+  assert.equal(header[header.length - 1], 'attendancePayroll.export.cashManualNote', '手填说明放在最后一列，不挪动原有列')
+  const liamIndex = exportPay.rows.findIndex((row) => row.userGuid === 'mock-liam')
+  const liamRow = exportRows[liamIndex]
+  assert.equal(liamRow[header.indexOf('attendancePayroll.export.cashPublicHoliday')], 100)
+  assert.match(String(liamRow[liamRow.length - 1]), /\$148\.50/, '手填说明里写着系统值 $148.50')
+  const jackRow = exportRows[exportPay.rows.findIndex((row) => row.userGuid === 'mock-jack')]
+  assert.equal(jackRow[jackRow.length - 1], '', '没有生效的手填不写说明')
+
+  // 清除后恢复系统值
+  setSampleCashOverride('mock-liam', 'PublicHoliday', null)
+  setSampleCashOverride('mock-jack', 'Leave', null)
+  const restored = await buildSamplePay(query)
+  assert.deepEqual(find(restored.rows, 'mock-liam').cash.publicHoliday.isManual, false)
+  assert.equal(find(restored.rows, 'mock-liam').grossPay, base.grossPay)
+  assert.deepEqual(summarizeCashOverrides(restored.rows), { count: 0, delta: 0 })
 }
 
 console.log('payrollLogic.test.ts: ok')

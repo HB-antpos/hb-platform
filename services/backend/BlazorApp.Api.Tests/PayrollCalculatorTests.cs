@@ -437,6 +437,153 @@ public sealed class PayrollCalculatorTests
 
     // ---------------- 年假、病假、周期 ----------------
 
+    // ---------------- 公假 / 带薪假「现金金额」手填（覆盖该档系统值，不是叠加） ----------------
+
+    [Fact]
+    public void 手填公假现金_覆盖该档系统值_不叠加()
+    {
+        var result = PayrollCalculator.CalculatePay(CashOverrideInput(publicHoliday: 80m));
+
+        // 全现金 $25/h：平日 4 h = 100；带薪假 8 h = 200（没手填，照系统值）；
+        // 公假 2 h 系统值 50 被手填 80 取代——是 100 + 80 + 200 = 380，不是 100 + 50 + 80 + 200 = 430。
+        Assert.Equal(50m, result.PublicHolidayCashSystemAmount);
+        Assert.True(result.PublicHolidayCashOverridden);
+        Assert.Equal(380m, result.CashAmount);
+        Assert.Equal(380m, result.GrossPay);
+        Assert.DoesNotContain(PayrollCalculator.WarningCashOverrideIgnored, result.Warnings);
+    }
+
+    [Fact]
+    public void 手填带薪假现金_覆盖该档系统值_带薪假与公假互不影响()
+    {
+        var result = PayrollCalculator.CalculatePay(CashOverrideInput(leave: 250m));
+
+        // 带薪假 8 h × 25 = 200 的系统值被 250 取代；公假没手填，照系统值 50。平日 100 + 公假 50 + 带薪假 250 = 400。
+        Assert.Equal(200m, result.LeaveCashSystemAmount);
+        Assert.True(result.LeaveCashOverridden);
+        Assert.False(result.PublicHolidayCashOverridden);
+        Assert.Equal(400m, result.CashAmount);
+    }
+
+    [Fact]
+    public void 手填两档现金_各自覆盖_转账不变()
+    {
+        var result = PayrollCalculator.CalculatePay(CashOverrideInput(publicHoliday: 80m, leave: 250m));
+
+        Assert.True(result.PublicHolidayCashOverridden);
+        Assert.True(result.LeaveCashOverridden);
+        // 平日 100 + 公假 80 + 带薪假 250。
+        Assert.Equal(430m, result.CashAmount);
+        Assert.Equal(0m, result.TransferAmount);
+        // 系统值始终是「不手填时」该档的金额，方便前端对照。
+        Assert.Equal(50m, result.PublicHolidayCashSystemAmount);
+        Assert.Equal(200m, result.LeaveCashSystemAmount);
+    }
+
+    [Fact]
+    public void 手填0元也生效_表示这一档不付现金()
+    {
+        var result = PayrollCalculator.CalculatePay(CashOverrideInput(publicHoliday: 0m));
+
+        Assert.True(result.PublicHolidayCashOverridden);
+        // 平日 100 + 公假 0 + 带薪假系统值 200。
+        Assert.Equal(300m, result.CashAmount);
+    }
+
+    [Fact]
+    public void 不手填时_现金金额与手填功能上线前完全一致_并给出各档系统值()
+    {
+        var plain = PayrollCalculator.CalculatePay(CashOverrideInput());
+
+        // 平日 4 h + 公假 2 h + 带薪假 8 h = 14 h × 25。
+        Assert.Equal(350m, plain.CashAmount);
+        Assert.Equal(50m, plain.PublicHolidayCashSystemAmount);
+        Assert.Equal(200m, plain.LeaveCashSystemAmount);
+        Assert.False(plain.PublicHolidayCashOverridden);
+        Assert.False(plain.LeaveCashOverridden);
+    }
+
+    [Fact]
+    public void 该档工时全在转账里_没有现金部分_手填不生效并提示()
+    {
+        // 与「按周日周六带薪假公假平日顺序装入转账」同一组数据：容量 14 h，带薪假 6 h 全部进了转账（现金 0），
+        // 公假剩 4 h、平日 8 h 走现金（单价 18）。
+        PayrollPayResult Calculate(decimal? publicHoliday, decimal? leave) => PayrollCalculator.CalculatePay(new PayrollPayInput
+        {
+            PeriodStart = PeriodStart,
+            Weeks = 1,
+            Rates = new[] { Mixed(14, 20m, 30m, 40m, 50m, cash: 18m) },
+            WorkItems = new[]
+            {
+                new PayrollWorkItem(PeriodStart, PayrollBucket.PublicHoliday, 300),
+                new PayrollWorkItem(PeriodStart.AddDays(1), PayrollBucket.Weekday, 480),
+                new PayrollWorkItem(PeriodStart.AddDays(5), PayrollBucket.Saturday, 240),
+                new PayrollWorkItem(PeriodStart.AddDays(6), PayrollBucket.Sunday, 180),
+            },
+            LeaveItems = new[] { new PayrollLeaveItem(PeriodStart.AddDays(2), 6m) },
+            PublicHolidayCashOverride = publicHoliday,
+            LeaveCashOverride = leave,
+        });
+
+        // 带薪假没有现金部分：手填 100 被忽略，现金仍是 12 h × 18 = 216，并提示。
+        var ignored = Calculate(publicHoliday: null, leave: 100m);
+        Assert.False(ignored.LeaveCashOverridden);
+        Assert.Equal(216m, ignored.CashAmount);
+        Assert.Contains(PayrollCalculator.WarningCashOverrideIgnored, ignored.Warnings);
+
+        // 公假有 4 h 现金工时：手填 100 取代系统值 4×18 = 72；平日 8×18 = 144 照旧 → 244。
+        var applied = Calculate(publicHoliday: 100m, leave: null);
+        Assert.True(applied.PublicHolidayCashOverridden);
+        Assert.Equal(72m, applied.PublicHolidayCashSystemAmount);
+        Assert.Equal(244m, applied.CashAmount);
+        // 转账一分不动。
+        Assert.Equal(410m, applied.TransferAmount);
+        Assert.DoesNotContain(PayrollCalculator.WarningCashOverrideIgnored, applied.Warnings);
+    }
+
+    [Fact]
+    public void 期中调薪_系统值按当天有效的现金时薪分别算_手填只取代带薪假那一档()
+    {
+        // 10-08 起现金时薪从 25 调到 30；公假在 10-05（旧价 25，1 h），带薪假在 10-09（新价 30，2 h）。
+        var oldRate = new PayrollRate("old", new DateTime(2026, 7, 1), PayrollCalculator.PayModeCash, 0, null, null, null, null, 25m, 0m, null);
+        var newRate = new PayrollRate("new", new DateTime(2026, 10, 8), PayrollCalculator.PayModeCash, 0, null, null, null, null, 30m, 0m, null);
+        PayrollPayResult Calculate(decimal? leave) => PayrollCalculator.CalculatePay(new PayrollPayInput
+        {
+            PeriodStart = PeriodStart,
+            Weeks = 1,
+            Rates = new[] { oldRate, newRate },
+            WorkItems = new[] { new PayrollWorkItem(PeriodStart, PayrollBucket.PublicHoliday, 60) },
+            LeaveItems = new[] { new PayrollLeaveItem(PeriodStart.AddDays(4), 2m) },
+            LeaveCashOverride = leave,
+        });
+
+        var plain = Calculate(null);
+        Assert.Equal(25m, plain.PublicHolidayCashSystemAmount);
+        Assert.Equal(60m, plain.LeaveCashSystemAmount);
+        Assert.Equal(85m, plain.CashAmount);
+
+        // 带薪假手填 100 取代它自己的 60；公假仍按旧价 25。
+        var overridden = Calculate(100m);
+        Assert.Equal(125m, overridden.CashAmount);
+        Assert.Equal(60m, overridden.LeaveCashSystemAmount);
+    }
+
+    /// <summary>全现金 $25/h：平日 4 h、公假 2 h、带薪假 8 h，可选手填公假 / 带薪假的现金金额。</summary>
+    private static PayrollPayInput CashOverrideInput(decimal? publicHoliday = null, decimal? leave = null) => new()
+    {
+        PeriodStart = PeriodStart,
+        Weeks = 1,
+        Rates = new[] { Cash(25m) },
+        WorkItems = new[]
+        {
+            new PayrollWorkItem(PeriodStart.AddDays(1), PayrollBucket.Weekday, 240),
+            new PayrollWorkItem(PeriodStart, PayrollBucket.PublicHoliday, 120),
+        },
+        LeaveItems = new[] { new PayrollLeaveItem(PeriodStart.AddDays(2), 8m) },
+        PublicHolidayCashOverride = publicHoliday,
+        LeaveCashOverride = leave,
+    };
+
     [Fact]
     public void 年假申请工时_区间内工作日排除公假乘8()
     {

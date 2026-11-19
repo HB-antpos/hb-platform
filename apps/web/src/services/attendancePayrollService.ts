@@ -3,11 +3,13 @@ import type {
   AttendanceDeletedScheduleDto,
   AttendanceHoursResultDto,
   AttendanceLeaveApprovalDto,
+  AttendancePayCashBucketDto,
   AttendancePayPeriodStoreStatusDto,
   AttendancePayRateDto,
   AttendancePayResultDto,
   AttendancePeriodKey,
   AttendancePeriodQuery,
+  SaveAttendanceCashOverridePayload,
   SaveAttendanceLeaveApprovalPayload,
   SaveAttendancePayNotePayload,
   SaveAttendancePayRatePayload,
@@ -77,6 +79,23 @@ function presentAnnual(detail?: AttendanceLeaveApprovalDto): AttendanceLeaveAppr
   return detail.requestedHours > 0 || detail.approvedHours > 0 ? detail : undefined
 }
 
+/**
+ * 公假 / 带薪假某一档的现金金额：后端总会返回；缺字段（例如 Web 先于后端上线的短暂窗口）时按「没有现金部分、不可改」兜底，
+ * 此时界面显示 —，不会让人对着一个没有后端支持的格子手填。
+ */
+function normalizeCashBucket(value?: Partial<AttendancePayCashBucketDto>): AttendancePayCashBucketDto {
+  return {
+    hours: value?.hours ?? 0,
+    amount: value?.amount ?? 0,
+    systemAmount: value?.systemAmount ?? 0,
+    isManual: value?.isManual ?? false,
+    manualAmount: value?.manualAmount ?? null,
+    editable: value?.editable ?? false,
+    updatedBy: value?.updatedBy ?? null,
+    updatedAt: value?.updatedAt ?? null,
+  }
+}
+
 export function normalizePayrollPay(value: unknown): AttendancePayResultDto {
   const data = asRecord(value) as unknown as AttendancePayResultDto
   return {
@@ -87,6 +106,11 @@ export function normalizePayrollPay(value: unknown): AttendancePayResultDto {
     pendingCount: data.pendingCount ?? 0,
     rows: (data.rows ?? []).map((row) => ({
       ...row,
+      cash: {
+        ...row.cash,
+        publicHoliday: normalizeCashBucket(row.cash?.publicHoliday),
+        leave: normalizeCashBucket(row.cash?.leave),
+      },
       leaveDetail: {
         sick: row.leaveDetail?.sick ?? 0,
         publicHolidayPay: row.leaveDetail?.publicHolidayPay ?? 0,
@@ -175,6 +199,11 @@ export async function saveAttendancePayNote(payload: SaveAttendancePayNotePayloa
 
 export async function saveAttendanceLeaveApproval(payload: SaveAttendanceLeaveApprovalPayload): Promise<void> {
   unwrapAttendanceApiData(await request.put<ApiResponse<unknown>>(`${API_BASE}/payroll/periods/leave-approvals`, payload))
+}
+
+/** 手填 / 清除某人某期「公假」「带薪假」的现金金额（覆盖该档系统值）；amount 为 null = 恢复系统值。 */
+export async function saveAttendanceCashOverride(payload: SaveAttendanceCashOverridePayload): Promise<void> {
+  unwrapAttendanceApiData(await request.put<ApiResponse<unknown>>(`${API_BASE}/payroll/periods/cash-overrides`, payload))
 }
 
 /** 提交并锁定：后端校验本期待处理为 0（PERIOD_HAS_PENDING），锁定后各写接口返回 PERIOD_LOCKED。 */

@@ -165,8 +165,34 @@ export interface AttendanceLeaveApprovalDto {
   isFinanceApproved?: boolean
 }
 
-/** 工资行告警码：没有时薪记录、缺转账 / 现金时薪、低于自填最低时薪。 */
-export type AttendancePayWarningCode = 'NO_RATE' | 'MISSING_TRANSFER_RATE' | 'MISSING_CASH_RATE' | 'BELOW_MINIMUM_RATE'
+/** 工资行告警码：没有时薪记录、缺转账 / 现金时薪、低于自填最低时薪、手填现金金额没生效。 */
+export type AttendancePayWarningCode =
+  | 'NO_RATE'
+  | 'MISSING_TRANSFER_RATE'
+  | 'MISSING_CASH_RATE'
+  | 'BELOW_MINIMUM_RATE'
+  | 'CASH_OVERRIDE_IGNORED'
+
+/** 可以手填现金金额的两档，值与后端 PayrollBucket 枚举名一致。 */
+export type AttendanceCashOverrideBucket = 'PublicHoliday' | 'Leave'
+
+/** 公假 / 带薪假某一档的现金金额：默认是系统算的（现金工时 × 现金时薪），财务可以手填覆盖。 */
+export interface AttendancePayCashBucketDto {
+  /** 这一档落到现金的工时（转账装不下的部分）。 */
+  hours: number
+  /** 最终现金金额：已手填则为手填值，否则等于 systemAmount。 */
+  amount: number
+  /** 系统算的现金金额，不含手填。 */
+  systemAmount: number
+  /** 手填值是否已生效。 */
+  isManual: boolean
+  /** 库里存着的手填值（即使因为这一档已没有现金工时而不生效也会带出）；没有手填为 null。 */
+  manualAmount?: number | null
+  /** 这一档有现金工时才允许手填（工时全在转账里的档位没有现金部分）。 */
+  editable: boolean
+  updatedBy?: string | null
+  updatedAt?: string | null
+}
 
 export interface AttendancePayRowDto {
   userGuid: string
@@ -186,8 +212,15 @@ export interface AttendancePayRowDto {
     cashOut?: AttendanceLeaveApprovalDto
   }
   transfer: { buckets: AttendancePayBuckets; hours: number; amount: number }
-  /** cash.amount 不含补贴。 */
-  cash: { buckets: AttendancePayBuckets; hours: number; rate?: number | null; amount: number }
+  /** cash.amount 不含补贴，但含公假 / 带薪假两档的手填金额（手填取代该档的系统值）。 */
+  cash: {
+    buckets: AttendancePayBuckets
+    hours: number
+    rate?: number | null
+    amount: number
+    publicHoliday: AttendancePayCashBucketDto
+    leave: AttendancePayCashBucketDto
+  }
   allowance: number
   grossPay: number
   note?: string | null
@@ -283,6 +316,13 @@ export interface SaveAttendanceLeaveApprovalPayload extends AttendancePeriodKey 
   userGuid: string
   leaveType: AttendanceAnnualLeaveType
   approvedHours: number
+}
+
+export interface SaveAttendanceCashOverridePayload extends AttendancePeriodKey {
+  userGuid: string
+  bucket: AttendanceCashOverrideBucket
+  /** 手填的现金金额（≥ 0，最多两位小数）；null = 清除手填、恢复系统值。 */
+  amount: number | null
 }
 
 export interface UnlockAttendancePeriodPayload extends AttendancePeriodKey {

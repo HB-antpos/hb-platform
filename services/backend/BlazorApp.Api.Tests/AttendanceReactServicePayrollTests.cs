@@ -708,6 +708,207 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(24m, hours.Data!.Employees.Single().Totals.Annual);
         }
 
+        // ---------------- 公假 / 带薪假「现金金额」手填 ----------------
+
+        /// <summary>
+        /// 全现金（$30/h）员工：10-05 公假当天上班 3.5 h（公假档）+ 年假休息 24 h（带薪假档）。
+        /// 系统现金金额：公假 3.5 × 30 = 105，带薪假 24 × 30 = 720，合计 825。
+        /// </summary>
+        private async Task SeedCashPayrollWithHolidayAndLeaveAsync()
+        {
+            await SeedPayrollStoreAsync();
+            await _db.Insertable(new EmployeePayRate
+            {
+                RateGuid = "rate-staff-cash",
+                UserGuid = "staff-user",
+                PayMode = "Cash",
+                CashRate = 30m,
+                EffectiveFrom = new DateTime(2026, 7, 1),
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await SeedWorkedScheduleAsync("ph-work", PayrollPeriodStart, "09:00-12:30", "09:00-12:30");
+            await _db.Insertable(new AttendanceLeaveRequest
+            {
+                LeaveGuid = "annual-cash",
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                LeaveType = "PaidAnnual",
+                StartDate = new DateTime(2026, 10, 5),
+                EndDate = new DateTime(2026, 10, 8),
+                PaidHours = 24m,
+                Status = "Approved",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+        }
+
+        private static UpsertAttendancePayPeriodCashOverrideDto CashOverrideRequest(string bucket, decimal? amount) => new()
+        {
+            StoreCode = "BRI",
+            PeriodStart = PayrollPeriodStart,
+            Weeks = 2,
+            UserGuid = "staff-user",
+            Bucket = bucket,
+            Amount = amount,
+        };
+
+        [Fact]
+        public async Task 现金金额手填_覆盖该档系统值_随工资表返回_改写不重复_清除后恢复系统值()
+        {
+            await SeedCashPayrollWithHolidayAndLeaveAsync();
+
+            var before = (await Manager().GetPayrollPayAsync(PayrollQuery())).Data!.Rows.Single();
+            Assert.Equal(3.5m, before.Cash.PublicHoliday.Hours);
+            Assert.Equal(105m, before.Cash.PublicHoliday.SystemAmount);
+            Assert.Equal(105m, before.Cash.PublicHoliday.Amount);
+            Assert.False(before.Cash.PublicHoliday.IsManual);
+            Assert.True(before.Cash.PublicHoliday.Editable);
+            Assert.Equal(720m, before.Cash.Leave.SystemAmount);
+            Assert.Equal(825m, before.Cash.Amount);
+            Assert.Equal(825m, before.GrossPay);
+
+            // 公假手填 150：取代该档系统值 105（不是 105 + 150）；带薪假没手填，照系统值 720。
+            var saved = await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 150m));
+            Assert.True(saved.Success, saved.Message);
+            Assert.Equal(150m, saved.Data!.Amount);
+            Assert.Equal(105m, saved.Data.SystemAmount);
+
+            var afterPay = await Manager().GetPayrollPayAsync(PayrollQuery());
+            var after = afterPay.Data!.Rows.Single();
+            Assert.True(after.Cash.PublicHoliday.IsManual);
+            Assert.Equal(150m, after.Cash.PublicHoliday.Amount);
+            Assert.Equal(150m, after.Cash.PublicHoliday.ManualAmount);
+            Assert.Equal(105m, after.Cash.PublicHoliday.SystemAmount);
+            Assert.False(string.IsNullOrWhiteSpace(after.Cash.PublicHoliday.UpdatedBy));
+            Assert.False(after.Cash.Leave.IsManual);
+            Assert.Equal(870m, after.Cash.Amount);
+            Assert.Equal(870m, after.GrossPay);
+            Assert.Equal(870m, afterPay.Data.TotalGrossPay);
+            // 转账与工时一分不动。
+            Assert.Equal(0m, after.Transfer.Amount);
+            Assert.Equal(before.Hours.Total, after.Hours.Total);
+
+            // 带薪假也手填；公假改写成 160（同一档只会有一条记录，不会重复插入）。
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", 700m))).Success);
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 160m))).Success);
+            Assert.Equal(2, await _db.Queryable<AttendancePayPeriodCashOverride>().CountAsync());
+            var both = (await Manager().GetPayrollPayAsync(PayrollQuery())).Data!.Rows.Single();
+            Assert.Equal(860m, both.Cash.Amount);
+
+            // 清除公假手填：恢复系统值 105；再清一次（本来就没有）也算成功。
+            var cleared = await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", null));
+            Assert.True(cleared.Success, cleared.Message);
+            Assert.Null(cleared.Data!.Amount);
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", null))).Success);
+            var restored = (await Manager().GetPayrollPayAsync(PayrollQuery())).Data!.Rows.Single();
+            Assert.False(restored.Cash.PublicHoliday.IsManual);
+            Assert.Null(restored.Cash.PublicHoliday.ManualAmount);
+            Assert.Equal(105m, restored.Cash.PublicHoliday.Amount);
+            // 公假回到系统值 105，带薪假仍是手填的 700。
+            Assert.Equal(805m, restored.Cash.Amount);
+            Assert.Equal(1, await _db.Queryable<AttendancePayPeriodCashOverride>().CountAsync());
+        }
+
+        [Fact]
+        public async Task 现金金额手填_档位金额与员工校验_只能公假或带薪假_金额范围与两位小数_没有现金工时不能填()
+        {
+            await SeedCashPayrollWithHolidayAndLeaveAsync();
+
+            Assert.Equal("INVALID_CASH_OVERRIDE_BUCKET",
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Weekday", 10m))).ErrorCode);
+            Assert.Equal("INVALID_CASH_OVERRIDE_BUCKET",
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest(" ", 10m))).ErrorCode);
+            Assert.Equal("INVALID_CASH_OVERRIDE_AMOUNT",
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", -1m))).ErrorCode);
+            Assert.Equal("INVALID_CASH_OVERRIDE_AMOUNT",
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", 1.234m))).ErrorCode);
+            Assert.Equal("INVALID_CASH_OVERRIDE_AMOUNT",
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", 100000.01m))).ErrorCode);
+
+            var noUser = CashOverrideRequest("Leave", 10m);
+            noUser.UserGuid = " ";
+            Assert.Equal("USER_REQUIRED", (await Manager().UpsertPayPeriodCashOverrideAsync(noUser)).ErrorCode);
+            // 本期没有这个人的工资行：同样没有现金工时。
+            var stranger = CashOverrideRequest("Leave", 10m);
+            stranger.UserGuid = "nobody";
+            Assert.Equal("NO_CASH_HOURS_IN_BUCKET", (await Manager().UpsertPayPeriodCashOverrideAsync(stranger)).ErrorCode);
+
+            // 边界金额：0 与上限都合法（0 表示这一档不付现金）。
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", 0m))).Success);
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", 100000m))).Success);
+            // 被拒绝的请求一条都不能写进去；上面两次成功只有同一档的一条记录。
+            Assert.Equal(1, await _db.Queryable<AttendancePayPeriodCashOverride>().CountAsync());
+
+            // 普通员工没有权限管理这家店的工资：不能手填。
+            Assert.False((await Staff().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 99m))).Success);
+        }
+
+        [Fact]
+        public async Task 现金金额手填_这一档工时全在转账里_没有现金部分_不能填_也不影响转账()
+        {
+            await SeedPayrollStoreAsync();
+            // 全转账：公假当天的 3.5 h 全部走转账，没有任何现金工时。
+            await SeedTransferRateAsync(30m, 35m, 40m, 60m);
+            await SeedWorkedScheduleAsync("ph-transfer", PayrollPeriodStart, "09:00-12:30", "09:00-12:30");
+
+            var row = (await Manager().GetPayrollPayAsync(PayrollQuery())).Data!.Rows.Single();
+            Assert.False(row.Cash.PublicHoliday.Editable);
+            Assert.Equal(0m, row.Cash.PublicHoliday.Hours);
+            Assert.Equal(210m, row.Transfer.Amount); // 3.5 × 公假转账价 60
+
+            var rejected = await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 100m));
+            Assert.Equal("NO_CASH_HOURS_IN_BUCKET", rejected.ErrorCode);
+            Assert.Equal(0, await _db.Queryable<AttendancePayPeriodCashOverride>().CountAsync());
+            // 清除（本来就没有手填）不需要这一档有现金工时，也不报错。
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", null))).Success);
+        }
+
+        [Fact]
+        public async Task 现金金额手填_周期提交锁定后拒绝保存和清除_但已有手填仍计入_解锁后恢复可改()
+        {
+            await SeedCashPayrollWithHolidayAndLeaveAsync();
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 150m))).Success);
+
+            var submitted = await Manager().SubmitPayPeriodAsync(PeriodKey());
+            Assert.True(submitted.Success, submitted.Message);
+
+            Assert.Equal(AttendanceReactService.PeriodLockedErrorCode,
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 200m))).ErrorCode);
+            Assert.Equal(AttendanceReactService.PeriodLockedErrorCode,
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", null))).ErrorCode);
+            Assert.Equal(AttendanceReactService.PeriodLockedErrorCode,
+                (await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("Leave", 10m))).ErrorCode);
+            // 锁定期里已有的手填值照常计入工资，没被动过。
+            var locked = (await Manager().GetPayrollPayAsync(PayrollQuery())).Data!.Rows.Single();
+            Assert.True(locked.Cash.PublicHoliday.IsManual);
+            Assert.Equal(150m, locked.Cash.PublicHoliday.Amount);
+            Assert.Equal(870m, locked.GrossPay);
+
+            var unlocked = await Manager().UnlockPayPeriodAsync(new UnlockAttendancePayPeriodDto
+            {
+                StoreCode = "BRI", PeriodStart = PayrollPeriodStart, Weeks = 2, Reason = "改公假现金",
+            });
+            Assert.True(unlocked.Success, unlocked.Message);
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 200m))).Success);
+        }
+
+        [Fact]
+        public async Task 现金金额手填_之后工时全转到转账_手填不再生效并提示_库里的值仍带出便于核对()
+        {
+            await SeedCashPayrollWithHolidayAndLeaveAsync();
+            Assert.True((await Manager().UpsertPayPeriodCashOverrideAsync(CashOverrideRequest("PublicHoliday", 150m))).Success);
+
+            // 之后时薪改成全转账：公假那一档不再有现金工时。
+            await _db.Deleteable<EmployeePayRate>().Where(item => item.RateGuid == "rate-staff-cash").ExecuteCommandAsync();
+            await SeedTransferRateAsync(30m, 35m, 40m, 60m);
+
+            var row = (await Manager().GetPayrollPayAsync(PayrollQuery())).Data!.Rows.Single();
+            Assert.False(row.Cash.PublicHoliday.IsManual);
+            Assert.False(row.Cash.PublicHoliday.Editable);
+            Assert.Equal(150m, row.Cash.PublicHoliday.ManualAmount);
+            Assert.Equal(0m, row.Cash.Amount);
+            Assert.Contains("CASH_OVERRIDE_IGNORED", row.Warnings);
+        }
+
         // ---------------- 带薪假申请 ----------------
 
         [Fact]
