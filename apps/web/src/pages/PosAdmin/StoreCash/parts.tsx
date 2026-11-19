@@ -2,7 +2,6 @@ import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import { Alert, Button, DatePicker, Select, Tooltip } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ReactNode } from 'react'
-import type { CashStoreOption } from '../../../types/storeCash'
 import {
   formatAud,
   classifyVariance,
