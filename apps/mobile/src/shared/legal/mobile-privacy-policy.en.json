@@ -33,7 +33,7 @@
         "Account and contact details: name, username, user identifier, email address, phone number and address.",
         "Employment, identity and sensitive details: date of birth, gender, profile image, identity documents, tax file number, position and employment records, medical certificates or related health information.",
         "Financial and payroll details: bank account, pay, superannuation and other payment or financial information.",
-        "Device and location information: device identifiers, hardware identifier, system device number, IP/network information, and precise or background location needed for attendance and authorised on-shift location features.",
+        "Device and location information: device identifiers, hardware identifier, system device number, IP/network information, and precise location collected while the app is in use, when an employee scans the store QR code to clock in or out, signs in, or opens the app while on shift.",
         "Photos, video, audio and business content: employee records and evidence, product or inventory photos, advertising images or videos, audio contained in selected videos, barcode or QR input, and submitted form content.",
         "Usage and diagnostics: app version, operating system, feature activity, errors, crashes, performance and security diagnostic logs."
       ]
@@ -47,7 +47,7 @@
       "items": [
         "Authenticate employee accounts and store devices, and enforce role, store and terminal access.",
         "Support employee profiles, rostering, attendance, leave, payroll and other employment processes.",
-        "Verify location at login or attendance events, support safety, and enable authorised on-shift operational auditing.",
+        "Verify location at login or attendance events, record location when the app is opened during a shift for attendance records, and support safety and attendance auditing.",
         "Provide store, inventory, order, advertising, printing, scanning and other business functions.",
         "Prevent misuse, diagnose faults, maintain security and reliability, and meet legal obligations."
       ]
@@ -61,7 +61,7 @@
       "items": [
         "Camera: scan barcodes or QR codes and capture inventory, employee-profile, leave-evidence and muted advertising video content.",
         "Photos: select employee records, business attachments and advertising images or videos; a selected video may contain audio.",
-        "Location: verify login or attendance location and support background location only during an authorised shift.",
+        "Location: verify login or attendance location. The app reads precise location only while it is open, when an employee signs in, scans the store QR code to clock in or out, or opens the app or returns to it while on shift; it does not collect location in the background.",
         "Bluetooth or local connections: discover, connect to and use store printers on authorised devices."
       ]
     },
