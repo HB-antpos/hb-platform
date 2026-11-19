@@ -128,7 +128,26 @@ assert.deepEqual(
 // 考勤记录接口自带全名：昵称模式也只能显示全名，不重复第二行
 assert.deepEqual(resolveEmployeeCell({ userGuid: 'x', mode: 'nickname', recordName: ' Old Staff ' }), { primary: 'Old Staff', alt: undefined, unresolved: false })
 assert.deepEqual(resolveEmployeeCell({ userGuid: 'x', mode: 'full', recordName: 'Old Staff' }), { primary: 'Old Staff', alt: undefined, unresolved: false })
-// 打卡接口不返回姓名、名单里也没有：显示 GUID 前 8 位
+// 打卡接口带回昵称 / 名 / 全名：名单外的人（如管理员在店里打卡）也按开关显示「昵称 / 全名」，不再是 GUID
+assert.deepEqual(
+  resolveEmployeeCell({ userGuid: '59e591b0-ff43', mode: 'nickname', recordName: 'admin Pan', recordNickname: ' Sean ', recordGivenName: 'admin' }),
+  { primary: 'Sean', alt: { kind: 'full', name: 'admin Pan' }, unresolved: false },
+)
+assert.deepEqual(
+  resolveEmployeeCell({ userGuid: '59e591b0-ff43', mode: 'full', recordName: 'admin Pan', recordNickname: 'Sean', recordGivenName: 'admin' }),
+  { primary: 'admin Pan', alt: { kind: 'nickname', name: 'Sean' }, unresolved: false },
+)
+// 没填昵称：用名兜底
+assert.deepEqual(
+  resolveEmployeeCell({ userGuid: 'left', mode: 'nickname', recordName: 'Left Staff', recordNickname: '  ', recordGivenName: 'Lefty' }),
+  { primary: 'Lefty', alt: { kind: 'full', name: 'Left Staff' }, unresolved: false },
+)
+// 名单里有这个人时以名单为准（含重名区分），不被记录自带的昵称覆盖
+assert.deepEqual(
+  resolveEmployeeCell({ userGuid: zhan.userGuid, mode: 'nickname', source: zhan, recordName: 'Other', recordNickname: 'Other' }),
+  { primary: 'Ethan', alt: { kind: 'full', name: 'Zhan Chen' }, unresolved: false },
+)
+// 名单里没有、记录也没带名字（如用户表里已查不到）：显示 GUID 前 8 位
 assert.deepEqual(resolveEmployeeCell({ userGuid: '8f3a41c2-1111-2222-3333-444455556666', mode: 'nickname' }), { primary: '8f3a41c2', unresolved: true })
 assert.deepEqual(resolveEmployeeCell({ userGuid: '8f3a41c2-1111-2222-3333-444455556666', mode: 'full', recordName: '   ' }), { primary: '8f3a41c2', unresolved: true })
 // 名单里有这个人但连名字、登录名都没填：同样退回 GUID 前 8 位

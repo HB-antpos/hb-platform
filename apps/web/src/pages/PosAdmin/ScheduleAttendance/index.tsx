@@ -1529,8 +1529,16 @@ export default function ScheduleAttendancePage() {
   ))
 
   // 员工列：第一行显示名（昵称 / 全名跟开关走），第二行灰字补另一种叫法；完整 GUID 收进悬停提示并可复制。
-  // 打卡接口不返回姓名，名字全靠名单补；名单里没有又没带名字的人显示 GUID 前 8 位。
-  const userCell = (record: { userName?: string; userGuid?: string; applicantName?: string; applicantUserGuid?: string }) => {
+  // 名单里的人按名单显示（含重名区分）；名单外的人（如管理员在店里打卡、已离职）用记录自带的昵称 / 名 / 全名，
+  // 打卡接口会带回这三项；名单里没有、记录也没带名字的人才显示 GUID 前 8 位。
+  const userCell = (record: {
+    userName?: string
+    userNickname?: string
+    userGivenName?: string
+    userGuid?: string
+    applicantName?: string
+    applicantUserGuid?: string
+  }) => {
     const guid = record.userGuid || record.applicantUserGuid
     if (!guid) return <Typography.Text type="secondary">--</Typography.Text>
     const display = resolveEmployeeCell({
@@ -1539,6 +1547,8 @@ export default function ScheduleAttendancePage() {
       source: rosterByGuid.get(guid),
       nicknameName: rosterNicknameNames.get(guid),
       recordName: record.userName || record.applicantName,
+      recordNickname: record.userNickname,
+      recordGivenName: record.userGivenName,
     })
     return (
       <Tooltip

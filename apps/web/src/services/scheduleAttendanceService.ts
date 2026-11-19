@@ -146,6 +146,8 @@ export function normalizeAttendancePunch(value: unknown): AttendancePunchDto {
     userGuid: readCompat<string>(source, 'userGuid', 'UserGuid') ?? '',
     userName: readCompat<string>(source, 'userName', 'UserName')
       ?? readCompat<string>(source, 'employeeName', 'EmployeeName'),
+    userNickname: readCompat<string>(source, 'employeeNickname', 'EmployeeNickname'),
+    userGivenName: readCompat<string>(source, 'employeeGivenName', 'EmployeeGivenName'),
     workDate: readCompat<string>(source, 'workDate', 'WorkDate') ?? '',
     storeTimeZone: readCompat<string>(source, 'storeTimeZone', 'StoreTimeZone'),
     punchType: readCompat<AttendancePunchDto['punchType']>(source, 'punchType', 'PunchType') ?? 'ClockIn',

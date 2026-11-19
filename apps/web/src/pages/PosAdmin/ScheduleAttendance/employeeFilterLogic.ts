@@ -123,8 +123,8 @@ export interface EmployeeCellDisplay {
 /**
  * 员工列显示：
  * - 名单里的人：昵称模式第一行昵称（没填用名兜底，重名已区分）、第二行全名；全名模式反过来。
- * - 不在名单里的人（已离职、或名单还没加载）：只能用记录自带的全名；连这个都没有就显示 GUID 前 8 位。
- * 打卡接口不返回姓名，所以打卡记录里的名字全靠名单补出来。
+ * - 不在名单里的人（管理员 / 仓库经理在店里打卡、已离职、没选分店、或名单还没加载）：用记录自带的
+ *   昵称 → 名 → 全名（打卡接口会带回这三项；考勤记录 / 可用时间接口只带全名）；都没有才显示 GUID 前 8 位。
  */
 export function resolveEmployeeCell(input: {
   userGuid: string
@@ -133,14 +133,21 @@ export function resolveEmployeeCell(input: {
   source?: StaffNameSource
   /** 昵称模式下已做重名区分的显示名（来自 resolveStaffNames），缺省则按单人规则算。 */
   nicknameName?: string
-  /** 记录自带的全名（考勤记录 / 可用时间接口返回，打卡接口不返回）。 */
+  /** 记录自带的全名（考勤记录 / 可用时间 / 打卡接口都返回）。 */
   recordName?: string
+  /** 记录自带的昵称（目前只有打卡接口返回）；只在名单里找不到这个人时使用。 */
+  recordNickname?: string
+  /** 记录自带的「名」（目前只有打卡接口返回）；没填昵称时兜底，只在名单里找不到这个人时使用。 */
+  recordGivenName?: string
 }): EmployeeCellDisplay {
   const { userGuid, mode, source } = input
   const recordName = clean(input.recordName)
   const full = clean(source?.fullName) ?? recordName ?? clean(source?.username)
-  // 昵称叫法：名单里的人按昵称 → 名 → 全名；不在名单里的人没有昵称，只能是全名
-  const nickname = source ? clean(input.nicknameName) ?? resolveStaffName(source, 'nickname') : full
+  // 昵称叫法：名单里的人按名单算（昵称 → 名 → 全名，含重名区分）；
+  // 不在名单里的人用记录自带的昵称 → 名，记录也没带就只能是全名
+  const nickname = source
+    ? clean(input.nicknameName) ?? resolveStaffName(source, 'nickname')
+    : clean(input.recordNickname) ?? clean(input.recordGivenName) ?? full
 
   if (!full && (!nickname || nickname === userGuid)) {
     return { primary: shortGuid(userGuid), unresolved: true }

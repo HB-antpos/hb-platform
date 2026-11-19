@@ -70,9 +70,15 @@ const punch = normalizeAttendancePunch({
   IsBreakBoundary: true,
   SupersedesPunchGuid: 'raw-punch-1',
   AdjustmentGuid: 'adjustment-1',
+  EmployeeName: 'admin Pan',
+  EmployeeNickname: 'Sean',
+  EmployeeGivenName: 'admin',
 })
 
 assertEqual(punch.segmentIndex, 2, '应兼容 PascalCase 打卡班段字段')
+assertEqual(punch.userName, 'admin Pan', '打卡应带回员工全名')
+assertEqual(punch.userNickname, 'Sean', '打卡应带回员工昵称（名单外的人也要能显示昵称）')
+assertEqual(punch.userGivenName, 'admin', '打卡应带回员工的名（没填昵称时兜底）')
 assertEqual(punch.supersedesPunchGuid, 'raw-punch-1', '应保留原始打卡审计关系')
 assertEqual(punch.adjustmentGuid, 'adjustment-1', '应保留补卡调整审计关系')
 
