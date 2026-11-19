@@ -138,6 +138,11 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.MainHistoryTable,
             SchemaMigrationCoordinator.AttendancePayCashOverrideMigrationId
         );
+        await AssertHistoryTableAsync(
+            databases.MainConnectionString,
+            SqlServerSchemaMigrationRuntime.MainHistoryTable,
+            SchemaMigrationCoordinator.AttendanceOvertimeThresholdMigrationId
+        );
     }
 
     [SchemaMigrationSqlServerFact]

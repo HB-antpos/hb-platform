@@ -773,6 +773,8 @@ namespace BlazorApp.Shared.DTOs
         public int? AnnualCashOutLeadDays { get; set; }
         public int? AnnualCashOutMaxWeeks { get; set; }
         public int? BirthdayRemindDays { get; set; }
+        /// <summary>早到 / 晚走满多少分钟才产生加班候选（0–120 整数）；null＝不修改。</summary>
+        public int? OvertimeThresholdMinutes { get; set; }
     }
 
     public class AttendanceSettingsDto : UpdateAttendanceSettingsDto { }

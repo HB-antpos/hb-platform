@@ -64,6 +64,77 @@ public sealed class AttendanceWorkSessionCalculatorTests
                 TimeSpan.FromMinutes(minutes).Add(TimeSpan.FromSeconds(seconds))));
     }
 
+    // 门槛 15（默认）/ 30：早到与晚走分别独立判断；达到门槛后仍按 15 分钟一档取整。
+    [Theory]
+    [InlineData(15, 14, 0)]
+    [InlineData(15, 15, 15)]
+    [InlineData(15, 29, 30)]
+    [InlineData(30, 15, 0)]
+    [InlineData(30, 29, 0)]
+    [InlineData(30, 30, 30)]
+    [InlineData(30, 37, 30)]
+    [InlineData(30, 38, 45)]
+    [InlineData(30, 60, 60)]
+    public void Calculate_OvertimeThreshold_AppliesToEarlyAndLateSeparately(
+        int threshold,
+        int minutes,
+        int expected)
+    {
+        // 早到 minutes 分钟、晚走 minutes 分钟，两侧用同一门槛。
+        var punches = new[]
+        {
+            Punch("in-1", "ClockIn", 9, 0, -minutes),
+            Punch("out-1", "ClockOut", 17, 0, minutes),
+        };
+
+        var result = AttendanceWorkSessionCalculator.Calculate(
+            Schedule,
+            punches,
+            segmentLimit: 2,
+            nowLocal: new DateTime(2026, 5, 18, 18, 30, 0),
+            earlyLeaveGraceMinutes: 5,
+            overtimeThresholdMinutes: threshold);
+
+        Assert.Equal(expected, result.EarlyOvertimeMinutes);
+        Assert.Equal(expected, result.LateOvertimeMinutes);
+        Assert.Equal(expected * 2, result.CandidateOvertimeMinutes);
+    }
+
+    [Fact]
+    public void Calculate_OvertimeThreshold_EarlyAboveThresholdLateBelow_OnlyEarlyCounts()
+    {
+        var punches = new[]
+        {
+            Punch("in-1", "ClockIn", 9, 0, -32),
+            Punch("out-1", "ClockOut", 17, 0, 20),
+        };
+
+        var result = AttendanceWorkSessionCalculator.Calculate(
+            Schedule,
+            punches,
+            segmentLimit: 2,
+            nowLocal: new DateTime(2026, 5, 18, 18, 30, 0),
+            earlyLeaveGraceMinutes: 5,
+            overtimeThresholdMinutes: 30);
+
+        Assert.Equal(30, result.EarlyOvertimeMinutes);
+        Assert.Equal(0, result.LateOvertimeMinutes);
+        Assert.Equal(30, result.CandidateOvertimeMinutes);
+    }
+
+    [Fact]
+    public void Calculate_WithoutThresholdArgument_KeepsLegacyFifteenMinuteBehavior()
+    {
+        var result = AttendanceWorkSessionCalculator.Calculate(
+            Schedule,
+            new[] { Punch("in-1", "ClockIn", 9, 0, -15), Punch("out-1", "ClockOut", 17, 0, 15) },
+            segmentLimit: 2,
+            nowLocal: new DateTime(2026, 5, 18, 18, 30, 0),
+            earlyLeaveGraceMinutes: 5);
+
+        Assert.Equal(30, result.CandidateOvertimeMinutes);
+    }
+
     [Fact]
     public void Calculate_EarlyIntermediateClockOutBeforeShiftEnd_RemainsBreakBoundary()
     {
@@ -165,7 +236,7 @@ public sealed class AttendanceWorkSessionCalculatorTests
         Assert.Equal(30, result.WorkedMinutes);
     }
 
-    private static AttendancePunch Punch(string guid, string type, int hour, int minute) => new()
+    private static AttendancePunch Punch(string guid, string type, int hour, int minute, int offsetMinutes = 0) => new()
     {
         PunchGuid = guid,
         ScheduleGuid = Schedule.ScheduleGuid,
@@ -173,8 +244,8 @@ public sealed class AttendanceWorkSessionCalculatorTests
         UserGuid = Schedule.UserGuid,
         WorkDate = Schedule.WorkDate,
         PunchType = type,
-        PunchTimeLocal = Schedule.WorkDate.AddHours(hour).AddMinutes(minute),
-        PunchTimeUtc = Schedule.WorkDate.AddHours(hour - 10).AddMinutes(minute),
+        PunchTimeLocal = Schedule.WorkDate.AddHours(hour).AddMinutes(minute + offsetMinutes),
+        PunchTimeUtc = Schedule.WorkDate.AddHours(hour - 10).AddMinutes(minute + offsetMinutes),
         Status = "Normal",
     };
 }

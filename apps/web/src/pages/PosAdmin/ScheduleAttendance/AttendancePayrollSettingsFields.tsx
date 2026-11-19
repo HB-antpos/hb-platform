@@ -62,6 +62,17 @@ export default function AttendancePayrollSettingsFields() {
 
       <Typography.Text strong>{t('posAdmin.scheduleAttendance.payrollSettings.punch')}</Typography.Text>
       <Row gutter={16}>
+        {/* 早到 / 晚走满该分钟数才产生加班候选（0–120）；达到门槛后仍按 15 分钟一档取整 */}
+        <Col xs={24} sm={12}>
+          <Form.Item
+            name="overtimeThresholdMinutes"
+            label={t('posAdmin.scheduleAttendance.payrollSettings.overtimeThresholdMinutes')}
+            tooltip={t('posAdmin.scheduleAttendance.payrollSettings.overtimeThresholdMinutesHint')}
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={0} max={120} precision={0} style={{ width: '100%' }} addonAfter={t('posAdmin.scheduleAttendance.payrollSettings.minutesUnit')} />
+          </Form.Item>
+        </Col>
         {number('employeeSegmentLimit', 'posAdmin.scheduleAttendance.payrollSettings.employeeSegmentLimit', 1, 10, 'posAdmin.scheduleAttendance.payrollSettings.segmentsUnit')}
         {number('managerSegmentLimit', 'posAdmin.scheduleAttendance.payrollSettings.managerSegmentLimit', 1, 10, 'posAdmin.scheduleAttendance.payrollSettings.segmentsUnit')}
         <Col xs={24}>

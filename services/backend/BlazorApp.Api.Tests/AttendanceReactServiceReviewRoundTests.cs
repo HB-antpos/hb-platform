@@ -996,5 +996,32 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(3, legacy.Data!.EmployeeSegmentLimit);
             Assert.False(legacy.Data.AutoClockOutAtMidnight);
         }
+
+        // 加班候选门槛：默认 15；可改为 30；0–120 之外拒绝；旧客户端不带该字段时保持原值。
+        [Fact]
+        public async Task UpdateSettingsAsync_OvertimeThreshold_DefaultsTo15_RoundTripsAndValidatesRange()
+        {
+            await SeedStoreScopeAsync();
+            var admin = CreateService("admin-user", "admin", "Admin");
+
+            var defaults = await admin.GetSettingsAsync();
+            Assert.Equal(15, defaults.Data!.OvertimeThresholdMinutes);
+
+            var updated = await admin.UpdateSettingsAsync(new UpdateAttendanceSettingsDto { OvertimeThresholdMinutes = 30 });
+            Assert.True(updated.Success, updated.Message);
+            Assert.Equal(30, updated.Data!.OvertimeThresholdMinutes);
+            Assert.Equal(30, (await admin.GetSettingsAsync()).Data!.OvertimeThresholdMinutes);
+
+            foreach (var invalid in new[] { -1, 121 })
+            {
+                var rejected = await admin.UpdateSettingsAsync(new UpdateAttendanceSettingsDto { OvertimeThresholdMinutes = invalid });
+                Assert.False(rejected.Success);
+                Assert.Equal(30, (await admin.GetSettingsAsync()).Data!.OvertimeThresholdMinutes);
+            }
+
+            var legacy = await admin.UpdateSettingsAsync(new UpdateAttendanceSettingsDto { LateGraceMinutes = 10 });
+            Assert.True(legacy.Success, legacy.Message);
+            Assert.Equal(30, legacy.Data!.OvertimeThresholdMinutes);
+        }
     }
 }

@@ -125,6 +125,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string EmployeeProfileHireDateMigrationId = "20261118.001-employee-profile-hire-date";
     internal const string PosIpadOtaAssignmentMigrationId = "20261119.001-pos-ipad-ota-assignment";
     internal const string AttendancePayCashOverrideMigrationId = "20261120.001-attendance-pay-cash-override";
+    internal const string AttendanceOvertimeThresholdMigrationId = "20261120.002-attendance-overtime-threshold";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -536,6 +537,11 @@ internal sealed class SchemaMigrationCoordinator
             AttendancePayCashOverrideMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyAttendancePayCashOverrideAsync(cancellationToken)
+        ),
+        new(
+            AttendanceOvertimeThresholdMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendanceOvertimeThresholdAsync(cancellationToken)
         ),
     ];
 

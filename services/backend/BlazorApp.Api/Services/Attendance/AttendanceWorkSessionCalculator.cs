@@ -5,13 +5,17 @@ namespace BlazorApp.Api.Services.Attendance;
 
 public static class AttendanceWorkSessionCalculator
 {
+    /// <summary>早到 / 晚走产生加班候选的默认门槛（分钟），与改为可配置之前的硬编码值一致。</summary>
+    public const int DefaultOvertimeThresholdMinutes = 15;
+
     public static AttendanceWorkSessionDto Calculate(
         AttendanceSchedule schedule,
         IEnumerable<AttendancePunch> sourcePunches,
         int segmentLimit,
         DateTime nowLocal,
         int earlyLeaveGraceMinutes,
-        int lateGraceMinutes = 5)
+        int lateGraceMinutes = 5,
+        int overtimeThresholdMinutes = DefaultOvertimeThresholdMinutes)
     {
         var punches = sourcePunches
             .Where(item => !item.IsDeleted && item.ScheduleGuid == schedule.ScheduleGuid)
@@ -144,10 +148,10 @@ public static class AttendanceWorkSessionCalculator
             boundaryClockOutDto.LateDepartureMinutes = Math.Max(0, endDeltaMinutes);
         }
         result.EarlyOvertimeMinutes = firstClockIn.HasValue
-            ? RoundOvertimeMinutes(scheduledStart - firstClockIn.Value)
+            ? RoundOvertimeMinutes(scheduledStart - firstClockIn.Value, overtimeThresholdMinutes)
             : 0;
         result.LateOvertimeMinutes = finalClockOut.HasValue
-            ? RoundOvertimeMinutes(finalClockOut.Value - scheduledEnd)
+            ? RoundOvertimeMinutes(finalClockOut.Value - scheduledEnd, overtimeThresholdMinutes)
             : 0;
         result.CandidateOvertimeMinutes = result.EarlyOvertimeMinutes + result.LateOvertimeMinutes;
         result.HasMissingClockOut = autoClosedBySystem
@@ -168,12 +172,16 @@ public static class AttendanceWorkSessionCalculator
     private static int RoundActualMinutes(TimeSpan value) =>
         (int)Math.Round(value.TotalMinutes, MidpointRounding.AwayFromZero);
 
-    public static int RoundOvertimeMinutes(int actualMinutes)
-        => RoundOvertimeMinutes(TimeSpan.FromMinutes(actualMinutes));
+    public static int RoundOvertimeMinutes(int actualMinutes, int thresholdMinutes = DefaultOvertimeThresholdMinutes)
+        => RoundOvertimeMinutes(TimeSpan.FromMinutes(actualMinutes), thresholdMinutes);
 
-    public static int RoundOvertimeMinutes(TimeSpan actual)
+    /// <summary>
+    /// 早到 / 晚走的加班候选分钟：不满门槛记 0；达到门槛后仍按 15 分钟一档四舍五入（取整规则不随门槛变化）。
+    /// 早到与晚走各自独立判断，门槛是「单侧」时长，不是两侧之和。
+    /// </summary>
+    public static int RoundOvertimeMinutes(TimeSpan actual, int thresholdMinutes = DefaultOvertimeThresholdMinutes)
     {
-        if (actual < TimeSpan.FromMinutes(15))
+        if (actual < TimeSpan.FromMinutes(Math.Max(0, thresholdMinutes)))
         {
             return 0;
         }

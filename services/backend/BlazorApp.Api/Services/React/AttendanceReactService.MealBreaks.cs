@@ -242,7 +242,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimit,
                     nowLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 var context = new MealScheduleContext(
                     schedule,
                     session,
@@ -358,7 +359,8 @@ namespace BlazorApp.Api.Services.React
                 segmentLimit,
                 punchLocal,
                 settings.EarlyLeaveGraceMinutes,
-                settings.LateGraceMinutes);
+                settings.LateGraceMinutes,
+                settings.OvertimeThresholdMinutes);
             var breaks = await LoadMealBreaksAsync(schedule.ScheduleGuid, clockOut.UserGuid);
             var claimedHandled = await CountClaimedHandledAsync(schedule.ScheduleGuid);
             // 缺口由服务端自己重算，客户端声明只用来确认其中几次没休息。
@@ -555,7 +557,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimitMap.GetValueOrDefault(schedule.UserGuid, 2),
                     ConvertUtcToStoreLocal(nowUtc, timeZone),
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 var scheduleBreaks = breaks
                     .Where(item => string.Equals(
                         item.ScheduleGuid,

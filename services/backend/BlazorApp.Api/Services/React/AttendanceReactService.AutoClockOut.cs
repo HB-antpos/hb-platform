@@ -70,7 +70,8 @@ namespace BlazorApp.Api.Services.React
                     segmentLimitMap.GetValueOrDefault(schedule.UserGuid, ResolveEmployeeSegmentLimit(settings)),
                     nowLocal,
                     settings.EarlyLeaveGraceMinutes,
-                    settings.LateGraceMinutes);
+                    settings.LateGraceMinutes,
+                    settings.OvertimeThresholdMinutes);
                 if (session.HasOpenSegment)
                 {
                     candidates.Add((schedule, timeZone));

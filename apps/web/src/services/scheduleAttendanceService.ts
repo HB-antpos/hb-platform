@@ -345,6 +345,7 @@ const PAYROLL_SETTING_KEYS = [
   'annualCashOutLeadDays',
   'annualCashOutMaxWeeks',
   'birthdayRemindDays',
+  'overtimeThresholdMinutes',
   'employeeSegmentLimit',
   'managerSegmentLimit',
   'autoClockOutAtMidnight',

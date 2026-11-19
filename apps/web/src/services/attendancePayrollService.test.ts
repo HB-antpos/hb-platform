@@ -148,7 +148,9 @@ const settings = normalizeAttendanceSettings({
   employeeSegmentLimit: 4,
   managerSegmentLimit: 6,
   autoClockOutAtMidnight: true,
+  overtimeThresholdMinutes: 30,
 })
+assert.equal(settings.overtimeThresholdMinutes, 30)
 assert.equal(settings.defaultPeriodWeeks, 2)
 assert.equal(settings.fortnightAnchorDate, '2026-10-05')
 assert.equal(settings.managerSegmentLimit, 6)

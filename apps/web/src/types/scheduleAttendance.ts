@@ -398,6 +398,7 @@ export interface AttendanceSettingsDto {
   annualCashOutLeadDays?: number
   annualCashOutMaxWeeks?: number
   birthdayRemindDays?: number
+  overtimeThresholdMinutes?: number
   employeeSegmentLimit?: number
   managerSegmentLimit?: number
   autoClockOutAtMidnight?: boolean
@@ -426,6 +427,7 @@ export type SaveAttendanceSettingsPayload = Pick<
   | 'annualCashOutLeadDays'
   | 'annualCashOutMaxWeeks'
   | 'birthdayRemindDays'
+  | 'overtimeThresholdMinutes'
   | 'employeeSegmentLimit'
   | 'managerSegmentLimit'
   | 'autoClockOutAtMidnight'
