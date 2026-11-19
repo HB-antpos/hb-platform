@@ -4,6 +4,8 @@ import type {
   AttendanceAdjustmentDetailDto,
   AttendanceAvailabilityDto,
   AttendanceEmployeeDto,
+  AttendanceLocationRequestDto,
+  AttendanceLocationRequestQuery,
   AttendanceLocationSampleDto,
   AttendanceMealClaimDto,
   AttendancePagedResult,
@@ -16,6 +18,7 @@ import type {
   AttendanceStoreHolidayDto,
   BatchUpsertAttendanceHolidayPayload,
   BatchUpsertAttendanceHolidayResult,
+  CreateAttendanceLocationRequestPayload,
   ReviewAttendanceApprovalPayload,
   SaveAttendanceHolidayPayload,
   SaveAttendanceSchedulePayload,
@@ -506,6 +509,65 @@ export async function getAttendanceLocationSamples(params: AttendanceQuery): Pro
     { params: params as Record<string, unknown> },
   )
   return unwrapAttendanceApiData<AttendanceLocationSampleDto[]>(response) ?? []
+}
+
+function optionalFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function optionalText(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined
+}
+
+/** 位置请求：后端契约是 camelCase，仍兼容 PascalCase；坐标 / 精度只认有限数字，缺失一律 undefined。 */
+export function normalizeAttendanceLocationRequest(value: unknown): AttendanceLocationRequestDto {
+  const source = asRecord(value)
+  const text = (camelKey: string, pascalKey: string) => optionalText(readCompat<unknown>(source, camelKey, pascalKey))
+  return {
+    requestGuid: text('requestGuid', 'RequestGuid') ?? '',
+    storeCode: text('storeCode', 'StoreCode') ?? '',
+    storeName: text('storeName', 'StoreName'),
+    targetUserGuid: text('targetUserGuid', 'TargetUserGuid') ?? '',
+    targetUserName: text('targetUserName', 'TargetUserName'),
+    requestedByUserGuid: text('requestedByUserGuid', 'RequestedByUserGuid') ?? '',
+    requestedByName: text('requestedByName', 'RequestedByName'),
+    status: text('status', 'Status') ?? '',
+    statusReason: text('statusReason', 'StatusReason'),
+    createdAtUtc: text('createdAtUtc', 'CreatedAtUtc') ?? '',
+    expiresAtUtc: text('expiresAtUtc', 'ExpiresAtUtc') ?? '',
+    respondedAtUtc: text('respondedAtUtc', 'RespondedAtUtc'),
+    sampleGuid: text('sampleGuid', 'SampleGuid'),
+    locationLatitude: optionalFiniteNumber(readCompat<unknown>(source, 'locationLatitude', 'LocationLatitude')),
+    locationLongitude: optionalFiniteNumber(readCompat<unknown>(source, 'locationLongitude', 'LocationLongitude')),
+    locationAccuracy: optionalFiniteNumber(readCompat<unknown>(source, 'locationAccuracy', 'LocationAccuracy')),
+    locationCapturedAtUtc: text('locationCapturedAtUtc', 'LocationCapturedAtUtc'),
+  }
+}
+
+/**
+ * 要求员工上报当前位置。业务失败是 HTTP 200 + success=false，由 unwrapAttendanceApiData 抛 RequestError
+ * （message 形如 `CODE: 说明`，payload 里带 errorCode），页面按错误码映射友好文案。
+ */
+export async function createAttendanceLocationRequest(
+  payload: CreateAttendanceLocationRequestPayload,
+): Promise<AttendanceLocationRequestDto> {
+  const response = await request.post<ApiResponse<AttendanceLocationRequestDto> | AttendanceLocationRequestDto>(
+    `${API_BASE}/location-requests`,
+    payload,
+  )
+  return normalizeAttendanceLocationRequest(unwrapAttendanceApiData(response))
+}
+
+/** 某员工最近的位置请求（服务端按创建时间倒序、只含调用者管辖分店内的记录）。 */
+export async function getAttendanceLocationRequests(
+  params: AttendanceLocationRequestQuery,
+): Promise<AttendanceLocationRequestDto[]> {
+  const response = await request.get<ApiResponse<AttendanceLocationRequestDto[]> | AttendanceLocationRequestDto[]>(
+    `${API_BASE}/location-requests`,
+    { params: params as Record<string, unknown> },
+  )
+  const data = unwrapAttendanceApiData<unknown[]>(response)
+  return Array.isArray(data) ? data.map(normalizeAttendanceLocationRequest) : []
 }
 
 export async function getAttendanceApprovals(params: AttendanceQuery): Promise<AttendancePagedResult<AttendanceApprovalDto>> {

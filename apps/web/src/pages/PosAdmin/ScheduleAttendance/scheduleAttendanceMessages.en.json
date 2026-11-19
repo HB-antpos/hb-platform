@@ -306,6 +306,49 @@
         "range": "Week {{week}}, {{year}} · {{start}} – {{end}}",
         "later": "{{count}} wk ahead",
         "earlier": "{{count}} wk ago"
+      },
+      "locationRequest": {
+        "title": "Request location from staff",
+        "button": "Request location",
+        "hint": "The employee gets a notification. A one-time location is captured and reported only after they tap it or bring the app to the foreground. A reported point appears in the in-shift samples timeline below.",
+        "sent": "Location request sent to {{name}}. Waiting for them to respond in the app.",
+        "requestedBy": "Requested by {{name}}",
+        "expiresAt": "Valid until {{time}}",
+        "respondedAt": "Responded {{time}}",
+        "loadFailed": "Failed to load location requests",
+        "empty": "No location requests for this employee yet",
+        "confirmTitle": "Ask {{name}} to share their current location?",
+        "confirmOk": "Send request",
+        "confirmNotify": "The employee will receive a notification.",
+        "confirmValidity": "The request is valid for 15 minutes. The employee must respond with the app in the foreground (tap the notification or open the app) before a one-time location is captured and reported. It expires automatically if left unanswered.",
+        "confirmAudit": "Every request is recorded (who, when, outcome). An employee can only be asked once every 10 minutes.",
+        "createFailed": "Failed to send the location request",
+        "status": {
+          "Pending": "Pending",
+          "Responded": "Responded",
+          "Expired": "Expired",
+          "Cancelled": "Cancelled",
+          "ClockedOut": "Clocked out, voided",
+          "Unknown": "Unknown"
+        },
+        "eventType": {
+          "ServerRequest": "Requested by manager"
+        },
+        "blocked": {
+          "self": "You cannot request your own location.",
+          "outOfScope": "You can only request staff at stores you manage.",
+          "noOpenSegment": "This employee has no shift in progress (not clocked in, or already clocked out), so a location cannot be requested right now."
+        },
+        "errors": {
+          "STORE_REQUIRED": "The store is missing, so the location request cannot be sent.",
+          "TARGET_USER_REQUIRED": "The employee is missing, so the location request cannot be sent.",
+          "FORBIDDEN_STORE": "You do not manage this store. You can only request staff at stores you manage.",
+          "CANNOT_REQUEST_SELF": "You cannot request your own location.",
+          "ACTIVE_SHIFT_REQUIRED": "This employee is not clocked in right now, so a location cannot be requested.",
+          "LOCATION_REQUEST_PENDING": "This employee already has a pending location request. Wait for them to respond or for it to expire, then try again.",
+          "LOCATION_REQUEST_RATE_LIMITED": "An employee can only be asked once every 10 minutes. Please try again later.",
+          "serverDetail": "(Server says: {{detail}})"
+        }
       }
     }
   }

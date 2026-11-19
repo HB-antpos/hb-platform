@@ -512,4 +512,25 @@ const invalidSelectedResult = buildAttendanceLocationTrajectory({
 assertEqual(invalidSelectedResult.ok, false, '非法选中打卡时间必须安全失败')
 assertEqual(invalidSelectedResult.reason, 'INVALID_SELECTED_TIME', '非法选中时间应返回稳定原因代码')
 
+// 样本事件类型要带到轨迹点上：服务端要求员工上报的点（ServerRequest）在时间轴上要能单独标出；上下班端点没有事件类型。
+const serverRequestResult = buildAttendanceLocationTrajectory({
+  selectedPunch: openIn,
+  punches: [openIn],
+  samples: [
+    sample('regular-sample', '2026-07-24T00:20:00.000Z', -33.85, 151.15, { eventType: 'ShiftSample' }),
+    sample('requested-sample', '2026-07-24T00:40:00.000Z', -33.86, 151.16, { eventType: 'ServerRequest' }),
+  ],
+  nowUtc: '2026-07-24T01:00:00.000Z',
+  currentStoreLocalDate: '2026-07-24',
+})
+assertDeepEqual(
+  serverRequestResult.points.map((point) => [point.key, point.eventType]),
+  [
+    ['punch:open-in', undefined],
+    ['sample:regular-sample', 'ShiftSample'],
+    ['sample:requested-sample', 'ServerRequest'],
+  ],
+  '样本轨迹点应保留事件类型，打卡端点不带事件类型',
+)
+
 console.log('attendanceLocationTrajectoryLogic.test.ts: ok')

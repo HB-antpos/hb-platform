@@ -123,6 +123,7 @@ internal sealed class SchemaMigrationCoordinator
     internal const string PackBlankCartonsMigrationId = "20261115.001-pack-blank-cartons";
     internal const string MyobPayslipSnapshotMigrationId = "20261117.001-myob-payslip-snapshot";
     internal const string EmployeeProfileHireDateMigrationId = "20261118.001-employee-profile-hire-date";
+    internal const string AttendanceLocationRequestMigrationId = "20261119.001-attendance-location-request";
     internal const string PosmMigrationId = "20260827.001-hbweb-posm-baseline";
     internal const string MobileDeviceActivationMigrationId =
         "20260831.001-mobile-device-activation";
@@ -524,6 +525,11 @@ internal sealed class SchemaMigrationCoordinator
             EmployeeProfileHireDateMigrationId,
             static (runtime, cancellationToken) =>
                 runtime.ApplyEmployeeProfileHireDateAsync(cancellationToken)
+        ),
+        new(
+            AttendanceLocationRequestMigrationId,
+            static (runtime, cancellationToken) =>
+                runtime.ApplyAttendanceLocationRequestAsync(cancellationToken)
         ),
     ];
 

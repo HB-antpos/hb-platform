@@ -199,6 +199,45 @@ export interface AttendanceLocationSampleDto {
   createdAt?: string
 }
 
+/** 位置请求的对外有效状态：Expired 由服务端按失效时间推导；Cancelled 的原因见 statusReason（目前只有 ClockedOut）。 */
+export type AttendanceLocationRequestStatus = 'Pending' | 'Responded' | 'Expired' | 'Cancelled' | string
+
+/** 服务端要求已上班员工在手机 App 前台取一次位置（GET / POST attendance/location-requests 共用）。 */
+export interface AttendanceLocationRequestDto {
+  requestGuid: string
+  storeCode: string
+  storeName?: string
+  targetUserGuid: string
+  targetUserName?: string
+  requestedByUserGuid: string
+  requestedByName?: string
+  status: AttendanceLocationRequestStatus
+  /** Cancelled 时的原因短码，目前只有 ClockedOut（员工已下班，请求作废）。 */
+  statusReason?: string
+  createdAtUtc: string
+  expiresAtUtc: string
+  respondedAtUtc?: string
+  /** 员工响应后写入「班中定位样本」的样本 GUID（样本 EventType = ServerRequest）。 */
+  sampleGuid?: string
+  locationLatitude?: number
+  locationLongitude?: number
+  locationAccuracy?: number
+  locationCapturedAtUtc?: string
+}
+
+export interface CreateAttendanceLocationRequestPayload {
+  /** 目标员工当前上班所在的分店（服务端按它校验管辖范围）。 */
+  storeCode: string
+  targetUserGuid: string
+}
+
+export interface AttendanceLocationRequestQuery {
+  storeCode?: string
+  targetUserGuid?: string
+  /** 只看最近 N 条；服务端默认 50、上限 200。 */
+  limit?: number
+}
+
 export interface AttendanceApprovalDto {
   approvalGuid: string
   sourceType: AttendanceApprovalSourceType

@@ -636,6 +636,9 @@ namespace BlazorApp.Shared.Constants
                 public const string Self = "Attendance.Punch.Self";
                 public const string ViewManagedStore = "Attendance.Punch.ViewManagedStore";
                 public const string AdjustManagedStore = "Attendance.Punch.AdjustManagedStore";
+                // 要求管辖分店内已上班的员工在前台取一次高精度位置；默认不授予任何角色，由管理员在生产手动授权
+                //（迁移 20261119.001-attendance-location-request 入库）。范围口径同 ViewManagedStore：店长只能请求自己管辖分店的员工。
+                public const string RequestLocation = "Attendance.Punch.RequestLocation";
             }
 
             public static class Approval

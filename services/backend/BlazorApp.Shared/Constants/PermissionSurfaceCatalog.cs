@@ -34,6 +34,8 @@ namespace BlazorApp.Shared.Constants
         private static readonly string[] WebOnlyCodes =
         {
             "Advertisements.Edit",
+            // 位置请求只能在 Web「班中定位样本」里发起；被请求的员工在 App 里用的是 Attendance.Punch.Self。
+            "Attendance.Punch.RequestLocation",
             "AustralianSuppliers.Edit",
             "Cash.AllStores.View",
             "Cash.Void",

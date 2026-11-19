@@ -38,6 +38,9 @@ namespace BlazorApp.Api.Services.React
         private readonly IAuthorizationService? _authorizationService;
         // 审批推送（提交 / 结果 / 失效撤回）。可选依赖：为 null 时所有推送逻辑静默跳过，行为与未接入通知平台时完全一致。
         private readonly IAttendanceApprovalNotifier? _approvalNotifier;
+        // 位置请求通知（见 AttendanceReactService.LocationRequest.cs）。同样是可选依赖：为 null 时只是不发通知，请求照常创建，
+        // 员工下次进前台仍会拉到待办——放在构造函数最末尾，既有调用方（含大量测试夹具）无需改动。
+        private readonly IAttendanceLocationRequestNotifier? _locationRequestNotifier;
 
         public AttendanceReactService(
             SqlSugarContext context,
@@ -51,7 +54,8 @@ namespace BlazorApp.Api.Services.React
             AttendanceQrKeyProtector? attendanceQrKeyProtector = null,
             AttendancePunchAuthorizationProtector? punchAuthorizationProtector = null,
             IAuthorizationService? authorizationService = null,
-            IAttendanceApprovalNotifier? approvalNotifier = null
+            IAttendanceApprovalNotifier? approvalNotifier = null,
+            IAttendanceLocationRequestNotifier? locationRequestNotifier = null
         )
         {
             _db = context.Db;
@@ -68,6 +72,7 @@ namespace BlazorApp.Api.Services.React
                 ?? throw new ArgumentNullException(nameof(punchAuthorizationProtector));
             _authorizationService = authorizationService;
             _approvalNotifier = approvalNotifier;
+            _locationRequestNotifier = locationRequestNotifier;
         }
 
         public async Task<ApiResponse<List<AttendanceScheduleDto>>> GetSchedulesAsync(

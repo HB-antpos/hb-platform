@@ -111,4 +111,11 @@ public static class AppNotificationTypes
     /// 发给下单人员授权里能替这些店下单的人；正文为英文，只含订单表名称、分店名与截止时间。Data 只带 formGuid。
     /// </summary>
     public const string SupplierPreorderReminder = "supplier-preorder.reminder";
+
+    /// <summary>
+    /// 位置请求：店长 / 管理员要求已上班的员工在前台取一次高精度位置。只发给被请求的员工；正文为英文，含请求人姓名与失效时限。
+    /// 是<b>可见推送</b>（不是静默推送）：App 不在前台取不到位置，员工点通知或下次进前台时仍在班中才会取。
+    /// Data 只带 requestGuid / storeCode / expiresAtUtc；通知本身保留在收件箱（不随请求过期隐藏），作为员工可查的留痕。
+    /// </summary>
+    public const string AttendanceLocationRequest = "attendance.location-request";
 }

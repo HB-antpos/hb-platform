@@ -1454,6 +1454,8 @@ builder.Services.AddHostedService<BlazorApp.Api.Services.Background.AttendanceAu
 // 考勤服务以可选依赖持有通知器，只在业务事务提交后调用，推送失败不影响业务结果。
 builder.Services.AddScoped<IAttendanceApproverResolver, AttendanceApproverResolver>();
 builder.Services.AddScoped<IAttendanceApprovalNotifier, AttendanceApprovalNotifier>();
+// 位置请求通知（可见推送 + 站内消息）；AttendanceReactService 把它当可选依赖，缺失时只是不发通知。
+builder.Services.AddScoped<IAttendanceLocationRequestNotifier, AttendanceLocationRequestNotifier>();
 builder.Services.AddScoped<ISeasonalCardRemainingReactService, SeasonalCardRemainingReactService>();
 builder.Services.AddScoped<ISeasonalCardStatsReactService, SeasonalCardStatsReactService>();
 builder.Services.AddScoped<IPDACartToOrderService, PDACartToOrderService>();

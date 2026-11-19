@@ -16,6 +16,10 @@ const trajectoryMapSource = readFileSync(
   path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/AttendanceLocationTrajectoryMap.tsx'),
   'utf8',
 )
+const requestPanelSource = readFileSync(
+  path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/AttendanceLocationRequestPanel.tsx'),
+  'utf8',
+)
 const recordColumnsStart = pageSource.indexOf('const recordColumns:')
 const availabilityColumnsStart = pageSource.indexOf('const availabilityColumns:', recordColumnsStart)
 assert(recordColumnsStart >= 0 && availabilityColumnsStart > recordColumnsStart, '应能定位考勤记录表格定义')
@@ -107,6 +111,14 @@ assert(trajectoryMapSource.includes('https://tile.openstreetmap.org/'), '轨迹�
 assert(trajectoryMapSource.includes('map?.remove()'), '关闭或切换轨迹时必须销毁 Leaflet 地图实例')
 assert(serviceSource.includes('MY_PUNCH_ADJUSTMENTS_ENDPOINT'), '补卡 mutation 路由必须集中在服务层')
 assert(serviceSource.includes("`${API_BASE}/records`"), '考勤记录必须走 Punch.ViewManagedStore 保护的 records endpoint')
+// 要求员工上报位置：入口受独立权限门控；点击只开二次确认，确认后才发请求；失败文案按服务端错误码映射
+assert(pageSource.includes('canRequestAttendanceLocation(access)'), '「请求位置」入口必须按 Attendance.Punch.RequestLocation 权限判断')
+assert(pageSource.includes('canRequestLocation && sampleTarget'), '无权限或没有当前抽屉目标时不得渲染请求面板')
+assert((requestPanelSource.match(/createAttendanceLocationRequest\(/g) ?? []).length === 1, '创建位置请求只能有一个调用点')
+assert(requestPanelSource.includes('onClick={() => setConfirmOpen(true)}'), '点击「请求位置」只能先打开二次确认，不得直接发请求')
+assert(requestPanelSource.includes('onOk={() => void submitRequest()}'), '只有二次确认的确定按钮才能提交请求')
+assert(requestPanelSource.includes('describeLocationRequestError(error, t)'), '创建失败必须按服务端错误码映射友好文案')
+assert(serviceSource.includes("`${API_BASE}/location-requests`"), '位置请求路由必须集中在服务层')
 
 const requiredLocalePaths = [
   'tabs.records',

@@ -324,6 +324,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyEmployeeProfileHireDateAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendanceLocationRequestAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceLocationRequestAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -2070,6 +2074,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             EmployeeProfileHireDateSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendanceLocationRequestAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceLocationRequestSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 列、主键与索引签名通过后协调器才登记账本：已存在但结构不对的同名表不会被误标为完成。
+        await VerifyAttendanceLocationRequestAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceLocationRequestAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceLocationRequestSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

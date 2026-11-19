@@ -306,6 +306,49 @@
         "range": "{{year}} 第 {{week}} 周 · {{start}} – {{end}}",
         "later": "下 {{count}} 周",
         "earlier": "上 {{count}} 周"
+      },
+      "locationRequest": {
+        "title": "要求员工上报位置",
+        "button": "请求位置",
+        "hint": "员工会收到通知；员工在手机 App 前台点开通知或回到 App 后，才会取一次位置并上报。上报的点会出现在下方「班中定位样本」时间轴里。",
+        "sent": "已向 {{name}} 发送位置请求，等待员工在 App 前台响应",
+        "requestedBy": "请求人：{{name}}",
+        "expiresAt": "有效至 {{time}}",
+        "respondedAt": "响应于 {{time}}",
+        "loadFailed": "加载位置请求记录失败",
+        "empty": "该员工暂无位置请求记录",
+        "confirmTitle": "要求 {{name}} 上报当前位置？",
+        "confirmOk": "发送请求",
+        "confirmNotify": "员工会收到一条通知。",
+        "confirmValidity": "请求 15 分钟内有效，员工需要在手机 App 前台（点开通知或回到 App）响应后才会取一次位置上报；超时未响应则自动失效。",
+        "confirmAudit": "每次请求都会留记录（请求人、时间、结果）。同一员工 10 分钟内只能被请求一次。",
+        "createFailed": "发送位置请求失败",
+        "status": {
+          "Pending": "待响应",
+          "Responded": "已响应",
+          "Expired": "已过期",
+          "Cancelled": "已取消",
+          "ClockedOut": "已下班，已作废",
+          "Unknown": "未知状态"
+        },
+        "eventType": {
+          "ServerRequest": "服务端请求"
+        },
+        "blocked": {
+          "self": "不能请求自己的位置。",
+          "outOfScope": "只能请求自己管辖分店的员工。",
+          "noOpenSegment": "该员工当前没有进行中的班段（未上班或已下班），暂时不能请求位置。"
+        },
+        "errors": {
+          "STORE_REQUIRED": "缺少分店信息，无法发送位置请求。",
+          "TARGET_USER_REQUIRED": "缺少要请求的员工，无法发送位置请求。",
+          "FORBIDDEN_STORE": "你没有该分店的管辖权限，只能请求自己管辖分店的员工。",
+          "CANNOT_REQUEST_SELF": "不能请求自己的位置。",
+          "ACTIVE_SHIFT_REQUIRED": "该员工当前没有上班，不能请求位置。",
+          "LOCATION_REQUEST_PENDING": "该员工已有一条待响应的位置请求，请等员工响应或请求失效后再试。",
+          "LOCATION_REQUEST_RATE_LIMITED": "同一员工 10 分钟内只能被请求一次，请稍后再试。",
+          "serverDetail": "（服务端提示：{{detail}}）"
+        }
       }
     }
   }

@@ -1118,6 +1118,89 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
     }
 
     [SchemaMigrationSqlServerFact]
+    public async Task 位置请求表_新表三索引_权限码入库不授角色_可重复执行_实体可读写_识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var main = databases.MainConnectionString;
+
+        // 迁移前：表不存在，门禁给 53300。
+        var missingTable = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql));
+        Assert.Equal(53300, missingTable.Number);
+
+        // 权限表还不存在时：权限块整体跳过，建表照常成功（全新库 / 旧库形态都不应让迁移失败）。
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql);
+
+        // 权限表出现后再执行：补入权限码；之后重复执行只入库一次。
+        await ExecuteNonQueryAsync(main, """
+            CREATE TABLE dbo.HbwebSysPermissions (
+                Id nvarchar(36) NOT NULL PRIMARY KEY, Code nvarchar(200) NOT NULL, Name nvarchar(200) NULL,
+                Category nvarchar(100) NULL, Description nvarchar(1000) NULL, CreatedAt datetime2 NOT NULL,
+                CreatedBy nvarchar(100) NULL, UpdatedAt datetime2 NULL, UpdatedBy nvarchar(100) NULL, IsDeleted bit NOT NULL);
+            """);
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.ApplySql);
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql);
+        Assert.Equal(1, await ScalarIntAsync(main,
+            "SELECT COUNT(*) FROM dbo.HbwebSysPermissions WHERE Code = N'Attendance.Punch.RequestLocation' AND Category = N'排班考勤' AND IsDeleted = 0"));
+        Assert.Equal(1, await ScalarIntAsync(main, "SELECT COUNT(*) FROM dbo.HbwebSysPermissions"));
+
+        // 管理员事后软删除权限码行：门禁不校验该行，不会让 API 启动不了。
+        await ExecuteNonQueryAsync(main,
+            "UPDATE dbo.HbwebSysPermissions SET IsDeleted = 1 WHERE Code = N'Attendance.Punch.RequestLocation';");
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql);
+
+        // 实体与迁移建出的表一致：SqlSugar 能写入并读回（审计列、可空列都对得上）。
+        var db = databases.CreateMainContext().Db;
+        var now = DateTime.UtcNow;
+        await db.Insertable(new BlazorApp.Shared.Models.AttendanceLocationRequest
+        {
+            RequestGuid = "req-1",
+            StoreCode = "BRI",
+            TargetUserGuid = "staff-user",
+            RequestedByUserGuid = "manager-user",
+            Status = BlazorApp.Shared.Models.AttendanceLocationRequestStatuses.Responded,
+            StatusReason = "ClockedOut",
+            ExpiresAtUtc = now.AddMinutes(15),
+            RespondedAtUtc = now,
+            SampleGuid = "sample-1",
+            CreatedAt = now,
+            CreatedBy = "manager",
+        }).ExecuteCommandAsync();
+        var stored = await db.Queryable<BlazorApp.Shared.Models.AttendanceLocationRequest>()
+            .SingleAsync(item => item.RequestGuid == "req-1");
+        Assert.Equal("staff-user", stored.TargetUserGuid);
+        Assert.Equal("sample-1", stored.SampleGuid);
+        Assert.False(stored.IsDeleted);
+
+        // RequestGuid 唯一：重复写入被数据库挡住（响应幂等与样本去重都靠它）。
+        var duplicate = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(main, """
+            INSERT dbo.AttendanceLocationRequest (RequestGuid, StoreCode, TargetUserGuid, RequestedByUserGuid, Status, ExpiresAtUtc, CreatedAt, IsDeleted)
+            VALUES (N'req-1', N'BRI', N'staff-user', N'manager-user', N'Pending', SYSUTCDATETIME(), SYSUTCDATETIME(), 0);
+            """));
+        Assert.Equal(2601, duplicate.Number);
+
+        // 列漂移：可空性变了（先补值再改 NOT NULL）→ 53301；还原后再测索引漂移。
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceLocationRequest ALTER COLUMN StatusReason nvarchar(30) NOT NULL;");
+        var columnDrift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql));
+        Assert.Equal(53301, columnDrift.Number);
+        await ExecuteNonQueryAsync(main, "ALTER TABLE dbo.AttendanceLocationRequest ALTER COLUMN StatusReason nvarchar(30) NULL;");
+        await ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql);
+
+        // 索引漂移：RequestGuid 唯一索引被换成非唯一 → 53302。
+        await ExecuteNonQueryAsync(main, """
+            DROP INDEX [UX_AttendanceLocationRequest_RequestGuid] ON dbo.AttendanceLocationRequest;
+            CREATE NONCLUSTERED INDEX [UX_AttendanceLocationRequest_RequestGuid] ON dbo.AttendanceLocationRequest (RequestGuid);
+            """);
+        var indexDrift = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(main, AttendanceLocationRequestSchema.VerifySql));
+        Assert.Equal(53302, indexDrift.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
     public async Task 考勤带薪假与工资_五张新表与旧表补列_权限码入库_可重复执行且识别漂移()
     {
         await using var databases = await IsolatedSchemaDatabases.CreateAsync();

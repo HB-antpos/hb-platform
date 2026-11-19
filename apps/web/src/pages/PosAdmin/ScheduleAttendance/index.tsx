@@ -121,6 +121,7 @@ import {
   splitExceptionDuration,
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
+import AttendanceLocationRequestPanel from './AttendanceLocationRequestPanel'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
 import AttendancePayrollSettingsFields from './AttendancePayrollSettingsFields'
 import BatchScheduleModal from './BatchScheduleModal'
@@ -199,6 +200,12 @@ import {
   normalizeAttendanceUtcText,
   splitAttendanceSampleDateRange,
 } from './attendanceLocationTrajectoryLogic'
+import {
+  canRequestAttendanceLocation,
+  hasOpenAttendanceSegment,
+  resolveLocationRequestEligibility,
+  resolveSampleEventTypeLabelKey,
+} from './attendanceLocationRequestLogic'
 import {
   buildStoreOptionsFromUserStores,
   filterStoreOptionsByManagedCodes,
@@ -487,6 +494,8 @@ export default function ScheduleAttendancePage() {
   const [trajectoryMapVisible, setTrajectoryMapVisible] = useState(false)
   const [sampleTitle, setSampleTitle] = useState('')
   const [sampleTimeZone, setSampleTimeZone] = useState('')
+  // 当前抽屉对应的打卡记录与「员工是否有进行中班段」预判：「请求位置」入口用它决定按钮是否置灰（最终以服务端为准）
+  const [sampleTarget, setSampleTarget] = useState<{ record: AttendancePunchDto; hasOpenSegment: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
   const [adjustmentPreviewLoading, setAdjustmentPreviewLoading] = useState(false)
   const [publishing, setPublishing] = useState(false)
@@ -545,7 +554,9 @@ export default function ScheduleAttendancePage() {
         latitude: point.latitude!,
         longitude: point.longitude!,
         accuracy: point.accuracy,
-        label: `${t(`posAdmin.scheduleAttendance.messages.trajectoryPoint${point.kind}`)} · ${
+        // 员工响应管理员请求取的点（ServerRequest）在地图提示里直接标成「服务端请求」，其余沿用班中样本 / 上下班标签
+        label: `${t((point.kind === 'Sample' ? resolveSampleEventTypeLabelKey(point.eventType) : null)
+          ?? `posAdmin.scheduleAttendance.messages.trajectoryPoint${point.kind}`)} · ${
           point.kind === 'Sample' || !point.displayTimeSource
             ? formatBusinessDisplayText(formatDateTimeInTimeZone(point.capturedAtUtc, sampleTimeZone))
             : formatBusinessDisplayText(formatStoredLocalDateTime(point.displayTimeSource))
@@ -598,6 +609,8 @@ export default function ScheduleAttendancePage() {
     (targetStoreCode?: string) => isStoreCodeInManagedScope(targetStoreCode, visibleStoreCodes),
     [visibleStoreCodeKey],
   )
+  // 班中定位样本抽屉里的「请求位置」入口：只认独立权限码 Attendance.Punch.RequestLocation（管理员放行）
+  const canRequestLocation = canRequestAttendanceLocation(access)
   const shouldSkipVisibleStoreQuery = useCallback(
     () => shouldSkipStoreQueryForScope(storeCode, visibleStoreCodes),
     [storeCode, visibleStoreCodeKey],
@@ -2574,6 +2587,7 @@ export default function ScheduleAttendancePage() {
       || dayjs(record.workDate).format('YYYY-MM-DD')
     setSampleTitle(`${record.userName || record.userGuid} / ${formatBusinessDisplayText(formatDate(record.workDate))}`)
     setSampleTimeZone(record.storeTimeZone || '')
+    setSampleTarget(null)
     setTrajectoryResult(null)
     setTrajectoryMapVisible(false)
     setSampleDrawerOpen(true)
@@ -2606,6 +2620,7 @@ export default function ScheduleAttendancePage() {
       }
       const trajectoryTimeZone = boundaryResult.clockIn?.storeTimeZone || record.storeTimeZone || ''
       setSampleTimeZone(trajectoryTimeZone)
+      setSampleTarget({ record, hasOpenSegment: hasOpenAttendanceSegment(punches, boundaryResult.isOpen) })
 
       const samplesByGuid = new Map<string, AttendanceLocationSampleDto>()
       const dateRanges = splitAttendanceSampleDateRange(boundaryResult.fromDate, boundaryResult.toDate)
@@ -3385,6 +3400,7 @@ export default function ScheduleAttendancePage() {
           setSampleDrawerOpen(false)
           setTrajectoryMapVisible(false)
           setTrajectoryResult(null)
+          setSampleTarget(null)
         }}
       >
         {sampleLoading ? (
@@ -3456,6 +3472,25 @@ export default function ScheduleAttendancePage() {
               />
             ) : null}
 
+            {canRequestLocation && sampleTarget ? (
+              <AttendanceLocationRequestPanel
+                key={`${sampleTarget.record.storeCode}:${sampleTarget.record.userGuid}`}
+                storeCode={sampleTarget.record.storeCode}
+                targetUserGuid={sampleTarget.record.userGuid}
+                targetUserName={sampleTarget.record.userName || sampleTarget.record.userGuid}
+                // 仅前端预判（置灰按钮）：是否真的能请求由服务端错误码最终裁决
+                eligibility={resolveLocationRequestEligibility({
+                  targetUserGuid: sampleTarget.record.userGuid,
+                  currentUserGuid: currentUser?.userGUID,
+                  isManagedStore: canEditStoreCode(sampleTarget.record.storeCode),
+                  hasOpenSegment: sampleTarget.hasOpenSegment,
+                })}
+                formatUtcTime={(value) => formatDateTimeInTimeZone(value, sampleTimeZone)}
+                onViewMap={(preview) => setMapPreview({ ...preview, timeZone: sampleTimeZone })}
+                onRefreshAll={() => void openLocationSamples(sampleTarget.record)}
+              />
+            ) : null}
+
             <Card
               size="small"
               title={t('posAdmin.scheduleAttendance.drawer.locationMap')}
@@ -3503,11 +3538,12 @@ export default function ScheduleAttendancePage() {
               items={trajectoryResult.points.map((point) => {
                 const hasCoordinates = typeof point.latitude === 'number' && typeof point.longitude === 'number'
                 const canOpenMap = trajectoryMapPointKeys.has(point.key)
+                const eventLabelKey = point.kind === 'Sample' ? resolveSampleEventTypeLabelKey(point.eventType) : null
                 const pointTime = point.kind === 'Sample' || !point.displayTimeSource
                   ? formatBusinessDisplayText(formatDateTimeInTimeZone(point.capturedAtUtc, sampleTimeZone))
                   : formatBusinessDisplayText(formatStoredLocalDateTime(point.displayTimeSource))
                 return {
-                  color: point.kind === 'ClockIn' ? 'green' : point.kind === 'ClockOut' ? 'red' : 'blue',
+                  color: point.kind === 'ClockIn' ? 'green' : point.kind === 'ClockOut' ? 'red' : eventLabelKey ? 'orange' : 'blue',
                   children: (
                     <Space direction="vertical" size={3} style={{ width: '100%' }}>
                       <Space size={[8, 4]} wrap>
@@ -3519,6 +3555,7 @@ export default function ScheduleAttendancePage() {
                           <Tag>{t('posAdmin.scheduleAttendance.fields.locationAccuracy')}: {Math.round(point.accuracy)}m</Tag>
                         ) : null}
                         {point.deviceSystem ? <Tag>{point.deviceSystem}</Tag> : null}
+                        {eventLabelKey ? <Tag color="orange">{t(eventLabelKey)}</Tag> : null}
                       </Space>
                       <Space size={[8, 4]} wrap>
                         {hasCoordinates ? (

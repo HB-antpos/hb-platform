@@ -110,6 +110,10 @@
       "name": "Adjust clock-ins for managed stores",
       "description": "In the app, add or correct clock-ins and clock-outs for staff at the stores you manage, taking effect straight away (this week, or last week on Monday and Tuesday). Store managers also need this to fix their own missed clock-ins without approval."
     },
+    "Attendance.Punch.RequestLocation": {
+      "name": "Ask staff to share their location",
+      "description": "On the web admin, ask a clocked-in employee at the stores you manage to share their current location once from the app. They are notified, the request is valid for 15 minutes, and every request is recorded."
+    },
     "Attendance.Punch.Self": {
       "name": "Clock in and out",
       "description": "Clock yourself in and out in the app."

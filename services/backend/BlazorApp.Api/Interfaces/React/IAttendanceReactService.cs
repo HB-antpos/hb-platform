@@ -36,6 +36,12 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendanceLocationSampleDto>> CreateLocationSampleAsync(AttendanceLocationSampleRequestDto request);
         Task<ApiResponse<AttendanceLocationSampleBatchResultDto>> CreateLocationSamplesBatchAsync(AttendanceLocationSampleBatchRequestDto request);
         Task<ApiResponse<List<AttendanceLocationSampleDto>>> GetLocationSamplesAsync(AttendanceLocationSampleQueryDto query);
+
+        // 「服务端要求员工取一次高精度位置」：发起 / 历史（Web）、员工待办与响应（App）。
+        Task<ApiResponse<AttendanceLocationRequestDto>> CreateLocationRequestAsync(CreateAttendanceLocationRequestDto request);
+        Task<ApiResponse<List<AttendanceLocationRequestDto>>> GetLocationRequestsAsync(AttendanceLocationRequestQueryDto query);
+        Task<ApiResponse<List<AttendanceLocationRequestDto>>> GetMyPendingLocationRequestsAsync();
+        Task<ApiResponse<AttendanceLocationRequestDto>> RespondLocationRequestAsync(string requestGuid, RespondAttendanceLocationRequestDto request);
         Task<ApiResponse<List<AttendanceLeaveRequestDto>>> GetMyLeaveRequestsAsync();
         Task<ApiResponse<AttendanceLeaveRequestDto>> CreateMyLeaveRequestAsync(CreateAttendanceLeaveRequestDto request);
         Task<ApiResponse<bool>> CancelMyLeaveRequestAsync(string leaveGuid);

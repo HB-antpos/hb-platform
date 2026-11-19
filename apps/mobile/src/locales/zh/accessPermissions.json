@@ -110,6 +110,10 @@
       "name": "补卡与修改管理分店打卡",
       "description": "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"
     },
+    "Attendance.Punch.RequestLocation": {
+      "name": "要求员工上报当前位置",
+      "description": "Web 页面 /pos-admin/schedule-attendance「班中定位样本」- 要求管辖分店内已上班的员工在手机 App 前台取一次高精度位置；员工会收到通知，请求 15 分钟内有效，留审计记录"
+    },
     "Attendance.Punch.Self": {
       "name": "本人打卡",
       "description": "移动端「个人考勤」- 本人打卡"

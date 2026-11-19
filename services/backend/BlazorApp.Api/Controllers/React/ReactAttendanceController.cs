@@ -189,6 +189,30 @@ namespace BlazorApp.Api.Controllers.React
         public async Task<IActionResult> GetLocationSamples([FromQuery] AttendanceLocationSampleQueryDto query) =>
             Ok(await _service.GetLocationSamplesAsync(query));
 
+        // 服务端要求员工取一次高精度位置：店长 / 管理员发起（范围同班中定位样本查询：管辖分店内、已上班的员工）。
+        [HttpPost("location-requests")]
+        [Authorize(Policy = Permissions.Attendance.Punch.RequestLocation)]
+        public async Task<IActionResult> CreateLocationRequest([FromBody] CreateAttendanceLocationRequestDto request) =>
+            Ok(await _service.CreateLocationRequestAsync(request));
+
+        [HttpGet("location-requests")]
+        [Authorize(Policy = Permissions.Attendance.Punch.RequestLocation)]
+        public async Task<IActionResult> GetLocationRequests([FromQuery] AttendanceLocationRequestQueryDto query) =>
+            Ok(await _service.GetLocationRequestsAsync(query));
+
+        // 员工 App 进前台 / 点通知时拉取：只含未过期、仍在班中的待响应请求。
+        [HttpGet("my/location-requests/pending")]
+        [Authorize(Policy = Permissions.Attendance.Punch.Self)]
+        public async Task<IActionResult> GetMyPendingLocationRequests() =>
+            Ok(await _service.GetMyPendingLocationRequestsAsync());
+
+        [HttpPost("my/location-requests/{requestGuid}/respond")]
+        [Authorize(Policy = Permissions.Attendance.Punch.Self)]
+        public async Task<IActionResult> RespondLocationRequest(
+            string requestGuid,
+            [FromBody] RespondAttendanceLocationRequestDto request) =>
+            Ok(await _service.RespondLocationRequestAsync(requestGuid, request));
+
         [HttpGet("my/leave-requests")]
         [Authorize(Policy = Permissions.Attendance.Leave.ApplySelf)]
         public async Task<IActionResult> GetMyLeaveRequests() =>

@@ -22,6 +22,8 @@ export interface AttendanceTrajectoryPoint {
   longitude?: number
   accuracy?: number
   deviceSystem?: string
+  /** 仅 Sample 有值：样本事件类型（ShiftSample / ShiftHeartbeat / ServerRequest 等），界面据此给「服务端请求」点位打标签。 */
+  eventType?: string
 }
 
 export interface AttendanceTrajectoryResult {
@@ -247,6 +249,7 @@ function samplePoint(sample: AttendanceLocationSampleDto): AttendanceTrajectoryP
     displayTimeSource: sample.locationCapturedAtUtc,
     accuracy: validAccuracy(sample.locationAccuracy),
     deviceSystem: sample.deviceSystem,
+    eventType: sample.eventType,
   }
   if (hasValidCoordinates(sample.locationLatitude, sample.locationLongitude)) {
     point.latitude = sample.locationLatitude

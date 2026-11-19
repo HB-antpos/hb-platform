@@ -207,6 +207,7 @@ Content-Type: application/json
 - 通知类型以 `SensitiveTypePrefixes`（默认 `face.`、`approval.`）开头的，推送的 `title` 固定为 `HB`，`body` 固定为 `You have a new notification. Open the app to view it.`，**不带门店名、分数、姓名、日期、编号**；`data` 只放 `notificationId` 与 `type`，**不合并**通知的 `DataJson`（里面有 `taskId` / `storeCode` / `entryId` 等标识）。
 - 说明：`data.type`（如 `face.unwelcome-hit`）不会显示在锁屏上，但会随请求到达 Expo 服务器——它只暴露「通知类别」，不含任何门店、人员或事件细节；因此这两项（`notificationId`、`type`）是敏感类型推送里唯一保留的结构化字段。
 - 现有类型的归属：`face.unwelcome-hit`（含相似度、任务 / 门店标识）、`face.unwelcome-expiring`（含名单条目标识）、`approval.submitted`（含员工姓名与请假日期）、`approval.decided`（含个人请假信息）是敏感类型；`store.price_updates`、`container.new_products`（只有数量）、`system.test` 不敏感，推送用原文。
+- `attendance.location-request`（位置请求，店长 / 管理员要求已上班的员工在 App 前台取一次位置）：**按默认配置属于非敏感类型**，推送用原文——锁屏上会显示请求人姓名与「15 分钟内打开 App 响应」，`data` 只含 `requestGuid` / `storeCode` / `expiresAtUtc` 三项标识，不含坐标。它是**可见推送**（高优先级通知，不是静默推送）：App 已不再声明后台定位，后台取不到位置，所以推送只负责提醒，员工点通知或下次进前台时才由 App 检查待办请求并取位置；推送不保证送达，进前台消费是兜底。通知保留在收件箱 30 天（远长于请求 15 分钟有效期），作为员工可查的留痕。**如要让锁屏也不显示请求人姓名**：把 `attendance.location-request` 加进 `Push:Expo:SensitiveTypePrefixes`——注意该配置一旦写了就**完全替换**默认值，必须连 `face.`、`approval.` 一起写全。上线前须确认生产 `Push:Expo:Enabled` 已开启（文档默认关闭，生产现状未核实），否则只有站内消息与进前台兜底，没有系统推送。
 - 新增通知类型时，先判断它的标题 / 正文 / `DataJson` 是否含个人信息或业务敏感标识；含的话要么用 `face.` / `approval.` 之外的敏感前缀并配进 `SensitiveTypePrefixes`，要么直接按这两个前缀命名。
 - 实现上是纯函数 `ExpoPushContent.Build`，有单测固定：敏感类型的请求体里不会出现原始文案与 `DataJson` 内容。
 

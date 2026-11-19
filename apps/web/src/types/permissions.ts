@@ -281,6 +281,8 @@ export const P = {
     PunchSelf: 'Attendance.Punch.Self',
     PunchViewManagedStore: 'Attendance.Punch.ViewManagedStore',
     PunchAdjustManagedStore: 'Attendance.Punch.AdjustManagedStore',
+    // 要求管辖分店内已上班的员工在手机 App 前台上报一次位置（Web「班中定位样本」抽屉）：默认不授予任何角色，生产手动授权
+    PunchRequestLocation: 'Attendance.Punch.RequestLocation',
     ApprovalViewManagedStore: 'Attendance.Approval.ViewManagedStore',
     ApprovalReviewManagedStore: 'Attendance.Approval.ReviewManagedStore',
     // 审核本人申请：默认不授予任何角色，生产手动授权

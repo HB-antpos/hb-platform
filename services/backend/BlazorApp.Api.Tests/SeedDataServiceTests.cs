@@ -371,6 +371,7 @@ namespace BlazorApp.Api.Tests
                 Permissions.Attendance.Punch.Self,
                 Permissions.Attendance.Punch.ViewManagedStore,
                 Permissions.Attendance.Punch.AdjustManagedStore,
+                Permissions.Attendance.Punch.RequestLocation,
                 Permissions.Attendance.Approval.ViewManagedStore,
                 Permissions.Attendance.Approval.ReviewManagedStore,
                 Permissions.Attendance.Approval.ReviewSelf,
@@ -399,6 +400,22 @@ namespace BlazorApp.Api.Tests
                 Assert.Matches(@"[\u4e00-\u9fff]", seed.Category);
                 Assert.Matches(@"[\u4e00-\u9fff]", seed.Description);
             });
+        }
+
+        [Fact]
+        public void RequestLocationPermission_仅注册_不写入任何角色模板_生产手动授权()
+        {
+            // 要求员工上报位置属于有隐私影响的权限：默认谁都没有，授给哪些角色由管理员在生产手动决定。
+            // 即使新增角色模板也不能把它带进去（即便是店长 / 经理类模板）。
+            Assert.All(PermissionSeedData.RolePermissionTemplates, template =>
+                Assert.DoesNotContain(Permissions.Attendance.Punch.RequestLocation, template.PermissionCodes));
+            // 移动端本人打卡的自助类权限同样不含它。
+            Assert.False(Permissions.IsAttendanceSelfServiceGranted(Permissions.Attendance.Punch.RequestLocation));
+            Assert.Equal("Attendance.Punch.RequestLocation", Permissions.Attendance.Punch.RequestLocation);
+            // 只在 Web「班中定位样本」发起：权限面目录登记为 Web。
+            Assert.Equal(
+                PermissionSurface.Web,
+                PermissionSurfaceCatalog.Resolve(Permissions.Attendance.Punch.RequestLocation));
         }
 
         [Fact]
@@ -810,7 +827,8 @@ namespace BlazorApp.Api.Tests
             Assert.Equal(firstPassActivePermissionCount, activeRolePermissions.Count);
             Assert.Equal(firstPassActivePermissionSnapshot, secondPassActivePermissionSnapshot);
             Assert.Equal(allPermissionRows.Count, allPermissionRows.Select(item => item.Code).Distinct().Count());
-            Assert.Equal(21, attendanceRows.Count);
+            // 考勤权限种子共 22 条（含 20261119 新增的 Attendance.Punch.RequestLocation）。
+            Assert.Equal(22, attendanceRows.Count);
             Assert.Empty(adminPermissionCodes);
             Assert.All(PermissionSeedData.AttendancePermissions, seed =>
             {

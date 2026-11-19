@@ -1,4 +1,7 @@
 import {
+  createAttendanceLocationRequest,
+  getAttendanceLocationRequests,
+  normalizeAttendanceLocationRequest,
   normalizeAttendanceEmployee,
   normalizeAttendanceApproval,
   normalizeAttendancePunch,
@@ -248,5 +251,112 @@ const legacyEmployee = normalizeAttendanceEmployee({ userGuid: 'old-1', username
 assertEqual(legacyEmployee.nickname, null, '旧后端缺昵称字段时为 null')
 assertEqual(legacyEmployee.givenName, null, '旧后端缺名字段时为 null')
 assertEqual(legacyEmployee.age, null, '没有年龄时为 null')
+
+// ───────── 位置请求（服务端要求员工上报位置）─────────
+const requestWire = {
+  requestGuid: 'req-1',
+  storeCode: 'S001',
+  storeName: 'Orion',
+  targetUserGuid: 'user-1',
+  targetUserName: 'Cody',
+  requestedByUserGuid: 'manager-1',
+  requestedByName: 'Sean',
+  status: 'Responded',
+  statusReason: null,
+  createdAtUtc: '2026-11-19T01:00:00',
+  expiresAtUtc: '2026-11-19T01:15:00',
+  respondedAtUtc: '2026-11-19T01:05:00',
+  sampleGuid: 'sample-1',
+  locationLatitude: -27.47,
+  locationLongitude: 153.02,
+  locationAccuracy: 12.5,
+  locationCapturedAtUtc: '2026-11-19T01:04:59',
+}
+const normalizedRequest = normalizeAttendanceLocationRequest(requestWire)
+assertEqual(normalizedRequest.requestGuid, 'req-1', '位置请求 GUID')
+assertEqual(normalizedRequest.requestedByName, 'Sean', '请求人姓名')
+assertEqual(normalizedRequest.statusReason, undefined, 'null 的取消原因收成 undefined')
+assertEqual(normalizedRequest.locationLatitude, -27.47, '纬度原样保留')
+assertEqual(normalizedRequest.locationAccuracy, 12.5, '精度原样保留')
+assertEqual(normalizedRequest.locationCapturedAtUtc, '2026-11-19T01:04:59', '采集时间原样保留（无后缀 UTC 由展示层补 Z）')
+
+const pascalRequest = normalizeAttendanceLocationRequest({
+  RequestGuid: 'req-2',
+  StoreCode: 'S002',
+  TargetUserGuid: 'user-2',
+  RequestedByUserGuid: 'manager-1',
+  Status: 'Cancelled',
+  StatusReason: 'ClockedOut',
+  CreatedAtUtc: '2026-11-19T02:00:00',
+  ExpiresAtUtc: '2026-11-19T02:15:00',
+})
+assertEqual(pascalRequest.status, 'Cancelled', '应兼容 PascalCase 状态')
+assertEqual(pascalRequest.statusReason, 'ClockedOut', '应兼容 PascalCase 取消原因')
+assertEqual(pascalRequest.locationLatitude, undefined, '未响应的请求没有坐标')
+
+const dirtyRequest = normalizeAttendanceLocationRequest({
+  requestGuid: 'req-3',
+  locationLatitude: '-27.47',
+  locationLongitude: Number.NaN,
+  locationAccuracy: null,
+})
+assertEqual(dirtyRequest.locationLatitude, undefined, '字符串坐标不当成数字')
+assertEqual(dirtyRequest.locationLongitude, undefined, 'NaN 坐标丢弃')
+assertEqual(dirtyRequest.locationAccuracy, undefined, 'null 精度收成 undefined')
+assertEqual(dirtyRequest.status, '', '缺失状态落成空串，由展示层走兜底')
+
+{
+  const originalFetch = globalThis.fetch
+  const captured: Array<{ url: URL; init?: RequestInit }> = []
+  let nextBody: unknown = {}
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://localhost')
+    // 失败请求会异步上报中心日志，这些请求不计入断言。
+    if (!url.pathname.startsWith('/api/react/v1/attendance')) {
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    captured.push({ url, init })
+    return new Response(JSON.stringify(nextBody), { status: 200, headers: { 'content-type': 'application/json' } })
+  }) as typeof fetch
+
+  try {
+    nextBody = { success: true, data: requestWire }
+    const created = await createAttendanceLocationRequest({ storeCode: 'S001', targetUserGuid: 'user-1' })
+    const createCall = captured[captured.length - 1]
+    assertEqual(createCall.url.pathname, '/api/react/v1/attendance/location-requests', '创建请求路径')
+    assertEqual(createCall.init?.method, 'POST', '创建请求是 POST')
+    assertEqual(createCall.init?.body, JSON.stringify({ storeCode: 'S001', targetUserGuid: 'user-1' }), '请求体只带分店与目标员工')
+    assertEqual(created.requestGuid, 'req-1', '创建结果应归一化')
+
+    // 业务失败是 HTTP 200 + success=false：必须抛错，并带着错误码让页面映射友好文案
+    nextBody = { success: false, errorCode: 'LOCATION_REQUEST_PENDING', message: '已有未响应的请求' }
+    let businessError: unknown
+    try {
+      await createAttendanceLocationRequest({ storeCode: 'S001', targetUserGuid: 'user-1' })
+    } catch (error) {
+      businessError = error
+    }
+    assertEqual(businessError instanceof Error, true, '业务失败必须抛错，不能误报成功')
+    assertEqual(
+      (businessError as { payload?: { errorCode?: string } }).payload?.errorCode,
+      'LOCATION_REQUEST_PENDING',
+      '错误码要随异常带出',
+    )
+
+    nextBody = { success: true, data: [requestWire, { ...requestWire, requestGuid: 'req-9' }] }
+    const listed = await getAttendanceLocationRequests({ storeCode: 'S001', targetUserGuid: 'user-1', limit: 20 })
+    const listCall = captured[captured.length - 1]
+    assertEqual(listCall.url.pathname, '/api/react/v1/attendance/location-requests', '列表路径')
+    assertEqual(listCall.init?.method ?? 'GET', 'GET', '列表是 GET')
+    assertEqual(listCall.url.search, '?storeCode=S001&targetUserGuid=user-1&limit=20', '列表查询参数')
+    assertEqual(listed.length, 2, '列表逐条归一化')
+    assertEqual(listed[1].requestGuid, 'req-9', '列表保持服务端顺序')
+
+    nextBody = { success: true, data: null }
+    assertEqual((await getAttendanceLocationRequests({ storeCode: 'S001' })).length, 0, '空数据兜底为空数组')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
 
 console.log('scheduleAttendanceService.test.ts: ok')
