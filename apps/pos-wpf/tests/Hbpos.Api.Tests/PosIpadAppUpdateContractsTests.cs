@@ -224,6 +224,57 @@ public sealed class PosIpadAppUpdateContractsTests
         Assert.IsType<ForbidResult>(otaResult.Result);
     }
 
+    [Fact]
+    public async Task Ota_check_forwards_device_identity_claims_to_central_decision()
+    {
+        var gateway = new CapturingOtaGateway();
+        var controller = new PosIpadAppUpdateController(
+            Options.Create(new PosIpadOptions()),
+            Options.Create(new AppUpdateOptions()),
+            gateway);
+        var claims = new List<Claim>
+        {
+            new(DeviceAuthConstants.StoreCodeClaim, " STORE-1 "),
+            new(DeviceAuthConstants.DeviceSystemClaim, DeviceSystems.IpadOs),
+            new(DeviceAuthConstants.DeviceCodeClaim, "IPAD-0001"),
+            new(DeviceAuthConstants.HardwareIdClaim, "hw-abc")
+        };
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(claims, DeviceAuthConstants.Scheme))
+            }
+        };
+
+        await controller.CheckOta("1.0.0", "update-1", "group-1", CancellationToken.None);
+
+        // 中心按「设备 → 分店 → 基线」决策，必须拿到认证 claim 里的设备身份（客户端自报的值不可信）。
+        var request = Assert.IsType<PosIpadOtaUpdateDecisionRequest>(gateway.LastOtaRequest);
+        Assert.Equal("STORE-1", request.StoreCode);
+        Assert.Equal("IPAD-0001", request.DeviceCode);
+        Assert.Equal("hw-abc", request.HardwareId);
+        Assert.Equal("update-1", request.CurrentUpdateId);
+    }
+
+    private sealed class CapturingOtaGateway : IPosIpadUpdateDecisionGateway
+    {
+        public PosIpadOtaUpdateDecisionRequest? LastOtaRequest { get; private set; }
+
+        public Task<PosIpadNativeUpdateDecision?> GetNativeDecisionAsync(
+            PosIpadNativeUpdateDecisionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<PosIpadNativeUpdateDecision?>(null);
+
+        public Task<PosIpadOtaUpdateResponse?> GetOtaDecisionAsync(
+            PosIpadOtaUpdateDecisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            LastOtaRequest = request;
+            return Task.FromResult<PosIpadOtaUpdateResponse?>(null);
+        }
+    }
+
     private static PosIpadAppUpdateController CreateController(PosIpadOptions configuration)
         => new(Options.Create(configuration));
 

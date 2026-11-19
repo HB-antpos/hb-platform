@@ -122,7 +122,9 @@ public sealed class PosIpadAppUpdateController : ControllerBase
                     storeCode,
                     runtimeVersion,
                     currentUpdateId,
-                    currentUpdateGroupId),
+                    currentUpdateGroupId,
+                    User.FindFirstValue(DeviceAuthConstants.DeviceCodeClaim)?.Trim(),
+                    User.FindFirstValue(DeviceAuthConstants.HardwareIdClaim)?.Trim()),
                 cancellationToken);
         if (decision is null)
         {
