@@ -6,7 +6,7 @@ namespace BlazorApp.Shared.Models
     /// 「服务端要求员工取一次高精度位置」的请求记录，同时是审计留痕：谁请求、请求谁、何时、结果。
     /// 只在目标员工已上班期间可创建；员工在 App 前台响应后，取到的点写入班中样本表 AttendanceLocationSample，
     /// 并用 <see cref="SampleGuid"/> 与本记录关联（样本的 ClientSampleId = RequestGuid，借唯一索引做幂等）。
-    /// 表由独立版本号迁移 20261119.001-attendance-location-request 建出，实体不进 SqlSugarContext 的 tableTypes。
+    /// 表由独立版本号迁移 20261119.002-attendance-location-request 建出，实体不进 SqlSugarContext 的 tableTypes。
     /// </summary>
     [SugarTable("AttendanceLocationRequest")]
     public class AttendanceLocationRequest : BaseEntity

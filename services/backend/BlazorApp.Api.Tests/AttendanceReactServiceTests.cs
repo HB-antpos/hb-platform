@@ -87,7 +87,7 @@ namespace BlazorApp.Api.Tests
                 // 考勤审批推送（见 AttendanceReactServiceApprovalNotificationTests.cs）落库到通知平台的两张表。
                 ,typeof(AppNotification)
                 ,typeof(AppNotificationRecipient)
-                // 位置请求（见 AttendanceReactServiceLocationRequestTests.cs）：生产由迁移 20261119.001 创建；测试库用 CodeFirst 建同样的表。
+                // 位置请求（见 AttendanceReactServiceLocationRequestTests.cs）：生产由迁移 20261119.002 创建；测试库用 CodeFirst 建同样的表。
                 ,typeof(AttendanceLocationRequest)
                 // 带薪假与工资五张表：生产由迁移 20261026.002 创建；测试库用 CodeFirst 建同样的表。
                 ,typeof(EmployeePayRate)
@@ -112,7 +112,7 @@ namespace BlazorApp.Api.Tests
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AttendanceLocationSample_User_ClientSample "
                 + "ON AttendanceLocationSample(UserGuid, ClientSampleId) WHERE ClientSampleId IS NOT NULL");
-            // 位置请求的 RequestGuid 唯一：生产由迁移 20261119.001 建唯一索引。
+            // 位置请求的 RequestGuid 唯一：生产由迁移 20261119.002 建唯一索引。
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_AttendanceLocationRequest_RequestGuid "
                 + "ON AttendanceLocationRequest(RequestGuid)");

@@ -94,6 +94,32 @@ public interface IPosIpadOtaPolicyService
     );
 
     Task<PosIpadOtaDecisionDto> GetDecisionAsync(PosIpadOtaDecisionRequest request);
+
+    Task<ApiResponse<List<PosIpadOtaAssignmentDto>>> GetAssignmentsAsync();
+
+    Task<ApiResponse<PosIpadOtaAssignmentDto>> CreateAssignmentAsync(
+        PosIpadOtaAssignmentRequest request,
+        string currentUser
+    );
+
+    Task<ApiResponse<PosIpadOtaAssignmentDto>> UpdateAssignmentAsync(
+        Guid id,
+        PosIpadOtaAssignmentRequest request,
+        string currentUser
+    );
+
+    Task<ApiResponse<bool>> DeleteAssignmentAsync(
+        Guid id,
+        long? expectedPolicyVersion,
+        string currentUser
+    );
+
+    Task<ApiResponse<PagedResult<PosIpadOtaTargetDeviceOptionDto>>> GetTargetDeviceOptionsAsync(
+        string? storeGuid,
+        string? keyword,
+        int page,
+        int pageSize
+    );
 }
 
 public interface IPosHandheldUpdateDecisionService

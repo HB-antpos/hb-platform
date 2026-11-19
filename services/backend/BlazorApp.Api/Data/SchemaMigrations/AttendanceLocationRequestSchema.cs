@@ -1,7 +1,7 @@
 namespace BlazorApp.Api.Data.SchemaMigrations;
 
 /// <summary>
-/// 「服务端要求员工取一次高精度位置」（迁移 20261119.001-attendance-location-request）：
+/// 「服务端要求员工取一次高精度位置」（迁移 20261119.002-attendance-location-request）：
 /// 新表 dbo.AttendanceLocationRequest（请求记录，同时是审计留痕），并把新权限码
 /// Attendance.Punch.RequestLocation 幂等写入 HbwebSysPermissions（启动不跑权限种子，不入库角色管理里就授不了），
 /// <b>不授予任何角色</b>——授给哪些角色由管理员在生产手动决定。

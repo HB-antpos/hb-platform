@@ -28,6 +28,10 @@ const tests = [
     entryPoint: 'src/pages/System/AppDownloads/appUpdatePolicyRequestLogic.test.ts',
   },
   {
+    name: 'pos-ipad-ota-assignments-logic',
+    entryPoint: 'src/pages/System/AppDownloads/posIpadOtaAssignmentsLogic.test.ts',
+  },
+  {
     name: 'mobile-android-native-policy-logic',
     entryPoint: 'src/pages/System/AppDownloads/mobileAndroidNativePolicyLogic.test.ts',
   },

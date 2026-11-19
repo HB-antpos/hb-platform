@@ -126,6 +126,12 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
             SqlServerSchemaMigrationRuntime.MainHistoryTable,
             SchemaMigrationCoordinator.AttendanceLocationSampleBatchMigrationId
         );
+        // iPad OTA 覆盖层新表：全新库经显式迁移建表并登记账本。
+        await AssertHistoryTableAsync(
+            databases.MainConnectionString,
+            SqlServerSchemaMigrationRuntime.MainHistoryTable,
+            SchemaMigrationCoordinator.PosIpadOtaAssignmentMigrationId
+        );
     }
 
     [SchemaMigrationSqlServerFact]
@@ -894,6 +900,88 @@ IF COL_LENGTH(N'dbo.PricingStrategyDetail', N'StartRetailPrice') IS NOT NULL
         var mismatch = await Assert.ThrowsAsync<SqlException>(() =>
             ExecuteNonQueryAsync(databases.MainConnectionString, EmployeeProfileSensitiveBirthdaySchema.VerifySql));
         Assert.Equal(51862, mismatch.Number);
+    }
+
+    [SchemaMigrationSqlServerFact]
+    public async Task iPadOTA覆盖层表_可重复执行_约束与过滤唯一索引生效_签名门禁识别漂移()
+    {
+        await using var databases = await IsolatedSchemaDatabases.CreateAsync();
+        var conn = databases.MainConnectionString;
+
+        // 表不存在：Verify 抛 54700；Apply 建表后 Verify 通过，重复 Apply 不报错也不丢数据。
+        var missing = await Assert.ThrowsAsync<SqlException>(() =>
+            ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql));
+        Assert.Equal(54700, missing.Number);
+        await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.ApplySql);
+        await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql);
+
+        const string insertPrefix = """
+            INSERT dbo.PosIpadOtaAssignment
+                (Id, Environment, TargetType, StoreGuid, DeviceRegistrationId, ReleaseId, ForceUpdate, Enabled, PolicyVersion, CreatedAt)
+            VALUES
+            """;
+        await ExecuteNonQueryAsync(conn, insertPrefix + " (NEWID(), N'production', N'store', N'store-1', NULL, NEWID(), 0, 1, 1, SYSUTCDATETIME());");
+        await ExecuteNonQueryAsync(conn, insertPrefix + " (NEWID(), N'production', N'device', NULL, 7, NEWID(), 0, 1, 2, SYSUTCDATETIME());");
+        await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.ApplySql);
+        await ExecuteNonQueryAsync(conn, """
+            IF (SELECT COUNT(*) FROM dbo.PosIpadOtaAssignment) <> 2
+                THROW 54790, 'Existing assignment rows were lost.', 1;
+            """);
+
+        // CHECK：目标类型非法 / 分店行带设备号 / 设备行缺设备号都被拒绝。
+        foreach (var bad in new[]
+        {
+            " (NEWID(), N'production', N'other', N'store-9', NULL, NEWID(), 0, 1, 11, SYSUTCDATETIME());",
+            " (NEWID(), N'production', N'store', N'store-9', 9, NEWID(), 0, 1, 12, SYSUTCDATETIME());",
+            " (NEWID(), N'production', N'device', NULL, NULL, NEWID(), 0, 1, 13, SYSUTCDATETIME());",
+            " (NEWID(), N'production', N'device', N'store-9', 9, NEWID(), 0, 1, 14, SYSUTCDATETIME());",
+        })
+        {
+            await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, insertPrefix + bad));
+        }
+
+        // 过滤唯一索引：同分店 / 同设备第二条启用行被拒绝；停用或已删除行不占位；PolicyVersion 同环境唯一。
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn,
+            insertPrefix + " (NEWID(), N'production', N'store', N'store-1', NULL, NEWID(), 0, 1, 21, SYSUTCDATETIME());"));
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn,
+            insertPrefix + " (NEWID(), N'production', N'device', NULL, 7, NEWID(), 0, 1, 22, SYSUTCDATETIME());"));
+        await ExecuteNonQueryAsync(conn,
+            insertPrefix + " (NEWID(), N'production', N'store', N'store-1', NULL, NEWID(), 0, 0, 23, SYSUTCDATETIME());");
+        await ExecuteNonQueryAsync(conn,
+            insertPrefix + " (NEWID(), N'staging', N'store', N'store-1', NULL, NEWID(), 0, 1, 1, SYSUTCDATETIME());");
+        await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn,
+            insertPrefix + " (NEWID(), N'production', N'store', N'store-2', NULL, NEWID(), 0, 1, 1, SYSUTCDATETIME());"));
+
+        // 漂移：列签名 → 54701；缺 CHECK → 54703；缺索引 → 54704。每次修复后 Verify 须恢复通过。
+        await ExecuteNonQueryAsync(conn, "ALTER TABLE dbo.PosIpadOtaAssignment ALTER COLUMN Note nvarchar(100) NULL;");
+        var column = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql));
+        Assert.Equal(54701, column.Number);
+        await ExecuteNonQueryAsync(conn, "ALTER TABLE dbo.PosIpadOtaAssignment ALTER COLUMN Note nvarchar(200) NULL;");
+        await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql);
+
+        await ExecuteNonQueryAsync(conn, "ALTER TABLE dbo.PosIpadOtaAssignment DROP CONSTRAINT CK_PosIpadOtaAssignment_Target;");
+        var check = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql));
+        Assert.Equal(54703, check.Number);
+
+        await ExecuteNonQueryAsync(conn, "DROP INDEX UX_PosIpadOtaAssignment_Store ON dbo.PosIpadOtaAssignment;");
+        await ExecuteNonQueryAsync(conn, """
+            ALTER TABLE dbo.PosIpadOtaAssignment ADD CONSTRAINT CK_PosIpadOtaAssignment_Target
+                CHECK (([TargetType] = N'store' AND [StoreGuid] IS NOT NULL AND [DeviceRegistrationId] IS NULL)
+                    OR ([TargetType] = N'device' AND [StoreGuid] IS NULL AND [DeviceRegistrationId] IS NOT NULL));
+            """);
+        var index = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql));
+        Assert.Equal(54704, index.Number);
+
+        // 同名但过滤条件不对的索引同样判不兼容；重新 Apply 补回缺失索引。
+        await ExecuteNonQueryAsync(conn, """
+            CREATE UNIQUE NONCLUSTERED INDEX UX_PosIpadOtaAssignment_Store
+                ON dbo.PosIpadOtaAssignment (Environment, StoreGuid) WHERE [Enabled] = 1 AND [IsDeleted] = 0;
+            """);
+        var filter = await Assert.ThrowsAsync<SqlException>(() => ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql));
+        Assert.Equal(54704, filter.Number);
+        await ExecuteNonQueryAsync(conn, "DROP INDEX UX_PosIpadOtaAssignment_Store ON dbo.PosIpadOtaAssignment;");
+        await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.ApplySql);
+        await ExecuteNonQueryAsync(conn, PosIpadOtaAssignmentSchema.VerifySql);
     }
 
     [SchemaMigrationSqlServerFact]

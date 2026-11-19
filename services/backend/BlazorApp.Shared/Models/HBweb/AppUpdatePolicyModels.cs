@@ -232,6 +232,53 @@ public sealed class PosIpadOtaRolloutTarget : BaseEntity
 }
 
 /// <summary>
+/// iPad OTA 覆盖层：在全局基线（PosIpadOtaRollout）之上，对单个分店或单台设备指定另一个 OTA 版本。
+/// 决策顺序为 设备 → 分店 → 基线，先命中的层生效；同一目标同时只能有一条启用的覆盖。
+/// </summary>
+[SugarTable("PosIpadOtaAssignment")]
+public sealed class PosIpadOtaAssignment : BaseEntity
+{
+    [SugarColumn(IsPrimaryKey = true, IsIdentity = false)]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [SugarColumn(Length = 32, IsNullable = false)]
+    public string Environment { get; set; } = "production";
+
+    /// <summary>目标类型：store 或 device，决定 StoreGuid / DeviceRegistrationId 二选一。</summary>
+    [SugarColumn(Length = 16, IsNullable = false)]
+    public string TargetType { get; set; } = "store";
+
+    [SugarColumn(Length = 100, IsNullable = true)]
+    public string? StoreGuid { get; set; }
+
+    /// <summary>POSM_设备注册信息表.ID；设备重新注册会产生新 ID，匹配时按同硬件同分店归并。</summary>
+    [SugarColumn(IsNullable = true)]
+    public int? DeviceRegistrationId { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public Guid ReleaseId { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public bool ForceUpdate { get; set; }
+
+    [SugarColumn(Length = 1000, IsNullable = true)]
+    public string? ReleaseMessage { get; set; }
+
+    [SugarColumn(Length = 200, IsNullable = true)]
+    public string? Note { get; set; }
+
+    /// <summary>到期后覆盖自动失效，目标回落到上一层；为空表示长期有效。</summary>
+    [SugarColumn(IsNullable = true)]
+    public DateTime? ExpiresAtUtc { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public bool Enabled { get; set; }
+
+    [SugarColumn(IsNullable = false)]
+    public long PolicyVersion { get; set; }
+}
+
+/// <summary>
 /// 手持 POS 单条发布 lane 的当前策略。四条 lane 各自只有一行，缺行代表继续使用旧配置。
 /// </summary>
 [SugarTable("PosHandheldUpdatePolicy")]

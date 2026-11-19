@@ -11,9 +11,16 @@ import type {
   MobileIosNativeUpdatePolicyRequest,
   NativeUpdatePolicy,
   PosIpadNativeUpdatePolicyRequest,
+  PosIpadOtaAssignment,
+  PosIpadOtaAssignmentCreateRequest,
+  PosIpadOtaAssignmentTargetType,
+  PosIpadOtaAssignmentUpdateRequest,
   PosIpadOtaRelease,
   PosIpadOtaRollout,
   PosIpadOtaRolloutRequest,
+  PosIpadOtaTargetDeviceOption,
+  PosIpadOtaTargetDevicePage,
+  PosIpadOtaTargetDeviceQuery,
 } from '../types/appUpdatePolicy'
 import request, { unwrapApiData } from '../utils/request'
 
@@ -26,12 +33,14 @@ export interface AppUpdatePolicyTransport {
   get(url: string, options?: TransportOptions): Promise<unknown>
   post(url: string, payload?: unknown, options?: TransportOptions): Promise<unknown>
   put(url: string, payload?: unknown, options?: TransportOptions): Promise<unknown>
+  delete(url: string, options?: TransportOptions): Promise<unknown>
 }
 
 const defaultTransport: AppUpdatePolicyTransport = {
   get: (url, options) => request.get(url, options),
   post: (url, payload, options) => request.post(url, payload, options),
   put: (url, payload, options) => request.put(url, payload, options),
+  delete: (url, options) => request.delete(url, options),
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -208,6 +217,75 @@ export function normalizePosIpadOtaRollout(value: unknown): PosIpadOtaRollout {
   }
 }
 
+function assignmentTargetType(raw: Record<string, unknown>): PosIpadOtaAssignmentTargetType {
+  return raw.targetType === 'device' ? 'device' : 'store'
+}
+
+export function normalizePosIpadOtaAssignment(value: unknown): PosIpadOtaAssignment {
+  const raw = asRecord(value)
+  const release = raw.release
+  return {
+    id: text(raw, 'id'),
+    targetType: assignmentTargetType(raw),
+    storeGuid: nullableText(raw, 'storeGuid'),
+    storeCode: nullableText(raw, 'storeCode'),
+    storeName: nullableText(raw, 'storeName'),
+    deviceRegistrationId: nullableInt32(raw, 'deviceRegistrationId'),
+    deviceNumber: nullableText(raw, 'deviceNumber'),
+    deviceRemarks: nullableText(raw, 'deviceRemarks'),
+    deviceAppVersion: nullableText(raw, 'deviceAppVersion'),
+    enabled: boolean(raw, 'enabled'),
+    expiresAtUtc: nullableText(raw, 'expiresAtUtc'),
+    isExpired: boolean(raw, 'isExpired'),
+    policyVersion: number(raw, 'policyVersion'),
+    releaseId: text(raw, 'releaseId'),
+    release: release && typeof release === 'object' && !Array.isArray(release)
+      ? normalizePosIpadOtaRelease(release)
+      : null,
+    forceUpdate: boolean(raw, 'forceUpdate'),
+    releaseMessage: nullableText(raw, 'releaseMessage'),
+    note: nullableText(raw, 'note'),
+    updatedAt: nullableText(raw, 'updatedAt'),
+    updatedBy: nullableText(raw, 'updatedBy'),
+  }
+}
+
+export function normalizePosIpadOtaTargetDevice(value: unknown): PosIpadOtaTargetDeviceOption {
+  const raw = asRecord(value)
+  return {
+    deviceRegistrationId: nullableInt32(raw, 'deviceRegistrationId') ?? 0,
+    systemDeviceNumber: text(raw, 'systemDeviceNumber'),
+    storeCode: nullableText(raw, 'storeCode'),
+    storeName: nullableText(raw, 'storeName'),
+    remarks: nullableText(raw, 'remarks'),
+    appVersion: nullableText(raw, 'appVersion'),
+    isOnline: boolean(raw, 'isOnline'),
+    lastHeartbeatAt: nullableText(raw, 'lastHeartbeatAt'),
+  }
+}
+
+export function normalizePosIpadOtaTargetDevicePage(value: unknown): PosIpadOtaTargetDevicePage {
+  const raw = asRecord(value)
+  // 兼容 items / data 两种分页形态；没有 id 的行（空对象、非对象）直接丢弃，避免勾选到无效设备。
+  const rows = Array.isArray(raw.items)
+    ? raw.items
+    : Array.isArray(raw.data)
+      ? raw.data
+      : []
+  const items = rows
+    .map(normalizePosIpadOtaTargetDevice)
+    .filter((item) => item.deviceRegistrationId > 0)
+  const total = Number(raw.total ?? raw.totalCount)
+  const page = Number(raw.page ?? raw.pageIndex)
+  const pageSize = Number(raw.pageSize)
+  return {
+    items,
+    total: Number.isFinite(total) && total >= 0 ? total : items.length,
+    page: Number.isInteger(page) && page >= 1 ? page : 1,
+    pageSize: Number.isInteger(pageSize) && pageSize >= 1 ? pageSize : items.length,
+  }
+}
+
 export function createAppUpdatePolicyService(transport: AppUpdatePolicyTransport) {
   return {
     async getIosAppStoreReleases(app: AppUpdateApp, signal?: AbortSignal) {
@@ -311,6 +389,66 @@ export function createAppUpdatePolicyService(transport: AppUpdatePolicyTransport
     ) {
       const response = await transport.put('/api/pos-ipad/ota-rollout', payload, { signal })
       return normalizePosIpadOtaRollout(unwrap(response))
+    },
+
+    async getPosIpadOtaAssignments(signal?: AbortSignal) {
+      const response = await transport.get('/api/pos-ipad/ota-assignments', { signal })
+      const payload = unwrap<unknown[]>(response)
+      return Array.isArray(payload) ? payload.map(normalizePosIpadOtaAssignment) : []
+    },
+
+    async getPosIpadOtaTargetDevices(
+      query: PosIpadOtaTargetDeviceQuery = {},
+      signal?: AbortSignal,
+    ) {
+      const keyword = query.keyword?.trim()
+      const response = await transport.get(
+        '/api/pos-ipad/ota-assignments/target-options/devices',
+        {
+          // 空值不入参，避免把「全部分店 / 无关键字」误传成空字符串条件。
+          params: {
+            ...(query.storeGuid ? { storeGuid: query.storeGuid } : {}),
+            ...(keyword ? { keyword } : {}),
+            page: query.page ?? 1,
+            pageSize: query.pageSize ?? 20,
+          },
+          signal,
+        },
+      )
+      return normalizePosIpadOtaTargetDevicePage(unwrap(response))
+    },
+
+    async createPosIpadOtaAssignment(
+      payload: PosIpadOtaAssignmentCreateRequest,
+      signal?: AbortSignal,
+    ) {
+      const response = await transport.post('/api/pos-ipad/ota-assignments', payload, { signal })
+      return normalizePosIpadOtaAssignment(unwrap(response))
+    },
+
+    async updatePosIpadOtaAssignment(
+      id: string,
+      payload: PosIpadOtaAssignmentUpdateRequest,
+      signal?: AbortSignal,
+    ) {
+      const response = await transport.put(
+        `/api/pos-ipad/ota-assignments/${encodeURIComponent(id)}`,
+        payload,
+        { signal },
+      )
+      return normalizePosIpadOtaAssignment(unwrap(response))
+    },
+
+    async deletePosIpadOtaAssignment(
+      id: string,
+      expectedPolicyVersion: number,
+      signal?: AbortSignal,
+    ) {
+      const response = await transport.delete(
+        `/api/pos-ipad/ota-assignments/${encodeURIComponent(id)}`,
+        { params: { expectedPolicyVersion }, signal },
+      )
+      unwrap<boolean>(response)
     },
   }
 }

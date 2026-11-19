@@ -76,6 +76,7 @@ import { formatAppDownloadLocalDateTime } from './time'
 import PosHandheldUpdatePolicyTab from './PosHandheldUpdatePolicyTab'
 import MobileOtaPolicyTab from './MobileOtaPolicyTab'
 import MobileAndroidNativePolicyTab from './MobileAndroidNativePolicyTab'
+import PosIpadOtaAssignmentsPanel from './PosIpadOtaAssignmentsPanel'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 
 /** 版本发布中心里由本面板承载的轨道；每个实例只渲染、只加载一条轨道。 */
@@ -1589,6 +1590,16 @@ export default function AppUpdatePolicyPanel({
               ) : null}
             </Form>
           </Card>
+
+          {/* 分店 / 设备覆盖：优先级高于上面的全局基线，自管加载与保存。 */}
+          <PosIpadOtaAssignmentsPanel
+            canManage={canManage}
+            releases={otaReleases}
+            releasesReady={otaDomainReady}
+            storeOptions={storeOptions}
+            baselineRuntimeVersion={otaRollout?.release?.runtimeVersion ?? null}
+            refreshVersion={refreshVersion}
+          />
         </Space>
       ),
     },

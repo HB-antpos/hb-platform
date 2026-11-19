@@ -1013,7 +1013,9 @@ builder.Services.AddScoped<IPosIpadOtaPolicyService>(sp =>
     var context = sp.GetRequiredService<SqlSugarContext>();
     return new PosIpadOtaPolicyService(
         context.Db,
-        sp.GetRequiredService<ILogger<PosIpadOtaPolicyService>>()
+        sp.GetRequiredService<ILogger<PosIpadOtaPolicyService>>(),
+        // 设备覆盖层需要读 POSM 的设备注册表。
+        sp.GetRequiredService<POSMSqlSugarContext>().Db
     );
 });
 builder.Services.AddScoped<IPosHandheldUpdatePolicyService>(sp =>

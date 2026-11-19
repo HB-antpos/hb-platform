@@ -26,7 +26,7 @@ namespace BlazorApp.Shared.Constants
                 new(Permissions.Attendance.Punch.Self, "本人打卡", "排班考勤", "移动端「个人考勤」- 本人打卡"),
                 new(Permissions.Attendance.Punch.ViewManagedStore, "查看管理分店打卡记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店打卡记录"),
                 new(Permissions.Attendance.Punch.AdjustManagedStore, "补卡与修改管理分店打卡", "排班考勤", "移动端「考勤管理」- 为管理分店员工补录或修改打卡并直接生效（可改本周，周一、周二可改上周）；店长本人补卡也需此权限才免审核"),
-                // 仅注册，不写入任何角色模板：授给哪些角色由管理员在生产手动决定；入库由版本号迁移 20261119.001 幂等完成。
+                // 仅注册，不写入任何角色模板：授给哪些角色由管理员在生产手动决定；入库由版本号迁移 20261119.002 幂等完成。
                 new(Permissions.Attendance.Punch.RequestLocation, "要求员工上报当前位置", "排班考勤", "Web 页面 /pos-admin/schedule-attendance「班中定位样本」- 要求管辖分店内已上班的员工在手机 App 前台取一次高精度位置；员工会收到通知，请求 15 分钟内有效，留审计记录"),
                 new(Permissions.Attendance.Approval.ViewManagedStore, "查看管理分店审核记录", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 查看管理分店审核记录"),
                 new(Permissions.Attendance.Approval.ReviewManagedStore, "审核管理分店考勤", "排班考勤", "Web 页面 /pos-admin/schedule-attendance 与移动端「考勤管理」- 审核管理分店考勤"),

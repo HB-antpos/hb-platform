@@ -48,6 +48,7 @@ public sealed class AppUpdatePolicyServiceTests : IDisposable
             typeof(PosIpadOtaRelease),
             typeof(PosIpadOtaRollout),
             typeof(PosIpadOtaRolloutTarget),
+            typeof(PosIpadOtaAssignment),
             typeof(Store)
         );
     }

@@ -306,9 +306,77 @@ public sealed class PosIpadOtaRolloutDto
 public sealed class PosIpadOtaDecisionRequest
 {
     public string? StoreCode { get; set; }
+
+    /// <summary>设备认证里的系统设备编号（hbpos_device_code）；缺失时跳过设备覆盖层。</summary>
+    public string? DeviceCode { get; set; }
+
+    /// <summary>设备认证里的硬件识别码（hbpos_hardware_id）；缺失时跳过设备覆盖层。</summary>
+    public string? HardwareId { get; set; }
+
     public string? RuntimeVersion { get; set; }
     public string? CurrentUpdateId { get; set; }
     public string? CurrentUpdateGroupId { get; set; }
+}
+
+public static class PosIpadOtaAssignmentTargetTypes
+{
+    public const string Store = "store";
+    public const string Device = "device";
+}
+
+/// <summary>
+/// 创建或修改 iPad OTA 覆盖。创建时 TargetType 与目标必填；修改时目标不可变，只认版本与投放方式字段。
+/// </summary>
+public sealed class PosIpadOtaAssignmentRequest
+{
+    public string? TargetType { get; set; }
+    public string? StoreGuid { get; set; }
+    public int? DeviceRegistrationId { get; set; }
+    public Guid? ReleaseId { get; set; }
+    public bool ForceUpdate { get; set; }
+    public string? ReleaseMessage { get; set; }
+    public string? Note { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>修改 / 删除时必填：该覆盖行当前的 PolicyVersion，用于乐观并发。</summary>
+    public long? ExpectedPolicyVersion { get; set; }
+}
+
+public sealed class PosIpadOtaAssignmentDto
+{
+    public Guid Id { get; set; }
+    public string TargetType { get; set; } = PosIpadOtaAssignmentTargetTypes.Store;
+    public string? StoreGuid { get; set; }
+    public string? StoreCode { get; set; }
+    public string? StoreName { get; set; }
+    public int? DeviceRegistrationId { get; set; }
+    public string? DeviceNumber { get; set; }
+    public string? DeviceRemarks { get; set; }
+    public string? DeviceAppVersion { get; set; }
+    public bool Enabled { get; set; }
+    public DateTime? ExpiresAtUtc { get; set; }
+    public bool IsExpired { get; set; }
+    public long PolicyVersion { get; set; }
+    public Guid ReleaseId { get; set; }
+    public PosIpadOtaReleaseDto? Release { get; set; }
+    public bool ForceUpdate { get; set; }
+    public string? ReleaseMessage { get; set; }
+    public string? Note { get; set; }
+    public DateTime? UpdatedAt { get; set; }
+    public string? UpdatedBy { get; set; }
+}
+
+public sealed class PosIpadOtaTargetDeviceOptionDto
+{
+    public int DeviceRegistrationId { get; set; }
+    public string SystemDeviceNumber { get; set; } = string.Empty;
+    public string? StoreCode { get; set; }
+    public string? StoreName { get; set; }
+    public string? Remarks { get; set; }
+    public string? AppVersion { get; set; }
+    public bool IsOnline { get; set; }
+    public DateTime? LastHeartbeatAt { get; set; }
 }
 
 public sealed class PosIpadOtaDecisionDto
