@@ -1163,7 +1163,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     const permissionBefore = await readLocationPermissionSnapshot();
     const consentedBeforeScan = locationUsageConsentedRef.current;
     // 扫码前已经在说明弹层里同意过就不再重复弹；只有扫码前没能判断出是上班（如状态过期）才在这里补弹。
-    const confirmed = consentedBeforeScan || await confirmBackgroundLocationUsage();
+    const confirmed = locationUsageConsentedRef.current || await confirmBackgroundLocationUsage();
     if (!isActive() || !confirmed) {
       if (isActive()) {
         reportPunchDiagnostic({
