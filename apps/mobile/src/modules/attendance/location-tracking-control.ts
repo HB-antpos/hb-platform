@@ -3,6 +3,7 @@ import { AppAsyncStorage } from "@/shared/storage/async-storage";
 import { isIosReviewSessionActive } from "@/modules/ios-review/session";
 import type { LastKeptLocationPoint } from "@/modules/attendance/location-sample-filter";
 import { locationSampleQueue } from "@/modules/attendance/location-sample-queue";
+import { FOREGROUND_SHIFT_LOCATION_STORAGE_KEY } from "@/modules/attendance/foreground-shift-location";
 
 export const ATTENDANCE_LOCATION_TASK = "hbweb-attendance-location-sample";
 export const ACTIVE_SHIFT_STORAGE_KEY = "hbweb_attendance_active_shift_location";
@@ -71,6 +72,10 @@ async function stopTrackingTask(options: { clearPendingSamples: boolean }) {
     // 队列清理失败不能阻止后面的原生任务停止，所以单独兜住。
     await clearPendingLocationSamples().catch((error) => {
       console.warn("[attendance-location] 清空本地定位队列失败", error);
+    });
+    // 登出 / 会话失效 / 设备重置：「回前台取一次位置」的上班标记同样属于上一个会话，一并清掉。
+    await AppAsyncStorage.removeItem(FOREGROUND_SHIFT_LOCATION_STORAGE_KEY).catch((error) => {
+      console.warn("[attendance-location] 清除班中前台定位标记失败", error);
     });
   }
 

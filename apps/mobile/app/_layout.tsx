@@ -42,6 +42,7 @@ import { NetworkRecoveryProvider } from "@/shared/network";
 import { IosReviewBanner } from "@/modules/ios-review/IosReviewBanner";
 import { hbLightTheme } from "@/shared/theme/theme";
 import "@/modules/attendance/location-tracking";
+import { useForegroundShiftLocationSample } from "@/modules/attendance/use-foreground-shift-location";
 import { useLegacyLocationTrackingCleanup } from "@/modules/attendance/use-legacy-location-cleanup";
 
 const MIN_SPLASH_VISIBLE_MS = 900;
@@ -133,6 +134,8 @@ export default function RootLayout() {
   usePrinterAutoConnect({ enabled: sideEffectsEnabled });
   // 班中后台定位已取消：启动就绪与每次回前台时，收掉旧版本留下的后台定位任务与本地残留（没有就什么都不做）。
   useLegacyLocationTrackingCleanup({ enabled: sideEffectsEnabled });
+  // 班中（已上班、未下班）每次打开 App / 回到前台时，在前台取一次位置并上传（间隔 ≥10 分钟、不弹权限框、无后台定位）。
+  useForegroundShiftLocationSample({ enabled: sideEffectsEnabled });
   // Android 原生包检查先注册 effect；共享互斥会让 APK 提示优先于 OTA optional。
   const nativeAppUpdate = useAutomaticNativeAppUpdate({
     enabled: automaticUpdatesEnabled,
