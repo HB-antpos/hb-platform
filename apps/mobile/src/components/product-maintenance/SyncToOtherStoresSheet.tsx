@@ -8,12 +8,10 @@ import { buildSyncToOtherStoresMessage } from "@/modules/price-updates/price-not
 import { formatDiscountLabel, formatMoney } from "@/modules/price-updates/presentation";
 import { priceUpdateCountQueryKey } from "@/modules/price-updates/query-keys";
 import {
-  DEFAULT_CREATE_PRICE_TASKS,
   DEFAULT_SYNC_FIELDS,
   describeSyncTargetChange,
   getDefaultSelectedSyncTargets,
   getSelectableSyncTargetCodes,
-  hasAnySyncField,
   resolveEffectiveSyncFields,
   willSyncWarehousePrice,
   type SyncFieldSelection,
@@ -44,7 +42,6 @@ export function SyncToOtherStoresSheet({
   const { t, language } = useAppTranslation(["priceUpdates", "common"]);
   const queryClient = useQueryClient();
   const [fields, setFields] = useState<SyncFieldSelection>(DEFAULT_SYNC_FIELDS);
-  const [createPriceTasks, setCreatePriceTasks] = useState(DEFAULT_CREATE_PRICE_TASKS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -64,8 +61,6 @@ export function SyncToOtherStoresSheet({
     if (!visible) {
       initializedForRef.current = null;
       setFields(DEFAULT_SYNC_FIELDS);
-      // 不记忆上次选择：每次打开都回到「创建任务」，关闭只对当次生效。
-      setCreatePriceTasks(DEFAULT_CREATE_PRICE_TASKS);
       setErrorMessage("");
       return;
     }
@@ -89,7 +84,8 @@ export function SyncToOtherStoresSheet({
     [fields, warehouseApplicable]
   );
   const syncsWarehouse = willSyncWarehousePrice(effectiveFields, warehouseApplicable);
-  const anyFieldSelected = hasAnySyncField(effectiveFields);
+  const anyFieldSelected =
+    effectiveFields.syncRetailPrice || effectiveFields.syncDiscountRate || effectiveFields.syncPurchasePrice;
 
   const toggleTarget = (storeCode: string) => {
     setSelected((current) => {
@@ -110,17 +106,10 @@ export function SyncToOtherStoresSheet({
         sourceStoreCode,
         targetStoreCodes: selectedCodes,
         ...effectiveFields,
-        createPriceTasks,
       });
       void queryClient.invalidateQueries({ queryKey: priceUpdateCountQueryKey() });
       onSynced(
-        buildSyncToOtherStoresMessage(
-          result.updatedStoreCount,
-          result.notification,
-          t,
-          result.warehouse.updated,
-          createPriceTasks
-        )
+        buildSyncToOtherStoresMessage(result.updatedStoreCount, result.notification, t, result.warehouse.updated)
       );
     } catch (error) {
       setErrorMessage(resolveLocalizedErrorMessage(error, { t, language, fallbackKey: "syncSheet.failed" }));
@@ -159,9 +148,7 @@ export function SyncToOtherStoresSheet({
       dismissable={!submitting}
       footer={(
         <View style={styles.footer}>
-          <Text variant="bodySmall" style={createPriceTasks ? styles.secondary : styles.warningText}>
-            {t(createPriceTasks ? "syncSheet.footerHint" : "syncSheet.footerHintNoTasks")}
-          </Text>
+          <Text variant="bodySmall" style={styles.secondary}>{t("syncSheet.footerHint")}</Text>
           {errorMessage ? <Text variant="bodySmall" style={styles.errorText}>{errorMessage}</Text> : null}
           <Button
             mode="contained"
@@ -191,7 +178,6 @@ export function SyncToOtherStoresSheet({
           ["syncRetailPrice", "syncSheet.fields.retailPrice"],
           ["syncDiscountRate", "syncSheet.fields.discountRate"],
           ["syncPurchasePrice", "syncSheet.fields.purchasePrice"],
-          ["syncIsSpecialProduct", "syncSheet.fields.specialProduct"],
         ] as const)
           // 仓库商品的进货价由仓库统一管理，不提供同步开关。
           .filter(([key]) => !(warehouseApplicable && key === "syncPurchasePrice"))
@@ -207,32 +193,12 @@ export function SyncToOtherStoresSheet({
         ))}
       </View>
 
-      <View style={[styles.taskCard, createPriceTasks ? null : styles.taskCardOff]}>
-        <View style={styles.taskHeader}>
-          <Icon
-            source={createPriceTasks ? "tag-multiple-outline" : "alert-outline"}
-            size={18}
-            color={createPriceTasks ? HB_COLORS.action : HB_COLORS.warning}
-          />
-          <Text variant="bodyMedium" style={[styles.flex, styles.taskTitle]}>{t("syncSheet.createTasks.title")}</Text>
-          <Switch
-            value={createPriceTasks}
-            disabled={submitting}
-            onValueChange={setCreatePriceTasks}
-            accessibilityLabel={t("syncSheet.createTasks.title")}
-          />
-        </View>
-        <Text variant="bodySmall" style={[styles.taskHint, createPriceTasks ? styles.secondary : styles.warningText]}>
-          {t(createPriceTasks ? "syncSheet.createTasks.hintOn" : "syncSheet.createTasks.hintOff")}
-        </Text>
-      </View>
-
       {syncsWarehouse ? (
         // 仓库商品：同步会把仓库价也改成本店的值，并让未同步且价格不同的分店收到「需改价」，提前说清楚。
         <View style={styles.warehouseNotice}>
           <Icon source="warehouse" size={18} color={HB_COLORS.warning} />
           <Text variant="bodySmall" style={[styles.flex, styles.warningText]}>
-            {t(createPriceTasks ? "syncSheet.warehouseNotice" : "syncSheet.warehouseNoticeNoTasks", {
+            {t("syncSheet.warehouseNotice", {
               price: formatMoney(data?.sourceRetailPrice ?? null),
             })}
           </Text>
@@ -419,12 +385,6 @@ const styles = StyleSheet.create({
   sourceText: { fontWeight: "700", color: HB_COLORS.textPrimary, fontVariant: ["tabular-nums"] },
   warehouseNotice: { flexDirection: "row", alignItems: "flex-start", gap: HB_SPACING.xs, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.control, backgroundColor: HB_COLORS.surfaceMuted },
   fieldRow: { flexDirection: "row", flexWrap: "wrap", gap: HB_SPACING.sm },
-  taskCard: { gap: HB_SPACING.xxs, padding: HB_SPACING.sm, borderRadius: HB_RADIUS.control, borderWidth: 1, borderColor: HB_COLORS.outlineMuted },
-  // 关闭时整块变橙，避免误关后没注意到。
-  taskCardOff: { borderColor: "#FEDF89", backgroundColor: "#FFFAEB" },
-  taskHeader: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
-  taskTitle: { fontWeight: "600", color: HB_COLORS.textPrimary },
-  taskHint: { paddingLeft: 26 },
   fieldSwitch: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xxs },
   listHeader: { flexDirection: "row", alignItems: "center", gap: HB_SPACING.xs },
   loader: { paddingVertical: HB_SPACING.md, alignItems: "center" },

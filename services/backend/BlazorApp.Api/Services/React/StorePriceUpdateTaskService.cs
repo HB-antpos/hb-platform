@@ -262,15 +262,6 @@ public sealed class StorePriceUpdateTaskService : IStorePriceUpdateTaskService
         return EvaluateProductsAsync(codes, null, initiator, byKey, allowCreate: true, cancellationToken);
     }
 
-    public Task RefreshPendingForProductsAsync(
-        IReadOnlyCollection<string> productCodes,
-        PriceTaskInitiator initiator,
-        CancellationToken cancellationToken = default
-    ) =>
-        // allowCreate=false：已有任务照常流转（需改价→待换标签、价格对齐即取消），但不新建任务；
-        // 定时对账同样不新建，所以关掉开关后不会被对账「补」出任务。
-        EvaluateProductsAsync(productCodes, null, initiator, null, allowCreate: false, cancellationToken);
-
     public async Task<int> ReconcilePendingAsync(string? storeCode, CancellationToken cancellationToken = default)
     {
         if (!await IsSchemaReadyAsync())

@@ -205,7 +205,6 @@
     "savedNoNotification": "Saved. Store prices already match, no notices sent",
     "syncedStores": "Synced to {{count}} stores",
     "syncedStoresWithLabels": "Synced to {{count}} stores, {{labelCount}} received a relabel notice",
-    "syncedStoresNoTasks": "Synced to {{count}} stores · no price & label tasks created",
     "warehouseUpdatedSuffix": "; warehouse price updated too",
     "previewAutoSync": "After saving, {{count}} stores update automatically and get a Relabel notice",
     "previewNeedsUpdate": "After saving, {{count}} stores with a different price get a Price change notice",
@@ -222,13 +221,7 @@
     "fields": {
       "retailPrice": "Retail price",
       "discountRate": "Discount",
-      "purchasePrice": "Cost",
-      "specialProduct": "Special product"
-    },
-    "createTasks": {
-      "title": "Create price & label tasks",
-      "hintOn": "Stores whose price changes get a Relabel task in Prices & labels so staff update the shelf label",
-      "hintOff": "No tasks: store prices change right away, but staff won't be reminded to relabel, so shelf labels may not match the till. Existing open tasks still update or cancel based on the new price."
+      "purchasePrice": "Cost"
     },
     "targets": "Target stores {{selected}}/{{total}}",
     "selectAll": "Select all",
@@ -241,10 +234,8 @@
     "loadFailed": "Could not load target stores",
     "failed": "Sync failed. Try again",
     "footerHint": "Synced stores receive a relabel notice",
-    "footerHintNoTasks": "No price & label tasks will be created",
     "submit": "Sync to {{count}} stores",
     "warehouseNotice": "Warehouse product: the warehouse retail price and suggested discount will also be set to this store's values (retail {{price}}). Stores you don't sync that have a different price get a Price change notice.",
-    "warehouseNoticeNoTasks": "Warehouse product: the warehouse retail price and suggested discount will also be set to this store's values (retail {{price}}).",
     "inlineEntry": "Sync to other stores · retail, discount",
     "inlineSaveAndSync": "Save & sync to other stores"
   },

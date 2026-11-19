@@ -4,24 +4,13 @@ export interface SyncFieldSelection {
   syncRetailPrice: boolean;
   syncDiscountRate: boolean;
   syncPurchasePrice: boolean;
-  /** 「是否特殊商品」标记：特殊商品是分店刻意维护的，默认不同步。 */
-  syncIsSpecialProduct: boolean;
 }
 
 export const DEFAULT_SYNC_FIELDS: SyncFieldSelection = {
   syncRetailPrice: true,
   syncDiscountRate: true,
   syncPurchasePrice: false,
-  syncIsSpecialProduct: false,
 };
-
-/** 「创建价格和标签更改任务」默认开启：每次打开面板都重置为开启，保持原有「同步即通知」行为。 */
-export const DEFAULT_CREATE_PRICE_TASKS = true;
-
-/** 至少勾了一个要同步的字段才允许提交（后端同样校验）。 */
-export function hasAnySyncField(fields: SyncFieldSelection): boolean {
-  return fields.syncRetailPrice || fields.syncDiscountRate || fields.syncPurchasePrice || fields.syncIsSpecialProduct;
-}
 
 /**
  * 仓库商品的进货价由仓库价统一管理：分店扫码对账时会静默按仓库进货价覆盖，

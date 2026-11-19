@@ -58,16 +58,6 @@ public interface IStorePriceUpdateTaskService
         CancellationToken cancellationToken = default
     );
 
-    /// <summary>
-    /// 分店价已被改写但调用方选择「不创建价格和标签更改任务」：只按新价格刷新 / 取消这些商品已有的未完成任务，
-    /// 不新建任何任务。须在改写写库之后调用。
-    /// </summary>
-    Task RefreshPendingForProductsAsync(
-        IReadOnlyCollection<string> productCodes,
-        PriceTaskInitiator initiator,
-        CancellationToken cancellationToken = default
-    );
-
     /// <summary>用实时价格复核未完成任务（形态流转、自动取消）。storeCode 为空表示全部分店。</summary>
     Task<int> ReconcilePendingAsync(string? storeCode, CancellationToken cancellationToken = default);
 

@@ -171,9 +171,6 @@ export interface SyncToOtherStoresRequest {
   syncRetailPrice: boolean;
   syncDiscountRate: boolean;
   syncPurchasePrice: boolean;
-  syncIsSpecialProduct: boolean;
-  /** false = 只改价，不新建价格和标签更改任务（已有未完成任务仍按新价格流转）；旧后端忽略此字段照常建任务。 */
-  createPriceTasks: boolean;
 }
 
 export interface PriceNotificationPreview {
