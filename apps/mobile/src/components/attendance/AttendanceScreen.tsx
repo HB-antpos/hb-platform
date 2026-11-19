@@ -113,6 +113,12 @@ import {
   startAttendanceLocationTracking,
   stopAttendanceLocationTracking,
 } from "@/modules/attendance/location-tracking";
+import { readHttpStatus, type PunchDiagnosticEvent } from "@/modules/attendance/punch-diagnostics";
+import {
+  flushPunchDiagnostics,
+  readLocationPermissionSnapshot,
+  reportPunchDiagnostic,
+} from "@/modules/attendance/punch-diagnostics-runtime";
 import { useShiftLocationTrackingState } from "@/modules/attendance/use-shift-location-tracking-state";
 import { resolveAttendanceTodayStatus } from "@/modules/attendance/attendance-today-status";
 import {
@@ -1077,6 +1083,11 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     locationConsentResolverRef.current = null;
   }, []);
 
+  // 进入打卡页时补传本机暂存的扫码打卡诊断（上次离线或未登录时没传出去的）；失败静默。
+  useEffect(() => {
+    void flushPunchDiagnostics();
+  }, []);
+
   /**
    * 扫码下班前问「今天吃饭休息了吗」。放在打开扫码器之前：二维码与打卡授权都有有效期，
    * 扫完再让员工想会导致过期。返回 null 表示员工取消，本次不打开扫码器。
@@ -1147,15 +1158,36 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     if (alreadyAllowed) {
       return true;
     }
+    // 诊断：App 判定「后台定位未授权」是异常路径（11-19 iOS 员工系统设置已是 Always 仍走到这里），
+    // 先记下系统此刻给出的前后台权限原始读数，之后与申请结果一起上报；只读、不弹窗、不阻塞。
+    const permissionBefore = await readLocationPermissionSnapshot();
+    const consentedBeforeScan = locationUsageConsentedRef.current;
     // 扫码前已经在说明弹层里同意过就不再重复弹；只有扫码前没能判断出是上班（如状态过期）才在这里补弹。
-    const confirmed = locationUsageConsentedRef.current || await confirmBackgroundLocationUsage();
+    const confirmed = consentedBeforeScan || await confirmBackgroundLocationUsage();
     if (!isActive() || !confirmed) {
+      if (isActive()) {
+        reportPunchDiagnostic({
+          stage: "permission",
+          outcome: "cancelled",
+          reason: "consentDeclined",
+          consentedBeforeScan,
+          permissionBefore,
+        });
+      }
       return false;
     }
     const allowed = await ensureAttendanceBackgroundLocationPermission();
     if (!isActive()) {
       return false;
     }
+    reportPunchDiagnostic({
+      stage: "permission",
+      outcome: allowed ? "granted" : "denied",
+      reason: allowed ? "requestGranted" : "requestDenied",
+      consentedBeforeScan,
+      permissionBefore,
+      permissionAfter: await readLocationPermissionSnapshot(),
+    });
     if (!allowed) {
       // 系统权限被拒绝后提供明确的设置入口，避免用户停留在不可恢复状态。
       showLocationPermissionSettingsPrompt();
@@ -1211,10 +1243,27 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     setAttendanceScannerSubmitting(true);
     setPunchStage("validating");
     const timing = createAttendanceQrPerformance();
+    // 诊断上报：失败发生在哪个阶段、业务错误码、HTTP 状态；严禁带入二维码 token、打卡授权凭证与请求体。
+    const scanStartedAtMs = Date.now();
+    const reportQrFailure = (
+      stage: PunchDiagnosticEvent["stage"],
+      error: unknown,
+      extra: Partial<PunchDiagnosticEvent> = {},
+    ) => reportPunchDiagnostic({
+      stage,
+      outcome: "failed",
+      errorCode: getAttendancePunchErrorCode(error),
+      httpStatus: readHttpStatus(error),
+      errorMessage: error instanceof Error ? error.message : undefined,
+      consentedBeforeScan: locationUsageConsentedRef.current,
+      elapsedMs: Date.now() - scanStartedAtMs,
+      ...extra,
+    });
     try {
       validateAttendanceQrToken(normalizedQrToken);
     } catch (error) {
       const code = error instanceof Error ? error.message : undefined;
+      reportQrFailure("format", error, { errorCode: code });
       failAttendanceQrScan(
         session,
         t(getAttendancePunchErrorKey(code) ?? "messages.qrFormatInvalid"),
@@ -1242,6 +1291,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       }
       // 仅记录阶段与业务错误码，严禁输出二维码 token、请求体或完整响应。
       console.warn("[attendance] qr request failed", { stage: "resolve", code });
+      reportQrFailure("resolve", error);
       const errorKey = getAttendancePunchErrorKey(code);
       failAttendanceQrProcessing(
         session,
@@ -1256,6 +1306,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       qrStore = resolveAttendanceQrStore(resolvedQr, stores);
     } catch (error) {
       const code = error instanceof Error ? error.message : undefined;
+      reportQrFailure("store", error, { errorCode: code });
       failAttendanceQrProcessing(
         session,
         t(getAttendancePunchErrorKey(code) ?? "messages.qrStoreForbidden"),
@@ -1280,6 +1331,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       });
     } catch (error) {
       if (attendanceScannerSessionGate.isActive(session)) {
+        reportQrFailure("today", error);
         failAttendanceQrProcessing(
           session,
           getErrorMessage(error, "messages.qrNetworkRequired"),
@@ -1303,6 +1355,28 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     });
     if (preparation.status === "stale") return;
     if (preparation.status !== "ready") {
+      // 诊断：定位准备没通过（后台权限 / GPS / 网络），连同当时系统给出的权限读数一起上报。
+      const failedVerification = latestVerification;
+      void readLocationPermissionSnapshot().then((permissionAfter) => reportPunchDiagnostic({
+        stage: "locating",
+        outcome: "failed",
+        reason: preparation.status,
+        punchType: qrToday.nextPunchType,
+        consentedBeforeScan: locationUsageConsentedRef.current,
+        elapsedMs: Date.now() - scanStartedAtMs,
+        permissionAfter,
+        ...(failedVerification
+          ? {
+              verification: {
+                locationStatus: failedVerification.location.status,
+                locationReason: failedVerification.location.reason,
+                locationPermission: failedVerification.location.permissionStatus,
+                networkStatus: failedVerification.network.status,
+                networkVerification: failedVerification.network.verificationStatus,
+              },
+            }
+          : {}),
+      }));
       if (preparation.status === "gpsRequired"
           && latestVerification?.location.status === "permissionDenied") {
         // 前台定位被拒绝时，同样引导用户前往系统设置恢复授权。
@@ -1334,6 +1408,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
         ),
       ));
     } catch (error) {
+      // 提交失败不论会话是否还有效都要记：服务端业务失败是 HTTP 200，nginx 与后端日志都看不到。
+      reportQrFailure("punch", error, { punchType: qrToday.nextPunchType });
       if (attendanceScannerSessionGate.isActive(session)) {
         const errorKey = getAttendancePunchErrorKey(getAttendancePunchErrorCode(error), qrToday.nextPunchType);
         failAttendanceQrProcessing(
