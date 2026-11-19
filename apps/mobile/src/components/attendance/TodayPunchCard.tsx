@@ -29,10 +29,6 @@ import {
   shiftProgress,
   shiftWindow,
 } from "@/modules/attendance/attendance-punch-hero";
-import {
-  resolveLocationNoticeVariant,
-  type ShiftLocationTrackingState,
-} from "@/modules/attendance/location-notice-state";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { type AttendanceStatusTone, StatusPill } from "./AdjustmentFormControls";
@@ -94,8 +90,6 @@ export function TodayPunchCard({
   hasAuthorizedStores,
   verification,
   lastQrPunch,
-  trackingWarning,
-  locationTrackingState,
   onScan,
   isMealBreakBusy,
   onStartMealBreak,
@@ -114,9 +108,6 @@ export function TodayPunchCard({
   hasAuthorizedStores: boolean;
   verification: AttendancePunchVerificationState;
   lastQrPunch?: AttendancePunch;
-  trackingWarning?: string;
-  /** 班中定位的真实状态；不传按 unknown 处理（只显示上班前说明卡，不显示开启 / 停止状态条）。 */
-  locationTrackingState?: ShiftLocationTrackingState;
   onScan: () => void;
   isMealBreakBusy?: boolean;
   onStartMealBreak?: (storeCode: string) => void;
@@ -205,15 +196,8 @@ export function TodayPunchCard({
   const heroVariant = status === "readyToClockOut" || isOnBreak ? "working" : status === "readyToClockIn" && allowPunch ? "before" : "summary";
   const canStartMeal = Boolean(mealSession && mealPanel && mealPanel.kind !== "done" && !isOnBreak && mealSession.hasOpenSegment && onStartMealBreak);
   const clockText = formatClockTime(currentTime);
-  // 定位使用说明：上班前显示说明卡，上班中 / 下班后显示与真实采集状态一致的状态条（口径见 location-notice-state.ts）。
-  // 系统补的午夜自动下班卡不是员工真实下班，不能据此说「已下班、定位已停止」。
-  const hasClockedOut = allSegments.some((segment) => segment.clockOut && !segment.clockOut.isSystemAutoClockOut);
-  const locationNoticeVariant = resolveLocationNoticeVariant({
-    heroVariant,
-    allowPunch,
-    tracking: locationTrackingState ?? "unknown",
-    hasClockedOut,
-  });
+  // 定位使用说明：只在当天、上班前显示（班中后台定位已取消，上班中 / 下班后没有什么需要说明的状态）。
+  const showLocationNotice = allowPunch && heroVariant === "before";
 
   // 上班前副行：班次 + 离上班还有多久 / 已过上班时间多久；已经打过卡（中间休息）时写已工作。
   const beforeLine = (() => {
@@ -396,10 +380,10 @@ export function TodayPunchCard({
   return (
     <View style={styles.root}>
       {renderHero()}
-      {locationNoticeVariant !== "none" ? (
-        <LocationUsageNotice variant={locationNoticeVariant} onOpenDetails={() => setLocationDetailsOpen(true)} />
+      {showLocationNotice ? (
+        <LocationUsageNotice onOpenDetails={() => setLocationDetailsOpen(true)} />
       ) : null}
-      <LocationUsageSheet visible={locationDetailsOpen} mode="info" onDismiss={() => setLocationDetailsOpen(false)} />
+      <LocationUsageSheet visible={locationDetailsOpen} onDismiss={() => setLocationDetailsOpen(false)} />
           {/* 用餐区：休息中显示计时；满 4 小时显示提醒横幅；未到时只给一行提示。不扫码，一键开始/结束。 */}
           {mealSession && mealPanel ? (
             <View
@@ -501,11 +485,6 @@ export function TodayPunchCard({
                     : undefined,
                 ].filter(Boolean).join(" · ")}
               </Text>
-              {trackingWarning ? (
-                <Text variant="bodySmall" selectable style={styles.dangerText}>
-                  {trackingWarning}
-                </Text>
-              ) : null}
             </View>
           ) : null}
         {display.relatedStoreAlerts.map((alert) => (
