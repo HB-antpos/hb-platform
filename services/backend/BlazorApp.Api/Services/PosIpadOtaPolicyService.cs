@@ -4,13 +4,16 @@ using BlazorApp.Api.Interfaces;
 using BlazorApp.Shared.DTOs;
 using BlazorApp.Shared.Models;
 using BlazorApp.Shared.Models.HBweb;
+using BlazorApp.Shared.Models.POSM;
 using SqlSugar;
 
 namespace BlazorApp.Api.Services;
 
-public sealed class PosIpadOtaPolicyService(
+public sealed partial class PosIpadOtaPolicyService(
     ISqlSugarClient db,
-    ILogger<PosIpadOtaPolicyService> logger
+    ILogger<PosIpadOtaPolicyService> logger,
+    // 设备注册信息在 POSM 库；未注入时设备覆盖层自动关闭，行为与改造前一致（单测与旧调用方不受影响）。
+    ISqlSugarClient? posmDb = null
 ) : IPosIpadOtaPolicyService
 {
     private const string ProductionEnvironment = "production";
@@ -454,20 +457,18 @@ public sealed class PosIpadOtaPolicyService(
             return NoOtaDecision();
         }
 
-        var rollout = await db.Queryable<PosIpadOtaRollout>()
-            .FirstAsync(item =>
-                item.Environment == ProductionEnvironment
-                && item.Enabled
-                && !item.IsDeleted
-            );
-        if (rollout is null || !await MatchesTargetAsync(rollout, store.StoreGUID))
+        // 关键：三层按 设备 → 分店 → 全局基线 依次查找，先命中的层就是最终结论，
+        // 即使该层结论是「已是目标版本 / runtime 不符」也不再回落到下一层，
+        // 否则被钉在旧版本的设备一到目标就会立刻被基线拉走。
+        var layer = await ResolveDecisionLayerAsync(request, store);
+        if (layer is null)
         {
             return NoOtaDecision();
         }
 
         var release = await db.Queryable<PosIpadOtaRelease>()
             .FirstAsync(item =>
-                item.Id == rollout.ReleaseId
+                item.Id == layer.ReleaseId
                 && item.Environment == ProductionEnvironment
                 && !item.IsDeleted
             );
@@ -495,16 +496,77 @@ public sealed class PosIpadOtaPolicyService(
 
         return new PosIpadOtaDecisionDto
         {
-            State = rollout.ForceUpdate
+            State = layer.ForceUpdate
                 ? AppUpdateStates.Required
                 : AppUpdateStates.Optional,
-            PolicyVersion = rollout.PolicyVersion.ToString(CultureInfo.InvariantCulture),
+            PolicyVersion = layer.PolicyVersion.ToString(CultureInfo.InvariantCulture),
             Channel = release.Channel,
             RuntimeVersion = release.RuntimeVersion,
             IosUpdateId = release.IosUpdateId,
             UpdateGroupId = release.UpdateGroupId,
-            ReleaseMessage = rollout.ReleaseMessage,
+            ReleaseMessage = layer.ReleaseMessage,
         };
+    }
+
+    private async Task<OtaDecisionLayer?> ResolveDecisionLayerAsync(
+        PosIpadOtaDecisionRequest request,
+        Store store
+    )
+    {
+        var now = DateTime.UtcNow;
+
+        // ① 设备覆盖：同硬件、同分店的所有注册记录都算同一台设备（重新激活会产生新注册 ID）。
+        var deviceIds = await ResolveDeviceRegistrationIdsAsync(request, store);
+        if (deviceIds.Count > 0)
+        {
+            var deviceAssignment = await db.Queryable<PosIpadOtaAssignment>()
+                .Where(item =>
+                    item.Environment == ProductionEnvironment
+                    && item.Enabled
+                    && !item.IsDeleted
+                    && item.TargetType == PosIpadOtaAssignmentTargetTypes.Device
+                    && item.DeviceRegistrationId != null
+                    && deviceIds.Contains(item.DeviceRegistrationId.Value)
+                    && (item.ExpiresAtUtc == null || item.ExpiresAtUtc > now)
+                )
+                .OrderByDescending(item => item.PolicyVersion)
+                .FirstAsync();
+            if (deviceAssignment is not null)
+            {
+                return OtaDecisionLayer.From(deviceAssignment);
+            }
+        }
+
+        // ② 分店覆盖
+        var storeAssignment = await db.Queryable<PosIpadOtaAssignment>()
+            .Where(item =>
+                item.Environment == ProductionEnvironment
+                && item.Enabled
+                && !item.IsDeleted
+                && item.TargetType == PosIpadOtaAssignmentTargetTypes.Store
+                && item.StoreGuid == store.StoreGUID
+                && (item.ExpiresAtUtc == null || item.ExpiresAtUtc > now)
+            )
+            .OrderByDescending(item => item.PolicyVersion)
+            .FirstAsync();
+        if (storeAssignment is not null)
+        {
+            return OtaDecisionLayer.From(storeAssignment);
+        }
+
+        // ③ 全局基线（原有 rollout，行为不变）
+        var rollout = await db.Queryable<PosIpadOtaRollout>()
+            .FirstAsync(item =>
+                item.Environment == ProductionEnvironment
+                && item.Enabled
+                && !item.IsDeleted
+            );
+        if (rollout is null || !await MatchesTargetAsync(rollout, store.StoreGUID))
+        {
+            return null;
+        }
+
+        return OtaDecisionLayer.From(rollout);
     }
 
     private async Task<ApiResponse<PosIpadOtaRolloutDto>> DisableRolloutAsync(
@@ -924,6 +986,26 @@ public sealed class PosIpadOtaPolicyService(
                 ActualPolicyVersion = actualPolicyVersion,
             }
         );
+
+    /// <summary>三层决策里被选中的那一层，统一成决策需要的四个字段。</summary>
+    private sealed record OtaDecisionLayer(
+        Guid ReleaseId,
+        bool ForceUpdate,
+        string? ReleaseMessage,
+        long PolicyVersion
+    )
+    {
+        public static OtaDecisionLayer From(PosIpadOtaRollout rollout) =>
+            new(rollout.ReleaseId, rollout.ForceUpdate, rollout.ReleaseMessage, rollout.PolicyVersion);
+
+        public static OtaDecisionLayer From(PosIpadOtaAssignment assignment) =>
+            new(
+                assignment.ReleaseId,
+                assignment.ForceUpdate,
+                assignment.ReleaseMessage,
+                assignment.PolicyVersion
+            );
+    }
 
     private sealed record NormalizedOtaReleaseFacts(
         string UpdateGroupId,

@@ -12,11 +12,15 @@ public sealed record PosIpadNativeUpdateDecisionRequest(
     string? Version,
     string? Build);
 
+// DeviceCode / HardwareId 来自设备认证 claim，供中心按「设备 → 分店 → 基线」三层决定 OTA 版本；
+// 带默认值是为了兼容只传分店的旧调用方，缺失时中心自动跳过设备层。
 public sealed record PosIpadOtaUpdateDecisionRequest(
     string StoreCode,
     string? RuntimeVersion,
     string? CurrentUpdateId,
-    string? CurrentUpdateGroupId);
+    string? CurrentUpdateGroupId,
+    string? DeviceCode = null,
+    string? HardwareId = null);
 
 public sealed record PosIpadNativeUpdateDecision(
     string State,
