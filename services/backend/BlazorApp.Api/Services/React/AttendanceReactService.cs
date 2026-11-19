@@ -2290,6 +2290,7 @@ namespace BlazorApp.Api.Services.React
                 .OrderByDescending(item => item.PunchTimeUtc)
                 .ToListAsync();
             var result = rows.Select(item => ToDto(item)).ToList();
+            await PopulatePunchEmployeeNamesAsync(result);
             var scheduleGuids = rows
                 .Where(item => !string.IsNullOrWhiteSpace(item.ScheduleGuid))
                 .Select(item => item.ScheduleGuid!)
@@ -4526,6 +4527,41 @@ namespace BlazorApp.Api.Services.React
                 .Where((us, s) => us.UserGUID == userGuid && !us.IsDeleted && !s.IsDeleted)
                 .Select((us, s) => s.StoreCode)
                 .ToListAsync();
+        }
+
+        /// <summary>
+        /// 打卡列表按 UserGuid 补员工姓名（全名 / 昵称 / 名）。
+        /// 管理端原先只靠「分店在职名单」补名字，名单外的人（管理员 / 仓库经理在店里打卡、已离职员工、
+        /// 或没选分店看全部）只能显示 GUID；这里直接从用户表取，已删除的账号也保留名字，便于对账。
+        /// </summary>
+        private async Task PopulatePunchEmployeeNamesAsync(List<AttendancePunchDto> punches)
+        {
+            if (punches.Count == 0)
+            {
+                return;
+            }
+
+            var userGuids = punches.Select(item => item.UserGuid).Distinct().ToList();
+            var users = await _db.Queryable<User>()
+                .Where(item => userGuids.Contains(item.UserGUID))
+                .Select(item => new { item.UserGUID, item.Username, item.FullName, item.GivenName, item.Nickname })
+                .ToListAsync();
+            var userMap = users
+                .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var punch in punches)
+            {
+                if (!userMap.TryGetValue(punch.UserGuid, out var user))
+                {
+                    continue;
+                }
+
+                // 全名口径与排班列表一致：没填全名用登录名
+                punch.EmployeeName = string.IsNullOrWhiteSpace(user.FullName) ? user.Username : user.FullName.Trim();
+                punch.EmployeeNickname = string.IsNullOrWhiteSpace(user.Nickname) ? null : user.Nickname.Trim();
+                punch.EmployeeGivenName = string.IsNullOrWhiteSpace(user.GivenName) ? null : user.GivenName.Trim();
+            }
         }
 
         private async Task PopulateScheduleDisplayFieldsAsync(List<AttendanceScheduleDto> schedules)

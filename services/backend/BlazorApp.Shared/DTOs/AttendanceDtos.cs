@@ -280,6 +280,10 @@ namespace BlazorApp.Shared.DTOs
         public string? PosDeviceCode { get; set; }
         public string? SigningKeyId { get; set; }
         public string? EmployeeName { get; set; }
+        /// <summary>员工昵称：打卡列表按 UserGuid 补全，管理端「昵称 / 全名」开关用；分店名单外的人（如管理员、已离职）也靠它显示昵称。</summary>
+        public string? EmployeeNickname { get; set; }
+        /// <summary>员工的「名」：没填昵称时作昵称兜底（与 PersonNameFormatter 的短名顺序一致：昵称 → 名 → 全名 → 登录名）。</summary>
+        public string? EmployeeGivenName { get; set; }
         public string? StoreName { get; set; }
         public DateTime? ServerTimeUtc { get; set; }
         public string? Remark { get; set; }

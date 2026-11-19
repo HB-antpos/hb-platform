@@ -773,6 +773,64 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetPunchesAsync_FillsEmployeeNamesIncludingUsersOutsideStoreRoster()
+        {
+            // 管理员不在分店名单里（也没绑本店），但在店里扫码打了卡：打卡列表仍要带回全名 / 昵称 / 名，
+            // 管理端才能显示「Sean / admin Pan」而不是 GUID；已删除的账号同样保留名字。
+            await SeedStoreScopeAsync();
+            await _db.Insertable(new[]
+            {
+                new User
+                {
+                    UserGUID = "admin-user",
+                    Username = "admin",
+                    Email = "admin@example.com",
+                    PasswordHash = "hash",
+                    FullName = "admin Pan",
+                    GivenName = "admin",
+                    Nickname = " Sean ",
+                    CreatedAt = DateTime.UtcNow,
+                },
+                new User
+                {
+                    UserGUID = "left-user",
+                    Username = "left",
+                    Email = "left@example.com",
+                    PasswordHash = "hash",
+                    FullName = "Left Staff",
+                    GivenName = "Lefty",
+                    IsDeleted = true,
+                    CreatedAt = DateTime.UtcNow,
+                },
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new[]
+            {
+                CreateStoredPunchForSchedule("admin-in", null!, "BRI", "admin-user", "ClockIn", new DateTime(2026, 5, 18, 9, 0, 0)),
+                CreateStoredPunchForSchedule("left-in", null!, "BRI", "left-user", "ClockIn", new DateTime(2026, 5, 18, 9, 5, 0)),
+                CreateStoredPunchForSchedule("staff-in", null!, "BRI", "staff-user", "ClockIn", new DateTime(2026, 5, 18, 9, 10, 0)),
+                CreateStoredPunchForSchedule("ghost-in", null!, "BRI", "ghost-user", "ClockIn", new DateTime(2026, 5, 18, 9, 15, 0)),
+            }).ExecuteCommandAsync();
+
+            var result = await CreateService("manager-user", "manager", "StoreManager")
+                .GetPunchesAsync(new AttendancePunchQueryDto { StoreCode = "BRI" });
+
+            Assert.True(result.Success, result.Message);
+            var byGuid = result.Data!.ToDictionary(item => item.PunchGuid);
+            Assert.Equal("admin Pan", byGuid["admin-in"].EmployeeName);
+            Assert.Equal("Sean", byGuid["admin-in"].EmployeeNickname);
+            Assert.Equal("admin", byGuid["admin-in"].EmployeeGivenName);
+            Assert.Equal("Left Staff", byGuid["left-in"].EmployeeName);
+            Assert.Null(byGuid["left-in"].EmployeeNickname);
+            Assert.Equal("Lefty", byGuid["left-in"].EmployeeGivenName);
+            // 没填全名的退回登录名；昵称 / 名都没填就留空
+            Assert.Equal("staff", byGuid["staff-in"].EmployeeName);
+            Assert.Null(byGuid["staff-in"].EmployeeNickname);
+            Assert.Null(byGuid["staff-in"].EmployeeGivenName);
+            // 用户表里查不到的 GUID 不报错，名字留空交给前端显示 GUID
+            Assert.Null(byGuid["ghost-in"].EmployeeName);
+        }
+
+        [Fact]
         public async Task GetSchedulesAsync_WithPunches_ReturnsRosterFieldsWithoutAttendanceDetails()
         {
             await SeedStoreScopeAsync();

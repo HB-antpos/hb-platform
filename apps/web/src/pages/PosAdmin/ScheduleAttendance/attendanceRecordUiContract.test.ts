@@ -360,6 +360,11 @@ assert(!pageSource.includes('buildShiftPresets') && !pageSource.includes('pickDe
   assert(pageSource.includes('if (requestId !== storeUsersRequestRef.current) return'), '旧分店的员工名单响应要丢弃')
   // 员工列：显示名跟开关走，名字取不到显示 GUID 前 8 位；完整 GUID 在悬停提示里可复制
   assert(pageSource.includes('resolveEmployeeCell({'), '员工列要按开关显示昵称 / 全名')
+  // 名单外的人（如管理员在店里打卡）要用打卡接口带回的昵称 / 名，不能退成 GUID
+  assert(
+    pageSource.includes('recordNickname: record.userNickname') && pageSource.includes('recordGivenName: record.userGivenName'),
+    '员工列要把记录自带的昵称 / 名传给 resolveEmployeeCell',
+  )
   assert(pageSource.includes('copyable={{ text: guid, tooltips: false }}'), '完整 GUID 放进悬停提示并可复制')
   assert(!pageSource.includes('{record.userGuid || record.applicantUserGuid ||'), '员工列不再直接铺两行 GUID')
   // 选了单店后隐藏「分店」列（整列都是同一家店），选「全部分店」时保留

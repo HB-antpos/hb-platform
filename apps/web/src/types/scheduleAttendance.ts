@@ -159,6 +159,10 @@ export interface AttendancePunchDto {
   storeName?: string
   userGuid: string
   userName?: string
+  /** 员工昵称（后端 EmployeeNickname）：分店名单外的人（管理员、已离职等）也能按「昵称 / 全名」显示。 */
+  userNickname?: string
+  /** 员工的「名」（后端 EmployeeGivenName）：没填昵称时作昵称兜底。 */
+  userGivenName?: string
   workDate: string
   storeTimeZone?: string
   punchType: AttendancePunchType
