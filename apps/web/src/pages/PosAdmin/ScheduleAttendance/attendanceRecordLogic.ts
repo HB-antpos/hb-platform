@@ -360,3 +360,12 @@ export function buildLocalPunchAdjustmentPreview(
     exceptions,
   }
 }
+
+/**
+ * 打卡的「共用设备」标记：后端告诉我们这台手机在打卡前 90 天内登录过几个账号。
+ * 2 个及以上才算标记（可能有人登录同事账号代打卡，仅是复核线索）；没有标记、数据缺失或异常值一律返回 undefined。
+ */
+export function getSharedDeviceAccountCount(punch: { sharedDeviceAccountCount?: number }): number | undefined {
+  const count = punch.sharedDeviceAccountCount
+  return typeof count === 'number' && Number.isFinite(count) && count >= 2 ? Math.floor(count) : undefined
+}

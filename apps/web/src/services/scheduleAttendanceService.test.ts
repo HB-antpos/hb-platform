@@ -81,6 +81,17 @@ assertEqual(punch.userNickname, 'Sean', '打卡应带回员工昵称（名单外
 assertEqual(punch.userGivenName, 'admin', '打卡应带回员工的名（没填昵称时兜底）')
 assertEqual(punch.supersedesPunchGuid, 'raw-punch-1', '应保留原始打卡审计关系')
 assertEqual(punch.adjustmentGuid, 'adjustment-1', '应保留补卡调整审计关系')
+assertEqual(punch.sharedDeviceAccountCount, undefined, '后端没返回共用设备标记时应保持为空')
+assertEqual(
+  normalizeAttendancePunch({ PunchGuid: 'punch-shared', SharedDeviceAccountCount: 3 }).sharedDeviceAccountCount,
+  3,
+  '应兼容 PascalCase 的共用设备账号数',
+)
+assertEqual(
+  normalizeAttendancePunch({ punchGuid: 'punch-shared', sharedDeviceAccountCount: 2 }).sharedDeviceAccountCount,
+  2,
+  '应兼容 camelCase 的共用设备账号数',
+)
 
 const approval = normalizeAttendanceApproval({
   ApprovalGuid: 'approval-1',

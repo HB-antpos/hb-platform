@@ -95,6 +95,8 @@ namespace BlazorApp.Api.Tests
                 ,typeof(AttendancePublicHolidayPay)
                 // 公假 / 带薪假现金金额手填：生产由迁移 20261120.001 创建；测试库同样用 CodeFirst。
                 ,typeof(AttendancePayPeriodCashOverride)
+                // 打卡「共用设备」标记按登录审计表反查同一台手机登录过的账号（见 AttendanceReactServiceDeviceFlagTests.cs）。
+                ,typeof(UserLoginDeviceRecord)
             );
             _db.Ado.ExecuteCommand(
                 "CREATE UNIQUE INDEX UX_Test_EmployeePayRate_User_EffectiveFrom "

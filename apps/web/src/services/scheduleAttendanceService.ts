@@ -155,6 +155,7 @@ export function normalizeAttendancePunch(value: unknown): AttendancePunchDto {
     punchTimeLocal: readCompat<string>(source, 'punchTimeLocal', 'PunchTimeLocal'),
     status: readCompat<AttendancePunchDto['status']>(source, 'status', 'Status') ?? 'Normal',
     deviceId: readCompat<string>(source, 'deviceId', 'DeviceId'),
+    sharedDeviceAccountCount: readCompat<number>(source, 'sharedDeviceAccountCount', 'SharedDeviceAccountCount'),
     source: readCompat<string>(source, 'source', 'Source'),
     remark: readCompat<string>(source, 'remark', 'Remark'),
     locationLatitude: readCompat<number>(source, 'locationLatitude', 'LocationLatitude'),

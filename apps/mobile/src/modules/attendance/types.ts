@@ -307,6 +307,11 @@ export interface AttendancePunchPayload {
   locationLongitude?: number;
   locationAccuracy?: number;
   locationCapturedAtUtc?: string;
+  /**
+   * 本机安装 ID（与登录审计用的是同一个值）。后端据此判断「同一台手机近期登录过多个账号」，
+   * 给店长一个复核线索（防止登录同事账号代打卡）；读取失败时不带，旧后端忽略此字段。
+   */
+  deviceId?: string;
   /** 扫码前员工对缺休息的回答；旧后端忽略此字段。 */
   mealDeclaration?: AttendanceMealDeclaration;
   /**

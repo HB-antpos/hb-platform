@@ -119,6 +119,7 @@ import {
   insertAttendanceWeekday,
   buildAttendanceMealPaySummary,
   splitExceptionDuration,
+  getSharedDeviceAccountCount,
 } from './attendanceRecordLogic'
 import type { LocalPunchAdjustmentPreview } from './attendanceRecordLogic'
 import AttendanceLocationTrajectoryMap from './AttendanceLocationTrajectoryMap'
@@ -1034,6 +1035,20 @@ export default function ScheduleAttendancePage() {
   const punchStatusTag = (value: AttendancePunchStatus) => {
     const color = value === 'Normal' || value === 'Approved' ? 'green' : value === 'PendingApproval' ? 'orange' : 'red'
     return <Tag color={color}>{statusLabel('punch', value)}</Tag>
+  }
+
+  // 共用设备标记：同一台手机近期登录过多个账号，提示店长核实是否有人登录同事账号代打卡。
+  // 只是复核线索，不改打卡状态、不拦截；账号数不足 2 或后端没返回时不显示。
+  const sharedDeviceTag = (record: AttendancePunchDto) => {
+    const accountCount = getSharedDeviceAccountCount(record)
+    if (accountCount === undefined) return null
+    return (
+      <Tooltip title={t('posAdmin.scheduleAttendance.deviceFlag.sharedTip', { count: accountCount })}>
+        <Tag color="orange" icon={<WarningOutlined />}>
+          {t('posAdmin.scheduleAttendance.deviceFlag.shared')}
+        </Tag>
+      </Tooltip>
+    )
   }
 
   const holidayStatusTag = (value: AttendanceHolidayBusinessStatus) => {
@@ -2690,7 +2705,17 @@ export default function ScheduleAttendancePage() {
       ),
     },
     { title: t('posAdmin.scheduleAttendance.fields.timeZone'), dataIndex: 'storeTimeZone', width: 180 },
-    { title: t('common.status'), dataIndex: 'status', width: 150, render: punchStatusTag },
+    {
+      title: t('common.status'),
+      dataIndex: 'status',
+      width: 200,
+      render: (value: AttendancePunchStatus, record) => (
+        <Space size={4} wrap>
+          {punchStatusTag(value)}
+          {sharedDeviceTag(record)}
+        </Space>
+      ),
+    },
     {
       title: t('posAdmin.scheduleAttendance.fields.location'),
       key: 'location',

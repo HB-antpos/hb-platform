@@ -186,6 +186,31 @@ for (const pathValue of requiredLocalePaths) {
 
 assert(recordColumnsSource.includes('buildAttendanceMealPaySummary(record)'), '考勤记录应展示用餐扣除、加回与计薪工时')
 
+// 打卡「共用设备」标记：同一台手机近期登录过多个账号时，在打卡记录的状态列提示店长复核（只提示，不改状态、不拦截）。
+{
+  assert(
+    serviceSource.includes("sharedDeviceAccountCount: readCompat<number>(source, 'sharedDeviceAccountCount', 'SharedDeviceAccountCount')"),
+    '打卡规整必须兼容 camelCase / PascalCase 的共用设备账号数',
+  )
+  assert(
+    punchColumnsSource.includes('punchStatusTag(value)') && punchColumnsSource.includes('sharedDeviceTag(record)'),
+    '打卡记录状态列要同时显示原状态标签和共用设备标记',
+  )
+  assert(
+    pageSource.includes('getSharedDeviceAccountCount(record)') && pageSource.includes("t('posAdmin.scheduleAttendance.deviceFlag.shared')"),
+    '共用设备标记必须经 getSharedDeviceAccountCount 判定（≥2 才显示），文案走多语言',
+  )
+  const deviceFlagKeys = (file: string) => Object.keys(JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance', file), 'utf8')).posAdmin.scheduleAttendance.deviceFlag)
+  for (const key of ['shared', 'sharedTip']) {
+    assert(
+      deviceFlagKeys('scheduleAttendanceMessages.zh.json').includes(key) && deviceFlagKeys('scheduleAttendanceMessages.en.json').includes(key),
+      `共用设备文案 ${key} 中英文都要有`,
+    )
+  }
+  const sharedTipZh = JSON.parse(readFileSync(path.resolve(process.cwd(), 'src/pages/PosAdmin/ScheduleAttendance/scheduleAttendanceMessages.zh.json'), 'utf8')).posAdmin.scheduleAttendance.deviceFlag.sharedTip as string
+  assert(sharedTipZh.includes('{{count}}') && sharedTipZh.includes('核实'), '提示要带账号数，并说明只是复核线索、请与员工核实（不能写成违规结论）')
+}
+
 console.log('attendanceRecordUiContract.test.ts: ok')
 
 // 员工、分店在编辑时不能直接改（后端 UpdateSchedule 不改这两项）：旧的「新建 / 编辑排班」抽屉已移除，
