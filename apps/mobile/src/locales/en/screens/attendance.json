@@ -1168,6 +1168,59 @@
       "close": "Close"
     }
   },
+  "storeWeek": {
+    "scopeLabel": "Roster scope",
+    "scope": {
+      "mine": "My shifts",
+      "store": "Whole store"
+    },
+    "viewLabel": "Display",
+    "view": {
+      "day": "By day",
+      "grid": "Table"
+    },
+    "meta": "{{shifts}} shifts · {{people}} people",
+    "published": "Published",
+    "me": "Me",
+    "today": "Today",
+    "colleagues": "Team",
+    "onDuty": "On",
+    "peopleOnDuty_one": "{{count}} person on",
+    "peopleOnDuty_other": "{{count}} people on",
+    "shiftCount_one": "{{count}} shift",
+    "shiftCount_other": "{{count}} shifts",
+    "peopleShort_one": "{{count}} person",
+    "peopleShort_other": "{{count}} people",
+    "gridHint": "Tap a cell to see who is on that day, or a name to see their week.",
+    "notice": "Only shifts your manager has published are shown. Times can change at short notice — the Today page is the source of truth for clocking in.",
+    "noStore": "You are not linked to any store yet. Please contact your manager.",
+    "empty": {
+      "title": "{{store}} has not published {{week}} yet",
+      "body": "Once your manager publishes it, the whole store's roster will show up here.",
+      "fillHint": "In the meantime you can tell your manager which days you can work.",
+      "fillAction": "Fill in availability"
+    },
+    "error": {
+      "title": "Couldn't load the store roster",
+      "stale": "Couldn't refresh the store roster. Showing the last loaded version.",
+      "retry": "Retry"
+    },
+    "daySheet": {
+      "title": "{{weekday}} {{date}} · {{count}} on",
+      "titleToday": "{{weekday}} {{date}} · Today · {{count}} on",
+      "mine": "You {{range}}",
+      "overlap": "{{hours}} h with {{name}}",
+      "noMine": "You are not working this day",
+      "empty": "Nobody is working this day",
+      "close": "Close",
+      "viewMine": "View my shifts"
+    },
+    "personSheet": {
+      "title": "{{name}} · {{count}} shifts this week",
+      "rest": "Off",
+      "close": "Close"
+    }
+  },
   "myAttendance": {
     "today": "Today",
     "done": "Done",

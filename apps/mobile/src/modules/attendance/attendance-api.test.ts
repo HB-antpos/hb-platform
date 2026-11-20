@@ -35,3 +35,9 @@ console.log("attendance-api.test.ts (schedule placement): ok");
 assert.match(source, /export async function getAttendanceEmployees[\s\S]{0,900}givenName: asOptionalString\(pick\(raw, "givenName", "GivenName"\)\)[\s\S]{0,200}familyName: asOptionalString\(pick\(raw, "familyName", "FamilyName"\)\)[\s\S]{0,200}nickname: asOptionalString\(pick\(raw, "nickname", "Nickname"\)\)/,
   "考勤员工接口必须映射 givenName / familyName / nickname（兼容 PascalCase）");
 console.log("attendance-api.test.ts (employee name parts): ok");
+
+// 员工「整店整周排班」：必须走只读的 my/store-week（员工只有「查看自己的排班」权限，不能用店长的 schedules/week），
+// 并且经 normalizeStoreWeek 规整，不把后端原始响应直接交给页面。
+assert.match(source, /export async function getMyStoreWeek\(storeCode\?: string, weekStartDate\?: string\)[\s\S]{0,300}apiClient\.get\(`\$\{ATTENDANCE_BASE\}\/my\/store-week`, \{ params: \{ storeCode, weekStartDate \} \}\)[\s\S]{0,200}normalizeStoreWeek\(response\.data/,
+  "整店排班应 GET /my/store-week 并经 normalizeStoreWeek 规整");
+console.log("attendance-api.test.ts (store week): ok");

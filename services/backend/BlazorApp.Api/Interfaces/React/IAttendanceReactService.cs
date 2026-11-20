@@ -19,6 +19,7 @@ namespace BlazorApp.Api.Interfaces.React
         Task<int> RunMidnightAutoClockOutAsync(CancellationToken cancellationToken = default);
         Task<ApiResponse<AttendanceTodayDto>> GetMyTodayAsync(DateTime? workDate = null, string? storeCode = null);
         Task<ApiResponse<List<AttendanceScheduleDto>>> GetMyWeekAsync(DateTime? weekStartDate, string? storeCode = null);
+        Task<ApiResponse<AttendanceStoreWeekDto>> GetMyStoreWeekAsync(DateTime? weekStartDate, string? storeCode = null);
         Task<ApiResponse<List<AttendanceAvailabilityDto>>> GetMyAvailabilityAsync(DateTime? weekStartDate, string? storeCode = null);
         Task<ApiResponse<List<AttendanceAvailabilityDto>>> CreateMyAvailabilityAsync(CreateAttendanceAvailabilityDto request);
         Task<ApiResponse<AttendanceAvailabilityDto>> UpdateMyAvailabilityAsync(string availabilityGuid, UpdateAttendanceAvailabilityDto request);
