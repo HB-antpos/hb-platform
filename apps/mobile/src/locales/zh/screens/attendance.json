@@ -1168,6 +1168,59 @@
       "close": "关闭"
     }
   },
+  "storeWeek": {
+    "scopeLabel": "排班范围",
+    "scope": {
+      "mine": "我的班次",
+      "store": "整店排班"
+    },
+    "viewLabel": "显示方式",
+    "view": {
+      "day": "按天",
+      "grid": "表格"
+    },
+    "meta": "{{shifts}} 班 · {{people}} 人",
+    "published": "已发布",
+    "me": "我",
+    "today": "今天",
+    "colleagues": "同事",
+    "onDuty": "在岗",
+    "peopleOnDuty_one": "{{count}} 人在岗",
+    "peopleOnDuty_other": "{{count}} 人在岗",
+    "shiftCount_one": "{{count}} 班",
+    "shiftCount_other": "{{count}} 班",
+    "peopleShort_one": "{{count}} 人",
+    "peopleShort_other": "{{count}} 人",
+    "gridHint": "点格子看当天谁在岗，点名字看他的一周。",
+    "notice": "只显示店长已发布的班；时间可能临时调整，以「今天」页的打卡为准。",
+    "noStore": "你还没有关联的分店，请联系店长。",
+    "empty": {
+      "title": "{{store}}{{week}}的班还没发布",
+      "body": "店长发布后，这里会显示整店的班。",
+      "fillHint": "现在可以先告诉店长你哪几天能上班。",
+      "fillAction": "去填可上班时间"
+    },
+    "error": {
+      "title": "整店排班加载失败",
+      "stale": "整店排班加载失败，下面是上次的内容",
+      "retry": "重试"
+    },
+    "daySheet": {
+      "title": "{{weekday}} {{date}} · {{count}} 人在岗",
+      "titleToday": "{{weekday}} {{date}} · 今天 · {{count}} 人在岗",
+      "mine": "你 {{range}}",
+      "overlap": "与 {{name}} 同时在岗 {{hours}} 小时",
+      "noMine": "你这天没有班",
+      "empty": "这天没有人上班",
+      "close": "关闭",
+      "viewMine": "看我的班次"
+    },
+    "personSheet": {
+      "title": "{{name}} · 本周 {{count}} 班",
+      "rest": "休息",
+      "close": "关闭"
+    }
+  },
   "myAttendance": {
     "today": "今天",
     "done": "已完成",

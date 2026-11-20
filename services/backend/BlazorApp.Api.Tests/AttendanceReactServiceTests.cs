@@ -1277,6 +1277,149 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetMyStoreWeekAsync_ReturnsColleaguesPublishedShiftsOfRelatedStoreOnly()
+        {
+            await SeedStoreScopeAsync();
+            await _db.Updateable<User>()
+                .SetColumns(item => item.Nickname == "Manny")
+                .Where(item => item.UserGUID == "manager-user")
+                .ExecuteCommandAsync();
+            await SeedScheduleAsync("mine", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active");
+            await SeedScheduleAsync("colleague", "BRI", "manager-user", new DateTime(2026, 5, 18), "Active",
+                new TimeSpan(7, 0, 0), new TimeSpan(15, 30, 0));
+            await SeedScheduleAsync("draft", "BRI", "manager-user", new DateTime(2026, 5, 19), "Draft");
+            await SeedScheduleAsync("cancelled", "BRI", "manager-user", new DateTime(2026, 5, 20), "Cancelled");
+            await SeedScheduleAsync("next-week", "BRI", "manager-user", new DateTime(2026, 5, 25), "Active");
+            await SeedScheduleAsync("other-store", "OTHER", "manager-user", new DateTime(2026, 5, 18), "Active");
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.GetMyStoreWeekAsync(new DateTime(2026, 5, 20), "BRI");
+
+            Assert.True(result.Success);
+            Assert.Equal(new DateTime(2026, 5, 18), result.Data!.WeekStartDate);
+            var store = Assert.Single(result.Data.Stores);
+            Assert.Equal("BRI", store.StoreCode);
+            Assert.Equal("Brisbane", store.StoreName);
+            Assert.True(store.Published);
+            // 按日期、开始时间排序：同一天 07:00 的同事排在 09:00 的我前面；草稿 / 已取消 / 下周 / 别的分店都不在里面。
+            Assert.Collection(
+                store.Shifts,
+                first =>
+                {
+                    Assert.Equal("Manny", first.DisplayName);
+                    Assert.False(first.IsMine);
+                    Assert.Equal(new TimeSpan(7, 0, 0), first.StartTime);
+                    Assert.Equal(new TimeSpan(15, 30, 0), first.EndTime);
+                },
+                second =>
+                {
+                    Assert.Equal("staff", second.DisplayName);
+                    Assert.True(second.IsMine);
+                });
+        }
+
+        [Fact]
+        public async Task GetMyStoreWeekAsync_WhenOnlyDraftsExist_ReportsNotPublished()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("draft", "BRI", "manager-user", new DateTime(2026, 5, 19), "Draft");
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.GetMyStoreWeekAsync(new DateTime(2026, 5, 18), "BRI");
+
+            Assert.True(result.Success);
+            var store = Assert.Single(result.Data!.Stores);
+            Assert.False(store.Published);
+            Assert.Empty(store.Shifts);
+        }
+
+        [Fact]
+        public async Task GetMyStoreWeekAsync_HidesColleagueLeaveButKeepsOwnShift()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("colleague-on-leave", "BRI", "manager-user", new DateTime(2026, 5, 18), "Active");
+            await SeedScheduleAsync("colleague-working", "BRI", "manager-user", new DateTime(2026, 5, 19), "Active");
+            await SeedScheduleAsync("mine-on-leave", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active");
+            await _db.Insertable(new[]
+            {
+                new AttendanceLeaveRequest
+                {
+                    LeaveGuid = "colleague-leave", StoreCode = "BRI", UserGuid = "manager-user", LeaveType = "SickLeave",
+                    StartDate = new DateTime(2026, 5, 18), EndDate = new DateTime(2026, 5, 18), Status = "Approved",
+                    CreatedAt = DateTime.UtcNow,
+                },
+                new AttendanceLeaveRequest
+                {
+                    LeaveGuid = "my-leave", StoreCode = "BRI", UserGuid = "staff-user", LeaveType = "AnnualLeave",
+                    StartDate = new DateTime(2026, 5, 18), EndDate = new DateTime(2026, 5, 18), Status = "Approved",
+                    CreatedAt = DateTime.UtcNow,
+                },
+            }).ExecuteCommandAsync();
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.GetMyStoreWeekAsync(new DateTime(2026, 5, 18), "BRI");
+
+            var shifts = Assert.Single(result.Data!.Stores).Shifts;
+            // 同事请假那天对员工就是「没班」；自己的班照常返回；响应里没有任何请假类型字段可泄露。
+            Assert.DoesNotContain(shifts, item => !item.IsMine && item.WorkDate == new DateTime(2026, 5, 18));
+            Assert.Contains(shifts, item => item.IsMine && item.WorkDate == new DateTime(2026, 5, 18));
+            Assert.Contains(shifts, item => !item.IsMine && item.WorkDate == new DateTime(2026, 5, 19));
+        }
+
+        [Fact]
+        public async Task GetMyStoreWeekAsync_WhenAllColleaguesOnLeave_StillReportsPublished()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("colleague-on-leave", "BRI", "manager-user", new DateTime(2026, 5, 18), "Active");
+            await _db.Insertable(new AttendanceLeaveRequest
+            {
+                LeaveGuid = "colleague-leave", StoreCode = "BRI", UserGuid = "manager-user", LeaveType = "SickLeave",
+                StartDate = new DateTime(2026, 5, 18), EndDate = new DateTime(2026, 5, 18), Status = "Approved",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.GetMyStoreWeekAsync(new DateTime(2026, 5, 18), "BRI");
+
+            var store = Assert.Single(result.Data!.Stores);
+            Assert.True(store.Published);
+            Assert.Empty(store.Shifts);
+        }
+
+        [Fact]
+        public async Task GetMyStoreWeekAsync_WithoutStoreCode_ListsAllRelatedStoresIncludingEmptyOnes()
+        {
+            await SeedStoreScopeAsync();
+            await _db.Insertable(new UserStore
+            {
+                UserStoreGUID = "staff-store-other", UserGUID = "staff-user", StoreGUID = "store-other", CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+            await SeedScheduleAsync("bri-shift", "BRI", "staff-user", new DateTime(2026, 5, 18), "Active");
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.GetMyStoreWeekAsync(new DateTime(2026, 5, 18));
+
+            Assert.True(result.Success);
+            // 按店名排序（Brisbane、Other）；没有排班的分店也要列出来，前端的分店切换才有得选。
+            Assert.Equal(new[] { "BRI", "OTHER" }, result.Data!.Stores.Select(item => item.StoreCode).ToArray());
+            Assert.True(result.Data.Stores[0].Published);
+            Assert.False(result.Data.Stores[1].Published);
+        }
+
+        [Fact]
+        public async Task GetMyStoreWeekAsync_WhenStoreNotRelated_IsForbidden()
+        {
+            await SeedStoreScopeAsync();
+            await SeedScheduleAsync("other-store", "OTHER", "manager-user", new DateTime(2026, 5, 18), "Active");
+            var service = CreateService("staff-user", "staff", "StoreStaff");
+
+            var result = await service.GetMyStoreWeekAsync(new DateTime(2026, 5, 18), "OTHER");
+
+            Assert.False(result.Success);
+            Assert.Equal("FORBIDDEN_STORE", result.ErrorCode);
+        }
+
+        [Fact]
         public async Task GetMyTodayAsync_WhenWorkDateProvided_ReturnsSelectedDateData()
         {
             await SeedStoreScopeAsync();
