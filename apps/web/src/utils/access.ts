@@ -125,6 +125,7 @@ function createEmptyAccess(): AccessControl {
     canViewAttendanceAvailability: false,
     canViewAttendancePunches: false,
     canReviewAttendance: false,
+    canViewAttendanceHoliday: false,
     canEditAttendanceHoliday: false,
     canEditAttendanceSettings: false,
     canReviewOwnAttendance: false,
@@ -425,6 +426,9 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     hasPermission(P.Attendance.PunchViewManagedStore)
   // 与后端口径一致：审批 / 驳回接口只认 Attendance.Approval.ReviewManagedStore（请假审核也走同一接口）。
   const canReviewAttendance = isAdmin || hasPermission(P.Attendance.ApprovalReviewManagedStore)
+  // 「公共假期」页签是否显示：后端 GET attendance/holidays 只认 Holiday.ViewStore（别名表里没有 EditManagedStore / Admin.View），
+  // 这里与后端严格一致，避免页签显示出来、点进去却 403。
+  const canViewAttendanceHoliday = isAdmin || hasPermission(P.Attendance.HolidayViewStore)
   const canEditAttendanceHoliday =
     isAdmin ||
     hasPermission(P.Attendance.AdminView) ||
@@ -616,6 +620,7 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canViewAttendanceAvailability,
     canViewAttendancePunches,
     canReviewAttendance,
+    canViewAttendanceHoliday,
     canEditAttendanceHoliday,
     canEditAttendanceSettings,
     canReviewOwnAttendance,

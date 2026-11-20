@@ -416,6 +416,20 @@ export default function ScheduleAttendancePage() {
   const [activeTab, setActiveTab] = useState<TabKey>(() => (
     canReviewTab && (wantsReviewTab || !canViewSchedulePart) ? 'review' : 'schedules'
   ))
+  // 页签 → 所需权限：没有权限的页签直接不渲染（而不是点进去才被接口 403）。
+  // 每一项都与该页签数据接口的后端授权一一对应：
+  //   records / punches → Attendance.Punch.ViewManagedStore；availability → Attendance.Availability.ViewManagedStore；
+  //   holidays → Attendance.Holiday.ViewStore；settings → Attendance.Settings.Edit（读写同一个码）。
+  // 未列出的页签（周排班）只要能进本页即可显示。
+  const scheduleTabPermissions: Partial<Record<TabKey, boolean>> = {
+    records: access.canViewAttendancePunches,
+    availability: access.canViewAttendanceAvailability,
+    punches: access.canViewAttendancePunches,
+    holidays: access.canViewAttendanceHoliday,
+    settings: access.canEditAttendanceSettings,
+  }
+  // 当前停留的页签是否仍有权限：权限变化（重新登录 / 换账号）后要回落，同时挡住对已隐藏页签的数据请求。
+  const isActiveTabPermitted = scheduleTabPermissions[activeTab] ?? true
   const [storeOptions, setStoreOptions] = useState<{ label: string; value: string }[]>([])
   const [storeCode, setStoreCode] = useState<string | undefined>()
   // 分店侧栏：最近使用、展开偏好按浏览器记住（只是便利功能，存储不可用时照常工作）
@@ -869,6 +883,8 @@ export default function ScheduleAttendancePage() {
   }, [settingsForm, t])
 
   const loadActiveTab = useCallback((page = 1) => {
+    // 当前页签已无权限（等待下面的回落 effect 切走）时不发请求，避免无谓的 403 与「加载失败」提示
+    if (!isActiveTabPermitted) return
     if (activeTab === 'schedules') {
       void loadSchedules(page)
       void loadStoreUsers()
@@ -881,7 +897,7 @@ export default function ScheduleAttendancePage() {
     if (activeTab === 'punches') void loadPunches(page)
     if (activeTab === 'holidays') void loadHolidays(page)
     if (activeTab === 'settings') void loadSettings()
-  }, [access.canViewAttendancePunches, activeTab, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers, loadWeekAvailability, loadWeekPunches])
+  }, [access.canViewAttendancePunches, activeTab, isActiveTabPermitted, loadAvailability, loadHolidays, loadPunches, loadRecords, loadScheduleHolidays, loadSchedules, loadSettings, loadStoreUsers, loadWeekAvailability, loadWeekPunches])
 
   useEffect(() => {
     if (visibleStoreCodes !== null) {
@@ -971,9 +987,10 @@ export default function ScheduleAttendancePage() {
     setEditingCell(null)
   }, [activeTab, storeCode, selectedWeek])
 
+  // 停留的页签失去权限（含考勤记录 / 打卡记录 / 员工可用时间 / 公共假期 / 考勤设置）时回落到周排班
   useEffect(() => {
-    if (activeTab === 'records' && !access.canViewAttendancePunches) setActiveTab('schedules')
-  }, [access.canViewAttendancePunches, activeTab])
+    if (!isActiveTabPermitted) setActiveTab('schedules')
+  }, [isActiveTabPermitted])
 
   // 旧地址 /pos-admin/attendance-review 重定向到 ?tab=review：本页已挂载（保活）时也要切过去。
   useEffect(() => {
@@ -3129,10 +3146,12 @@ export default function ScheduleAttendancePage() {
     ),
   } : null
   const afterRecordsKeys = new Set<string>(['schedules', 'records'])
+  // 没有对应权限的页签直接隐藏；「考勤审核」不在此列，仍只由 canReviewAttendance 决定
+  const permittedScheduleTabItems = scheduleTabItems.filter((item) => scheduleTabPermissions[item.key as TabKey] ?? true)
   const tabItems = [
-    ...(canViewSchedulePart ? scheduleTabItems.filter((item) => afterRecordsKeys.has(item.key)) : []),
+    ...(canViewSchedulePart ? permittedScheduleTabItems.filter((item) => afterRecordsKeys.has(item.key)) : []),
     ...(reviewTabItem ? [reviewTabItem] : []),
-    ...(canViewSchedulePart ? scheduleTabItems.filter((item) => !afterRecordsKeys.has(item.key)) : []),
+    ...(canViewSchedulePart ? permittedScheduleTabItems.filter((item) => !afterRecordsKeys.has(item.key)) : []),
   ]
 
   return (

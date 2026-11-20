@@ -142,6 +142,7 @@ export interface AccessControl {
   canViewAttendanceAvailability: boolean
   canViewAttendancePunches: boolean
   canReviewAttendance: boolean
+  canViewAttendanceHoliday: boolean
   canEditAttendanceHoliday: boolean
   canEditAttendanceSettings: boolean
   canReviewOwnAttendance: boolean
