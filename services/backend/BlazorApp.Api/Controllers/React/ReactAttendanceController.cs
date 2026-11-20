@@ -97,6 +97,14 @@ namespace BlazorApp.Api.Controllers.React
             [FromQuery] string? storeCode = null
         ) => Ok(await _service.GetMyWeekAsync(weekStartDate, storeCode));
 
+        // 员工查看自己关联分店的整周排班（只读，只含姓名与班次时间）；权限同 my/week，不需要店长权限。
+        [HttpGet("my/store-week")]
+        [Authorize(Policy = Permissions.Attendance.Schedule.ViewSelf)]
+        public async Task<IActionResult> GetMyStoreWeek(
+            [FromQuery] DateTime? weekStartDate = null,
+            [FromQuery] string? storeCode = null
+        ) => Ok(await _service.GetMyStoreWeekAsync(weekStartDate, storeCode));
+
         [HttpGet("my/availability")]
         [Authorize(Policy = Permissions.Attendance.Availability.SubmitSelf)]
         public async Task<IActionResult> GetMyAvailability(

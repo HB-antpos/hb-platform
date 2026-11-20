@@ -4055,6 +4055,34 @@ function registerAttendanceRoutes(
       },
     };
   });
+  // 整店排班（只读）：审核账号只有自己一个人，返回自己已发布的班即可，保证该页签在审核模式下不报错。
+  register(transport, ["GET"], "/react/v1/attendance/my/store-week", ({ query }) => {
+    const current = state();
+    const mine = current.schedules.filter(
+      (item) => item.isMine && String(item.status ?? "Active").toLowerCase() === "active",
+    );
+    return {
+      data: {
+        weekStartDate: query.get("weekStartDate") ?? current.today,
+        stores: [
+          {
+            storeCode: query.get("storeCode") ?? String(mine[0]?.storeCode ?? "REV001"),
+            storeName: mine[0]?.storeName ?? "Review Store",
+            published: mine.length > 0,
+            shifts: mine.map((item) => ({
+              userGuid: String(item.userGuid ?? "review-user"),
+              displayName: String(item.employeeName ?? "Me"),
+              fullName: item.employeeName,
+              workDate: item.workDate,
+              startTime: item.startTime,
+              endTime: item.endTime,
+              isMine: true,
+            })),
+          },
+        ],
+      },
+    };
+  });
   register(transport, ["GET"], "/react/v1/attendance/my/availability", () => ({
     data: clone(state().availability),
   }));

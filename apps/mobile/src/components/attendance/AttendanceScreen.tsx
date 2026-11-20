@@ -40,6 +40,11 @@ import { ScheduleManagementCard } from "@/components/attendance/ScheduleManageme
 import { TodayPunchCard } from "@/components/attendance/TodayPunchCard";
 import { MyRequestsPanel } from "@/components/attendance/MyRequestsPanel";
 import { MySchedulePanel } from "@/components/attendance/MySchedulePanel";
+import {
+  MyScheduleScopeSwitch,
+  StoreWeekPanel,
+  type MyScheduleScope,
+} from "@/components/attendance/schedule/StoreWeekPanel";
 import { shiftDate } from "@/modules/attendance/attendance-my-week";
 import { executePlacement } from "@/modules/attendance/schedule-placement-actions";
 import type { PlacementTargetCell } from "@/modules/attendance/schedule-placement-actions";
@@ -64,6 +69,7 @@ import {
   getManagedAvailability,
   getMyAttendanceToday,
   getMyAttendanceWeek,
+  getMyStoreWeek,
   getMyAvailability,
   getAttendanceEmployees,
   getAttendancePunchScheduleGuids,
@@ -254,6 +260,8 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
   );
   const [activePersonalTab, setActivePersonalTab] =
     useState<PersonalAttendanceTab>("punchRecords");
+  // 「我的排班」页签里：我的班次 / 整店排班（只读，看同事的已发布班次）。
+  const [myScheduleScope, setMyScheduleScope] = useState<MyScheduleScope>("mine");
   const [activeManagementTab, setActiveManagementTab] =
     useState<AttendanceManagementTab>(() =>
       access.canViewAttendancePunchRecords ? "punches" : "schedule");
@@ -409,6 +417,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       getMyAttendanceWeek(selectedStoreCode, employeeWeekStartDate),
     // 打卡页的本周日期条与「下一个班」也用这份数据。
     enabled: Boolean(isAuthenticated && user && (isAvailabilityWeekTab || isPunchRecordsTab)),
+  });
+  const storeWeekQuery = useQuery({
+    queryKey: ["attendance", "my", "store-week", selectedStoreCode ?? "all", employeeWeekStartDate],
+    queryFn: () => getMyStoreWeek(selectedStoreCode, employeeWeekStartDate),
+    // 只在「我的排班 → 整店排班」打开时才请求，平时不多一个请求。
+    enabled: Boolean(isAuthenticated && user && isAvailabilityWeekTab && myScheduleScope === "store"),
   });
   const availabilityQuery = useQuery({
     queryKey: attendanceKeys.availability(
@@ -860,7 +874,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
 
   const isPersonalRefreshing = isPunchRecordsTab
     ? todayQuery.isRefetching
-    : weekQuery.isRefetching || availabilityQuery.isRefetching;
+    : weekQuery.isRefetching || availabilityQuery.isRefetching || storeWeekQuery.isRefetching;
   const isManagementRefreshing =
     (isScheduleManagementTab &&
       (managerSchedulesQuery.isRefetching || storeUsersQuery.isRefetching)) ||
@@ -977,12 +991,17 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     router.navigate("/(shell)/settings");
   }, [router]);
 
+  const scopeSwitch = (
+    <MyScheduleScopeSwitch value={myScheduleScope} onChange={setMyScheduleScope} />
+  );
+
   const refresh = useCallback(async () => {
     try {
       await Promise.all([
         isPunchRecordsTab ? todayQuery.refetch() : Promise.resolve(),
         isAvailabilityWeekTab ? weekQuery.refetch() : Promise.resolve(),
         isAvailabilityWeekTab ? availabilityQuery.refetch() : Promise.resolve(),
+        isAvailabilityWeekTab && myScheduleScope === "store" ? storeWeekQuery.refetch() : Promise.resolve(),
         isLeaveManagementTab ? approvalsQuery.refetch() : Promise.resolve(),
         (isScheduleManagementTab || isLeaveManagementTab) && selectedStoreCode
           ? storeUsersQuery.refetch()
@@ -1022,10 +1041,12 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
     isScheduleManagementTab,
     managedAvailabilityQuery,
     managerSchedulesQuery,
+    myScheduleScope,
     queryClient,
     selectedStoreCode,
     showMessage,
     storeUsersQuery,
+    storeWeekQuery,
     t,
     todayQuery,
     weekQuery,
@@ -1761,26 +1782,45 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
             ) : null}
             {isAvailabilityWeekTab ? (
               <>
-                {employeeLoadError ? (
-                  <Text accessibilityRole="alert" style={styles.muted}>
-                    {getErrorMessage(employeeLoadError, "messages.loadFailed")}
-                  </Text>
-                ) : null}
-                <MySchedulePanel
-                  weekStartDate={employeeWeekStartDate}
-                  today={todayDate}
-                  week={weekQuery.data}
-                  availability={availabilityQuery.data ?? []}
-                  isLoading={employeeInitialLoading}
-                  onPreviousWeek={() => setSelectedDate((current) => shiftDate(current, -7))}
-                  onNextWeek={() => setSelectedDate((current) => shiftDate(current, 7))}
-                  onFillAvailability={(dates) => setAvailabilitySheet({ dates })}
-                  onEditAvailability={(item) => setAvailabilitySheet({ dates: [item.workDate], item })}
-                  onGoToToday={() => {
-                    setSelectedDate(todayDate);
-                    setActivePersonalTab("punchRecords");
-                  }}
-                />
+                {myScheduleScope === "store" ? (
+                  <StoreWeekPanel
+                    weekStartDate={employeeWeekStartDate}
+                    today={todayDate}
+                    storeCode={selectedStoreCode}
+                    week={storeWeekQuery.data}
+                    isLoading={storeWeekQuery.isLoading}
+                    isError={storeWeekQuery.isError}
+                    onRetry={() => void storeWeekQuery.refetch()}
+                    onPreviousWeek={() => setSelectedDate((current) => shiftDate(current, -7))}
+                    onNextWeek={() => setSelectedDate((current) => shiftDate(current, 7))}
+                    onGoToMine={() => setMyScheduleScope("mine")}
+                    scopeSwitch={scopeSwitch}
+                  />
+                ) : (
+                  <>
+                    {employeeLoadError ? (
+                      <Text accessibilityRole="alert" style={styles.muted}>
+                        {getErrorMessage(employeeLoadError, "messages.loadFailed")}
+                      </Text>
+                    ) : null}
+                    <MySchedulePanel
+                      weekStartDate={employeeWeekStartDate}
+                      today={todayDate}
+                      week={weekQuery.data}
+                      availability={availabilityQuery.data ?? []}
+                      isLoading={employeeInitialLoading}
+                      onPreviousWeek={() => setSelectedDate((current) => shiftDate(current, -7))}
+                      onNextWeek={() => setSelectedDate((current) => shiftDate(current, 7))}
+                      onFillAvailability={(dates) => setAvailabilitySheet({ dates })}
+                      onEditAvailability={(item) => setAvailabilitySheet({ dates: [item.workDate], item })}
+                      onGoToToday={() => {
+                        setSelectedDate(todayDate);
+                        setActivePersonalTab("punchRecords");
+                      }}
+                      scopeSwitch={scopeSwitch}
+                    />
+                  </>
+                )}
                 <AvailabilitySheet
                   visible={availabilitySheet !== null}
                   weekStartDate={employeeWeekStartDate}

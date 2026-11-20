@@ -62,6 +62,7 @@ import {
 } from "@/modules/attendance/attendance-punch-adjustment";
 import { buildAttendanceApprovalReviewRequest } from "@/modules/attendance/attendance-approval";
 import { asStringArray } from "@/modules/attendance/raw-fields";
+import { normalizeStoreWeek, type StoreWeek } from "@/modules/attendance/store-week";
 import {
   createAvailabilityBatch as runAvailabilityBatch,
   verifyAvailabilityBatch as runVerifyAvailabilityBatch,
@@ -662,6 +663,12 @@ export async function getMyAttendanceWeek(storeCode?: string, weekStartDate?: st
       schedules: day.schedules.filter((item) => item.status.toLowerCase() === "active"),
     })),
   };
+}
+
+/** 员工查看自己关联分店的整周排班（只读）：只含已发布班次的姓名与起止时间，同事的工时 / 请假 / 备注不下发。 */
+export async function getMyStoreWeek(storeCode?: string, weekStartDate?: string): Promise<StoreWeek> {
+  const response = await apiClient.get(`${ATTENDANCE_BASE}/my/store-week`, { params: { storeCode, weekStartDate } });
+  return normalizeStoreWeek(response.data, weekStartDate ?? "");
 }
 
 export async function getMyAvailability(storeCode?: string, weekStartDate?: string): Promise<AttendanceAvailability[]> {
