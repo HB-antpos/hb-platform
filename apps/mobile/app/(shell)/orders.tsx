@@ -340,7 +340,9 @@ function OrderDetailContent({
     [onPrintLine, printingDetailGuid, t, visibleDetailGuids]
   );
 
-  const renderDetailHeader = useCallback(
+  // 列表头必须作为「元素」传给 FlatList，不能传函数：函数依赖筛选词，每输入一个字就换一个新引用，
+  // FlatList 会把它当成新的组件类型整段卸载重挂，搜索框随之失焦、键盘收起。元素则按原位复用，焦点保留。
+  const detailHeader = useMemo(
     () => (
       <View style={styles.detailHeaderContent}>
         <View style={styles.detailStoreBanner}>
@@ -480,7 +482,7 @@ function OrderDetailContent({
           styles.detailListContent,
           filteredItems.length ? null : styles.detailListContentEmpty,
         ]}
-        ListHeaderComponent={renderDetailHeader}
+        ListHeaderComponent={detailHeader}
         ListEmptyComponent={renderDetailEmpty}
         ListFooterComponent={(
           <View style={styles.detailReturnBar}>
