@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { ActivityIndicator, Button, Icon, Text } from "react-native-paper";
 import {
@@ -7,7 +7,6 @@ import {
   defaultAvailabilityDates,
   formatScheduleHours,
   schedulePaidMinutes,
-  shiftWeekStart,
   type MyWeekRow,
 } from "@/modules/attendance/attendance-my-week";
 import {
@@ -20,6 +19,7 @@ import type { AttendanceAvailability, AttendanceSchedule, AttendanceWeek } from 
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { ATTENDANCE_STATUS_TONES, StatusPill } from "./AdjustmentFormControls";
+import { WeekNavBar, weekTagKey } from "./WeekNavBar";
 
 const SUMMARY_BLUE = "#0958D9";
 const BAR_MAX_HEIGHT = 40;
@@ -31,22 +31,6 @@ function hhmm(value: string) {
 /** 已工作分钟 → 「4:03」。 */
 function clock(minutes: number) {
   return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
-}
-
-/** 周一的日期 → 相对本周的标签：本周 / 下周 / 上周；更远的周不加标签。 */
-function weekTagKey(weekStartDate: string, today: string) {
-  const thisWeek = buildWeekStartOf(today);
-  if (weekStartDate === thisWeek) return "current";
-  if (weekStartDate === shiftWeekStart(thisWeek, 1)) return "next";
-  if (weekStartDate === shiftWeekStart(thisWeek, -1)) return "previous";
-  return undefined;
-}
-
-function buildWeekStartOf(date: string) {
-  const day = new Date(`${date.slice(0, 10)}T00:00:00Z`);
-  const offset = (day.getUTCDay() + 6) % 7;
-  day.setUTCDate(day.getUTCDate() - offset);
-  return day.toISOString().slice(0, 10);
 }
 
 /**
@@ -66,6 +50,7 @@ export function MySchedulePanel({
   onFillAvailability,
   onEditAvailability,
   onGoToToday,
+  scopeSwitch,
 }: {
   weekStartDate: string;
   today: string;
@@ -78,6 +63,8 @@ export function MySchedulePanel({
   onEditAvailability: (item: AttendanceAvailability) => void;
   /** 今天那张卡的「去打卡」：切回「今天」页签。 */
   onGoToToday?: () => void;
+  /** 周导航下面的「我的班次 / 整店排班」分段开关，由页面传入。 */
+  scopeSwitch?: ReactNode;
 }) {
   const { t } = useAppTranslation(["attendance", "common"]);
   const rows = useMemo(
@@ -238,17 +225,12 @@ export function MySchedulePanel({
 
   return (
     <View style={styles.root}>
-      <View style={styles.weekNav}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t("availability.previousWeek")} onPress={onPreviousWeek} hitSlop={8} style={styles.weekArrow}>
-          <Icon source="chevron-left" size={22} color={HB_COLORS.textSecondary} />
-        </Pressable>
-        <Text style={styles.weekLabel}>
-          {tagKey ? `${range} · ${t(`myAttendance.weekTag.${tagKey}`)}` : range}
-        </Text>
-        <Pressable accessibilityRole="button" accessibilityLabel={t("availability.nextWeek")} onPress={onNextWeek} hitSlop={8} style={styles.weekArrow}>
-          <Icon source="chevron-right" size={22} color={HB_COLORS.textSecondary} />
-        </Pressable>
-      </View>
+      <WeekNavBar
+        label={tagKey ? `${range} · ${t(`myAttendance.weekTag.${tagKey}`)}` : range}
+        onPreviousWeek={onPreviousWeek}
+        onNextWeek={onNextWeek}
+      />
+      {scopeSwitch}
       {isLoading ? <ActivityIndicator /> : null}
 
       {fillMode ? (
@@ -345,18 +327,6 @@ const styles = StyleSheet.create({
   faint: { color: "#98A2B3" },
   pressed: { opacity: 0.7 },
   holiday: { color: HB_COLORS.warning },
-  weekNav: {
-    alignItems: "center",
-    backgroundColor: HB_COLORS.white,
-    borderColor: HB_COLORS.outlineMuted,
-    borderRadius: HB_RADIUS.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    height: 42,
-    paddingHorizontal: 6,
-  },
-  weekArrow: { alignItems: "center", height: 36, justifyContent: "center", width: 36 },
-  weekLabel: { color: HB_COLORS.textPrimary, flex: 1, fontSize: 14, fontVariant: ["tabular-nums"], fontWeight: "600", textAlign: "center" },
   summary: { backgroundColor: SUMMARY_BLUE, borderRadius: 16, gap: HB_SPACING.sm, padding: 14 },
   summaryTop: { alignItems: "flex-end", flexDirection: "row", justifyContent: "space-between" },
   summaryLabel: { color: "#D1E9FF", fontSize: 12.5 },
