@@ -5,6 +5,8 @@ import {
 } from "@hb/pos-domain/features/installments/installment-authorization";
 import type { InstallmentCardRepaymentCancellation } from "./installment-models";
 import {
+  INSTALLMENT_CUSTOMER_NAME_MAX_LENGTH,
+  INSTALLMENT_CUSTOMER_PHONE_MAX_LENGTH,
   INSTALLMENT_MINIMUM_DOWN_PAYMENT_CENTS,
   INSTALLMENT_MINIMUM_TOTAL_CENTS,
   InstallmentWorkflowError,
@@ -147,6 +149,24 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
             total: aud(draft.totalCents),
             remaining: aud(draft.totalCents),
             fieldIssue: "installment-total-below-minimum",
+            checkout: Object.freeze({
+              ...checkoutPresentation("installment-create"),
+              lines: Object.freeze([...draft.lines]),
+              installmentCustomer: customerPresentation(true),
+            }),
+          });
+          return false;
+        }
+        if (draft.lines.some((line) => line.actualAmountCents <= 0)) {
+          // 服务端不接受金额为 0 的商品行，而首付会先于提交扣下；
+          // 有这种行时不开放收款，提示先在销售页删除或改价。
+          this.patch({
+            initialized: true,
+            phase: "ready",
+            providers,
+            total: aud(draft.totalCents),
+            remaining: aud(draft.totalCents),
+            fieldIssue: "installment-lines-invalid",
             checkout: Object.freeze({
               ...checkoutPresentation("installment-create"),
               lines: Object.freeze([...draft.lines]),
@@ -886,11 +906,15 @@ export class InstallmentCheckoutPresenter implements PaymentScreenPresenter {
   }
 
   public setInstallmentCustomerDraftName(value: string): void {
-    this.patchCustomer({ draftName: value.slice(0, 256) });
+    this.patchCustomer({
+      draftName: value.slice(0, INSTALLMENT_CUSTOMER_NAME_MAX_LENGTH),
+    });
   }
 
   public setInstallmentCustomerDraftPhone(value: string): void {
-    this.patchCustomer({ draftPhone: value.slice(0, 128) });
+    this.patchCustomer({
+      draftPhone: value.slice(0, INSTALLMENT_CUSTOMER_PHONE_MAX_LENGTH),
+    });
   }
 
   public saveInstallmentCustomer(): void {

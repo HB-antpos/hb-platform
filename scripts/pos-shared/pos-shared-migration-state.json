@@ -185,6 +185,12 @@
       "requiredAssertion": "hasCode(\"RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE\")"
     },
     {
+      "path": "features/returns/return-workflow.test.ts",
+      "package": "pos-domain",
+      "reason": "覆盖无小票退货选银行卡 / 礼券时在确认阶段就以稳定错误码拒绝，工作流不进入执行层、不留下需要恢复的未知退款动作",
+      "requiredAssertion": "无小票退货选银行卡 / 礼券：确认时在进入执行层之前就失败，不会冻结成 Unknown"
+    },
+    {
       "path": "features/receipts/refund-voucher-receipt-renderer.test.ts",
       "package": "pos-receipt-core",
       "reason": "券面材料端口改为返回数组，新增混合退款（卡+两张券）逐张出券面与券材料张数不一致失败关闭的行为测试",
@@ -421,10 +427,10 @@
     {
       "path": "features/returns/return-domain.ts",
       "package": "pos-domain",
-      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券；新增主管结案相关稳定错误码 RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED / RETURN_RESOLUTION_EVIDENCE_REQUIRED / RETURN_SUPERVISOR_NOT_REFUNDED",
+      "reason": "原支付不能原路退回的额度（手工刷卡 MANUAL）标记 substituteOnly，只允许现金或礼券代替并绑定原额度；分期额度不能礼券代替；与 WPF 对齐\"代金券买的商品不能退现金/退卡\"：按原单代金券原始付款占比向上取整预留须退代金券部分（优先原券额度，不足以其他额度改发代金券），原券额度只能退券，离线须退券时拒绝，多笔原支付逐笔签券；新增主管结案相关稳定错误码 RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED / RETURN_RESOLUTION_EVIDENCE_REQUIRED / RETURN_SUPERVISOR_NOT_REFUNDED；无小票退货只允许现金（银行卡 / 礼券无原额度可绑定，生产退款适配器会在账本写入后才失败而卡成未知），新增稳定错误码 RETURN_NO_RECEIPT_CASH_ONLY，在写账本之前拒绝",
       "baselineCanonicalRuntimeSha256": "3797772fd2f5077d3dee899186d28a0e52201d024b6c77be1b6b31f48dd71257",
-      "canonicalRuntimeSha256": "7cfef7124e26edf8fc115f9e6cfb9da44418ef5b37359a0647f454c85b0fd7d7",
-      "canonicalTypeSha256": "2693985f703f0d12972097ecbef74ff515d893f85343cd47beec20ee2946e3e7",
+      "canonicalRuntimeSha256": "cc441669d37a0fd8285095bea102ad066cbf685ec106f7e5ede218ef4e0224e0",
+      "canonicalTypeSha256": "7b67879b7a9bb82f87f9d4f04ce6e685a2730a12a9d46e1fc95e0a733102aea6",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",
@@ -483,10 +489,10 @@
     {
       "path": "features/returns/return-workflow.ts",
       "package": "pos-domain",
-      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划；新增 resolveUnknownBySupervisor：在 Unknown 状态下先取得强制另一名主管的授权，再调用执行端口 resolveUnknown，授权失败不改变 Unknown 锁定",
+      "reason": "查单结果含只能代替退款的额度（手工刷卡）时默认现金兜底，避免按原支付方式发起无法完成的原卡退款；快照携带代金券占比依据 voucherFundedBasis 并传给退款计划；新增 resolveUnknownBySupervisor：在 Unknown 状态下先取得强制另一名主管的授权，再调用执行端口 resolveUnknown，授权失败不改变 Unknown 锁定；确认时在生成退款计划阶段（需联网 / 额度 / 退款方式 / 无小票只能现金等校验类错误）失败，没有创建 actionId、没写账本，工作流回到草稿而不是冻结成 failed，收银员改选后可重试",
       "baselineCanonicalRuntimeSha256": "55a8b7b7f0db17efa15f1d7591e4fb8624b4b4b35b1efe4443927704ef262afc",
-      "canonicalRuntimeSha256": "0f9182fad1e9c951b44320ca78f64ec356a9e2a3a804b8aca38723062baceb6a",
-      "canonicalTypeSha256": "d4caa552a9c62421300df54f3da553e8ae6b88bb5ccd0ebacb5e38aca411b6a8",
+      "canonicalRuntimeSha256": "bdb11b887fddb3017e5d9014e86377bc4043f36e00e95faa84fd2b3f3bc3e034",
+      "canonicalTypeSha256": "aa6643d9fec04984466103f2afa464a7ef844c0f2af0aa406b50e39221a2c1fd",
       "behaviorTests": [
         {
           "workspace": "packages/pos-domain",

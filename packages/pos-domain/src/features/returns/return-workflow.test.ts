@@ -224,6 +224,35 @@ test("无小票退货不能伪装为本地容量，断网确认必定拒绝", as
     workflow.confirm(),
     hasCode("RETURN_ONLINE_REQUIRED"),
   );
+  // 断网只是计划阶段的校验失败：没有 actionId、没有写账本，恢复在线后同一页面可直接重试。
+  assert.equal(workflow.getSnapshot().status, "draft");
+  online = true;
+  assert.equal((await workflow.confirm()).status, "completed");
+});
+
+test("无小票退货选银行卡 / 礼券：确认时在进入执行层之前就失败，不会冻结成 Unknown", async () => {
+  for (const method of ["card", "voucher"] as const) {
+    const execution = new FakeExecution();
+    const workflow = createWorkflow({ execution });
+    workflow.beginNoReceipt();
+    await workflow.addNoReceiptProduct("9320001");
+    workflow.setPreferredMethod(method);
+
+    await assert.rejects(
+      workflow.confirm(),
+      hasCode("RETURN_NO_RECEIPT_CASH_ONLY"),
+    );
+    // 没有进入执行层 = 没有写退货账本，更不会留下需要恢复的 Unknown 动作。
+    assert.equal(execution.executeCalls.length, 0);
+    // 计划阶段的校验错误回到草稿（而不是冻结成 failed）：收银员按提示改选现金即可继续。
+    assert.equal(workflow.getSnapshot().status, "draft");
+    assert.equal(workflow.getSnapshot().lastErrorCode, "RETURN_NO_RECEIPT_CASH_ONLY");
+    workflow.setPreferredMethod("cash");
+    const outcome = await workflow.confirm();
+    assert.equal(outcome.status, "completed");
+    assert.equal(execution.executeCalls.length, 1);
+    assert.equal(execution.executeCalls[0]?.plan.allocations[0]?.method, "cash");
+  }
 });
 
 test("旧收银员 lease 在查询和执行异步边界后均不能更新页面或重复退款", async () => {

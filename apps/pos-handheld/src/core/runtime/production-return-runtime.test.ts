@@ -361,7 +361,6 @@ test("无票 AddNoReceiptItem 只授权一次并生成独立 opaque grant；两�
   const presenter = await harness.runtime.createPresenter();
   assert.equal(presenter.beginNoReceipt(), true);
   assert.equal(await presenter.addNoReceiptProduct("P1"), true);
-  assert.equal(presenter.selectMethod("card"), true);
   assert.equal(await presenter.addNoReceiptProduct("P2"), true);
   assert.equal(await presenter.confirm(), true);
 
@@ -439,14 +438,37 @@ test("无票 AddNoReceiptItem 只授权一次并生成独立 opaque grant；两�
   );
 });
 
-test("在线退款的本地 action/allocation 完成后才确认其耐久支付 attempt", async () => {
-  const harness = createHarness({
-    acknowledgementImpl: async () => undefined,
-  });
+test("无票退货选银行卡：在写退货账本之前就被拒绝，不留下未知动作，也不锁住之后的退货", async () => {
+  const harness = createHarness();
   const presenter = await harness.runtime.createPresenter();
   assert.equal(presenter.beginNoReceipt(), true);
   assert.equal(await presenter.addNoReceiptProduct("P1"), true);
   assert.equal(presenter.selectMethod("card"), true);
+
+  assert.equal(await presenter.confirm(), false);
+
+  // 无小票没有原支付可追溯；生产退款适配器会在账本 CAS 之后才报缺原额度，把退货永久卡成 Unknown。
+  // 回到选择页并给出原因（不是失败终态），且没有写任何账本 / 调任何通道。
+  assert.equal(presenter.getState().phase, "selecting");
+  assert.equal(presenter.getState().errorCode, "RETURN_NO_RECEIPT_CASH_ONLY");
+  assert.equal(harness.ledger.prepared.length, 0);
+  assert.equal(harness.ledger.actions().length, 0);
+  assert.equal(harness.onlinePrepares.length, 0);
+  assert.equal(harness.onlineSubmits.length, 0);
+
+  // 没有未知动作 = 不会拦住之后的退货：按提示在同一页改选现金即可完成，无需重新授权 / 重选商品。
+  assert.equal(presenter.selectMethod("cash"), true);
+  assert.equal(await presenter.confirm(), true);
+  assert.equal(harness.ledger.actions()[0]?.status, "completed");
+  assert.equal(harness.ledger.actions().length, 1);
+});
+
+test("在线退款的本地 action/allocation 完成后才确认其耐久支付 attempt", async () => {
+  const harness = createHarness({
+    remoteCardReceipt: true,
+    acknowledgementImpl: async () => undefined,
+  });
+  const presenter = await selectedReceiptPresenter(harness);
 
   assert.equal(await presenter.confirm(), true);
 
@@ -500,6 +522,7 @@ test("在线现金退款（hbpos-api attempt）不走 Linkly ACK：支付账本�
 test("退货 ACK pending 暂停 action；恢复只确认原退款，不重放 provider", async () => {
   let failOnce = true;
   const harness = createHarness({
+    remoteCardReceipt: true,
     acknowledgementImpl: async () => {
       if (failOnce) {
         failOnce = false;
@@ -507,10 +530,7 @@ test("退货 ACK pending 暂停 action；恢复只确认原退款，不重放 pr
       }
     },
   });
-  const presenter = await harness.runtime.createPresenter();
-  assert.equal(presenter.beginNoReceipt(), true);
-  assert.equal(await presenter.addNoReceiptProduct("P1"), true);
-  assert.equal(presenter.selectMethod("card"), true);
+  const presenter = await selectedReceiptPresenter(harness);
 
   assert.equal(await presenter.confirm(), false);
 
@@ -530,13 +550,11 @@ test("退货 ACK pending 暂停 action；恢复只确认原退款，不重放 pr
 
 test("退货 ACK 返回缺失结果时暂停 action，不继续提交退款", async () => {
   const harness = createHarness({
+    remoteCardReceipt: true,
     acknowledgementImpl: async () => undefined,
     malformedAcknowledgementResult: true,
   });
-  const presenter = await harness.runtime.createPresenter();
-  assert.equal(presenter.beginNoReceipt(), true);
-  assert.equal(await presenter.addNoReceiptProduct("P1"), true);
-  assert.equal(presenter.selectMethod("card"), true);
+  const presenter = await selectedReceiptPresenter(harness);
 
   // ACK 结果不完整时必须停在可恢复状态，不能把下一笔金融动作当作已获确认。
   assert.equal(await presenter.confirm(), false);
@@ -549,15 +567,13 @@ test("退货 ACK 返回缺失结果时暂停 action，不继续提交退款", as
 
 test("Unknown 退货恢复完成后只确认原 durable attempt，不再次 submit", async () => {
   const harness = createHarness({
+    remoteCardReceipt: true,
     acknowledgementImpl: async () => undefined,
     onlineSubmitOutcomes: [
       { status: "unknown", protectedRecoveryKey: "PROTECTED-RECOVERY" },
     ],
   });
-  const first = await harness.runtime.createPresenter();
-  assert.equal(first.beginNoReceipt(), true);
-  assert.equal(await first.addNoReceiptProduct("P1"), true);
-  assert.equal(first.selectMethod("card"), true);
+  const first = await selectedReceiptPresenter(harness);
   assert.equal(await first.confirm(), false);
   assert.equal(first.getState().phase, "unknown");
 
@@ -901,6 +917,8 @@ type HarnessOptions = Readonly<{
   acknowledgementImpl?(attemptId: string): Promise<void>;
   acknowledgementPending?: boolean;
   malformedAcknowledgementResult?: boolean;
+  /** 查单走远程并返回一张带银行卡原支付的小票：生产里只有这种退货会产生 payment-provider 退款。 */
+  remoteCardReceipt?: boolean;
   supervisorResolve?(record: ReturnSupervisorResolutionRecord): Promise<"declined" | "waiting">;
   supervisorDrain?(): Promise<unknown>;
 }>;
@@ -1032,6 +1050,7 @@ function createHarness(options: HarnessOptions = {}) {
         throw transportFailure();
       },
       async getReturnContext() {
+        if (options.remoteCardReceipt) return remoteCardReceiptContext();
         throw transportFailure();
       },
     },
@@ -1532,6 +1551,53 @@ function authorizationPendingActionId(harness: Harness): string {
   const state = harness.authorizationService.getState();
   assert.equal(state.kind, "awaiting-supervisor");
   return state.actionId;
+}
+
+/** 一张 $5.00 的小票，只有一笔 Square 银行卡原支付：整行退回 = 原路退卡（payment-provider）。 */
+function remoteCardReceiptContext(): never {
+  return {
+    order: {
+      orderGuid: ORDER_GUID,
+      storeCode: STORE_CODE,
+      deviceCode: DEVICE_CODE,
+      cashierName: "Original Cashier",
+      actualAmount: 5,
+      lines: [
+        {
+          orderLineGuid: "detail-1",
+          productCode: "P1",
+          displayName: "Receipt Product",
+          lookupCode: "LOOKUP-1",
+          itemNumber: "ITEM-1",
+          quantity: 1,
+          actualAmount: 5,
+          kind: 1,
+          referenceCode: "RECEIPT-REF",
+        },
+      ],
+      payments: [],
+    },
+    returnRecords: [],
+    lineCapacities: [
+      {
+        originalOrderLineGuid: "detail-1",
+        originalAmount: 5,
+        returnedAmount: 0,
+        remainingAmount: 5,
+      },
+    ],
+    paymentCapacities: [
+      {
+        method: 2,
+        originalAmount: 5,
+        refundedAmount: 0,
+        remainingAmount: 5,
+        originalOrderGuid: ORDER_GUID,
+        reference: "SQ:card-payment",
+        cardTransactions: [{ processor: "Square" }],
+      },
+    ],
+  } as never;
 }
 
 function transportFailure(): HbposApiError {

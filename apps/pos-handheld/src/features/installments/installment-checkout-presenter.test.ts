@@ -191,6 +191,90 @@ test("新分期公开 WPF 最低金额和顾客必填错误，不调用 workflow
   assert.equal(createInputs.length, 0);
 });
 
+test("新分期含 0 元商品行：不开放收款、提示先删除或改价，且不调用 workflow", async () => {
+  const createInputs: InstallmentWorkflowCreateInput[] = [];
+  const presenter = new InstallmentCheckoutPresenter({
+    entry: installmentCreatePaymentEntry({
+      checkoutIntentId: CHECKOUT_ID,
+      expectedCartRevision: 7,
+    }),
+    createDrafts: {
+      getSnapshot: () => ({
+        revision: 7,
+        totalCents: 6_000,
+        lines: [
+          {
+            lineKey: "line-paid",
+            displayName: "正常商品",
+            quantity: "1",
+            actualAmountCents: 6_000,
+          },
+          {
+            lineKey: "line-free",
+            displayName: "0 元赠品",
+            quantity: "1",
+            actualAmountCents: 0,
+          },
+        ],
+      }),
+      subscribe: () => () => undefined,
+    },
+    initialOnline: true,
+    permissions: createPermissions(),
+    workflow: workflowStub({
+      create: async (input) => {
+        createInputs.push(input);
+        return details({});
+      },
+    }),
+    createTenderId: () => "tender-zero-line",
+  });
+
+  // 服务端不接受金额为 0 的分期行，而首付会先于提交扣下，所以这里不允许开始收款。
+  assert.equal(await presenter.initialize(), false);
+  assert.equal(presenter.getState().fieldIssue, "installment-lines-invalid");
+  assert.equal(presenter.getState().allowedActions.start, false);
+  assert.equal(await presenter.submitSelected(), false);
+  assert.equal(createInputs.length, 0);
+});
+
+test("新分期顾客姓名 / 电话输入按服务端列宽（100 / 40）截断", async () => {
+  const presenter = new InstallmentCheckoutPresenter({
+    entry: installmentCreatePaymentEntry({
+      checkoutIntentId: CHECKOUT_ID,
+      expectedCartRevision: 7,
+    }),
+    createDrafts: {
+      getSnapshot: () => ({
+        revision: 7,
+        totalCents: 5_000,
+        lines: [
+          {
+            lineKey: "line-minimum",
+            displayName: "最低金额",
+            quantity: "1",
+            actualAmountCents: 5_000,
+          },
+        ],
+      }),
+      subscribe: () => () => undefined,
+    },
+    initialOnline: true,
+    permissions: createPermissions(),
+    workflow: workflowStub(),
+    createTenderId: () => "tender-caps",
+  });
+  assert.equal(await presenter.initialize(), true);
+  presenter.openInstallmentCustomerEditor();
+
+  presenter.setInstallmentCustomerDraftName("名".repeat(150));
+  presenter.setInstallmentCustomerDraftPhone("1".repeat(80));
+
+  const customer = presenter.getState().checkout.installmentCustomer;
+  assert.equal(customer?.draftName.length, 100);
+  assert.equal(customer?.draftPhone.length, 40);
+});
+
 test("还款顾客只读，银行卡拒绝超付并冻结所选 Linkly provider", async () => {
   const repaymentInputs: InstallmentWorkflowRepaymentInput[] = [];
   const presenter = new InstallmentCheckoutPresenter({

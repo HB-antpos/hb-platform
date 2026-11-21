@@ -659,6 +659,48 @@ test("离线只接受带原单证明的现金容量，卡券分期均被门禁",
   assert.equal(plan.allocations[0]?.offlineCashProof?.evidenceId, "proof-cash");
 });
 
+test("无小票退货只能退现金：银行卡 / 礼券 / 分期在写账本前就被拒绝", () => {
+  const line = updateReturnLineQuantity(
+    [
+      createNoReceiptDraftLine({
+        sourceKind: "no-receipt-product",
+        selectionKey: "line-cash-only",
+        returnSourceKey: "noreceipt:BNE:cash-only",
+        productCode: "P-300",
+        itemNumber: "3001",
+        lookupCode: "9320003000010",
+        displayName: "Product 300",
+        unitRefundCents: 900,
+        syncProvenance: { referenceCode: null, priceSource: 0 },
+      }),
+    ],
+    "line-cash-only",
+    1,
+  );
+  const plan = (preferredMethod: "cash" | "card" | "voucher" | "installment" | null) =>
+    buildReturnRefundPlan({
+      sourceKind: "no-receipt",
+      originalOrderGuid: null,
+      lines: line,
+      capacities: [],
+      online: true,
+      preferredMethod,
+    });
+
+  // 现金（含未选择时的默认现金）照常出计划，且不绑定任何原额度。
+  for (const method of [null, "cash"] as const) {
+    const cashPlan = plan(method);
+    assert.equal(cashPlan.allocations.length, 1);
+    assert.equal(cashPlan.allocations[0]?.method, "cash");
+    assert.equal(cashPlan.allocations[0]?.originalCapacityId, null);
+  }
+  // 其余方式没有原支付可追溯；生产退款适配器会在账本 CAS 之后才报缺 capacity，
+  // 把退货永久卡成 Unknown，所以必须在这里（写账本之前）就拒绝。
+  for (const method of ["card", "voucher", "installment"] as const) {
+    assert.throws(() => plan(method), hasCode("RETURN_NO_RECEIPT_CASH_ONLY"));
+  }
+});
+
 test("OPENITEM 不能通过普通无小票商品路径绕过专用输入校验", () => {
   assert.throws(
     () =>

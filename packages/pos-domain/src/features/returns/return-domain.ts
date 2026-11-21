@@ -30,6 +30,7 @@ export type ReturnErrorCode =
   | "RETURN_RECOVERY_FAILED"
   | "RETURN_ORIGINAL_REFUND_UNAVAILABLE"
   | "RETURN_VOUCHER_SUBSTITUTE_UNAVAILABLE"
+  | "RETURN_NO_RECEIPT_CASH_ONLY"
   | "RETURN_SUPERVISOR_RESOLUTION_UNSUPPORTED"
   | "RETURN_RESOLUTION_EVIDENCE_REQUIRED"
   | "RETURN_SUPERVISOR_NOT_REFUNDED";
@@ -418,6 +419,13 @@ export function buildReturnRefundPlan(input: Readonly<{
   if (input.sourceKind !== "receipt") {
     if (!input.online) throw new ReturnFeatureError("RETURN_ONLINE_REQUIRED");
     const method = input.preferredMethod ?? "cash";
+    // 无小票退货没有原支付可追溯：银行卡无从原路退回，礼券代替也要绑定原额度（capacity）。
+    // 生产退款适配器是在退货账本已 CAS 为 submitted 之后才发现缺 capacity，
+    // 会把这笔退货永久卡成 Unknown，并连带拒绝本机之后所有新收款。
+    // 所以在写账本之前就拒绝，无小票只允许现金。
+    if (method !== "cash") {
+      throw new ReturnFeatureError("RETURN_NO_RECEIPT_CASH_ONLY");
+    }
     return {
       sourceKind: input.sourceKind,
       totalRefundCents,
