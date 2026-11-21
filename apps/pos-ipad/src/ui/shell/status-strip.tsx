@@ -2,6 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
+import { describeBleScannerIndicator } from "./ble-scanner-indicator";
 import { usePosShellStore } from "./pos-shell-store";
 
 import { PosPressable } from "@/ui/controls/pos-pressable";
@@ -114,6 +115,7 @@ export function PosStatusStrip({
   const { i18n, t } = useTranslation();
   const {
     connectivity,
+    bleScanner,
     deviceGate,
     display,
     pendingSync,
@@ -121,6 +123,8 @@ export function PosStatusStrip({
     scanner,
     terminalPresentation,
   } = usePosShellStore();
+  // 没有 BLE 服务（旧原生包）或本机不支持蓝牙时为 null，不显示图标。
+  const bleIndicator = bleScanner ? describeBleScannerIndicator(bleScanner) : null;
   const currentLanguage =
     language ?? i18n.resolvedLanguage ?? i18n.language;
   const targetLanguageGlyph = currentLanguage
@@ -204,6 +208,18 @@ export function PosStatusStrip({
         tone={scanner === "capturing" || scanner === "camera" ? "good" : "neutral"}
         value={t(`status.scanner.${scanner}`)}
       />
+      {bleIndicator ? (
+        <StatusIndicator
+          icon={bleIndicator.icon}
+          label={t("status.bleScanner")}
+          tone={bleIndicator.tone}
+          value={
+            bleIndicator.batteryLevel === null
+              ? t(bleIndicator.labelKey)
+              : `${t(bleIndicator.labelKey)} ${bleIndicator.batteryLevel}%`
+          }
+        />
+      ) : null}
       <StatusIndicator
         icon="monitor"
         label={t("status.display")}
