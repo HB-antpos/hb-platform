@@ -864,3 +864,65 @@ test("会话时钟：召回的旧挂单带着挂起时的时点，恢复后按�
   withoutClock.increaseLine("line-1");
   assert.equal(withoutClock.getSnapshot().lines[0]!.discount.cents, 0);
 });
+
+/** 往 session 里加两件 5 澳元的 Tea，满 2 件时 lateTwoForEightPromotion 优惠 2 澳元。 */
+function addTwoTeas(active: ActivePricingCartSession): void {
+  active.addItemWithDisposition({
+    lineId: "line-1",
+    productCode: "P1",
+    itemNumber: null,
+    lookupCode: "1",
+    displayName: "Tea",
+    unitPrice: { currency: "AUD", cents: 500 },
+    syncProvenance: { referenceCode: null, priceSource: 0 },
+  });
+  active.increaseLine("line-1");
+}
+
+test("成单清车后新车沿用门店促销规则，下一单仍按促销计价", () => {
+  const now = "2026-06-13T09:30:00.000Z";
+  const active = new ActivePricingCartSession(
+    new PricingCart(),
+    () => new PricingCart(),
+    { nowIso: () => now },
+  );
+  active.applyPromotionSnapshot([lateTwoForEightPromotion()], now);
+
+  addTwoTeas(active);
+  assert.equal(active.getSnapshot().lines[0]!.discount.cents, 200, "第 1 单有促销");
+
+  active.clearAfterCommittedOrder("ORDER-1");
+  assert.equal(active.getSnapshot().lines.length, 0);
+  assert.equal(
+    active.read().pricingState.promotions.length,
+    1,
+    "促销规则是门店级状态，不能随成单清车丢失",
+  );
+
+  addTwoTeas(active);
+  assert.equal(
+    active.getSnapshot().lines[0]!.discount.cents,
+    200,
+    "第 2 单必须仍然有促销折扣（曾因空车工厂不带规则而多收）",
+  );
+});
+
+test("移交恢复中心清车同样保留门店促销规则", async () => {
+  const now = "2026-06-13T09:30:00.000Z";
+  const active = new ActivePricingCartSession(
+    new PricingCart(),
+    () => new PricingCart(),
+    { nowIso: () => now },
+  );
+  active.applyPromotionSnapshot([lateTwoForEightPromotion()], now);
+  addTwoTeas(active);
+
+  await active.runExclusive(async (lease) => {
+    lease.clearAfterRecoveryParked("ORDER-PARKED");
+  });
+  assert.equal(active.getSnapshot().lines.length, 0);
+  assert.equal(active.read().pricingState.promotions.length, 1);
+
+  addTwoTeas(active);
+  assert.equal(active.getSnapshot().lines[0]!.discount.cents, 200);
+});

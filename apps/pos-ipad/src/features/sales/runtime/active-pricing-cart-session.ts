@@ -531,10 +531,17 @@ export class ActivePricingCartSession {
 
   /** 移交恢复中心只清当前车，不可污染订单完成幂等墓碑。 */
   private clearCurrentCartWithoutCompletionTombstone(): ActivePricingCartSessionSnapshot {
+    // 中文注释：促销规则是门店级状态（登录、目录下载、后台刷新装入），不属于某一单；
+    // 空车工厂造出来的车没有规则，若直接换上，之后没有任何路径会把规则装回来，
+    // 导致登录后第一单有自动促销、第二单起全部按原价多收。与 clearManually 和 WPF 的 Clear() 一致，
+    // 清车只清行、保留规则。
+    const storePromotions = this.cart.stateSnapshot().promotions;
     const emptyCart = cloneCart(this.createEmptyCart(), this.restoreOptions);
     if (emptyCart.snapshot().lines.length > 0) {
       throw new Error("Empty cart factory must return a cart without lines.");
     }
+    // 定价时点用新车自己的（当前时钟），不沿用旧车可能停在登录那一刻的时点。
+    emptyCart.setPromotions(storePromotions, emptyCart.stateSnapshot().asOfIso);
 
     this.assertCanAdvance();
     this.advanceTransactionEpoch();

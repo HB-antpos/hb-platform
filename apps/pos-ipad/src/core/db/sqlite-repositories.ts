@@ -2446,13 +2446,24 @@ function requiredAuditScope(scope: AuditScope | null): AuditScope {
   return scope;
 }
 
+/**
+ * 键名虽含敏感子串、但只是业务字段的白名单（已规范化：去掉 _ 与 -，转小写）：
+ * - authorizationmode：只描述授权方式，不是 token。
+ * - referencecode：购物车审计每个商品项都带的目录同步引用码，不是支付引用。
+ * 宽泛的子串匹配会让合法审计永远无法落库，而执行器会吞掉审计异常，表现为审计静默丢失；
+ * 新增含敏感子串的业务键时必须同时补 sqlite-cart-audit-payload.integration.test.ts。
+ */
+const AUDIT_KEY_ALLOWLIST: ReadonlySet<string> = new Set([
+  "authorizationmode",
+  "referencecode",
+]);
+
 function assertSafe(value: unknown): void {
   if (!value || typeof value !== "object") return;
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    // authorizationMode 只描述授权方式，不是 token；宽泛匹配会让合法的主管审计永远无法落库。
     const normalized = key.replaceAll(/[_-]/gu, "").toLowerCase();
     if (
-      normalized !== "authorizationmode" &&
+      !AUDIT_KEY_ALLOWLIST.has(normalized) &&
       /authorization|token|card|pan|cvv|voucher|secret|payment|session|txn|rfn|reference/i.test(key)
     ) {
       throw new Error("Sensitive audit payload key is not allowed.");
