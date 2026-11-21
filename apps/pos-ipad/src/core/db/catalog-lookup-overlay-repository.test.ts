@@ -487,6 +487,52 @@ test("精确查询和名称搜索在同一 SQLite 语句内选择 active 代次"
   }
 });
 
+test("精确查询在没有 ANALYZE 统计信息时也必须按索引查找，不能全表扫描目录", async () => {
+  // 回归：连接顺序写成「目录表 CROSS JOIN active_scope」会强制目录表做外层循环，snapshot_id 的等值
+  // 条件用不上索引前导列；只有存在 sqlite_stat1 时 SQLite 才会用跳跃扫描兜底。设备库从不执行 ANALYZE，
+  // 于是每次扫码 / 加购都全表扫描并解密整个目录（真机实测每次约 200ms，一次手点无码商品要查两次）。
+  const connection = new RecordingConnection(new DatabaseSync(":memory:"));
+  try {
+    await applyMigrations(connection, () => T0);
+    await insertSnapshot(connection, "snapshot-1", "active");
+    await insertCatalogItem(connection, "snapshot-1", item());
+
+    // 前提：本库确实没有统计信息，否则测不到设备上的计划。
+    const stats = await connection.getAll<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE name = 'sqlite_stat1'",
+    );
+    assert.equal(stats.length, 0);
+
+    const found = await createRepository(connection).findExact("STORE-1", "TEA-1");
+    assert.equal(found?.displayName, "Tea");
+
+    const statement = connection.lastCatalogLookup;
+    assert.ok(statement, "应抓取到 findExact 实际发出的 SQL");
+    const plan = await connection.getAll<{ detail: string }>(
+      `EXPLAIN QUERY PLAN ${statement.sql}`,
+      statement.parameters,
+    );
+    const details = plan.map((row) => row.detail);
+
+    // 目录表与覆盖表都必须是 SEARCH ... USING INDEX；任何 SCAN items / SCAN overlays 都是全表扫描。
+    assert.ok(
+      details.some((detail) => /^SEARCH items USING (COVERING )?INDEX/u.test(detail)),
+      `目录表应走索引查找，实际计划：\n${details.join("\n")}`,
+    );
+    assert.ok(
+      details.some((detail) => /^SEARCH overlays USING (COVERING )?INDEX/u.test(detail)),
+      `覆盖表应走索引查找，实际计划：\n${details.join("\n")}`,
+    );
+    assert.deepEqual(
+      details.filter((detail) => /^SCAN (items|overlays)\b/u.test(detail)),
+      [],
+      `不应出现目录表 / 覆盖表的全表扫描，实际计划：\n${details.join("\n")}`,
+    );
+  } finally {
+    await connection.close();
+  }
+});
+
 test("PosDatabase 只暴露目录覆盖窄 facade，不泄露 SQLCipher 连接", async () => {
   const database = await PosDatabase.open({
     databaseName: "catalog-overlay-test.db",
@@ -587,6 +633,21 @@ class TransactionConnection extends SystemSqliteConnection {
 
   public override close(): Promise<void> {
     return Promise.reject(new Error("Transaction cannot close database."));
+  }
+}
+
+class RecordingConnection extends SystemSqliteConnection {
+  /** 最近一次目录合并查询（以 WITH 开头）实际发出的 SQL 与参数，用于对它做 EXPLAIN。 */
+  public lastCatalogLookup: { sql: string; parameters: readonly SqlValue[] } | null = null;
+
+  public override async getFirst<T extends object>(
+    sql: string,
+    parameters: readonly SqlValue[] = [],
+  ): Promise<T | null> {
+    if (sql.trimStart().startsWith("WITH")) {
+      this.lastCatalogLookup = { sql, parameters };
+    }
+    return super.getFirst<T>(sql, parameters);
   }
 }
 

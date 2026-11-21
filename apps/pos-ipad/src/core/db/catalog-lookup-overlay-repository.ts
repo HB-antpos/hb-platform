@@ -164,7 +164,7 @@ export class SqliteCatalogLookupOverlayRepository {
     const lookupCodeNormalized = normalizeLookupCode(lookupCode);
     if (!lookupCodeNormalized) return null;
     const row = await this.db.getFirst<CatalogLookupRow>(
-      `${combinedCatalogSql()}
+      `${combinedCatalogSql(true)}
        SELECT
          candidate.*,
          active_scope.active_count,
@@ -174,7 +174,7 @@ export class SqliteCatalogLookupOverlayRepository {
          END AS integrity_error
        FROM active_scope
        LEFT JOIN candidate
-         ON candidate.lookup_code_normalized = ?
+         ON candidate.lookup_code_normalized = ?4
        ORDER BY candidate.source_priority ASC
        LIMIT 1`,
       [
@@ -347,7 +347,17 @@ async function readActiveSnapshotId(
     : null;
 }
 
-function combinedCatalogSql(): string {
+function combinedCatalogSql(exactLookup = false): string {
+  // 精确查码必须在两个候选分支内限制 lookup code；若只在 CTE 外过滤，
+  // SQLite 会先物化整店目录，TC26 的 SQLCipher 冷缓存会放大到秒级。
+  const overlayExactPredicate = exactLookup
+    ? "AND overlays.lookup_code_normalized = ?4"
+    : "";
+  const itemExactPredicate = exactLookup
+    ? "AND items.lookup_code_normalized = ?4"
+    : "";
+  const overlayStoreParameter = exactLookup ? "?2" : "?";
+  const itemStoreParameter = exactLookup ? "?3" : "?";
   return `
     WITH active_rows AS (
       SELECT
@@ -389,12 +399,13 @@ function combinedCatalogSql(): string {
         overlays.discount_rate,
         overlays.is_special_product,
         0 AS source_priority
-      FROM catalog_lookup_overlays overlays
-      CROSS JOIN active_scope
+      FROM active_scope
+      CROSS JOIN catalog_lookup_overlays overlays
       WHERE active_scope.active_count <= 1
         AND overlays.base_snapshot_id = active_scope.generation_key
-        AND overlays.store_code = ?
+        AND overlays.store_code = ${overlayStoreParameter}
         AND overlays.record_kind = 'item'
+        ${overlayExactPredicate}
 
       UNION ALL
 
@@ -418,12 +429,13 @@ function combinedCatalogSql(): string {
         items.discount_rate,
         items.is_special_product,
         1 AS source_priority
-      FROM catalog_items items
-      CROSS JOIN active_scope
+      FROM active_scope
+      CROSS JOIN catalog_items items
       WHERE active_scope.active_count = 1
         AND items.snapshot_id = active_scope.snapshot_id
-        AND items.store_code = ?
+        AND items.store_code = ${itemStoreParameter}
         AND items.is_active = 1
+        ${itemExactPredicate}
         AND NOT EXISTS (
           SELECT 1
           FROM catalog_lookup_overlays shadow
