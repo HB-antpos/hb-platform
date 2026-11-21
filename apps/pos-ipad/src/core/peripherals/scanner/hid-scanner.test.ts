@@ -146,6 +146,136 @@ router.acceptHidText("A".repeat(33));
 router.acceptHidText("GOOD\n");
 assert.equal(events.at(-1)?.value, "GOOD", "超长缓冲必须丢弃，不能污染下一码");
 
+/* ---------------- BLE 来源：按场景租约投递 ---------------- */
+{
+  let bleNow = 50_000;
+  const bleEvents: { value: string; context: string; source: string; category: string }[] = [];
+  const bleRouter = new HidScannerRouter({ now: () => bleNow });
+  bleRouter.subscribeRouted((event) => bleEvents.push(event));
+  const portEvents: string[] = [];
+  bleRouter.subscribe((event) => portEvents.push(`${event.context}:${event.value}`));
+
+  assert.equal(
+    bleRouter.acceptBleText("9313559558795"),
+    false,
+    "栈顶是无人占用的默认 product 时 BLE 码不得投递（当前页面不接收扫码）",
+  );
+  assert.equal(bleEvents.length, 0);
+
+  bleRouter.pushContext("dialog");
+  assert.equal(
+    bleRouter.acceptBleText("PUSHED-DIALOG"),
+    false,
+    "pushContext 不是租约，BLE 不投递",
+  );
+  bleRouter.popContext();
+
+  const releaseSales = bleRouter.acquireContext("product");
+  bleNow += 1_000;
+  assert.equal(
+    bleRouter.acceptBleText(" 9313559558795\r"),
+    true,
+    "页面占用 product 租约时 BLE 码不需要隐藏输入框焦点也能投递",
+  );
+  assert.deepEqual(scanSummary(bleEvents.at(-1)), {
+    value: "9313559558795",
+    context: "product",
+    source: "ble",
+    category: "product-code",
+  });
+  assert.equal(portEvents.at(-1), "product:9313559558795");
+
+  bleNow += 50;
+  assert.equal(bleRouter.acceptBleText("9313559558795"), true);
+  assert.equal(
+    bleEvents.length,
+    2,
+    "同一来源的连续重复不得去重（连扫两件同款）",
+  );
+
+  // 跨来源去重：同一把枪键盘模式与 BLE 模式都开着，300ms 内同码只算一次。
+  bleRouter.setCaptureActive(true);
+  bleNow += 1_000;
+  bleRouter.acceptHidText("DUAL-MODE-1\n", bleNow);
+  assert.equal(bleRouter.acceptBleText("DUAL-MODE-1", bleNow + 120), true);
+  assert.equal(
+    bleEvents.filter((event) => event.value === "DUAL-MODE-1").length,
+    1,
+    "300ms 内 HID 与 BLE 的同码只投递一次",
+  );
+  assert.equal(bleRouter.acceptBleText("DUAL-MODE-1", bleNow + 800), true);
+  assert.equal(
+    bleEvents.filter((event) => event.value === "DUAL-MODE-1").length,
+    2,
+    "超过 300ms 的同码是新的一次扫码",
+  );
+  bleNow += 2_000;
+  assert.equal(bleRouter.acceptBleText("CAM-DUP", bleNow), true);
+  void bleRouter.startCamera();
+  assert.equal(
+    bleRouter.acceptCameraText("CAM-DUP", bleNow + 100),
+    true,
+    "被去重的相机码按已处理返回 true",
+  );
+  void bleRouter.stopCamera();
+  assert.equal(
+    bleEvents.filter((event) => event.value === "CAM-DUP").length,
+    1,
+    "300ms 内 BLE 与相机的同码只投递一次",
+  );
+
+  // 主管授权弹窗压在页面上时，BLE 码进入授权场景而不是商品场景。
+  const releaseSupervisor = bleRouter.acquireContext("supervisor-authorization");
+  bleNow += 1_000;
+  bleRouter.acceptBleText("SUPERVISOR-BLE");
+  assert.equal(bleEvents.at(-1)?.context, "supervisor-authorization");
+  releaseSupervisor();
+
+  // 敏感码：HBDEV1- 不进任何共享订阅；device-activation 场景静默吞掉。
+  const beforeSensitive = bleEvents.length;
+  assert.equal(bleRouter.acceptBleText("hbdev1-SECRET"), false);
+  const releaseActivation = bleRouter.acquireContext("device-activation");
+  assert.equal(bleRouter.acceptBleText("HBDEV1-SECRET-2"), true);
+  releaseActivation();
+  assert.equal(bleEvents.length, beforeSensitive, "开通码不得进入 routed 总线");
+
+  // 测试独占：scanner-test 租约下所有来源的码只以 scanner-test 场景投递，且不去重。
+  const releaseTest = bleRouter.acquireContext("scanner-test");
+  bleNow += 1_000;
+  const portBeforeTest = portEvents.length;
+  bleRouter.acceptHidText("TEST-1\n", bleNow);
+  bleRouter.acceptBleText("TEST-1", bleNow + 50);
+  void bleRouter.startCamera();
+  bleRouter.acceptCameraText("TEST-CAM", bleNow + 60);
+  void bleRouter.stopCamera();
+  const testEvents = bleEvents.filter((event) => event.context === "scanner-test");
+  assert.deepEqual(
+    testEvents.map((event) => `${event.source}:${event.value}:${event.category}`),
+    [
+      "hid:TEST-1:scanner-test",
+      "ble:TEST-1:scanner-test",
+      "camera:TEST-CAM:scanner-test",
+    ],
+    "测试独占时三种来源都只进 scanner-test，且如实保留双模式重复",
+  );
+  assert.equal(
+    portEvents.length,
+    portBeforeTest,
+    "测试场景的码不得广播给通用 ScannerPort 订阅者",
+  );
+  releaseTest();
+  bleNow += 1_000;
+  bleRouter.acceptBleText("AFTER-TEST");
+  assert.equal(bleEvents.at(-1)?.context, "product", "测试关闭后恢复页面场景");
+
+  releaseSales();
+  assert.equal(
+    bleRouter.acceptBleText("NO-PAGE"),
+    false,
+    "页面释放租约后 BLE 码不再投递",
+  );
+}
+
 console.log("hid-scanner.test.ts: ok");
 
 function scanSummary(event: (typeof events)[number] | undefined) {

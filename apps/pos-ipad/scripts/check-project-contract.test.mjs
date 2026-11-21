@@ -154,4 +154,21 @@ assert.equal(
   "最终 Android 配置不得申请录音权限。",
 );
 
+// BLE 扫码枪接入后仍只在前台用蓝牙：不得出现后台蓝牙模式；三处写入的蓝牙用途说明必须是同一句。
+assert.equal(
+  backgroundModes.includes("bluetooth-central"),
+  false,
+  "最终 iOS 配置不得启用后台蓝牙（bluetooth-central）。",
+);
+assert.equal(
+  backgroundModes.includes("bluetooth-peripheral"),
+  false,
+  "最终 iOS 配置不得启用蓝牙外设后台模式。",
+);
+assert.equal(
+  finalInfoPlist.NSBluetoothAlwaysUsageDescription,
+  "HB POS 使用蓝牙连接门店小票打印机、钱箱和蓝牙扫码枪。",
+  "蓝牙用途说明必须覆盖小票打印机、钱箱和蓝牙扫码枪。",
+);
+
 console.log("pos-ipad project contract: ok");

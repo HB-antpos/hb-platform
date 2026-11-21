@@ -132,6 +132,18 @@ assert.ok(
     finalInfoPlist.NSLocationWhenInUseUsageDescription.length > 0,
   "最终 Info.plist 必须保留 NSLocationWhenInUseUsageDescription"
 );
+// ===== BLE 扫码枪（react-native-ble-plx）：只在前台连接，不开后台蓝牙 =====
+// 打印机插件与 ble-plx 插件都会写 NSBluetoothAlwaysUsageDescription，最终文案必须同时覆盖打印机与扫码枪。
+const blePlxOptions = pluginMap.get("react-native-ble-plx");
+assert.ok(blePlxOptions, "必须配置 react-native-ble-plx 插件（BLE 扫码枪）");
+assert.equal(blePlxOptions.isBackgroundEnabled, false, "ble-plx 不得开启后台蓝牙");
+assert.deepEqual(blePlxOptions.modes, [], "ble-plx 不得声明蓝牙后台模式");
+assert.match(finalInfoPlist.NSBluetoothAlwaysUsageDescription ?? "", /printers/i, "蓝牙文案必须覆盖打印机");
+assert.match(finalInfoPlist.NSBluetoothAlwaysUsageDescription ?? "", /barcode scanners/i, "蓝牙文案必须覆盖扫码枪");
+for (const mode of ["bluetooth-central", "bluetooth-peripheral"]) {
+  assert.equal((finalInfoPlist.UIBackgroundModes ?? []).includes(mode), false, `最终 Info.plist 不得包含后台模式 ${mode}`);
+}
+
 const finalAndroidPermissions = introspected.android?.permissions ?? [];
 assert.ok(finalAndroidPermissions.length > 0, "introspect 结果缺少 android.permissions，无法核对最终权限");
 for (const permission of [

@@ -163,6 +163,7 @@
   "status.scanner.inactive": "Unfocused",
   "status.scanner.capturing": "HID ready",
   "status.scanner.camera": "Camera",
+  "status.scanner.bleNotAccepted": "Bluetooth scanner: this screen does not accept scans, so the scan was ignored",
   "customerDisplay.mode.idle": "Welcome",
   "customerDisplay.mode.cart": "Your order",
   "customerDisplay.mode.payment": "Payment",

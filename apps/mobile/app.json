@@ -27,8 +27,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Allow HB to scan barcodes, take photos for inventory, leave requests and employee profiles, and record silent advertisement videos",
         "NSPhotoLibraryUsageDescription": "Allow HB to select employee profile media, business attachments, and advertisement photos or videos",
-        "NSBluetoothAlwaysUsageDescription": "Used to scan and connect Bluetooth receipt and label printers",
-        "NSBluetoothPeripheralUsageDescription": "Used to scan and connect Bluetooth receipt and label printers",
+        "NSBluetoothAlwaysUsageDescription": "Used to scan and connect Bluetooth receipt printers, label printers and barcode scanners",
+        "NSBluetoothPeripheralUsageDescription": "Used to scan and connect Bluetooth receipt printers, label printers and barcode scanners",
         "NSLocationWhenInUseUsageDescription": "Used to verify sign-in and attendance punches with your current precise location",
         "ITSAppUsesNonExemptEncryption": false
       },
@@ -188,6 +188,14 @@
     "plugins": [
       "expo-router",
       "./plugins/with-ios-printer-module",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": [],
+          "bluetoothAlwaysPermission": "Used to scan and connect Bluetooth receipt printers, label printers and barcode scanners"
+        }
+      ],
       [
         "expo-camera",
         {

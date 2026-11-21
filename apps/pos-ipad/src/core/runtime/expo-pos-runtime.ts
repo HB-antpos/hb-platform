@@ -74,6 +74,8 @@ import {
   externalDisplay,
 } from "../peripherals/customer-display/native";
 import { HidScannerRouter } from "../peripherals/scanner";
+import type { BleScannerService } from "../peripherals/scanner/ble/ble-scanner-service";
+import { createBleScannerService } from "../peripherals/scanner/ble/create-ble-scanner-service";
 import { SecurityApiCredentialProvider } from "../security/api-credential-provider";
 import { CashierAuthenticationService } from "../security/cashier-authentication";
 import { CashierSessionInvalidationBus } from "@hb/pos-domain/core/security/cashier-session-invalidation";
@@ -182,7 +184,11 @@ export type ExpoPosRuntimeServices = PosRuntimeServices &
     appUpdates: AppUpdateOrchestrator;
     appUpdateRecovery: AppUpdateRecoveryRuntimePort;
     serverConnection: PreloginServerConnectionControl;
-    scanner: Readonly<{ router: HidScannerRouter }>;
+    /**
+     * ble：App 内直连的 BLE 扫码枪服务；旧原生包（没有 ble-plx）为 null，
+     * 设置页据此隐藏「蓝牙扫码枪」卡片。可选字段，避免旧测试桩全部要补。
+     */
+    scanner: Readonly<{ router: HidScannerRouter; ble?: BleScannerService | null }>;
     applicationLog: ApplicationLogRuntime;
     updateIdentity: ExpoPosUpdateIdentity;
     /** 设备运行状态心跳（在线、应用版本），由运行时工作桥按节奏触发；失败由调用方吞掉。 */
@@ -830,6 +836,26 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
     const scannerRouter = new HidScannerRouter();
     const scannerTest =
       new SettingsScannerTestCoordinator(scannerRouter);
+    // BLE 扫码枪：只组装不启动，等运行时初始化成功后再 start，避免启动失败后蓝牙连接还挂着。
+    const bleScanner = createBleScannerService({
+      router: scannerRouter,
+      storage: database.bleScannerSettings(),
+      // 搜索时排除已保存的小票打印机，免得把打印机当扫码枪连走。
+      loadExcludedPeripheralIds: async () => {
+        const receipt = await database.settings().getReceiptPrinterSettings();
+        return receipt.peripheralId ? [receipt.peripheralId] : [];
+      },
+      log: (event) => {
+        applicationLog?.record({
+          level: event === "ble-start-failed" ? "Warning" : "Information",
+          message:
+            event === "ble-start-failed"
+              ? "BLE scanner start failed."
+              : "BLE scan dropped: no screen is accepting scans.",
+          category: "peripherals.ble-scanner",
+        });
+      },
+    });
     const paymentTestApi =
       new HbposSettingsPaymentTestApi(transport);
     const squareSetupApi =
@@ -1306,6 +1332,8 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
     );
     // `applicationLog` 仅为 catch 路径保留可空状态；返回的 runtime 闭包固定使用已构造实例。
     const activeApplicationLog = applicationLog;
+    // 运行时已就绪：读已保存的扫码枪并挂起连接（蓝牙失败只记日志，不影响收银）。
+    bleScanner?.start();
 
     return {
       ...services,
@@ -1329,7 +1357,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
             }),
           ),
       }),
-      scanner: Object.freeze({ router: scannerRouter }),
+      scanner: Object.freeze({ router: scannerRouter, ble: bleScanner }),
       applicationLog: activeApplicationLog,
       updateIdentity,
       runtimeStatus: new RuntimeStatusReporter({
@@ -1360,6 +1388,8 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
             // 与 401/403/手动锁屏使用同一可信桥撤销可信会话。
             () => cashierSessionInvalidation.notify("manual-lock"),
             () => appUpdates.dispose(),
+            // 关闭运行时（换店、重新注册等）时断开扫码枪会话、退订前台监听。
+            () => bleScanner?.dispose(),
           ],
           sync: services.sync,
           applicationLog: activeApplicationLog,

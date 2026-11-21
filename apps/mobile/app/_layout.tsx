@@ -10,6 +10,8 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { StatusBar } from "expo-status-bar";
 import { installPrinterLinkDiagnostics } from "@/modules/printer/link-diagnostics-runtime";
 import { usePrinterAutoConnect } from "@/modules/printer/use-printer-auto-connect";
+import { useBleScannerAutoStart } from "@/modules/scanner/ble/use-ble-scanner-auto-start";
+import { BleScannerNoticeHost } from "@/modules/scanner/ble/BleScannerNoticeHost";
 import { waitForStartupReadiness } from "@/modules/startup/startup-readiness";
 import {
   shouldRunAutomaticAppUpdatesForProfile,
@@ -132,6 +134,8 @@ export default function RootLayout() {
     return installPrinterLinkDiagnostics();
   }, [sideEffectsEnabled]);
   usePrinterAutoConnect({ enabled: sideEffectsEnabled });
+  // BLE 扫码枪：保存过才自动连接；与打印机同一开关，iOS 审核态不扫描不连接。
+  useBleScannerAutoStart({ enabled: sideEffectsEnabled });
   // 班中后台定位已取消：启动就绪与每次回前台时，收掉旧版本留下的后台定位任务与本地残留（没有就什么都不做）。
   useLegacyLocationTrackingCleanup({ enabled: sideEffectsEnabled });
   // 班中（已上班、未下班）每次打开 App / 回到前台时，在前台取一次位置并上传（间隔 ≥10 分钟、不弹权限框、无后台定位）。
@@ -301,6 +305,7 @@ export default function RootLayout() {
                       <Stack.Screen name="(shell)" />
                     </Stack>
                     {isIosReviewSession ? <IosReviewBanner /> : null}
+                    <BleScannerNoticeHost />
                   </View>
                 </MobileOtaUpdateBoundary>
                 </AndroidNativeUpdateBoundary>

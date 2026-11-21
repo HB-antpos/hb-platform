@@ -1,5 +1,11 @@
-import type { ScanEvent, ScannerContext, ScannerPort } from "../../contracts/scanner";
+import type {
+  ScanEvent,
+  ScannerContext,
+  ScannerPort,
+  ScanSource,
+} from "../../contracts/scanner";
 
+import { CrossSourceScanDeduper } from "./ble/ble-scanner-core";
 import type {
   RoutedScanEvent,
   ScannerCaptureContext,
@@ -39,6 +45,8 @@ export class HidScannerRouter implements ScannerPort {
   private lastInputAt: number | null = null;
   private captureActive = false;
   private cameraActive = false;
+  /** 同一个码 300ms 内从不同来源（hid / camera / ble）各来一次只投递一次。 */
+  private readonly crossSourceDeduper = new CrossSourceScanDeduper();
 
   constructor(options: HidScannerRouterOptions = {}) {
     this.idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
@@ -169,6 +177,25 @@ export class HidScannerRouter implements ScannerPort {
     return this.emit(normalized, "camera", receivedAt);
   }
 
+  /**
+   * BLE 数据模式扫码枪交来的整码（已由控制器拼帧、分类为 barcode）。
+   * 与 HID 不同，它不依赖隐藏输入框焦点，所以必须靠「场景租约」判断有没有页面在收：
+   * 只有栈顶是某个页面 / 弹窗 acquireContext 拿到的租约时才投递；
+   * 栈顶是没人占用的默认 product（付款页、普通表单等）时返回 false，由调用方轻提示后丢弃。
+   * HBDEV1- 开通码隔离、device-activation 静默与 HID / 相机共用 emit。
+   */
+  acceptBleText(value: string, receivedAt = this.now()): boolean {
+    const top = this.contextStack.at(-1);
+    if (!top || top.leaseId === null) {
+      return false;
+    }
+    const normalized = normalizeScanValue(value);
+    if (!normalized) {
+      return false;
+    }
+    return this.emit(normalized, "ble", receivedAt);
+  }
+
   subscribe(listener: (event: ScanEvent) => void): () => void {
     this.scannerListeners.add(listener);
     return () => this.scannerListeners.delete(listener);
@@ -234,7 +261,7 @@ export class HidScannerRouter implements ScannerPort {
     this.lastInputAt = null;
   }
 
-  private emit(value: string, source: "hid" | "camera", receivedAt: number): boolean {
+  private emit(value: string, source: ScanSource, receivedAt: number): boolean {
     const context = this.currentContext();
     if (context === "device-activation") {
       // 开通码只交给相机弹窗的直接回调或当前输入框，禁止进入任何共享扫码订阅。
@@ -244,6 +271,15 @@ export class HidScannerRouter implements ScannerPort {
       // 即使未进入专用上下文，也绝不能把疑似设备秘密当商品或员工码广播。
       return false;
     }
+    if (
+      context !== "scanner-test" &&
+      !this.crossSourceDeduper.accept(value, source, receivedAt)
+    ) {
+      // 同码已从另一来源投递过（例如同一把枪键盘模式和 BLE 模式都开着）：
+      // 视为已处理，返回 true，避免相机等调用方把它当成「未被接收」。
+      // 扫码测试不去重：测试面板要把「两种模式同时开着」的重复如实显示出来。
+      return true;
+    }
     const event: RoutedScanEvent = {
       value,
       source,
@@ -252,7 +288,8 @@ export class HidScannerRouter implements ScannerPort {
       receivedAtIso: new Date(receivedAt).toISOString(),
     };
     this.routedListeners.forEach((listener) => listener(event));
-    if (context !== "emergency-qr") {
+    // 紧急 QR 与扫码测试只走 routed 订阅，不广播给通用 ScannerPort 订阅者。
+    if (context !== "emergency-qr" && context !== "scanner-test") {
       const scannerEvent: ScanEvent = {
         value: event.value,
         source: event.source,
@@ -271,6 +308,11 @@ export class HidScannerRouter implements ScannerPort {
 
 export function normalizeScanValue(value: string): string {
   return value.replace(/[\r\n]/g, "").trim();
+}
+
+/** 测试面板等只读展示用：疑似设备开通码（HBDEV1-）要屏蔽显示。 */
+export function isDeviceActivationScanValue(value: string): boolean {
+  return hasDeviceActivationPrefix(value);
 }
 
 function hasDeviceActivationPrefix(value: string): boolean {
@@ -313,6 +355,8 @@ function categoryForContext(context: ScannerCaptureContext): ScannerScanCategory
       return "emergency-qr";
     case "device-activation":
       return "device-activation";
+    case "scanner-test":
+      return "scanner-test";
     case "product":
     case "product-search":
       return "product-code";

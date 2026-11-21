@@ -34,7 +34,7 @@
 
 `4. Continue only through the payment step explicitly enabled for the dedicated review store. No live customer card or production payment terminal is required.`
 
-`The camera permission is used only as a barcode-scanning fallback. Bluetooth access is used only for supported receipt printers. Local-network access is used only for supported store payment terminals. The app does not request microphone permission.`
+`The camera permission is used only as a barcode-scanning fallback. Bluetooth access is used only while the app is in the foreground, to connect supported receipt printers (including their cash drawers) and Bluetooth barcode scanners; the app does not use Bluetooth in the background. Local-network access is used only for supported store payment terminals. The app does not request microphone permission.`
 
 ## 提交前证据门槛
 

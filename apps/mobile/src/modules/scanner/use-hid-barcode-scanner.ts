@@ -17,6 +17,7 @@ import {
   subscribeHidScannerMode,
 } from "./hid-scanner-mode-state";
 import { createHidScannerEnabledGate } from "./hid-scanner-enabled-gate";
+import { acquireBleScanLease, noteScanSource } from "./ble/ble-scan-hub";
 
 interface UseHidBarcodeScannerOptions {
   enabled?: boolean;
@@ -91,6 +92,8 @@ export function useHidBarcodeScanner({
 }: UseHidBarcodeScannerOptions) {
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
+  const minLengthRef = useRef(minLength);
+  minLengthRef.current = minLength;
 
   const [textInputValue, setTextInputValue] = useState("");
   const textInputTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -117,7 +120,8 @@ export function useHidBarcodeScanner({
     idleMs,
     minLength,
     onBarcode: (barcode) => {
-      if (enabledGateRef.current.isEnabled()) {
+      // 跨来源去重：同码 300ms 内 BLE 已经来过（同一把枪两种模式都开着）就跳过。
+      if (enabledGateRef.current.isEnabled() && noteScanSource(barcode, "hid")) {
         onScanRef.current?.(barcode);
       }
     },
@@ -156,6 +160,10 @@ export function useHidBarcodeScanner({
       lastSubmittedTimeRef.current = now;
       lastSubmittedRawValueRef.current = normalizedRawValue;
 
+      // 跨来源去重：同码 300ms 内 BLE 已经来过就跳过（上面的分段状态仍照常更新）。
+      if (!noteScanSource(barcode, "hid")) {
+        return;
+      }
       onScanRef.current?.(barcode);
     },
     [minLength],
@@ -279,6 +287,26 @@ export function useHidBarcodeScanner({
       nativeKeyBuffer.dispose();
     };
   }, [nativeKeyBuffer]);
+
+  // BLE 扫码枪：启用中的 hook 持有一份租约，BLE 码只投给最后一个启用的 hook（见 ble-scan-hub）。
+  // 与键盘模式无关：textInputOnly（弹层内）同样接收 BLE 码，因为 BLE 不受原生 Modal 窗口限制。
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+    const lease = acquireBleScanLease((value) => {
+      // 渲染期已同步更新闸门：effect 清理前的空档里也不能把码投给已停用的页面。
+      if (!enabledGateRef.current.isEnabled()) {
+        return false;
+      }
+      // 过短的码按页面原规则忽略，但算已处理，避免误报「当前页面不接收扫码」。
+      if (value.length >= minLengthRef.current) {
+        void onScanRef.current?.(value);
+      }
+      return true;
+    });
+    return () => lease.release();
+  }, [enabled]);
 
   useEffect(() => {
     const mod = getNativeModule();

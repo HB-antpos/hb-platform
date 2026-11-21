@@ -208,6 +208,26 @@ async function run() {
     );
     assert.match(hydrateSavedPrinterSource, /PrinterStorage\.getPrinter\(\)/);
 
+    // BLE 扫码枪：审核态不扫描、不连接（与打印机一致），设置页整行隐藏，根布局随副作用开关启停。
+    const bleScannerSource = readMobileSource("src/modules/scanner/ble/ble-scanner-service.ts");
+    assertGuardBefore(bleScannerSource, "export async function startBleScannerService", "getController()", "扫码枪启动");
+    assertGuardBefore(bleScannerSource, "export async function startBleScannerDiscovery", ".startDiscovery(", "扫码枪搜索");
+    assertGuardBefore(bleScannerSource, "export async function pairBleScanner", ".pair(", "扫码枪配对");
+    assertGuardBefore(bleScannerSource, "export async function reconnectBleScanner", ".reconnect()", "扫码枪重连");
+    assertGuardBefore(bleScannerSource, "export function resumeBleScannerService", ".resume()", "扫码枪回前台重连");
+    assertGuardBefore(bleScannerSource, "function routeScan", "deliverBleScan(", "扫码枪分发");
+    assert.match(
+      bleScannerSource,
+      /export function isBleScannerFeatureAvailable\(\)[\s\S]{0,120}!isIosReviewSessionActive\(\)/,
+      "审核态必须隐藏蓝牙扫码枪入口",
+    );
+    const rootLayoutSource = readMobileSource("app/_layout.tsx");
+    assert.match(
+      rootLayoutSource,
+      /useBleScannerAutoStart\(\{\s*enabled:\s*sideEffectsEnabled\s*\}\)/,
+      "扫码枪自动连接必须跟随 sideEffectsEnabled（审核态关闭）",
+    );
+
     const settingsSource = readMobileSource("app/(shell)/settings.tsx");
     assertGuardBefore(settingsSource, "const handleCheckUpdates", "await checkMobileOtaUpdate()", "手动 OTA");
     assert.match(

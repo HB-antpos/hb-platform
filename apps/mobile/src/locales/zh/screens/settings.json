@@ -192,6 +192,136 @@
     "empty": "没有找到可用的蓝牙小票打印机，请确认打印机已开机并处于可发现范围。",
     "available": "可用设备"
   },
+  "bleScanner": {
+    "title": "蓝牙扫码枪",
+    "manage": "管理蓝牙扫码枪",
+    "unnamed": "未命名设备",
+    "rowNotPaired": "未连接 · 键盘模式扫码枪无需设置",
+    "sleepingHint": "休眠中，按扳机唤醒",
+    "reconnectingTooLong": "长时间没连上",
+    "batteryShort": "电量 {{level}}%",
+    "lastScanShort": "最近 {{tail}}",
+    "state": {
+      "ready": "已连接",
+      "learning": "学习中",
+      "connecting": "连接中",
+      "reconnecting": "重连中",
+      "sleeping": "休眠",
+      "disconnected": "已断开",
+      "bluetoothOff": "蓝牙已关闭",
+      "unauthorized": "未授权",
+      "unsupported": "不支持",
+      "notPaired": "未配置",
+      "attention": "需处理"
+    },
+    "stateHint": {
+      "ready": "已连接，可以扫码。商品查询、仓库、拣货、打包等扫码页面直接可用。",
+      "learning": "已连接。首次使用这款扫码枪，请扫一个商品条码，App 会自动学会它的数据通道。",
+      "connecting": "正在连接扫码枪，请保持扫码枪开机并在附近。",
+      "reconnecting": "连接断开，正在自动重连。按一下扳机可以唤醒扫码枪。",
+      "sleeping": "扫码枪长时间没扫码已自动休眠，按一下扳机即可唤醒并自动连回。",
+      "disconnected": "已手动断开，点「重新连接」恢复。",
+      "bluetoothOff": "手机蓝牙已关闭，打开蓝牙后会自动连回。",
+      "unauthorized": "App 没有蓝牙权限，请到系统设置里允许。",
+      "unsupported": "这台设备不支持低功耗蓝牙。",
+      "notPaired": "还没有连接蓝牙扫码枪。",
+      "attention": "长时间没连上或电量低。请确认扫码枪已开机、在附近，并且没有被别的设备连着。"
+    },
+    "info": {
+      "channel": "数据通道",
+      "signal": "信号",
+      "battery": "电量",
+      "lastScan": "最近一次扫码",
+      "unknown": "未知",
+      "none": "暂无"
+    },
+    "channel": {
+      "learning": "学习中（请扫一个码）",
+      "known": "已知型号",
+      "learned": "厂商私有（已学会）",
+      "unknown": "未知"
+    },
+    "signal": {
+      "strong": "强 {{rssi}} dBm",
+      "good": "良好 {{rssi}} dBm",
+      "weak": "弱 {{rssi}} dBm"
+    },
+    "testScan": "测试扫码",
+    "autoReconnect": "打开 App 时自动重连",
+    "autoReconnectHint": "关闭后需要在这里手动点「重新连接」",
+    "alias": "备注名",
+    "aliasPlaceholder": "如：1 号背夹",
+    "aliasHint": "多把枪广播名相同时用来区分",
+    "knownModelHint": "扫码枪出厂是键盘模式，请扫说明书上的「BLE 模式」码；背夹扫不到装着它的手机屏幕，请扫纸质说明书。",
+    "lastError": "最近错误：{{code}}",
+    "disconnect": "断开",
+    "reconnect": "重新连接",
+    "replace": "更换",
+    "forget": "忘记这把扫码枪",
+    "forgetConfirmTitle": "忘记这把扫码枪？",
+    "forgetConfirmMessage": "会断开连接并删除本机保存的配置，之后需要重新搜索连接。",
+    "actionFailed": "操作失败",
+    "search": {
+      "subtitle": "连接后可在所有扫码页面直接使用",
+      "bleModeHint": "先切到 BLE 模式：扫说明书「蓝牙模式」里的 BLE 模式码。背夹扫不到装着它的手机屏幕，请扫纸质说明书，或在另一台设备上显示设置码再扫。",
+      "bluetoothOff": "手机蓝牙已关闭，请先打开蓝牙。",
+      "unauthorized": "App 没有蓝牙权限，无法搜索扫码枪。",
+      "openSettings": "打开系统设置",
+      "nearby": "附近的扫码枪",
+      "scanning": "扫描中 {{seconds}} 秒",
+      "waiting": "正在搜索…",
+      "empty": "没有搜到扫码枪。",
+      "lastConnected": "上次连接过",
+      "recommended": "推荐",
+      "connecting": "连接中",
+      "connect": "连接",
+      "showAll": "显示全部蓝牙设备",
+      "showAllHint": "默认隐藏打印机、耳机等无关设备",
+      "notFoundHint": "搜不到？可能还是键盘模式（出厂默认）、正在休眠（按一下扳机），或被另一台设备连着（BLE 同时只能连一台）。",
+      "rescan": "重新扫描"
+    },
+    "test": {
+      "title": "测试扫码",
+      "subtitle": "这里扫到的码不会进入任何业务页面",
+      "learningHint": "首次扫码时会自动学会数据通道。",
+      "wakeHint": "扫码枪在休眠：按一下扳机唤醒，唤醒后再扫一次。",
+      "duplicateHint": "同一个码从键盘模式又来了一次：这把枪可能两种模式都开着，建议只留 BLE 模式。",
+      "latest": "最新一次 · {{time}}",
+      "bleDetail": "{{length}} 位 · {{packets}} 个分包 · 结束符 {{terminator}} · 耗时 {{duration}} ms",
+      "hidDetail": "{{length}} 位 · 键盘模式输入",
+      "showRaw": "显示原始数据（十六进制）",
+      "hideRaw": "隐藏原始数据",
+      "rawHidden": "敏感码不显示原始数据",
+      "waiting": "请扫一个码。",
+      "recent": "最近记录",
+      "clear": "清空",
+      "sourceKeyboard": "键盘",
+      "sourceBle": "蓝牙",
+      "symbologyOther": "其他码型",
+      "recordMeta": "{{length}} 位 · {{time}}",
+      "keyboardHint": "没有蓝牙扫码枪？也可以用这页测键盘模式扫码枪：直接扫，记录里会标「键盘」。",
+      "check": {
+        "bluetooth": "蓝牙权限",
+        "connected": "已连接",
+        "subscribed": "已订阅通道",
+        "received": "收到扫码",
+        "noDuplicate": "无键盘重复输入"
+      },
+      "terminator": {
+        "CR": "CR",
+        "LF": "LF",
+        "TAB": "Tab",
+        "idle": "无（超时结束）"
+      },
+      "kind": {
+        "setting-code": "设置码",
+        "device-reply": "设备回复"
+      }
+    },
+    "notice": {
+      "noReceiver": "当前页面不接收扫码"
+    }
+  },
   "offlineData": {
     "title": "离线商品数据",
     "description": "离线查询与打印标签使用的本地商品快照。请在这里手动下载、更新数据或切换分店。",

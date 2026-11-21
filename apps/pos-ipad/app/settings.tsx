@@ -161,6 +161,9 @@ export default function SettingsRoute() {
       {...(runtime.services?.scanner?.router
         ? { scanner: runtime.services.scanner.router }
         : {})}
+      {...(runtime.services?.scanner?.ble
+        ? { bleScanner: runtime.services.scanner.ble }
+        : {})}
     />
   );
 }

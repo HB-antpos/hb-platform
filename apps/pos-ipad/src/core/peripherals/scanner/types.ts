@@ -3,7 +3,9 @@ import type { ScanEvent, ScannerContext } from "../../contracts/scanner";
 export type ScannerCaptureContext =
   | ScannerContext
   | "emergency-qr"
-  | "device-activation";
+  | "device-activation"
+  /** 设置页「测试扫码」弹窗独占：所有来源的码只进测试面板，不触发任何业务。 */
+  | "scanner-test";
 
 export type ScannerScanCategory =
   | "cashier-code"
@@ -11,7 +13,8 @@ export type ScannerScanCategory =
   | "supervisor-code"
   | "dialog-code"
   | "emergency-qr"
-  | "device-activation";
+  | "device-activation"
+  | "scanner-test";
 
 export type ScannerCaptureStatus = "inactive" | "capturing" | "camera";
 

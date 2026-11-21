@@ -163,6 +163,7 @@
   "status.scanner.inactive": "未聚焦",
   "status.scanner.capturing": "HID 就绪",
   "status.scanner.camera": "相机",
+  "status.scanner.bleNotAccepted": "蓝牙扫码枪：当前页面不接收扫码，这次没有生效",
   "customerDisplay.mode.idle": "欢迎光临",
   "customerDisplay.mode.cart": "您的订单",
   "customerDisplay.mode.payment": "请付款",

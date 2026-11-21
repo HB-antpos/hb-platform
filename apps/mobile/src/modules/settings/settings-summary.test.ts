@@ -9,13 +9,27 @@ import {
   resolveRuntimeVersionLabel,
 } from "./settings-summary";
 
-const ok = { canViewDeviceCard: true, deviceReady: true, labelPrinterError: false, receiptPrinterError: false };
+const ok = {
+  canViewDeviceCard: true,
+  deviceReady: true,
+  labelPrinterError: false,
+  receiptPrinterError: false,
+  bleScannerAttention: false,
+};
 
 test("需处理项数：设备未就绪、标签机出错、小票机出错各算一项", () => {
   assert.equal(countAttentionItems(ok), 0);
   assert.equal(countAttentionItems({ ...ok, deviceReady: false }), 1);
   assert.equal(countAttentionItems({ ...ok, labelPrinterError: true }), 1);
   assert.equal(countAttentionItems({ ...ok, deviceReady: false, labelPrinterError: true, receiptPrinterError: true }), 3);
+});
+
+test("蓝牙扫码枪需处理（重连超时 / 电量低）算一项", () => {
+  assert.equal(countAttentionItems({ ...ok, bleScannerAttention: true }), 1);
+  assert.equal(
+    countAttentionItems({ ...ok, deviceReady: false, labelPrinterError: true, receiptPrinterError: true, bleScannerAttention: true }),
+    4,
+  );
 });
 
 test("没有设备会话 / 绑定 / 用户时，设备未就绪不算需处理", () => {

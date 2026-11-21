@@ -70,7 +70,9 @@ RCT_EXTERN_METHOD(printWarehouseLocationLabel:(NSDictionary *)payload
 @end
 `;
 
-const BLUETOOTH_USAGE = "Used to scan and connect Bluetooth receipt and label printers";
+// 与 app.json 的 NSBluetoothAlwaysUsageDescription、react-native-ble-plx 插件的 bluetoothAlwaysPermission 保持一致：
+// 两个插件都会写这个键，文案相同才不会因执行顺序不同而互相覆盖成旧文案。
+const BLUETOOTH_USAGE = "Used to scan and connect Bluetooth receipt printers, label printers and barcode scanners";
 const BRIDGE_IMPORTS = [
   "#import <React/RCTBridgeModule.h>",
   "#import <React/RCTEventEmitter.h>",

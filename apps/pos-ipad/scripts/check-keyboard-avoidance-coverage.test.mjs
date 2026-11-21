@@ -27,6 +27,7 @@ const keyboardAwareHosts = new Set([
   "src/features/remote-history/remote-history-screen.tsx",
   "src/features/returns/return-screen.tsx",
   "src/features/sales/ui/sales-screen.tsx",
+  "src/features/settings/ble-scanner-settings.tsx",
   "src/features/settings/settings-screen.tsx",
   "src/features/special-products/special-products-screen.tsx",
 ]);

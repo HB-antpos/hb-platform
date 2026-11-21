@@ -25,6 +25,7 @@ import {
 } from "@hb/pos-api-client/transport-failover";
 
 import { useApiEntrySettings } from "./api-entry-settings";
+import { BleScannerCard } from "./ble-scanner-settings";
 import {
   resolveSettingsLocale,
   settingsText,
@@ -54,6 +55,7 @@ import {
   HidScannerCapture,
   type HidScannerRouter,
 } from "@/core/peripherals/scanner";
+import type { BleScannerService } from "@/core/peripherals/scanner/ble/ble-scanner-service";
 import {
   DEFAULT_LOCAL_HBPOS_API_BASE_URL,
   DEFAULT_REMOTE_HBPOS_API_BASE_URL,
@@ -179,6 +181,8 @@ type SettingsScreenProps = Readonly<{
   onOpenSyncHistory?(): void;
   presenter: SettingsScreenPresenter;
   scanner?: HidScannerRouter;
+  /** BLE 扫码枪服务；旧原生包（没有 ble-plx）不传，外设页不显示蓝牙扫码枪卡片。 */
+  bleScanner?: BleScannerService;
 }>;
 
 const NAV_ITEMS: readonly Readonly<{
@@ -230,6 +234,7 @@ const SETTINGS_COMPACT_NAVIGATION_WIDTH = 1100;
  */
 export function SettingsScreen({
   apiEntry,
+  bleScanner,
   locale: localeOverride,
   onBack,
   onOpenNetworkCheck,
@@ -252,10 +257,9 @@ export function SettingsScreen({
   }, [presenter]);
   useEffect(() => {
     if (!scanner) return undefined;
-    scanner.pushContext("dialog");
-    return () => {
-      scanner.popContext();
-    };
+    // 用租约而不是 push/pop：卸载顺序与其他弹窗交错时也只释放自己这一层；
+    // BLE 扫码枪也靠「栈顶是租约」判断设置页在收码（交给「等待一次扫码」）。
+    return scanner.acquireContext("dialog");
   }, [scanner]);
   const setScannerStatus = usePosShellStore((current) => current.setScanner);
   const { i18n } = useTranslation();
@@ -387,6 +391,7 @@ export function SettingsScreen({
             {state.kind === "ready" ? (
               <SettingsPaneContent
                 apiEntry={apiEntry}
+                bleScanner={bleScanner}
                 locale={locale}
                 onBack={onBack}
                 onOpenNetworkCheck={onOpenNetworkCheck}
@@ -487,6 +492,7 @@ export function SettingsUnavailableScreen({
 
 function SettingsPaneContent({
   apiEntry,
+  bleScanner,
   locale,
   onBack,
   onOpenNetworkCheck,
@@ -496,6 +502,7 @@ function SettingsPaneContent({
   state,
 }: Readonly<{
   apiEntry: ApiEntrySettingsController | undefined;
+  bleScanner: BleScannerService | undefined;
   locale: SettingsLocale;
   onBack: (() => void) | undefined;
   onOpenNetworkCheck: (() => void) | undefined;
@@ -512,7 +519,13 @@ function SettingsPaneContent({
       );
     case "peripherals":
       return (
-        <PeripheralsPane locale={locale} presenter={presenter} state={state} />
+        <PeripheralsPane
+          bleScanner={bleScanner}
+          locale={locale}
+          presenter={presenter}
+          scanner={scanner}
+          state={state}
+        />
       );
     case "device":
       return (
@@ -2926,12 +2939,16 @@ function ReceiptStoreProfileCard({
 }
 
 function PeripheralsPane({
+  bleScanner,
   locale,
   presenter,
+  scanner,
   state,
 }: Readonly<{
+  bleScanner: BleScannerService | undefined;
   locale: SettingsLocale;
   presenter: SettingsScreenPresenter;
+  scanner: HidScannerRouter | undefined;
   state: SettingsState;
 }>) {
   usePosThemeVersion();
@@ -3154,6 +3171,21 @@ function PeripheralsPane({
             />
           </View>
         </SectionCard>
+
+        {/* 蓝牙扫码枪卡片放在打印机下面；旧原生包没有 BLE 服务时不显示。 */}
+        {bleScanner ? (
+          <BleScannerCard
+            disabled={printerDisabled}
+            locale={locale}
+            router={scanner}
+            service={bleScanner}
+            testDisabled={
+              state.busy ||
+              state.confirmation !== null ||
+              !state.access.canTestScanner
+            }
+          />
+        ) : null}
 
         <ReceiptStoreProfileCard
           disabled={printerDisabled}

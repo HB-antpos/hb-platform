@@ -202,7 +202,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       UIRequiresFullScreen: true,
       UISupportedInterfaceOrientations: supportedInterfaceOrientations,
       "UISupportedInterfaceOrientations~ipad": supportedInterfaceOrientations,
-      NSBluetoothAlwaysUsageDescription: "HB POS 使用蓝牙连接门店小票打印机。",
+      // 与 plugins/with-hb-printer.js、react-native-ble-plx 插件三处保持同一句，后写的插件会覆盖前者。
+      NSBluetoothAlwaysUsageDescription: "HB POS 使用蓝牙连接门店小票打印机、钱箱和蓝牙扫码枪。",
       NSCameraUsageDescription: "HB POS 使用相机作为条码扫描备用方式。",
       NSLocalNetworkUsageDescription: "HB POS 需要访问受支持的门店支付终端。",
     },
@@ -259,6 +260,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     ],
     "./plugins/with-hb-external-display",
+    [
+      // BLE 扫码枪（GATT notify）。只在前台使用：不开后台蓝牙模式、不加 UIBackgroundModes。
+      "react-native-ble-plx",
+      {
+        isBackgroundEnabled: false,
+        modes: [],
+        bluetoothAlwaysPermission: "HB POS 使用蓝牙连接门店小票打印机、钱箱和蓝牙扫码枪。",
+      },
+    ],
   ],
   experiments: {
     typedRoutes: true,
