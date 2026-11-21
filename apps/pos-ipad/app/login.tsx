@@ -1,7 +1,9 @@
 import { router, type Href, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Keyboard } from "react-native";
 
+import type { RoutedScanEvent } from "@/core/peripherals/scanner";
 import type { ExpoPosUpdateIdentity } from "@/core/runtime/expo-pos-runtime";
 import {
   type NativeAppVersion,
@@ -20,8 +22,12 @@ import {
   isCashierLoginRuntimeReady,
   useCashierLoginStore,
 } from "@/features/cashier-login";
+import { BleScannerLoginPanel } from "@/features/settings/ble-scanner-settings";
 import { toggleAppLanguage } from "@/i18n";
-import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
+import {
+  RouteHidScannerCapture,
+  useRouteBleScan,
+} from "@/ui/scanner/scanner-route-bridge";
 import { usePosThemeVersion } from "@/ui/theme";
 
 export default function LoginRoute() {
@@ -35,6 +41,9 @@ export default function LoginRoute() {
   const scanInFlight = useRef(false);
   // 可见条码框会 autoFocus，首帧先禁用隐藏输入，避免两者竞争焦点。
   const [manualInputActive, setManualInputActive] = useState(true);
+  // 蓝牙扫码枪面板：原生包不带 BLE 服务（旧包）时没有入口。
+  const bleScanner = runtime.services?.scanner?.ble ?? null;
+  const [bleScannerOpen, setBleScannerOpen] = useState(false);
   const hidRestoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const clearHidRestoreTimer = useCallback(() => {
@@ -77,6 +86,32 @@ export default function LoginRoute() {
     },
     [runtime],
   );
+  // 键盘模式（HID）的枪往聚焦的输入框打字，不需要租约；但 BLE 数据模式的码只投递给持有场景租约的页面。
+  // 可见条码框默认 autoFocus，隐藏输入（RouteHidScannerCapture）因此大多数时间是关的，
+  // 租约也随之释放，BLE 的码会被路由器丢弃（"no screen is accepting scans"）。
+  // 所以登录页单独、始终持有 cashier-login 租约（只有蓝牙面板打开时让出），只收 BLE 来源的码。
+  useRouteBleScan({
+    context: "cashier-login",
+    enabled: !bleScannerOpen,
+    onScan: (value) => {
+      void signInFromScanner(value);
+    },
+    path: "/login",
+  });
+  // 隐藏输入收到的 BLE 码交给上面的订阅处理，避免同一个码触发两次登录。
+  const handleHidScan = useCallback(
+    (value: string, source?: RoutedScanEvent["source"]) => {
+      if (source === "ble") return;
+      return signInFromScanner(value);
+    },
+    [signInFromScanner],
+  );
+  const handleOpenBleScanner = useCallback(() => {
+    // 先收起软键盘，避免盖住面板；面板打开期间扫码交给面板自己的测试 / 配对流程。
+    Keyboard.dismiss();
+    setBleScannerOpen(true);
+  }, []);
+  const handleCloseBleScanner = useCallback(() => setBleScannerOpen(false), []);
   const handleSwitchLanguage = useCallback(() => {
     void toggleAppLanguage();
   }, []);
@@ -123,14 +158,15 @@ export default function LoginRoute() {
     <>
       <RouteHidScannerCapture
         context="cashier-login"
-        enabled={!manualInputActive}
-        onScan={signInFromScanner}
+        enabled={!manualInputActive && !bleScannerOpen}
+        onScan={handleHidScan}
         path="/login"
       />
       <CashierLoginScreen
         attendanceQr={attendanceQr}
         language={i18n.resolvedLanguage ?? i18n.language}
         onManualInputFocusChange={handleManualInputFocusChange}
+        {...(bleScanner ? { onOpenBleScanner: handleOpenBleScanner } : {})}
         onOpenNetworkCheck={() => router.push("/network-check" as Href)}
         onSwitchLanguage={handleSwitchLanguage}
         onSuccess={() => router.replace("/sales" as Href)}
@@ -138,6 +174,18 @@ export default function LoginRoute() {
         runtime={runtime}
         versionInfo={versionInfo}
       />
+      {bleScannerOpen && bleScanner ? (
+        <BleScannerLoginPanel
+          locale={
+            (i18n.resolvedLanguage ?? i18n.language).toLowerCase().startsWith("zh")
+              ? "zh"
+              : "en"
+          }
+          onClose={handleCloseBleScanner}
+          router={runtime.services?.scanner?.router}
+          service={bleScanner}
+        />
+      ) : null}
     </>
   );
 }

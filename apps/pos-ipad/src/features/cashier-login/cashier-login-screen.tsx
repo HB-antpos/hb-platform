@@ -61,6 +61,7 @@ type LoginCopy = Readonly<{
   emergencyKeyUnknown: string;
   emergencyInvalid: string;
   networkCheck: string;
+  bleScanner: string;
 }>;
 
 const copy: Record<"en" | "zh", LoginCopy> = {
@@ -96,6 +97,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
       "The emergency signing key is unavailable. Connect this iPad and refresh its security keys.",
     emergencyInvalid: "This emergency sign-in QR is invalid.",
     networkCheck: "Network check",
+    bleScanner: "Bluetooth scanner",
   },
   zh: {
     eyebrow: "收银员登录",
@@ -124,6 +126,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     emergencyKeyUnknown: "紧急登录签名密钥不可用，请联网刷新安全密钥。",
     emergencyInvalid: "紧急登录二维码无效。",
     networkCheck: "网络检测",
+    bleScanner: "蓝牙扫码枪",
   },
 };
 
@@ -146,6 +149,7 @@ export function CashierLoginScreen({
   controller,
   language = "zh",
   onManualInputFocusChange,
+  onOpenBleScanner,
   onOpenNetworkCheck,
   onSwitchLanguage,
   onSuccess,
@@ -160,6 +164,8 @@ export function CashierLoginScreen({
   controller?: CashierLoginController;
   language?: string;
   onManualInputFocusChange?(focused: boolean): void;
+  /** 打开蓝牙扫码枪面板（配对 / 连接 / 测试）；登录前就能用。原生包不带 BLE 服务时不传，按钮不显示。 */
+  onOpenBleScanner?(): void;
   /** 打开只读网络检测页；登录前就能用，不受终端就绪状态限制。 */
   onOpenNetworkCheck?(): void;
   onSwitchLanguage?: () => void;
@@ -520,6 +526,19 @@ export function CashierLoginScreen({
               sound="navigate"
               style={styles.networkCheckButton}
               testID="cashier-login-network-check"
+              tone="quiet"
+            />
+          ) : null}
+          {onOpenBleScanner ? (
+            <PosButton
+              disabled={submitting}
+              icon="barcode-scan"
+              label={text.bleScanner}
+              onPress={onOpenBleScanner}
+              size="medium"
+              sound="navigate"
+              style={styles.networkCheckButton}
+              testID="cashier-login-ble-scanner"
               tone="quiet"
             />
           ) : null}

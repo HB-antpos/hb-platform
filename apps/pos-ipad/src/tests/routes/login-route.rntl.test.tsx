@@ -6,6 +6,9 @@ import LoginRoute from "../../../app/login";
 let mockRuntime: any;
 let mockRouteCaptureProps: any;
 let mockScreenProps: any;
+let mockBleScanOptions: any;
+let mockBlePanelProps: any;
+const mockLogin = jest.fn<(barcode: string, runtime: unknown) => Promise<void>>();
 const mockRouterReplace = jest.fn();
 const mockToggleAppLanguage = jest.fn<() => Promise<"en" | "zh">>();
 
@@ -50,6 +53,13 @@ jest.mock("@/features/cashier-login", () => {
       mockScreenProps = props;
       return React.createElement(Text, { testID: "cashier-login" }, "login");
     },
+    // 扫码登录与手动登录共用公开 controller；这里只关心码有没有被交给它。
+    CashierLoginController: class {
+      public login(barcode: string, runtime: unknown): Promise<void> {
+        return mockLogin(barcode, runtime);
+      }
+    },
+    useCashierLoginStore: { getState: () => ({}) },
     // 与真实实现一致：就绪（含离线就绪）且设备未锁定。
     isCashierLoginRuntimeReady: (runtime: {
       state: { phase: string; device: string };
@@ -74,6 +84,21 @@ jest.mock("@/ui/scanner/scanner-route-bridge", () => {
         { testID: "login-hid-capture" },
         String((props as { enabled?: boolean }).enabled ?? true),
       );
+    },
+    useRouteBleScan: (options: unknown) => {
+      mockBleScanOptions = options;
+    },
+  };
+});
+
+jest.mock("@/features/settings/ble-scanner-settings", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  const { Text } =
+    jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    BleScannerLoginPanel: (props: unknown) => {
+      mockBlePanelProps = props;
+      return React.createElement(Text, { testID: "login-ble-panel" }, "panel");
     },
   };
 });
@@ -338,4 +363,96 @@ test("没有考勤服务或创建失败时登录页照常显示、不带考勤�
   await focusLoginRoute();
   expect(mockScreenProps.attendanceQr).toBeNull();
   await second.unmount();
+});
+
+function bleRuntime(withBle: boolean) {
+  const ble = { id: "ble-service" };
+  const router = { id: "scanner-router" };
+  return {
+    state: { phase: "ready", device: "authorized-online" },
+    services: {
+      cashierSession: { signIn: jest.fn() },
+      scanner: { router, ...(withBle ? { ble } : {}) },
+    },
+  };
+}
+
+test("BLE 扫码枪：登录页始终持有 cashier-login 租约，BLE 码直接扫码登录", async () => {
+  mockRuntime = bleRuntime(true);
+  mockBleScanOptions = null;
+  mockScreenProps = null;
+  mockLogin.mockReset();
+  mockLogin.mockResolvedValue(undefined);
+  mockRouterReplace.mockClear();
+  const screen = await render(<LoginRoute />);
+
+  // 可见条码框默认聚焦（隐藏输入关闭）时，BLE 租约也必须在：这是登录页 BLE 不工作的根因。
+  expect(mockRouteCaptureProps.enabled).toBe(false);
+  expect(mockBleScanOptions).toMatchObject({
+    context: "cashier-login",
+    enabled: true,
+    path: "/login",
+  });
+
+  await act(async () => {
+    mockBleScanOptions.onScan("EMP-0001");
+    await Promise.resolve();
+  });
+  expect(mockLogin).toHaveBeenCalledTimes(1);
+  expect(mockLogin).toHaveBeenCalledWith("EMP-0001", mockRuntime);
+  expect(mockRouterReplace).toHaveBeenCalledWith("/sales");
+  await screen.unmount();
+});
+
+test("隐藏输入收到的 BLE 码不重复处理（交给 BLE 订阅），键盘模式 HID 码照常登录", async () => {
+  mockRuntime = bleRuntime(true);
+  mockLogin.mockReset();
+  mockLogin.mockResolvedValue(undefined);
+  const screen = await render(<LoginRoute />);
+
+  await act(async () => {
+    await mockRouteCaptureProps.onScan("EMP-0002", "ble");
+  });
+  expect(mockLogin).not.toHaveBeenCalled();
+
+  await act(async () => {
+    await mockRouteCaptureProps.onScan("EMP-0002", "hid");
+  });
+  expect(mockLogin).toHaveBeenCalledTimes(1);
+  expect(mockLogin).toHaveBeenCalledWith("EMP-0002", mockRuntime);
+  await screen.unmount();
+});
+
+test("蓝牙入口：原生包带 BLE 服务才显示；点开面板后让出扫码租约，关闭后恢复", async () => {
+  // 旧原生包没有 BLE 服务：不显示入口，也不渲染面板。
+  mockRuntime = bleRuntime(false);
+  mockScreenProps = null;
+  let screen = await render(<LoginRoute />);
+  expect(mockScreenProps.onOpenBleScanner).toBeUndefined();
+  expect(screen.queryByTestId("login-ble-panel")).toBeNull();
+  await screen.unmount();
+
+  mockRuntime = bleRuntime(true);
+  mockBlePanelProps = null;
+  screen = await render(<LoginRoute />);
+  expect(typeof mockScreenProps.onOpenBleScanner).toBe("function");
+  expect(screen.queryByTestId("login-ble-panel")).toBeNull();
+
+  await act(async () => {
+    mockScreenProps.onOpenBleScanner();
+  });
+  expect(screen.getByTestId("login-ble-panel")).toBeTruthy();
+  expect(mockBlePanelProps.service).toEqual({ id: "ble-service" });
+  expect(mockBlePanelProps.router).toEqual({ id: "scanner-router" });
+  expect(mockBlePanelProps.locale).toBe("en");
+  // 面板打开期间：登录页让出 BLE 租约与隐藏输入，扫码交给面板自己的配对 / 测试流程。
+  expect(mockBleScanOptions.enabled).toBe(false);
+  expect(mockRouteCaptureProps.enabled).toBe(false);
+
+  await act(async () => {
+    mockBlePanelProps.onClose();
+  });
+  expect(screen.queryByTestId("login-ble-panel")).toBeNull();
+  expect(mockBleScanOptions.enabled).toBe(true);
+  await screen.unmount();
 });

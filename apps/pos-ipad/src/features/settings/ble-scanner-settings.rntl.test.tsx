@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { act, fireEvent, render } from "@testing-library/react-native";
 
-import { BleScannerCard } from "./ble-scanner-settings";
+import { BleScannerCard, BleScannerLoginPanel } from "./ble-scanner-settings";
 
 import { HidScannerRouter } from "@/core/peripherals/scanner";
 import type {
@@ -228,4 +228,49 @@ test("屏幕设置码：BLE 模式码标「必扫」并画出 Code128", async ()
   expect(screen.getByText("必扫")).toBeTruthy();
   expect(screen.getByText("扫码枪出厂是键盘模式，先扫「BLE 模式」码。")).toBeTruthy();
   expect(screen.getByLabelText("%%SpecCodeAC")).toBeTruthy();
+});
+
+test("登录页面板：登录前就能看到蓝牙扫码枪卡片且配置 / 测试操作不被权限闸禁用；关闭按钮与背板都能关闭", async () => {
+  const { service, router } = setup();
+  const onClose = jest.fn();
+  const screen = await render(
+    <BleScannerLoginPanel
+      locale="zh"
+      onClose={onClose}
+      router={router}
+      service={service}
+    />,
+  );
+
+  expect(screen.getByTestId("login-ble-scanner-panel")).toBeTruthy();
+  expect(screen.getByTestId("settings-ble-scanner-card")).toBeTruthy();
+  expect(screen.getByText("1 号背夹 · 9C2E")).toBeTruthy();
+  // 登录前没有收银员权限：测试、替换、断开都必须可点（disabled 为 false）。
+  for (const testID of [
+    "settings-ble-scanner-test",
+    "settings-ble-scanner-replace",
+    "settings-ble-scanner-disconnect",
+  ]) {
+    const button = screen.getByTestId(testID);
+    expect(button.props.accessibilityState?.disabled ?? false).toBe(false);
+  }
+
+  expect(screen.getByText("关闭")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("login-ble-scanner-close"));
+  expect(onClose).toHaveBeenCalledTimes(1);
+  await fireEvent.press(screen.getByTestId("login-ble-scanner-backdrop"));
+  expect(onClose).toHaveBeenCalledTimes(2);
+});
+
+test("登录页面板英文文案：关闭按钮显示 Close", async () => {
+  const { service, router } = setup();
+  const screen = await render(
+    <BleScannerLoginPanel
+      locale="en"
+      onClose={jest.fn()}
+      router={router}
+      service={service}
+    />,
+  );
+  expect(screen.getByText("Close")).toBeTruthy();
 });
