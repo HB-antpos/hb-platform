@@ -2090,6 +2090,14 @@
       "version": "2.1.1",
       "workspaces": [],
       "reason": "react-native-svg 15.12.1 的传递依赖（纯 JS，解析 SVG 样式）"
+    },
+    {
+      "name": "react-native-ble-plx",
+      "version": "3.5.1",
+      "workspaces": [
+        "apps/pos-ipad"
+      ],
+      "reason": "BLE 数据模式蓝牙扫码枪的连接、订阅与读电量（iOS CoreBluetooth / Android BluetoothGatt，MIT，零传递依赖）；手机端 apps/mobile 用同一版本；含原生模块，iPad 需出新 TestFlight 包，不开后台蓝牙"
     }
   ]
 }
