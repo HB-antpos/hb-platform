@@ -491,7 +491,7 @@ export default function AttendancePayrollPage() {
             rateReviews={periodRateReviews}
             onOpenRates={() => setActiveTab('rates')}
             myobPush={myobPush.cells}
-            onManualEntry={manualEntryEnabled ? (userGuid) => openManualEntry({ userGuid }) : undefined}
+            onManualEntry={manualEntryEnabled ? (userGuid) => openManualEntry(userGuid ? { userGuid } : undefined) : undefined}
           />
         ),
       },

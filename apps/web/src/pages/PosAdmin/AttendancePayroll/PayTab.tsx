@@ -42,8 +42,12 @@ interface PayTabProps {
   onOpenRates?: () => void
   /** 每人的 MYOB 推送状态；有值才显示「MYOB 推送」这一列（没权限 / 服务器没开放 / 本期未锁定时为空）。 */
   myobPush?: Readonly<Record<string, PayrollPushCell>> | null
-  /** 手动补录工时入口：没权限 / 本期已锁定时不传（行上就没有「补录」按钮）。 */
-  onManualEntry?: (userGuid: string) => void
+  /**
+   * 手动补录工时入口：没权限 / 本期已锁定时不传（行上就没有「补录」按钮）。
+   * 带 userGuid = 从某一行进来（预选该员工）；不带 = 从表格下方「添加员工补录」进来，在抽屉里选人
+   * （本期一个工时都没有的人不在工资表里，只能走这个入口）。
+   */
+  onManualEntry?: (userGuid?: string) => void
 }
 
 const HOUR_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday'] as const
@@ -329,6 +333,15 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
   if (!data && loading) return <div className="atp-loading"><Spin /></div>
   if (!data) return <Empty description={t('attendancePayroll.empty')} />
 
+  // 工资表只列本期有工时的人：一个工时都没有（没排班也没打卡）的人不在表里，要从这里选人补录
+  const addEmployeeButton = onManualEntry ? (
+    <div className="atp-me-add-row">
+      <Button type="dashed" onClick={() => onManualEntry()}>
+        {t('attendancePayroll.manualEntry.addEmployee')}
+      </Button>
+    </div>
+  ) : null
+
   return (
     <Spin spinning={loading}>
       <div className="atp-stack">
@@ -524,9 +537,13 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
               </tfoot>
             </table>
             <div className="atp-legend-note">{t('attendancePayroll.pay.footnote', { weeks })}</div>
+            {addEmployeeButton}
           </div>
         ) : (
-          <Empty description={t('attendancePayroll.empty')} />
+          <>
+            <Empty description={t('attendancePayroll.empty')} />
+            {addEmployeeButton}
+          </>
         )}
       </div>
     </Spin>
