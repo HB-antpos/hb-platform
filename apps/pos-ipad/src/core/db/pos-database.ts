@@ -90,7 +90,10 @@ import {
   type OperationAuditLocalScope,
 } from "@hb/pos-db/core/db/sqlite-operation-audit-read";
 import { SqliteOrderSyncMaterialResolver } from "./sqlite-order-sync-material";
-import { SqliteManualPaymentOrderCommitter } from "./sqlite-manual-payment-committer";
+import {
+  SqliteManualPaymentOrderCommitter,
+  type ManualPaymentRecallPort,
+} from "./sqlite-manual-payment-committer";
 import { SqlitePaymentActionBindingStore } from "./sqlite-payment-action-binding-store";
 import {
   SqlitePaymentDraftRecoveryStore,
@@ -268,7 +271,11 @@ export class PosDatabase implements DatabasePort {
 
   /** 人工确认已收款只经专用事务写入 manual tender，不能伪造 provider Approved。 */
   public manualPaymentOrderCommitter(): SqliteManualPaymentOrderCommitter {
-    return new SqliteManualPaymentOrderCommitter(this.connection, this.nowIso);
+    return new SqliteManualPaymentOrderCommitter(
+      this.connection,
+      this.nowIso,
+      createManualPaymentRecallPort(),
+    );
   }
 
   /**
@@ -1857,6 +1864,54 @@ async function completeRecalledHoldInApprovedPaymentTransaction(
   if (completion.recallAudit.orderGuid !== orderGuid) {
     throw new Error("Recall audit order changed during approved payment completion.");
   }
+}
+
+/**
+ * 恢复中心主管判「已收款」时，取单订单的最后一笔人工 tender 与取单收尾同事务完成。
+ * 围栏校验与写库都复用卡通道最后一笔 tender 的那一套（validateApprovedPaymentRecallFence /
+ * completeRecalledHoldInApprovedPaymentTransaction），两条路径对取单围栏、挂单与共享 claim 的处理保持一致。
+ */
+export function createManualPaymentRecallPort(): ManualPaymentRecallPort {
+  return {
+    async prepare(transaction, input) {
+      const { binding, orderGuid, stamp } = input;
+      const completion: RecalledHoldCompletion = {
+        binding,
+        recalledAtIso: stamp.recalledAtIso,
+        recallAudit: {
+          eventId: stamp.eventId,
+          eventType: "ORDER_RECALL",
+          occurredAtIso: stamp.recalledAtIso,
+          orderGuid,
+          correlationId: binding.holdId,
+          payload: {
+            source: "ipad-pos",
+            action: "recall",
+            result: "completed",
+            storeCode: binding.scope.storeCode,
+            deviceCode: binding.scope.deviceCode,
+            cashierId: stamp.actor.cashierId,
+            cashierName: stamp.actor.cashierName,
+            userGuid: stamp.actor.userGuid,
+          },
+        },
+      };
+      const fence = await readTerminalCartFenceForCheckout(
+        transaction,
+        binding.scope.storeCode,
+        binding.scope.deviceCode,
+      );
+      validateApprovedPaymentRecallFence(completion, fence);
+      return completion;
+    },
+    async complete(transaction, input) {
+      await completeRecalledHoldInApprovedPaymentTransaction(
+        transaction,
+        input.orderGuid,
+        input.completion,
+      );
+    },
+  };
 }
 
 async function completeRecalledHoldInCashTransaction(

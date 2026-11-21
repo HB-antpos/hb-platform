@@ -294,6 +294,14 @@ export function createProductionPaymentRuntime(
         payloadJson: JSON.stringify({ orderGuid: completion.record.orderGuid }),
         nextAttemptAtIso: occurredAtIso,
       },
+      // 取单订单的最后一笔人工已收款要与取单收尾（挂单置 Recalled、删围栏、共享 claim）同事务完成。
+      // 是不是取单订单由提交器从草稿指纹里的取单绑定判断，不看活动购物车（恢复中心场景下它可能早已不在）；
+      // 这里只提供取单审计的事件号、时刻和操作人（与完成审计同为主管）。
+      recallStamp: {
+        eventId: input.createId(),
+        recalledAtIso: occurredAtIso,
+        actor: completion.supervisorActor,
+      },
     });
   };
   const cartLease = new ActivePricingCartPaymentLeaseCoordinator(
