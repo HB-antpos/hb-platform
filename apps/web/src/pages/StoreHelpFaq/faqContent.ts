@@ -37,6 +37,13 @@ export type StoreHelpFaqGroup = {
 
 export const STORE_HELP_FAQ_PATH = '/support/faq'
 
+/**
+ * 公开支持邮箱：与 `/privacy/pos` 隐私政策页里的联系邮箱保持同一个地址（测试里有一致性断言）。
+ * 这个页面是 App Store 里 HB POS（iPad）的「技术支持网址」，审核方必须能在页面上看到可用的联系方式。
+ */
+export const STORE_HELP_FAQ_CONTACT_EMAIL = 'inquiries@hotbargain.com.au'
+export const STORE_HELP_FAQ_POS_PRIVACY_PATH = '/privacy/pos'
+
 export const STORE_HELP_FAQ_COPY = {
   en: {
     documentTitle: 'POS & app how-to guide',
@@ -68,6 +75,18 @@ export const STORE_HELP_FAQ_COPY = {
       'If you lack a permission, [d:Approval required|需要操作授权] appears. Ask a colleague who has it to scan their staff barcode. Use [k:中 / EN] at the top right to switch language.',
     mobileNote: 'If a tile or button is missing, your account probably lacks that permission. Ask your store manager to grant it under Staff.',
     footer: 'HOT BARGAIN INTERNATIONAL PTY LTD',
+    // iPad 版说明卡片：只写已核实的事实（授权门店专用、无公开注册、权限决定可见功能），不写具体操作路径
+    ipadTitle: 'HB POS for iPad',
+    ipadBody:
+      'The iPad checkout app for authorised Hot Bargain stores. Devices are registered, and store access and cashier permissions are assigned, by the organisation. There is no public sign-up, and the app is not intended for consumer use.',
+    ipadPoints: [
+      'New iPad: ask your store manager or HQ IT to register the device for your store.',
+      'After registering, load the product catalogue before you start selling. The first load can take several minutes.',
+      'Your cashier permissions decide which functions appear. If one is missing, ask your store manager.',
+    ],
+    contactLabel: 'Support email',
+    contactHint: 'Please include your store name and what you were doing when the problem happened.',
+    privacyLink: 'Privacy policy',
   },
   zh: {
     documentTitle: '收银与 App 使用问题解答',
@@ -99,6 +118,17 @@ export const STORE_HELP_FAQ_COPY = {
       '没有权限时会弹出 [d:Approval required|需要操作授权]，请有权限的同事扫他的员工码即可继续。界面右上角 [k:中 / EN] 可切换中英文。',
     mobileNote: '看不到某个磁贴或按钮，通常是账号没有对应权限，请联系店长在「人员管理」里开通。',
     footer: 'HOT BARGAIN INTERNATIONAL PTY LTD',
+    ipadTitle: 'HB POS iPad 版',
+    ipadBody:
+      '供 Hot Bargain 授权门店使用的 iPad 收银应用。设备注册、门店范围和收银员权限均由公司统一分配，不开放公开注册，也不面向普通消费者使用。',
+    ipadPoints: [
+      '新 iPad：请联系店长或总部 IT，为你的门店注册该设备。',
+      '注册后、开始收银前先加载商品目录，第一次加载可能需要几分钟。',
+      '界面上能看到哪些功能由收银员权限决定；缺少某项功能请联系店长。',
+    ],
+    contactLabel: '支持邮箱',
+    contactHint: '请写明门店名称，以及出问题时你在做什么。',
+    privacyLink: '隐私政策',
   },
 } satisfies Localized<Record<string, unknown>>
 
