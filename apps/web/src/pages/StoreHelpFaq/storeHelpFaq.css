@@ -1135,10 +1135,71 @@
   }
 }
 
+/* iPad 版说明卡片：沿用 .store-faq-card 的底色与描边，这里只补内部排版 */
+.store-faq-ipad {
+  padding: 18px 20px;
+  color: var(--faq-ink-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.store-faq-ipad h2 {
+  margin: 0 0 6px;
+  color: var(--faq-ink);
+  font-size: 16px;
+  font-weight: 750;
+}
+
+.store-faq-ipad p {
+  margin: 0;
+}
+
+.store-faq-ipad ul {
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.store-faq-ipad li + li {
+  margin-top: 4px;
+}
+
+.store-faq-ipad .store-faq-ipad-contact {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--faq-line-soft);
+}
+
+.store-faq-ipad-contact span {
+  color: var(--faq-ink-3);
+  font-weight: 650;
+}
+
+.store-faq-ipad-contact a {
+  color: var(--faq-toggle-ink);
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+/* 提示句单独占一行，窄屏下不和链接挤在一起 */
+.store-faq-ipad-contact small {
+  flex-basis: 100%;
+  color: var(--faq-ink-3);
+  font-size: 13px;
+}
+
 .store-faq-footer {
   padding: 18px 2px 0;
   color: var(--faq-ink-3);
   font-size: 13px;
+}
+
+.store-faq-footer a {
+  color: inherit;
+  text-underline-offset: 2px;
 }
 
 /* —— 手机宽度：目录与速览隐藏，问题改为折叠列表 —— */
@@ -1233,6 +1294,11 @@
 
   .store-faq-note {
     padding: 10px 12px;
+    font-size: 13px;
+  }
+
+  .store-faq-ipad {
+    padding: 14px 14px 12px;
     font-size: 13px;
   }
 

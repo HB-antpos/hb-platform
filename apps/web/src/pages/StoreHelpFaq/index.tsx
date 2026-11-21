@@ -6,9 +6,11 @@ import {
 } from '../MobilePrivacy/documentMetadata'
 
 import {
+  STORE_HELP_FAQ_CONTACT_EMAIL,
   STORE_HELP_FAQ_COPY,
   STORE_HELP_FAQ_MAPS,
   STORE_HELP_FAQ_PATH,
+  STORE_HELP_FAQ_POS_PRIVACY_PATH,
   type StoreHelpFaqGroup,
   type StoreHelpFaqLanguage,
   type StoreHelpFaqQuestion,
@@ -463,6 +465,23 @@ export default function StoreHelpFaqPage() {
         </aside>
 
         <main className="store-faq-main">
+          {/* iPad 版说明 + 公开联系方式：App Store 的技术支持网址落在本页，搜索时收起以免挤占结果 */}
+          {!searching ? (
+            <section className="store-faq-card store-faq-ipad" aria-labelledby="store-faq-ipad-title">
+              <h2 id="store-faq-ipad-title">{copy.ipadTitle}</h2>
+              <p>{copy.ipadBody}</p>
+              <ul>
+                {copy.ipadPoints.map((point) => <li key={point}>{point}</li>)}
+              </ul>
+              <p className="store-faq-ipad-contact">
+                <span>{copy.contactLabel}</span>
+                <a href={`mailto:${STORE_HELP_FAQ_CONTACT_EMAIL}`}>{STORE_HELP_FAQ_CONTACT_EMAIL}</a>
+                <a href={STORE_HELP_FAQ_POS_PRIVACY_PATH}>{copy.privacyLink}</a>
+                <small>{copy.contactHint}</small>
+              </p>
+            </section>
+          ) : null}
+
           {!searching ? (
             <details className="store-faq-card store-faq-map" open>
               <summary>
@@ -511,7 +530,10 @@ export default function StoreHelpFaqPage() {
             </Fragment>
           ))}
 
-          <footer className="store-faq-footer">© {new Date().getFullYear()} {copy.footer}</footer>
+          {/* 页脚常驻联系邮箱：搜索状态下上面的说明卡片会收起，联系方式仍然可见 */}
+          <footer className="store-faq-footer">
+            © {new Date().getFullYear()} {copy.footer} · <a href={`mailto:${STORE_HELP_FAQ_CONTACT_EMAIL}`}>{STORE_HELP_FAQ_CONTACT_EMAIL}</a>
+          </footer>
         </main>
       </div>
     </div>

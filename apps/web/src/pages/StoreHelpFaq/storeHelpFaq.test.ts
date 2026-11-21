@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
+  STORE_HELP_FAQ_CONTACT_EMAIL,
+  STORE_HELP_FAQ_COPY,
   STORE_HELP_FAQ_PATH,
+  STORE_HELP_FAQ_POS_PRIVACY_PATH,
   type StoreHelpFaqGroup,
   type StoreHelpFaqLanguage,
   type StoreHelpFaqTab,
@@ -188,5 +191,31 @@ assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'product-rep
 assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'lay-by-continue'), 'pos')
 assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'pos-daily-close'), 'pos')
 assert.equal(findStoreHelpFaqTabByQuestionId(STORE_HELP_FAQ_GROUPS, 'missing'), undefined)
+
+// iPad 版说明与公开联系方式：本页是 App Store 里 HB POS（iPad）的「技术支持网址」，审核方必须看得到可用邮箱
+const pageSource = readFileSync('src/pages/StoreHelpFaq/index.tsx', 'utf8')
+assert.match(STORE_HELP_FAQ_CONTACT_EMAIL, /^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+// 邮箱必须与 POS 隐私政策页（中英两份）里的联系邮箱是同一个，避免两处公开页面写出不同地址
+for (const file of ['pos-privacy-policy.en.json', 'pos-privacy-policy.zh.json']) {
+  const privacyPolicy = JSON.parse(readFileSync(`src/content/${file}`, 'utf8')) as { organization: { email: string } }
+  assert.equal(privacyPolicy.organization.email, STORE_HELP_FAQ_CONTACT_EMAIL, `${file} 的联系邮箱与支持页不一致`)
+}
+// 支持页里链到的隐私政策路径必须是免登录的公开路径
+assert.equal(STORE_HELP_FAQ_POS_PRIVACY_PATH, '/privacy/pos')
+assert.ok(publicPathSource.includes(`'${STORE_HELP_FAQ_POS_PRIVACY_PATH}'`))
+// 中英文案齐全且条数一致；明确写出「不开放公开注册」，与 App Store 描述保持同一口径
+assert.equal(STORE_HELP_FAQ_COPY.en.ipadPoints.length, STORE_HELP_FAQ_COPY.zh.ipadPoints.length)
+assert.ok(STORE_HELP_FAQ_COPY.en.ipadPoints.length >= 1)
+for (const language of languages) {
+  const copy = STORE_HELP_FAQ_COPY[language]
+  for (const text of [copy.ipadTitle, copy.ipadBody, copy.contactLabel, copy.contactHint, copy.privacyLink, ...copy.ipadPoints]) {
+    assert.ok(text.trim().length > 0, `${language} 的 iPad 说明文案不能为空`)
+  }
+}
+assert.match(STORE_HELP_FAQ_COPY.en.ipadBody, /no public sign-up/)
+assert.match(STORE_HELP_FAQ_COPY.zh.ipadBody, /不开放公开注册/)
+// 页面渲染：说明卡片里和页脚各有一个 mailto（搜索时卡片收起，页脚保证联系方式始终可见）
+assert.ok(pageSource.includes('className="store-faq-card store-faq-ipad"'))
+assert.equal(pageSource.split('mailto:${STORE_HELP_FAQ_CONTACT_EMAIL}').length - 1, 2)
 
 console.log('store help FAQ tests passed')
