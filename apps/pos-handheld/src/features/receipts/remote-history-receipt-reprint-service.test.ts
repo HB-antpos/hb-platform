@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { receiptCode128 } from "@hb/pos-receipt-core/features/receipts/receipt-code128";
 import type {
   FrozenReceiptReprintSettings,
   ReceiptReprintSettingsSource,
@@ -154,7 +155,7 @@ test("远程历史重打资格只接受正额、非现金且明细与付款精�
   }
 });
 
-test("prepare 重新读取严格订单，冻结一次设置并生成带完整机读 GUID 的重打票据", async () => {
+test("prepare 重新读取严格订单，冻结一次设置并生成带订单短码条码的重打票据", async () => {
   const harness = createService({ response: details({ storeCode: "BnE" }) });
 
   const prepared = await harness.service.prepare(orderGuid);
@@ -165,7 +166,12 @@ test("prepare 重新读取严格订单，冻结一次设置并生成带完整机
   assert.equal(prepared?.orderGuid, orderGuid);
   assert.equal(prepared?.printerId, "printer-001");
   assert.match(receipt, /\*\*\* REPRINT \*\*\*/u);
-  assert.match(receipt, /12345678-1234-1234-1234-abcdef47\n[\s\S]*c164\n[\s\S]*Date:/u);
+  // 对齐 WPF：顶部是 GUID 末 8 位短码（EF47C164）的 Code128，下方印可读短码；不再印完整 GUID 文本。
+  const payload = receiptCode128("EF47C164").payload;
+  assert.ok(receipt.includes(payload));
+  assert.ok(receipt.indexOf(payload) < receipt.indexOf("Date:"));
+  assert.ok(receipt.indexOf("EF47C164", receipt.indexOf(payload) + payload.length) > receipt.indexOf(payload));
+  assert.doesNotMatch(receipt, /12345678-1234-1234-1234|abcdef47/iu);
   assert.doesNotMatch(receipt, /Order:|#EF47C164/u);
   assert.match(receipt, /Ref: \*\*\*\*4321/u);
   assert.match(receipt, /Refunds and returns/u);

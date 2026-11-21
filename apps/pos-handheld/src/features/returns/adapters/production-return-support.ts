@@ -4,6 +4,7 @@ import {
   type ReturnRefundPlan,
 } from "@hb/pos-domain/features/returns/return-domain";
 import type { ReturnExecutionCommand } from "@hb/pos-domain/features/returns/return-workflow";
+import { matchesReceiptOrderShortCode } from "@hb/pos-receipt-core/features/receipts/receipt-document";
 
 import type {
   DurableReturnLine,
@@ -286,7 +287,10 @@ function isReturnableSale(order: LocalOrder, storeCode: string): boolean {
 }
 
 function matchesLocalOrderQuery(order: LocalOrder, query: string): boolean {
-  return order.orderGuid === query || String(order.localSequence) === query;
+  return order.orderGuid === query
+    || String(order.localSequence) === query
+    // 小票只印订单 GUID 末 8 位短码条码（对齐 WPF），断网退货扫它也要能在本机找到原单。
+    || matchesReceiptOrderShortCode(order.orderGuid, query);
 }
 
 function mapSaleLine(order: LocalOrder, line: CartLine): ReceiptReturnLine {

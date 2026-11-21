@@ -613,10 +613,10 @@
     {
       "path": "features/receipts/receipt-document.ts",
       "package": "pos-receipt-core",
-      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）；新增可选 orderBarcode 顶部单号条码（Order 行之前，含控制字符校验，放不下或非可打印 ASCII 时静默省略）与 receiptOrderShortCode（取显示单号末 8 位转大写，对齐 WPF #1207），仅分期补打传入，未传入时输出与此前逐字节一致",
+      "reason": "销售小票文档新增可选 termsBlock 条款块（退货政策之后、条码之前，含控制字符校验），仅分期补打传入；未传入时输出与固定基线一致。同时保留抽取 ReceiptStoreHeading 命名类型的原适配；状态行默认值按净额判断，退款单打印 Refund（defaultSaleStatusText，对齐 WPF #885）；新增可选 orderBarcode 顶部单号条码（Order 行之前，含控制字符校验，放不下或非可打印 ASCII 时静默省略）与 receiptOrderShortCode（取显示单号末 8 位转大写，对齐 WPF #1207），仅分期补打传入，未传入时输出与此前逐字节一致；销售小票对齐 WPF 的订单单号打印：普通销售 / 退货（orderPresentation 为 guid-only）未传 orderBarcode 时，顶部自动印订单 GUID 去横杠末 8 位大写短码的一维条码（receiptOrderShortCodeFromGuid，非标准 GUID 回退印完整 GUID 文本），条码行新增 presentation=order（条宽首选 3 点放不下退回 2 点、高 80、下方印可读短码，对齐 WPF）；不再印底部完整 GUID 一维码与二维码（includeMachineCodes 保留为空操作，对齐 WPF 2026-10-31 产品决定）；新增 isReceiptOrderShortCode / matchesReceiptOrderShortCode 供退货本机查单使用；其余条码与未传入的小票输出保持不变",
       "baselineCanonicalRuntimeSha256": "be588d9a3581e769fb819e30d22bc72e1f4873eaf98c2aa754416e1ccc9af8bc",
-      "canonicalRuntimeSha256": "b9dc9646bb7114692f0c667afef62893370ffde912c14fbbec65392d4d2d0aef",
-      "canonicalTypeSha256": "f798093a040108611613b73b6e2bf12938509e3851d59f5b4ba58a3f1ae6a979",
+      "canonicalRuntimeSha256": "5e5d71cf8fb6b866c32b47db28fb51ce9240c46ad2c4fa70137b46f950808017",
+      "canonicalTypeSha256": "179ba386575fd0245df5cbe72a56786a18b163cb7f039beab536bf4e0658ffe2",
       "behaviorTests": [
         {
           "workspace": "packages/pos-receipt-core",
@@ -780,6 +780,28 @@
           "workspace": "apps/pos-handheld",
           "script": "test:receipts",
           "path": "src/features/receipts/remote-history-receipt-reprint-service.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        }
+      ]
+    },
+    {
+      "path": "features/receipts/receipt-code128.ts",
+      "package": "pos-receipt-core",
+      "reason": "receiptCode128ModuleWidth 新增可选首选模块宽度参数（订单短码条码用 3 点，放不下退回 2 点）；不传时仍只用 2 点，行为与固定基线一致",
+      "baselineCanonicalRuntimeSha256": "05d042990a95ffae650fd4cae7d5cfbd1a4a4d52e8cebc37404e495c3505a385",
+      "canonicalRuntimeSha256": "192d726b8ced8635135580c72857b70549d9a6f8cba4f09893ee9496e5bd6015",
+      "canonicalTypeSha256": "05075bd3abb4c1643e4574b6e15a6c9bbee261997f7eec054af799153cee52b9",
+      "behaviorTests": [
+        {
+          "workspace": "apps/pos-ipad",
+          "script": "test:receipts",
+          "path": "src/features/receipts/receipt-document.test.ts",
+          "pattern": "src/features/receipts/*.test.ts"
+        },
+        {
+          "workspace": "apps/pos-handheld",
+          "script": "test:receipts",
+          "path": "src/features/receipts/receipt-document.test.ts",
           "pattern": "src/features/receipts/*.test.ts"
         }
       ]

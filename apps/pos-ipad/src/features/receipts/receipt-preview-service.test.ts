@@ -102,8 +102,12 @@ test("未配置打印机也能预览，并以可信 storeCode 回退空品牌", 
   assert.ok(preview?.lines.some((line) => line.kind === "text" && line.text === "BNE"));
   assert.ok(preview?.lines.some((line) => line.kind === "text" && line.text === "Brisbane"));
   assert.ok(preview?.lines.some((line) => line.kind === "text" && line.text === "1 Queen St"));
-  assert.ok(preview?.lines.some(
+  // 对齐 WPF：顶部是订单 GUID 末 8 位短码条码，不再有完整 GUID 文本。
+  assert.equal(preview?.lines.some(
     (line) => line.kind === "text" && line.text === current.orderGuid,
+  ), false);
+  assert.ok(preview?.lines.some(
+    (line) => line.kind === "barcode" && line.value === "55440000",
   ));
   assert.equal(preview?.lines.some(
     (line) => line.kind === "text" && /Order:|#1084/.test(line.text),
@@ -113,7 +117,7 @@ test("未配置打印机也能预览，并以可信 storeCode 回退空品牌", 
   ));
 });
 
-test("预览只保留掩码引用，机器码固定编码完整规范化 orderGuid", async () => {
+test("预览只保留掩码引用，机器码只有订单 GUID 末 8 位短码条码（无完整 GUID 条码与 QR）", async () => {
   const current = order();
   const preview = await service(current, { brandName: "Hot Bargain" }).getPreview(current.orderGuid);
   const visibleText = preview?.lines
@@ -123,8 +127,11 @@ test("预览只保留掩码引用，机器码固定编码完整规范化 orderGu
 
   assert.match(visibleText, /\*\*\*\*1234/);
   assert.doesNotMatch(visibleText, /4111111111111234|must-never-preview/);
-  assert.equal(preview?.lines.some((line) => line.kind === "barcode"), false);
-  assert.ok(preview?.lines.some((line) => line.kind === "qr" && line.value === current.orderGuid));
+  assert.deepEqual(
+    preview?.lines.filter((line) => line.kind === "barcode"),
+    [{ kind: "barcode", value: "55440000", presentation: "order" }],
+  );
+  assert.equal(preview?.lines.some((line) => line.kind === "qr"), false);
 });
 
 test("现金订单缺少持久化完成审计时拒绝猜测找零", async () => {

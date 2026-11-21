@@ -24,7 +24,11 @@ export type ReceiptSeparatorLine = Readonly<{
   bold: boolean;
 }>;
 export type ReceiptFeedLine = Readonly<{ kind: "feed"; text?: string }>;
-export type ReceiptBarcodeLine = Readonly<{ kind: "barcode"; value: string; text?: string }>;
+/**
+ * presentation === "order"：小票顶部的订单短码条码，对齐 WPF（条宽 3 点、高 80 点，条码下方印可读短码）。
+ * 不设置则保持原样（2 点宽、高 100、无可读文字），退款券等其它条码字节不变。
+ */
+export type ReceiptBarcodeLine = Readonly<{ kind: "barcode"; value: string; text?: string; presentation?: "order" }>;
 export type ReceiptQrLine = Readonly<{ kind: "qr"; value: string; text?: string }>;
 export type ReceiptLine = ReceiptTextLine | ReceiptSeparatorLine | ReceiptFeedLine | ReceiptBarcodeLine | ReceiptQrLine;
 export type EscPosDocument = Readonly<{ paper: ReceiptPaper; lines: readonly ReceiptLine[] }>;
@@ -69,10 +73,15 @@ export type SaleInput = Readonly<{
   storeCode?: string;
   statusText?: string;
   printedAtIso?: string;
+  /**
+   * @deprecated 对齐 WPF（2026-10-31 产品决定）：订单小票不再在底部印完整 GUID 条码与二维码，
+   * 退货查单改扫顶部的 8 位短码条码；此开关保留仅为兼容旧调用，不再有任何输出。
+   */
   includeMachineCodes?: boolean;
   /**
-   * 顶部（「Order:」行之前）的居中一维条码内容，目前只有分期补打传入（见 receiptOrderShortCode）。
-   * 不传（默认）则完全不打印，其它所有小票的输出保持字节级不变。
+   * 顶部（「Order:」行之前）的居中一维条码内容（见 receiptOrderShortCode）。
+   * 分期补打显式传入分期单号末 8 位；普通销售 / 退货（orderPresentation 为 "guid-only"）不传时，
+   * 自动用订单 GUID 去横杠后的末 8 位（receiptOrderShortCodeFromGuid，与 WPF / 后端 ShortOrderNo 同口径）。
    * 条码在当前纸宽放不下时静默省略，不抛错：它只是辅助扫码，不能因此让整张小票打不出来。
    */
   orderBarcode?: string;
@@ -113,6 +122,27 @@ export function receiptOrderShortCode(displayNumber: string): string {
       ? trimmed
       : trimmed.slice(-RECEIPT_ORDER_SHORT_CODE_LENGTH)
   ).toUpperCase();
+}
+
+/** 订单短码是否为 8 位十六进制（扫码枪扫到小票条码的结果）；与 WPF ReceiptOrderShortCode.TryNormalize 同口径。 */
+export function isReceiptOrderShortCode(value: string): boolean {
+  return /^[0-9a-f]{8}$/iu.test(value.trim());
+}
+
+/**
+ * 由订单 GUID 生成小票短码：去横杠后的末 8 位、转大写（与 WPF ReceiptOrderShortCode.Create、后端 ShortOrderNo 同口径）。
+ * 例：7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab → 6E0F13AB。不是标准 32 位十六进制 GUID 时返回 null，
+ * 由调用方回退为直接印完整 GUID 文本，不能凭空截出一个查不到单的码。
+ */
+export function receiptOrderShortCodeFromGuid(orderGuid: string): string | null {
+  const hex = orderGuid.trim().replaceAll("-", "");
+  return /^[0-9a-f]{32}$/iu.test(hex) ? hex.slice(-8).toUpperCase() : null;
+}
+
+/** 订单 GUID 的短码是否等于给定短码（给定值先规范化；不是 8 位十六进制一律不匹配，避免商品条码误当单号）。 */
+export function matchesReceiptOrderShortCode(orderGuid: string, code: string): boolean {
+  return isReceiptOrderShortCode(code)
+    && receiptOrderShortCodeFromGuid(orderGuid) === code.trim().toUpperCase();
 }
 
 /**
@@ -164,15 +194,22 @@ export function buildSaleReceiptDocument(input: SaleInput): EscPosDocument {
   }
   b.blank();
 
-  // 中文注释：分期单号约 40 位（IP-门店号-32 位十六进制），80mm 纸放不下整串 Code128，
-  // 所以顶部条码只放单号末 8 位，分期中心的搜索按「包含」匹配单号，扫它即可定位；完整单号仍由下面的「Order:」行印出。
-  const orderBarcode = nonBlank(input.orderBarcode);
+  // 中文注释：对齐 WPF：顶部居中一条 8 位短码一维条码代替整串 GUID 文本，条码下方印可读短码。
+  // 分期单号约 40 位（IP-门店号-32 位十六进制），80mm 纸放不下整串 Code128，所以条码只放单号末 8 位，
+  // 分期中心的搜索按「包含」匹配单号；完整单号仍由下面的「Order:」行印出。
+  // 普通销售 / 退货（guid-only）未显式给条码时，用订单 GUID 末 8 位（退货查单扫它即可，服务端与本机都认）。
+  const guidOnly = input.orderPresentation === "guid-only";
+  if (guidOnly && !orderGuid) throw new Error("Sale receipt GUID display requires orderGuid.");
+  const orderBarcode = nonBlank(input.orderBarcode)
+    ?? (guidOnly && orderGuid ? receiptOrderShortCodeFromGuid(orderGuid) : null);
+  let orderBarcodePrinted = false;
   if (orderBarcode && canPrintCode128(orderBarcode, input.paper)) {
-    b.barcode(orderBarcode);
+    b.barcode(orderBarcode, "order");
+    orderBarcodePrinted = true;
   }
-  if (input.orderPresentation === "guid-only") {
-    if (!orderGuid) throw new Error("Sale receipt GUID display requires orderGuid.");
-    b.text(orderGuid);
+  if (guidOnly) {
+    // 条码生成不了（非标准 GUID、纸宽放不下）时才回退印完整 GUID 文本，保证单号永远能在小票上找到。
+    if (!orderBarcodePrinted && orderGuid) b.text(orderGuid);
   } else {
     b.text(`${zh ? "订单" : "Order"}: ${displayOrder}`);
   }
@@ -241,15 +278,8 @@ export function buildSaleReceiptDocument(input: SaleInput): EscPosDocument {
   }
 
   b.separator();
-  // 中文注释：顾客看到本机序号，机读码仍固定使用完整 orderGuid，二者不得混用。
-  if (input.includeMachineCodes && orderGuid) {
-    const code128 = receiptCode128(orderGuid);
-    // 中文注释：完整 GUID 在窄纸上未必能满足 Code128 静区；放不下时保留完整 QR，绝不截断载荷。
-    if (receiptCode128ModuleWidth(code128, input.paper) !== null) {
-      b.barcode(orderGuid);
-    }
-    b.qr(orderGuid);
-  }
+  // 中文注释：订单小票不再印完整 GUID 条码与二维码（对齐 WPF 2026-10-31 产品决定）；
+  // 退货查单改扫顶部的 8 位短码条码。
   b.text(`Print Time: ${formatDate(printedAtIso)}`);
   b.text(`${zh ? "设备" : "Device"}: ${input.deviceCode}`);
   b.blank();
@@ -329,7 +359,7 @@ export function documentToEscPosBytes(document: EscPosDocument): Uint8Array {
         );
         break;
       case "barcode":
-        appendCode128(chunks, line.value, document.paper, utf8);
+        appendCode128(chunks, line.value, document.paper, utf8, line.presentation);
         break;
       case "qr":
         appendQrModel2(chunks, line.value, utf8);
@@ -369,8 +399,8 @@ class Builder {
     this.text(two(left, right, this.width), "left", bold);
   }
 
-  public barcode(value: string): void {
-    this.out.push({ kind: "barcode", value });
+  public barcode(value: string, presentation?: "order"): void {
+    this.out.push(presentation ? { kind: "barcode", value, presentation } : { kind: "barcode", value });
   }
 
   public qr(value: string): void {
@@ -396,16 +426,24 @@ function appendCode128(
   value: string,
   paper: ReceiptPaper,
   utf8: TextEncoder,
+  presentation?: "order",
 ): void {
   const encoding = receiptCode128(value);
-  const moduleWidth = receiptCode128ModuleWidth(encoding, paper);
+  const order = presentation === "order";
+  // 中文注释：订单短码对齐 WPF（3 点宽、80 点高），纸宽放不下 3 点时退回 2 点；其它条码仍是 2 点宽、高 100。
+  const moduleWidth = receiptCode128ModuleWidth(encoding, paper, order ? 3 : 2);
   if (moduleWidth === null) {
     throw new Error("Code128 receipt value does not fit the configured paper.");
   }
   const payload = utf8.encode(encoding.payload);
   if (payload.length === 0 || payload.length > 255) throw new Error("Code128 receipt value is out of range.");
   // 中文注释：GS k Function B；固定使用可移植的 2 dot，并保留自动 B/C 集合切换。
-  chunks.push(0x1b, 0x61, 1, 0x1d, 0x68, 100, 0x1d, 0x77, moduleWidth, 0x1d, 0x48, 0, 0x1d, 0x6b, 73, payload.length, ...payload, 0x0a);
+  chunks.push(0x1b, 0x61, 1, 0x1d, 0x68, order ? 80 : 100, 0x1d, 0x77, moduleWidth, 0x1d, 0x48, 0, 0x1d, 0x6b, 73, payload.length, ...payload, 0x0a);
+  if (order) {
+    // 中文注释：不依赖打印机 HRI（各机型字体 / 位置不一），条码下方明确印一行居中的可读短码，
+    // 与 WPF「条码下方印可读单号」一致，条码刮花时店员可手输。
+    chunks.push(0x1b, 0x61, 1, 0x1b, 0x45, 0, ...encodeEscPosText(value), 0x0a);
+  }
 }
 
 function appendQrModel2(chunks: number[], value: string, utf8: TextEncoder): void {

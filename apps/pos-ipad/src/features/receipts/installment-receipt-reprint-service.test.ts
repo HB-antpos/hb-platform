@@ -397,7 +397,8 @@ test("prepare 点击时重读可信分期并按 WPF 字段生成带 REPRINT 的�
   assert.match(receipt, /VISA/u);
   assert.match(receipt, /\*\*\*\*4321/u);
   assert.doesNotMatch(receipt, /\*\*\*\*9999/u);
-  assert.match(receipt, new RegExp(installmentGuid, "u"));
+  // 对齐 WPF：底部不再印完整 GUID 条码 / QR。
+  assert.doesNotMatch(receipt, new RegExp(installmentGuid, "u"));
 });
 
 test("分期补打顶部印单号末 8 位条码（对齐 WPF #1207），在「Order:」行之前，完整单号仍照印", async () => {
@@ -418,12 +419,15 @@ test("分期补打顶部印单号末 8 位条码（对齐 WPF #1207），在「O
   assert.equal(receipt.split(payload).length - 1, 1);
   assert.ok(receipt.indexOf(installmentNumber.slice(-8), orderAt) > orderAt, "完整单号的尾部仍印在「Order:」行里");
   assert.ok(receipt.includes("Lay-by No: IP-1013-"), "分期信息行仍带分期单号");
-  // 标准 2 点模块 Code128 命令出现在字节里（放得下才印）。
-  assert.ok(
-    Array.from({ length: prepared.receiptBytes.length - 2 }, (_, i) => i).some(
-      (i) => prepared.receiptBytes[i] === 0x1d && prepared.receiptBytes[i + 1] === 0x77 && prepared.receiptBytes[i + 2] === 2,
-    ),
-  );
+  // 对齐 WPF：80mm 下 Code128 用高 80、条宽 3 点的命令，条码下方紧跟一行可读短码；且没有 QR 命令。
+  const bytes = prepared.receiptBytes;
+  const hasSequence = (sequence: readonly number[]) =>
+    Array.from({ length: bytes.length - sequence.length + 1 }, (_, i) => i).some(
+      (i) => sequence.every((value, offset) => bytes[i + offset] === value),
+    );
+  assert.ok(hasSequence([0x1d, 0x68, 80, 0x1d, 0x77, 3]));
+  assert.ok(receipt.indexOf("3D2E1F00", barcodeAt + payload.length) > barcodeAt, "条码下方印可读短码");
+  assert.equal(hasSequence([0x1d, 0x28, 0x6b]), false);
 });
 
 test("prepare 对四种分期状态使用 WPF 状态与提货语义", async () => {
@@ -520,11 +524,10 @@ test("进行中分期补打在退货政策之后、条码之前追加英文分�
 
   const policy = receipt.indexOf("Refunds and returns");
   const title = receipt.indexOf("LAY-BY TERMS");
-  // 条款之后依次是分隔线、完整 GUID 的 QR 载荷与页脚，所以取条款后第一次出现的 GUID 比较。
-  const machineCode = receipt.indexOf(installmentGuid, title);
+  // 对齐 WPF：条款之后只有分隔线与页脚，底部不再有条码 / QR。
   const printTime = receipt.indexOf("Print Time:");
   assert.ok(policy >= 0 && title > policy, "条款在退货政策之后");
-  assert.ok(machineCode > title && printTime > machineCode, "条款在条码/QR 与页脚之前");
+  assert.ok(printTime > title, "条款在页脚之前");
   assert.match(receipt, /Order total: \$50\.00 minimum\./u);
   assert.match(receipt, /First payment: \$20\.00 minimum\./u);
   // 第三条在 80mm（42 字符）下于单词边界换成两行，不是手工拆行。
@@ -570,9 +573,8 @@ test("总部下发了分期条款正文：进行中补打标题仍是 LAY-BY TER
 
   const policy = receipt.indexOf("Refunds and returns");
   const title = receipt.indexOf("LAY-BY TERMS");
-  const machineCode = receipt.indexOf(installmentGuid, title);
   assert.ok(policy >= 0 && title > policy, "条款仍在退货政策之后");
-  assert.ok(machineCode > title, "条款仍在条码/QR 之前");
+  assert.ok(receipt.indexOf("Print Time:") > title, "条款仍在页脚之前");
   assert.equal(receipt.split("LAY-BY TERMS").length - 1, 1);
   // 三行正文依次紧跟标题，空行被丢弃、行首尾空白被去掉。
   assert.ok(receipt.indexOf("Deposit $30 minimum.", title) > title);

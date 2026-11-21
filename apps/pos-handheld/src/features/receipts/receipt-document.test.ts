@@ -11,7 +11,10 @@ import {
   buildSaleReceiptDocument,
   documentToEscPosBytes,
   displayWidth,
+  isReceiptOrderShortCode,
+  matchesReceiptOrderShortCode,
   receiptOrderShortCode,
+  receiptOrderShortCodeFromGuid,
 } from "@hb/pos-receipt-core/features/receipts/receipt-document";
 
 const sale = {
@@ -128,7 +131,7 @@ test("中文销售文本使用 GB18030 双字节并替换 N160 不可靠字形",
   assert.equal(containsBytes(bytes, [...new TextEncoder().encode("感谢惠顾")]), false);
 });
 
-test("销售小票按 WPF 顺序加入显示元数据和完整 GUID 机读码", () => {
+test("销售小票按 WPF 顺序加入显示元数据和订单短码一维条码", () => {
   const document = buildSaleReceiptDocument({
     ...sale,
     paper: "80mm",
@@ -141,34 +144,35 @@ test("销售小票按 WPF 顺序加入显示元数据和完整 GUID 机读码", 
     includeMachineCodes: true,
   });
   const text = receiptText(document);
-  const qr = document.lines.find((line) => line.kind === "qr");
   const bytes = documentToEscPosBytes(document);
-  const code128 = receiptCode128(fullOrderGuid);
-  const code128Width = receiptCode128ModuleWidth(code128, document.paper);
+  const barcodes = document.lines.filter((line) => line.kind === "barcode");
 
-  assert.equal(document.lines.some((line) => line.kind === "barcode"), false);
-  assert.equal(qr?.value, fullOrderGuid);
-  assert.match(text, new RegExp(`^${fullOrderGuid}$`, "m"));
+  // 对齐 WPF：只有顶部一条 GUID 末 8 位短码条码；不再印完整 GUID 文本、底部条码和 QR。
+  assert.deepEqual(barcodes, [{ kind: "barcode", value: "55555555", presentation: "order" }]);
+  assert.equal(document.lines.some((line) => line.kind === "qr"), false);
+  assert.doesNotMatch(text, new RegExp(fullOrderGuid));
   assert.doesNotMatch(text, /^Order(?:#|:)/m);
   assert.doesNotMatch(text, /^S1-100$/m);
   assert.match(text, /Store: Brisbane \(S001\)/);
   assert.match(text, new RegExp(`Print Time: ${localReceiptTime("2026-08-02T12:34:56.000Z")}`));
   assert.ok(text.indexOf("TAX INVOICE") < text.indexOf("*** Paid ***"));
-  assert.ok(text.indexOf("*** Paid ***") < text.indexOf(fullOrderGuid));
-  assert.ok(text.indexOf(fullOrderGuid) < text.indexOf("Date:"));
+  const barcodeIndex = document.lines.findIndex((line) => line.kind === "barcode");
+  const paidIndex = document.lines.findIndex((line) => line.kind === "text" && line.text === "*** Paid ***");
+  const dateIndex = document.lines.findIndex((line) => line.kind === "text" && line.text.startsWith("Date:"));
+  assert.ok(paidIndex < barcodeIndex && barcodeIndex < dateIndex, "状态行 → 条码 → Date");
   assert.ok(text.indexOf("Date:") < text.indexOf("ITEM"));
   assert.ok(text.indexOf("Payment:") < text.indexOf("Print Time:"));
   assert.ok(document.lines.every((line) => line.kind === "feed" || line.kind === "barcode" || line.kind === "qr" || displayWidth(line.text) <= 42));
-  assert.equal(code128Width, null);
-  assert.equal(containsBytes(bytes, [0x1d, 0x6b, 73]), false);
+  // 字节层：80mm 与 WPF 一致用 3 点条宽、高 80，条码下方印一行居中的可读短码；没有 QR 命令。
+  const expectedWidth = receiptCode128ModuleWidth(receiptCode128("55555555"), "80mm", 3);
+  assert.equal(expectedWidth, 3);
   assert.ok(containsBytes(bytes, [
-    0x1d, 0x28, 0x6b, 4, 0, 49, 65, 50, 0,
-    0x1d, 0x28, 0x6b, 3, 0, 49, 67, 6,
-    0x1d, 0x28, 0x6b, 3, 0, 49, 69, 49,
-    0x1d, 0x28, 0x6b, 39, 0, 49, 80, 48,
-    ...new TextEncoder().encode(fullOrderGuid),
-    0x1d, 0x28, 0x6b, 3, 0, 49, 81, 48,
+    0x1b, 0x61, 1, 0x1d, 0x68, 80, 0x1d, 0x77, 3, 0x1d, 0x48, 0, 0x1d, 0x6b, 73,
   ]));
+  assert.ok(containsBytes(bytes, [
+    0x1b, 0x61, 1, 0x1b, 0x45, 0, ...new TextEncoder().encode("55555555"), 0x0a,
+  ]));
+  assert.equal(containsBytes(bytes, [0x1d, 0x28, 0x6b]), false);
 });
 
 test("销售小票在设备与商品表之间安全渲染扩展信息行", () => {
@@ -225,7 +229,8 @@ test("80mm 销售小票严格使用 WPF 商品列、标题和正式打印语义"
   assert.equal(lines.filter((line) => line === "Brisbane").length, 1, "品牌与分店同名时只显示一次");
   assert.ok(lines.includes("Shop 1 Sunnybank Shopping Centre"));
   assert.ok(lines.includes("Brisbane Queensland"));
-  assert.ok(lines.includes(fullOrderGuid));
+  assert.equal(lines.includes(fullOrderGuid), false, "对齐 WPF：不再印完整 GUID 文本，改为顶部短码条码");
+  assert.ok(document.lines.some((line) => line.kind === "barcode" && line.value === "55555555"));
   assert.equal(lines.some((line) => /^Order(?:#|:)/.test(line)), false);
   assert.equal(lines.includes("#100"), false);
   assert.ok(lines.includes("===== TAX INVOICE ====="));
@@ -269,9 +274,13 @@ test("分期小票顶部条码：取显示单号末 8 位并转大写，印在�
       withBarcode.lines.filter((_, index) => index !== barcodeIndexes[0]),
       without.lines,
     );
-    // 字节层：标准 2 点模块 Code128 命令出现在带条码的小票里，不传时没有。
-    assert.ok(containsBytes(documentToEscPosBytes(withBarcode), [0x1d, 0x77, 2]));
-    assert.equal(containsBytes(documentToEscPosBytes(without), [0x1d, 0x77, 2]), false);
+    // 字节层：对齐 WPF（高 80、条宽 3 点，58mm 放不下退回 2 点），条码下方印可读短码；不传时没有任何条码命令。
+    const expectedWidth = receiptCode128ModuleWidth(receiptCode128("3D2E1F00"), paper, 3);
+    assert.equal(expectedWidth, paper === "80mm" ? 3 : 2);
+    const withBytes = documentToEscPosBytes(withBarcode);
+    assert.ok(containsBytes(withBytes, [0x1d, 0x68, 80, 0x1d, 0x77, expectedWidth!]));
+    assert.ok(containsBytes(withBytes, [...new TextEncoder().encode("3D2E1F00"), 0x0a]));
+    assert.equal(containsBytes(documentToEscPosBytes(without), [0x1d, 0x6b, 73]), false);
 
     // 空串、纯空白：与不传（上面的 without）逐字节一致，其余所有小票的输出保持不变。
     const baseline = documentToEscPosBytes(without);
@@ -313,11 +322,11 @@ test("销售小票统一拒绝可注入 ESC/POS 命令的控制字符", () => {
   );
 });
 
-test("58/80mm 对放不下的完整 GUID 都省略一维码并保留完整 QR", () => {
-  const worstCaseGuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+test("普通销售 / 退货顶部印订单 GUID 末 8 位短码条码；58mm 退回 2 点条宽，非标准 GUID 回退印完整 GUID 文本", () => {
+  const guid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
   const narrow = buildSaleReceiptDocument({
     ...sale,
-    orderGuid: worstCaseGuid,
+    orderGuid: guid,
     orderDisplay: "#42",
     orderPresentation: "guid-only",
     includeMachineCodes: true,
@@ -325,26 +334,53 @@ test("58/80mm 对放不下的完整 GUID 都省略一维码并保留完整 QR", 
   const wide = buildSaleReceiptDocument({
     ...sale,
     paper: "80mm",
-    orderGuid: worstCaseGuid,
+    orderGuid: guid,
     orderDisplay: "#42",
     orderPresentation: "guid-only",
     includeMachineCodes: true,
   });
 
-  assert.equal(narrow.lines.some((line) => line.kind === "barcode"), false);
-  assert.ok(narrow.lines.some((line) => line.kind === "qr" && line.value === worstCaseGuid));
-  assert.equal(
-    narrow.lines
-      .filter((line) => line.kind === "text")
-      .map((line) => line.text)
-      .filter((line) => worstCaseGuid.includes(line))
-      .join(""),
-    worstCaseGuid,
-  );
-  assert.equal(narrow.lines.some((line) => line.kind === "text" && /^Order(?:#|:)/.test(line.text)), false);
-  assert.equal(wide.lines.some((line) => line.kind === "barcode"), false);
-  assert.ok(wide.lines.some((line) => line.kind === "qr" && line.value === worstCaseGuid));
-  assert.ok(wide.lines.some((line) => line.kind === "text" && line.text === worstCaseGuid));
+  for (const document of [narrow, wide]) {
+    assert.deepEqual(
+      document.lines.filter((line) => line.kind === "barcode"),
+      [{ kind: "barcode", value: "EEEEEEEE", presentation: "order" }],
+    );
+    assert.equal(document.lines.some((line) => line.kind === "qr"), false);
+    assert.equal(receiptText(document).includes(guid), false, "不再印完整 GUID 文本");
+    assert.equal(document.lines.some((line) => line.kind === "text" && /^Order(?:#|:)/.test(line.text)), false);
+  }
+  // 条宽：80mm 放得下 3 点就用 3 点（对齐 WPF），58mm 放不下则退回通用的 2 点。
+  assert.equal(receiptCode128ModuleWidth(receiptCode128("EEEEEEEE"), "80mm", 3), 3);
+  assert.equal(receiptCode128ModuleWidth(receiptCode128("EEEEEEEE"), "58mm", 3), 2);
+  assert.ok(containsBytes(documentToEscPosBytes(wide), [0x1d, 0x68, 80, 0x1d, 0x77, 3]));
+  assert.ok(containsBytes(documentToEscPosBytes(narrow), [0x1d, 0x68, 80, 0x1d, 0x77, 2]));
+
+  // 不是标准 32 位十六进制 GUID 时不凭空截码，回退为原来的完整文本，保证单号仍可在小票上找到。
+  const odd = buildSaleReceiptDocument({
+    ...sale,
+    orderGuid: "not-a-standard-guid",
+    orderDisplay: "#42",
+    orderPresentation: "guid-only",
+  });
+  assert.equal(odd.lines.some((line) => line.kind === "barcode"), false);
+  assert.ok(odd.lines.some((line) => line.kind === "text" && line.text === "not-a-standard-guid"));
+});
+
+test("订单短码：GUID 去横杠取末 8 位大写，与 WPF ReceiptOrderShortCode 同口径；只认 8 位十六进制", () => {
+  assert.equal(receiptOrderShortCodeFromGuid("7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab"), "6E0F13AB");
+  assert.equal(receiptOrderShortCodeFromGuid("  7E4C91D20B5A4F3E9A215C8D6E0F13AB  "), "6E0F13AB");
+  assert.equal(receiptOrderShortCodeFromGuid("not-a-guid"), null);
+  assert.equal(receiptOrderShortCodeFromGuid("7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13a"), null);
+  assert.equal(isReceiptOrderShortCode("6e0f13ab"), true);
+  assert.equal(isReceiptOrderShortCode(" 6E0F13AB "), true);
+  for (const value of ["6E0F13A", "6E0F13ABC", "6E0F-13A", "6E0F13AG", "９３００００００", "9300000000001"]) {
+    assert.equal(isReceiptOrderShortCode(value), false, value);
+  }
+  const guid = "7e4c91d2-0b5a-4f3e-9a21-5c8d6e0f13ab";
+  assert.equal(matchesReceiptOrderShortCode(guid, "6e0f13ab"), true);
+  assert.equal(matchesReceiptOrderShortCode(guid, "6E0F13AC"), false);
+  assert.equal(matchesReceiptOrderShortCode(guid, "0b5a4f3e"), false);
+  assert.equal(matchesReceiptOrderShortCode("not-a-guid", "6E0F13AB"), false);
 });
 
 test("可装入纸宽的短 Code 128 使用标准双点模块输出", () => {
