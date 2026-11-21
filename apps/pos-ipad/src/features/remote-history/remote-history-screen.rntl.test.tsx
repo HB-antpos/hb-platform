@@ -376,3 +376,47 @@ test("普通完成订单可从可信详情进入既有退款流程，重打权�
     "10000000-0000-4000-8000-000000000001",
   );
 });
+
+test("BLE 扫码关键字：填入关键字框并立即按当前日期范围与设备筛选，id 递增才再次筛选", async () => {
+  const presenter = new RemoteHistoryPresenter({
+    port,
+    trustedStoreCode: "S1",
+    currentDeviceCode: "IPAD-1",
+    online: true,
+    permissionCodes: [REMOTE_HISTORY_VIEW_PERMISSION],
+    now: () => new Date("2026-07-27T05:00:00Z"),
+  });
+  const setFilters = jest.spyOn(presenter, "setFilters");
+  const screen = await render(<RemoteHistoryScreen presenter={presenter} />);
+  await waitFor(() => expect(screen.getByTestId("remote-history-list")).toBeTruthy());
+  setFilters.mockClear();
+
+  await screen.rerender(
+    <RemoteHistoryScreen
+      presenter={presenter}
+      scannedKeyword={{ id: 1, value: "6E0F13AB" }}
+    />,
+  );
+  expect(setFilters).toHaveBeenCalledTimes(1);
+  expect(setFilters).toHaveBeenLastCalledWith(
+    expect.objectContaining({ keyword: "6E0F13AB" }),
+  );
+  expect(screen.getByTestId("remote-history-keyword").props.value).toBe("6E0F13AB");
+
+  // 重渲染（id 不变）不会重复筛选；同一个码再扫一次（id 递增）才再次筛选。
+  setFilters.mockClear();
+  await screen.rerender(
+    <RemoteHistoryScreen
+      presenter={presenter}
+      scannedKeyword={{ id: 1, value: "6E0F13AB" }}
+    />,
+  );
+  expect(setFilters).not.toHaveBeenCalled();
+  await screen.rerender(
+    <RemoteHistoryScreen
+      presenter={presenter}
+      scannedKeyword={{ id: 2, value: "6E0F13AB" }}
+    />,
+  );
+  expect(setFilters).toHaveBeenCalledTimes(1);
+});

@@ -15,6 +15,7 @@ import {
   type InstallmentPresenter,
 } from "@/features/installments";
 import { installmentRepaymentPaymentEntry } from "@/features/payments/ui";
+import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
@@ -66,6 +67,17 @@ export default function InstallmentsRoute() {
     binding.cashier === activeCashier
       ? binding.presenter
       : null;
+  // BLE 扫码枪：扫分期小票顶部的单号条码（编号末 8 位），分期中心按「包含」匹配直接定位；
+  // 只在「历史」面板生效，新建分期面板不处理。键盘模式扫码枪仍直接打进输入框。
+  useRouteBleScan({
+    path: "/installments",
+    enabled: presenter !== null,
+    onScan: (value) => {
+      if (!presenter || presenter.getState().pane !== "history") return;
+      presenter.setSearchQuery(value);
+      void presenter.load();
+    },
+  });
 
   useEffect(() => {
     if (

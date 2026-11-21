@@ -54,16 +54,22 @@ export const REMOTE_HISTORY_MIN_TOUCH_TARGET = 44;
 /** 左侧订单列表的固定宽度，与本机历史一致（设计图 420）。 */
 export const REMOTE_HISTORY_LIST_WIDTH = 420;
 
+/** 路由收到 BLE 扫码枪的码后交给页面：id 递增保证同一个码连扫两次也会再次触发筛选。 */
+export type HistoryScannedKeyword = Readonly<{ id: number; value: string }>;
+
 type RemoteHistoryScreenProps = Readonly<{
   presenter: RemoteHistoryPresenter;
   onBack?(): void;
   onRefund?(orderGuid: string): void;
+  /** BLE 扫码枪扫到的小票短码 / 订单号：填入关键字并立即按当前日期范围、设备筛选。 */
+  scannedKeyword?: HistoryScannedKeyword | null;
 }>;
 
 export function RemoteHistoryScreen({
   presenter,
   onBack,
   onRefund,
+  scannedKeyword = null,
 }: RemoteHistoryScreenProps) {
   usePosThemeVersion();
   const state = useSyncExternalStore(
@@ -100,6 +106,7 @@ export function RemoteHistoryScreen({
       from: fromDate,
       to: toDate,
     },
+    keywordOverride: string = keyword,
   ) => {
     const range = localDateRange(dates.from, dates.to);
     if (!range) {
@@ -110,10 +117,18 @@ export function RemoteHistoryScreen({
     presenter.setFilters({
       ...range,
       deviceCode: nullableText(deviceCode),
-      keyword: nullableText(keyword),
+      keyword: nullableText(keywordOverride),
     });
     void presenter.refresh();
   };
+
+  // 路由交来的扫码关键字：立刻填入并筛选（只在 id 变化时触发，重渲染不会重复筛选）。
+  useEffect(() => {
+    if (!scannedKeyword) return;
+    setKeyword(scannedKeyword.value);
+    applyFilters(undefined, scannedKeyword.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scannedKeyword?.id]);
   const selectedRow =
     state.rows.find((row) => row.orderGuid === state.selectedOrderGuid) ??
     null;

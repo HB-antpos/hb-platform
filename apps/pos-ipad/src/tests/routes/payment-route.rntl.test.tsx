@@ -4,6 +4,7 @@ import { act, render, waitFor } from "@testing-library/react-native";
 import PaymentRoute from "../../../app/payment";
 
 import type { PosAuthorizedFulfilmentActionResult } from "@/core/runtime/production-pos-service-composition";
+import { takePendingSalesScan } from "@/ui/scanner/pending-scan-handoff";
 
 let mockRuntime: any;
 let mockActiveCashier: any;
@@ -23,6 +24,19 @@ const mockReprintCurrentReceipt = jest.fn<
   (orderGuid: string) => Promise<PosAuthorizedFulfilmentActionResult>
 >();
 let mockRegularPresenters: any[];
+
+let mockBleScanOptions: any;
+let mockHidCaptureProps: any;
+// 扫码路由桥依赖真实导航容器；路由测试只关心页面把码交给了谁，所以替换成可调用的 mock。
+jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
+  RouteHidScannerCapture: (props: unknown) => {
+    mockHidCaptureProps = props;
+    return null;
+  },
+  useRouteBleScan: (options: unknown) => {
+    mockBleScanOptions = options;
+  },
+}));
 
 jest.mock("expo-router", () => {
   const React = jest.requireActual<typeof import("react")>("react");
@@ -666,3 +680,35 @@ function createMockPresenter(destroy: jest.Mock): any {
     },
   };
 }
+
+test("付款成功页扫到商品码：交给收银页自动加购并直接回收银页；支付进行中不启用扫码捕获", async () => {
+  takePendingSalesScan();
+  const screen = await render(<PaymentRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("payment-screen")).toBeTruthy();
+  });
+
+  // 支付进行中有金额 / 礼券输入框，隐藏的扫码输入框不能抢焦点。
+  expect(mockHidCaptureProps.path).toBe("/payment");
+  expect(mockHidCaptureProps.context).toBe("product");
+  expect(mockHidCaptureProps.enabled).toBe(false);
+
+  await act(async () => {
+    mockRegularPresenters[0].setState({ phase: "success", orderGuid: "order-1" });
+  });
+  expect(mockHidCaptureProps.enabled).toBe(true);
+
+  const onScan = mockHidCaptureProps.onScan;
+  onScan("9313559558795", "ble");
+  expect(mockRouterDismissTo).toHaveBeenCalledWith("/sales");
+  expect(takePendingSalesScan()).toMatchObject({
+    value: "9313559558795",
+    source: "ble",
+  });
+  // 回调引用在重渲染间保持稳定，否则每次渲染都会释放 / 重新申请扫码租约。
+  await act(async () => {
+    mockRegularPresenters[0].setState({ busy: false });
+  });
+  expect(mockHidCaptureProps.onScan).toBe(onScan);
+  await screen.unmount();
+});

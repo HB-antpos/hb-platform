@@ -2,6 +2,11 @@ import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 
 import SalesRoute from "../../../app/sales";
+import {
+  offerPendingSalesScan,
+  PENDING_SALES_SCAN_MAX_AGE_MS,
+  takePendingSalesScan,
+} from "@/ui/scanner/pending-scan-handoff";
 
 import { passesPosDestinationGuard } from "@/features/navigation/pos-destination-access";
 import { PosNavigationContext } from "@/ui/shell/pos-navigation-context";
@@ -1461,4 +1466,44 @@ test("主管授权弹窗出现时临时隐藏钱箱弹窗，授权结束后恢�
     await Promise.resolve();
   });
   expect(screen.getByTestId("cash-movement-amount").props.children).toBe("$7");
+});
+
+test("付款成功页交接来的商品码：收银页聚焦并释放结账冻结后自动加购一次；没有交接码或已过期不加购", async () => {
+  takePendingSalesScan();
+  mockAddScannedLookupCode.mockImplementation(async () => true);
+  const screen = await render(<SalesRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  });
+  const focus = async () => {
+    await act(async () => {
+      for (const effect of mockSalesRouteFocusEffects) effect();
+      await Promise.resolve();
+    });
+  };
+
+  // 没有交接码：普通聚焦（例如从历史页返回）不会加购任何商品。
+  await focus();
+  expect(mockAddScannedLookupCode).not.toHaveBeenCalled();
+
+  // 有交接码：BLE 来源与键盘模式扫码枪同属「扫码枪」，查码来源记为 hid；先释放冻结再加购，且只加购一次。
+  offerPendingSalesScan("9313559558795", "ble");
+  mockReleasePreparedCheckout.mockClear();
+  await focus();
+  expect(mockAddScannedLookupCode.mock.calls).toEqual([["9313559558795", "hid"]]);
+  expect(mockReleasePreparedCheckout.mock.invocationCallOrder[0]).toBeLessThan(
+    mockAddScannedLookupCode.mock.invocationCallOrder[0]!,
+  );
+  await focus();
+  expect(mockAddScannedLookupCode).toHaveBeenCalledTimes(1);
+
+  // 过期的交接码不再自动加购，避免很久以后回到收银页时误加商品。
+  offerPendingSalesScan(
+    "9300000000000",
+    "ble",
+    Date.now() - PENDING_SALES_SCAN_MAX_AGE_MS - 1,
+  );
+  await focus();
+  expect(mockAddScannedLookupCode).toHaveBeenCalledTimes(1);
+  await screen.unmount();
 });

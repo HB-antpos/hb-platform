@@ -21,6 +21,7 @@ import {
   type ReturnPresenter,
   ReturnScreen,
 } from "@/features/returns";
+import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
@@ -57,6 +58,20 @@ export default function ReturnsRoute() {
     binding.cashier === activeCashier
       ? binding.presenter
       : null;
+  // BLE 扫码枪：有小票退货扫小票条码（订单 GUID 末 8 位短码）查单，无小票退货扫商品码加行；
+  // 键盘模式扫码枪仍直接打进输入框。提交中、结果页等阶段不处理。
+  useRouteBleScan({
+    path: "/returns",
+    enabled: presenter !== null,
+    onScan: (value) => {
+      if (!presenter) return;
+      const state = presenter.getState();
+      if (state.busy) return;
+      if (state.phase !== "search" && state.phase !== "selecting") return;
+      if (state.mode === "receipt") void presenter.loadReceipt(value);
+      else void presenter.addNoReceiptProduct(value);
+    },
+  });
 
   useEffect(() => {
     if (

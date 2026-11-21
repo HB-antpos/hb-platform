@@ -18,6 +18,15 @@ const mockCreatePresenter = jest.fn<() => Promise<any>>();
 const mockDestroyPresenter = jest.fn();
 const mockRouterDismissTo = jest.fn();
 
+let mockBleScanOptions: any;
+// 扫码路由桥依赖真实导航容器；路由测试只关心页面把码交给了谁，所以替换成可调用的 mock。
+jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
+  RouteHidScannerCapture: () => null,
+  useRouteBleScan: (options: unknown) => {
+    mockBleScanOptions = options;
+  },
+}));
+
 jest.mock("expo-router", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } =
@@ -272,3 +281,56 @@ function deferred<T>(): Readonly<{
     resolve: resolvePromise,
   };
 }
+
+function bleReturnPresenter(state: Record<string, unknown>) {
+  return {
+    destroy: mockDestroyPresenter,
+    getState: () => ({ busy: false, phase: "search", mode: "receipt", ...state }),
+    loadReceipt: jest.fn(async (_query: string) => true),
+    addNoReceiptProduct: jest.fn(async (_query: string) => true),
+  };
+}
+
+test("BLE 扫码枪：有小票模式扫小票条码直接查单，无小票模式扫商品码直接加行", async () => {
+  for (const [mode, expectLoad] of [["receipt", true], ["no-receipt", false]] as const) {
+    const presenter = bleReturnPresenter({ mode });
+    mockCreatePresenter.mockResolvedValueOnce(presenter);
+    mockBleScanOptions = undefined;
+    const screen = await render(<ReturnsRoute />);
+    await waitFor(() => {
+      expect(screen.getByTestId("return-screen")).toBeTruthy();
+    });
+
+    expect(mockBleScanOptions.path).toBe("/returns");
+    expect(mockBleScanOptions.enabled).toBe(true);
+    mockBleScanOptions.onScan("6E0F13AB");
+    expect(presenter.loadReceipt).toHaveBeenCalledTimes(expectLoad ? 1 : 0);
+    expect(presenter.addNoReceiptProduct).toHaveBeenCalledTimes(expectLoad ? 0 : 1);
+    expect(
+      (expectLoad ? presenter.loadReceipt : presenter.addNoReceiptProduct).mock.calls[0]?.[0],
+    ).toBe("6E0F13AB");
+    await screen.unmount();
+  }
+});
+
+test("BLE 扫码枪：提交中 / 结果页 / 处理中的退货页不处理扫码，避免打断正在进行的退款", async () => {
+  for (const state of [
+    { busy: true },
+    { phase: "submitting" },
+    { phase: "unknown" },
+    { phase: "success" },
+    { phase: "failed" },
+  ]) {
+    const presenter = bleReturnPresenter(state);
+    mockCreatePresenter.mockResolvedValueOnce(presenter);
+    const screen = await render(<ReturnsRoute />);
+    await waitFor(() => {
+      expect(screen.getByTestId("return-screen")).toBeTruthy();
+    });
+
+    mockBleScanOptions.onScan("6E0F13AB");
+    expect(presenter.loadReceipt).not.toHaveBeenCalled();
+    expect(presenter.addNoReceiptProduct).not.toHaveBeenCalled();
+    await screen.unmount();
+  }
+});

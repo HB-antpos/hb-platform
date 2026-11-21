@@ -4,7 +4,7 @@ import {
   useLocalSearchParams,
   useRouter,
 } from "expo-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
@@ -34,6 +34,8 @@ import {
   type UnifiedPaymentFacadeDependencies,
 } from "@/features/payments/ui";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { offerPendingSalesScan } from "@/ui/scanner/pending-scan-handoff";
+import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type PaymentPresenterBinding = Readonly<{
@@ -132,6 +134,17 @@ export default function PaymentRoute() {
       ? binding.presenter
       : null;
   const presenterState = usePaymentPresenterState(presenter);
+  // 付款成功页上扫到商品码：交给收银页自动加购，并直接回到收银页开始下一单（等同点「新交易」）。
+  // dismissTo 放进 ref，让回调引用永远稳定，否则每次渲染都会释放 / 重新申请扫码租约。
+  const dismissToRef = useRef(dismissTo);
+  dismissToRef.current = dismissTo;
+  const handleSuccessScan = useCallback(
+    (value: string, source?: "hid" | "camera" | "ble") => {
+      offerPendingSalesScan(value, source ?? "hid");
+      dismissToRef.current("/sales" as Href);
+    },
+    [],
+  );
   const printCurrentReceipt = useMemo<
     ((orderGuid: string) => Promise<PaymentReceiptPrintOutcome>) | undefined
   >(() => {
@@ -305,15 +318,24 @@ export default function PaymentRoute() {
   });
 
   return (
-    <PaymentScreen
-      locale={resolvePaymentLocale(i18n.resolvedLanguage ?? i18n.language)}
-      onBack={() => dismissTo("/sales" as Href)}
-      onOpenRecoveryCenter={() => push("/payment-recovery" as Href)}
-      onComplete={() => dismissTo("/sales" as Href)}
-      presenter={presenter}
-      {...(installmentModeControl ? { installmentModeControl } : {})}
-      {...(printCurrentReceipt ? { onPrintReceipt: printCurrentReceipt } : {})}
-    />
+    <>
+      {/* 只在「支付成功」页启用：其它阶段有金额 / 礼券输入框，不能让隐藏输入框抢焦点。 */}
+      <RouteHidScannerCapture
+        context="product"
+        enabled={presenterState?.phase === "success"}
+        onScan={handleSuccessScan}
+        path="/payment"
+      />
+      <PaymentScreen
+        locale={resolvePaymentLocale(i18n.resolvedLanguage ?? i18n.language)}
+        onBack={() => dismissTo("/sales" as Href)}
+        onOpenRecoveryCenter={() => push("/payment-recovery" as Href)}
+        onComplete={() => dismissTo("/sales" as Href)}
+        presenter={presenter}
+        {...(installmentModeControl ? { installmentModeControl } : {})}
+        {...(printCurrentReceipt ? { onPrintReceipt: printCurrentReceipt } : {})}
+      />
+    </>
   );
 }
 

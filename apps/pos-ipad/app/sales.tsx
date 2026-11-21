@@ -61,6 +61,7 @@ import {
   readCameraScanMode,
   saveCameraScanMode,
 } from "@/ui/preferences/terminal-ui-preferences";
+import { takePendingSalesScan } from "@/ui/scanner/pending-scan-handoff";
 import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosNavigation } from "@/ui/shell/pos-navigation-context";
@@ -271,6 +272,15 @@ export default function SalesRoute() {
   const noteHidTextChange = useCallback(() => {
     scanTiming.noteHidCharacter();
   }, []);
+  // 付款成功页扫到的商品码：回到收银页聚焦后自动加购。放在 releasePreparedCheckout 的聚焦回调之后，
+  // 这时结账冻结态已释放、presenter 回到 selling；码有 15 秒有效期，过期不再自动加购。
+  useFocusEffect(
+    useCallback(() => {
+      if (!presenter) return;
+      const pending = takePendingSalesScan();
+      if (pending) handleRoutedScan(pending.value, pending.source);
+    }, [handleRoutedScan, presenter]),
+  );
   const handleCameraScan = useCallback(
     (barcode: string): Promise<boolean> =>
       addScannedProduct(barcode, "camera"),

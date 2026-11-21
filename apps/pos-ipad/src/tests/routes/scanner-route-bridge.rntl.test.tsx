@@ -5,6 +5,7 @@ import { HidScannerRouter } from "@/core/peripherals/scanner";
 import {
   RouteHidScannerCapture,
   ScannerRouteProvider,
+  useRouteBleScan,
 } from "@/ui/scanner/scanner-route-bridge";
 
 let mockRuntime: any;
@@ -266,4 +267,117 @@ test("BLE 扫码枪的码只投给聚焦路由，不依赖隐藏输入框焦点�
   await screen.unmount();
   expect(scanner.acceptBleText("BLE-AFTER-UNMOUNT")).toBe(false);
   expect(onScan).toHaveBeenCalledTimes(1);
+});
+
+function BleScanProbe(props: Readonly<{
+  path: string;
+  enabled?: boolean;
+  onScan: (value: string) => void;
+}>) {
+  useRouteBleScan(props);
+  return null;
+}
+
+function bleRuntime(scanner: HidScannerRouter) {
+  return {
+    services: {
+      operationAuthorization: {
+        status: "available",
+        getState: () => ({ kind: "idle" }),
+        subscribe: () => () => undefined,
+      },
+      scanner: { router: scanner },
+    },
+  };
+}
+
+test("useRouteBleScan：页面聚焦时申请租约，只把 BLE 来源的整码交给页面；HID / 相机来源不处理", async () => {
+  const scanner = new HidScannerRouter();
+  const onScan = jest.fn<(value: string) => void>();
+  mockRuntime = bleRuntime(scanner);
+  mockPathname = "/returns";
+
+  const screen = await render(
+    <ScannerRouteProvider>
+      <BleScanProbe onScan={onScan} path="/returns" />
+    </ScannerRouteProvider>,
+  );
+
+  // 有租约：BLE 码投递成功，页面收到整码。
+  expect(scanner.acceptBleText("6E0F13AB\n")).toBe(true);
+  expect(onScan).toHaveBeenCalledWith("6E0F13AB");
+  // 键盘模式 / 相机的码不归这个 hook 管（HID 仍打进页面自己的输入框）。
+  scanner.setCaptureActive(true);
+  scanner.acceptHidText("HID-CODE\n");
+  scanner.setCaptureActive(false);
+  await scanner.startCamera();
+  scanner.acceptCameraText("CAMERA-CODE");
+  expect(onScan).toHaveBeenCalledTimes(1);
+
+  await screen.unmount();
+  // 页面卸载后租约释放：BLE 码重新变成「没人收」，由调用方轻提示后丢弃。
+  expect(scanner.acceptBleText("AFTER-UNMOUNT")).toBe(false);
+  expect(onScan).toHaveBeenCalledTimes(1);
+});
+
+test("useRouteBleScan：失焦、路径不符、被禁用或主管授权弹窗期间不申请租约，BLE 码无人接收", async () => {
+  const scanner = new HidScannerRouter();
+  const onScan = jest.fn<(value: string) => void>();
+  const listeners = new Set<() => void>();
+  let authorizationState: { kind: "awaiting-supervisor" | "idle" } = {
+    kind: "idle",
+  };
+  mockRuntime = {
+    services: {
+      operationAuthorization: {
+        status: "available",
+        getState: () => authorizationState,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+      scanner: { router: scanner },
+    },
+  };
+  const tree = (enabled: boolean) => (
+    <ScannerRouteProvider>
+      <BleScanProbe enabled={enabled} onScan={onScan} path="/returns" />
+    </ScannerRouteProvider>
+  );
+
+  // 路径不符。
+  mockPathname = "/sales";
+  const screen = await render(tree(true));
+  expect(scanner.acceptBleText("WRONG-PATH")).toBe(false);
+  // 失焦。
+  mockPathname = "/returns";
+  mockIsFocused = false;
+  await screen.rerender(tree(true));
+  expect(scanner.acceptBleText("UNFOCUSED")).toBe(false);
+  // 被禁用。
+  mockIsFocused = true;
+  await screen.rerender(tree(false));
+  expect(scanner.acceptBleText("DISABLED")).toBe(false);
+  expect(onScan).not.toHaveBeenCalled();
+
+  // 恢复后可收；主管授权弹窗出现时让出租约（由弹窗独占扫码），关闭后恢复。
+  await screen.rerender(tree(true));
+  expect(scanner.acceptBleText("ACTIVE")).toBe(true);
+  expect(onScan).toHaveBeenLastCalledWith("ACTIVE");
+  authorizationState = { kind: "awaiting-supervisor" };
+  await act(async () => {
+    listeners.forEach((listener) => listener());
+  });
+  // 栈顶是授权弹窗的 supervisor-authorization 租约：码按主管码投递，不会进页面回调。
+  expect(scanner.acceptBleText("SUPERVISOR-BARCODE")).toBe(true);
+  expect(onScan).toHaveBeenCalledTimes(1);
+  authorizationState = { kind: "idle" };
+  await act(async () => {
+    listeners.forEach((listener) => listener());
+  });
+  expect(scanner.acceptBleText("RESTORED")).toBe(true);
+  expect(onScan).toHaveBeenLastCalledWith("RESTORED");
+
+  await screen.unmount();
 });

@@ -15,6 +15,7 @@ import {
   resolveRemoteHistoryPresenterFactory,
   type RemoteHistoryPresenter,
 } from "@/features/remote-history";
+import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
@@ -59,6 +60,17 @@ export default function RemoteHistoryRoute() {
     binding.cashier === activeCashier
       ? binding.presenter
       : null;
+  // BLE 扫码枪：扫小票短码 / 订单号条码，直接填入关键字并筛选；键盘模式扫码枪仍直接打进输入框。
+  const [scannedKeyword, setScannedKeyword] = useState<Readonly<{
+    id: number;
+    value: string;
+  }> | null>(null);
+  useRouteBleScan({
+    path: "/remote-history",
+    enabled: presenter !== null,
+    onScan: (value) =>
+      setScannedKeyword((previous) => ({ id: (previous?.id ?? 0) + 1, value })),
+  });
 
   useEffect(() => {
     if (
@@ -154,6 +166,7 @@ export default function RemoteHistoryRoute() {
 
   return (
     <RemoteHistoryScreen
+      scannedKeyword={scannedKeyword}
       onBack={() => router.dismissTo("/sales" as Href)}
       {...(canOpenReturns
         ? {

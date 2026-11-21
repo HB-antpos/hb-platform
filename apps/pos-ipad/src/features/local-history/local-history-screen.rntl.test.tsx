@@ -867,3 +867,43 @@ test("中文页面本地化付款摘要与订单状态", async () => {
   expect(order.props.accessibilityLabel).toContain("现金、银行卡");
   expect(order.props.accessibilityLabel).toContain("待同步");
 });
+
+test("BLE 扫码关键字：填入关键字框并立即按当前日期范围筛选；同一个码连扫两次（id 递增）会再次筛选", async () => {
+  const presenter = createPresenter();
+  const screen = await render(
+    <LocalHistoryScreen presenter={presenter} scannedKeyword={null} />,
+  );
+  presenter.setFilters.mockClear();
+
+  await screen.rerender(
+    <LocalHistoryScreen
+      presenter={presenter}
+      scannedKeyword={{ id: 1, value: "6E0F13AB" }}
+    />,
+  );
+  expect(presenter.setFilters).toHaveBeenCalledTimes(1);
+  expect(presenter.setFilters).toHaveBeenLastCalledWith(
+    expect.objectContaining({ keyword: "6E0F13AB" }),
+  );
+  expect(screen.getByTestId("local-history-keyword").props.value).toBe("6E0F13AB");
+  expect(presenter.refresh).toHaveBeenCalled();
+
+  // 重渲染（id 不变）不会重复筛选。
+  presenter.setFilters.mockClear();
+  await screen.rerender(
+    <LocalHistoryScreen
+      presenter={presenter}
+      scannedKeyword={{ id: 1, value: "6E0F13AB" }}
+    />,
+  );
+  expect(presenter.setFilters).not.toHaveBeenCalled();
+
+  // 同一个码再扫一次：id 递增，再次筛选。
+  await screen.rerender(
+    <LocalHistoryScreen
+      presenter={presenter}
+      scannedKeyword={{ id: 2, value: "6E0F13AB" }}
+    />,
+  );
+  expect(presenter.setFilters).toHaveBeenCalledTimes(1);
+});
