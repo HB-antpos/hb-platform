@@ -841,3 +841,49 @@ test("没有考勤码或终端未就绪时，登录页左栏保持原来的品�
     blocked.getByText(/此终端只允许已获本门店授权的员工进入收银/),
   ).toBeTruthy();
 });
+
+test("登录页蓝牙扫码枪入口：传回调才显示（旧原生包不带 BLE 服务时不传），终端未就绪也可点，中英文文案", async () => {
+  const onOpenBleScanner = jest.fn();
+  const notReady = {
+    ...runtime(async () => cashier()),
+    services: null,
+  } as unknown as CashierLoginRuntime;
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onOpenBleScanner={onOpenBleScanner}
+      onSuccess={jest.fn()}
+      runtime={notReady}
+    />,
+  );
+  expect(screen.getByText("蓝牙扫码枪")).toBeTruthy();
+  await fireEvent.press(screen.getByTestId("cashier-login-ble-scanner"));
+  expect(onOpenBleScanner).toHaveBeenCalledTimes(1);
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("cashier-login-ble-scanner").props.style,
+    ).minHeight,
+  ).toBeGreaterThanOrEqual(56);
+
+  await screen.rerender(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="en"
+      onOpenBleScanner={onOpenBleScanner}
+      onSuccess={jest.fn()}
+      runtime={notReady}
+    />,
+  );
+  expect(screen.getByText("Bluetooth scanner")).toBeTruthy();
+
+  await screen.rerender(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      onSuccess={jest.fn()}
+      runtime={notReady}
+    />,
+  );
+  expect(screen.queryByTestId("cashier-login-ble-scanner")).toBeNull();
+  await screen.unmount();
+});

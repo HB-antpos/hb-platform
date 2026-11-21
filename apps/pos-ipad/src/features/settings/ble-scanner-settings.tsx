@@ -376,6 +376,69 @@ function MetricTile({
 
 /* ------------------------------------------------------------------ */
 /* 搜索并连接                                                            */
+/**
+ * 登录页「蓝牙扫码枪」面板：登录前就能配对、连接、测试扫码枪，不必先登录再进设置页。
+ *
+ * - 以路由内的遮罩层呈现，而不是再包一层原生 Modal：卡片里的配对 / 测试 / 设置码本身就是 Modal，
+ *   避免 Modal 套 Modal 在 iOS 上叠放异常。
+ * - 登录前没有收银员，设置页的外设权限闸在这里不适用；扫码枪配对只写本机配置，
+ *   不涉及订单、支付或员工数据，所以配置类与测试操作都放开。
+ */
+export function BleScannerLoginPanel({
+  locale,
+  onClose,
+  router,
+  service,
+}: Readonly<{
+  locale: SettingsLocale;
+  onClose(): void;
+  router: HidScannerRouter | undefined;
+  service: BleScannerService;
+}>) {
+  usePosThemeVersion();
+  const t = useTranslate(locale);
+  return (
+    <View
+      accessibilityViewIsModal
+      style={[styles.overlay, styles.loginPanelOverlay]}
+      testID="login-ble-scanner-panel"
+    >
+      <PosPressable
+        accessible={false}
+        onPress={onClose}
+        sound="navigate"
+        style={styles.backdrop}
+        testID="login-ble-scanner-backdrop"
+      />
+      <View style={[styles.sheet, styles.sheetWide]}>
+        <ScrollView
+          contentContainerStyle={styles.loginPanelBody}
+          keyboardShouldPersistTaps="handled"
+          style={styles.loginPanelScroll}
+        >
+          <BleScannerCard
+            disabled={false}
+            locale={locale}
+            router={router}
+            service={service}
+            testDisabled={false}
+          />
+        </ScrollView>
+        <View style={styles.sheetActions}>
+          <PosButton
+            icon="close"
+            label={t("bleScanner.loginClose")}
+            onPress={onClose}
+            size="medium"
+            testID="login-ble-scanner-close"
+            tone="primary"
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 
 type PairView = "list" | "codes" | "alias";
@@ -1396,6 +1459,10 @@ const styles = createPosStyles((colors) => ({
     padding: 24,
   },
   backdrop: { ...StyleSheet.absoluteFillObject },
+  // 登录页面板铺满整个路由，盖在登录屏幕之上。
+  loginPanelOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20 },
+  loginPanelScroll: { flexShrink: 1 },
+  loginPanelBody: { gap: 12 },
   sheet: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
