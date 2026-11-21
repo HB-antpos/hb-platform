@@ -24,6 +24,67 @@ import type {
   PaymentProviderAvailabilityPort,
 } from "@/features/payments/runtime/payment-provider-registry";
 
+test("支付启动在建出草稿前失败且没有阻塞草稿时释放购物车租约，并抛出原始错误", async () => {
+  // 回归：购物车含实收 0 元的销售行时草稿层拒绝建草稿，租约却没人释放，
+  // 销售页删行、清空、挂单全部报购物车忙，只能强退 App。
+  for (const kind of ["provider", "cash"] as const) {
+    const harness = createHarness();
+    harness.drafts.createError = new TypeError("Payment cart line amount sign is invalid.");
+    const runtime = harness.runtime();
+    await assert.rejects(
+      kind === "provider"
+        ? runtime.start(startInput())
+        : runtime.startCash({
+            checkoutIntentId: startInput().checkoutIntentId,
+            expectedCartRevision: startInput().expectedCartRevision,
+            actionId: "cash-action-1",
+            amount: aud(1000),
+          }),
+      /amount sign is invalid/,
+      kind,
+    );
+    assert.equal(harness.lease.releaseWithoutDraftCalls, 1, `${kind} 应释放租约`);
+    assert.equal(harness.lease.releaseCalls, 0, "不是安全取消路径");
+  }
+});
+
+test("已存在阻塞草稿或无法确认时保持购物车锁定，不得放开", async () => {
+  // 耐久草稿已存在时放开购物车，会让重启后的恢复材料与被改过的购物车冲突；
+  // 读库失败（无法确认）同样只能保持锁定。
+  const blocked = createHarness();
+  blocked.drafts.createError = new Error("create failed after persisting");
+  blocked.drafts.recovery = {
+    draft: blocked.drafts.current,
+    attemptId: null,
+    preparedAction: null,
+  };
+  await assert.rejects(blocked.runtime().start(startInput()), /create failed after persisting/);
+  assert.equal(blocked.lease.releaseWithoutDraftCalls, 0);
+
+  const unknown = createHarness();
+  unknown.drafts.createError = new Error("create failed");
+  unknown.drafts.findBlockingError = new Error("db unavailable");
+  await assert.rejects(unknown.runtime().start(startInput()), /create failed/);
+  assert.equal(unknown.lease.releaseWithoutDraftCalls, 0);
+});
+
+test("草稿已建成后支付动作失败不会释放购物车租约", async () => {
+  const harness = createHarness();
+  harness.providers.unblock("manual-card");
+  // 已确认但金额不是全部余额：校验发生在草稿建成之后（startPreparedDraft），此时草稿已存在，租约必须保持。
+  await assert.rejects(
+    harness.runtime().start({
+      ...startInput(),
+      provider: "manual-card",
+      manualConfirmed: true,
+      amount: aud(500),
+    }),
+    /MANUAL_CARD_FULL_BALANCE_REQUIRED/,
+  );
+  assert.equal(harness.drafts.createCalls, 1);
+  assert.equal(harness.lease.releaseWithoutDraftCalls, 0);
+});
+
 test("手动刷卡必须显式确认且一次收齐余额，拒绝时不调用支付服务", async () => {
   const harness = createHarness();
   harness.providers.unblock("manual-card");
@@ -2063,6 +2124,14 @@ class MemoryLease implements PaymentCartLeasePort {
     this.releaseCalls += 1;
     this.events.push("lease:release");
   }
+
+  public releaseWithoutDraftCalls = 0;
+
+  public async releaseWithoutDraft(value: PaymentCartLease): Promise<void> {
+    assert.strictEqual(value, this.value);
+    this.releaseWithoutDraftCalls += 1;
+    this.events.push("lease:release-without-draft");
+  }
 }
 
 class MemoryDrafts implements PaymentCheckoutDraftPort {
@@ -2100,11 +2169,17 @@ class MemoryDrafts implements PaymentCheckoutDraftPort {
     private readonly events: string[],
   ) {}
 
+  /** 模拟草稿层拒绝建草稿（例如实收 ≤ 0 的销售行）。 */
+  public createError: unknown = null;
+  /** 模拟「无法确认是否已有阻塞草稿」（读库失败）。 */
+  public findBlockingError: unknown = null;
+
   public async createOrReuse(input: {
     checkoutIntentId: string;
     lease: PaymentCartLease;
   }): Promise<PaymentCheckoutDraft> {
     this.createCalls += 1;
+    if (this.createError) throw this.createError;
     assert.equal(input.checkoutIntentId, this.current.checkoutIntentId);
     assert.equal(input.lease.pricingState.promotions[0]?.id, "promo-1");
     assert.deepEqual(
@@ -2130,6 +2205,7 @@ class MemoryDrafts implements PaymentCheckoutDraftPort {
   }
 
   public async findBlockingRecovery() {
+    if (this.findBlockingError) throw this.findBlockingError;
     return this.recovery;
   }
 

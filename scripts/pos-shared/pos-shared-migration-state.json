@@ -195,10 +195,10 @@
     {
       "path": "core/sync/hbpos-sync-adapters.ts",
       "package": "pos-sync",
-      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400；员工审计上传白名单新增 CASH_IN / CASH_OUT / CASH_MOVEMENT_VOID（现金进出，服务端白名单已有）",
+      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400；员工审计上传白名单新增 CASH_IN / CASH_OUT / CASH_MOVEMENT_VOID（现金进出，服务端白名单已有）；订单上传失败映射中 404 / 405 / 413 / 408 与「2xx 但正文不是 API 信封」按可重试保留待传，只有 400 / 409 / 422 或带业务信封的其它 4xx 才永久拒绝（反向代理配错时积压订单不再被永久作废）",
       "baselineCanonicalRuntimeSha256": "1320cf6ac0ade04e774ee613faf5fff1c562384f7e8d6397c3a45a3e3adaac58",
-      "canonicalRuntimeSha256": "d415dc2a96183e588c3b1a63b5ec82efe495c5383f0a4179c0376bba977778ec",
-      "canonicalTypeSha256": "00728a8bf1bee7aaf5da7ec2beb6269f42431a5a55cf987db9f25b42d191f637",
+      "canonicalRuntimeSha256": "f3e15f563c21c944420938ecc2910798e6e7065955537fb6a549c7c0f6870f24",
+      "canonicalTypeSha256": "6b167c7c95bba0fb6b9d61e1844777c335c2995334ac449d43da17a5cc65caa3",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",

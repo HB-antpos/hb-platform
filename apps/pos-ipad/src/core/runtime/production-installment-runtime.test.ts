@@ -2310,6 +2310,48 @@ test("分期提货响应显示名变更时仍按稳定操作事实结算", async
   assert.equal(await pickedUp.runtime.hasRecoveryRequired(), false);
 });
 
+test("提货 / 作废回包时间经 SQL datetime 舍入后差几毫秒仍按同一次操作结算，不进恢复", async () => {
+  // 回归：服务端把时间写进 datetime 列（1/300 秒精度），回包毫秒值与冻结命令相差 2~3 ms。
+  // 旧实现用严格相等，约 7 成提货 / 作废抛错进恢复，且 lifecycle 只有 Completed 一种结案，整台 iPad 卡死。
+  for (const skewMs of [3, -3, 2, 1]) {
+    const voided = createHarness();
+    voided.api.lifecycleTimestampSkewMs = skewMs;
+    await workflowOf(voided.runtime.createPresenter()).void({
+      installmentGuid: "installment-1",
+      reason: "duplicate",
+    });
+    assert.equal(voided.api.voidCalls.length, 1, `作废 skew=${skewMs}`);
+    assert.equal(await voided.runtime.hasRecoveryRequired(), false, `作废 skew=${skewMs}`);
+
+    const pickedUp = createHarness();
+    pickedUp.api.detailsResponse = details({ status: "PaidOff" });
+    pickedUp.api.lifecycleTimestampSkewMs = skewMs;
+    await workflowOf(pickedUp.runtime.createPresenter()).confirmPickup({
+      installmentGuid: "installment-1",
+      note: null,
+    });
+    assert.equal(pickedUp.api.pickupCalls.length, 1, `提货 skew=${skewMs}`);
+    assert.equal(await pickedUp.runtime.hasRecoveryRequired(), false, `提货 skew=${skewMs}`);
+  }
+});
+
+test("提货回包时间与冻结命令相差远超服务端精度时仍视为不一致并进入恢复", async () => {
+  const pickedUp = createHarness();
+  pickedUp.api.detailsResponse = details({ status: "PaidOff" });
+  pickedUp.api.lifecycleTimestampSkewMs = 5_000;
+  await assert.rejects(
+    workflowOf(pickedUp.runtime.createPresenter()).confirmPickup({
+      installmentGuid: "installment-1",
+      note: null,
+    }),
+    (error) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "payment-recovery-required",
+  );
+  assert.equal(await pickedUp.runtime.hasRecoveryRequired(), true);
+});
+
 test("分期提货备注在冻结前 trim/空白转 null，回包丢失重启后原样复用", async () => {
   for (const [inputNote, expectedNote] of [
     ["  Customer collected at dock  ", "Customer collected at dock"],
@@ -4202,6 +4244,8 @@ class ScriptedApi {
   public pickupTransportFailsOnce = false;
   public lifecycleCashierNameOverride: string | undefined;
   public lifecycleVoidReasonOverride: string | undefined;
+  /** 模拟服务端 SQL Server datetime（1/300 秒）舍入：提货 / 作废回包的时间与冻结命令相差这么多毫秒。 */
+  public lifecycleTimestampSkewMs = 0;
   public capabilities: InstallmentRepaymentCapabilities;
   public claimCreateErrorCode: string | null;
   public claimCreateErrorStatus: number;
@@ -4667,7 +4711,7 @@ class ScriptedApi {
       status: "Cancelled",
       cancellationInfo: {
         kind: "VoidCancel",
-        cancelledAtIso: Reflect.get(command, "voidedAtIso"),
+        cancelledAtIso: this.skewIso(Reflect.get(command, "voidedAtIso")),
         cancelledBy:
           this.lifecycleCashierNameOverride ??
           Reflect.get(command, "cashierName"),
@@ -4681,6 +4725,11 @@ class ScriptedApi {
     }
     return result;
   }
+  private skewIso(iso: string): string {
+    return this.lifecycleTimestampSkewMs === 0
+      ? iso
+      : new Date(Date.parse(iso) + this.lifecycleTimestampSkewMs).toISOString();
+  }
   public async confirmPickup(command: { installmentGuid: string }) {
     this.pickupCalls.push(command);
     const result = details({
@@ -4688,7 +4737,7 @@ class ScriptedApi {
       deviceCode: this.detailsResponse?.deviceCode ?? DEVICE_CODE,
       status: "PickedUp",
       pickupInfo: {
-        pickedUpAtIso: Reflect.get(command, "confirmedAtIso"),
+        pickedUpAtIso: this.skewIso(Reflect.get(command, "confirmedAtIso")),
         pickedUpBy:
           this.lifecycleCashierNameOverride ??
           Reflect.get(command, "cashierName"),

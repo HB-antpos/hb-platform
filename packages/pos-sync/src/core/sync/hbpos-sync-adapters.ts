@@ -162,14 +162,30 @@ function mapFailure(error: unknown): AdapterFailure {
               code: error.code ?? "HTTP_403",
             };
       }
-      // 限流不是业务拒绝：保留本地事件并交给分钟级 durable retry。
-      if (error.status === 429) return { kind: "retry", failure: "server" };
-      if ((error.status ?? 0) >= 500) return { kind: "retry", failure: "server" };
+      const status = error.status ?? 0;
+      // 限流 / 请求超时不是业务拒绝：保留本地事件并交给分钟级 durable retry。
+      if (status === 429 || status === 408) return { kind: "retry", failure: "server" };
+      if (status >= 500) return { kind: "retry", failure: "server" };
       // 历史已收款订单可能仍有 POSM int 列不支持的小数数量，等待人工核对和数据迁移后重传。
-      if (error.status === 400 && error.code === "ORDER_SYNC_QUANTITY_UNSUPPORTED") {
+      if (status === 400 && error.code === "ORDER_SYNC_QUANTITY_UNSUPPORTED") {
         return { kind: "retry", failure: "server", code: error.code };
       }
-      return { kind: "rejected", code: error.code ?? `HTTP_${error.status ?? "UNKNOWN"}` };
+      // 400 / 409 / 422 是「请求本身无效」，重传结果不会变，永久拒绝。
+      if (status === 400 || status === 409 || status === 422) {
+        return { kind: "rejected", code: error.code ?? `HTTP_${status}` };
+      }
+      // 其余 4xx（404 / 405 / 413 等）：只有响应带 ApiResult 信封（服务端明确给出了业务结论）才永久拒绝；
+      // 否则多半是网关 / 反代 / 路由配置问题（例如 nginx 少一个斜杠让 POS 路由全部 404），
+      // 无法证明订单本身有问题。若在这里置 Rejected，窗口内所有积压订单会永不重传，
+      // 同步历史页也没有重试入口。保留待传，等网关恢复后自动补传。
+      return error.apiEnvelope === true
+        ? { kind: "rejected", code: error.code ?? `HTTP_${status}` }
+        : { kind: "retry", failure: "server", code: error.code ?? `HTTP_${status || "UNKNOWN"}` };
+    }
+    // 2xx 但正文不是 ApiResult 信封（网关 HTML 页、Wi-Fi 认证页、空 200）：无法证明服务端给出了业务结论
+    // （见 isHbposNonApiResponse 的约定），同样不得据此持久化拒绝。
+    if (error.apiEnvelope === false) {
+      return { kind: "retry", failure: "server", code: error.code ?? "API_NOT_ENVELOPE" };
     }
     return { kind: "rejected", code: error.code ?? "API_ENVELOPE_REJECTED" };
   }

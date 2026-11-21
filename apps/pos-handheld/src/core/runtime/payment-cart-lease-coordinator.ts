@@ -162,6 +162,11 @@ implements PaymentCartLeasePort {
     await this.releaseHeld(held);
   }
 
+  /** 支付启动在建出任何草稿前失败：没有耐久状态需要保护，只释放内存写锁（调用方已确认无阻塞草稿）。 */
+  public async releaseWithoutDraft(lease: PaymentCartLease): Promise<void> {
+    await this.releaseHeld(this.requireHeld(lease));
+  }
+
   /**
    * 恢复中心已先耐久接管原订单；随后释放支付 lease 并开启空白交易。
    * 若清车失败，case 仍已安全保存在数据库，重启不会重新占用当前收银车。
