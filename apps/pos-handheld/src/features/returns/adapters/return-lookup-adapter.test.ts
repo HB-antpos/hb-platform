@@ -620,6 +620,76 @@ test("在线查单：读不到本机退货时标记记录可能过期，但不�
   assert.equal(context?.lines[0]?.availableQuantity, 2);
 });
 
+test("在线查单：读不到本机退货时，卡额度只能现金 / 代金券代替退款；读得到时仍可原路退卡", async () => {
+  const cardCapacities = async (readError: unknown) => {
+    const remote = new FakeHistoryApi();
+    remote.contextResult = remoteContext();
+    const records = new FakeLocalReturnRecords([]);
+    records.error = readError;
+    const adapter = createAdapter({
+      historyApi: remote,
+      localReturnRecords: records,
+    });
+    const context = await adapter.lookupReceipt(orderGuid);
+    return context?.tenderCapacities.map((capacity) => [
+      capacity.method,
+      capacity.remainingCents,
+      capacity.substituteOnly === true,
+    ]);
+  };
+
+  // 读不到本机未同步的退货：其中可能已有退到同一张卡的记录，卡额度改为只能代替退款，现金不受影响。
+  assert.deepEqual(await cardCapacities(new Error("db busy")), [
+    ["cash", 500, false],
+    ["card", 501, true],
+  ]);
+  // 对照：本机退货读取成功时，卡额度照常可以原路退回。
+  assert.deepEqual(await cardCapacities(null), [
+    ["cash", 500, false],
+    ["card", 501, false],
+  ]);
+});
+
+test("本地降级查单：卡额度只能现金 / 代金券代替退款，现金额度不受影响", async () => {
+  const remote = new FakeHistoryApi();
+  remote.searchError = new HbposApiError("offline", { kind: "transport" });
+  const local = new FakeLocalOrders();
+  const snapshot = localSnapshot();
+  local.result = {
+    ...snapshot,
+    capacities: [
+      ...snapshot.capacities,
+      {
+        sourceKey: "local-card",
+        method: "card",
+        originalOrderGuid: orderGuid,
+        remainingCents: 400,
+        protectedProviderMaterial: {
+          reference: "SQ:payment-local",
+          cardTransactions: [],
+        },
+      },
+    ],
+  };
+  const adapter = createAdapter({ historyApi: remote, localOrders: local });
+
+  const context = await adapter.lookupReceipt("receipt-local");
+
+  assert.equal(context?.loadedFrom, "local");
+  // 本机看不到服务端与其它设备的退货记录，同一笔卡付款可能已被退过，不能再原路退卡。
+  assert.deepEqual(
+    context?.tenderCapacities.map((capacity) => [
+      capacity.method,
+      capacity.remainingCents,
+      capacity.substituteOnly === true,
+    ]),
+    [
+      ["cash", 500, false],
+      ["card", 400, true],
+    ],
+  );
+});
+
 test("本地降级查单扣掉本机全部已退数量（含已同步的），不再取原单全量", async () => {
   const remote = new FakeHistoryApi();
   remote.searchError = new HbposApiError("offline", { kind: "transport" });

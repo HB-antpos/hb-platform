@@ -358,7 +358,20 @@ public sealed partial class CashMovementViewModel : ObservableObject
         var original = row.Movement.VoidsMovementGuid is { } voids
             ? _snapshot.Movements.FirstOrDefault(item => item.MovementGuid == voids)
             : null;
-        var result = await _printService.PrintAsync(row.Movement, original, _snapshot.Totals, ReceiptPrintReason.Reprint);
+        ReceiptPrintResult result;
+        try
+        {
+            result = await _printService.PrintAsync(row.Movement, original, _snapshot.Totals, ReceiptPrintReason.Reprint);
+        }
+        catch (Exception ex)
+        {
+            // 打印机 / 设置读取抛异常时只提示失败：命令里没有别的兜底，异常冒出去会落到全局未处理异常。
+            ConsoleLog.WriteWarning(
+                "CashMovement",
+                $"reprint slip failed error={ex.GetType().Name} message={ex.Message}");
+            result = new ReceiptPrintResult(false, T("cashMovement.status.printFailed"));
+        }
+
         _setStatus(result.Succeeded ? T("cashMovement.status.reprinted") : result.Message, result.Succeeded);
     }
 
@@ -460,12 +473,24 @@ public sealed partial class CashMovementViewModel : ObservableObject
 
     private async Task AfterSavedAsync(PosSessionState session, LocalCashMovement movement, LocalCashMovement? voidedOriginal)
     {
-        // 记录已落库：开钱箱、打印、审计任何一步失败都只提示，不回滚记录。
+        // 记录已落库：开钱箱、打印、审计任何一步失败（含直接抛异常）都只提示，不回滚记录。
+        // 每一步各自兜底：否则异常会冒到 ConfirmAsync / ConfirmVoidAsync 的 catch，被报成「保存失败」，
+        // 收银员会以为没记上而重录一笔，同时后面的审计也被跳过。这里没有取消令牌，所以不区分取消异常。
         var drawerOk = true;
         if (_openCashDrawerAsync is not null)
         {
-            var drawer = await _openCashDrawerAsync();
-            drawerOk = drawer.Succeeded;
+            try
+            {
+                var drawer = await _openCashDrawerAsync();
+                drawerOk = drawer.Succeeded;
+            }
+            catch (Exception ex)
+            {
+                drawerOk = false;
+                ConsoleLog.WriteWarning(
+                    "CashMovement",
+                    $"open cash drawer failed after save error={ex.GetType().Name} message={ex.Message}");
+            }
         }
 
         await RefreshAsync();
@@ -473,23 +498,42 @@ public sealed partial class CashMovementViewModel : ObservableObject
         string? printMessage = null;
         if (_printService is not null && _snapshot is not null)
         {
-            var printed = await _printService.PrintAsync(movement, voidedOriginal, _snapshot.Totals);
-            printOk = printed.Succeeded;
-            printMessage = printed.Message;
+            try
+            {
+                var printed = await _printService.PrintAsync(movement, voidedOriginal, _snapshot.Totals);
+                printOk = printed.Succeeded;
+                printMessage = printed.Message;
+            }
+            catch (Exception ex)
+            {
+                printOk = false;
+                ConsoleLog.WriteWarning(
+                    "CashMovement",
+                    $"print slip failed after save error={ex.GetType().Name} message={ex.Message}");
+            }
         }
 
-        OperationAuditEvents.RecordAction(
-            _auditLogger,
-            voidedOriginal is not null
-                ? OperationAuditTypes.CashMovementVoid
-                : movement.Direction == CashMovementDirection.In ? OperationAuditTypes.CashIn : OperationAuditTypes.CashOut,
-            "Succeeded",
-            session,
-            reasonCode: movement.ReasonCode,
-            paymentMethod: "Cash",
-            paymentAmount: movement.SignedAmount,
-            orderGuid: movement.MovementGuid.ToString("D"),
-            receiptNumber: movement.DisplayNumber);
+        try
+        {
+            OperationAuditEvents.RecordAction(
+                _auditLogger,
+                voidedOriginal is not null
+                    ? OperationAuditTypes.CashMovementVoid
+                    : movement.Direction == CashMovementDirection.In ? OperationAuditTypes.CashIn : OperationAuditTypes.CashOut,
+                "Succeeded",
+                session,
+                reasonCode: movement.ReasonCode,
+                paymentMethod: "Cash",
+                paymentAmount: movement.SignedAmount,
+                orderGuid: movement.MovementGuid.ToString("D"),
+                receiptNumber: movement.DisplayNumber);
+        }
+        catch (Exception ex)
+        {
+            ConsoleLog.WriteWarning(
+                "CashMovement",
+                $"record audit failed after save error={ex.GetType().Name} message={ex.Message}");
+        }
 
         var key = voidedOriginal is not null
             ? "cashMovement.status.voided"

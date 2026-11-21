@@ -390,10 +390,29 @@ public sealed partial class ReceiptReturnsViewModel : ObservableObject, IScanner
             OrderLines.Add(new ReceiptReturnOrderLineViewModel(
                 result.Order,
                 line,
-                T("returns.priceSource.receipt", "Receipt return")));
+                T("returns.priceSource.receipt", "Receipt return"),
+                CountReturnQuantityInCart(result.Order.OrderGuid, line.OrderLineGuid)));
         }
 
         OnPendingLinesChanged();
+    }
+
+    /// <summary>
+    /// 购物车里已有的、指向同一原单行的退货数量（按原单号 + 原单行号匹配，与退货行合并用的来源键同源）。
+    /// 没有传入购物车（旧调用方 / 测试）时按 0 处理。
+    /// </summary>
+    private decimal CountReturnQuantityInCart(Guid originalOrderGuid, Guid originalOrderLineGuid)
+    {
+        if (_cart is null)
+        {
+            return 0m;
+        }
+
+        return _cart.Lines
+            .Where(line => line.IsReturnLine &&
+                line.OriginalOrderGuid == originalOrderGuid &&
+                line.OriginalOrderLineGuid == originalOrderLineGuid)
+            .Sum(line => line.Quantity);
     }
 
     private async Task AddNoReceiptProductAsync(
@@ -990,8 +1009,10 @@ public sealed partial class ReceiptReturnOrderLineViewModel : ObservableObject
     public ReceiptReturnOrderLineViewModel(
         ReceiptReturnOrder order,
         ReceiptReturnOrderLine line,
-        string priceSourceLabel)
+        string priceSourceLabel,
+        decimal inCartQuantity = 0m)
     {
+        InCartQuantity = Math.Max(0m, inCartQuantity);
         OrderGuid = order.OrderGuid;
         OrderLineGuid = line.OrderLineGuid;
         StoreCode = order.StoreCode;
@@ -1033,10 +1054,17 @@ public sealed partial class ReceiptReturnOrderLineViewModel : ObservableObject
 
     public string PriceSourceLabel { get; }
 
+    /// <summary>
+    /// 打开本页之前，已经以「确认加入购物车」放进收银台购物车的同一原单行的退货数量。
+    /// 这部分尚未成单，服务端 / 本机退货记录里没有，必须从可退数量里扣掉，
+    /// 否则同一件商品能分多次确认重复退，直到上传时才被服务端拒收（款已退出）。
+    /// </summary>
+    public decimal InCartQuantity { get; }
+
     [ObservableProperty]
     private decimal _pendingQuantity;
 
-    public decimal AvailableRemaining => Math.Max(0m, OriginalQuantity - ReturnedQuantity - PendingQuantity);
+    public decimal AvailableRemaining => Math.Max(0m, OriginalQuantity - ReturnedQuantity - InCartQuantity - PendingQuantity);
 }
 
 public sealed partial class PendingReturnLineViewModel : ObservableObject
