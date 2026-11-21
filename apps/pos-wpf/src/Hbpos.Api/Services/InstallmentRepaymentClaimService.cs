@@ -161,14 +161,20 @@ public sealed class InstallmentRepaymentClaimService(
     {
         var normalizedIdentity = NormalizeIdentity(identity);
         var normalizedRequest = NormalizeCreateRequest(request);
-        // 旧入口建 claim 时还不知道通道，只看刷卡续付总开关；通道白名单在 begin-provider 时检查。
-        EnsureNewCardRepaymentAllowed(normalizedRequest.Method, provider: null);
-        ValidatePaymentPermissions(normalizedIdentity, normalizedRequest.Method);
-        var details = await GetRequiredInstallmentAsync(installmentGuid, cancellationToken);
-        ValidateInstallmentForNewClaim(details, normalizedIdentity, normalizedRequest.Amount);
         var fingerprint = CreateFingerprint(installmentGuid, normalizedRequest);
 
+        // 同一 operation 的重放必须先于「新 claim」的分期状态校验：
+        // 这笔续付若已入账，分期的余额已经扣减（最后一笔还会让分期变为已完成），
+        // 再按「新 claim」规则校验会把已入账的重试误报成 Mismatch，客户端当确定失败清草稿，
+        // 收银员可能把钱退给顾客。已有 claim 的归属与事实指纹由下面的 ValidateAccess / 指纹比较把关。
         var existing = await claimRepository.GetAsync(normalizedRequest.OperationGuid, cancellationToken);
+        if (existing is null)
+        {
+            // 旧入口建 claim 时还不知道通道，只看刷卡续付总开关；通道白名单在 begin-provider 时检查。
+            EnsureNewCardRepaymentAllowed(normalizedRequest.Method, provider: null);
+        }
+
+        ValidatePaymentPermissions(normalizedIdentity, normalizedRequest.Method);
         if (existing is not null)
         {
             existing = await ExpirePreparedAsync(existing, cancellationToken);
@@ -181,6 +187,8 @@ public sealed class InstallmentRepaymentClaimService(
             return await MapAsync(existing, alreadyExists: true);
         }
 
+        var details = await GetRequiredInstallmentAsync(installmentGuid, cancellationToken);
+        ValidateInstallmentForNewClaim(details, normalizedIdentity, normalizedRequest.Amount);
         await EnsureNoBlockingClaimAsync(installmentGuid, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var claim = new InstallmentRepaymentClaimRecord(

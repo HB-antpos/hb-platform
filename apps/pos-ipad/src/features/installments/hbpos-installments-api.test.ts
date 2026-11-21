@@ -817,6 +817,60 @@ test("详情优先使用服务端 updatedAt，null 时回退 createdAt", async (
   assert.equal(legacy?.updatedAtIso, "2026-07-27T01:02:03.000Z");
 });
 
+test("备注 / 取货备注 / 取消原因允许换行与制表符（WPF 开单备注框可回车），其余控制字符仍拒收", async () => {
+  const multiline = "第一行\n第二行\r\n\t缩进";
+  const payload = {
+    ...detailsPayload({ status: 4, balanceAmount: 0 }),
+    note: multiline,
+    pickupInfo: {
+      pickedUpAt: "2026-07-27T03:00:00Z",
+      pickedUpBy: "Alice",
+      note: multiline,
+    },
+    cancellationInfo: {
+      kind: 2,
+      cancelledAt: "2026-07-27T03:00:00Z",
+      cancelledBy: "Alice",
+      reason: multiline,
+    },
+  };
+  const details = await new HbposInstallmentsApi(
+    new QueueTransport([{ success: true, data: payload }]),
+    "S1",
+  ).getDetails(installmentGuid);
+
+  assert.equal(details?.note, multiline);
+  assert.equal(details?.pickupInfo?.note, multiline);
+  assert.equal(details?.cancellationInfo?.reason, multiline);
+
+  // 单行字段（顾客名等）不放宽；多行字段里的 NUL / 退格 / ESC 等控制字符仍然拒收。
+  for (const bad of ["a\u0000b", "a\u0008b", "a\u001bb", "a\u007fb"]) {
+    await assert.rejects(
+      () =>
+        new HbposInstallmentsApi(
+          new QueueTransport([
+            { success: true, data: { ...payload, note: bad } },
+          ]),
+          "S1",
+        ).getDetails(installmentGuid),
+      /details\.note/,
+    );
+  }
+  await assert.rejects(
+    () =>
+      new HbposInstallmentsApi(
+        new QueueTransport([
+          {
+            success: true,
+            data: { ...payload, customerName: "Bob\nSmith" },
+          },
+        ]),
+        "S1",
+      ).getDetails(installmentGuid),
+    /customerName/,
+  );
+});
+
 test("创建、补款、退款取消、作废和取货使用固定 v1 路由", async () => {
   const responseDetails = detailsPayload({ status: 1, balanceAmount: 80 });
   const transport = new QueueTransport([
