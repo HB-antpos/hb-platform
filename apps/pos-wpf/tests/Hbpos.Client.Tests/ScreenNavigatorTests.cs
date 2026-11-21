@@ -6,6 +6,7 @@ using Hbpos.Client.Wpf.Services;
 using Hbpos.Client.Wpf.ViewModels;
 using Hbpos.Contracts.Catalog;
 using Microsoft.Extensions.Time.Testing;
+using PaymentMethodKind = Hbpos.Contracts.Orders.PaymentMethodKind;
 
 namespace Hbpos.Client.Tests;
 
@@ -279,6 +280,96 @@ public sealed class ScreenNavigatorTests : IDisposable
     }
 
     [Fact]
+    public void Installment_center_opened_from_history_returns_to_the_same_history_screen_without_reloading()
+    {
+        var navigator = CreateNavigator();
+        var receiptQuery = new CountingReceiptQueryService();
+        var history = AttachHistory(navigator, receiptQuery);
+        // 历史页上的查询状态（关键词）必须在往返分期中心之后原样保留。
+        history.SearchText = "keep-me";
+        var center = AttachInstallmentCenter(navigator);
+
+        navigator.ShowInstallmentCenterFromHistory();
+
+        Assert.Same(center, navigator.CurrentScreen);
+        Assert.Equal(InstallmentCenterBackTarget.History, center.BackTarget);
+        // 没注入本地化服务时用源码里的英文兜底文案。
+        Assert.Equal("Back to History", center.BackToPaymentText);
+        var queriesBeforeBack = receiptQuery.QueryCallCount;
+
+        center.BackToPaymentCommand.Execute(null);
+
+        Assert.Same(history, navigator.CurrentScreen);
+        Assert.Equal(new object?[] { center, history }, _screens);
+        // 返回只切换当前屏幕：历史页不重新查询，来源与关键词原样保留。
+        Assert.Equal(queriesBeforeBack, receiptQuery.QueryCallCount);
+        Assert.Equal("keep-me", history.SearchText);
+        Assert.True(history.IsLocalSourceSelected);
+    }
+
+    [Fact]
+    public void Installment_center_opened_from_history_falls_back_to_pos_when_history_was_released()
+    {
+        var navigator = CreateNavigator();
+        var pos = AttachPosTerminal(navigator);
+        AttachHistory(navigator, new CountingReceiptQueryService());
+        var center = AttachInstallmentCenter(navigator);
+        navigator.ShowInstallmentCenterFromHistory();
+
+        // 例如设备重新注册后清屏，历史页视图模型已被置空。
+        navigator.TransactionHistory = null;
+        center.BackToPaymentCommand.Execute(null);
+
+        Assert.Same(pos, navigator.CurrentScreen);
+    }
+
+    [Fact]
+    public void Installment_center_opened_from_payment_still_returns_to_payment_and_history_entry_does_not_leak()
+    {
+        var navigator = CreateNavigator();
+        _cart.AddItem(CreateItem("SKU-1", 3.50m));
+        var payment = AttachPayment(navigator);
+        var history = AttachHistory(navigator, new CountingReceiptQueryService());
+        var center = AttachInstallmentCenter(navigator);
+
+        // 先从历史页进入再返回，然后换成付款页入口：去向与文案必须跟着入口重设，不能沿用上一次。
+        navigator.ShowInstallmentCenterFromHistory();
+        center.BackToPaymentCommand.Execute(null);
+        Assert.Same(history, navigator.CurrentScreen);
+
+        navigator.ShowInstallmentCenter();
+
+        Assert.Same(center, navigator.CurrentScreen);
+        Assert.Equal(InstallmentCenterBackTarget.Payment, center.BackTarget);
+        Assert.Equal("Back to Payment", center.BackToPaymentText);
+
+        center.BackToPaymentCommand.Execute(null);
+
+        Assert.Same(payment, navigator.CurrentScreen);
+    }
+
+    [Fact]
+    public async Task Installment_center_entry_from_history_carries_the_cart_snapshot_and_starts_loading()
+    {
+        var navigator = CreateNavigator();
+        AttachHistory(navigator, new CountingReceiptQueryService());
+        var center = AttachInstallmentCenter(navigator);
+        var readyStatus = center.StatusMessage;
+
+        // 购物车为空：快照为 null，分期中心能处理。
+        navigator.ShowInstallmentCenterFromHistory();
+        Assert.Null(center.CartSnapshot);
+
+        _cart.AddItem(CreateItem("SKU-1", 3.50m));
+        navigator.ShowInstallmentCenterFromHistory();
+
+        Assert.NotNull(center.CartSnapshot);
+        Assert.Equal(_cart.ActualAmount, center.CartSnapshot!.ActualAmount);
+        // 进入即触发 LoadAsync：状态栏从「就绪」提示变成加载结果。
+        await WaitUntilAsync(() => center.StatusMessage != readyStatus);
+    }
+
+    [Fact]
     public void Current_cart_snapshot_is_null_for_empty_cart_and_projects_lines_otherwise()
     {
         var navigator = CreateNavigator();
@@ -389,6 +480,38 @@ public sealed class ScreenNavigatorTests : IDisposable
         return pos;
     }
 
+    private TransactionHistoryViewModel AttachHistory(ScreenNavigator navigator, IReceiptQueryService receiptQuery)
+    {
+        var history = new TransactionHistoryViewModel(receiptQuery);
+        _disposables.Add(history);
+        navigator.TransactionHistory = history;
+        return history;
+    }
+
+    /// <summary>
+    /// 直接挂一个「返回」回调接到导航器的分期中心：与 CreateInstallmentCenterViewModel 生产接线一致，
+    /// 但不需要创建 MainChildViewModelFactory（本测试类传入的是 null 工厂）。
+    /// </summary>
+    private InstallmentCenterViewModel AttachInstallmentCenter(ScreenNavigator navigator)
+    {
+        var center = new InstallmentCenterViewModel(
+            NoopInstallmentOrderService.Instance,
+            Session,
+            _ => Task.CompletedTask,
+            navigator.BackFromInstallmentCenter);
+        _disposables.Add(center);
+        navigator.InstallmentCenter = center;
+        return center;
+    }
+
+    private PaymentViewModel AttachPayment(ScreenNavigator navigator)
+    {
+        var payment = new PaymentViewModel(_cart, new NoopPaymentWorkflowService(), Session);
+        _disposables.Add(payment);
+        navigator.CashPayment = payment;
+        return payment;
+    }
+
     private static SellableItemDto CreateItem(string productCode, decimal price) =>
         new(
             "S01",
@@ -403,6 +526,84 @@ public sealed class ScreenNavigatorTests : IDisposable
             "Store",
             1m,
             null);
+
+    /// <summary>只统计查询次数的本地订单查询替身：用来证明「返回历史页」没有触发重新查询。</summary>
+    private sealed class CountingReceiptQueryService : IReceiptQueryService
+    {
+        public int QueryCallCount { get; private set; }
+
+        public Task<IReadOnlyList<LocalOrderSummary>> GetRecentOrdersAsync(int take = 50, CancellationToken cancellationToken = default)
+        {
+            QueryCallCount++;
+            return Task.FromResult<IReadOnlyList<LocalOrderSummary>>([]);
+        }
+
+        public Task<IReadOnlyList<LocalOrderSummary>> GetRecentOrdersAsync(
+            LocalOrderHistoryQuery query,
+            int take = 50,
+            CancellationToken cancellationToken = default)
+        {
+            QueryCallCount++;
+            return Task.FromResult<IReadOnlyList<LocalOrderSummary>>([]);
+        }
+
+        public Task<ReceiptDetails?> GetReceiptAsync(Guid orderGuid, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ReceiptDetails?>(null);
+
+        public Task<ReceiptDetails?> GetLatestReceiptAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<ReceiptDetails?>(null);
+    }
+
+    /// <summary>付款页只用来当「返回目标」，不会真的收款：用到的工作流方法一律不应被调用。</summary>
+    private sealed class NoopPaymentWorkflowService : ICashPaymentWorkflowService
+    {
+        public bool TryParseTenderedAmount(string? amountTenderedText, out decimal tenderedAmount) =>
+            decimal.TryParse(amountTenderedText, out tenderedAmount);
+
+        public decimal CalculateChange(string? amountTenderedText, decimal actualAmount) => 0m;
+
+        public decimal CalculateTenderedAmount(IReadOnlyList<PaymentTender> tenders) => tenders.Sum(tender => tender.Amount);
+
+        public decimal CalculateRemainingAmount(decimal actualAmount, IReadOnlyList<PaymentTender> tenders) =>
+            Math.Max(0m, actualAmount - CalculateTenderedAmount(tenders));
+
+        public decimal CalculateChange(IReadOnlyList<PaymentTender> tenders, decimal actualAmount) => 0m;
+
+        public Task<PaymentTenderAttemptResult> AddTenderAsync(
+            PaymentMethodKind method,
+            PosSessionState session,
+            decimal actualAmount,
+            IReadOnlyList<PaymentTender> currentTenders,
+            string? amountText,
+            string? referenceText = null,
+            CancellationToken cancellationToken = default,
+            PosCartSnapshot? cartSnapshot = null) =>
+            throw new NotSupportedException();
+
+        public Task<CashPaymentWorkflowResult> CompleteAsync(
+            PosCartService cart,
+            PosSessionState session,
+            string? amountTenderedText,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CashPaymentWorkflowResult> CompletePaymentAsync(
+            PosCartService cart,
+            PosSessionState session,
+            IReadOnlyList<PaymentTender> tenders,
+            decimal cashTenderedAmount,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<CashPaymentWorkflowResult> RetryVoucherUploadAsync(
+            Guid orderGuid,
+            PosCartService cart,
+            PosSessionState session,
+            decimal tenderedAmount,
+            decimal changeAmount,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
 
     private sealed class KeyEchoLocalization : ILocalizationService
     {

@@ -141,6 +141,26 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             pending.ClaimantDeviceCode ?? "-");
     public IRelayCommand BackToPaymentCommand { get; }
 
+    /// <summary>
+    /// 「返回」按钮的去向：付款页（旧入口）或历史页（历史页「在线」来源的入口）。
+    /// 分期中心视图模型由导航器常驻复用，所以每次进入前都由导航器重新设定；默认回付款页。
+    /// 实际跳转由构造时注入的回调完成，这里只决定按钮文案并让导航器知道该回哪里。
+    /// </summary>
+    public InstallmentCenterBackTarget BackTarget { get; private set; } = InstallmentCenterBackTarget.Payment;
+
+    public void SetBackTarget(InstallmentCenterBackTarget target)
+    {
+        if (BackTarget == target)
+        {
+            return;
+        }
+
+        BackTarget = target;
+        OnPropertyChanged(nameof(BackTarget));
+        // 返回按钮的文案随去向变化。
+        OnPropertyChanged(nameof(BackToPaymentText));
+    }
+
     public string PageTitleText => T("installment.center.title", "Lay-by Center");
     public string CurrentOrderSummaryText => CartSnapshot is null
         ? T("installment.center.currentOrder.none", "There is no current order available for a new lay-by.")
@@ -154,7 +174,9 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
     public string LoadText => T("common.load", "Load");
     public string SearchButtonText => T("installment.center.action.search", "Search");
     public string SearchTextLabel => T("installment.center.search", "Search order no., name, or phone");
-    public string BackToPaymentText => T("installment.center.action.backToPayment", "Back to Payment");
+    public string BackToPaymentText => BackTarget == InstallmentCenterBackTarget.History
+        ? T("installment.center.action.backToHistory", "Back to History")
+        : T("installment.center.action.backToPayment", "Back to Payment");
     public string OfflineNoticeText => T("installment.center.offline", "Offline mode only supports local cached lay-by orders.");
     public string SelectedOrderNumberText => SelectedOrder?.OrderNumber ?? T("installment.center.selected.none", "No lay-by selected");
     public string SelectedOrderCustomerText => SelectedOrder?.CustomerName ?? T("installment.center.selected.customer.empty", "Select a lay-by order on the left");
@@ -1099,6 +1121,16 @@ public sealed partial class InstallmentCenterViewModel : ObservableObject, IDisp
             _localization.CultureChanged -= onCultureChanged;
         }
     }
+}
+
+/// <summary>分期中心「返回」按钮的去向。</summary>
+public enum InstallmentCenterBackTarget
+{
+    /// <summary>付款页（旧入口，从付款页进入分期中心）。</summary>
+    Payment,
+
+    /// <summary>历史页（历史页「在线」来源里的分期中心入口），返回时保持历史页原有的来源与查询状态。</summary>
+    History
 }
 
 /// <summary>主管结案刷卡续付的选项。</summary>
