@@ -578,8 +578,10 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
-    public async Task VerifyAsync_WhenLegacyWindowsRequestOmitsHardwareId_PreservesExistingCompatibility()
+    public async Task VerifyAsync_WhenWindowsRequestOmitsHardwareId_NeverReturnsTheAuthorizationCode()
     {
+        // 安全回归：verify 是匿名端点，设备号只有「POS_门店_时分」每店约 1440 种。
+        // 曾经 Windows 不带硬件码也会返回已启用设备的授权码，可被枚举后冒充收银机。
         var repository = new FakeDeviceRegistrationRepository
         {
             DeviceByCode = new DeviceRegistrationRecord
@@ -596,6 +598,95 @@ public sealed class DeviceServiceTests
 
         var response = await service.VerifyAsync(
             new DeviceVerifyRequest("POS_1003_1011", "1003"),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.Null(response.AuthorizationCode);
+        Assert.Equal("Device hardware id is required for Windows.", response.Message);
+        Assert.False(response.ExactIdentityMatched);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task VerifyAsync_WhenHardwareIdIsBlank_DoesNotRevealWhetherTheDeviceExists(string? hardwareId)
+    {
+        // 不带硬件码时，已存在与不存在的设备号必须得到完全相同的响应，否则仍可枚举设备号。
+        var registered = new DeviceService(
+            new FakeDeviceRegistrationRepository
+            {
+                DeviceByCode = new DeviceRegistrationRecord
+                {
+                    DeviceCode = "POS_1003_1011",
+                    StoreCode = "1003",
+                    HardwareId = "HW-001",
+                    DeviceStatus = 1,
+                    DeviceSystem = "Windows",
+                    AuthorizationCode = "AUTH-001"
+                }
+            },
+            LoadStoreAsync);
+        var unregistered = new DeviceService(new FakeDeviceRegistrationRepository(), LoadStoreAsync);
+
+        var existing = await registered.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", hardwareId),
+            CancellationToken.None);
+        var missing = await unregistered.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", hardwareId),
+            CancellationToken.None);
+
+        Assert.Equal(missing, existing);
+        Assert.False(existing.IsAllowed);
+        Assert.Null(existing.AuthorizationCode);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WhenWindowsHardwareIdDoesNotMatch_NeverReturnsTheAuthorizationCode()
+    {
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            DeviceByCode = new DeviceRegistrationRecord
+            {
+                DeviceCode = "POS_1003_1011",
+                StoreCode = "1003",
+                HardwareId = "HW-001",
+                DeviceStatus = 1,
+                DeviceSystem = "Windows",
+                AuthorizationCode = "AUTH-001"
+            }
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", "HW-OTHER", DeviceSystem: "Windows"),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.Null(response.AuthorizationCode);
+        Assert.Equal("Device hardware id does not match.", response.Message);
+    }
+
+    [Fact]
+    public async Task VerifyAsync_WhenWindowsHardwareIdMatches_ReturnsTheAuthorizationCode()
+    {
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            DeviceByCode = new DeviceRegistrationRecord
+            {
+                DeviceCode = "POS_1003_1011",
+                StoreCode = "1003",
+                HardwareId = "HW-001",
+                DeviceStatus = 1,
+                DeviceSystem = "Windows",
+                AuthorizationCode = "AUTH-001"
+            }
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        // 大小写与首尾空白不敏感，与历史行为一致。
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", " hw-001 ", DeviceSystem: "Windows"),
             CancellationToken.None);
 
         Assert.True(response.IsAllowed);
@@ -777,7 +868,7 @@ public sealed class DeviceServiceTests
         var service = new DeviceService(repository, LoadStoreAsync);
 
         var response = await service.VerifyAsync(
-            new DeviceVerifyRequest("POS_1003_1011", "1003"),
+            new DeviceVerifyRequest("POS_1003_1011", "1003", "HW-001"),
             CancellationToken.None);
 
         Assert.False(response.IsAllowed);
@@ -1868,7 +1959,7 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
-    public async Task VerifyAsync_WhenLegacyWindowsRequestOmitsHardwareIdForDuplicateRows_UsesLatestRow()
+    public async Task VerifyAsync_WhenWindowsRequestOmitsHardwareIdForDuplicateRows_ReturnsNoRowAndNoCode()
     {
         var repository = new FakeDeviceRegistrationRepository
         {
@@ -1902,9 +1993,9 @@ public sealed class DeviceServiceTests
             new DeviceVerifyRequest("POS_1003_1101", "1003"),
             CancellationToken.None);
 
-        // 旧客户端不带硬件码时，确定性地取最新一行，而不是随机行。
-        Assert.True(response.IsAllowed);
-        Assert.Equal("AUTH-002", response.AuthorizationCode);
+        // 不带硬件码时不再按设备号取「最新一行」返回授权码，撞号的历史行也一样不会被取到。
+        Assert.False(response.IsAllowed);
+        Assert.Null(response.AuthorizationCode);
     }
 
     private static Task<DeviceStoreInfo?> LoadStoreAsync(string storeCode, CancellationToken cancellationToken)

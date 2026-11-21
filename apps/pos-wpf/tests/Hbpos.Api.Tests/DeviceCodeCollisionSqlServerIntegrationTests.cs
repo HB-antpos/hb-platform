@@ -56,9 +56,9 @@ public sealed class DeviceCodeCollisionSqlServerIntegrationTests(
             Assert.Equal("AUTH-B", deviceB.AuthorizationCode);
             Assert.True(deviceA.IsAllowed, deviceA.Message);
             Assert.Equal("AUTH-A", deviceA.AuthorizationCode);
-            // 旧客户端不带硬件码时确定性地取最新一行。
-            Assert.True(legacy.IsAllowed, legacy.Message);
-            Assert.Equal("AUTH-B", legacy.AuthorizationCode);
+            // 不带硬件码一律不返回授权码（verify 是匿名端点，设备号可枚举）。
+            Assert.False(legacy.IsAllowed);
+            Assert.Null(legacy.AuthorizationCode);
         });
     }
 
