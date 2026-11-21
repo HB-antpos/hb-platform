@@ -3742,6 +3742,8 @@ function errorCopyKey(errorCode: string): SalesCopyKey {
       return "error.invalidDiscount";
     case "empty-cart":
       return "error.emptyCart";
+    case "total-not-payable":
+      return "error.totalNotPayable";
     case "cash-invalid":
       return "error.cashInvalid";
     case "cash-insufficient":

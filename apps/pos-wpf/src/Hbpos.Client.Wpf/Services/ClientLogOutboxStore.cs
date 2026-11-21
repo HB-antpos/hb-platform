@@ -34,6 +34,12 @@ internal sealed class ClientLogOutboxStore
 {
     private readonly string _databasePath;
     private readonly int _runtimePendingLimit;
+
+    // 容量裁剪的间隔（每多少条运行日志做一次）。裁剪那条 DELETE 要对全部 Pending 行排序、再跳过上限条数，
+    // 积压接近上限（长时间断网）时单次约 60ms；原先每写一条日志就做一次，写日志的队列满了就丢日志。
+    // 改为每 N 条做一次：上限的超出量最多 N-1 条（上限的 1/8 与 256 取小，上限很小时每条都裁，保持精确）。
+    private readonly int _runtimeTrimInterval;
+    private int _runtimeInsertsSinceTrim;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private long _runtimeDroppedCount;
 
@@ -42,6 +48,7 @@ internal sealed class ClientLogOutboxStore
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         _databasePath = Path.GetFullPath(databasePath);
         _runtimePendingLimit = Math.Max(1, runtimePendingLimit);
+        _runtimeTrimInterval = Math.Clamp(_runtimePendingLimit / 8, 1, 256);
     }
 
     public long RuntimeDroppedCount => Interlocked.Read(ref _runtimeDroppedCount);
@@ -130,7 +137,8 @@ internal sealed class ClientLogOutboxStore
                 await insert.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            if (kind == ClientLogOutboxKind.Runtime)
+            // _runtimeInsertsSinceTrim 只在持有 _writeGate 时读写；写入失败回滚时不清零，下一条会再次触发裁剪。
+            if (kind == ClientLogOutboxKind.Runtime && ++_runtimeInsertsSinceTrim >= _runtimeTrimInterval)
             {
                 await using var trim = connection.CreateCommand();
                 trim.Transaction = (SqliteTransaction)transaction;
@@ -145,6 +153,7 @@ internal sealed class ClientLogOutboxStore
                     );
                     """;
                 var dropped = await trim.ExecuteNonQueryAsync(cancellationToken);
+                _runtimeInsertsSinceTrim = 0;
                 if (dropped > 0)
                 {
                     Interlocked.Add(ref _runtimeDroppedCount, dropped);

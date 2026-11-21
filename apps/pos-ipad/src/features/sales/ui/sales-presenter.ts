@@ -42,6 +42,8 @@ export type SalesErrorCode =
   | "price-too-high"
   | "invalid-discount"
   | "empty-cart"
+  /** 购物车合计不大于 0：无法进入付款，提示改价或删除 0 元商品。 */
+  | "total-not-payable"
   | "cash-invalid"
   | "cash-insufficient"
   | "cash-failed"
@@ -1333,6 +1335,20 @@ export class SalesPresenter {
             pendingLookupCount:
               this.dependencies.workflow.getPendingCatalogWorkCount(),
             errorCode: "empty-cart",
+          });
+          return null;
+        }
+        // 合计不大于 0（整单 0 元 / 负数）的购物车付款页与现金结账都会拒收；
+        // 此前这里照常放行、到付款入口才静默返回，收银员点了「结账」毫无反馈。
+        // 在收银页明确提示，让收银员改价或删除 0 元商品。
+        if (cart.actualAmount.cents <= 0) {
+          this.releasePreparedCheckout();
+          this.patchState({
+            phase: "selling",
+            cart,
+            pendingLookupCount:
+              this.dependencies.workflow.getPendingCatalogWorkCount(),
+            errorCode: "total-not-payable",
           });
           return null;
         }

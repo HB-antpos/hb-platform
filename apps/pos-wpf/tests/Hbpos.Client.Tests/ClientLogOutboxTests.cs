@@ -166,6 +166,44 @@ public sealed class ClientLogOutboxTests
     }
 
     [Fact]
+    public async Task Runtime_cap_is_trimmed_in_batches_so_the_overshoot_is_bounded_and_the_oldest_still_go_first()
+    {
+        var databasePath = CreateDatabasePath();
+        try
+        {
+            // 上限 16 → 每 2 条做一次裁剪（上限的 1/8）：偶数条时精确，奇数条时最多多出 1 条。
+            var store = new ClientLogOutboxStore(databasePath, runtimePendingLimit: 16);
+            await store.InitializeAsync(CancellationToken.None);
+            var now = DateTimeOffset.Parse("2026-07-10T01:00:00Z");
+            var ids = Enumerable.Range(1, 18)
+                .Select(index => Guid.Parse($"20000000-0000-0000-0000-{index:D12}"))
+                .ToArray();
+
+            for (var index = 0; index < 17; index++)
+            {
+                var occurredAt = now.AddSeconds(index);
+                await store.EnqueueAsync(ClientLogOutboxKind.Runtime, ids[index], occurredAt, "{}", occurredAt, CancellationToken.None);
+            }
+
+            // 第 17 条没赶上裁剪点：暂时多出 1 条，没有丢任何日志。
+            Assert.Equal(17, await store.CountPendingAsync(ClientLogOutboxKind.Runtime, CancellationToken.None));
+            Assert.Equal(0, store.RuntimeDroppedCount);
+
+            var eighteenth = now.AddSeconds(17);
+            await store.EnqueueAsync(ClientLogOutboxKind.Runtime, ids[17], eighteenth, "{}", eighteenth, CancellationToken.None);
+
+            // 第 18 条赶上裁剪点：回到上限，丢掉的是最旧的两条。
+            var runtime = await store.ReadPendingAsync(ClientLogOutboxKind.Runtime, now.AddMinutes(1), 100, CancellationToken.None);
+            Assert.Equal(ids[2..], runtime.Select(item => item.EventId));
+            Assert.Equal(2, store.RuntimeDroppedCount);
+        }
+        finally
+        {
+            await DeleteDatabaseFilesAsync(databasePath);
+        }
+    }
+
+    [Fact]
     public async Task Cleanup_removes_rejected_records_older_than_thirty_days()
     {
         var databasePath = CreateDatabasePath();

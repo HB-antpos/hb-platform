@@ -253,3 +253,24 @@ test("时间戳：没有时区的按 UTC，解析不了的留空", () => {
     assert.equal(normalizeZellerTimestamp(invalid), null);
   }
 });
+
+test("时间戳：偏移补冒号、小写 z 转大写，输出恒为 Z 或 ±hh:mm（卡证据契约只认这两种）", () => {
+  assert.equal(normalizeZellerTimestamp("2026-11-05T11:24:01+1000"), "2026-11-05T11:24:01+10:00");
+  assert.equal(normalizeZellerTimestamp("2026-11-05T11:24:01-0930"), "2026-11-05T11:24:01-09:30");
+  assert.equal(normalizeZellerTimestamp("2026-11-05T01:27:12.345z"), "2026-11-05T01:27:12.345Z");
+  // 换写法不改变瞬时：+1000 与 +10:00 指向同一时刻。
+  assert.equal(
+    Date.parse(normalizeZellerTimestamp("2026-11-05T11:24:01+1000")!),
+    Date.parse("2026-11-05T11:24:01+10:00"),
+  );
+  // 与 pos-domain 卡证据契约 nullableBankDateTime 同一条正则：所有合法输入的输出都必须满足。
+  for (const raw of [
+    "2026-11-05T01:27:12.345Z",
+    "2026-11-05T11:24:01+10:00",
+    "2026-11-05T11:24:01+1000",
+    "2026-11-05T01:27:12z",
+    "2026-11-05T01:27:12",
+  ]) {
+    assert.match(normalizeZellerTimestamp(raw)!, /(?:Z|[+-]\d{2}:\d{2})$/u);
+  }
+});

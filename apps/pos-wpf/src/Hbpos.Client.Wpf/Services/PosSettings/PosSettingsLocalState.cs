@@ -17,6 +17,11 @@ public sealed record PosSettingStoredValue(bool Value, string Source);
 /// <param name="OfflineOverrideCount">累计离线临时修改次数，只增不减（服务端按最大值记录，恢复联网后随回执上报）。</param>
 /// <param name="AckedHash">已成功回执给服务端的指纹。</param>
 /// <param name="AckedOverrideCount">已成功回执给服务端的累计离线修改次数。</param>
+/// <param name="KeySignature">
+/// 保存这份快照时，本版本认识的设置键集合的签名。服务端的指纹覆盖它下发的全部键，而本机只保存认识的键：
+/// 旧版本丢掉了不认识的新键、却把指纹原样存下，升级后带着旧指纹去问，服务端答「没变化」，新键就永远不会应用。
+/// 签名和当前版本不一致（含旧版本留下的、没有签名的快照）时，下一次同步不带指纹，强制完整拉取一遍。
+/// </param>
 public sealed record PosSettingsLocalState(
     string? StoreCode,
     string? Hash,
@@ -25,7 +30,8 @@ public sealed record PosSettingsLocalState(
     IReadOnlyDictionary<string, bool> Overrides,
     int OfflineOverrideCount,
     string? AckedHash,
-    int AckedOverrideCount)
+    int AckedOverrideCount,
+    string? KeySignature = null)
 {
     public static PosSettingsLocalState Empty { get; } = new(
         null,
@@ -82,7 +88,8 @@ public sealed class PosSettingsLocalStore(ILocalAppSettingsRepository repository
                 stored.Overrides ?? [],
                 Math.Max(0, stored.OfflineOverrideCount),
                 stored.AckedHash,
-                Math.Max(0, stored.AckedOverrideCount));
+                Math.Max(0, stored.AckedOverrideCount),
+                stored.KeySignature);
         }
         catch (JsonException)
         {
@@ -102,7 +109,8 @@ public sealed class PosSettingsLocalStore(ILocalAppSettingsRepository repository
             state.Overrides.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal),
             state.OfflineOverrideCount,
             state.AckedHash,
-            state.AckedOverrideCount);
+            state.AckedOverrideCount,
+            state.KeySignature);
         return repository.SetValueAsync(StorageKey, JsonSerializer.Serialize(stored, JsonOptions), cancellationToken);
     }
 
@@ -115,5 +123,6 @@ public sealed class PosSettingsLocalStore(ILocalAppSettingsRepository repository
         Dictionary<string, bool>? Overrides,
         int OfflineOverrideCount,
         string? AckedHash,
-        int AckedOverrideCount);
+        int AckedOverrideCount,
+        string? KeySignature = null);
 }

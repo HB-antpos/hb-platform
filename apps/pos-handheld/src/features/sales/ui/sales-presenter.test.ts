@@ -550,6 +550,29 @@ test("空购物车禁止进入现金结账，未接入能力不会伪造成功",
   presenter.destroy();
 });
 
+test("合计为 0 的购物车不进入结账，页面给出明确提示，改价后可继续", async () => {
+  const cart = new MemoryCartPort(saleCart(0));
+  const { presenter } = createPresenter({ cart });
+
+  // 现金结账入口：此前会照常进入，付款入口才静默返回，收银员点了没有任何反馈。
+  assert.equal(await presenter.openCash(), false);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "total-not-payable");
+
+  // 在线付款入口走同一道预备，同样被拦并提示。
+  assert.equal(await presenter.prepareOnlineCheckout(), null);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "total-not-payable");
+
+  // 收银员改价后合计大于 0，可以继续，提示随之清掉。
+  cart.snapshot = saleCart(995);
+  assert.equal(await presenter.openCash(), true);
+  assert.equal(presenter.getState().phase, "cash");
+  assert.equal(presenter.getState().errorCode, null);
+
+  presenter.destroy();
+});
+
 test("未接入的生产路由 presenter 明确禁用全部能力且绝不进入成功态", async () => {
   const presenter = createDisconnectedSalesPresenter();
 

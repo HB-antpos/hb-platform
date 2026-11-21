@@ -223,6 +223,8 @@ export const salesEnglishCopy = {
   "error.invalidDiscount":
     "Enter a valid discount amount or a percent from 0 to 100.",
   "error.emptyCart": "Add an item before checkout.",
+  "error.totalNotPayable":
+    "The total must be above $0.00 to check out. Adjust a price or remove the free item.",
   "error.cashInvalid": "Enter a valid cash amount with up to two decimals.",
   "error.cashInsufficient": "Cash tendered is less than the amount due.",
   "error.cashFailed":
@@ -453,6 +455,8 @@ const salesChineseCopy = {
   "error.priceTooHigh": "价格不能超过 {{max}}。",
   "error.invalidDiscount": "请输入有效折扣金额，或 0 至 100 的百分比。",
   "error.emptyCart": "请先加入商品再结账。",
+  "error.totalNotPayable":
+    "合计须大于 $0.00 才能结账，请调整价格或删除 0 元商品。",
   "error.cashInvalid": "请输入最多两位小数的有效现金金额。",
   "error.cashInsufficient": "实收现金少于应收金额。",
   "error.cashFailed": "交易未确认，请核对错误后再试。",
