@@ -326,9 +326,47 @@ internal sealed class ScreenNavigator
 
         // 分期入口从支付页进入，先带上当前购物车汇总做 UI 骨架展示。
         InstallmentCenter ??= CreateInstallmentCenterViewModel();
+        // 分期中心视图模型常驻复用，每次进入都要重设「返回」去向，避免沿用上次从历史页进入时的设置。
+        InstallmentCenter.SetBackTarget(InstallmentCenterBackTarget.Payment);
         InstallmentCenter.Prepare(Session, CreateCurrentCartSnapshot());
         SetCurrentScreen(InstallmentCenter);
         _ = InstallmentCenter.LoadAsync();
+    }
+
+    /// <summary>
+    /// 历史页「在线」来源里的「分期中心」入口：不依赖付款页，直接进入分期中心整页。
+    /// 「返回」回到历史页本身（见 <see cref="BackFromInstallmentCenter"/>）。
+    /// </summary>
+    public void ShowInstallmentCenterFromHistory()
+    {
+        InstallmentCenter ??= CreateInstallmentCenterViewModel();
+        InstallmentCenter.SetBackTarget(InstallmentCenterBackTarget.History);
+        // 带上当前购物车汇总（购物车为空时为 null，分期中心已能处理）。
+        InstallmentCenter.Prepare(Session, CreateCurrentCartSnapshot());
+        SetCurrentScreen(InstallmentCenter);
+        _ = InstallmentCenter.LoadAsync();
+    }
+
+    /// <summary>
+    /// 分期中心「返回」按钮的统一落点：按进入时设定的去向回到历史页或付款页。
+    /// 回历史页只切换当前屏幕，不重新加载——历史页视图模型常驻缓存，来源 / 日期 / 关键词 / 选中订单原样保留。
+    /// 历史页视图模型若已被释放（如设备重新注册后清屏），退回收银首页。
+    /// </summary>
+    public void BackFromInstallmentCenter()
+    {
+        if (InstallmentCenter?.BackTarget == InstallmentCenterBackTarget.History)
+        {
+            if (TransactionHistory is null)
+            {
+                ShowPos();
+                return;
+            }
+
+            SetCurrentScreen(TransactionHistory);
+            return;
+        }
+
+        ShowCashPayment();
     }
 
     public async Task ShowInstallmentCreateAsync(PosCartServiceSnapshot? cartSnapshot)
@@ -685,7 +723,8 @@ internal sealed class ScreenNavigator
             ShowPos,
             viewModel => _printSelectedHistoryReceiptAsync(viewModel),
             ShowInstallmentRepaymentAsync,
-            _confirmationDialogService);
+            _confirmationDialogService,
+            ShowInstallmentCenterFromHistory);
     }
 
     public InstallmentCenterViewModel CreateInstallmentCenterViewModel()
@@ -693,7 +732,8 @@ internal sealed class ScreenNavigator
         return _factory.CreateInstallmentCenterViewModel(
             Session,
             ShowInstallmentCreateAsync,
-            ShowCashPayment,
+            // 「返回」按分期中心当前的去向分流：历史页入口回历史页，付款页入口回付款页。
+            BackFromInstallmentCenter,
             _printInstallmentRefundVouchersAsync);
     }
 

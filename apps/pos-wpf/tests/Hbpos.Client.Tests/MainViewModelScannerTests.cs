@@ -8413,6 +8413,35 @@ public sealed class MainViewModelScannerTests
             printService.Calls.Select(call => call.Receipt!.RefundVoucher!.VoucherCode));
     }
 
+    [Fact]
+    public async Task History_online_source_opens_installment_center_and_back_returns_to_the_same_history()
+    {
+        var viewModel = CreateAuthorizedMainViewModel(
+            new FakeCustomerDisplayWindowService(),
+            installmentOrderService: new RecordingInstallmentOrderService());
+        await viewModel.InitializeAsync(new AppStartupOptions([], false, null, null));
+        await viewModel.ShowHistoryCommand.ExecuteAsync(null);
+        var history = Assert.IsType<TransactionHistoryViewModel>(viewModel.TransactionHistory);
+        history.IsOnlineSourceSelected = true;
+        history.SearchText = "keep-me";
+
+        // 入口接线：导航器创建历史页时已把「进入分期中心」回调（经工厂）注入历史页。
+        Assert.True(history.OpenInstallmentCenterCommand.CanExecute(null));
+        await history.OpenInstallmentCenterCommand.ExecuteAsync(null);
+
+        var center = Assert.IsType<InstallmentCenterViewModel>(viewModel.InstallmentCenter);
+        Assert.Same(center, viewModel.CurrentScreen);
+        Assert.Equal(InstallmentCenterBackTarget.History, center.BackTarget);
+
+        // 返回按钮经工厂接到导航器的统一落点：回到历史页本身，来源与关键词原样保留。
+        center.BackToPaymentCommand.Execute(null);
+
+        Assert.Same(history, viewModel.CurrentScreen);
+        Assert.Same(history, viewModel.TransactionHistory);
+        Assert.True(history.IsOnlineSourceSelected);
+        Assert.Equal("keep-me", history.SearchText);
+    }
+
     private static async Task InvokeShowInstallmentRepaymentAsync(MainViewModel viewModel, InstallmentOrderSummary order)
     {
         var navigatorField = typeof(MainViewModel).GetField("_screenNavigator", BindingFlags.Instance | BindingFlags.NonPublic);

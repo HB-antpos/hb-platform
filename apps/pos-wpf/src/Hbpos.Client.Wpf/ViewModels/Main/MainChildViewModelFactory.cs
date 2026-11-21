@@ -180,7 +180,8 @@ internal sealed class MainChildViewModelFactory
         Action showPos,
         Func<TransactionHistoryViewModel, Task> printSelectedHistoryReceiptAsync,
         Func<InstallmentOrderSummary, Task>? continueInstallmentPaymentAsync = null,
-        IConfirmationDialogService? confirmationDialogService = null)
+        IConfirmationDialogService? confirmationDialogService = null,
+        Action? openInstallmentCenter = null)
     {
         var viewModel = new TransactionHistoryViewModel(
             _receiptQueryService,
@@ -206,7 +207,8 @@ internal sealed class MainChildViewModelFactory
             timeProvider: null,
             sharedHeldOrderPublicationWorker: _sharedHeldOrderPublicationWorker,
             localSellableItemIndex: _priceIndex,
-            rawScannerService: _rawScannerService);
+            rawScannerService: _rawScannerService,
+            openInstallmentCenter: openInstallmentCenter);
         viewModel.ReprintRequested += async (_, _) => await printSelectedHistoryReceiptAsync(viewModel);
         return viewModel;
     }

@@ -496,6 +496,24 @@
                                          Style="{StaticResource HeldScopeSegmentRadioStyle}" />
                         </StackPanel>
                     </Border>
+
+                    <!-- 「在线」来源专属的分期中心入口：进入分期中心整页（取消并退款 / 作废 / 主管结案 / 取货）。
+                         与上面的挂单范围选择器共用右侧一格，两者对应的来源互斥，不会同时显示。 -->
+                    <Button x:Name="HistoryInstallmentCenterButton"
+                            Grid.Column="3"
+                            Command="{Binding OpenInstallmentCenterCommand}"
+                            Height="46"
+                            Padding="14,0"
+                            FontSize="14"
+                            AutomationProperties.AutomationId="TransactionHistoryOpenInstallmentCenter"
+                            AutomationProperties.Name="{loc:Loc installment.center.title}"
+                            Visibility="{Binding IsOnlineSourceSelected, Converter={StaticResource BoolToVis}}"
+                            Style="{StaticResource PosSecondaryButtonStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <materialDesign:PackIcon Kind="CalendarClock" Width="16" Height="16" Margin="0,0,6,0" />
+                            <TextBlock Text="{loc:Loc installment.center.title}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
                 </Grid>
 
                 <Border x:Name="HistoryFilterPanel"
