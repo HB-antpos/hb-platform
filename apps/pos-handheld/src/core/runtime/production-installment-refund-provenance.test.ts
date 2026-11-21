@@ -155,6 +155,30 @@ test("金额不闭合、卡 provider 不明确或跨 scope 时返回 incomplete 
   }
 });
 
+test("他机开的分期单（开单设备 ≠ 发起退款的本机）一律导入不了：返回 incomplete 且不写 vault", async () => {
+  // 取消并退款在建中央 claim 之前，运行时靠这条事实拦截他机分期单；
+  // 若这里将来放开，运行时的前置拦截（cancelWithRefund 的设备校验）必须同步调整。
+  const vault = new RecordingVault(null);
+  const provenance = new HbposInstallmentRefundProvenance(
+    new RecordingTransport([
+      ok(
+        details({
+          deviceCode: "OTHER-DEVICE",
+          paidAmount: 10,
+          payments: [payment("01", 1, 10, null, null, null)],
+        }),
+      ),
+    ]),
+    vault,
+  );
+
+  const result = await provenance.resolveOrImport(scope());
+
+  assert.equal(result.complete, false);
+  assert.equal(result.tenders.length, 0);
+  assert.equal(vault.imports.length, 0);
+});
+
 test("退代金券模式不要求原卡交易证据，但卡 provider 仍须可识别；原路退保持严格", async () => {
   // 刷卡原付款只有 Square 前缀引用、没有卡交易明细。
   const withoutCardTransactions = details({
@@ -365,6 +389,7 @@ function scope() {
 
 function details(input: Readonly<{
   storeCode?: string;
+  deviceCode?: string;
   paidAmount: number;
   payments: readonly Record<string, unknown>[];
 }>): Record<string, unknown> {
@@ -372,7 +397,7 @@ function details(input: Readonly<{
     installmentGuid: INSTALLMENT_GUID,
     installmentNumber: "IP-0001",
     storeCode: input.storeCode ?? STORE_CODE,
-    deviceCode: DEVICE_CODE,
+    deviceCode: input.deviceCode ?? DEVICE_CODE,
     cashierId: "cashier-1",
     cashierName: "Alice",
     customerName: "Customer",

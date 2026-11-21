@@ -2084,6 +2084,7 @@ function StatusBanner({
     "authorization-declined",
     "cancel-refund-method-unsupported",
     "cancel-refund-mode-unsupported",
+    "cancel-refund-unavailable",
     "claim-busy",
     "claim-review-required",
     "conflict",

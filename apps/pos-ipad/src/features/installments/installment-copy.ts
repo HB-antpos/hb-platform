@@ -209,6 +209,8 @@ export const installmentEnglishCopy = {
     "Card payments cannot be refunded through the original route. Choose “All to voucher”; nothing was refunded.",
   "status.cancel-refund-mode-unsupported":
     "The server does not support voucher refunds yet; nothing was refunded. Use the original route or update the server.",
+  "status.cancel-refund-unavailable":
+    "This device cannot access the original payment details, so the lay-by could not be refunded (usually because it was created on another device). Nothing was refunded and the lay-by is unchanged; cancel it on the device that created it.",
   "status.claim-busy":
     "Another repayment for this lay-by is still in progress. No payment was taken; wait a moment and try again, or ask a supervisor to check it.",
   "status.claim-review-required":
@@ -446,6 +448,8 @@ const installmentChineseCopy = {
     "刷卡付款无法原路退回，请改选“全部退代金券”；未发生任何退款。",
   "status.cancel-refund-mode-unsupported":
     "服务端暂不支持退代金券，未发生任何退款；请改用原路退回或升级服务端。",
+  "status.cancel-refund-unavailable":
+    "本机取不到这笔分期的原付款凭据，无法退款（通常是因为它由其他设备开单）。未发生任何退款，分期状态未改变；请到开单的那台设备上取消。",
   "status.claim-busy":
     "该分期另有一笔续付仍在处理中，本次未收款；请稍后重试，或请主管核对。",
   "status.claim-review-required":

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { CurrentCashierSession } from "./current-cashier-session";
 import {
+  InstallmentPaymentAdapterError,
   ProductionInstallmentPaymentAdapter,
   type InstallmentApprovedPaymentMaterial,
   type InstallmentCashSettlement,
@@ -3525,6 +3526,90 @@ test("首次退款在 provider 前拒绝跨设备分期，但同设备正常流�
   assert.equal(allowed.api.cancelCalls.length, 1);
 });
 
+/** 他机开单、现金原付款的详情：开了跨机取消后界面允许发起，真实的凭据导入器却导不进来。 */
+function otherDeviceCashDetails(): InstallmentDetails {
+  return details({
+    deviceCode: "DEVICE-OTHER",
+    payments: [
+      {
+        paymentGuid: "20000000-0000-4000-8000-000000000001",
+        method: "cash",
+        amountCents: 2_000,
+        status: "Recorded",
+        recordedAtIso: "2026-07-28T08:00:00.000Z",
+        cashierId: "CASHIER-1",
+        deviceCode: "DEVICE-OTHER",
+        cardType: null,
+        maskedCardNumber: null,
+      },
+    ],
+  });
+}
+
+function enableCrossDeviceCancelRefund(harness: ReturnType<typeof createHarness>) {
+  harness.api.capabilities = Object.freeze({
+    ...harness.api.capabilities,
+    crossDeviceCancelRefundEnabled: true,
+  }) as InstallmentRepaymentCapabilities;
+}
+
+test("取消并退款：建退款计划就失败（原付款凭据导不进来，如他机分期单）且没碰过 provider 时，释放中央占用并结案，不留双边 Unknown", async () => {
+  // 以前：claim 已是 RefundPending 才发现导不进来 → 两边都 Unknown；Unknown 只能由发起机恢复、
+  // 不会超时，而本机只要有一条恢复不了的分期动作就整台卖不了货。现在：provider 没被碰过，
+  // 退款确定没发生，应把中央 claim 与本地 action 一并结案，让原开单设备还能正常取消。
+  const harness = createHarness({
+    paymentOutcomes: ["throw"],
+    paymentThrowError: new InstallmentPaymentAdapterError(
+      "INSTALLMENT_REFUND_PROVENANCE_INVALID",
+      "Installment refund provenance is invalid.",
+      { providerUntouched: true },
+    ),
+  });
+  enableCrossDeviceCancelRefund(harness);
+  harness.api.detailsResponse = otherDeviceCashDetails();
+  const presenter = harness.runtime.createPresenter();
+  // 界面层的「他机可取消」开关是 load() 时读进来的，必须先 load 才与真实使用一致。
+  await presenter.load();
+  await presenter.select("installment-1");
+
+  await presenter.cancelWithRefund();
+
+  assert.equal(harness.payments.beginCalls, 1);
+  assert.ok(harness.events.includes("cancel-claim-resolve:Declined"));
+  assert.ok(!harness.events.includes("cancel-claim-resolve:Unknown"));
+  assert.equal(harness.api.cancelClaim?.status, "Declined");
+  assert.equal(await harness.runtime.hasRecoveryRequired(), false);
+  assert.equal(
+    presenter.getState().statusCode,
+    "cancel-refund-unavailable",
+  );
+});
+
+test("取消并退款：无法证明没碰过 provider 的失败（普通传输错误 / 未打 providerUntouched 的适配器错误）仍保持双边 Unknown", async () => {
+  const unproven: readonly Error[] = [
+    new Error("provider transport failed"),
+    new InstallmentPaymentAdapterError(
+      "INSTALLMENT_REFUND_PROVENANCE_INVALID",
+      "Installment refund provenance is invalid.",
+    ),
+  ];
+  for (const error of unproven) {
+    const harness = createHarness({
+      paymentOutcomes: ["throw"],
+      paymentThrowError: error,
+    });
+    const presenter = harness.runtime.createPresenter();
+    await presenter.select("installment-1");
+
+    await presenter.cancelWithRefund();
+
+    assert.equal(presenter.getState().statusCode, "payment-recovery-required");
+    assert.equal(harness.api.cancelClaim?.status, "Unknown");
+    assert.ok(!harness.events.includes("cancel-claim-resolve:Declined"));
+    assert.equal(await harness.runtime.hasRecoveryRequired(), true);
+  }
+});
+
 test("cancel claim 返回异常详情后恢复只读取同一 claim，不再重退 provider", async () => {
   const harness = createHarness({
     cancelResultMode: "active-without-refund",
@@ -3592,6 +3677,8 @@ class ScriptedPayments implements InstallmentMutationPaymentPort {
   public providerAvailability: readonly PaymentProviderAvailability[] = [];
   public cashSettlementState: "Prepared" | "Approved" | "Missing" = "Prepared";
   public readonly actions: InstallmentPaymentAction[] = [];
+  /** outcome 为 "throw" 时抛出的错误；缺省是普通传输错误（无法证明没碰过 provider）。 */
+  public throwError: Error = new Error("provider transport failed");
   public readonly prepareBindings: {
     provider: string;
     providerAttemptId: string;
@@ -3703,7 +3790,7 @@ class ScriptedPayments implements InstallmentMutationPaymentPort {
         ? this.outcomes.shift()
         : this.outcomes[0] ?? "approved";
     if (outcome === "unknown") return { kind: "unknown" as const };
-    if (outcome === "throw") throw new Error("provider transport failed");
+    if (outcome === "throw") throw this.throwError;
     if (outcome === "declined") {
       return action.kind === "cancel-refund"
         ? { kind: "declined" as const, allRefundsDeclined: this.cancelAllRefundsDeclined }
@@ -4729,6 +4816,8 @@ function createHarness(options: Readonly<{
     events: string[],
   ) => InstallmentMutationPaymentPort;
   cancelAllRefundsDeclined?: boolean;
+  /** paymentOutcome 为 "throw" 时抛出的错误对象。 */
+  paymentThrowError?: Error;
   permissions?: readonly string[];
   receiptReprint?: InstallmentReceiptReprintRuntimePort;
   refundVoucherPrinter?: Readonly<{
@@ -4798,6 +4887,9 @@ function createHarness(options: Readonly<{
     options.paymentPrepareFails ?? false,
     options.cancelAllRefundsDeclined ?? true,
   );
+  if (options.paymentThrowError) {
+    scriptedPayments.throwError = options.paymentThrowError;
+  }
   const payments = options.paymentsFactory?.(actionStore, events) ?? scriptedPayments;
   let id = 0;
   const dependencies: ProductionInstallmentRuntimeDependencies = {

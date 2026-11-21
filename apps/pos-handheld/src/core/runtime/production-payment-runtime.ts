@@ -63,6 +63,7 @@ import {
   PaymentAttemptService,
   PaymentAttemptOfflineError,
   type PaymentConnectivityPort,
+  type PersistedOrderDraftPort,
   type PaymentProviderRegistryPort,
   type PaymentRecoveryControl,
 } from "@hb/pos-payments-core/features/payments/payment-attempt-service";
@@ -545,10 +546,24 @@ export function createProductionPaymentRuntime(
   const legacyReconciler = linklyAcknowledger
     ? legacyReconcilerOrNull(linklyAcknowledger)
     : null;
+  // 中文注释：退货退款的 attempt 也走 PaymentAttemptService，其订单是「退货单」而不是支付草稿；
+  // 退货单没有支付草稿绑定，原样用 drafts.assertPersisted 会让卡 / 券退款在第一步必然被拒。
+  // 这里对「进行中的退货单」放行（耐久事实由退货执行账本持有），其余订单仍要求支付草稿。
+  const attemptDrafts: PersistedOrderDraftPort = {
+    async assertPersisted(orderGuid) {
+      if (
+        typeof drafts.isActiveReturnRefundOrder === "function" &&
+        (await drafts.isActiveReturnRefundOrder(orderGuid))
+      ) {
+        return;
+      }
+      await drafts.assertPersisted(orderGuid);
+    },
+  };
   const attempts = new PaymentAttemptService({
     ledger: input.repositories.payments,
     actionBindings: input.database.paymentActionBindings(),
-    drafts,
+    drafts: attemptDrafts,
     providers: input.bootstrap.providers,
     connectivity: input.connectivity,
     createAttemptId: input.createId,
@@ -577,7 +592,7 @@ export function createProductionPaymentRuntime(
   const createQueryOnlyAttempts = (onQueryCompleted?: (result: PaymentStatusQueryResult) => void) => new PaymentAttemptService({
     ledger: input.repositories.payments,
     actionBindings: input.database.paymentActionBindings(),
-    drafts,
+    drafts: attemptDrafts,
     providers: queryOnlyPaymentProviders(recoveryProviders, onQueryCompleted),
     connectivity: input.connectivity,
     createAttemptId: input.createId,

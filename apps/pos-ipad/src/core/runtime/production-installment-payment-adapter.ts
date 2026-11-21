@@ -250,12 +250,21 @@ export type InstallmentPaymentAdapterErrorCode =
   | "INSTALLMENT_VOUCHER_MATERIAL_INVALID";
 
 export class InstallmentPaymentAdapterError extends Error {
+  /**
+   * 中文注释：为 true 表示该失败发生在任何 provider 调用与 attempt 计划落库之前，
+   * 没有任何金融动作发生过。运行时据此才可以安全地释放中央占用并结案为 Declined；
+   * 缺省 false（无法证明没碰过 provider 时一律保持 Unknown）。
+   */
+  public readonly providerUntouched: boolean;
+
   public constructor(
     public readonly code: InstallmentPaymentAdapterErrorCode,
     message: string,
+    options: Readonly<{ providerUntouched?: boolean }> = {},
   ) {
     super(message);
     this.name = "InstallmentPaymentAdapterError";
+    this.providerUntouched = options.providerUntouched === true;
   }
 }
 
@@ -641,7 +650,7 @@ export class ProductionInstallmentPaymentAdapter
 
     const candidate =
       action.action.kind === "cancel-refund"
-        ? await this.createRefundPlan(action)
+        ? await this.createRefundPlanBeforeAnyProviderContact(action)
         : await this.createPurchasePlan(action);
     let persisted: InstallmentProviderAttemptPlan;
     try {
@@ -720,6 +729,27 @@ export class ProductionInstallmentPaymentAdapter
       attempts: Object.freeze([record]),
       cashSettlements: Object.freeze([]),
     });
+  }
+
+  /**
+   * 建退款计划（取原付款凭据并校验）发生在计划落库、任何 provider 调用之前：
+   * 这里「确定性的校验失败」（凭据不完整 / 不同 scope / 金额不闭合等）没有任何金融动作，
+   * 打上 providerUntouched，让运行时可以干净地释放中央占用。
+   * 网络中断等暂时性失败不打标：原样抛出，仍走可恢复的 Unknown 路径等待重试。
+   */
+  private async createRefundPlanBeforeAnyProviderContact(
+    action: PersistedInstallmentAction,
+  ): Promise<InstallmentProviderAttemptPlan> {
+    try {
+      return await this.createRefundPlan(action);
+    } catch (error) {
+      if (error instanceof InstallmentPaymentAdapterError) {
+        throw new InstallmentPaymentAdapterError(error.code, error.message, {
+          providerUntouched: true,
+        });
+      }
+      throw error;
+    }
   }
 
   private async createRefundPlan(
@@ -1006,9 +1036,16 @@ export class ProductionInstallmentPaymentAdapter
         continue;
       }
       if (execution.kind === "declined") {
-        return Object.freeze({
-          kind: providerRefundApproved ? "unknown" : "declined",
-        });
+        // 中文注释：此前（含历次恢复留下的）没有任何一笔 provider 退款被批准，现金退款也要等
+        // 全部 provider 成功后才批准——这正是运行时要求的「全部退款均被拒绝」证明，
+        // 必须显式带上 allRefundsDeclined，否则运行时无法证明而永久 Unknown。
+        // 一旦有任何一笔已批准，被拒只能说明部分退款，保持 Unknown 交主管核实。
+        return providerRefundApproved
+          ? Object.freeze({ kind: "unknown" as const })
+          : Object.freeze({
+              kind: "declined" as const,
+              allRefundsDeclined: true,
+            });
       }
       return Object.freeze({ kind: "unknown" });
     }

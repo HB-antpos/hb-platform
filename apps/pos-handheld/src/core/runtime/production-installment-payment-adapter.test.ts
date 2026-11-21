@@ -997,7 +997,10 @@ test("远程 provenance 必须完整、同 scope、paymentGuid 唯一且金额�
       () => adapter.beginOrRecover(ACTION_ID),
       (error) =>
         error instanceof InstallmentPaymentAdapterError &&
-        error.code === "INSTALLMENT_REFUND_PROVENANCE_INVALID",
+        error.code === "INSTALLMENT_REFUND_PROVENANCE_INVALID" &&
+        // 建计划失败发生在任何 provider 调用与计划落库之前：运行时据此可以安全释放中央占用，
+        // 不必把 action 留成永久 Unknown。
+        error.providerUntouched === true,
     );
     assert.equal(store.plans.size, 0);
     assert.equal(provider.calls.length, 0);
@@ -1036,6 +1039,41 @@ test("部分 provider 已退款后另一笔 Declined 必须保持 Unknown，禁�
       .get(ACTION_ID)
       ?.attempts.some((record) => record.attempt.state === "Approved"),
     true,
+  );
+});
+
+test("取消退款的首笔 provider 退款被通道拒绝（此前没有任何一笔批准）：返回 allRefundsDeclined，运行时才能释放 action", async () => {
+  // 运行时只认 allRefundsDeclined === true 才结案为 Declined；缺这个字段，任何一次退款被拒
+  // 都会被当成「不能证明此前没有批准过」而永久 Unknown，取消流程再也走不出去。
+  const store = new MemoryAttemptStore(cancelAction());
+  const provenance = new FakeProvenance(
+    provenanceSnapshot([
+      originalTender("card", 1_000, "01", "square"),
+      originalTender("voucher", 500, "02", "voucher"),
+      originalTender("cash", 300, "03"),
+    ]),
+  );
+  const square = new ScriptedProvider("square");
+  square.refundResults.push(providerResult("Declined"));
+  const voucher = new ScriptedProvider("voucher");
+  const adapter = createAdapter({
+    store,
+    provenance,
+    providers: new ProviderRegistry(square, voucher),
+  });
+
+  assert.deepEqual(await adapter.beginOrRecover(ACTION_ID), {
+    kind: "declined",
+    allRefundsDeclined: true,
+  });
+  // 被拒之后既不能继续发下一笔，也不能提前批准现金退款。
+  assert.equal(voucher.calls.length, 0);
+  assert.equal(store.cashApprovalCalls, 0);
+  assert.equal(
+    store.plans
+      .get(ACTION_ID)
+      ?.attempts.some((record) => record.attempt.state === "Approved"),
+    false,
   );
 });
 

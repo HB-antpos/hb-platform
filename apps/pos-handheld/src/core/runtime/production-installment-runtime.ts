@@ -2970,7 +2970,18 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       result = authorize
         ? await this.context.input.payments.beginOrRecover(action.actionId)
         : await this.context.input.payments.recoverBlocking(action.actionId);
-    } catch {
+    } catch (error) {
+      if (isProviderUntouchedFailure(error)) {
+        // 中文注释：建退款计划（取原付款凭据并校验）就确定性失败，provider 一次都没被调用、
+        // 计划也没落库，退款确定没发生。若仍按 Unknown 处理，中央 claim 已是 RefundPending，
+        // 两边都卡死（Unknown 只能由发起机恢复且不会超时，还会让整台设备卖不了货）。
+        // 这里干净地结案：释放中央占用 + 本地 action 置 Declined，让原开单设备还能正常取消。
+        await this.declineCancelClaim(persisted, identity, cancelCommand);
+        throw workflowError(
+          "refund-unavailable",
+          "Original payment provenance is unavailable on this device; nothing was refunded.",
+        );
+      }
       await this.markCancelUnknown(persisted, identity);
       throw paymentRecoveryError("Refund provider request must be recovered before another action.");
     }
@@ -2985,19 +2996,7 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
           "Refund decline does not prove that no earlier refund was approved.",
         );
       }
-      try {
-        const declined = await this.context.input.api.resolveCancelClaim({ ...identity, outcome: "Declined" });
-        validateCancelClaim(declined, action, cancelCommand);
-        if (declined.status !== "Declined") throw paymentRecoveryError("Cancel claim decline was not recorded.");
-        await this.context.input.actionStore.decline({
-          actionId: action.actionId,
-          expectedState: persisted.state === "Unknown" ? "Unknown" : "ProviderPending",
-          terminal: this.context.terminal,
-        });
-        await this.acknowledgeCompletedAction(action.actionId);
-      } catch (error) {
-        throw paymentRecoveryError(error instanceof Error ? error.message : "Declined refund requires recovery.");
-      }
+      await this.declineCancelClaim(persisted, identity, cancelCommand);
       throw workflowError("authorization-declined", "Refund was declined.");
     }
     if (!("refunds" in result)) throw paymentRecoveryError("Payment adapter returned an action of the wrong kind.");
@@ -3111,6 +3110,32 @@ class LeaseBoundInstallmentWorkflow implements InstallmentWorkflowPort {
       "refund-mode-unsupported",
       "The server did not accept the selected cancellation refund mode.",
     );
+  }
+
+  /**
+   * 退款确定没有发生（全部被拒，或根本没碰过 provider）时的结案：
+   * 先在中央把 claim 置 Declined，再把本地 action 置 Declined 并确认完成。
+   * 任一步失败都转成可恢复错误，由后续恢复继续，绝不吞掉。
+   */
+  private async declineCancelClaim(
+    persisted: PersistedInstallmentAction,
+    identity: Readonly<{ installmentGuid: string; operationGuid: string }>,
+    cancelCommand: InstallmentCancelActionCommand,
+  ): Promise<void> {
+    const action = persisted.action;
+    try {
+      const declined = await this.context.input.api.resolveCancelClaim({ ...identity, outcome: "Declined" });
+      validateCancelClaim(declined, action, cancelCommand);
+      if (declined.status !== "Declined") throw paymentRecoveryError("Cancel claim decline was not recorded.");
+      await this.context.input.actionStore.decline({
+        actionId: action.actionId,
+        expectedState: persisted.state === "Unknown" ? "Unknown" : "ProviderPending",
+        terminal: this.context.terminal,
+      });
+      await this.acknowledgeCompletedAction(action.actionId);
+    } catch (error) {
+      throw paymentRecoveryError(error instanceof Error ? error.message : "Declined refund requires recovery.");
+    }
   }
 
   private async markCancelUnknown(
@@ -4566,6 +4591,14 @@ function positiveInteger(value: number, label: string): number {
     throw new Error(`${label} must be a positive safe integer.`);
   }
   return value;
+}
+
+/**
+ * 适配器已声明「失败发生在任何 provider 调用与计划落库之前」。只认这个显式标记：
+ * 缺失 / 为 false（含普通网络错误）一律视为无法证明，保持 Unknown 交恢复流程。
+ */
+function isProviderUntouchedFailure(error: unknown): boolean {
+  return error instanceof Error && Reflect.get(error, "providerUntouched") === true;
 }
 
 function paymentRecoveryError(message: string): InstallmentWorkflowError {
