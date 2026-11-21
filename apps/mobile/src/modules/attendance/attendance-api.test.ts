@@ -41,3 +41,15 @@ console.log("attendance-api.test.ts (employee name parts): ok");
 assert.match(source, /export async function getMyStoreWeek\(storeCode\?: string, weekStartDate\?: string\)[\s\S]{0,300}apiClient\.get\(`\$\{ATTENDANCE_BASE\}\/my\/store-week`, \{ params: \{ storeCode, weekStartDate \} \}\)[\s\S]{0,200}normalizeStoreWeek\(response\.data/,
   "整店排班应 GET /my/store-week 并经 normalizeStoreWeek 规整");
 console.log("attendance-api.test.ts (store week): ok");
+
+// 打卡带本机安装 ID：后端据此反查「同一台手机近期登录过几个账号」，给店长复核借账号代打卡。
+// 读取失败不能挡住打卡；调用方显式传入的 deviceId 优先。
+assert.match(types, /interface AttendancePunchPayload\s*\{[\s\S]*deviceId\?:\s*string;/,
+  "punch payload 必须支持可选的本机安装 ID");
+assert.match(source, /import \{ DeviceStorage \} from "@\/modules\/device\/storage";/,
+  "打卡设备 ID 必须取自与登录审计相同的 DeviceStorage 安装 ID");
+assert.match(source, /async function resolvePunchDeviceId\(explicitDeviceId\?: string\)[\s\S]{0,300}if \(explicit\) return explicit;[\s\S]{0,300}DeviceStorage\.getInstallationId\(\)[\s\S]{0,300}catch \{\s*return undefined;\s*\}/,
+  "读取安装 ID 失败只能不带字段，不能抛错挡住打卡；显式传入的优先");
+assert.match(source, /export async function punchAttendance\([\s\S]{0,200}const deviceId = await resolvePunchDeviceId\(payload\.deviceId\);[\s\S]{0,200}sanitizePayload\(\{ \.\.\.payload, deviceId \}\)/,
+  "punch 请求必须带上解析出的 deviceId");
+console.log("attendance-api.test.ts (punch device id): ok");
