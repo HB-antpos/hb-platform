@@ -1024,6 +1024,8 @@ public sealed partial class ReceiptReturnOrderLineViewModel : ObservableObject
         OriginalQuantity = line.OriginalQuantity;
         ReturnedQuantity = line.ReturnedQuantity;
         ReturnUnitAmount = line.ReturnUnitAmount;
+        RemainingReturnQuantity = line.AvailableQuantity;
+        RemainingReturnAmount = line.RemainingAmount;
         PriceSource = PriceSourceKind.ProductBase;
         PriceSourceLabel = priceSourceLabel;
     }
@@ -1049,6 +1051,11 @@ public sealed partial class ReceiptReturnOrderLineViewModel : ObservableObject
     public decimal ReturnedQuantity { get; }
 
     public decimal ReturnUnitAmount { get; }
+
+    /// <summary>原行扣掉已退部分后还可退的数量与金额（不含本次待退），用于入购物车时对齐取整误差。</summary>
+    public decimal RemainingReturnQuantity { get; }
+
+    public decimal RemainingReturnAmount { get; }
 
     public PriceSourceKind PriceSource { get; }
 
@@ -1134,7 +1141,10 @@ public sealed partial class PendingReturnLineViewModel : ObservableObject
 
     public Guid? OriginalOrderLineGuid { get; }
 
-    public decimal NegativeSubtotal => -decimal.Round(Quantity * UnitPrice, 2, MidpointRounding.AwayFromZero);
+    // 界面小计要和实际入购物车的金额一致：同样先按剩余金额对齐取整误差，再逐行累加。
+    public decimal NegativeSubtotal => -ReceiptReturnsWorkflowService
+        .ReconcileWithRemainingAmount(ToPendingReturnLine())
+        .Sum(line => decimal.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero));
 
     public PendingReturnLine ToPendingReturnLine()
     {
@@ -1152,7 +1162,9 @@ public sealed partial class PendingReturnLineViewModel : ObservableObject
             PriceSourceLabel,
             ReturnSourceKey,
             OriginalOrderGuid,
-            OriginalOrderLineGuid);
+            OriginalOrderLineGuid,
+            ReceiptLine?.RemainingReturnAmount,
+            ReceiptLine?.RemainingReturnQuantity);
     }
 }
 
