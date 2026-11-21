@@ -36,6 +36,7 @@ import {
   type SalesOperationSecurity,
 } from "@hb/pos-domain/features/sales/runtime/sales-operation-security";
 import { getLeadingZeroBarcodeVariant } from "@hb/pos-domain/features/sales/scan/barcode-variants";
+import { markOpenItemTiming } from "@/features/sales/runtime/open-item-timing";
 import { scanTiming } from "@/features/sales/runtime/scan-timing";
 
 export const SALES_NEW_TRANSACTIONS_DISABLED =
@@ -1245,7 +1246,12 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       eventType: "CART_ITEM_ADD",
       getCart: () => this.cart.getSnapshot(),
       operation: async () => {
+        // 分段计时（诊断旁路）：进入回调 = 授权已通过；回调内依次是目录查询、购物车写入；
+        // runCartMutation 返回时剩下的耗时即审计写入与授权收尾。授权与审计在共享包里，
+        // 这里只取回调两侧的时间差，不改共享包。
+        markOpenItemTiming("authorized");
         const match = await this.requireExactCatalogItem("OPENITEM");
+        markOpenItemTiming("catalog");
         this.assertCanStartOrContinueTransaction();
         const lineId = this.createLineId();
         this.cart.addOpenCatalogItem(
@@ -1253,9 +1259,11 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
           lineId,
           unitPriceCents,
         );
+        markOpenItemTiming("cart");
         this.completeLookupAttempt(attempt, { lineId, kind: "added" });
       },
       });
+      markOpenItemTiming("audited");
     } catch (error) {
       this.notifyFailedLookupAttempt(attempt, error);
       throw error;
