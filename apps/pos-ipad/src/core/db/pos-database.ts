@@ -40,6 +40,7 @@ import { SqliteApplicationLogOutbox } from "../logging/application-log";
 import { SqliteCatalogCodeConflictRepository } from "./catalog-code-conflict-repository";
 import { SqliteCatalogLookupOverlayRepository } from "./catalog-lookup-overlay-repository";
 import { SqliteCatalogSnapshotRepository } from "./catalog-repository";
+import { BleScannerSettingsRepository } from "./ble-scanner-settings-repository";
 import { applyMigrations } from "./migrations";
 import { PosIpadOtaUpdatePolicyRepository } from "./pos-ipad-ota-update-policy-repository";
 import { PosIpadUpdatePolicyRepository } from "./pos-ipad-update-policy-repository";
@@ -413,6 +414,11 @@ export class PosDatabase implements DatabasePort {
   /** 设置仅经受类型约束的 facade 访问，业务层不能读写任意 app_settings JSON。 */
   public settings(): PosSettingsRepository {
     return new PosSettingsRepository(this.connection, this.nowIso);
+  }
+
+  /** BLE 扫码枪配置只经此窄 facade 读写 app_settings 的 ble_scanner_v1 固定键（不加迁移）。 */
+  public bleScannerSettings(): BleScannerSettingsRepository {
+    return new BleScannerSettingsRepository(this.connection, this.nowIso);
   }
 
   public paymentMethodSettings(): PaymentMethodSettingsRepository {

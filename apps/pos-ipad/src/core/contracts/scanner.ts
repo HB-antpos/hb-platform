@@ -5,7 +5,8 @@ export type ScannerContext =
   | "supervisor-authorization"
   | "dialog";
 
-export type ScanSource = "hid" | "camera";
+/** ble = App 内直连的 BLE 数据模式扫码枪（GATT notify），不经过键盘输入。 */
+export type ScanSource = "hid" | "camera" | "ble";
 
 export type CameraScanMode = "single" | "continuous";
 

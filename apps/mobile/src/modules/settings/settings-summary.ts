@@ -8,17 +8,23 @@ export interface ConnectionAttentionInput {
   deviceReady: boolean;
   labelPrinterError: boolean;
   receiptPrinterError: boolean;
+  /**
+   * BLE 扫码枪需要处理：已保存但重连超时仍未连上，或电量低（来自控制器的 status.attention）。
+   * 正常休眠（sleeping）不算。
+   */
+  bleScannerAttention: boolean;
 }
 
 /**
- * 「设备与打印」需要处理的项数：设备未就绪、标签机出错、小票机出错各算一项。
+ * 「设备与打印」需要处理的项数：设备未就绪、标签机出错、小票机出错、蓝牙扫码枪需处理各算一项。
  * 首页分区标题右侧的汇总胶囊（「全部正常」/「N 项需处理」）就用它，取代原来 70px 高的汇总卡。
  */
 export function countAttentionItems(input: ConnectionAttentionInput): number {
   return (
     (input.canViewDeviceCard && !input.deviceReady ? 1 : 0) +
     (input.labelPrinterError ? 1 : 0) +
-    (input.receiptPrinterError ? 1 : 0)
+    (input.receiptPrinterError ? 1 : 0) +
+    (input.bleScannerAttention ? 1 : 0)
   );
 }
 

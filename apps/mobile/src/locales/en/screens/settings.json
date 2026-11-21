@@ -192,6 +192,136 @@
     "empty": "No Bluetooth receipt printer was found. Make sure the printer is on and nearby.",
     "available": "Available devices"
   },
+  "bleScanner": {
+    "title": "Bluetooth scanner",
+    "manage": "Manage Bluetooth scanner",
+    "unnamed": "Unnamed device",
+    "rowNotPaired": "Not connected · keyboard-mode scanners need no setup",
+    "sleepingHint": "Asleep, press the trigger to wake",
+    "reconnectingTooLong": "Not reconnected for a while",
+    "batteryShort": "Battery {{level}}%",
+    "lastScanShort": "Last {{tail}}",
+    "state": {
+      "ready": "Connected",
+      "learning": "Learning",
+      "connecting": "Connecting",
+      "reconnecting": "Reconnecting",
+      "sleeping": "Asleep",
+      "disconnected": "Disconnected",
+      "bluetoothOff": "Bluetooth off",
+      "unauthorized": "No permission",
+      "unsupported": "Not supported",
+      "notPaired": "Not set up",
+      "attention": "Needs attention"
+    },
+    "stateHint": {
+      "ready": "Connected and ready. Works on every scanning page: product lookup, warehouse, picking, packing and more.",
+      "learning": "Connected. First time with this scanner: scan any product barcode and the app will learn its data channel.",
+      "connecting": "Connecting. Keep the scanner on and nearby.",
+      "reconnecting": "Connection lost, reconnecting automatically. Press the trigger to wake the scanner.",
+      "sleeping": "The scanner went to sleep after a while without scanning. Press the trigger to wake it and it will reconnect.",
+      "disconnected": "Disconnected manually. Tap Reconnect to resume.",
+      "bluetoothOff": "Bluetooth is off on this phone. It will reconnect once Bluetooth is on.",
+      "unauthorized": "The app has no Bluetooth permission. Allow it in system Settings.",
+      "unsupported": "This device does not support Bluetooth Low Energy.",
+      "notPaired": "No Bluetooth scanner connected yet.",
+      "attention": "Not reconnected for a while, or battery is low. Check the scanner is on, nearby, and not connected to another device."
+    },
+    "info": {
+      "channel": "Data channel",
+      "signal": "Signal",
+      "battery": "Battery",
+      "lastScan": "Last scan",
+      "unknown": "Unknown",
+      "none": "None yet"
+    },
+    "channel": {
+      "learning": "Learning (scan a code)",
+      "known": "Known model",
+      "learned": "Vendor-specific (learned)",
+      "unknown": "Unknown"
+    },
+    "signal": {
+      "strong": "Strong {{rssi}} dBm",
+      "good": "Good {{rssi}} dBm",
+      "weak": "Weak {{rssi}} dBm"
+    },
+    "testScan": "Test scanning",
+    "autoReconnect": "Reconnect when the app opens",
+    "autoReconnectHint": "When off, tap Reconnect here manually",
+    "alias": "Nickname",
+    "aliasPlaceholder": "e.g. Back clip 1",
+    "aliasHint": "Tells scanners apart when they share the same name",
+    "knownModelHint": "Scanners ship in keyboard mode. Scan the “BLE mode” code in the manual. A back-clip scanner can't read the screen of the phone it's attached to, so scan the printed manual.",
+    "lastError": "Last error: {{code}}",
+    "disconnect": "Disconnect",
+    "reconnect": "Reconnect",
+    "replace": "Replace",
+    "forget": "Forget this scanner",
+    "forgetConfirmTitle": "Forget this scanner?",
+    "forgetConfirmMessage": "This disconnects it and deletes the saved settings on this phone. You'll need to search and connect again.",
+    "actionFailed": "Action failed",
+    "search": {
+      "subtitle": "Once connected, it works on every scanning page",
+      "bleModeHint": "Switch to BLE mode first: scan the BLE mode code in the manual's Bluetooth section. A back-clip scanner can't read the screen of the phone it's attached to, so scan the printed manual or show the code on another device.",
+      "bluetoothOff": "Bluetooth is off. Turn it on first.",
+      "unauthorized": "The app has no Bluetooth permission, so it can't search for scanners.",
+      "openSettings": "Open Settings",
+      "nearby": "Nearby scanners",
+      "scanning": "Scanning {{seconds}}s",
+      "waiting": "Searching…",
+      "empty": "No scanners found.",
+      "lastConnected": "Used before",
+      "recommended": "Recommended",
+      "connecting": "Connecting",
+      "connect": "Connect",
+      "showAll": "Show all Bluetooth devices",
+      "showAllHint": "Printers, headphones and other devices are hidden by default",
+      "notFoundHint": "Can't find it? It may still be in keyboard mode (factory default), asleep (press the trigger), or connected to another device (BLE connects to one at a time).",
+      "rescan": "Scan again"
+    },
+    "test": {
+      "title": "Test scanning",
+      "subtitle": "Codes scanned here never reach any business page",
+      "learningHint": "The data channel is learned automatically on the first scan.",
+      "wakeHint": "The scanner is asleep: press the trigger to wake it, then scan again.",
+      "duplicateHint": "The same code also arrived as keyboard input: this scanner may have both modes on. Keep only BLE mode.",
+      "latest": "Latest · {{time}}",
+      "bleDetail": "{{length}} chars · {{packets}} packets · ends with {{terminator}} · {{duration}} ms",
+      "hidDetail": "{{length}} chars · keyboard input",
+      "showRaw": "Show raw data (hex)",
+      "hideRaw": "Hide raw data",
+      "rawHidden": "Raw data is hidden for sensitive codes",
+      "waiting": "Scan a code.",
+      "recent": "Recent",
+      "clear": "Clear",
+      "sourceKeyboard": "Keyboard",
+      "sourceBle": "Bluetooth",
+      "symbologyOther": "Other",
+      "recordMeta": "{{length}} chars · {{time}}",
+      "keyboardHint": "No Bluetooth scanner? You can test a keyboard-mode scanner here too: just scan, and it will be labelled Keyboard.",
+      "check": {
+        "bluetooth": "Bluetooth permission",
+        "connected": "Connected",
+        "subscribed": "Channel subscribed",
+        "received": "Scan received",
+        "noDuplicate": "No keyboard duplicates"
+      },
+      "terminator": {
+        "CR": "CR",
+        "LF": "LF",
+        "TAB": "Tab",
+        "idle": "none (timeout)"
+      },
+      "kind": {
+        "setting-code": "Setting code",
+        "device-reply": "Device reply"
+      }
+    },
+    "notice": {
+      "noReceiver": "This page doesn't accept scans"
+    }
+  },
   "offlineData": {
     "title": "Offline product data",
     "description": "The local product snapshot used for offline lookup and label printing. Download or update data manually, or switch store here.",

@@ -431,7 +431,7 @@ export type SettingsClearSavedPrinterResult = Readonly<{
 }>;
 
 export type SettingsScannerTestResult = Readonly<{
-  source: "camera" | "hid";
+  source: "camera" | "hid" | "ble";
   value: string;
 }>;
 

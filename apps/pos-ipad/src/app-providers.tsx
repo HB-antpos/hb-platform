@@ -23,6 +23,7 @@ import {
   readStoredTheme,
   saveStoredTheme,
 } from "@/ui/preferences/terminal-ui-preferences";
+import { BleScanNoticeBridge } from "@/ui/shell/ble-scan-notice-bridge";
 import { NetworkStatusBridge } from "@/ui/shell/network-status-bridge";
 import { PeripheralStatusBridge } from "@/ui/shell/peripheral-status-bridge";
 import { RuntimeStatusBridge } from "@/ui/shell/runtime-status-bridge";
@@ -83,6 +84,8 @@ export function AppProviders({ children }: PropsWithChildren) {
                 <RuntimeWorkBridge />
                 <OperationAuthorizationModalBridge />
                 {children}
+                {/* BLE 扫码枪扫到码但当前页面不收时的轻提示，浮在页面之上、不拦截触摸。 */}
+                <BleScanNoticeBridge />
                 <AppUpdateGateBridge />
               </ApplicationErrorObservationBridge>
             </PosRuntimeProvider>

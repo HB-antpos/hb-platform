@@ -1,0 +1,716 @@
+/**
+ * BLE 扫码枪连接控制器（纯 TS，蓝牙库通过 BleScannerTransport 注入）。
+ *
+ * 与 ble-scanner-core.ts 一样，本文件在 iPad POS 与移动端各有一份逐字相同的拷贝，
+ * 由 apps/mobile/src/modules/scanner/ble/ble-shared-sync.test.ts 校验一致。
+ *
+ * 职责：搜索、连接、选数据通道（已知型号直连，未知型号嗅探学习）、订阅拼帧、
+ * 读电量、断开后挂起式重连、休眠判断。不负责把码投给页面——那是各端路由的事。
+ */
+import {
+  BLE_BATTERY_LEVEL_UUID,
+  BLE_BATTERY_SERVICE_UUID,
+  BleScanFrameAssembler,
+  type BleScanFrame,
+  type BleScanKind,
+  classifyBleScanValue,
+  findBleScannerProfile,
+  looksLikeBleScanner,
+  matchBleScannerProfile,
+  normalizeBleUuid,
+  parseBatteryLevel,
+  type SavedBleScanner,
+} from "./ble-scanner-core";
+
+/* ------------------------------------------------------------------ */
+/* 蓝牙传输层接口                                                         */
+/* ------------------------------------------------------------------ */
+
+export type BleAdapterState = "on" | "off" | "unauthorized" | "unsupported" | "unknown";
+
+export type BleDiscoveredDevice = Readonly<{
+  id: string;
+  name: string | null;
+  rssi: number | null;
+  serviceUuids: readonly string[];
+}>;
+
+export type BleCharacteristicInfo = Readonly<{
+  serviceUuid: string;
+  uuid: string;
+  notifiable: boolean;
+  readable: boolean;
+}>;
+
+export interface BleScannerTransport {
+  getState(): Promise<BleAdapterState>;
+  onStateChange(listener: (state: BleAdapterState) => void): () => void;
+  /** 开始扫描附近设备；返回停止函数。 */
+  startScan(
+    onDevice: (device: BleDiscoveredDevice) => void,
+    onError: (error: Error) => void,
+  ): () => void;
+  /**
+   * 连接。**不设超时**：iOS 的 connect 本身不超时，Android 用 autoConnect=true，
+   * 扫码枪休眠时请求一直挂着，按扳机唤醒后由系统接上。
+   */
+  connect(id: string, options: Readonly<{ pending: boolean }>): Promise<void>;
+  cancelConnection(id: string): Promise<void>;
+  onDisconnected(id: string, listener: (error: Error | null) => void): () => void;
+  discover(id: string): Promise<readonly BleCharacteristicInfo[]>;
+  monitor(
+    id: string,
+    serviceUuid: string,
+    characteristicUuid: string,
+    onValue: (bytes: Uint8Array) => void,
+    onError: (error: Error) => void,
+  ): () => void;
+  read(id: string, serviceUuid: string, characteristicUuid: string): Promise<Uint8Array>;
+  readRssi(id: string): Promise<number | null>;
+}
+
+export interface BleScannerStorage {
+  load(): Promise<SavedBleScanner | null>;
+  save(value: SavedBleScanner | null): Promise<void>;
+}
+
+/* ------------------------------------------------------------------ */
+/* 状态                                                                 */
+/* ------------------------------------------------------------------ */
+
+export type BleScannerConnectionState =
+  | "unsupported"
+  | "bluetooth-off"
+  | "unauthorized"
+  /** 没有保存的扫码枪。 */
+  | "not-paired"
+  /** 已保存但关了自动重连，或用户手动断开。 */
+  | "disconnected"
+  | "connecting"
+  /** 未知型号：已订阅全部 notify 特征，等第一次扫码学会数据通道。 */
+  | "learning"
+  | "ready"
+  /** 长时间没扫码后断开：扫码枪正常休眠，按扳机即可唤醒，不算异常。 */
+  | "sleeping"
+  | "reconnecting";
+
+export type BleScannerStatus = Readonly<{
+  state: BleScannerConnectionState;
+  saved: SavedBleScanner | null;
+  batteryLevel: number | null;
+  rssi: number | null;
+  lastScanAt: number | null;
+  lastScanValue: string | null;
+  /** 需要人处理（重连太久仍未连上 / 电量低）。休眠不算。 */
+  attention: boolean;
+  lastErrorCode: string | null;
+}>;
+
+export type BleScannerScan = Readonly<{
+  frame: BleScanFrame;
+  kind: BleScanKind;
+  characteristicUuid: string;
+}>;
+
+export type BleScannerControllerOptions = Readonly<{
+  transport: BleScannerTransport;
+  storage: BleScannerStorage;
+  now?: () => number;
+  /** 多久没扫码后断开就算休眠。背夹出厂 1 分钟，实测这把约 5 分钟。 */
+  sleepAfterMs?: number;
+  /** reconnecting 持续多久仍未连上才标「需处理」。 */
+  attentionAfterMs?: number;
+  batteryPollMs?: number;
+  lowBatteryLevel?: number;
+  setTimer?: (callback: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+  setRepeatingTimer?: (callback: () => void, ms: number) => unknown;
+  clearRepeatingTimer?: (handle: unknown) => void;
+}>;
+
+export const BLE_SLEEP_AFTER_MS = 50_000;
+export const BLE_ATTENTION_AFTER_MS = 60_000;
+export const BLE_BATTERY_POLL_MS = 5 * 60_000;
+export const BLE_LOW_BATTERY_LEVEL = 20;
+
+type Session = {
+  id: string;
+  generation: number;
+  cleanups: (() => void)[];
+  assemblers: BleScanFrameAssembler[];
+};
+
+export class BleScannerController {
+  private readonly transport: BleScannerTransport;
+  private readonly storage: BleScannerStorage;
+  private readonly now: () => number;
+  private readonly sleepAfterMs: number;
+  private readonly attentionAfterMs: number;
+  private readonly batteryPollMs: number;
+  private readonly lowBatteryLevel: number;
+  private readonly setTimer: (callback: () => void, ms: number) => unknown;
+  private readonly clearTimer: (handle: unknown) => void;
+  private readonly setRepeatingTimer: (callback: () => void, ms: number) => unknown;
+  private readonly clearRepeatingTimer: (handle: unknown) => void;
+  private readonly statusListeners = new Set<(status: BleScannerStatus) => void>();
+  private readonly scanListeners = new Set<(scan: BleScannerScan) => void>();
+  private status: BleScannerStatus;
+  private adapterState: BleAdapterState = "unknown";
+  private started = false;
+  private session: Session | null = null;
+  private generation = 0;
+  private lastActivityAt: number | null = null;
+  private reconnectingSince: number | null = null;
+  private attentionTimer: unknown = null;
+  private batteryTimer: unknown = null;
+  private stopAdapterListener: (() => void) | null = null;
+  private stopScan: (() => void) | null = null;
+  /** 排队执行蓝牙操作，避免搜索、连接、断开交错。 */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  constructor(options: BleScannerControllerOptions) {
+    this.transport = options.transport;
+    this.storage = options.storage;
+    this.now = options.now ?? Date.now;
+    this.sleepAfterMs = options.sleepAfterMs ?? BLE_SLEEP_AFTER_MS;
+    this.attentionAfterMs = options.attentionAfterMs ?? BLE_ATTENTION_AFTER_MS;
+    this.batteryPollMs = options.batteryPollMs ?? BLE_BATTERY_POLL_MS;
+    this.lowBatteryLevel = options.lowBatteryLevel ?? BLE_LOW_BATTERY_LEVEL;
+    this.setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
+    this.clearTimer =
+      options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+    this.setRepeatingTimer =
+      options.setRepeatingTimer ?? ((callback, ms) => setInterval(callback, ms));
+    this.clearRepeatingTimer =
+      options.clearRepeatingTimer ??
+      ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
+    this.status = Object.freeze({
+      state: "not-paired",
+      saved: null,
+      batteryLevel: null,
+      rssi: null,
+      lastScanAt: null,
+      lastScanValue: null,
+      attention: false,
+      lastErrorCode: null,
+    });
+  }
+
+  getStatus(): BleScannerStatus {
+    return this.status;
+  }
+
+  subscribeStatus(listener: (status: BleScannerStatus) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => this.statusListeners.delete(listener);
+  }
+
+  /** 收到的每一个完整码（含设置码、设备回复，由调用方按 kind 决定去向）。 */
+  subscribeScans(listener: (scan: BleScannerScan) => void): () => void {
+    this.scanListeners.add(listener);
+    return () => this.scanListeners.delete(listener);
+  }
+
+  /** App 启动：读保存的扫码枪，蓝牙可用就挂起连接。可重复调用。 */
+  async start(): Promise<void> {
+    if (this.started) return;
+    this.started = true;
+    this.stopAdapterListener = this.transport.onStateChange((state) => {
+      this.handleAdapterState(state);
+    });
+    const [adapterState, saved] = await Promise.all([
+      this.transport.getState().catch((): BleAdapterState => "unknown"),
+      this.storage.load().catch(() => null),
+    ]);
+    this.update({ saved });
+    this.handleAdapterState(adapterState);
+  }
+
+  /** App 回到前台：如果之前在重连 / 休眠，重新挂一次连接请求。 */
+  resume(): void {
+    const saved = this.status.saved;
+    if (!this.started || !saved?.autoReconnect || this.adapterState !== "on") return;
+    if (this.status.state === "ready" || this.status.state === "connecting" || this.status.state === "learning") {
+      return;
+    }
+    void this.enqueue(() => this.connectSaved(true));
+  }
+
+  dispose(): void {
+    this.started = false;
+    this.stopDiscovery();
+    this.stopAdapterListener?.();
+    this.stopAdapterListener = null;
+    this.teardownSession();
+    this.clearAttentionTimer();
+  }
+
+  /* ---------------- 搜索 ---------------- */
+
+  startDiscovery(
+    onDevices: (devices: readonly BleDiscoveredDevice[]) => void,
+    options: Readonly<{ excludeIds?: readonly string[] }> = {},
+  ): () => void {
+    this.stopDiscovery();
+    const exclude = new Set(options.excludeIds ?? []);
+    const found = new Map<string, BleDiscoveredDevice>();
+    const emit = () => {
+      const devices = [...found.values()].sort(compareDiscovered);
+      onDevices(devices);
+    };
+    const stop = this.transport.startScan(
+      (device) => {
+        if (exclude.has(device.id)) return;
+        if (!device.name && device.serviceUuids.length === 0) return;
+        found.set(device.id, device);
+        emit();
+      },
+      (error) => {
+        this.update({ lastErrorCode: errorCode(error, "scan-failed") });
+      },
+    );
+    this.stopScan = stop;
+    return () => {
+      if (this.stopScan === stop) this.stopDiscovery();
+    };
+  }
+
+  stopDiscovery(): void {
+    const stop = this.stopScan;
+    this.stopScan = null;
+    stop?.();
+  }
+
+  /* ---------------- 配对 / 断开 ---------------- */
+
+  /** 连接搜索列表里的设备并保存为本机扫码枪（替换已保存的那把）。 */
+  pair(device: BleDiscoveredDevice): Promise<void> {
+    this.stopDiscovery();
+    return this.enqueue(async () => {
+      const previous = this.status.saved;
+      if (previous && previous.peripheralId !== device.id) {
+        this.teardownSession();
+        await this.transport.cancelConnection(previous.peripheralId).catch(() => undefined);
+      }
+      const profile = matchBleScannerProfile(device.serviceUuids, device.name);
+      const saved: SavedBleScanner = Object.freeze({
+        version: 1,
+        peripheralId: device.id,
+        name: device.name ?? "",
+        alias: previous?.peripheralId === device.id ? previous.alias : null,
+        profileId: profile?.id ?? null,
+        serviceUuid: profile?.serviceUuid ?? "",
+        notifyUuid: profile?.notifyUuid ?? "",
+        autoReconnect: true,
+        savedAt: new Date(this.now()).toISOString(),
+      });
+      // 未知型号先存空通道，嗅探学会后再补；空通道不会通过 parseSavedBleScanner，
+      // 所以学会之前不落盘，避免存下不可用的配置。
+      this.update({ saved, lastErrorCode: null });
+      if (saved.serviceUuid) await this.storage.save(saved);
+      await this.connectSaved(false);
+    });
+  }
+
+  /** 忘记这把扫码枪：断开、清存储。 */
+  forget(): Promise<void> {
+    return this.enqueue(async () => {
+      const saved = this.status.saved;
+      this.teardownSession();
+      this.clearAttentionTimer();
+      if (saved) await this.transport.cancelConnection(saved.peripheralId).catch(() => undefined);
+      await this.storage.save(null);
+      this.update({
+        saved: null,
+        state: this.baseStateWithoutDevice(),
+        batteryLevel: null,
+        rssi: null,
+        lastScanAt: null,
+        lastScanValue: null,
+        lastErrorCode: null,
+      });
+    });
+  }
+
+  /** 手动断开：保留配置，但本次不再自动重连，直到用户点「重新连接」。 */
+  disconnect(): Promise<void> {
+    return this.enqueue(async () => {
+      const saved = this.status.saved;
+      if (!saved) return;
+      this.teardownSession();
+      this.clearAttentionTimer();
+      await this.transport.cancelConnection(saved.peripheralId).catch(() => undefined);
+      this.update({ state: "disconnected" });
+    });
+  }
+
+  reconnect(): Promise<void> {
+    return this.enqueue(() => this.connectSaved(false));
+  }
+
+  setAlias(alias: string | null): Promise<void> {
+    return this.enqueue(async () => {
+      const saved = this.status.saved;
+      if (!saved) return;
+      const next = Object.freeze({ ...saved, alias });
+      this.update({ saved: next });
+      if (next.serviceUuid) await this.storage.save(next);
+    });
+  }
+
+  setAutoReconnect(autoReconnect: boolean): Promise<void> {
+    return this.enqueue(async () => {
+      const saved = this.status.saved;
+      if (!saved) return;
+      const next = Object.freeze({ ...saved, autoReconnect });
+      this.update({ saved: next });
+      if (next.serviceUuid) await this.storage.save(next);
+    });
+  }
+
+  /* ---------------- 内部：连接流程 ---------------- */
+
+  private handleAdapterState(state: BleAdapterState): void {
+    this.adapterState = state;
+    if (state === "on") {
+      if (!this.status.saved) {
+        this.update({ state: "not-paired" });
+        return;
+      }
+      if (this.session) return;
+      if (this.status.saved.autoReconnect) {
+        void this.enqueue(() => this.connectSaved(true));
+      } else {
+        this.update({ state: "disconnected" });
+      }
+      return;
+    }
+    // 蓝牙关闭 / 未授权：丢掉会话，等恢复后再连。
+    this.teardownSession();
+    this.update({
+      state:
+        state === "off"
+          ? "bluetooth-off"
+          : state === "unauthorized"
+            ? "unauthorized"
+            : state === "unsupported"
+              ? "unsupported"
+              : this.status.saved
+                ? "disconnected"
+                : "not-paired",
+    });
+  }
+
+  private async connectSaved(pending: boolean): Promise<void> {
+    const saved = this.status.saved;
+    if (!saved || this.adapterState !== "on") return;
+    this.teardownSession();
+    const session: Session = {
+      id: saved.peripheralId,
+      generation: ++this.generation,
+      cleanups: [],
+      assemblers: [],
+    };
+    this.session = session;
+    if (!pending || this.status.state === "not-paired" || this.status.state === "disconnected") {
+      this.update({ state: "connecting" });
+    }
+    const connecting = this.transport.connect(saved.peripheralId, { pending: true });
+    // 挂起的连接可能很久才完成；不 await 在队列里，避免堵住后续操作。
+    void connecting.then(
+      () => this.onConnected(session),
+      (error: unknown) => {
+        if (!this.isCurrent(session)) return;
+        this.update({ lastErrorCode: errorCode(error, "connect-failed") });
+        this.onLinkLost(session);
+      },
+    );
+  }
+
+  private async onConnected(session: Session): Promise<void> {
+    if (!this.isCurrent(session)) return;
+    this.reconnectingSince = null;
+    this.clearAttentionTimer();
+    session.cleanups.push(
+      this.transport.onDisconnected(session.id, () => this.onLinkLost(session)),
+    );
+    let characteristics: readonly BleCharacteristicInfo[];
+    try {
+      characteristics = await this.transport.discover(session.id);
+    } catch (error) {
+      if (!this.isCurrent(session)) return;
+      this.update({ lastErrorCode: errorCode(error, "discover-failed") });
+      this.onLinkLost(session);
+      return;
+    }
+    if (!this.isCurrent(session)) return;
+    const saved = this.status.saved;
+    if (!saved) return;
+    const channel = this.pickChannel(saved, characteristics);
+    if (channel.kind === "none") {
+      this.update({ state: "reconnecting", lastErrorCode: "no-notify-characteristic" });
+      return;
+    }
+    for (const candidate of channel.candidates) {
+      this.subscribe(session, candidate, channel.kind === "learning");
+    }
+    this.lastActivityAt = this.now();
+    this.update({
+      state: channel.kind === "learning" ? "learning" : "ready",
+      lastErrorCode: null,
+    });
+    const battery = characteristics.find(
+      (item) =>
+        normalizeBleUuid(item.serviceUuid) === BLE_BATTERY_SERVICE_UUID &&
+        normalizeBleUuid(item.uuid) === BLE_BATTERY_LEVEL_UUID &&
+        item.readable,
+    );
+    if (battery) {
+      // 背夹的电量特征订阅会失败（没有 CCCD），统一定时读。
+      void this.readBattery(session);
+      const handle = this.setRepeatingTimer(() => {
+        void this.readBattery(session);
+      }, this.batteryPollMs);
+      session.cleanups.push(() => this.clearRepeatingTimer(handle));
+    }
+    void this.transport.readRssi(session.id).then(
+      (rssi) => {
+        if (this.isCurrent(session)) this.update({ rssi });
+      },
+      () => undefined,
+    );
+  }
+
+  private pickChannel(
+    saved: SavedBleScanner,
+    characteristics: readonly BleCharacteristicInfo[],
+  ):
+    | Readonly<{ kind: "known"; candidates: readonly BleCharacteristicInfo[] }>
+    | Readonly<{ kind: "learning"; candidates: readonly BleCharacteristicInfo[] }>
+    | Readonly<{ kind: "none" }> {
+    if (saved.serviceUuid && saved.notifyUuid) {
+      const known = characteristics.find(
+        (item) =>
+          normalizeBleUuid(item.serviceUuid) === saved.serviceUuid &&
+          normalizeBleUuid(item.uuid) === saved.notifyUuid &&
+          item.notifiable,
+      );
+      if (known) return { kind: "known", candidates: [known] };
+    }
+    // 设备连上后才看到服务的，再按服务识别一次型号。
+    const profile =
+      findBleScannerProfile(saved.profileId) ??
+      matchBleScannerProfile(
+        characteristics.map((item) => item.serviceUuid),
+        saved.name,
+      );
+    if (profile) {
+      const byProfile = characteristics.find(
+        (item) =>
+          normalizeBleUuid(item.serviceUuid) === profile.serviceUuid &&
+          normalizeBleUuid(item.uuid) === profile.notifyUuid &&
+          item.notifiable,
+      );
+      if (byProfile) return { kind: "known", candidates: [byProfile] };
+    }
+    const candidates = characteristics.filter(
+      (item) =>
+        item.notifiable &&
+        // 电池通道不可能是条码。
+        normalizeBleUuid(item.serviceUuid) !== BLE_BATTERY_SERVICE_UUID,
+    );
+    return candidates.length > 0 ? { kind: "learning", candidates } : { kind: "none" };
+  }
+
+  private subscribe(session: Session, characteristic: BleCharacteristicInfo, learning: boolean): void {
+    const assembler = new BleScanFrameAssembler({
+      now: this.now,
+      onFrame: (frame) => {
+        if (!this.isCurrent(session)) return;
+        void this.handleFrame(session, characteristic, frame, learning);
+      },
+    });
+    session.assemblers.push(assembler);
+    const stop = this.transport.monitor(
+      session.id,
+      characteristic.serviceUuid,
+      characteristic.uuid,
+      (bytes) => {
+        if (!this.isCurrent(session)) return;
+        assembler.push(bytes, this.now());
+      },
+      (error) => {
+        // 个别特征订阅失败（如没有 CCCD）不影响其他候选。
+        if (!this.isCurrent(session)) return;
+        if (!learning) this.update({ lastErrorCode: errorCode(error, "monitor-failed") });
+      },
+    );
+    session.cleanups.push(stop);
+  }
+
+  private async handleFrame(
+    session: Session,
+    characteristic: BleCharacteristicInfo,
+    frame: BleScanFrame,
+    learning: boolean,
+  ): Promise<void> {
+    const kind = classifyBleScanValue(frame.value);
+    if (learning && this.status.state !== "learning") {
+      // 已学会数据通道：其余候选特征的数据一律忽略（本次会话结束后不再订阅它们）。
+      const learned = this.status.saved?.notifyUuid;
+      if (learned !== normalizeBleUuid(characteristic.uuid)) return;
+    }
+    this.lastActivityAt = frame.receivedAt;
+    if (learning && this.status.state === "learning") {
+      // 第一次收到像条码的数据的那个特征就是数据通道，写进配置，下次直接订阅它。
+      const saved = this.status.saved;
+      if (saved) {
+        const next: SavedBleScanner = Object.freeze({
+          ...saved,
+          serviceUuid: normalizeBleUuid(characteristic.serviceUuid),
+          notifyUuid: normalizeBleUuid(characteristic.uuid),
+        });
+        this.update({ saved: next, state: "ready" });
+        await this.storage.save(next).catch(() => undefined);
+      }
+    }
+    this.update({
+      lastScanAt: frame.receivedAt,
+      lastScanValue: kind === "barcode" ? frame.value : this.status.lastScanValue,
+    });
+    const scan: BleScannerScan = Object.freeze({
+      frame,
+      kind,
+      characteristicUuid: normalizeBleUuid(characteristic.uuid),
+    });
+    this.scanListeners.forEach((listener) => listener(scan));
+  }
+
+  private async readBattery(session: Session): Promise<void> {
+    try {
+      const bytes = await this.transport.read(
+        session.id,
+        BLE_BATTERY_SERVICE_UUID,
+        BLE_BATTERY_LEVEL_UUID,
+      );
+      if (!this.isCurrent(session)) return;
+      const level = parseBatteryLevel(bytes);
+      if (level !== null) this.update({ batteryLevel: level });
+    } catch {
+      // 读电量失败不影响扫码。
+    }
+  }
+
+  /** 链路断开：判断是休眠还是异常，然后挂起新的连接请求。 */
+  private onLinkLost(session: Session): void {
+    if (!this.isCurrent(session)) return;
+    const saved = this.status.saved;
+    this.teardownSession();
+    if (!saved || this.adapterState !== "on") return;
+    if (!saved.autoReconnect) {
+      this.update({ state: "disconnected" });
+      return;
+    }
+    const idleFor = this.lastActivityAt === null ? 0 : this.now() - this.lastActivityAt;
+    const sleeping = idleFor >= this.sleepAfterMs;
+    this.update({ state: sleeping ? "sleeping" : "reconnecting" });
+    if (!sleeping) this.startAttentionTimer();
+    // 不排队：断开回调可能发生在队列任务内部。
+    void this.connectSaved(true);
+  }
+
+  private startAttentionTimer(): void {
+    if (this.reconnectingSince === null) this.reconnectingSince = this.now();
+    this.clearAttentionTimer();
+    this.attentionTimer = this.setTimer(() => {
+      this.attentionTimer = null;
+      if (this.status.state === "reconnecting") this.update({});
+    }, this.attentionAfterMs);
+  }
+
+  private clearAttentionTimer(): void {
+    if (this.attentionTimer !== null) {
+      this.clearTimer(this.attentionTimer);
+      this.attentionTimer = null;
+    }
+  }
+
+  private teardownSession(): void {
+    const session = this.session;
+    this.session = null;
+    if (!session) return;
+    for (const cleanup of session.cleanups.splice(0)) {
+      try {
+        cleanup();
+      } catch {
+        // 清理失败不影响后续流程。
+      }
+    }
+    session.assemblers.forEach((assembler) => assembler.dispose());
+  }
+
+  private isCurrent(session: Session): boolean {
+    return this.session === session && session.generation === this.generation;
+  }
+
+  private baseStateWithoutDevice(): BleScannerConnectionState {
+    if (this.adapterState === "off") return "bluetooth-off";
+    if (this.adapterState === "unauthorized") return "unauthorized";
+    if (this.adapterState === "unsupported") return "unsupported";
+    return "not-paired";
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
+
+  private update(patch: Partial<Omit<BleScannerStatus, "attention">>): void {
+    const next = { ...this.status, ...patch };
+    const reconnectingTooLong =
+      next.state === "reconnecting" &&
+      this.reconnectingSince !== null &&
+      this.now() - this.reconnectingSince >= this.attentionAfterMs;
+    if (next.state !== "reconnecting") this.reconnectingSince = null;
+    const lowBattery =
+      next.batteryLevel !== null &&
+      next.batteryLevel < this.lowBatteryLevel &&
+      next.saved !== null;
+    const status: BleScannerStatus = Object.freeze({
+      ...next,
+      attention: reconnectingTooLong || lowBattery,
+    });
+    if (shallowEqualStatus(status, this.status)) return;
+    this.status = status;
+    this.statusListeners.forEach((listener) => listener(status));
+  }
+}
+
+function shallowEqualStatus(left: BleScannerStatus, right: BleScannerStatus): boolean {
+  return (
+    left.state === right.state &&
+    left.saved === right.saved &&
+    left.batteryLevel === right.batteryLevel &&
+    left.rssi === right.rssi &&
+    left.lastScanAt === right.lastScanAt &&
+    left.lastScanValue === right.lastScanValue &&
+    left.attention === right.attention &&
+    left.lastErrorCode === right.lastErrorCode
+  );
+}
+
+function compareDiscovered(left: BleDiscoveredDevice, right: BleDiscoveredDevice): number {
+  const leftScanner = looksLikeBleScanner(left.serviceUuids, left.name) ? 0 : 1;
+  const rightScanner = looksLikeBleScanner(right.serviceUuids, right.name) ? 0 : 1;
+  if (leftScanner !== rightScanner) return leftScanner - rightScanner;
+  return (right.rssi ?? -999) - (left.rssi ?? -999);
+}
+
+function errorCode(error: unknown, fallback: string): string {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code: unknown }).code;
+    if (typeof code === "string" || typeof code === "number") return `${fallback}:${code}`;
+  }
+  return fallback;
+}

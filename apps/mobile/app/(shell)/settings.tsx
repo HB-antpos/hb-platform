@@ -53,6 +53,13 @@ import {
 } from "@/modules/printer/device-list";
 import { isBlePrintingSupported } from "@/modules/printer/native";
 import { usePrinterStore, useReceiptPrinterStore, type PrinterConnectionState } from "@/modules/printer/state";
+import { BleScannerSettingsSheet } from "@/modules/scanner/ble/BleScannerSettingsSheet";
+import {
+  buildBleScannerRowSubtitle,
+  resolveBleScannerBadge,
+} from "@/modules/scanner/ble/ble-scanner-presentation";
+import { isBleScannerFeatureAvailable } from "@/modules/scanner/ble/ble-scanner-service";
+import { useBleScannerStore } from "@/modules/scanner/ble/ble-scanner-state";
 import type { PrinterDevice } from "@/modules/printer/types";
 import { i18n, setAppLanguage } from "@/shared/i18n/i18n";
 import { resolveLocalizedErrorMessage } from "@/shared/i18n/error-message";
@@ -464,6 +471,11 @@ export default function Settings() {
   const autoReconnectPaused = usePrinterStore((state) => state.autoReconnectPaused);
   const savedReceiptPrinter = useReceiptPrinterStore((state) => state.savedPrinter);
   const receiptPrinterStatus = useReceiptPrinterStore((state) => state.status);
+  // BLE 扫码枪：旧原生包（OTA 推到没有 ble-plx 的包）或 iOS 审核态整行隐藏。
+  const bleScannerStatus = useBleScannerStore((state) => state.status);
+  const bleScannerAvailable = isBleScannerFeatureAvailable();
+  const bleScannerBadge = resolveBleScannerBadge(bleScannerStatus);
+  const [bleScannerVisible, setBleScannerVisible] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [rawPrinters, setRawPrinters] = useState<PrinterDevice[]>([]);
   const [printerBusy, setPrinterBusy] = useState(false);
@@ -491,6 +503,7 @@ export default function Settings() {
   const deviceTriggerRef = useRef<View>(null);
   const labelPrinterTriggerRef = useRef<View>(null);
   const receiptPrinterTriggerRef = useRef<View>(null);
+  const bleScannerTriggerRef = useRef<View>(null);
   const apiHostTriggerRef = useRef<View>(null);
   const offlineDataTriggerRef = useRef<View>(null);
 
@@ -772,6 +785,8 @@ export default function Settings() {
     deviceReady,
     labelPrinterError: printerStatus === "error",
     receiptPrinterError: receiptPrinterStatus === "error",
+    // 已保存但重连超时 / 电量低；正常休眠不算。
+    bleScannerAttention: bleScannerAvailable && bleScannerStatus.attention,
   });
   const currentApiHostPreset = API_HOST_PRESETS.find(
     (preset) => normalizeApiHost(apiHost) === preset.host
@@ -923,6 +938,16 @@ export default function Settings() {
   const openPrinterSettings = (triggerRef: RefObject<View | null>) => {
     rememberModalTrigger(triggerRef);
     setPrinterSettingsVisible(true);
+  };
+
+  const openBleScannerSettings = () => {
+    rememberModalTrigger(bleScannerTriggerRef);
+    setBleScannerVisible(true);
+  };
+
+  const dismissBleScannerSettings = () => {
+    setBleScannerVisible(false);
+    restoreModalTriggerFocus();
   };
 
   const openApiHostSettings = () => {
@@ -1508,6 +1533,24 @@ export default function Settings() {
               onPress={() => openPrinterSettings(receiptPrinterTriggerRef)}
               accessibilityLabel={t("overview.managePrinters")}
             />
+            {bleScannerAvailable ? (
+              <SettingsRow
+                divider
+                icon="barcode-scan"
+                title={t("bleScanner.title")}
+                subtitle={buildBleScannerRowSubtitle(bleScannerStatus, t)}
+                right={
+                  <StatusDotLabel
+                    label={t(`bleScanner.state.${bleScannerBadge.key}`)}
+                    tone={bleScannerBadge.tone}
+                  />
+                }
+                actionRef={bleScannerTriggerRef}
+                onPress={openBleScannerSettings}
+                accessibilityLabel={t("bleScanner.manage")}
+                testID="settings-ble-scanner"
+              />
+            ) : null}
             {offlineEligible ? (
               <SettingsRow
                 divider
@@ -1616,6 +1659,10 @@ export default function Settings() {
           ) : null}
         </ScrollView>
       )}
+      {/* 详情 / 搜索 / 测试在同一个 BusinessSheet 里切换，不连开两个原生 Modal。 */}
+      {bleScannerAvailable ? (
+        <BleScannerSettingsSheet visible={bleScannerVisible} onDismiss={dismissBleScannerSettings} />
+      ) : null}
       <DeviceActivationDialog
         visible={activationVisible}
         mode={activationMode}

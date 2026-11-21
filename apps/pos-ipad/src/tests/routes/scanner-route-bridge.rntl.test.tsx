@@ -216,3 +216,54 @@ test("同一次 HID 回车同时触发 keyPress 和 submitEditing 时只提交�
   expect(onScan).toHaveBeenCalledTimes(2);
   await screen.unmount();
 });
+
+test("BLE 扫码枪的码只投给聚焦路由，不依赖隐藏输入框焦点；主管授权弹窗优先", async () => {
+  const scanner = new HidScannerRouter();
+  const listeners = new Set<() => void>();
+  let authorizationState: { kind: "awaiting-supervisor" | "idle" } = {
+    kind: "idle",
+  };
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera" | "ble") => void>();
+  mockRuntime = {
+    services: {
+      operationAuthorization: {
+        status: "available",
+        getState: () => authorizationState,
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      },
+      scanner: { router: scanner },
+    },
+  };
+
+  const screen = await render(
+    <ScannerRouteProvider>
+      <RouteHidScannerCapture context="product" onScan={onScan} path="/sales" />
+    </ScannerRouteProvider>,
+  );
+
+  // 隐藏输入框没有焦点（captureActive=false）时 BLE 码照样投给当前路由。
+  scanner.setCaptureActive(false);
+  await waitFor(() => {
+    expect(scanner.acceptBleText("BLE-SKU-1")).toBe(true);
+    expect(onScan).toHaveBeenLastCalledWith("BLE-SKU-1", "ble");
+  });
+
+  await act(async () => {
+    authorizationState = { kind: "awaiting-supervisor" };
+    listeners.forEach((listener) => listener());
+  });
+  expect(scanner.acceptBleText("BLE-SUPERVISOR")).toBe(true);
+  expect(onScan).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    authorizationState = { kind: "idle" };
+    listeners.forEach((listener) => listener());
+  });
+  await screen.unmount();
+  expect(scanner.acceptBleText("BLE-AFTER-UNMOUNT")).toBe(false);
+  expect(onScan).toHaveBeenCalledTimes(1);
+});

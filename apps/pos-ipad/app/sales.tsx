@@ -261,9 +261,10 @@ export default function SalesRoute() {
     [presenter],
   );
   const handleRoutedScan = useCallback(
-    (barcode: string, source: "hid" | "camera" = "hid"): void => {
+    (barcode: string, source: "hid" | "camera" | "ble" = "hid"): void => {
       // HID 路由不能等待在线目录续作；Presenter 自己维护 pending 生命周期。
-      void addScannedProduct(barcode, source);
+      // BLE 扫码枪与键盘模式扫码枪同属「扫码枪」：查码来源记为 hid，沿用同一套扫码计时与统计口径。
+      void addScannedProduct(barcode, source === "camera" ? "camera" : "hid");
     },
     [addScannedProduct],
   );

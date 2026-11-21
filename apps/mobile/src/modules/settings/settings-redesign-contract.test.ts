@@ -73,9 +73,27 @@ test("设备与打印：分区标题右侧是汇总胶囊，行尾是状态点�
   assert.match(mainView, /<StatusDotLabel/);
   assert.match(mainView, /\{offlineEligible \? \([\s\S]{0,900}testID="settings-offline-data"/);
   // 三个弹层入口都还在，并保留触发元素引用用于恢复焦点。
-  for (const ref of ["deviceTriggerRef", "labelPrinterTriggerRef", "receiptPrinterTriggerRef"]) {
+  for (const ref of ["deviceTriggerRef", "labelPrinterTriggerRef", "receiptPrinterTriggerRef", "bleScannerTriggerRef"]) {
     assert.match(mainView, new RegExp(`actionRef=\\{${ref}\\}`));
   }
+});
+
+test("设备与打印：蓝牙扫码枪一行在小票打印机下面，旧原生包 / 审核态隐藏，需处理计入汇总", () => {
+  const receiptRow = mainView.indexOf("actionRef={receiptPrinterTriggerRef}");
+  const bleRow = mainView.indexOf('testID="settings-ble-scanner"');
+  assert.ok(receiptRow > 0 && bleRow > receiptRow, "蓝牙扫码枪行必须在小票打印机下面");
+  assert.match(mainView, /\{bleScannerAvailable \? \(\s*<SettingsRow[\s\S]{0,700}testID="settings-ble-scanner"/);
+  assert.match(source, /const bleScannerAvailable = isBleScannerFeatureAvailable\(\)/);
+  assert.match(source, /countAttentionItems\(\{[\s\S]{0,400}bleScannerAttention: bleScannerAvailable && bleScannerStatus\.attention/);
+  assert.match(source, /<BleScannerSettingsSheet visible=\{bleScannerVisible\} onDismiss=\{dismissBleScannerSettings\} \/>/);
+
+  // 详情 / 搜索 / 测试放在同一个 BusinessSheet 的二级页里：不连开两个原生 Modal，也不新开路由。
+  const sheet = read("src/modules/scanner/ble/BleScannerSettingsSheet.tsx");
+  assert.equal(sheet.match(/<BusinessSheet\b/g)?.length, 1, "只能有一个 BusinessSheet");
+  assert.doesNotMatch(sheet, /<Modal\b|NativeModal|router\.push|useRouter/);
+  assert.match(sheet, /onBack=\{onBack\}/);
+  // 测试页独占 BLE 码，关闭时必须还原。
+  assert.match(sheet, /setBleScanInterceptor\(\(\) => undefined\)[\s\S]{0,800}setBleScanInterceptor\(null\)/);
 });
 
 test("偏好：语言、悬浮按钮开关、按住时长滑轨；退出登录仍在首页底部", () => {

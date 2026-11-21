@@ -1,6 +1,7 @@
 const { createRunOncePlugin, withInfoPlist } = require("@expo/config-plugins");
 
-const BLUETOOTH_USAGE = "HB POS 使用蓝牙连接芯烨小票打印机和钱箱。";
+// 与 app.config.ts 及 react-native-ble-plx 插件的蓝牙用途说明保持同一句（打印机、钱箱与 BLE 扫码枪共用）。
+const BLUETOOTH_USAGE = "HB POS 使用蓝牙连接门店小票打印机、钱箱和蓝牙扫码枪。";
 
 /**
  * 本地 Expo Module 已由 autolinking 编译进 iOS；插件只声明系统权限。
