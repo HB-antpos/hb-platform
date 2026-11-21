@@ -21,6 +21,10 @@
           "MealBreak": "Missed meal break"
         }
       },
+      "deviceFlag": {
+        "shared": "Shared phone",
+        "sharedTip": "This phone has been signed in to {{count}} accounts in the last 90 days, so someone may be clocking in with a colleague's account. For review only: it also appears after a phone change or on a shared phone, so please check with the employee."
+      },
       "meal": {
         "column": "Meal & paid",
         "deduction": "Meal −{{duration}}",

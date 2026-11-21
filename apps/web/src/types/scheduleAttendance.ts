@@ -170,6 +170,11 @@ export interface AttendancePunchDto {
   punchTimeLocal?: string
   status: AttendancePunchStatus
   deviceId?: string
+  /**
+   * 共用设备标记（后端 SharedDeviceAccountCount，仅店长查看打卡列表时有值）：
+   * 这台手机在打卡前 90 天内登录过几个账号。≥2 表示可能有人登录同事账号代打卡，是复核线索而非违规结论。
+   */
+  sharedDeviceAccountCount?: number
   source?: string
   remark?: string
   locationLatitude?: number

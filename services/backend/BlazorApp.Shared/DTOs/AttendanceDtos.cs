@@ -270,6 +270,11 @@ namespace BlazorApp.Shared.DTOs
         public DateTime PunchTimeLocal { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? DeviceId { get; set; }
+        /// <summary>
+        /// 共用设备标记（仅店长查看打卡列表时计算；员工自己的视图恒为空）：这台手机在打卡前 90 天内登录过几个账号。
+        /// 2 及以上表示可能有人登录同事账号替人打卡，只是复核线索不是违规结论；空表示没有标记。
+        /// </summary>
+        public int? SharedDeviceAccountCount { get; set; }
         public double? LocationLatitude { get; set; }
         public double? LocationLongitude { get; set; }
         public double? LocationAccuracy { get; set; }

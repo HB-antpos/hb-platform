@@ -1,4 +1,5 @@
 import { apiClient } from "@/shared/api/client";
+import { DeviceStorage } from "@/modules/device/storage";
 import type { StoreUserListItem } from "@/modules/users/types";
 import {
   normalizeAttendancePunchMutationResult,
@@ -729,12 +730,28 @@ export async function cancelAvailability(availabilityGuid: string): Promise<void
   await apiClient.post(`${ATTENDANCE_BASE}/my/availability/${encodeURIComponent(availabilityGuid)}/cancel`);
 }
 
+/**
+ * 打卡时带上本机安装 ID：后端用它反查「这台手机近期登录过几个账号」，给店长复核借账号代打卡。
+ * 读取失败（钥匙串异常等）只影响这条线索，绝不能挡住员工打卡，所以吞掉错误、不带该字段。
+ */
+async function resolvePunchDeviceId(explicitDeviceId?: string): Promise<string | undefined> {
+  const explicit = explicitDeviceId?.trim();
+  if (explicit) return explicit;
+  try {
+    const installationId = (await DeviceStorage.getInstallationId())?.trim();
+    return installationId || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function punchAttendance(
   payload: AttendancePunchPayload,
 ): Promise<AttendancePunchMutationResult> {
+  const deviceId = await resolvePunchDeviceId(payload.deviceId);
   const response = await apiClient.post(
     `${ATTENDANCE_BASE}/punch`,
-    sanitizePayload({ ...payload }),
+    sanitizePayload({ ...payload, deviceId }),
   );
   return normalizeAttendancePunchMutationResult(
     response.data,

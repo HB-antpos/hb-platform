@@ -21,6 +21,10 @@
           "MealBreak": "用餐未休息"
         }
       },
+      "deviceFlag": {
+        "shared": "共用设备",
+        "sharedTip": "这台手机近 90 天内登录过 {{count}} 个账号，可能有人用同事的账号代打卡。仅供复核：换手机、共用手机也会出现，请与员工核实。"
+      },
       "meal": {
         "column": "用餐与计薪",
         "deduction": "用餐扣 {{duration}}",

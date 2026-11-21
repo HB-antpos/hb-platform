@@ -1229,7 +1229,9 @@ namespace BlazorApp.Api.Services.React
                 PunchTimeUtc = punchUtc,
                 PunchTimeLocal = punchLocal,
                 Status = status,
-                DeviceId = request.DeviceId,
+                // 设备 ID 是手机端自报的本机安装 ID（与登录审计同一个值），仅作复核线索：去空白并截到列宽，
+                // 超长值不能让整笔打卡因为「字符串被截断」落库失败。
+                DeviceId = NormalizeOptional(request.DeviceId, 100),
                 LocationLatitude = request.LocationLatitude,
                 LocationLongitude = request.LocationLongitude,
                 LocationAccuracyMeters = request.LocationAccuracy,
@@ -2294,6 +2296,16 @@ namespace BlazorApp.Api.Services.React
                 .ToListAsync();
             var result = rows.Select(item => ToDto(item)).ToList();
             await PopulatePunchEmployeeNamesAsync(result);
+            try
+            {
+                // 共用设备标记只给店长复核用：员工自己的视图（my/today 等）不走这里，也不会带标记。
+                await AttendancePunchDeviceFlagEvaluator.PopulateAsync(_db, result);
+            }
+            catch (Exception exception)
+            {
+                // 标记只是辅助线索，登录审计表查询出错时只记日志，不能让打卡列表跟着失败。
+                _logger.LogWarning(exception, "打卡共用设备标记计算失败，已忽略");
+            }
             var scheduleGuids = rows
                 .Where(item => !string.IsNullOrWhiteSpace(item.ScheduleGuid))
                 .Select(item => item.ScheduleGuid!)

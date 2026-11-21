@@ -14,6 +14,7 @@ import {
   insertAttendanceWeekday,
   buildAttendanceMealPaySummary,
   splitExceptionDuration,
+  getSharedDeviceAccountCount,
 } from './attendanceRecordLogic'
 import type { AttendanceScheduleDto } from '../../../types/scheduleAttendance'
 
@@ -366,5 +367,17 @@ assertEqual(durationText(120), '2h0m', '整 2 小时')
 assertEqual(durationText(135), '2h15m', '135 分钟 = 2 小时 15 分')
 assertEqual(durationText(59.6), '1h0m', '小数分钟先四舍五入再拆分')
 assertEqual(durationText(-5), '0h0m', '负数按 0 处理')
+
+// 共用设备标记：账号数 ≥ 2 才算；缺失 / 1 / 非数字 / 异常值都不显示。
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: 2 }), 2, '2 个账号应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: 5 }), 5, '多个账号应原样返回账号数')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: 1 }), undefined, '只有 1 个账号不应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: 0 }), undefined, '0 不应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: -3 }), undefined, '负数不应标记')
+assertEqual(getSharedDeviceAccountCount({}), undefined, '后端没返回时不应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: Number.NaN }), undefined, 'NaN 不应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: Number.POSITIVE_INFINITY }), undefined, '无穷大不应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: '3' as unknown as number }), undefined, '字符串不是有效账号数，不应标记')
+assertEqual(getSharedDeviceAccountCount({ sharedDeviceAccountCount: 2.9 }), 2, '小数向下取整')
 
 console.log('attendanceRecordLogic.test.ts: ok')
