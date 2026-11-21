@@ -42,6 +42,9 @@ const mockTranslations: Readonly<Record<string, Readonly<Record<string, string>>
       "status.network.online": "Online",
       "status.peripheral.disconnected": "Disconnected",
       "status.printer": "Printer",
+      "status.bleScanner": "BLE scanner",
+      "status.bleScanner.ready": "Connected",
+      "status.bleScanner.bluetooth-off": "Bluetooth off",
       "status.scanner": "Scanner",
       "status.scanner.inactive": "Unfocused",
       "status.storeName": "Branch name",
@@ -61,6 +64,9 @@ const mockTranslations: Readonly<Record<string, Readonly<Record<string, string>>
       "status.network.online": "在线",
       "status.peripheral.disconnected": "未连接",
       "status.printer": "打印机",
+      "status.bleScanner": "蓝牙枪",
+      "status.bleScanner.ready": "已连接",
+      "status.bleScanner.bluetooth-off": "蓝牙已关",
       "status.scanner": "扫码",
       "status.scanner.inactive": "未聚焦",
       "status.storeName": "分店名称",
@@ -307,4 +313,33 @@ test("顶栏可显示品牌名与版本号，未传时两者都不占位", async
   expect(version.props.numberOfLines).toBe(1);
   // 版本号不能把状态指示挤掉：它自己不收缩，由中间的弹性空白让位。
   expect(StyleSheet.flatten(version.props.style).flexShrink).toBe(0);
+});
+
+test("BLE 扫码枪图标：没有 BLE 服务时不显示，随连接状态切换颜色、图标与电量", async () => {
+  const screen = await render(<PosStatusStrip language="zh" />);
+  expect(screen.queryByLabelText(/^蓝牙枪:/u)).toBeNull();
+
+  await act(async () => {
+    usePosShellStore
+      .getState()
+      .setBleScanner({ state: "ready", batteryLevel: 85, attention: false });
+  });
+  expect(screen.getByLabelText("蓝牙枪: 已连接 85%")).toBeTruthy();
+  expect(screen.getByText("bluetooth-connect")).toBeTruthy();
+
+  await act(async () => {
+    usePosShellStore
+      .getState()
+      .setBleScanner({ state: "bluetooth-off", batteryLevel: null, attention: false });
+  });
+  expect(screen.getByLabelText("蓝牙枪: 蓝牙已关")).toBeTruthy();
+  expect(screen.getByText("bluetooth-off")).toBeTruthy();
+
+  // 本机不支持蓝牙：整个图标消失，而不是显示一个永远灰着的状态。
+  await act(async () => {
+    usePosShellStore
+      .getState()
+      .setBleScanner({ state: "unsupported", batteryLevel: null, attention: false });
+  });
+  expect(screen.queryByLabelText(/^蓝牙枪:/u)).toBeNull();
 });

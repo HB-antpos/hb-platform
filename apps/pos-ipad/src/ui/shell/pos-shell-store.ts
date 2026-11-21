@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import type { BleScannerIndicatorSnapshot } from "./ble-scanner-indicator";
+
 import type { DisplayStatus, PrinterStatus } from "@/core/contracts";
 import type { ScannerCaptureStatus } from "@/core/peripherals/scanner";
 
@@ -25,6 +27,8 @@ type PosShellState = {
   pendingSync: PendingSyncStatus;
   printer: PrinterStatus;
   scanner: ScannerCaptureStatus;
+  /** BLE 扫码枪连接状态；null = 本机没有 BLE 服务，顶栏不显示该图标。 */
+  bleScanner: BleScannerIndicatorSnapshot | null;
   display: DisplayStatus;
   terminalPresentation: TerminalPresentation | null;
   setConnectivity(status: ConnectivityStatus): void;
@@ -32,6 +36,7 @@ type PosShellState = {
   setPendingSync(status: PendingSyncStatus): void;
   setPrinter(status: PrinterStatus): void;
   setScanner(status: ScannerCaptureStatus): void;
+  setBleScanner(status: BleScannerIndicatorSnapshot | null): void;
   setDisplay(status: DisplayStatus): void;
   setTerminalPresentation(
     terminalPresentation: TerminalPresentation | null,
@@ -45,6 +50,7 @@ const initialStatus = {
   pendingSync: { kind: "checking" },
   printer: "disconnected",
   scanner: "inactive",
+  bleScanner: null,
   display: "disconnected",
   terminalPresentation: null,
 } as const;
@@ -64,6 +70,7 @@ export const usePosShellStore = create<PosShellState>((set) => ({
   },
   setPrinter: (printer) => set({ printer }),
   setScanner: (scanner) => set({ scanner }),
+  setBleScanner: (bleScanner) => set({ bleScanner }),
   setDisplay: (display) => set({ display }),
   setTerminalPresentation: (terminalPresentation) =>
     set({ terminalPresentation }),

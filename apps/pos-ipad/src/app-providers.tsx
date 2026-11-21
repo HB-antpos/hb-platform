@@ -25,6 +25,7 @@ import {
   saveStoredTheme,
 } from "@/ui/preferences/terminal-ui-preferences";
 import { BleScanNoticeBridge } from "@/ui/shell/ble-scan-notice-bridge";
+import { BleScannerStatusBridge } from "@/ui/shell/ble-scanner-status-bridge";
 import { NetworkStatusBridge } from "@/ui/shell/network-status-bridge";
 import { PeripheralStatusBridge } from "@/ui/shell/peripheral-status-bridge";
 import { RuntimeStatusBridge } from "@/ui/shell/runtime-status-bridge";
@@ -81,6 +82,7 @@ export function AppProviders({ children }: PropsWithChildren) {
                 <CashierSessionInvalidationBridge />
                 <NetworkStatusBridge />
                 <PeripheralStatusBridge />
+                <BleScannerStatusBridge />
                 <RuntimeStatusBridge />
                 <RuntimeWorkBridge />
                 <OperationAuthorizationModalBridge />
