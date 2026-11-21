@@ -2217,9 +2217,9 @@ test("本机历史组合只按可信终端读取，并从选中订单账本进�
   assert.ok(preview.document.lines.some(
     (line) => line.kind === "text" && line.text === "Store: Brisbane (S001)",
   ));
-  assert.ok(preview.document.lines.some(
-    (line) => line.kind === "qr" && line.value === order.orderGuid,
-  ));
+  // 对齐 WPF：不再有底部完整 GUID 的 QR / 条码。夹具订单号不是标准 GUID、截不出 8 位短码，
+  // 所以回退印完整文本（见上面的文本断言）；标准 GUID 的短码条码由 receipt-document 测试覆盖。
+  assert.equal(preview.document.lines.some((line) => line.kind === "qr" || line.kind === "barcode"), false);
 
   // 预览不需要外设；真实重打仍须重新配置并冻结有效 printerId。
   await services.receiptSettings.save({

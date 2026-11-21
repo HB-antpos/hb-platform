@@ -151,6 +151,26 @@ test("整行一分优惠按远端四舍五入单价及尾差提供本地退货",
   assert.equal(receipt?.lines[0]?.remainingAmountCents, 1999);
 });
 
+test("本地订单支持按小票短码（订单 GUID 末 8 位，大小写不敏感）查找；非 8 位十六进制、跨店、非售单均不命中", async () => {
+  const other = makeOrder({ orderGuid: "22222222-2222-4222-8222-abcdefabcdef", localSequence: 3 });
+  const foreign = makeOrder({ orderGuid: "33333333-3333-4333-8333-333333333333", localSequence: 2, storeCode: "OTHER" });
+  const repository = new FakeOrders([makeOrder(), other, foreign]);
+  const lookup = new OrderRepositoryLocalReturnLookup(repository);
+
+  // 小票条码内容是 GUID 去横杠后的末 8 位大写；断网退货扫它也要能在本机找到原单（对齐 WPF）。
+  assert.equal((await lookup.findSameStore({ storeCode: "S01", query: "11111111" }))?.originalOrderGuid, orderGuid);
+  assert.equal((await lookup.findSameStore({ storeCode: "S01", query: "efabcdef" }))?.originalOrderGuid, other.orderGuid);
+  assert.equal((await lookup.findSameStore({ storeCode: "S01", query: "EFABCDEF" }))?.originalOrderGuid, other.orderGuid);
+  assert.equal((await lookup.findSameStore({ storeCode: "S01", query: " EFABCDEF " }))?.originalOrderGuid, other.orderGuid);
+  // 不是 8 位十六进制、或只是中间段 / 别的订单的片段，一律不命中。
+  for (const query of ["1111111", "111111111", "EFABCDEG", "abcdefab", "11111112"]) {
+    assert.equal(await lookup.findSameStore({ storeCode: "S01", query }), null, query);
+  }
+  // 门店隔离仍然生效：别的门店订单的短码不能命中。
+  assert.equal(await lookup.findSameStore({ storeCode: "S01", query: "33333333" }), null);
+  assert.equal(repository.getByGuidCalls, 0, "短码不是 GUID，不走 getByGuid");
+});
+
 test("GUID 查询优先 getByGuid，非 returnable 或跨店命中均 fail closed", async () => {
   const repository = new FakeOrders([makeOrder({ storeCode: "OTHER" })]);
   const lookup = new OrderRepositoryLocalReturnLookup(repository);

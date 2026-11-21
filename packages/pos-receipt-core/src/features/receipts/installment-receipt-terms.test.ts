@@ -99,7 +99,6 @@ function goldenDocumentWithoutTerms(): EscPosDocument {
       text("Refunds within 14 days with"),
       text("proof of purchase."),
       separator(),
-      { kind: "qr", value: orderGuid },
       text(`Print Time: ${localReceiptTime("2026-08-03T03:04:05.000Z")}`),
       text("Device: POS-1"),
       text(""),
@@ -151,23 +150,23 @@ test("没有可打印内容的 termsBlock 不产生任何输出（不留空分�
   }
 });
 
-test("58mm 条款块位于退货政策之后、条码/QR/页脚之前，标题左对齐加粗、条款行左对齐", () => {
+test("58mm 条款块位于退货政策之后、打印时间/页脚之前，标题左对齐加粗、条款行左对齐", () => {
   const document = buildSaleReceiptDocument({ ...installmentSale, termsBlock: INSTALLMENT_RECEIPT_TERMS });
   const lines = document.lines;
   const titleIndex = lines.findIndex((line) => line.kind === "text" && line.text === "LAY-BY TERMS");
   const policyIndex = lines.findIndex((line) => line.kind === "text" && line.text === "Refunds and returns");
-  const qrIndex = lines.findIndex((line) => line.kind === "qr");
   const printTimeIndex = lines.findIndex((line) => line.kind === "text" && line.text.startsWith("Print Time:"));
 
   assert.ok(titleIndex > policyIndex, "条款在退货政策之后");
-  assert.ok(titleIndex < qrIndex, "条款在 QR 之前");
-  assert.ok(qrIndex < printTimeIndex);
-  // 标题前后各一条分隔线：前一条与退货政策隔开，后一条沿用原有「条码前分隔线」。
+  assert.ok(titleIndex < printTimeIndex, "条款在打印时间之前");
+  // 对齐 WPF：订单小票底部不再有完整 GUID 条码 / QR。
+  assert.equal(lines.some((line) => line.kind === "qr"), false);
+  // 标题前后各一条分隔线：前一条与退货政策隔开，后一条沿用原有的页脚前分隔线。
   assert.equal(lines[titleIndex - 1]?.kind, "separator");
   assert.deepEqual(lines[titleIndex], { kind: "text", text: "LAY-BY TERMS", align: "left", bold: true });
-  assert.equal(lines[qrIndex - 1]?.kind, "separator");
+  assert.equal(lines[printTimeIndex - 1]?.kind, "separator");
 
-  const termBodies = lines.slice(titleIndex + 1, qrIndex - 1);
+  const termBodies = lines.slice(titleIndex + 1, printTimeIndex - 1);
   assert.ok(termBodies.length > 0);
   for (const line of termBodies) {
     assert.equal(line.kind, "text");

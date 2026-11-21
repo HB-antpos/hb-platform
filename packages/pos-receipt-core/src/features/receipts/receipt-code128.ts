@@ -137,16 +137,23 @@ export function receiptCode128(value: string): ReceiptCode128Encoding {
 export function receiptCode128ModuleWidth(
   encoding: ReceiptCode128Encoding,
   paper: "58mm" | "80mm",
+  /**
+   * 首选模块宽度。订单短码条码对齐 WPF 用 3 点（更容易扫），放不下再退到通用的 2 点；
+   * 不传则只使用 2 点，其它条码的输出保持不变。
+   */
+  preferredModuleWidth: 2 | 3 = 2,
 ): number | null {
   const printableDots = paper === "58mm" ? 384 : 576;
-  const supportedModuleWidth = 2;
-  const requiredDots = (
-    encoding.moduleCount + QUIET_ZONE_MODULES
-  ) * supportedModuleWidth;
-
-  // 通用 ESC/POS 只使用可移植且可扫描的最小宽度 2；放不下时由调用方
-  // 省略一维码并保留完整二维码，禁止用单点模块生成不可靠的“伪成功”。
-  return requiredDots <= printableDots ? supportedModuleWidth : null;
+  const candidates = preferredModuleWidth === 3 ? [3, 2] : [2];
+  for (const moduleWidth of candidates) {
+    const requiredDots = (
+      encoding.moduleCount + QUIET_ZONE_MODULES
+    ) * moduleWidth;
+    // 通用 ESC/POS 最小只用可移植且可扫描的 2 点；放不下时由调用方
+    // 省略一维码，禁止用单点模块生成不可靠的“伪成功”。
+    if (requiredDots <= printableDots) return moduleWidth;
+  }
+  return null;
 }
 
 function isDigitPair(value: string, index: number): boolean {
