@@ -8,6 +8,7 @@ import {
   deriveCashDraft,
   EMPTY_SALE_CART,
   getAvailableTenderMethods,
+  getCashDueCents,
   MIN_TOUCH_TARGET,
   parseCashInput,
   SalesPresenter,
@@ -226,6 +227,23 @@ function cartWithLines(lineIds: readonly string[]): CartSnapshot {
       lookupCode: `93000000000${index + 1}`,
       displayName: `测试商品 ${index + 1}`,
     })),
+  };
+}
+
+/** 单价 9.95 的商品被折扣折到 0 元：整单合计恰好 0，但单价不是 0（有别于「0 元单价」的数据问题）。 */
+function discountedToZeroCart(): CartSnapshot {
+  const base = saleCart(995);
+  return {
+    ...base,
+    lines: [
+      {
+        ...base.lines[0]!,
+        discount: createAud(995),
+        actualAmount: createAud(0),
+      },
+    ],
+    discount: createAud(995),
+    actualAmount: createAud(0),
   };
 }
 
@@ -539,24 +557,127 @@ test("空购物车禁止进入现金结账，未接入能力不会伪造成功",
   presenter.destroy();
 });
 
-test("合计为 0 的购物车不进入结账，页面给出明确提示，改价后可继续", async () => {
-  const cart = new MemoryCartPort(saleCart(0));
+test("合计为负数的购物车不进入结账，页面给出明确提示，改价后可继续", async () => {
+  const cart = new MemoryCartPort(saleCart(-100));
   const { presenter } = createPresenter({ cart });
 
-  // 现金结账入口：此前会照常进入，付款入口才静默返回，收银员点了没有任何反馈。
+  // 付款页与现金结账都不接收负数合计；此前照常放行、到付款入口才静默返回，收银员点了没有任何反馈。
   assert.equal(await presenter.openCash(), false);
   assert.equal(presenter.getState().phase, "selling");
   assert.equal(presenter.getState().errorCode, "total-not-payable");
 
-  // 在线付款入口走同一道预备，同样被拦并提示。
-  assert.equal(await presenter.prepareOnlineCheckout(), null);
+  assert.equal(await presenter.startCheckout(), null);
   assert.equal(presenter.getState().phase, "selling");
   assert.equal(presenter.getState().errorCode, "total-not-payable");
 
-  // 收银员改价后合计大于 0，可以继续，提示随之清掉。
+  // 收银员改价后合计大于 0：交给付款页，提示随之清掉。
   cart.snapshot = saleCart(995);
-  assert.equal(await presenter.openCash(), true);
+  const route = await presenter.startCheckout();
+  assert.equal(route?.kind, "payment");
+  assert.equal(
+    route?.kind === "payment" ? route.cart.actualAmount.cents : null,
+    995,
+  );
+  assert.equal(presenter.getState().errorCode, null);
+
+  presenter.destroy();
+});
+
+test("合计恰好 0 元：结账进入零元确认弹窗而不是付款页，提交不带实收现金，成功后没有找零", async () => {
+  const cart = new MemoryCartPort(discountedToZeroCart());
+  const completeInputs: Array<{
+    checkoutIntentId: string;
+    cart: CartSnapshot;
+    cashTenderedCents: number | null;
+  }> = [];
+  const { presenter } = createPresenter({
+    cart,
+    workflow: createWorkflow(async (input) => {
+      completeInputs.push(input);
+      return {
+        completed: true,
+        canClearCart: true,
+        orderGuid: "order-zero-total",
+        cashDueCents: 0,
+        changeCents: 0,
+        postCommit: { drawerDisposition: "not-required" },
+      };
+    }),
+  });
+
+  // 付款页不接收 0 元订单：presenter 直接打开确认弹窗（现金阶段），不把购物车交给付款页。
+  const route = await presenter.startCheckout();
+  assert.deepEqual(route, { kind: "zero-total" });
   assert.equal(presenter.getState().phase, "cash");
+  assert.equal(presenter.getState().errorCode, null);
+  assert.equal(getCashDueCents(presenter.getState().cart), 0);
+
+  // 0 元订单无需输入实收现金，直接可以确认。
+  assert.equal(await presenter.submitCash(), true);
+  assert.equal(completeInputs.length, 1);
+  assert.equal(completeInputs[0]?.cashTenderedCents, null);
+  assert.equal(completeInputs[0]?.cart.actualAmount.cents, 0);
+  assert.equal(completeInputs[0]?.checkoutIntentId, "checkout-intent-1");
+
+  assert.equal(presenter.getState().phase, "success");
+  assert.equal(presenter.getState().success?.orderGuid, "order-zero-total");
+  assert.equal(presenter.getState().success?.cashDueCents, 0);
+  assert.equal(presenter.getState().success?.changeCents, 0);
+  assert.equal(
+    presenter.getState().success?.drawerDisposition,
+    "not-required",
+  );
+
+  presenter.destroy();
+});
+
+test("合计恰好 0 元但现金结账能力不可用：回到收银态并提示，不进入弹窗", async () => {
+  const { presenter } = createPresenter({
+    cart: new MemoryCartPort(discountedToZeroCart()),
+    capabilities: { ...ALL_CAPABILITIES, cashCheckout: false },
+  });
+
+  assert.equal(await presenter.startCheckout(), null);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "runtime-unavailable");
+
+  presenter.destroy();
+});
+
+test("含 0 元单价商品行的购物车不能结账（与 WPF 一致），无论合计是否为 0，改价后可继续", async () => {
+  // 整单都是 0 元单价商品：合计也是 0，但不能当零元结算卖出（多半是目录价格缺失）。
+  const cart = new MemoryCartPort(saleCart(0));
+  const { presenter } = createPresenter({ cart });
+
+  assert.equal(await presenter.startCheckout(), null);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "zero-price-item");
+
+  assert.equal(await presenter.openCash(), false);
+  assert.equal(presenter.getState().phase, "selling");
+  assert.equal(presenter.getState().errorCode, "zero-price-item");
+
+  // 正常商品 + 一行 0 元单价：合计大于 0 也拦（此前会去付款页才失败）。
+  const base = saleCart(995);
+  cart.snapshot = {
+    ...base,
+    lines: [
+      base.lines[0]!,
+      {
+        ...base.lines[0]!,
+        lineId: "line-free",
+        unitPrice: createAud(0),
+        actualAmount: createAud(0),
+      },
+    ],
+  };
+  assert.equal(await presenter.startCheckout(), null);
+  assert.equal(presenter.getState().errorCode, "zero-price-item");
+
+  // 收银员改价后可以继续，提示随之清掉。
+  cart.snapshot = saleCart(995);
+  const route = await presenter.startCheckout();
+  assert.equal(route?.kind, "payment");
   assert.equal(presenter.getState().errorCode, null);
 
   presenter.destroy();

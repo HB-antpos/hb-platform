@@ -152,6 +152,7 @@ export const salesEnglishCopy = {
   "summary.checkoutOnline": "Card / voucher",
   "summary.goToPayment": "Go to payment",
   "summary.checkoutDisabled": "Add an item to continue",
+  "summary.completeZeroTotal": "Complete $0.00 sale",
   "cash.title": "Cash payment",
   "cash.amountDue": "Amount due",
   "cash.tendered": "Cash tendered",
@@ -161,6 +162,10 @@ export const salesEnglishCopy = {
   "cash.cancel": "Back",
   "cash.confirm": "Confirm cash",
   "cash.confirming": "Saving sale…",
+  "cash.zeroTitle": "Complete $0.00 sale",
+  "cash.zeroHint":
+    "This sale totals $0.00, so no payment is needed. Confirming saves the order and prints the receipt when a printer is set up.",
+  "cash.confirmZero": "Complete sale",
   "discount.title": "Line discount",
   "discount.hint": "Choose a manager-approved quick discount.",
   "discount.amount": "Amount",
@@ -196,6 +201,7 @@ export const salesEnglishCopy = {
   "clearCart.cancel": "Keep sale",
   "success.eyebrow": "SALE COMMITTED",
   "success.title": "Cash sale saved",
+  "success.titleZero": "Sale saved",
   "success.order": "Order {{orderGuid}}",
   "success.change": "Change due",
   "success.syncOnline": "Queued for reliable backend sync.",
@@ -230,7 +236,9 @@ export const salesEnglishCopy = {
     "Enter a valid discount amount or a percent from 0 to 100.",
   "error.emptyCart": "Add an item before checkout.",
   "error.totalNotPayable":
-    "The total must be above $0.00 to check out. Adjust a price or remove the free item.",
+    "The total is negative, so this sale cannot be checked out. Check the discounts and prices.",
+  "error.zeroPriceItem":
+    "The cart contains an item priced at $0.00. Update its price or remove it before checkout.",
   "error.cashInvalid": "Enter a valid cash amount with up to two decimals.",
   "error.cashInsufficient": "Cash tendered is less than the amount due.",
   "error.cashFailed":
@@ -397,6 +405,7 @@ const salesChineseCopy = {
   "summary.checkoutOnline": "银行卡 / 礼券",
   "summary.goToPayment": "跳转支付",
   "summary.checkoutDisabled": "加入商品后继续",
+  "summary.completeZeroTotal": "完成 0 元订单",
   "cash.title": "现金付款",
   "cash.amountDue": "应收金额",
   "cash.tendered": "实收现金",
@@ -406,6 +415,10 @@ const salesChineseCopy = {
   "cash.cancel": "返回",
   "cash.confirm": "确认现金",
   "cash.confirming": "正在保存交易…",
+  "cash.zeroTitle": "完成 0 元订单",
+  "cash.zeroHint":
+    "本单合计 $0.00，无需收款。确认后直接保存订单，已配置打印机时会打印小票。",
+  "cash.confirmZero": "确认完成",
   "discount.title": "单行折扣",
   "discount.hint": "请选择已获主管授权的快捷折扣。",
   "discount.amount": "按金额",
@@ -438,6 +451,7 @@ const salesChineseCopy = {
   "clearCart.cancel": "保留交易",
   "success.eyebrow": "交易已提交",
   "success.title": "现金交易已保存",
+  "success.titleZero": "订单已保存",
   "success.order": "订单 {{orderGuid}}",
   "success.change": "应找金额",
   "success.syncOnline": "已进入可靠补传队列。",
@@ -465,7 +479,9 @@ const salesChineseCopy = {
   "error.invalidDiscount": "请输入有效折扣金额，或 0 至 100 的百分比。",
   "error.emptyCart": "请先加入商品再结账。",
   "error.totalNotPayable":
-    "合计须大于 $0.00 才能结账，请调整价格或删除 0 元商品。",
+    "合计为负数，无法结账。请检查折扣与价格。",
+  "error.zeroPriceItem":
+    "购物车里有单价为 $0.00 的商品，请先改价或删除后再结账。",
   "error.cashInvalid": "请输入最多两位小数的有效现金金额。",
   "error.cashInsufficient": "实收现金少于应收金额。",
   "error.cashFailed": "交易未确认，请核对错误后再试。",

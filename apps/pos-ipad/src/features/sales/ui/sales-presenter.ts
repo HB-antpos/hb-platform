@@ -29,6 +29,11 @@ export type SalesUiPhase =
 
 export type SalesSearchStatus = "idle" | "searching" | "ready";
 
+/** 收银页「结账」的去向：合计大于 0 进付款页；合计恰好 0 元走零元结账（presenter 已打开确认弹窗）。 */
+export type SalesCheckoutRoute =
+  | Readonly<{ kind: "payment"; cart: CartSnapshot }>
+  | Readonly<{ kind: "zero-total" }>;
+
 export type SalesErrorCode =
   | "search-required"
   | "search-failed"
@@ -42,8 +47,10 @@ export type SalesErrorCode =
   | "price-too-high"
   | "invalid-discount"
   | "empty-cart"
-  /** 购物车合计不大于 0：无法进入付款，提示改价或删除 0 元商品。 */
+  /** 购物车合计为负数：付款页与现金结账都不接收，提示检查折扣与价格。合计恰好为 0 元走零元结账，不在此列。 */
   | "total-not-payable"
+  /** 购物车含 0 元单价的商品行：与 WPF 一致，改价或删除后才能结账（折扣折到 0 的行不算）。 */
+  | "zero-price-item"
   | "cash-invalid"
   | "cash-insufficient"
   | "cash-failed"
@@ -1003,6 +1010,41 @@ export class SalesPresenter {
       return false;
     }
 
+    this.enterCashPhase(cart);
+    return true;
+  }
+
+  /**
+   * 收银页「结账」入口：先做结账预备，再按合计决定去向。
+   * - 合计大于 0：交给调用方进入付款页（kind = "payment"）。
+   * - 合计恰好 0 元（整单折扣 / 改价后无款可收）：付款页不接收 0 元订单，
+   *   改走现金结账服务的零元单路径（无款项、不开钱箱，只保存订单并按设置打印），
+   *   这里直接进入确认弹窗（kind = "zero-total"），由收银员确认后提交。
+   * 结账预备失败（购物车为空 / 合计为负 / 待选未处理等）返回 null，错误码已写入状态。
+   */
+  public async startCheckout(): Promise<SalesCheckoutRoute | null> {
+    const cart = await this.prepareCheckout();
+    if (!cart) {
+      return null;
+    }
+    if (cart.actualAmount.cents !== 0) {
+      return { kind: "payment", cart };
+    }
+    if (!this.dependencies.capabilities.cashCheckout) {
+      this.releasePreparedCheckout();
+      this.patchState({ errorCode: "runtime-unavailable" });
+      return null;
+    }
+    this.enterCashPhase(cart);
+    return { kind: "zero-total" };
+  }
+
+  public prepareOnlineCheckout(): Promise<CartSnapshot | null> {
+    return this.prepareCheckout();
+  }
+
+  /** 进入现金确认阶段：生成本次结账的幂等意图，清掉上一次的输入与成功态。 */
+  private enterCashPhase(cart: CartSnapshot): void {
     this.cashIntentId = this.dependencies.createCheckoutIntentId();
     this.patchState({
       cart,
@@ -1011,11 +1053,6 @@ export class SalesPresenter {
       errorCode: null,
       success: null,
     });
-    return true;
-  }
-
-  public prepareOnlineCheckout(): Promise<CartSnapshot | null> {
-    return this.prepareCheckout();
   }
 
   public releasePreparedCheckout(): void {
@@ -1338,19 +1375,17 @@ export class SalesPresenter {
           });
           return null;
         }
-        // 合计不大于 0（整单 0 元 / 负数）的购物车付款页与现金结账都会拒收；
-        // 此前这里照常放行、到付款入口才静默返回，收银员点了「结账」毫无反馈。
-        // 在收银页明确提示，让收银员改价或删除 0 元商品。
-        if (cart.actualAmount.cents <= 0) {
-          this.releasePreparedCheckout();
-          this.patchState({
-            phase: "selling",
-            cart,
-            pendingLookupCount:
-              this.dependencies.workflow.getPendingCatalogWorkCount(),
-            errorCode: "total-not-payable",
-          });
-          return null;
+        // 与 WPF（HasZeroPriceLine → cart.status.zeroPriceItem）同口径：含 0 元单价商品行的购物车不能结账。
+        // 单价为 0 通常是目录价格缺失 / 被写成 0 的数据问题，不能静默 0 元卖出；
+        // 单价大于 0、靠折扣折到 0 的行不受影响（零元结账只给这类整单）。
+        if (cart.lines.some((line) => line.unitPrice.cents === 0)) {
+          return this.rejectPreparedCheckout(cart, "zero-price-item");
+        }
+        // 合计为负数的购物车付款页与现金结账都会拒收；此前这里照常放行、到付款入口才静默返回，
+        // 收银员点了「结账」毫无反馈。在收银页明确提示，让收银员检查折扣与价格。
+        // 合计恰好 0 元不在此拦：它有零元结账路径（见 startCheckout），由调用方按合计分流。
+        if (cart.actualAmount.cents < 0) {
+          return this.rejectPreparedCheckout(cart, "total-not-payable");
         }
         this.patchState({
           cart,
@@ -1366,6 +1401,22 @@ export class SalesPresenter {
       });
     this.checkoutPreparation = preparation;
     return preparation;
+  }
+
+  /** 结账预备被业务规则拒绝：释放预备、回到收银态并给出明确提示。 */
+  private rejectPreparedCheckout(
+    cart: CartSnapshot,
+    errorCode: SalesErrorCode,
+  ): null {
+    this.releasePreparedCheckout();
+    this.patchState({
+      phase: "selling",
+      cart,
+      pendingLookupCount:
+        this.dependencies.workflow.getPendingCatalogWorkCount(),
+      errorCode,
+    });
+    return null;
   }
 
   private canMutateNewTransaction(): boolean {
