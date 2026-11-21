@@ -15,6 +15,10 @@ import {
   roundCashAmount,
   type MergeCompatibleCartLinesResult,
 } from "@/features/sales/domain";
+import {
+  beginOpenItemTiming,
+  finishOpenItemTiming,
+} from "@/features/sales/runtime/open-item-timing";
 import { scanTiming } from "@/features/sales/runtime/scan-timing";
 
 export const MIN_TOUCH_TARGET = 44;
@@ -772,9 +776,20 @@ export class SalesPresenter {
       this.publishBlockedAddAttempt("manual");
       return Promise.resolve(false);
     }
-    return this.runManualProductAdd(() =>
-      this.dependencies.workflow.addOpenItem(unitPriceCents),
-    );
+    // 分段计时（诊断旁路）：从工作流开始计，到结果合并进 presenter 状态（弹窗随后关闭）结束。
+    // runManualProductAdd 会忽略在途期间的重复点击；只有真正启动了加购的这一次才允许 finish，
+    // 否则被忽略的重复点击会误结束正在计时的那一次。
+    let timed = false;
+    return this.runManualProductAdd(() => {
+      timed = true;
+      beginOpenItemTiming();
+      return this.dependencies.workflow.addOpenItem(unitPriceCents);
+    }).then((added) => {
+      if (timed) {
+        finishOpenItemTiming(added ? "success" : "failure", this.state.errorCode);
+      }
+      return added;
+    });
   }
 
   public increaseLine(lineId: string): Promise<boolean> {

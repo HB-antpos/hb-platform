@@ -18,6 +18,7 @@ import {
 import { AppUpdateGateBridge } from "@/features/app-updates";
 import { CashierSessionInvalidationBridge } from "@/features/cashier-login";
 import { OperationAuthorizationModal } from "@/features/operation-authorization/operation-authorization-modal";
+import { setOpenItemTimingSink } from "@/features/sales/runtime/open-item-timing";
 import { PosSoundProvider } from "@/ui/feedback/pos-sound-provider";
 import {
   readStoredTheme,
@@ -105,6 +106,20 @@ function ApplicationErrorObservationBridge({ children }: PropsWithChildren) {
 
   useEffect(
     () => installApplicationErrorObserver(() => applicationLogRef.current),
+    [],
+  );
+
+  // 「加入无码商品」分段计时 → 程序日志（诊断旁路，只含毫秒数与固定错误码，经中心日志上传）。
+  useEffect(
+    () =>
+      setOpenItemTimingSink((report) => {
+        applicationLogRef.current?.record({
+          level: "Information",
+          message: "iPad 手点加入无码商品耗时",
+          category: "pos.open-item-timing",
+          properties: { ...report },
+        });
+      }),
     [],
   );
 

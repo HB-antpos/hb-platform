@@ -10,6 +10,12 @@ import type {
 } from "@/features/catalog/catalog-lookup-revalidation";
 import { PricingCart } from "@/features/sales/domain";
 import { ActivePricingCartSession } from "@/features/sales/runtime/active-pricing-cart-session";
+import {
+  beginOpenItemTiming,
+  finishOpenItemTiming,
+  setOpenItemTimingSink,
+  type OpenItemTimingReport,
+} from "@/features/sales/runtime/open-item-timing";
 
 const CATALOG_ITEM: LocalCatalogMatch = {
   storeCode: "STORE-1",
@@ -112,6 +118,41 @@ test("商品搜索和扫码加入分别请求 Sales.View 与 Sales.AddItem，加
       actualDeltaCents: 500,
     },
   ]);
+});
+
+test("无码商品分段计时：真实工作流依次打出 授权 / 目录 / 购物车 / 审计 四个点，价格非法时不会留下计时残留", async () => {
+  const reports: OpenItemTimingReport[] = [];
+  const release = setOpenItemTimingSink((report) => reports.push(report));
+  try {
+    const harness = connected();
+
+    beginOpenItemTiming();
+    await harness.dependencies.workflow.addOpenItem(1_234);
+    finishOpenItemTiming("success");
+
+    assert.equal(reports.length, 1);
+    const [report] = reports;
+    assert.equal(report?.outcome, "success");
+    // 四段都必须有值（而不是 null）：说明 authorized → catalog → cart → audited 全部按序触发。
+    for (const phase of [
+      report?.authorizeMs,
+      report?.catalogMs,
+      report?.cartMs,
+      report?.auditMs,
+    ]) {
+      assert.equal(typeof phase, "number");
+    }
+
+    // 价格非法在进入授权回调之前就抛错：只有授权前失败，后三段为 null。
+    beginOpenItemTiming();
+    await assert.rejects(() => harness.dependencies.workflow.addOpenItem(0));
+    finishOpenItemTiming("failure", "cart-mutation-rejected");
+    assert.equal(reports[1]?.outcome, "failure");
+    assert.equal(reports[1]?.authorizeMs, null);
+    assert.equal(reports[1]?.catalogMs, null);
+  } finally {
+    release();
+  }
 });
 
 test("无码商品使用本地唯一 OPENITEM、正整数分币价格和 AddOpenItem 权限，且每次建立独立行", async () => {

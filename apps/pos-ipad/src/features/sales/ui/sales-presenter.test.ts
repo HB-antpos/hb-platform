@@ -28,6 +28,11 @@ import {
   type CartLine,
   type CartSnapshot,
 } from "@/core/contracts";
+import {
+  markOpenItemTiming,
+  setOpenItemTimingSink,
+  type OpenItemTimingReport,
+} from "@/features/sales/runtime/open-item-timing";
 
 const ALL_CAPABILITIES: SalesCapabilities = {
   catalog: true,
@@ -1979,4 +1984,82 @@ test("清空购物车与页面销毁放弃全部待选并逐条记日志；锁�
       ["abandoned", "page-destroyed"],
     ],
   );
+});
+
+test("手点加入无码商品：成功时上报一次分段计时，重复点击被忽略时不会误结束在途计时", async () => {
+  const reports: OpenItemTimingReport[] = [];
+  const release = setOpenItemTimingSink((report) => reports.push(report));
+  const releaseWorkflow: (() => void)[] = [];
+  try {
+    const { presenter } = createPresenter({
+      workflow: {
+        ...createWorkflow(async () => ({
+          completed: true,
+          canClearCart: true,
+          orderGuid: "order-open-item-timing",
+          cashDueCents: 995,
+          changeCents: 5,
+          postCommit: { drawerDisposition: "queued" },
+        })),
+        async addOpenItem() {
+          // 真实工作流在授权 / 目录查询 / 购物车写入时打点；这里只打授权点，验证 presenter 的开始与结束。
+          markOpenItemTiming("authorized");
+          await new Promise<void>((resolve) => {
+            releaseWorkflow.push(resolve);
+          });
+        },
+      },
+    });
+
+    const first = presenter.addOpenItem(300);
+    // 在途期间的重复点击会被忽略，且不能提前上报或结束第一次的计时。
+    assert.equal(await presenter.addOpenItem(300), false);
+    assert.equal(reports.length, 0);
+
+    for (const resolve of releaseWorkflow) resolve();
+    assert.equal(await first, true);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]?.outcome, "success");
+    assert.equal(reports[0]?.errorCode, null);
+    assert.notEqual(reports[0]?.authorizeMs, null);
+    // 授权后没有再打后续点：目录 / 购物车 / 审计记 null，而不是 0。
+    assert.equal(reports[0]?.catalogMs, null);
+    presenter.destroy();
+  } finally {
+    release();
+  }
+});
+
+test("手点加入无码商品失败时上报 failure 与 presenter 错误码；校验失败不进工作流也不上报", async () => {
+  const reports: OpenItemTimingReport[] = [];
+  const release = setOpenItemTimingSink((report) => reports.push(report));
+  try {
+    const { presenter } = createPresenter({
+      workflow: {
+        ...createWorkflow(async () => ({
+          completed: true,
+          canClearCart: true,
+          orderGuid: "order-open-item-timing-fail",
+          cashDueCents: 995,
+          changeCents: 5,
+          postCommit: { drawerDisposition: "queued" },
+        })),
+        async addOpenItem() {
+          throw new Error("catalog unavailable");
+        },
+      },
+    });
+
+    // 价格非法在进工作流之前就被拒，不属于这条链路的耗时。
+    assert.equal(await presenter.addOpenItem(0), false);
+    assert.equal(reports.length, 0);
+
+    assert.equal(await presenter.addOpenItem(500), false);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0]?.outcome, "failure");
+    assert.equal(reports[0]?.errorCode, "product-add-failed");
+    presenter.destroy();
+  } finally {
+    release();
+  }
 });
