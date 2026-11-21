@@ -346,7 +346,7 @@ test("真实 SQLite：人工来源绑定和 case scope 不可篡改，tender 金
   });
 });
 
-test("真实 SQLite：人工金额不足时只进入 Completing，召回 draft 或终端 fence 一律拒绝", async () => {
+test("真实 SQLite：人工金额不足时只进入 Completing，结构不完整的取单绑定仍一律拒绝（完整取单绑定的收尾见 sqlite-manual-payment-recall.integration.test.ts）", async () => {
   await withDatabase(async (connection) => {
     await seedRecovery(connection, { amountCents: 400 });
     const committer = new SqliteManualPaymentOrderCommitter(connection, () => T1);

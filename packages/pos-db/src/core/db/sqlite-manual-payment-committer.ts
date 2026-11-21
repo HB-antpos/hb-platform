@@ -7,7 +7,43 @@ import type {
   ApprovedPaymentOrderCommitResult,
   AuditEventDraft,
   OutboxMessageDraft,
+  RecalledHoldCompletion,
 } from "@hb/pos-domain/core/contracts/order";
+import type { RecallActiveBinding } from "@hb/pos-domain/core/contracts/terminal-cart";
+
+/**
+ * 取单订单的人工已收款收尾所需的「盖章」：取单审计事件号、完成时刻和操作人。
+ * 取单绑定本身不由调用方给，而是从草稿指纹里读（恢复中心场景下活动购物车可能早已不在）。
+ */
+export type ManualPaymentRecallStamp = Readonly<{
+  eventId: string;
+  recalledAtIso: string;
+  actor: AuditActorSnapshot;
+}>;
+
+/**
+ * 取单收尾的写库逻辑（取单围栏、挂单记录、共享挂单 claim、订单来源）在各 App 的数据库层，共享包不能依赖它们，
+ * 所以由 App 注入；与卡通道最后一笔 tender 的取单收尾（SqliteApprovedPaymentOrderCommitter）是同一套。
+ */
+export interface ManualPaymentRecallPort {
+  /**
+   * 写 tender 之前调用：按取单绑定与盖章生成取单收尾，并校验取单围栏 / 挂单仍与绑定一致。
+   * 不一致就抛错，整个事务回滚，案件保持 manual-paid、可重试。
+   */
+  prepare(
+    transaction: SqliteConnectionPort,
+    input: Readonly<{
+      binding: RecallActiveBinding;
+      orderGuid: string;
+      stamp: ManualPaymentRecallStamp;
+    }>,
+  ): Promise<RecalledHoldCompletion>;
+  /** 订单、tender、审计、outbox 都已写入之后调用：绑定围栏、写订单来源 / 完成共享 claim、挂单置 Recalled、写取单审计、删除围栏。 */
+  complete(
+    transaction: SqliteConnectionPort,
+    input: Readonly<{ orderGuid: string; completion: RecalledHoldCompletion }>,
+  ): Promise<void>;
+}
 
 export type ManualPaymentOrderCommit = Readonly<{
   recordId: string;
@@ -20,6 +56,8 @@ export type ManualPaymentOrderCommit = Readonly<{
   tenderGuid: string;
   completionAuditEvent: AuditEventDraft;
   outbox: OutboxMessageDraft;
+  /** 订单若是取单订单（草稿指纹带取单绑定），最后一笔人工已收款必须同事务完成取单；没带盖章时按取单订单提交会 fail-closed。 */
+  recallStamp?: ManualPaymentRecallStamp;
 }>;
 
 type ManualPaymentTruthRow = Readonly<{
@@ -87,6 +125,8 @@ export class SqliteManualPaymentOrderCommitter {
   public constructor(
     private readonly connection: SqliteConnectionPort,
     private readonly nowIso: () => string,
+    /** 未注入时取单订单一律 fail-closed（MANUAL_PAYMENT_RECALL_UNSUPPORTED）。 */
+    private readonly recallPort?: ManualPaymentRecallPort,
   ) {}
 
   public completeManualPaymentOrder(
@@ -201,13 +241,24 @@ export class SqliteManualPaymentOrderCommitter {
     }
 
     assertNewCommitState(truth);
-    assertNoRecallBinding(truth.request_fingerprint);
-    const boundFence = await transaction.getFirst<{ kind: unknown }>(
-      `SELECT kind FROM terminal_cart_fences
-       WHERE store_code = ? AND device_code = ? AND bound_order_guid = ?`,
-      [input.storeCode, input.deviceCode, input.orderGuid],
-    );
-    if (boundFence) throw new Error("MANUAL_PAYMENT_RECALL_UNSUPPORTED");
+    const recallBinding = decodeRecallBinding(truth.request_fingerprint);
+    const recallPort = this.recallPort;
+    if (recallBinding === null) {
+      // 普通订单：本机不能有绑定到该订单的取单围栏（原有防线，保持不变）。
+      const boundFence = await transaction.getFirst<{ kind: unknown }>(
+        `SELECT kind FROM terminal_cart_fences
+         WHERE store_code = ? AND device_code = ? AND bound_order_guid = ?`,
+        [input.storeCode, input.deviceCode, input.orderGuid],
+      );
+      if (boundFence) throw new Error("MANUAL_PAYMENT_RECALL_UNSUPPORTED");
+    } else if (
+      !recallPort ||
+      recallBinding.scope.storeCode !== input.storeCode ||
+      recallBinding.scope.deviceCode !== input.deviceCode
+    ) {
+      // 取单订单：必须接入了取单收尾，且取单绑定属于本订单所在的门店 / 终端；否则 fail-closed。
+      throw new Error("MANUAL_PAYMENT_RECALL_UNSUPPORTED");
+    }
 
     const total = await transaction.getFirst<{ tender_total: unknown }>(
       "SELECT COALESCE(SUM(amount_cents), 0) AS tender_total FROM order_tenders WHERE order_guid = ?",
@@ -221,7 +272,24 @@ export class SqliteManualPaymentOrderCommitter {
       throw new Error("MANUAL_PAYMENT_WOULD_OVERPAY");
     }
     const completed = completedAmountCents === orderAmountCents;
-    if (completed) assertCompletion(input);
+    let recalledHold: RecalledHoldCompletion | null = null;
+    if (completed) {
+      assertCompletion(input);
+      if (recallBinding !== null && recallPort) {
+        // 取单订单的最后一笔人工已收款：取单收尾与订单完成必须在同一事务内（与卡通道同口径）。
+        // 部分付款不动取单围栏与挂单，等最后一笔再收尾。
+        const stamp = input.recallStamp;
+        if (!stamp) throw new Error("MANUAL_PAYMENT_RECALL_STAMP_REQUIRED");
+        strictText(stamp.eventId, "manual recall audit event id", 128);
+        canonicalIso(stamp.recalledAtIso, "manual recall time");
+        // 写 tender 之前先校验围栏 / 挂单仍与取单绑定一致；不一致整事务回滚，案件保持 manual-paid 可重试。
+        recalledHold = await recallPort.prepare(transaction, {
+          binding: recallBinding,
+          orderGuid: input.orderGuid,
+          stamp,
+        });
+      }
+    }
 
     const currentOrderState = text(truth.order_state, "manual payment order state");
     const now = canonicalIso(this.nowIso(), "manual payment commit time");
@@ -255,6 +323,13 @@ export class SqliteManualPaymentOrderCommitter {
         [input.outbox.messageId, input.orderGuid, input.outbox.payloadJson,
           input.outbox.nextAttemptAtIso, now, now],
       );
+      if (recalledHold !== null && recallPort) {
+        // 订单与 tender 都已写入后再收尾：绑定围栏、写订单来源 / 完成共享 claim、挂单置 Recalled、写取单审计、删除围栏。
+        await recallPort.complete(transaction, {
+          orderGuid: input.orderGuid,
+          completion: recalledHold,
+        });
+      }
     }
     return {
       replayed: false,
@@ -375,7 +450,11 @@ function parseActor(value: unknown, code: string): AuditActorSnapshot {
   throw new Error(code);
 }
 
-function assertNoRecallBinding(value: unknown): void {
+/**
+ * 读草稿指纹里的取单绑定：没有取单绑定返回 null。结构不完整的绑定一律按 MANUAL_PAYMENT_RECALL_UNSUPPORTED
+ * fail-closed，不去猜，也不让半截绑定走到取单收尾。
+ */
+function decodeRecallBinding(value: unknown): RecallActiveBinding | null {
   let decoded: unknown;
   try {
     decoded = JSON.parse(text(value, "manual draft fingerprint"));
@@ -385,10 +464,36 @@ function assertNoRecallBinding(value: unknown): void {
   if (!decoded || typeof decoded !== "object" || (decoded as { version?: unknown }).version !== 2) {
     throw new Error("MANUAL_PAYMENT_DRAFT_FINGERPRINT_INVALID");
   }
-  if ((decoded as { recallBinding?: unknown }).recallBinding !== null &&
-      (decoded as { recallBinding?: unknown }).recallBinding !== undefined) {
+  const raw = (decoded as { recallBinding?: unknown }).recallBinding;
+  if (raw === null || raw === undefined) return null;
+  const binding = raw as {
+    kind?: unknown;
+    scope?: { storeCode?: unknown; deviceCode?: unknown } | null;
+    holdId?: unknown;
+    recallAttemptId?: unknown;
+  };
+  if (
+    typeof raw !== "object" || Array.isArray(raw) ||
+    binding.kind !== "recalled" ||
+    !binding.scope || typeof binding.scope !== "object" ||
+    !isIdentifier(binding.scope.storeCode) || !isIdentifier(binding.scope.deviceCode) ||
+    !isIdentifier(binding.holdId) || !isIdentifier(binding.recallAttemptId)
+  ) {
     throw new Error("MANUAL_PAYMENT_RECALL_UNSUPPORTED");
   }
+  return Object.freeze({
+    kind: "recalled",
+    scope: Object.freeze({
+      storeCode: binding.scope.storeCode,
+      deviceCode: binding.scope.deviceCode,
+    }),
+    holdId: binding.holdId,
+    recallAttemptId: binding.recallAttemptId,
+  });
+}
+
+function isIdentifier(value: unknown): value is string {
+  return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 128;
 }
 
 function assertCompletion(input: ManualPaymentOrderCommit): void {
