@@ -946,13 +946,25 @@ function assertSafeObject(value: unknown, label: string): void {
   if (serialized.length > 1_048_576) {
     throw new TypeError(`${label} is too large.`);
   }
-  if (
-    /authorization|reservationtoken|vouchercode|access[_-]?token|refresh[_-]?token|cardnumber|pan\b|hardware[_-]?id/i.test(
-      serialized,
-    )
-  ) {
+  // 只按字段名拦截受保护支付数据。旧实现对整段 JSON（含值）做子串匹配，
+  // 收银员姓名等普通值（如 "Sean Pan" 命中 pan\b）会被误判，导致最后一笔现金
+  // 无法提交、订单进入恢复中心（MIXED_CASH_COMMIT_FAILED）。
+  if (hasProtectedPaymentKey(value)) {
     throw new TypeError(`${label} contains protected payment data.`);
   }
+}
+
+const PROTECTED_PAYMENT_KEY =
+  /authorization|reservationtoken|vouchercode|access[_-]?token|refresh[_-]?token|cardnumber|pan\b|hardware[_-]?id/i;
+
+/** 递归检查对象 / 数组中是否出现受保护支付字段名；值本身不参与匹配。 */
+function hasProtectedPaymentKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasProtectedPaymentKey);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(
+    ([key, child]) =>
+      PROTECTED_PAYMENT_KEY.test(key) || hasProtectedPaymentKey(child),
+  );
 }
 
 function normalizedActor(actor: AuditActorSnapshot): AuditActorSnapshot {

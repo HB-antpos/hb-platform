@@ -6469,6 +6469,86 @@ test("真实 SQLite：最终现金 round-down 保留订单入账并持久化规�
   });
 });
 
+test("真实 SQLite：最终现金审计载荷里收银员姓名以 Pan 结尾不再被误判为卡号，受保护字段名仍被拒绝", async () => {
+  await withDatabase("mixed-cash-cashier-name-pan", async (connection) => {
+    await migrateFresh(connection);
+    for (const orderGuid of ["order-cashier-surname", "order-protected-key"]) {
+      await insertOrder(connection, {
+        orderGuid,
+        sequence: orderGuid === "order-cashier-surname" ? 1 : 2,
+        storeCode: "S-MIX",
+        deviceCode: "D-MIX",
+        cashierId: "C-MIX",
+        amountCents: 500,
+        state: "Draft",
+        syncProvenance: TEST_SYNC_PROVENANCE,
+      });
+    }
+    // 生产 planner 会把收银员姓名写进完成审计载荷（requestingCashierName）。
+    const actor = {
+      cashierId: "cashier-pan",
+      cashierName: "Sean Pan",
+      userGuid: "user-guid-pan",
+    } as const;
+    let extraPayload: Record<string, unknown> = {};
+    const ids = sequenceIds("name-pan-tender", "name-pan-audit");
+    const store = new SqliteMixedPaymentTenderStore(
+      connection,
+      {
+        createTenderGuid: ids.createOrderGuid,
+        createAuditEventId: ids.createAuditEventId,
+      },
+      () => T1,
+      {
+        planner: {
+          async planFinalCash(input) {
+            const plan = completionPlan(input.orderGuid, input.orderGuid);
+            return {
+              ...plan,
+              completionAuditEvents: plan.completionAuditEvents.map((event) => ({
+                ...event,
+                payload: {
+                  ...event.payload,
+                  requestingCashierId: actor.cashierId,
+                  requestingCashierName: actor.cashierName,
+                  requestingUserGuid: actor.userGuid,
+                  ...extraPayload,
+                },
+              })),
+            };
+          },
+        },
+        encryptor,
+      },
+    );
+
+    const result = await store.appendCashTenderAtomically({
+      actionId: "name-pan-action",
+      orderGuid: "order-cashier-surname",
+      actor,
+      amount: { currency: "AUD", cents: 500 },
+      tenderedAmount: { currency: "AUD", cents: 500 },
+      change: { currency: "AUD", cents: 0 },
+    });
+    assert.equal(result.replayed, false);
+    assert.equal(result.truth.state, "PendingSync");
+
+    // 防泄露检查仍然有效：载荷里出现受保护字段名（含嵌套）必须整体拒绝。
+    extraPayload = { provider: { pan: "4111111111111111" } };
+    await assert.rejects(
+      () => store.appendCashTenderAtomically({
+        actionId: "protected-key-action",
+        orderGuid: "order-protected-key",
+        actor,
+        amount: { currency: "AUD", cents: 500 },
+        tenderedAmount: { currency: "AUD", cents: 500 },
+        change: { currency: "AUD", cents: 0 },
+      }),
+      /contains protected payment data/,
+    );
+  });
+});
+
 test("真实 SQLite：最终现金 round-up 与 1/2 分零实收均保持完整入账", async () => {
   await withDatabase("mixed-cash-rounding-boundaries", async (connection) => {
     await migrateFresh(connection);
