@@ -11,6 +11,11 @@
  * - 任何异常（含 sink）都在这里吞掉，诊断旁路不能改变加购结果。
  */
 
+import {
+  beginNativeCallTrace,
+  endNativeCallTrace,
+} from "@/core/performance/native-call-trace";
+
 export type OpenItemTimingPhase = "authorized" | "catalog" | "cart" | "audited";
 
 export type OpenItemTimingReport = Readonly<{
@@ -28,6 +33,11 @@ export type OpenItemTimingReport = Readonly<{
   /** 工作流返回 → presenter 把结果合并进状态（弹窗此时才会关闭）。 */
   presenterMs: number | null;
   totalMs: number;
+  /**
+   * 计时期间每次原生 SQLite 调用的时间线（`类型:动词:表名@起点偏移ms+时长ms`，以 " | " 分隔）。
+   * 调用时长是纯原生执行；相邻调用之间的空隙是排队或 JS 线程忙。无调用时为 null。
+   */
+  nativeCalls: string | null;
 }>;
 
 export type OpenItemTimingSink = (report: OpenItemTimingReport) => void;
@@ -50,6 +60,7 @@ export function setOpenItemTimingSink(next: OpenItemTimingSink | null): () => vo
 
 export function beginOpenItemTiming(now: () => number = monotonicNow): void {
   active = { startedAt: now(), marks: {} };
+  beginNativeCallTrace(now);
 }
 
 export function markOpenItemTiming(
@@ -68,6 +79,7 @@ export function finishOpenItemTiming(
   const timing = active;
   active = null;
   if (!timing) return;
+  const nativeCalls = endNativeCallTrace();
   try {
     const finishedAt = now();
     const { authorized, catalog, cart, audited } = timing.marks;
@@ -83,6 +95,7 @@ export function finishOpenItemTiming(
       auditMs: span(cart, audited),
       presenterMs: span(audited, finishedAt),
       totalMs: round(finishedAt - timing.startedAt),
+      nativeCalls,
     });
   } catch {
     // 诊断旁路失败不能反向影响加购。

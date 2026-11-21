@@ -9,6 +9,11 @@ import {
   type OpenItemTimingReport,
 } from "./open-item-timing";
 
+import {
+  isNativeCallTracing,
+  recordNativeCall,
+} from "@/core/performance/native-call-trace";
+
 /** 可手动推进的假时钟：每次 tick 返回当前值，测试里按需 set。 */
 function clock(start = 1_000) {
   let value = start;
@@ -60,6 +65,7 @@ test("各阶段差值分别归入授权 / 目录 / 购物车 / 审计 / presente
       auditMs: 300,
       presenterMs: 25,
       totalMs: 480,
+      nativeCalls: null,
     },
   ]);
 });
@@ -85,6 +91,7 @@ test("没跑到的阶段记 null，不把「没执行」误报成 0ms；失败�
       auditMs: null,
       presenterMs: null,
       totalMs: 95,
+      nativeCalls: null,
     },
   ]);
 });
@@ -132,4 +139,26 @@ test("sink 抛错不外溢，诊断旁路不能影响加购；注销只在 sink 
   beginOpenItemTiming(time.now);
   finishOpenItemTiming("success", null, time.now);
   assert.equal(reports.length, 1);
+});
+
+test("计时期间的原生 SQLite 调用时间线随报告输出，结束后追踪关闭、下一次从零开始", () => {
+  const reports = collect();
+  const time = clock(0);
+
+  beginOpenItemTiming(time.now);
+  recordNativeCall("getFirst", "SELECT 1 FROM catalog_items", 10, 220);
+  recordNativeCall("run", "INSERT INTO audit_events VALUES (?)", 230, 440);
+  time.set(450);
+  finishOpenItemTiming("success", null, time.now);
+
+  assert.equal(
+    reports[0]?.nativeCalls,
+    "getFirst:SELECT:catalog_items@10+210 | run:INSERT:audit_events@230+210",
+  );
+  assert.equal(isNativeCallTracing(), false);
+
+  // 下一次手点从零开始：上一次的调用不会串进来；没有调用时为 null。
+  beginOpenItemTiming(time.now);
+  finishOpenItemTiming("success", null, time.now);
+  assert.equal(reports[1]?.nativeCalls, null);
 });
