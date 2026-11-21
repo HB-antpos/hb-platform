@@ -40,7 +40,10 @@ class FakeTransport implements BleScannerTransport {
   monitors = new Map<string, (bytes: Uint8Array) => void>();
   battery = 70;
 
+  /** 可替换：模拟 getState() 比状态事件晚返回的真机时序。 */
+  getStateImpl: (() => Promise<BleAdapterState>) | null = null;
   async getState() {
+    if (this.getStateImpl) return this.getStateImpl();
     return this.state;
   }
   onStateChange(listener: (state: BleAdapterState) => void) {
@@ -295,6 +298,111 @@ async function main(): Promise<void> {
   await transport.wake();
   await flush();
   assert.equal(controller.getStatus().state, "ready");
+  controller.dispose();
+}
+
+// 9. 真机回归（2026-11-21 iPad Pro）：状态事件 on 先到、getState() 的 unknown 后到，
+//    不能被旧值覆盖成「蓝牙未就绪」，否则已保存的扫码枪永远不重连。
+{
+  const clock = { now: 0 };
+  const transport = new FakeTransport();
+  const storage = new MemoryStorage();
+  storage.value = Object.freeze({
+    version: 1,
+    peripheralId: SCANNER_ID,
+    name: "BarCode Scanner BLE",
+    alias: null,
+    profileId: "yichip-feea",
+    serviceUuid: normalizeBleUuid("FEEA"),
+    notifyUuid: normalizeBleUuid("2AA1"),
+    autoReconnect: true,
+    savedAt: "2026-11-21T00:00:00.000Z",
+  });
+  let resolveState: (state: BleAdapterState) => void = () => undefined;
+  transport.getStateImpl = () =>
+    new Promise<BleAdapterState>((resolve) => {
+      resolveState = resolve;
+    });
+  const { controller } = createController(transport, storage, clock);
+  const starting = controller.start();
+  await flush();
+  transport.setState("on"); // 事件先到
+  resolveState("unknown"); // 旧值后到
+  await starting;
+  await flush();
+  assert.equal(transport.connectCalls, 1, "以事件 on 为准，挂起连接");
+  await transport.wake();
+  await flush();
+  assert.equal(controller.getStatus().state, "ready");
+  controller.dispose();
+}
+
+// 10. 真机回归：启动时只拿到 unknown、也没收到事件，用户随后配对 —— 必须重新问状态并真正去连，
+//     不能「只保存不连接」停在未连接。
+{
+  const clock = { now: 0 };
+  const transport = new FakeTransport();
+  const storage = new MemoryStorage();
+  let calls = 0;
+  transport.getStateImpl = async () => (++calls === 1 ? "unknown" : "on");
+  const { controller } = createController(transport, storage, clock);
+  await controller.start();
+  assert.equal(controller.getStatus().state, "not-paired");
+  const pairing = controller.pair({
+    id: SCANNER_ID,
+    name: "BarCode Scanner BLE",
+    rssi: -60,
+    serviceUuids: ["FEEA"],
+  });
+  await flush();
+  assert.equal(transport.connectCalls, 1, "配对时重新确认蓝牙已开并发起连接");
+  await transport.wake();
+  await pairing;
+  await flush();
+  assert.equal(controller.getStatus().state, "ready");
+  assert.equal(storage.value?.peripheralId, SCANNER_ID);
+  controller.dispose();
+}
+
+// 11. 启动读存储比用户配对慢：读到的旧值（null）不能把刚配对的扫码枪覆盖掉。
+{
+  const clock = { now: 0 };
+  const transport = new FakeTransport();
+  let releaseLoad: () => void = () => undefined;
+  const storage = new MemoryStorage();
+  const slowStorage = {
+    load: () =>
+      new Promise<SavedBleScanner | null>((resolve) => {
+        releaseLoad = () => resolve(null);
+      }),
+    save: (value: SavedBleScanner | null) => storage.save(value),
+  };
+  const statuses: BleScannerStatus[] = [];
+  const controller = new BleScannerController({
+    transport,
+    storage: slowStorage,
+    now: () => clock.now,
+    setTimer: () => 0,
+    clearTimer: () => undefined,
+    setRepeatingTimer: () => 0,
+    clearRepeatingTimer: () => undefined,
+  });
+  controller.subscribeStatus((status) => statuses.push(status));
+  const starting = controller.start();
+  const pairing = controller.pair({
+    id: SCANNER_ID,
+    name: "BarCode Scanner BLE",
+    rssi: -60,
+    serviceUuids: ["FEEA"],
+  });
+  await flush();
+  await transport.wake();
+  await pairing;
+  releaseLoad();
+  await starting;
+  await flush();
+  assert.equal(controller.getStatus().saved?.peripheralId, SCANNER_ID, "配对结果不被启动时的旧值覆盖");
+  assert.notEqual(controller.getStatus().state, "not-paired");
   controller.dispose();
 }
 

@@ -164,6 +164,10 @@ export class BleScannerController {
   private attentionTimer: unknown = null;
   private batteryTimer: unknown = null;
   private stopAdapterListener: (() => void) | null = null;
+  /** 是否已收到过蓝牙状态事件（收到后以事件为准）。 */
+  private adapterEventReceived = false;
+  private adapterRetryCount = 0;
+  private adapterRetryTimer: unknown = null;
   private stopScan: (() => void) | null = null;
   /** 排队执行蓝牙操作，避免搜索、连接、断开交错。 */
   private queue: Promise<unknown> = Promise.resolve();
@@ -216,14 +220,18 @@ export class BleScannerController {
     if (this.started) return;
     this.started = true;
     this.stopAdapterListener = this.transport.onStateChange((state) => {
+      // 真机实测（2026-11-21 iPad Pro）：状态事件可能比 getState() 的结果先到。
+      // 一旦收到过事件，就以事件为准，后到的 getState() 旧值（常是 unknown）不得覆盖它。
+      this.adapterEventReceived = true;
       this.handleAdapterState(state);
     });
     const [adapterState, saved] = await Promise.all([
       this.transport.getState().catch((): BleAdapterState => "unknown"),
       this.storage.load().catch(() => null),
     ]);
-    this.update({ saved });
-    this.handleAdapterState(adapterState);
+    // 读存储期间用户可能已经配对了新扫码枪：内存里已有的配置比启动时读到的旧值新，不能被覆盖。
+    if (!this.status.saved && saved) this.update({ saved });
+    this.handleAdapterState(this.adapterEventReceived ? this.adapterState : adapterState);
   }
 
   /** App 回到前台：如果之前在重连 / 休眠，重新挂一次连接请求。 */
@@ -243,6 +251,10 @@ export class BleScannerController {
     this.stopAdapterListener = null;
     this.teardownSession();
     this.clearAttentionTimer();
+    if (this.adapterRetryTimer !== null) {
+      this.clearTimer(this.adapterRetryTimer);
+      this.adapterRetryTimer = null;
+    }
   }
 
   /* ---------------- 搜索 ---------------- */
@@ -308,7 +320,7 @@ export class BleScannerController {
       // 所以学会之前不落盘，避免存下不可用的配置。
       this.update({ saved, lastErrorCode: null });
       if (saved.serviceUuid) await this.storage.save(saved);
-      await this.connectSaved(false);
+      await this.connectWhenAdapterReady();
     });
   }
 
@@ -345,7 +357,7 @@ export class BleScannerController {
   }
 
   reconnect(): Promise<void> {
-    return this.enqueue(() => this.connectSaved(false));
+    return this.enqueue(() => this.connectWhenAdapterReady());
   }
 
   setAlias(alias: string | null): Promise<void> {
@@ -370,8 +382,35 @@ export class BleScannerController {
 
   /* ---------------- 内部：连接流程 ---------------- */
 
+  /**
+   * 用户主动配对 / 重新连接时：本地记录的蓝牙状态不是 on 就先重新问一次，
+   * 不能因为启动时拿到的 unknown 而「只保存不连接」（真机上表现为保存后仍显示未连接）。
+   */
+  private async connectWhenAdapterReady(): Promise<void> {
+    if (this.adapterState !== "on") {
+      const fresh = await this.transport.getState().catch((): BleAdapterState => "unknown");
+      if (fresh !== "unknown") this.adapterState = fresh;
+    }
+    if (this.adapterState === "on") {
+      await this.connectSaved(false);
+      return;
+    }
+    // 仍未就绪：显示对应状态；之后的状态事件（on）会自动挂起连接。
+    this.handleAdapterState(this.adapterState);
+  }
+
   private handleAdapterState(state: BleAdapterState): void {
     this.adapterState = state;
+    if (state === "unknown") {
+      // unknown 是 iOS 蓝牙管理器初始化中的过渡态，不是故障：不拆会话，等下一个状态事件；
+      // 同时补问几次，防止事件已经错过、状态永远停在 unknown。
+      if (!this.session) {
+        this.update({ state: this.status.saved ? "connecting" : "not-paired" });
+      }
+      this.scheduleAdapterStateRetry();
+      return;
+    }
+    this.adapterRetryCount = 0;
     if (state === "on") {
       if (!this.status.saved) {
         this.update({ state: "not-paired" });
@@ -399,6 +438,22 @@ export class BleScannerController {
                 ? "disconnected"
                 : "not-paired",
     });
+  }
+
+  /** 蓝牙状态停在 unknown 时每秒补问一次，最多 5 次。 */
+  private scheduleAdapterStateRetry(): void {
+    if (!this.started || this.adapterRetryTimer !== null || this.adapterRetryCount >= 5) return;
+    this.adapterRetryCount += 1;
+    this.adapterRetryTimer = this.setTimer(() => {
+      this.adapterRetryTimer = null;
+      if (!this.started || this.adapterState !== "unknown") return;
+      void this.transport.getState().then(
+        (state) => {
+          if (this.started && this.adapterState === "unknown") this.handleAdapterState(state);
+        },
+        () => this.scheduleAdapterStateRetry(),
+      );
+    }, 1000);
   }
 
   private async connectSaved(pending: boolean): Promise<void> {
