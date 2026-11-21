@@ -94,9 +94,14 @@ export function localHistoryLayoutForWidth(
       };
 }
 
+/** 路由收到 BLE 扫码枪的码后交给页面：id 递增保证同一个码连扫两次也会再次触发筛选。 */
+export type HistoryScannedKeyword = Readonly<{ id: number; value: string }>;
+
 type LocalHistoryScreenProps = Readonly<{
   presenter: LocalHistoryScreenPresenter;
   onBack?(): void;
+  /** BLE 扫码枪扫到的小票短码 / 订单号：填入关键字并立即按当前日期范围筛选。 */
+  scannedKeyword?: HistoryScannedKeyword | null;
 }>;
 
 export type LocalHistoryScreenPresenter = Pick<
@@ -124,6 +129,7 @@ type DetailsPaneKey = "details" | "receiptPreview";
 export function LocalHistoryScreen({
   presenter,
   onBack,
+  scannedKeyword = null,
 }: LocalHistoryScreenProps) {
   usePosThemeVersion();
   const state = useSyncExternalStore(
@@ -166,6 +172,7 @@ export function LocalHistoryScreen({
       from: fromDate,
       to: toDate,
     },
+    keywordOverride: string = keyword,
   ) => {
     const range = localHistoryBusinessDayRange(
       dates.from,
@@ -179,7 +186,7 @@ export function LocalHistoryScreen({
     try {
       presenter.setFilters({
         ...range,
-        keyword: nullableText(keyword),
+        keyword: nullableText(keywordOverride),
       });
     } catch {
       setFilterError("query");
@@ -188,6 +195,14 @@ export function LocalHistoryScreen({
     setFilterError(null);
     void presenter.refresh();
   };
+
+  // 路由交来的扫码关键字：立刻填入并筛选（只在 id 变化时触发，重渲染不会重复筛选）。
+  useEffect(() => {
+    if (!scannedKeyword) return;
+    setKeyword(scannedKeyword.value);
+    applyFilters(undefined, scannedKeyword.value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scannedKeyword?.id]);
 
   return (
     <PosScreenFrame

@@ -20,6 +20,15 @@ const mockSetOnline = jest.fn();
 const mockRouterDismissTo = jest.fn();
 const mockRouterPush = jest.fn();
 
+let mockBleScanOptions: any;
+// 扫码路由桥依赖真实导航容器；路由测试只关心页面把码交给了谁，所以替换成可调用的 mock。
+jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
+  RouteHidScannerCapture: () => null,
+  useRouteBleScan: (options: unknown) => {
+    mockBleScanOptions = options;
+  },
+}));
+
 jest.mock("expo-router", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } =
@@ -266,5 +275,26 @@ test("网络恢复后就地调用 presenter.setOnline 翻转在线状态（不�
   await waitFor(() => {
     expect(mockSetOnline).toHaveBeenCalledWith(true);
   });
+  await screen.unmount();
+});
+
+test("BLE 扫码枪：扫到的码以递增 id 交给历史屏幕作为关键字，同一个码连扫两次也会再次触发", async () => {
+  mockBleScanOptions = undefined;
+  const screen = await render(<RemoteHistoryRoute />);
+  await waitFor(() => {
+    expect(screen.getByTestId("remote-history-screen")).toBeTruthy();
+  });
+
+  expect(mockBleScanOptions.path).toBe("/remote-history");
+  expect(mockBleScanOptions.enabled).toBe(true);
+  expect(mockScreenProps.scannedKeyword).toBeNull();
+  await act(async () => {
+    mockBleScanOptions.onScan("6E0F13AB");
+  });
+  expect(mockScreenProps.scannedKeyword).toEqual({ id: 1, value: "6E0F13AB" });
+  await act(async () => {
+    mockBleScanOptions.onScan("6E0F13AB");
+  });
+  expect(mockScreenProps.scannedKeyword).toEqual({ id: 2, value: "6E0F13AB" });
   await screen.unmount();
 });

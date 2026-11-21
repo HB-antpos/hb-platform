@@ -15,6 +15,7 @@ import {
   resolveLocalHistoryPresenterFactory,
   type LocalHistoryPresenter,
 } from "@/features/local-history";
+import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
@@ -47,6 +48,17 @@ export default function LocalHistoryRoute() {
     binding.cashier === activeCashier
       ? binding.presenter
       : null;
+  // BLE 扫码枪：扫小票短码 / 订单号条码，直接填入关键字并筛选；键盘模式扫码枪仍直接打进输入框。
+  const [scannedKeyword, setScannedKeyword] = useState<Readonly<{
+    id: number;
+    value: string;
+  }> | null>(null);
+  useRouteBleScan({
+    path: "/local-history",
+    enabled: presenter !== null,
+    onScan: (value) =>
+      setScannedKeyword((previous) => ({ id: (previous?.id ?? 0) + 1, value })),
+  });
 
   useEffect(() => {
     if (
@@ -131,6 +143,7 @@ export default function LocalHistoryRoute() {
 
   return (
     <LocalHistoryScreen
+      scannedKeyword={scannedKeyword}
       onBack={() => router.dismissTo("/sales" as Href)}
       presenter={presenter}
     />

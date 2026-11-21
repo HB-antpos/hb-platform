@@ -27,6 +27,12 @@ const mockGetDeviceIdentity = jest.fn<
 const mockRouterDismissTo = jest.fn();
 const mockRouterPush = jest.fn();
 
+// 扫码路由桥依赖真实导航容器；该测试只关心路由与屏幕的装配，所以替换成空实现。
+jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
+  RouteHidScannerCapture: () => null,
+  useRouteBleScan: () => undefined,
+}));
+
 jest.mock("expo-router", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } =

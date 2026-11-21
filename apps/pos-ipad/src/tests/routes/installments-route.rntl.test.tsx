@@ -11,6 +11,8 @@ let mockLoad: ReturnType<typeof jest.fn>;
 let mockDestroy: ReturnType<typeof jest.fn>;
 let mockGetDeviceIdentity: ReturnType<typeof jest.fn>;
 let mockRouterDismissTo: ReturnType<typeof jest.fn>;
+let mockSetSearchQuery: ReturnType<typeof jest.fn>;
+let mockPane: "history" | "create";
 // 稳定单例：避免每次渲染返回新 factory 导致路由 effect 无限重建 presenter。
 let mockRuntimeFactory: unknown;
 let mockClearActiveCashier: ReturnType<typeof jest.fn>;
@@ -19,12 +21,23 @@ const MOCK_PRESENTER = () => ({
   setOnline: mockSetOnline,
   load: mockLoad,
   destroy: mockDestroy,
+  getState: () => ({ pane: mockPane }),
+  setSearchQuery: mockSetSearchQuery,
 });
 
 // 用真实 zustand store 模拟 connectivity，使 setState 能驱动 React 重渲染。
 type MockShellState = Readonly<{ connectivity: string }>;
 const mockShellStore = create<MockShellState>()(() => ({
   connectivity: "online",
+}));
+
+let mockBleScanOptions: any;
+// 扫码路由桥依赖真实导航容器；路由测试只关心页面把码交给了谁，所以替换成可调用的 mock。
+jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
+  RouteHidScannerCapture: () => null,
+  useRouteBleScan: (options: unknown) => {
+    mockBleScanOptions = options;
+  },
 }));
 
 jest.mock("expo-router", () => {
@@ -105,6 +118,8 @@ beforeEach(() => {
   mockShellStore.setState({ connectivity: "online" });
   mockSetOnline = jest.fn();
   mockLoad = jest.fn(async () => undefined);
+  mockSetSearchQuery = jest.fn();
+  mockPane = "history";
   mockDestroy = jest.fn();
   mockGetDeviceIdentity = jest.fn(async () => ({
     storeCode: "1003",
@@ -176,5 +191,32 @@ test("在线期间 connectivity 保持 online 不重复触发加载", async () =
   });
 
   expect(mockSetOnline).toHaveBeenCalledWith(true);
+  expect(mockLoad).not.toHaveBeenCalled();
+});
+
+test("BLE 扫码枪：分期历史面板扫小票条码直接按单号搜索；新建分期面板不处理", async () => {
+  mockBleScanOptions = undefined;
+  mockRuntime.state = { backend: "online" };
+  await act(async () => {
+    await render(<InstallmentsRoute />);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  mockLoad.mockClear();
+
+  expect(mockBleScanOptions.path).toBe("/installments");
+  expect(mockBleScanOptions.enabled).toBe(true);
+  await act(async () => {
+    mockBleScanOptions.onScan("3D2E1F00");
+  });
+  expect(mockSetSearchQuery).toHaveBeenCalledWith("3D2E1F00");
+  expect(mockLoad).toHaveBeenCalledTimes(1);
+
+  mockSetSearchQuery.mockClear();
+  mockLoad.mockClear();
+  mockPane = "create";
+  await act(async () => {
+    mockBleScanOptions.onScan("3D2E1F00");
+  });
+  expect(mockSetSearchQuery).not.toHaveBeenCalled();
   expect(mockLoad).not.toHaveBeenCalled();
 });
