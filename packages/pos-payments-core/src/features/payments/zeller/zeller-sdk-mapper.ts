@@ -164,11 +164,18 @@ export function mapZellerSdkPairingResponse(
 /**
  * 刷卡机给的时间。实测有两种写法：UTC 带 Z 和带时区偏移；没有时区的按 UTC 处理（与 WPF 一致，
  * 不能交给 Date.parse 按本机时区猜）。只用于显示和排序，解析不了就留空。
+ *
+ * 输出统一成「Z（大写）或 ±hh:mm」：这个值会原样进卡证据的 bankDateTimeIso，而证据契约
+ * （pos-domain 的 nullableBankDateTime）只认这两种写法，遇到 +1000、小写 z 会整条证据抛错，
+ * 让一笔已批准的交易建不了单、落成「结果未知」。所以在这里把偏移补上冒号、Z 转大写。
  */
 export function normalizeZellerTimestamp(value: unknown): string | null {
   if (typeof value !== "string" || value.trim() === "") return null;
-  const trimmed = value.trim();
-  const withZone = /(?:z|[+-]\d{2}:?\d{2})$/iu.test(trimmed) ? trimmed : `${trimmed}Z`;
+  const trimmed = value
+    .trim()
+    .replace(/([+-]\d{2})(\d{2})$/u, "$1:$2")
+    .replace(/z$/u, "Z");
+  const withZone = /(?:Z|[+-]\d{2}:\d{2})$/u.test(trimmed) ? trimmed : `${trimmed}Z`;
   return Number.isNaN(Date.parse(withZone)) ? null : withZone;
 }
 

@@ -35,6 +35,9 @@ public sealed class PosSettingsService : IPosSettingsService
     private readonly IPosSettingsLocalStore _store;
     private readonly IReadOnlyList<IPosSettingBinding> _bindings;
     private readonly HashSet<string> _knownKeys;
+
+    // 本版本认识的键集合的签名（排序后拼接）。随快照一起落盘，用来识别「快照是在认识更少键的旧版本上存下的」。
+    private readonly string _keySignature;
     private readonly DeviceAuthorizationState _authorization;
     private readonly IOperationAuditLogger? _audit;
     private readonly IAppVersionProvider? _versionProvider;
@@ -81,6 +84,7 @@ public sealed class PosSettingsService : IPosSettingsService
         _store = store;
         _bindings = bindings;
         _knownKeys = bindings.Select(binding => binding.Key).ToHashSet(StringComparer.Ordinal);
+        _keySignature = string.Join('|', _knownKeys.OrderBy(key => key, StringComparer.Ordinal));
         _authorization = authorization;
         _audit = audit;
         _versionProvider = versionProvider;
@@ -351,7 +355,12 @@ public sealed class PosSettingsService : IPosSettingsService
         try
         {
             await EnsureLoadedAsync(storeCode, cancellationToken);
-            knownHash = _state.Hash;
+            // 快照是在认识键集合不同的版本上存下的（升级后常见）：服务端的指纹覆盖它下发的全部键，
+            // 而那一版丢掉了不认识的键，带着旧指纹问「没变吧」只会得到「没变化」、新键永远不应用。
+            // 这种情况不带指纹，强制完整拉取一遍；落盘时盖上本版本的签名，之后恢复正常的指纹比较。
+            knownHash = string.Equals(_state.KeySignature, _keySignature, StringComparison.Ordinal)
+                ? _state.Hash
+                : null;
         }
         catch (Exception ex) when (!IsCancellation(ex, cancellationToken))
         {
@@ -549,6 +558,7 @@ public sealed class PosSettingsService : IPosSettingsService
         {
             StoreCode = storeCode,
             Hash = sync.Changed ? sync.Hash : state.Hash,
+            KeySignature = _keySignature,
             Values = target,
             SyncedAtUtc = _timeProvider.GetUtcNow(),
             Overrides = new Dictionary<string, bool>(),

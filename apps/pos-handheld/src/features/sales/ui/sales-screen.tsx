@@ -1183,30 +1183,37 @@ export function SalesScreen({
               compactSuccessLayout && styles.successTitleCompact,
             ]}
           >
-            {t("success.title")}
+            {t(
+              state.success.cashDueCents === 0
+                ? "success.titleZero"
+                : "success.title",
+            )}
           </Text>
           <Text style={styles.successOrder}>
             {t("success.order", { orderGuid: state.success.orderGuid })}
           </Text>
-          <View
-            style={[
-              styles.changeCard,
-              compactSuccessLayout && styles.changeCardCompact,
-            ]}
-          >
-            <Text style={styles.changeLabel}>{t("success.change")}</Text>
-            <Text
-              adjustsFontSizeToFit
-              minimumFontScale={0.7}
-              numberOfLines={1}
+          {/* 0 元订单没有收款也没有找零，不显示「应找金额」。 */}
+          {state.success.cashDueCents === 0 ? null : (
+            <View
               style={[
-                styles.changeAmount,
-                compactSuccessLayout && styles.changeAmountCompact,
+                styles.changeCard,
+                compactSuccessLayout && styles.changeCardCompact,
               ]}
             >
-              {formatAud(state.success.changeCents, locale)}
-            </Text>
-          </View>
+              <Text style={styles.changeLabel}>{t("success.change")}</Text>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.7}
+                numberOfLines={1}
+                style={[
+                  styles.changeAmount,
+                  compactSuccessLayout && styles.changeAmountCompact,
+                ]}
+              >
+                {formatAud(state.success.changeCents, locale)}
+              </Text>
+            </View>
+          )}
           <Text
             style={[
               styles.successSync,
@@ -1265,6 +1272,9 @@ export function SalesScreen({
     !state.capabilities.cartEditing ||
     !state.capabilities.cashCheckout;
   const cashDraft = deriveCashDraft(state.cart, state.cashTenderedText);
+  // 合计恰好 0 元的整单：结账按钮与现金弹窗都改成零元结账的样子（无需收款、没有键盘）。
+  const zeroTotalSale =
+    state.cart.lines.length > 0 && state.cart.actualAmount.cents === 0;
   const toolbarActions: readonly SalesToolbarAction[] = [
     {
       disabled:
@@ -1636,15 +1646,17 @@ export function SalesScreen({
             label={
               cartEmpty
                 ? t("summary.checkoutDisabled")
-                : `${t("summary.goToPayment")} · ${formatAud(
-                    state.cart.actualAmount.cents,
-                    locale,
-                  )}`
+                : `${t(
+                    zeroTotalSale
+                      ? "summary.completeZeroTotal"
+                      : "summary.goToPayment",
+                  )} · ${formatAud(state.cart.actualAmount.cents, locale)}`
             }
             onPress={() => {
               if (!onOpenPayment) return;
-              void presenter.prepareOnlineCheckout().then((preparedCart) => {
-                if (preparedCart) onOpenPayment(preparedCart);
+              // 合计恰好 0 元时 presenter 自己打开零元结账确认弹窗，不进付款页（付款页不接收 0 元订单）。
+              void presenter.startCheckout().then((route) => {
+                if (route?.kind === "payment") onOpenPayment(route.cart);
               });
             }}
             sound="navigate"
@@ -2292,37 +2304,48 @@ export function SalesScreen({
             style={styles.numericModal}
             testID="sales-cash-modal"
           >
-            <Text style={styles.modalTitle}>{t("cash.title")}</Text>
+            <Text style={styles.modalTitle}>
+              {t(zeroTotalSale ? "cash.zeroTitle" : "cash.title")}
+            </Text>
             <View style={styles.numericEditorBody}>
               <View style={styles.numericEditorSummary}>
                 <Text style={styles.cashDueLabel}>{t("cash.amountDue")}</Text>
                 <Text style={styles.cashDueAmount}>
                   {formatAud(getCashDueCents(state.cart), locale)}
                 </Text>
-                <Text style={styles.fieldLabel}>{t("cash.tendered")}</Text>
-                <NumericValueDisplay
-                  accessibilityLabel={t("cash.tendered")}
-                  currencyPrefix="$"
-                  placeholder={t("cash.tenderedPlaceholder")}
-                  testID="sales-cash-tendered"
-                  value={state.cashTenderedText}
-                />
-                <ActionButton
-                  disabled={state.phase !== "cash"}
-                  label={t("cash.exact")}
-                  onPress={() => presenter.setExactCash()}
-                  style={styles.cashExactAction}
-                  testID="sales-cash-exact"
-                  tone="secondary"
-                />
-                <View style={styles.changePreview}>
-                  <Text style={styles.changePreviewLabel}>
-                    {t("cash.change")}
+                {zeroTotalSale ? (
+                  // 0 元订单没有款项可收：不显示实收 / 正好 / 找零与键盘，只说明确认后会发生什么。
+                  <Text style={styles.fieldLabel} testID="sales-cash-zero-hint">
+                    {t("cash.zeroHint")}
                   </Text>
-                  <Text style={styles.changePreviewAmount}>
-                    {formatAud(cashDraft.changeCents, locale)}
-                  </Text>
-                </View>
+                ) : (
+                  <>
+                    <Text style={styles.fieldLabel}>{t("cash.tendered")}</Text>
+                    <NumericValueDisplay
+                      accessibilityLabel={t("cash.tendered")}
+                      currencyPrefix="$"
+                      placeholder={t("cash.tenderedPlaceholder")}
+                      testID="sales-cash-tendered"
+                      value={state.cashTenderedText}
+                    />
+                    <ActionButton
+                      disabled={state.phase !== "cash"}
+                      label={t("cash.exact")}
+                      onPress={() => presenter.setExactCash()}
+                      style={styles.cashExactAction}
+                      testID="sales-cash-exact"
+                      tone="secondary"
+                    />
+                    <View style={styles.changePreview}>
+                      <Text style={styles.changePreviewLabel}>
+                        {t("cash.change")}
+                      </Text>
+                      <Text style={styles.changePreviewAmount}>
+                        {formatAud(cashDraft.changeCents, locale)}
+                      </Text>
+                    </View>
+                  </>
+                )}
                 {state.errorCode === "cash-invalid" ||
                 state.errorCode === "cash-insufficient" ||
                 state.errorCode === "cash-failed" ? (
@@ -2331,15 +2354,17 @@ export function SalesScreen({
                   </Text>
                 ) : null}
               </View>
-              <View style={styles.numericKeypadColumn}>
-                <SalesNumberKeypad
-                  disabled={state.phase !== "cash"}
-                  labels={keypadLabels}
-                  mode="decimal"
-                  onKeyPress={handleCashKey}
-                  testIDPrefix="sales-cash"
-                />
-              </View>
+              {zeroTotalSale ? null : (
+                <View style={styles.numericKeypadColumn}>
+                  <SalesNumberKeypad
+                    disabled={state.phase !== "cash"}
+                    labels={keypadLabels}
+                    mode="decimal"
+                    onKeyPress={handleCashKey}
+                    testIDPrefix="sales-cash"
+                  />
+                </View>
+              )}
             </View>
             <View style={styles.modalActions}>
               <ActionButton
@@ -2356,7 +2381,7 @@ export function SalesScreen({
                 label={
                   state.phase === "submitting-cash"
                     ? t("cash.confirming")
-                    : t("cash.confirm")
+                    : t(zeroTotalSale ? "cash.confirmZero" : "cash.confirm")
                 }
                 onPress={() => {
                   void presenter.submitCash();
@@ -3742,6 +3767,10 @@ function errorCopyKey(errorCode: string): SalesCopyKey {
       return "error.invalidDiscount";
     case "empty-cart":
       return "error.emptyCart";
+    case "total-not-payable":
+      return "error.totalNotPayable";
+    case "zero-price-item":
+      return "error.zeroPriceItem";
     case "cash-invalid":
       return "error.cashInvalid";
     case "cash-insufficient":

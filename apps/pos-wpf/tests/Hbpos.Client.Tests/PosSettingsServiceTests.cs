@@ -380,6 +380,35 @@ public sealed class PosSettingsServiceTests
     }
 
     [Fact]
+    public async Task A_key_the_older_version_dropped_is_applied_after_upgrade_although_the_server_hash_did_not_change()
+    {
+        using var harness = new Harness();
+        harness.Api.Server(("payment.manualCard", true, "global"), ("receipt.bankReceipt", false, "global"));
+
+        // 旧版本只认识 ManualCard 一个键：BankReceipt 被当作未知键丢弃，服务端的指纹却原样存了下来。
+        var olderBindings = new List<IPosSettingBinding> { new FakeBinding(PosSettingKeys.ManualCard, harness) };
+        var older = new PosSettingsService(
+            harness.Api, harness.Store, olderBindings, harness.Auth, harness.Audit, new FakeVersion(), harness.Time);
+        await older.SyncNowAsync();
+        Assert.True(harness.Local[PosSettingKeys.BankReceipt]);
+
+        // 升级：同一份本机存储，新版本认识全部键；服务端设置没有任何变化（指纹不变）。
+        harness.Api.KnownHashes.Clear();
+        var upgraded = harness.NewService();
+        var result = await upgraded.SyncNowAsync();
+
+        // 快照记录的键集合和当前版本不同，不能带旧指纹去问「没变吧」，必须完整拉取一遍。
+        Assert.Equal(PosSettingsSyncOutcome.Applied, result.Outcome);
+        Assert.Null(Assert.Single(harness.Api.KnownHashes));
+        Assert.False(harness.Local[PosSettingKeys.BankReceipt]);
+
+        // 完整拉取并落盘后恢复正常的指纹比较：下一轮带指纹，服务端答「没变化」。
+        harness.Api.KnownHashes.Clear();
+        await upgraded.SyncNowAsync();
+        Assert.Equal(harness.Api.Hash, Assert.Single(harness.Api.KnownHashes));
+    }
+
+    [Fact]
     public async Task Failed_write_does_not_persist_the_snapshot_and_is_retried_next_round()
     {
         using var harness = new Harness();
