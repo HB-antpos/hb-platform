@@ -571,6 +571,7 @@
   <data name="settings.network.confirm.apply" xml:space="preserve"><value>确认修改</value></data>
   <data name="settings.network.fixed.passed" xml:space="preserve"><value>已修改，复测通过：收银机能连上服务器了。如果仍显示 Offline，请等几秒或重启 HB POS。</value></data>
   <data name="settings.network.fixed.stillFailing" xml:space="preserve"><value>已修改，但复测仍发现问题。请看上面的结果，或复制报告发给技术支持。</value></data>
+  <data name="settings.network.fixed.retestFailed" xml:space="preserve"><value>已修改，但复测没能运行。请再点一次检测，确认结果。</value></data>
   <data name="settings.network.fixed.cancelled" xml:space="preserve"><value>没有修改：未获得授权。</value></data>
   <data name="settings.network.fixed.failed" xml:space="preserve"><value>修改没能完成。</value></data>
   <data name="settings.network.undone" xml:space="preserve"><value>已还原修改。</value></data>

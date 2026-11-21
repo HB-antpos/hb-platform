@@ -99,6 +99,18 @@ public sealed class ShellAppUpdateInstallSafetyGuard(
             return false;
         }
 
+        // 中文注释：日结点钞草稿只存在内存里；保存、打印、日结后自动 Linkly 结算期间 IsBusy 为 true。
+        // 这两种状态下安装器退出收银端，会丢掉已录入的点钞数量或打断结算，所以同样视为「进行中」，
+        // 与 ShellRestartSafetyProbe.IsDailyCloseBusy（凌晨重启的安全检查）同一口径。
+        // 沿用 activeTransaction 键：协调器靠这个键判断「等操作结束后自动继续」，换键会被当成安装失败。
+        if (mainViewModel.DailyClose is { } dailyClose &&
+            (dailyClose.IsBusy || dailyClose.HasDailyCloseDraft))
+        {
+            statusKey = "appUpdate.install.activeTransaction";
+            args = [];
+            return false;
+        }
+
         statusKey = string.Empty;
         args = [];
         return true;
