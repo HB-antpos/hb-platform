@@ -1486,15 +1486,25 @@ function assertReversedTruth(record: VoucherTenderReversalRecord): void {
 
 function safeJson(value: Readonly<Record<string, unknown>>): string {
   const encoded = JSON.stringify(value);
-  if (
-    !encoded ||
-    /voucherCode|reservationToken|protectedReference|authorization|pan/iu.test(
-      encoded,
-    )
-  ) {
+  // 只按字段名拦截券码、令牌等受保护数据。旧实现对整段 JSON（含值）做子串匹配，
+  // 载荷里的收银员姓名（如 "Sean Pan" 命中 pan）会被误判，导致撤券无法落库。
+  if (!encoded || hasProtectedVoucherKey(value)) {
     throw new Error("Voucher reversal audit payload is unsafe.");
   }
   return encoded;
+}
+
+const PROTECTED_VOUCHER_KEY =
+  /voucherCode|reservationToken|protectedReference|authorization|pan/iu;
+
+/** 递归检查对象 / 数组中是否出现受保护字段名；值本身不参与匹配。 */
+function hasProtectedVoucherKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasProtectedVoucherKey);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(
+    ([key, child]) =>
+      PROTECTED_VOUCHER_KEY.test(key) || hasProtectedVoucherKey(child),
+  );
 }
 
 function strictId(value: unknown, label: string): string {

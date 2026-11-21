@@ -656,6 +656,37 @@ test("legacy 未决 action 无 actor 列时整体回退原订单员工，终态 
   });
 });
 
+test("收银员姓名以 Pan 结尾时撤券 prepare/submit/released 仍能完成，不被误判为卡号", async () => {
+  await withDatabase(async (connection) => {
+    await applyMigrations(connection, () => T0);
+    const seeded = await seedApprovedVoucherPurchase(connection, "surname", 500);
+    // 撤券 actor 会以 requestingCashierName 写入 audit_actor_json 与终态审计。
+    const command = {
+      ...seeded,
+      actor: {
+        cashierId: "cashier-pan",
+        cashierName: "Sean Pan",
+        userGuid: "user-guid-pan",
+      },
+    };
+    await saveReleasedProtectedState(connection, command);
+    const store = createStore(connection);
+
+    const prepared = await store.prepareOrLoad(command);
+    assert.equal(prepared.state, "Prepared");
+    const submitted = await store.markSubmitted(prepared);
+    const reversed = await store.commitReleased(submitted, {
+      state: "Cancelled",
+      responseCode: "VOUCHER_RELEASED",
+    });
+    assert.equal(reversed.state, "Reversed");
+    assert.equal(
+      await negativeTenderCount(connection, command.orderGuid),
+      1,
+    );
+  });
+});
+
 test("同一门店设备出现多笔未决撤券时整体失败关闭，不静默挑选一笔", async () => {
   await withDatabase(async (connection) => {
     await applyMigrations(connection, () => T0);
