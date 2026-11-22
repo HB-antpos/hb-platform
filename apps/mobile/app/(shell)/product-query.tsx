@@ -208,9 +208,15 @@ interface SendProductLabelOptions {
   discountRate?: number | null;
   action?: PrintAction;
   printType?: string | null;
-  /** 自动打印链路专用：普通标签打完后，有折扣就接着补打折扣标签（手动按钮不传）。 */
-  withDiscountLabel?: boolean;
+  /**
+   * 折扣标签口径（折扣率是否 > 0 由 sendProductLabel 判定）：
+   * - true：普通标签打完后，有折扣再补打折扣标签（手动「普通」按钮、码表行）；
+   * - "only"：自动打印专用，有折扣时只打折扣标签、不打普通标签；没有折扣照常打普通标签。
+   */
+  withDiscountLabel?: DiscountLabelMode;
 }
+
+type DiscountLabelMode = boolean | "only";
 
 /** 提示条上的操作按钮（如「重新连接并重试」）；只在提示文字仍是当时那条时才显示，避免挂到别的提示上。 */
 interface SnackbarAction {
@@ -2138,7 +2144,26 @@ function ProductQueryContent() {
       // 这次打印开始前已打出的标签数：失败时用它判断中途有没有已经打出标签（有就不能自动重印）。
       const printedBefore = getPrintedLabelCount();
       const printStartedAt = Date.now();
+      // 折扣率口径与 printProductLabel 的 buildPayload 一致：显式值（含 0）优先，缺省回退门店价折扣。
+      const discountRate = options?.discountRate ?? targetDetail.storePrice?.discountRate;
+      const hasDiscount = shouldAutoPrintDiscountLabel(discountRate);
       try {
+        if (options?.withDiscountLabel === "only" && hasDiscount) {
+          // 自动打印 + 有折扣：只打折扣标签（份数与普通标签一致），不再先打普通标签。
+          console.log("[product-query] sendDiscountLabelOnly", { action, printType: options.printType });
+          for (let i = 0; i < printQuantity; i++) {
+            await printDiscountLabel(targetDetail, options.printType, {
+              barcode: options.barcode,
+              retailPrice: options.retailPrice,
+              discountRate: options.discountRate,
+            });
+          }
+          setSnackbarMessage(t("messages.printSuccess"));
+          if (quantitySingleUse && printQuantity > 1) {
+            setPrintQuantity(1);
+          }
+          return true;
+        }
         console.log("[product-query] sendProductLabel", {
           action,
           printType: options?.printType,
@@ -2169,9 +2194,7 @@ function ProductQueryContent() {
           quantity: qty,
           elapsedMs: Date.now() - printStartedAt,
         });
-        // 折扣率口径与 printProductLabel 的 buildPayload 一致：显式值（含 0）优先，缺省回退门店价折扣。
-        const discountRate = options?.discountRate ?? targetDetail.storePrice?.discountRate;
-        if (options?.withDiscountLabel && shouldAutoPrintDiscountLabel(discountRate)) {
+        if (options?.withDiscountLabel === true && hasDiscount) {
           try {
             // 份数与普通标签一致（与手动「折扣标签」按钮同口径）。
             for (let i = 0; i < qty; i++) {
@@ -2236,7 +2259,7 @@ function ProductQueryContent() {
       targetDetail: ProductDetail,
       target: CodeLabelTarget,
       printType: string | null,
-      withDiscountLabel = false,
+      withDiscountLabel: DiscountLabelMode = false,
       /** 价格页签的按钮打子码时仍按 product / small 记忙碌态，让转圈落在按下的那个按钮上而不是码表行。 */
       actionOverride?: PrintAction,
     ) => {
@@ -2267,8 +2290,8 @@ function ProductQueryContent() {
     async (savedDetail: ProductDetail, dialog: AutoPricingDialogState) => {
       const printType = smallLabel ? "small" : null;
       const target = dialog.printTarget;
-      // 只有「自动打印」开着时才补打折扣标签；折扣率是否大于 0 由 sendProductLabel 判定。
-      const withDiscountLabel = dialog.autoPrintEnabled === true;
+      // 「自动打印」开着时有折扣只打折扣标签；折扣率是否大于 0 由 sendProductLabel 判定。
+      const withDiscountLabel: DiscountLabelMode = dialog.autoPrintEnabled === true ? "only" : false;
       if (target?.kind === "set" && target.codeId) {
         return sendCodeLabel(savedDetail, {
           kind: "set",
@@ -2386,8 +2409,8 @@ function ProductQueryContent() {
             : `${printTarget.kind}:${printTarget.codeId}` as PrintAction,
           // 主条码（product）与套码、多码一样遵循「小标签」开关，否则扫主条码总是打普通标签。
           printType: smallLabel ? "small" : null,
-          // 自动打印：普通标签之后，有折扣再补打折扣标签。
-          withDiscountLabel: true,
+          // 自动打印：有折扣只打折扣标签，没有折扣打普通标签。
+          withDiscountLabel: "only",
         });
       }
 
@@ -2398,7 +2421,7 @@ function ProductQueryContent() {
         !printTarget && isSubCodeFocus(scanFocus) ? resolveFocusLabelTarget(targetDetail, scanFocus) : null;
       const resolved = printTarget ? null : focusTarget ?? resolveScannedCodeLabel(targetDetail, kw);
       if (resolved?.kind === "set" || resolved?.kind === "multi") {
-        return sendCodeLabel(targetDetail, resolved, smallLabel ? "small" : null, true);
+        return sendCodeLabel(targetDetail, resolved, smallLabel ? "small" : null, "only");
       }
       if (!printTarget && !resolved) {
         // 扫到的码不在已加载的码表里（如码表分页未加载到）时，不能回退打印主档条码和价格。
@@ -2426,7 +2449,7 @@ function ProductQueryContent() {
       }
 
       // 扫到的是主条码 / 货号等主档码：打主档标签，同样要带上小标签开关。
-      return sendProductLabel(targetDetail, { printType: smallLabel ? "small" : null, withDiscountLabel: true });
+      return sendProductLabel(targetDetail, { printType: smallLabel ? "small" : null, withDiscountLabel: "only" });
     },
     [
       getErrorMessage,
