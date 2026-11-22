@@ -97,6 +97,13 @@ android {
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
+    sourceSets {
+        main {
+            // 标签打印内置字体（HbPrinterTextRenderer 读 assets/printer-fonts/*）：与 iOS 配置插件共用同一份文件，
+            // 不在 android/ 下另存副本，免得两端字体漂移。
+            assets.srcDirs += ["$projectDir/../../plugins/printer-assets"]
+        }
+    }
     signingConfigs {
         debug {
             storeFile file('debug.keystore')

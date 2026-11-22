@@ -7,6 +7,18 @@ import {
   buildWarehouseLocationLabelCommand,
   buildWarehouseProductLabelCommand,
 } from "@/modules/printer/cpcl-labels";
+import {
+  chunkItems,
+  encodeBase64,
+  normalizeLabelRenderInfo,
+  normalizeTextBitmap,
+  normalizeTextMetrics,
+  type LabelRenderInfo,
+  type LabelRenderTextItem,
+  type LabelTextBitmap,
+  type LabelTextItem,
+  type LabelTextMetrics,
+} from "@/modules/printer/label-render";
 import type {
   NativeLinkEvent,
   PrinterDevice,
@@ -37,6 +49,14 @@ type NativePrinterModule = {
   printBigDiscountLabel(payload: ProductLabelPrintPayload, printType?: string | null): Promise<boolean>;
   printWarehouseProductLabel(payload: WarehouseProductLabelPrintPayload): Promise<boolean>;
   printWarehouseLocationLabel(payload: WarehouseLocationLabelPrintPayload): Promise<boolean>;
+  /** 新原生包才有（JS 排版能力标记）：内置字体、批量上限等。 */
+  getLabelRenderInfo?(): Promise<unknown>;
+  /** 新原生包才有：批量量文字尺寸。 */
+  measureTexts?(items: LabelTextItem[]): Promise<unknown>;
+  /** 新原生包才有：批量把文字画成 1bit 位图。 */
+  renderTexts?(items: LabelRenderTextItem[]): Promise<unknown>;
+  /** 新原生包才有：下发原始字节（base64），与 print 共用写入路径。 */
+  writeBytes?(base64: string): Promise<boolean>;
 };
 
 const nativeModule = NativeModules.HbPrinterModule as NativePrinterModule | undefined;
@@ -226,6 +246,82 @@ export async function disconnectPrinter() {
 export async function printRawCommand(command: string) {
   await ensureBluetoothPermissions();
   return getModule().print(command, "GB18030");
+}
+
+let labelRenderInfoPromise: Promise<LabelRenderInfo | null> | null = null;
+
+/**
+ * JS 排版能力：新原生包返回内置字体与批量上限，旧包 / 取不到 / 版本不够返回 null（调用方继续走旧的原生排版）。
+ * 原生能力在一次安装内不会变，成功结果缓存；失败不缓存，下次再试。
+ */
+export function getLabelRenderInfo(): Promise<LabelRenderInfo | null> {
+  if ((Platform.OS !== "android" && Platform.OS !== "ios") || typeof nativeModule?.getLabelRenderInfo !== "function") {
+    return Promise.resolve(null);
+  }
+  if (!labelRenderInfoPromise) {
+    const module = nativeModule;
+    labelRenderInfoPromise = Promise.resolve()
+      .then(() => module.getLabelRenderInfo?.())
+      .then(normalizeLabelRenderInfo)
+      .then((info) => {
+        if (!info) labelRenderInfoPromise = null;
+        return info;
+      })
+      .catch(() => {
+        labelRenderInfoPromise = null;
+        return null;
+      });
+  }
+  return labelRenderInfoPromise;
+}
+
+async function requireLabelRender() {
+  const info = await getLabelRenderInfo();
+  const module = getModule();
+  if (!info || typeof module.measureTexts !== "function" || typeof module.renderTexts !== "function") {
+    throw new Error("This app version does not support JS label layout yet.");
+  }
+  return { info, module };
+}
+
+/** 批量量文字尺寸；超过原生单批上限时自动分批，结果与入参一一对应。 */
+export async function measureLabelTexts(items: readonly LabelTextItem[]): Promise<LabelTextMetrics[]> {
+  if (items.length === 0) return [];
+  const { info, module } = await requireLabelRender();
+  const results: LabelTextMetrics[] = [];
+  for (const batch of chunkItems(items, info.maxBatch)) {
+    const raw = await module.measureTexts!(batch);
+    if (!Array.isArray(raw) || raw.length !== batch.length) {
+      throw new Error("Printer measure result does not match the request.");
+    }
+    results.push(...raw.map(normalizeTextMetrics));
+  }
+  return results;
+}
+
+/** 批量把文字画成 1bit 位图；超过原生单批上限时自动分批，结果与入参一一对应。 */
+export async function renderLabelTexts(items: readonly LabelRenderTextItem[]): Promise<LabelTextBitmap[]> {
+  if (items.length === 0) return [];
+  const { info, module } = await requireLabelRender();
+  const results: LabelTextBitmap[] = [];
+  for (const batch of chunkItems(items, info.maxBatch)) {
+    const raw = await module.renderTexts!(batch);
+    if (!Array.isArray(raw) || raw.length !== batch.length) {
+      throw new Error("Printer render result does not match the request.");
+    }
+    results.push(...raw.map(normalizeTextBitmap));
+  }
+  return results;
+}
+
+/** 下发原始字节（如二进制 CG 位图）；旧包没有 writeBytes 时明确报错，不偷偷改成文本发送。 */
+export async function printRawBytes(bytes: Uint8Array) {
+  await ensureBluetoothPermissions();
+  const module = getModule();
+  if (typeof module.writeBytes !== "function") {
+    throw new Error("This app version does not support raw byte printing yet.");
+  }
+  return module.writeBytes(encodeBase64(bytes));
 }
 
 export async function printNativeProductLabel(payload: ProductLabelPrintPayload, printType?: string | null) {
