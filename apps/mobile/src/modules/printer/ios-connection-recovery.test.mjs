@@ -40,6 +40,8 @@ function buildHarness(source) {
     ["  func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral)"],
     ["  func configureWrite("],
     ["  private func writePrinterCommand("],
+    // 新包把写入主体拆到 writePrinterData（writeBytes 共用）；旧源码没有时跳过。
+    ["  private func writePrinterData(", { optional: true }],
     ["  private func planWriteChunks("],
     ["  private func printTimeoutSeconds(forByteCount byteCount: Int)"],
     ["  private func ensureBluetoothReady(_ reject: @escaping RCTPromiseRejectBlock)"],

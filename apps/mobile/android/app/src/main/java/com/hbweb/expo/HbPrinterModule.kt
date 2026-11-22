@@ -24,6 +24,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.google.zxing.BarcodeFormat
@@ -78,6 +79,9 @@ class HbPrinterModule(
   // 链路诊断（只被动记录，由 JS 经 drainLinkDiagnostics 取走）；diagAddress 是最近一次要连接的打印机地址，
   // 只有它（或当前已连接的地址）的 ACL / 配对广播才记录，免得被周边别的蓝牙设备刷屏。
   private val linkDiag = PrinterLinkDiagnostics()
+
+  // JS 排版用的通用文字渲染器（内置 Roboto 字体，见 HbPrinterTextRenderer）。
+  private val textRenderer by lazy { HbPrinterTextRenderer(appContext) }
   @Volatile
   private var diagAddress: String? = null
 
@@ -565,6 +569,123 @@ class HbPrinterModule(
     }.start()
   }
 
+  /**
+   * 下发原始字节（base64）。JS 排版可直接发二进制 CPCL（如 CG 位图），不必像 EG 那样转十六进制文本；
+   * 与 print 共用同一写入路径和失败处理（失败只失效连接，不自动重放）。
+   */
+  @ReactMethod
+  fun writeBytes(base64: String, promise: Promise) {
+    Thread {
+      try {
+        val bytes = try {
+          android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+        } catch (error: IllegalArgumentException) {
+          throw HbPrinterTextRenderer.RenderError("PRINT_INVALID_BYTES", "Print data is not valid base64.")
+        }
+        writePrinterBytes(bytes)
+        promise.resolve(true)
+      } catch (error: HbPrinterTextRenderer.RenderError) {
+        promise.reject(error.code, error.message, error)
+      } catch (error: Exception) {
+        promise.reject("PRINT_ERROR", error.message, error)
+      }
+    }.start()
+  }
+
+  /** JS 排版的能力标记：有这个方法且 version >= 1 才说明本包带内置字体与 measureTexts / renderTexts / writeBytes。 */
+  @ReactMethod
+  fun getLabelRenderInfo(promise: Promise) {
+    val fonts = Arguments.createArray()
+    HbPrinterTextRenderer.BUNDLED_FONTS.keys.forEach { fonts.pushString(it) }
+    promise.resolve(Arguments.createMap().apply {
+      putInt("version", HbPrinterTextRenderer.RENDER_VERSION)
+      putArray("fonts", fonts)
+      putInt("maxBatch", HbPrinterTextRenderer.MAX_BATCH)
+      putInt("maxBitmapWidth", HbPrinterTextRenderer.MAX_BITMAP_WIDTH)
+      putInt("maxBitmapHeight", HbPrinterTextRenderer.MAX_BITMAP_HEIGHT)
+      putBoolean("supportsFileFonts", true)
+    })
+  }
+
+  /** 批量量文字：[{ text, font, size }] → [{ advance, ascent, descent, inkLeft, inkTop, inkRight, inkBottom }]。 */
+  @ReactMethod
+  fun measureTexts(items: ReadableArray, promise: Promise) {
+    Thread {
+      try {
+        val result = Arguments.createArray()
+        forEachTextItem(items) { _, text, font, size ->
+          val metrics = textRenderer.measure(text, font, size)
+          result.pushMap(Arguments.createMap().apply {
+            putDouble("advance", metrics.advance.toDouble())
+            putDouble("ascent", metrics.ascent.toDouble())
+            putDouble("descent", metrics.descent.toDouble())
+            putDouble("inkLeft", metrics.inkLeft.toDouble())
+            putDouble("inkTop", metrics.inkTop.toDouble())
+            putDouble("inkRight", metrics.inkRight.toDouble())
+            putDouble("inkBottom", metrics.inkBottom.toDouble())
+          })
+        }
+        promise.resolve(result)
+      } catch (error: HbPrinterTextRenderer.RenderError) {
+        promise.reject(error.code, error.message, error)
+      } catch (error: Exception) {
+        promise.reject("PRINTER_RENDER_ERROR", error.message, error)
+      }
+    }.start()
+  }
+
+  /** 批量把文字画成 1bit 位图：[{ text, font, size, inverse?, padding? }] → [{ width, height, originX, originY, hasInk, ink*, bits }]。 */
+  @ReactMethod
+  fun renderTexts(items: ReadableArray, promise: Promise) {
+    Thread {
+      try {
+        val result = Arguments.createArray()
+        forEachTextItem(items) { item, text, font, size ->
+          val inverse = item.hasKey("inverse") && !item.isNull("inverse") && item.getBoolean("inverse")
+          val padding = if (item.hasKey("padding") && !item.isNull("padding")) item.getInt("padding") else 0
+          val bitmap = textRenderer.render(text, font, size, inverse, padding)
+          result.pushMap(Arguments.createMap().apply {
+            putInt("width", bitmap.width)
+            putInt("height", bitmap.height)
+            putInt("originX", bitmap.originX)
+            putInt("originY", bitmap.originY)
+            putBoolean("hasInk", bitmap.hasInk)
+            putInt("inkLeft", bitmap.inkLeft)
+            putInt("inkTop", bitmap.inkTop)
+            putInt("inkRight", bitmap.inkRight)
+            putInt("inkBottom", bitmap.inkBottom)
+            putString("bits", bitmap.bitsBase64)
+          })
+        }
+        promise.resolve(result)
+      } catch (error: HbPrinterTextRenderer.RenderError) {
+        promise.reject(error.code, error.message, error)
+      } catch (error: Exception) {
+        promise.reject("PRINTER_RENDER_ERROR", error.message, error)
+      }
+    }.start()
+  }
+
+  /** 统一校验批量入参：条数上限、text / font / size 必填；任何一项不合法整批报错，不返回部分结果。 */
+  private fun forEachTextItem(
+    items: ReadableArray,
+    action: (item: ReadableMap, text: String, font: String, size: Float) -> Unit,
+  ) {
+    if (items.size() > HbPrinterTextRenderer.MAX_BATCH) {
+      throw HbPrinterTextRenderer.RenderError("PRINTER_RENDER_INVALID", "Too many text items: ${items.size()}")
+    }
+    for (index in 0 until items.size()) {
+      val item = items.getMap(index)
+        ?: throw HbPrinterTextRenderer.RenderError("PRINTER_RENDER_INVALID", "Text item $index is not an object.")
+      val text = if (item.hasKey("text") && !item.isNull("text")) item.getString("text").orEmpty() else ""
+      val font = if (item.hasKey("font") && !item.isNull("font")) item.getString("font").orEmpty() else ""
+      if (!item.hasKey("size") || item.isNull("size")) {
+        throw HbPrinterTextRenderer.RenderError("PRINTER_RENDER_INVALID", "Text item $index has no size.")
+      }
+      action(item, text, font, item.getDouble("size").toFloat())
+    }
+  }
+
   @ReactMethod
   fun printProductLabel(payload: ReadableMap, printType: String?, promise: Promise) {
     Thread {
@@ -652,14 +773,17 @@ class HbPrinterModule(
   }
 
   private fun writePrinterCommand(command: String, encoding: String) {
+    writePrinterBytes(command.toByteArray(Charset.forName(encoding)))
+  }
+
+  private fun writePrinterBytes(bytes: ByteArray) {
     val activeConnection = synchronized(connectionLock) { connection }
     if (activeConnection == null || !activeConnection.isConnected) {
       throw IllegalStateException("No Bluetooth printer is connected.")
     }
 
-    val charset = Charset.forName(encoding)
     try {
-      activeConnection.write(command.toByteArray(charset))
+      activeConnection.write(bytes)
     } catch (error: Exception) {
       // 数据是否已被打印机接收不可判定：只失效连接并保留原始异常，禁止自动重放。
       if (clearConnection(activeConnection)) {

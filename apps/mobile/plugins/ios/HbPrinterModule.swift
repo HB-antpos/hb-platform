@@ -35,6 +35,9 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
   }
 
   private let bluetoothQueue = DispatchQueue(label: "com.hbweb.expo.printer.ble")
+  /// JS 排版的文字量取 / 渲染单独排队，不占用 BLE 队列，避免画字时拖慢在途写入回调。
+  private let renderQueue = DispatchQueue(label: "com.hbweb.expo.printer.render", qos: .userInitiated)
+  private let textRenderer = HbPrinterTextRenderer()
   private var centralManager: CBCentralManager!
   private var discoveredPrinters: [String: [String: Any]] = [:]
   private var discoveredPeripherals: [String: CBPeripheral] = [:]
@@ -246,6 +249,124 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
   ) {
     bluetoothQueue.async {
       self.writePrinterCommand(command, encoding: encoding, resolver: resolve, rejecter: reject)
+    }
+  }
+
+  /// 下发原始字节（base64）。JS 排版可直接发二进制 CPCL（如 CG 位图），不必转十六进制文本；与 print 共用写入路径。
+  @objc(writeBytes:resolver:rejecter:)
+  func writeBytes(
+    _ base64: String,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    bluetoothQueue.async {
+      guard let data = Data(base64Encoded: base64, options: .ignoreUnknownCharacters) else {
+        self.reject(reject, "PRINT_INVALID_BYTES", "Print data is not valid base64.")
+        return
+      }
+      self.writePrinterData(encoding: { data }, resolver: resolve, rejecter: reject)
+    }
+  }
+
+  /// JS 排版的能力标记：有这个方法且 version >= 1 才说明本包带内置字体与 measureTexts / renderTexts / writeBytes。
+  @objc(getLabelRenderInfo:rejecter:)
+  func getLabelRenderInfo(
+    _ resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    self.resolve(resolve, [
+      "version": HbPrinterTextRenderer.renderVersion,
+      "fonts": HbPrinterTextRenderer.bundledFonts.map { $0.key },
+      "maxBatch": HbPrinterTextRenderer.maxBatch,
+      "maxBitmapWidth": HbPrinterTextRenderer.maxBitmapWidth,
+      "maxBitmapHeight": HbPrinterTextRenderer.maxBitmapHeight,
+      "supportsFileFonts": true,
+    ])
+  }
+
+  /// 批量量文字：[{ text, font, size }] → [{ advance, ascent, descent, inkLeft, inkTop, inkRight, inkBottom }]。
+  @objc(measureTexts:resolver:rejecter:)
+  func measureTexts(
+    _ items: NSArray,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    renderQueue.async {
+      do {
+        let result = try self.mapTextItems(items) { _, text, font, size -> [String: Any] in
+          let metrics = try self.textRenderer.measure(text: text, font: font, size: size)
+          return [
+            "advance": metrics.advance,
+            "ascent": metrics.ascent,
+            "descent": metrics.descent,
+            "inkLeft": metrics.inkLeft,
+            "inkTop": metrics.inkTop,
+            "inkRight": metrics.inkRight,
+            "inkBottom": metrics.inkBottom,
+          ]
+        }
+        self.resolve(resolve, result)
+      } catch let error as HbPrinterTextRenderer.RenderError {
+        self.reject(reject, error.code, error.message)
+      } catch {
+        self.reject(reject, "PRINTER_RENDER_ERROR", error.localizedDescription)
+      }
+    }
+  }
+
+  /// 批量把文字画成 1bit 位图：[{ text, font, size, inverse?, padding? }] → [{ width, height, originX, originY, hasInk, ink*, bits }]。
+  @objc(renderTexts:resolver:rejecter:)
+  func renderTexts(
+    _ items: NSArray,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    renderQueue.async {
+      do {
+        let result = try self.mapTextItems(items) { item, text, font, size -> [String: Any] in
+          let inverse = (item["inverse"] as? NSNumber)?.boolValue ?? false
+          let padding = (item["padding"] as? NSNumber)?.intValue ?? 0
+          let bitmap = try self.textRenderer.render(text: text, font: font, size: size, inverse: inverse, padding: padding)
+          return [
+            "width": bitmap.width,
+            "height": bitmap.height,
+            "originX": bitmap.originX,
+            "originY": bitmap.originY,
+            "hasInk": bitmap.hasInk,
+            "inkLeft": bitmap.inkLeft,
+            "inkTop": bitmap.inkTop,
+            "inkRight": bitmap.inkRight,
+            "inkBottom": bitmap.inkBottom,
+            "bits": bitmap.bitsBase64,
+          ]
+        }
+        self.resolve(resolve, result)
+      } catch let error as HbPrinterTextRenderer.RenderError {
+        self.reject(reject, error.code, error.message)
+      } catch {
+        self.reject(reject, "PRINTER_RENDER_ERROR", error.localizedDescription)
+      }
+    }
+  }
+
+  /// 统一校验批量入参：条数上限、text / font / size 必填；任何一项不合法整批报错，不返回部分结果（与 Android 一致）。
+  private func mapTextItems(
+    _ items: NSArray,
+    _ transform: (NSDictionary, String, String, CGFloat) throws -> [String: Any]
+  ) throws -> [[String: Any]] {
+    guard items.count <= HbPrinterTextRenderer.maxBatch else {
+      throw HbPrinterTextRenderer.RenderError(code: "PRINTER_RENDER_INVALID", message: "Too many text items: \(items.count)")
+    }
+    return try items.enumerated().map { index, raw in
+      guard let item = raw as? NSDictionary else {
+        throw HbPrinterTextRenderer.RenderError(code: "PRINTER_RENDER_INVALID", message: "Text item \(index) is not an object.")
+      }
+      guard let size = item["size"] as? NSNumber else {
+        throw HbPrinterTextRenderer.RenderError(code: "PRINTER_RENDER_INVALID", message: "Text item \(index) has no size.")
+      }
+      let text = item["text"] as? String ?? ""
+      let font = item["font"] as? String ?? ""
+      return try transform(item, text, font, CGFloat(size.doubleValue))
     }
   }
 
@@ -488,6 +609,16 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
+    writePrinterData(encoding: { try self.encodeCommand(command, encoding: encoding) }, resolver: resolve, rejecter: reject)
+  }
+
+  /// 文本命令与 writeBytes 的原始字节共用同一条 BLE 写入路径；encoding 闭包在连接与在途检查通过后才执行，
+  /// 保持原来「先报未连接 / 正在打印，再报编码错误」的顺序。
+  private func writePrinterData(
+    encoding encode: () throws -> Data,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
     guard let peripheral = connectedPeripheral,
           peripheral.state == .connected,
           let characteristic = writeCharacteristic else {
@@ -501,7 +632,7 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     }
 
     do {
-      let data = try encodeCommand(command, encoding: encoding)
+      let data = try encode()
       if data.isEmpty {
         self.resolve(resolve, true)
         return
