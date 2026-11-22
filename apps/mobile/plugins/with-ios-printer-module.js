@@ -30,6 +30,10 @@ RCT_EXTERN_METHOD(connect:(NSString *)address
 RCT_EXTERN_METHOD(disconnect:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(configureWrite:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(print:(NSString *)command
                   encoding:(NSString *)encoding
                   resolver:(RCTPromiseResolveBlock)resolve

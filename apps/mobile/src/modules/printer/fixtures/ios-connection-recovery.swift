@@ -96,11 +96,20 @@ final class HarnessModule {
   private var pendingCharacteristicServiceCount = 0
   private var printResolve: RCTPromiseResolveBlock?
   private var printReject: RCTPromiseRejectBlock?
-  private var pendingWriteChunks: [Data] = []
-  private var pendingWriteType: CBCharacteristicWriteType?
+  private struct PendingWriteChunk {
+    let data: Data
+    let type: CBCharacteristicWriteType
+  }
+
+  private var pendingWriteChunks: [PendingWriteChunk] = []
   private var pendingWriteCharacteristic: CBCharacteristic?
+  private var awaitingWriteResponse = false
+  private var pendingWriteStartedAt: Date?
+  private var pendingWritePerfSummary = ""
   private var printTimeoutWorkItem: DispatchWorkItem?
   private var hasStatusListeners = false
+  private var writeMode = "fast"
+  private var writeAckIntervalBytes = 2048
   private static let statusEvent = "HbPrinterStatusChanged"
 
   private func sendEvent(withName name: String, body: Any?) {}
@@ -254,6 +263,116 @@ extension HarnessModule {
     try expect(writeCharacteristic === characteristic, "内容编码失败不得清写特征")
     try expect(centralManager.cancelledPeripherals.isEmpty, "内容编码失败不得请求断开")
   }
+
+  private func writeTypes(_ peripheral: CBPeripheral) -> [CBCharacteristicWriteType] {
+    peripheral.writes.map { $0.2 }
+  }
+
+  func verifyFastModeStreamsWithoutResponseAndWaitsAtBarriers() throws {
+    let peripheralUnderTest = CBPeripheral()
+    let characteristic = CBCharacteristic(properties: [.write, .writeWithoutResponse])
+    attach(peripheralUnderTest, characteristic: characteristic)
+    // 每包 20 字节、每 40 字节一个栅栏：100 字节 = 5 包，第 2、4 包和最后一包要应答。
+    writeAckIntervalBytes = 40
+    var resolved = false
+    writePrinterCommand(
+      String(repeating: "F", count: 100),
+      encoding: "UTF-8",
+      resolver: { _ in resolved = true },
+      rejecter: { code, message, _ in fatalError("fast 打印不应失败: \(code ?? "") \(message ?? "")") }
+    )
+    try expect(writeTypes(peripheralUnderTest) == [.withoutResponse, .withResponse], "fast 应无应答连发到第一个栅栏后停下")
+
+    peripheralIsReady(toSendWriteWithoutResponse: peripheralUnderTest)
+    try expect(peripheralUnderTest.writes.count == 2, "栅栏应答前 peripheralIsReady 不得推进下一包")
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    try expect(peripheralUnderTest.writes.count == 4, "栅栏应答后应继续发到下一个栅栏")
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    try expect(
+      writeTypes(peripheralUnderTest) == [.withoutResponse, .withResponse, .withoutResponse, .withResponse, .withResponse],
+      "最后一包必须是有应答写入"
+    )
+    pumpMainQueue(until: { resolved }, timeout: 0.2)
+    try expect(!resolved, "最后一包应答前不得报打印成功")
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    pumpMainQueue(until: { resolved })
+    try expect(resolved, "最后一包应答后应报打印成功")
+    let payload = peripheralUnderTest.writes.map { $0.0 }.reduce(Data(), +)
+    try expect(payload == Data(String(repeating: "F", count: 100).utf8), "分包拼回后必须与原始数据一致且顺序不变")
+
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    try expect(peripheralUnderTest.writes.count == 5, "多余应答不得触发额外写入")
+  }
+
+  func verifyFastModeHonorsLocalSendBuffer() throws {
+    let peripheralUnderTest = CBPeripheral()
+    let characteristic = CBCharacteristic(properties: [.write, .writeWithoutResponse])
+    attach(peripheralUnderTest, characteristic: characteristic)
+    writeAckIntervalBytes = 2048
+    peripheralUnderTest.canSendWriteWithoutResponse = false
+    var resolved = false
+    writePrinterCommand(
+      String(repeating: "G", count: 60),
+      encoding: "UTF-8",
+      resolver: { _ in resolved = true },
+      rejecter: { _, _, _ in fatalError("缓冲等待不应失败") }
+    )
+    try expect(peripheralUnderTest.writes.isEmpty, "本机发送缓冲满时不得写入无应答包")
+    peripheralUnderTest.canSendWriteWithoutResponse = true
+    peripheralIsReady(toSendWriteWithoutResponse: peripheralUnderTest)
+    try expect(writeTypes(peripheralUnderTest) == [.withoutResponse, .withoutResponse, .withResponse], "缓冲恢复后继续发送，末包要应答")
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    pumpMainQueue(until: { resolved })
+    try expect(resolved, "末包应答后应报打印成功")
+  }
+
+  func verifyReliableModeKeepsLegacyWithResponseWrites() throws {
+    let peripheralUnderTest = CBPeripheral()
+    let characteristic = CBCharacteristic(properties: [.write, .writeWithoutResponse])
+    attach(peripheralUnderTest, characteristic: characteristic)
+    var configured = false
+    configureWrite(["mode": "reliable", "ackIntervalBytes": 1], resolver: { _ in configured = true }, rejecter: { _, _, _ in })
+    pumpMainQueue(until: { configured })
+    try expect(writeMode == "reliable", "configureWrite 应切到 reliable")
+    try expect(writeAckIntervalBytes == 256, "栅栏间隔应夹到下限 256")
+
+    var resolved = false
+    writePrinterCommand(
+      String(repeating: "R", count: 45),
+      encoding: "UTF-8",
+      resolver: { _ in resolved = true },
+      rejecter: { _, _, _ in fatalError("reliable 打印不应失败") }
+    )
+    try expect(writeTypes(peripheralUnderTest) == [.withResponse], "reliable 应逐包有应答写入")
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    peripheral(peripheralUnderTest, didWriteValueFor: characteristic, error: nil)
+    pumpMainQueue(until: { resolved })
+    try expect(writeTypes(peripheralUnderTest) == [.withResponse, .withResponse, .withResponse], "reliable 全部有应答")
+    try expect(resolved, "reliable 末包应答后应报成功")
+
+    var ignored = false
+    configureWrite(["mode": "turbo", "ackIntervalBytes": 999_999], resolver: { _ in ignored = true }, rejecter: { _, _, _ in })
+    pumpMainQueue(until: { ignored })
+    try expect(writeMode == "reliable", "未知模式应忽略并保留当前值")
+    try expect(writeAckIntervalBytes == 16384, "栅栏间隔应夹到上限 16384")
+  }
+
+  func verifyWithoutResponseOnlyCharacteristicStillStreams() throws {
+    let peripheralUnderTest = CBPeripheral()
+    let characteristic = CBCharacteristic(properties: .writeWithoutResponse)
+    attach(peripheralUnderTest, characteristic: characteristic)
+    var resolved = false
+    writePrinterCommand(
+      String(repeating: "W", count: 50),
+      encoding: "UTF-8",
+      resolver: { _ in resolved = true },
+      rejecter: { _, _, _ in fatalError("无应答特征值打印不应失败") }
+    )
+    pumpMainQueue(until: { resolved })
+    try expect(writeTypes(peripheralUnderTest) == [.withoutResponse, .withoutResponse, .withoutResponse], "只支持无应答的特征值保持全部无应答")
+    try expect(resolved, "只支持无应答的特征值发完即成功（与旧行为一致）")
+  }
 }
 
 do {
@@ -265,6 +384,14 @@ do {
   print("PASS readiness without active print keeps healthy session")
   try HarnessModule().verifyEncodingFailureKeepsHealthySession()
   print("PASS encoding failure keeps healthy session")
+  try HarnessModule().verifyFastModeStreamsWithoutResponseAndWaitsAtBarriers()
+  print("PASS fast mode streams without response and waits at barriers")
+  try HarnessModule().verifyFastModeHonorsLocalSendBuffer()
+  print("PASS fast mode honors local send buffer")
+  try HarnessModule().verifyReliableModeKeepsLegacyWithResponseWrites()
+  print("PASS reliable mode keeps legacy with-response writes")
+  try HarnessModule().verifyWithoutResponseOnlyCharacteristicStillStreams()
+  print("PASS without-response-only characteristic still streams")
 } catch {
   fputs("FAIL \(error)\n", stderr)
   exit(1)
