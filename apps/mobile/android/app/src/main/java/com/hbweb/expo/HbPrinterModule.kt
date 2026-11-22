@@ -791,18 +791,22 @@ class HbPrinterModule(
     val infoWidth = if (isSmall) 100 else 124
     val wasX = infoX + infoWidth + columnGap
     val wasWidth = if (isSmall) 76 else 96
-    val nowX = if (showOriginalPrice) wasX + wasWidth + columnGap else wasX
-    val nowWidth = w - 12 - nowX
-    val nowPadding = 6
-    val nowGroupGap = 6
-    val nowLabelBitmap = fittedText("NOW", 6f, nowWidth, inverse = true)
-    val nowPriceBitmap = fittedText("$${formatMoney(nowPrice)}", 16f, nowWidth - nowLabelBitmap.width - nowGroupGap - nowPadding * 2, 52, inverse = true)
-    val nowHeight = max(nowLabelBitmap.height, nowPriceBitmap.height) + nowPadding * 2
-    val nowBitmap = Bitmap.createBitmap(nowWidth, nowHeight, Bitmap.Config.ARGB_8888)
-    Canvas(nowBitmap).apply {
+    // 右下黑底：折扣率（如「25% OFF」）；右上大字：折后新价格。两块与旧版对调。
+    val boxX = if (showOriginalPrice) wasX + wasWidth + columnGap else wasX
+    val boxWidth = w - 12 - boxX
+    val boxPadding = 6
+    val offGap = 8
+    val offBitmap = fittedText("OFF", 10f, boxWidth / 3, inverse = true)
+    val rateBitmap = fittedText("${discountValue.roundToInt()}%", 16f, boxWidth - offBitmap.width - offGap - boxPadding * 2, 52, inverse = true)
+    val boxHeight = max(rateBitmap.height, offBitmap.height) + boxPadding * 2
+    val boxBitmap = Bitmap.createBitmap(boxWidth, boxHeight, Bitmap.Config.ARGB_8888)
+    Canvas(boxBitmap).apply {
       drawColor(Color.BLACK)
-      drawBitmap(nowLabelBitmap, nowPadding.toFloat(), ((nowHeight - nowLabelBitmap.height) / 2).toFloat(), null)
-      drawBitmap(nowPriceBitmap, (nowWidth - nowPadding - nowPriceBitmap.width).toFloat(), ((nowHeight - nowPriceBitmap.height) / 2).toFloat(), null)
+      // 折扣率与「OFF」整体水平居中，底部（基线）对齐。
+      val groupX = max(boxPadding, (boxWidth - rateBitmap.width - offGap - offBitmap.width) / 2)
+      val bottom = boxPadding + rateBitmap.height
+      drawBitmap(rateBitmap, groupX.toFloat(), boxPadding.toFloat(), null)
+      drawBitmap(offBitmap, (groupX + rateBitmap.width + offGap).toFloat(), (bottom - offBitmap.height).toFloat(), null)
     }
     val wasLabelBitmap = fittedText("WAS", 6f, wasWidth)
     val wasPriceBitmap = fittedText("$${formatMoney(retailPrice)}", 8f, wasWidth, 30)
@@ -810,12 +814,38 @@ class HbPrinterModule(
     // 超长货号明确显示省略号；二维码继续编码完整条码/货号。
     val itemDisplay = if (itemNumber.length > 24) itemNumber.take(21) + "..." else itemNumber
     val itemBitmap = itemDisplay.takeIf { it.isNotBlank() }?.let { fittedText(it, 7f, infoWidth, 28) }
-    val discountBitmap = fittedText(discountValue.roundToInt().toString().padStart(2, '0'), 44f, w / 2, 108)
-    val offBitmap = fittedText("OFF", 16f, 110)
-    val percentBitmap = fittedText("%", 20f, 70)
+    // 新价格沿用普通价签写法：整数 44 号大字，「$」「.」小数 20 号并上对齐；放不下时整组等比缩小，不截断金额。
+    val price = formatPriceParts(nowPrice)
+    val headMaxWidth = w - 12 - 160
+    fun priceParts(scale: Float) = listOf(
+      textToBitmap("$", fontSizeToPixels(20f * scale), true, "sans-serif-black"),
+      textToBitmap(price.integer, fontSizeToPixels(44f * scale), true, "sans-serif-black"),
+      textToBitmap(".", fontSizeToPixels(20f * scale), true, "sans-serif-black"),
+      textToBitmap(price.decimal, fontSizeToPixels(20f * scale), true, "sans-serif-black"),
+    )
+    var priceScale = 1f
+    var parts = priceParts(priceScale)
+    while ((parts.sumOf { it.width } > headMaxWidth || parts[1].height > 108) && priceScale > 0.1f) {
+      priceScale -= 0.05f
+      parts = priceParts(priceScale)
+    }
+    val (currencyBitmap, integerBitmap, dotBitmap, decimalBitmap) = parts
+    // 合成一张位图再下发：避免相邻位图按字节补齐的空白互相覆盖。
+    val priceBitmap = Bitmap.createBitmap(parts.sumOf { it.width }, parts.maxOf { it.height }, Bitmap.Config.ARGB_8888)
+    Canvas(priceBitmap).apply {
+      drawColor(Color.WHITE)
+      var x = 0f
+      drawBitmap(currencyBitmap, x, 0f, null)
+      x += currencyBitmap.width
+      drawBitmap(integerBitmap, x, 0f, null)
+      x += integerBitmap.width
+      // 小数点贴整数底部。
+      drawBitmap(dotBitmap, x, (integerBitmap.height - dotBitmap.height).toFloat(), null)
+      x += dotBitmap.width
+      drawBitmap(decimalBitmap, x, 0f, null)
+    }
     val startY = 20
-    val headerGap = 8 // EG 每行按 8 点补齐，留出字节尾部空白，避免相邻位图覆盖。
-    val startX = w - 12 - discountBitmap.width - headerGap - max(percentBitmap.width, percentBitmap.width / 2 + offBitmap.width)
+    val startX = w - 12 - priceBitmap.width
     val qrBitmap = barcode.takeIf { it.isNotBlank() }?.let { createQrCodeBitmap(it, 64) }
     // 两种纸宽都遵守现有 204 点有效打印区，底部保留 10 点。
     val infoBandBottom = 194
@@ -857,13 +887,7 @@ class HbPrinterModule(
       "! 0 200 200 $h 1",
       "PAGE-WIDTH $w",
       bitmapCommand(5, 5, nameBitmap),
-      bitmapCommand(startX, startY, discountBitmap),
-      bitmapCommand(startX + discountBitmap.width + headerGap, startY, percentBitmap),
-      bitmapCommand(
-        startX + discountBitmap.width + headerGap + percentBitmap.width / 2,
-        startY + discountBitmap.height - offBitmap.height,
-        offBitmap,
-      ),
+      bitmapCommand(startX, startY, priceBitmap),
     )
 
     if (itemBitmap != null) {
@@ -881,7 +905,7 @@ class HbPrinterModule(
       val strikeY = wasPriceY + wasPriceBitmap.height / 2
       commands += "LINE $wasX $strikeY ${wasX + wasPriceBitmap.width - 1} $strikeY 2"
     }
-    commands += bitmapCommand(nowX, infoBandBottom - nowBitmap.height, nowBitmap)
+    commands += bitmapCommand(boxX, infoBandBottom - boxBitmap.height, boxBitmap)
     commands += "PRINT"
 
     return commands.joinToString("\r\n", postfix = "\r\n")

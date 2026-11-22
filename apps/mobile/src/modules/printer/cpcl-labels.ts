@@ -368,7 +368,6 @@ export function buildDiscountLabelCommand(payload: ProductLabelPrintPayload, pri
     && Number(payload.retailPrice) > nowPrice
     && nowPrice >= 0;
   const wasText = `$${formatMoney(payload.retailPrice)}`;
-  const nowText = `$${formatMoney(nowPrice)}`;
   // CPCL 固定字体：font 0 为 8×9 点，font 7 为 12×24 点；非 ASCII 保守按双宽。
   const textWidth = (value: string, font: 0 | 7) => Array.from(value).reduce(
     (total, char) => total + ((char.codePointAt(0) ?? 0) > 127 ? 2 : 1) * (font === 0 ? 8 : 12),
@@ -386,24 +385,33 @@ export function buildDiscountLabelCommand(payload: ProductLabelPrintPayload, pri
   const baseWasWidth = small ? 76 : 96;
   const wasFont: 0 | 7 = textWidth(wasText, 7) <= baseWasWidth ? 7 : 0;
   const wasWidth = Math.max(baseWasWidth, textWidth(wasText, wasFont));
-  const nowX = hasWasPrice ? wasX + wasWidth + 10 : wasX;
-  const nowRight = width - 12;
-  const nowLabelWidth = textWidth("NOW", 7);
-  const nowAmountMaxWidth = nowRight - nowX - nowLabelWidth - 18;
-  const nowFont: 0 | 7 = textWidth(nowText, 7) <= nowAmountMaxWidth ? 7 : 0;
-  const nowBaseWidth = textWidth(nowText, nowFont);
-  if (nowBaseWidth > nowAmountMaxWidth) {
+  // 右下黑底：折扣率（如「25% OFF」）；右上大字：折后新价格。两块与旧版对调。
+  const boxX = hasWasPrice ? wasX + wasWidth + 10 : wasX;
+  const boxRight = width - 12;
+  const discountText = `${discountPercent(payload.discountRate)}%`;
+  const offGap = 8;
+  const offWidth = textWidth("OFF", 7);
+  // 折扣率优先 2 倍字；黑底放不下才退回 1 倍。
+  const discountMag = textWidth(discountText, 7) * 2 + offGap + offWidth <= boxRight - boxX - 12 ? 2 : 1;
+  const discountTextWidth = textWidth(discountText, 7) * discountMag;
+  const discountTextHeight = 24 * discountMag;
+  const boxHeight = discountTextHeight + 12;
+  const boxTop = 194 - boxHeight;
+  const discountGroupX = boxX + Math.max(6, Math.floor((boxRight - boxX - discountTextWidth - offGap - offWidth) / 2));
+  // 新价格按普通价签写法拆成「$」「整数」「.」「小数」：整数大字，其余半号并上对齐；放不下时整体降倍率。
+  const [priceInteger, priceDecimal] = formatMoney(nowPrice).split(".");
+  const headMaxWidth = width - 12 - 160;
+  const priceWidthAt = (bigMag: number, smallMag: number) =>
+    textWidth(priceInteger, 7) * bigMag + textWidth("$.", 7) * smallMag + textWidth(priceDecimal, 7) * smallMag;
+  let priceMag = 4;
+  while (priceMag > 1 && priceWidthAt(priceMag, Math.ceil(priceMag / 2)) > headMaxWidth) priceMag--;
+  const priceSmallMag = Math.ceil(priceMag / 2);
+  const priceWidth = priceWidthAt(priceMag, priceSmallMag);
+  if (priceWidth > headMaxWidth) {
     throw new Error("Discount label price is too long for its price area.");
   }
-  const nowScaleX = Math.min(2, Math.floor(nowAmountMaxWidth / nowBaseWidth));
-  const nowScaleY = nowFont === 7 ? nowScaleX : 2;
-  const nowPriceHeight = (nowFont === 7 ? 24 : 9) * nowScaleY;
-  const nowHeight = Math.max(24, nowPriceHeight) + 12;
-  const nowTop = 194 - nowHeight;
-  const discountText = String(discountPercent(payload.discountRate)).padStart(2, "0");
-  const discountWidth = textWidth(discountText, 7) * 4;
-  const discountX = width - 12 - discountWidth - 8 - 48;
-  const nameMaxWidth = Math.max(36, discountX - 15);
+  const priceX = width - 12 - priceWidth;
+  const nameMaxWidth = Math.max(36, priceX - 15);
   const nameChars = Array.from(cpclText(payload.productName));
   let firstLineLength = 0;
   while (firstLineLength < nameChars.length
@@ -425,9 +433,14 @@ export function buildDiscountLabelCommand(payload: ProductLabelPrintPayload, pri
     lines.push(`SETMAG ${scaleX} ${scaleY}`, text(font, x, y, value));
   };
   nameLines.forEach((value, index) => addText(7, 5, 5 + index * 30, value));
-  addText(7, discountX, 20, discountText, 4, 4);
-  addText(7, discountX + discountWidth + 8, 20, "%", 2, 2);
-  addText(7, discountX + discountWidth + 20, 92, "OFF");
+  // 右上新价格：整数在 y=20 起 24×倍率 高，小数点按整数底部对齐。
+  const priceSmallWidth = 12 * priceSmallMag;
+  const priceIntegerX = priceX + priceSmallWidth;
+  const priceDotX = priceIntegerX + textWidth(priceInteger, 7) * priceMag;
+  addText(7, priceX, 20, "$", priceSmallMag, priceSmallMag);
+  addText(7, priceIntegerX, 20, priceInteger, priceMag, priceMag);
+  addText(7, priceDotX, 20 + 24 * priceMag - 24 * priceSmallMag, ".", priceSmallMag, priceSmallMag);
+  addText(7, priceDotX + priceSmallWidth, 20, priceDecimal, priceSmallMag, priceSmallMag);
   addText(itemFont, infoX, 142, item, 1, itemFont === 0 ? 2 : 1);
   addText(0, infoX + 2, 174, formatDate(), 1, 2);
   lines.push(`INVERSE-LINE ${infoX} 172 ${infoX + 84} 172 22`);
@@ -438,10 +451,11 @@ export function buildDiscountLabelCommand(payload: ProductLabelPrintPayload, pri
     addText(wasFont, wasX, wasPriceY, wasText, 1, wasFont === 0 ? 2 : 1);
     lines.push(line(wasX, wasPriceY + wasPriceHeight / 2, wasX + textWidth(wasText, wasFont) - 1, wasPriceY + wasPriceHeight / 2, 2));
   }
-  addText(7, nowX + 6, nowTop + (nowHeight - 24) / 2, "NOW");
-  addText(nowFont, nowRight - 6 - nowBaseWidth * nowScaleX, nowTop + (nowHeight - nowPriceHeight) / 2, nowText, nowScaleX, nowScaleY);
-  // 在同一矩形内反显 NOW 和完整金额，右侧留 6 点空白。
-  lines.push(`INVERSE-LINE ${nowX} ${nowTop} ${nowRight} ${nowTop} ${nowHeight}`, "SETMAG 0 0");
+  addText(7, discountGroupX, boxTop + 6, discountText, discountMag, discountMag);
+  // 「OFF」小一号，底部与折扣率对齐。
+  addText(7, discountGroupX + discountTextWidth + offGap, boxTop + 6 + discountTextHeight - 24, "OFF");
+  // 在同一矩形内反显折扣率与 OFF。
+  lines.push(`INVERSE-LINE ${boxX} ${boxTop} ${boxRight} ${boxTop} ${boxHeight}`, "SETMAG 0 0");
   if (barcodeValue) lines.push(`BARCODE QR 10 130 M 2 U ${qrUnit}`, `MA,${barcodeValue}`, "ENDQR");
   lines.push("PRINT");
   return command(lines);
