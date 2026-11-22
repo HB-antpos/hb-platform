@@ -96,12 +96,16 @@ namespace BlazorApp.Api.Services.React
                     // 扫码枪 / 相机会把 EAN-13 前导 0 去掉成 12 位（UPC-A），库里却可能按 13 位存放（反之亦然）。
                     // 只有精确匹配完全没有结果时才回退到另一种写法：生产库里存在 12 位 X 与 13 位 0+X
                     // 分属不同商品的情况，精确命中必须优先，不能把两种写法当作等价一起查。
-                    var barcodeVariant = BarcodeVariants.GetLeadingZeroVariant(keyword);
-                    if (barcodeVariant != null)
+                    // 扫到外箱 / 中包的 14 位箱码（ITF-14）时同理：库里没登记这个箱码才换算成单件条码再查。
+                    foreach (var barcodeVariant in BarcodeVariants.GetLookupFallbacks(keyword))
                     {
                         hits = FilterExactCodeHits(
                             await QueryLookupHitsAsync(barcodeVariant, selectedStoreCodes, barcodeOnly: true)
                         );
+                        if (hits.Count > 0)
+                        {
+                            break;
+                        }
                     }
                 }
                 matchSw.Stop();
