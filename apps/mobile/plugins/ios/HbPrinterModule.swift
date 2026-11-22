@@ -879,22 +879,29 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     let infoWidth = isSmall ? 100 : 124
     let wasX = infoX + infoWidth + columnGap
     let wasWidth = isSmall ? 76 : 96
-    let nowX = showOriginalPrice ? wasX + wasWidth + columnGap : wasX
-    let nowWidth = width - 12 - nowX
-    let nowPadding = 6
-    let nowGroupGap = 6
-    let nowLabel = fittedText("NOW", size: 6, maxWidth: nowWidth)
-    let nowPriceText = "$\(formatMoney(nowPrice))"
-    let nowPriceTextBitmap = fittedText(nowPriceText, size: 16, maxWidth: nowWidth - nowLabel.bitmap.width - nowGroupGap - nowPadding * 2, maxHeight: 52)
-    let nowHeight = max(nowLabel.bitmap.height, nowPriceTextBitmap.bitmap.height) + nowPadding * 2
-    let nowBitmap = renderPrinterBitmap(width: nowWidth, height: nowHeight, isInverse: true) {
-      ("NOW" as NSString).draw(
-        at: CGPoint(x: nowPadding, y: (nowHeight - nowLabel.bitmap.height) / 2 - nowLabel.inkTop),
-        withAttributes: [.font: printerFont(fontFamily: "sans-serif-black", fontSize: fontSizeToPixels(nowLabel.fontSize), isBold: true), .foregroundColor: UIColor.white]
+    // 右下黑底：折扣率（如「25% OFF」）；右上大字：折后新价格。两块与旧版对调。
+    let boxX = showOriginalPrice ? wasX + wasWidth + columnGap : wasX
+    let boxWidth = width - 12 - boxX
+    let boxPadding = 6
+    let offGap = 8
+    func blackFont(_ size: CGFloat) -> UIFont {
+      printerFont(fontFamily: "sans-serif-black", fontSize: fontSizeToPixels(size), isBold: true)
+    }
+    let offText = fittedText("OFF", size: 10, maxWidth: boxWidth / 3)
+    let rateString = "\(Int(discountValue.rounded()))%"
+    let rateText = fittedText(rateString, size: 16, maxWidth: boxWidth - offText.bitmap.width - offGap - boxPadding * 2, maxHeight: 52)
+    let boxHeight = max(rateText.bitmap.height, offText.bitmap.height) + boxPadding * 2
+    let boxBitmap = renderPrinterBitmap(width: boxWidth, height: boxHeight, isInverse: true) {
+      // 折扣率与「OFF」整体水平居中，按墨迹底部对齐。
+      let groupX = max(boxPadding, (boxWidth - rateText.bitmap.width - offGap - offText.bitmap.width) / 2)
+      let bottom = boxPadding + rateText.bitmap.height
+      (rateString as NSString).draw(
+        at: CGPoint(x: groupX, y: boxPadding - rateText.inkTop),
+        withAttributes: [.font: blackFont(rateText.fontSize), .foregroundColor: UIColor.white]
       )
-      (nowPriceText as NSString).draw(
-        at: CGPoint(x: nowWidth - nowPadding - nowPriceTextBitmap.bitmap.width, y: (nowHeight - nowPriceTextBitmap.bitmap.height) / 2 - nowPriceTextBitmap.inkTop),
-        withAttributes: [.font: printerFont(fontFamily: "sans-serif-black", fontSize: fontSizeToPixels(nowPriceTextBitmap.fontSize), isBold: true), .foregroundColor: UIColor.white]
+      ("OFF" as NSString).draw(
+        at: CGPoint(x: groupX + rateText.bitmap.width + offGap, y: bottom - offText.bitmap.height - offText.inkTop),
+        withAttributes: [.font: blackFont(offText.fontSize), .foregroundColor: UIColor.white]
       )
     }
     let wasLabelBitmap = fittedText("WAS", size: 6, maxWidth: wasWidth).bitmap
@@ -903,12 +910,43 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     // 超长货号明确显示省略号；二维码继续编码完整条码/货号。
     let itemDisplay = itemNumber.count > 24 ? String(itemNumber.prefix(21)) + "..." : itemNumber
     let itemBitmap = itemDisplay.isEmpty ? nil : fittedText(itemDisplay, size: 7, maxWidth: infoWidth, maxHeight: 28).bitmap
-    let discountBitmap = fittedText(String(format: "%02d", Int(discountValue.rounded())), size: 44, maxWidth: width / 2, maxHeight: 108).bitmap
-    let offBitmap = fittedText("OFF", size: 16, maxWidth: 110).bitmap
-    let percentBitmap = fittedText("%", size: 20, maxWidth: 70).bitmap
+    // 新价格沿用普通价签写法：整数 44 号大字，「$」「.」小数 20 号并上对齐；放不下时整组等比缩小，不截断金额。
+    let price = formatPriceParts(nowPrice)
+    let headMaxWidth = width - 12 - 160
+    typealias PricePart = (text: String, bitmap: PrinterBitmap, fontSize: CGFloat, inkTop: Int)
+    func priceParts(_ scale: CGFloat) -> [PricePart] {
+      let specs: [(text: String, size: CGFloat)] = [("$", 20), (price.integer, 44), (".", 20), (price.decimal, 20)]
+      var result: [PricePart] = []
+      for spec in specs {
+        let part = fittedText(spec.text, size: spec.size * scale, maxWidth: Int.max, maxHeight: Int.max)
+        result.append((text: spec.text, bitmap: part.bitmap, fontSize: part.fontSize, inkTop: part.inkTop))
+      }
+      return result
+    }
+    var priceScale: CGFloat = 1
+    var parts = priceParts(priceScale)
+    while (parts.reduce(0) { $0 + $1.bitmap.width } > headMaxWidth || parts[1].bitmap.height > 108) && priceScale > 0.1 {
+      priceScale -= 0.05
+      parts = priceParts(priceScale)
+    }
+    let priceWidth = parts.reduce(0) { $0 + $1.bitmap.width }
+    let priceHeight = parts.map { $0.bitmap.height }.max() ?? 1
+    let integerHeight = parts[1].bitmap.height
+    // 合成一张位图再下发：避免相邻位图按字节补齐的空白互相覆盖。
+    let priceBitmap = renderPrinterBitmap(width: priceWidth, height: priceHeight, isInverse: false) {
+      var x = 0
+      for (index, part) in parts.enumerated() {
+        // 小数点贴整数墨迹底部，其余上对齐。
+        let top = index == 2 ? integerHeight - part.bitmap.height : 0
+        (part.text as NSString).draw(
+          at: CGPoint(x: x, y: top - part.inkTop),
+          withAttributes: [.font: blackFont(part.fontSize), .foregroundColor: UIColor.black]
+        )
+        x += part.bitmap.width
+      }
+    }
     let startY = 20
-    let headerGap = 8 // EG 每行按 8 点补齐，留出字节尾部空白，避免相邻位图覆盖。
-    let startX = width - 12 - discountBitmap.width - headerGap - max(percentBitmap.width, percentBitmap.width / 2 + offBitmap.width)
+    let startX = width - 12 - priceWidth
     let qrBitmap = barcode.isEmpty ? nil : createQrCodeBitmap(barcode, size: 64)
     // 两种纸宽都遵守现有 204 点有效打印区，底部保留 10 点。
     let infoBandBottom = 194
@@ -917,7 +955,6 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     let dateY = infoBandBottom - dateBitmap.height
     let itemY = dateY - (itemBitmap?.height ?? 0) - 6
     let wasPriceY = infoBandBottom - wasPriceBitmap.height
-    let discountOffY = startY + discountBitmap.height - offBitmap.height
     let nameMaxWidth = max(1, startX - 15)
     let nameFont = printerFont(fontFamily: "Arial", fontSize: fontSizeToPixels(10), isBold: false)
     var nameLines = wrapText(cpclText(productName), font: nameFont, maxWidth: nameMaxWidth, maxLines: 2)
@@ -943,13 +980,7 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
       "! 0 200 200 \(height) 1",
       "PAGE-WIDTH \(width)",
       bitmapCommand(5, 5, nameBitmap),
-      bitmapCommand(startX, startY, discountBitmap),
-      bitmapCommand(startX + discountBitmap.width + headerGap, startY, percentBitmap),
-      bitmapCommand(
-        startX + discountBitmap.width + headerGap + percentBitmap.width / 2,
-        discountOffY,
-        offBitmap
-      ),
+      bitmapCommand(startX, startY, priceBitmap),
     ]
 
     if let itemBitmap {
@@ -967,7 +998,7 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
       let strikeY = wasPriceY + wasPriceBitmap.height / 2
       commands.append("LINE \(wasX) \(strikeY) \(wasX + wasPriceBitmap.width - 1) \(strikeY) 2")
     }
-    commands.append(bitmapCommand(nowX, infoBandBottom - nowBitmap.height, nowBitmap))
+    commands.append(bitmapCommand(boxX, infoBandBottom - boxBitmap.height, boxBitmap))
     commands.append("PRINT")
     return commands.joined(separator: "\r\n") + "\r\n"
   }

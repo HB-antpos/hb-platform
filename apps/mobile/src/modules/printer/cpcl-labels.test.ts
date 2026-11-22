@@ -292,17 +292,22 @@ function assertDiscountGeometry(command: string) {
     }
   }
   const inverse = rows.filter((row) => row.startsWith("INVERSE-LINE ")).at(-1)?.split(" ").map(Number);
-  assert.ok(inverse, "必须输出 NOW 黑底区域");
-  const now = boxes.find((box) => box.value === "NOW");
-  const amount = boxes.find((box) => box.value.startsWith("$") && box.x >= inverse[1]);
-  assert.ok(now && amount, "NOW 与当前价必须都在黑底内");
-  for (const box of [now, amount]) {
-    assert.ok(box.x >= inverse[1] + 6 && box.x + box.w <= inverse[3] - 6 && box.y >= inverse[2] && box.y + box.h <= inverse[2] + inverse[5], "NOW 黑底须完整包住文字并保留左右内边距");
+  assert.ok(inverse, "必须输出折扣率黑底区域");
+  // 对调后：黑底里是折扣率（如「25%」+「OFF」），右上角大字是折后新价格。
+  const rate = boxes.find((box) => /^\d+%$/.test(box.value));
+  const off = boxes.find((box) => box.value === "OFF");
+  assert.ok(rate && off, "折扣率与 OFF 必须都在黑底内");
+  for (const box of [rate, off]) {
+    assert.ok(box.x >= inverse[1] + 6 && box.x + box.w <= inverse[3] - 6 && box.y >= inverse[2] && box.y + box.h <= inverse[2] + inverse[5], "折扣率黑底须完整包住文字并保留左右内边距");
   }
+  assert.equal(boxes.some((box) => box.value === "NOW"), false, "黑底不再显示 NOW 价格");
+  const head = boxes.filter((box) => box.x !== 5 && box.y + box.h <= 130).sort((a, b) => a.x - b.x);
+  assert.ok(head.length === 4 && head.every((box) => box.y === 20 || box.value === "."), "新价格在右上角，$、整数、小数上对齐");
+  assert.ok(head.every((box) => box.x + box.w <= width - 12), "新价格右侧保留 12 点边距");
   const was = boxes.find((box) => box.value === "WAS");
   const strike = rows.find((row) => row.startsWith("LINE "))?.split(" ").map(Number);
   if (was) {
-    const original = boxes.find((box) => box.value.startsWith("$") && box.x < inverse[1]);
+    const original = boxes.find((box) => box.value.startsWith("$") && box.value.length > 1 && box.y >= 130);
     assert.ok(original && strike, "原价金额必须完整保留并带删除线");
     assert.ok(original.x + original.w < inverse[1], "原价必须放在当前价前面");
     assert.ok(strike[1] >= original.x && strike[3] < original.x + original.w && strike[2] > original.y && strike[2] < original.y + original.h, "删除线只覆盖原价金额");
@@ -321,25 +326,31 @@ function assertDiscountGeometry(command: string) {
   assert.equal(scaleY, 1, "打印后必须复位文字倍率");
   return boxes;
 }
+/** 右上角新价格按 x 拼回完整金额，如「$9.26」。 */
+function headPrice(boxes: DiscountTextBox[]) {
+  return boxes.filter((box) => box.x !== 5 && box.y + box.h <= 130).sort((a, b) => a.x - b.x).map((box) => box.value).join("");
+}
 
 for (const paper of ["small", undefined]) {
   const discountCommand = buildDiscountLabelCommand(productPayload, paper);
   const boxes = assertDiscountGeometry(discountCommand);
   assert.ok(discountCommand.includes(`PAGE-WIDTH ${paper ? 472 : 570}`), "保持现有两种纸宽");
   assert.ok(boxes.some((box) => box.value === "$12.34"), "原价金额必须完整");
-  assert.ok(boxes.some((box) => box.value === "$9.26"), "折后价按分四舍五入");
-  assert.ok(boxes.some((box) => box.value === "25") && boxes.some((box) => box.value === "%"), "保留折扣力度");
+  assert.equal(headPrice(boxes), "$9.26", "右上角新价格按分四舍五入");
+  assert.ok(boxes.some((box) => box.value === "25%") && boxes.some((box) => box.value === "OFF"), "黑底显示折扣率");
+  assert.ok(discountCommand.includes("SETMAG 4 4\r\nTEXT 7 0"), "短价格整数用 4 倍大字");
   assert.ok(discountCommand.includes("BARCODE QR 10 130 M 2 U 3"), "短条码使用 63 点二维码");
   assert.ok(discountCommand.includes(`MA,${productPayload.barcode}\r\nENDQR`), "二维码编码完整商品条码");
   for (const discountRate of [0, 0.00001, 1]) {
     const prices = assertDiscountGeometry(buildDiscountLabelCommand({ ...productPayload, discountRate }, paper));
     assert.equal(prices.some((box) => box.value === "WAS"), discountRate === 1, "按分舍入后确有降价才显示 WAS");
-    assert.ok(prices.some((box) => box.value === (discountRate === 1 ? "$0.00" : "$12.34")), "零折扣与免费价格正确");
+    assert.equal(headPrice(prices), discountRate === 1 ? "$0.00" : "$12.34", "零折扣与免费价格正确");
   }
   for (const retailPrice of [2.01, 1234.56, 123456.78, 99999999.99]) {
     const prices = assertDiscountGeometry(buildDiscountLabelCommand({ ...productPayload, retailPrice, discountRate: 0.5 }, paper));
     assert.ok(prices.some((box) => box.value === `$${retailPrice.toFixed(2)}`), "大金额原价不能截断");
-    if (retailPrice === 2.01) assert.ok(prices.some((box) => box.value === "$1.01"), "半分边界向上舍入");
+    assert.equal(headPrice(prices), `$${(Math.round(retailPrice * 50 + 1e-8) / 100).toFixed(2)}`, "长新价格自动降倍率、不截断");
+    if (retailPrice === 2.01) assert.equal(headPrice(prices), "$1.01", "半分边界向上舍入");
   }
   for (const productName of ["Very long Coconut Water Product Name Extra Large 1L ".repeat(2), "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".repeat(2), "中文超长商品名测试完整安全换行".repeat(4)]) {
     const boxes = assertDiscountGeometry(buildDiscountLabelCommand({ ...productPayload, productName, itemNumber: "中文货号很长".repeat(5) }, paper));
