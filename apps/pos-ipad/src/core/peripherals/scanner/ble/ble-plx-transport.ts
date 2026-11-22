@@ -134,13 +134,17 @@ export function createBlePlxTransport(): BleScannerTransport {
       };
     },
 
-    async connect(id) {
+    async connect(id, options) {
       if (!(await ensureAndroidPermissions())) {
         throw Object.assign(new Error("Bluetooth permission denied"), { code: "permission" });
       }
-      // 不传 timeout：iOS 的 connect 本身不超时；Android autoConnect=true 由系统在设备
-      // 重新广播时接上。扫码枪休眠期间请求一直挂着，按扳机唤醒约 1–2 秒连回。
-      await manager().connectToDevice(id, { autoConnect: Platform.OS === "android" });
+      // 不传 timeout：iOS 的 connect 本身不超时。
+      // Android：挂起请求（pending）用 autoConnect=true，由系统在设备重新广播时接上；
+      // 用户主动连接 / 控制器刚扫到广播时直连（autoConnect=false 快得多，连不上会超时报错，
+      // 控制器随即回到休眠 / 重连中并继续唤醒扫描）。
+      await manager().connectToDevice(id, {
+        autoConnect: Platform.OS === "android" && options.pending,
+      });
     },
 
     async cancelConnection(id) {

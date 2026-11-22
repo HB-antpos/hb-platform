@@ -320,6 +320,11 @@
     },
     "notice": {
       "noReceiver": "This page doesn't accept scans"
+    },
+    "indicator": {
+      "statusA11y": "Bluetooth scanner: {{state}}",
+      "reconnectA11y": "Bluetooth scanner: {{state}}, tap to reconnect",
+      "reconnectHint": "If the scanner is asleep, press its trigger first. Long-press to open scanner settings"
     }
   },
   "offlineData": {

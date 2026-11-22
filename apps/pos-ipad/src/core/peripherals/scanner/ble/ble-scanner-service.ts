@@ -21,6 +21,7 @@ export type BleScannerControllerPort = Pick<
   BleScannerController,
   | "start"
   | "resume"
+  | "pause"
   | "dispose"
   | "getStatus"
   | "subscribeStatus"
@@ -55,8 +56,10 @@ export type BleScannerServiceOptions = Readonly<{
   router: BleScannerRouterPort;
   /** 搜索时排除的外设 ID（已保存的小票打印机），避免把打印机当扫码枪连走。 */
   loadExcludedPeripheralIds?: () => Promise<readonly string[]>;
-  /** App 回到前台的订阅；回到前台时重新挂一次连接请求。 */
+  /** App 回到前台的订阅；回到前台时休眠 / 重连中的扫码枪立即补一轮唤醒扫描。 */
   subscribeForeground?: (listener: () => void) => () => void;
+  /** App 进后台的订阅；进后台时停止唤醒扫描（省电）。 */
+  subscribeBackground?: (listener: () => void) => () => void;
   /** 只记事件名，不记码值（码可能是员工码或其他敏感内容）。 */
   log?: (event: BleScannerServiceLogEvent) => void;
 }>;
@@ -66,6 +69,7 @@ export class BleScannerService {
   private readonly router: BleScannerRouterPort;
   private readonly loadExcludedPeripheralIds: () => Promise<readonly string[]>;
   private readonly subscribeForeground?: BleScannerServiceOptions["subscribeForeground"];
+  private readonly subscribeBackground?: BleScannerServiceOptions["subscribeBackground"];
   private readonly log?: BleScannerServiceOptions["log"];
   private readonly testListeners = new Set<(scan: BleScannerTestScan) => void>();
   private readonly undeliveredListeners = new Set<
@@ -81,6 +85,7 @@ export class BleScannerService {
     this.loadExcludedPeripheralIds =
       options.loadExcludedPeripheralIds ?? (() => Promise.resolve([]));
     this.subscribeForeground = options.subscribeForeground;
+    this.subscribeBackground = options.subscribeBackground;
     this.log = options.log;
   }
 
@@ -91,6 +96,9 @@ export class BleScannerService {
     this.cleanups.push(this.controller.subscribeScans((scan) => this.handleScan(scan)));
     if (this.subscribeForeground) {
       this.cleanups.push(this.subscribeForeground(() => this.controller.resume()));
+    }
+    if (this.subscribeBackground) {
+      this.cleanups.push(this.subscribeBackground(() => this.controller.pause()));
     }
     void this.controller.start().catch(() => {
       // 蓝牙初始化失败不影响收银主流程；状态停在未配对 / 不可用。

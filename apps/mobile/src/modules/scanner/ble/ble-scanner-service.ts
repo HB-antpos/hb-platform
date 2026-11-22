@@ -120,11 +120,16 @@ export async function startBleScannerService(options: Readonly<{ onlyIfSaved?: b
   return started;
 }
 
-/** App 回到前台：休眠 / 重连中的扫码枪重新挂一次连接请求。 */
+/** App 回到前台：休眠 / 重连中的扫码枪立即补一轮唤醒扫描（不叠加连接请求）。 */
 export function resumeBleScannerService(): void {
   if (isIosReviewSessionActive()) return;
   if (!startPromise) return;
   controller?.resume();
+}
+
+/** App 进后台：停止唤醒扫描（省电；iOS 没有声明蓝牙后台模式，后台本来也扫不了）。 */
+export function pauseBleScannerService(): void {
+  controller?.pause();
 }
 
 /** 副作用关闭（如进入 iOS 审核态）：停止搜索、断开、解除订阅；保存的配置保留。 */

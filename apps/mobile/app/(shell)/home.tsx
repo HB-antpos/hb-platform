@@ -24,6 +24,7 @@ import {
   TextInput as PaperTextInput,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 import { AnimatedEmptyStateGraphic } from "@/components/ui/AnimatedEmptyStateGraphic";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -1238,6 +1239,8 @@ export default function Home() {
               </View>
             </View>
           </Pressable>
+          {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+          <BleScannerStatusButton />
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={

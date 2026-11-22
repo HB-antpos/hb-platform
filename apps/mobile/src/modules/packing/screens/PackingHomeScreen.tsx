@@ -346,7 +346,7 @@ export function PackingHomeScreen() {
   if (!owner) {
     return (
       <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-        <PickHeader title={t("home.title")} onBack={goBack} backLabel={t("actions.back")} />
+        <PickHeader showBleScanner title={t("home.title")} onBack={goBack} backLabel={t("actions.back")} />
         <ActivityIndicator style={packStyles.loading} />
       </SafeAreaView>
     );
@@ -542,7 +542,7 @@ export function PackingHomeScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-      <PickHeader
+      <PickHeader showBleScanner
         title={selectMode ? t("select.title", { count: chosen.length }) : t("home.title")}
         onBack={selectMode ? exitSelect : goBack}
         backLabel={selectMode ? t("select.exit") : t("actions.back")}

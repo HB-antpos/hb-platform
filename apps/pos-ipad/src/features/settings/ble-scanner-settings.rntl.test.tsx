@@ -48,6 +48,7 @@ class FakeController implements BleScannerControllerPort {
   forgetCalls = 0;
   async start(): Promise<void> {}
   resume(): void {}
+  pause(): void {}
   dispose(): void {}
   getStatus(): BleScannerStatus {
     return this.status;

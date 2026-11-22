@@ -54,6 +54,67 @@ export function buildBleScannerRowSubtitle(status: BleScannerStatus, t: Translat
   return parts.join(" · ");
 }
 
+/** 扫码页「蓝牙枪」状态按钮的展示（图标 / 颜色 / 文案 / 点按行为）。 */
+export type BleScannerIndicator = Readonly<{
+  icon: "bluetooth" | "bluetooth-connect" | "bluetooth-off" | "bluetooth-transfer";
+  tone: RowTone;
+  /** 状态文案 key（settings 命名空间）。 */
+  labelKey: string;
+  /** 已连接时显示的电量；其余状态为 null。 */
+  batteryLevel: number | null;
+  /** 点按行为：休眠 / 重连中 / 已断开直接重连，其余打开扫码枪设置。 */
+  action: "reconnect" | "open-settings";
+}>;
+
+/** 与控制器的低电量阈值（BLE_LOW_BATTERY_LEVEL = 20）一致。 */
+const LOW_BATTERY_LEVEL = 20;
+
+/**
+ * 扫码页的状态按钮。返回 null 表示不显示：本机没有配对过扫码枪（大多数人用键盘模式扫码枪，
+ * 不该在扫码页多出一个灰图标），或本机不支持蓝牙。
+ * 颜色与设置页一致：绿 = 已连上；黄 = 连接中 / 重连中；灰 = 休眠 / 已断开；红 = 蓝牙关闭 / 未授权 / 需处理。
+ */
+export function describeBleScannerIndicator(status: BleScannerStatus): BleScannerIndicator | null {
+  if (!status.saved) return null;
+  // 文案按连接状态取；「需处理」只用于重连太久（低电量时仍显示「已连接」并标红，不改文案）。
+  const stuckReconnecting = status.state === "reconnecting" && status.attention;
+  const labelKey = `bleScanner.state.${stuckReconnecting ? "attention" : STATE_BADGE[status.state].key}`;
+  switch (status.state) {
+    case "not-paired":
+    case "unsupported":
+      return null;
+    case "ready": {
+      const lowBattery = status.batteryLevel !== null && status.batteryLevel < LOW_BATTERY_LEVEL;
+      return {
+        icon: "bluetooth-connect",
+        tone: lowBattery ? "danger" : "success",
+        labelKey,
+        batteryLevel: status.batteryLevel,
+        action: "open-settings",
+      };
+    }
+    case "learning":
+      return { icon: "bluetooth-connect", tone: "warning", labelKey, batteryLevel: null, action: "open-settings" };
+    case "connecting":
+      return { icon: "bluetooth-transfer", tone: "warning", labelKey, batteryLevel: null, action: "open-settings" };
+    case "reconnecting":
+      return {
+        icon: "bluetooth-transfer",
+        tone: stuckReconnecting ? "danger" : "warning",
+        labelKey,
+        batteryLevel: null,
+        action: "reconnect",
+      };
+    case "sleeping":
+      return { icon: "bluetooth", tone: "neutral", labelKey, batteryLevel: null, action: "reconnect" };
+    case "disconnected":
+      return { icon: "bluetooth-off", tone: "neutral", labelKey, batteryLevel: null, action: "reconnect" };
+    case "bluetooth-off":
+    case "unauthorized":
+      return { icon: "bluetooth-off", tone: "danger", labelKey, batteryLevel: null, action: "open-settings" };
+  }
+}
+
 /** 信号强度分档（dBm）：只用于界面文字。 */
 export function describeBleRssi(rssi: number | null): "strong" | "good" | "weak" | "unknown" {
   if (rssi === null) return "unknown";

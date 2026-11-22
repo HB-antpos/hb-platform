@@ -19,6 +19,7 @@ import {
   TextInput as PaperTextInput,
 } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { type Href, useRouter } from "expo-router";
 import { useIsMutating, useQueryClient } from "@tanstack/react-query";
@@ -763,6 +764,8 @@ export default function Cart() {
               </Text>
             </View>
           </View>
+          {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+          <BleScannerStatusButton />
           <Menu
             visible={moreMenuVisible}
             onDismiss={() => setMoreMenuVisible(false)}
