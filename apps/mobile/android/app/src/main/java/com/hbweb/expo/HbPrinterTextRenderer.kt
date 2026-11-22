@@ -215,6 +215,8 @@ internal class HbPrinterTextRenderer(private val context: Context) {
       "roboto-medium" to "HbPrinter-Roboto-Medium.ttf",
       "roboto-bold" to "HbPrinter-Roboto-Bold.ttf",
       "roboto-black" to "HbPrinter-Roboto-Black.ttf",
+      // 安卓旧排版的 sans-serif-condensed 加粗（大折扣标签的原价 / 省下金额 / %）。
+      "roboto-condensed-bold" to "HbPrinter-RobotoCondensed-Bold.ttf",
     )
   }
 }

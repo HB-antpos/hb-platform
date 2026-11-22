@@ -10,6 +10,7 @@ export const LABEL_FONTS = [
   "roboto-medium",
   "roboto-bold",
   "roboto-black",
+  "roboto-condensed-bold",
 ] as const;
 
 export type LabelBundledFont = (typeof LABEL_FONTS)[number];

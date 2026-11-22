@@ -58,3 +58,31 @@
 - 中文：内置 Roboto 不含中文，两端渲染时都会自动回退到系统字体（Android minikin 回退链 / iOS CoreText 级联），
   能打出来但两端字形不完全相同；需要一致时再用 `file://` 下发中文字体。
 - 包体：五个字重约 1.5MB（两端各一份）。
+
+## P1 实现（2026-11-23）
+
+代码在 `apps/mobile/src/modules/printer/label-layout/`：
+
+| 文件 | 作用 |
+|---|---|
+| `mono-bitmap.ts` | 1bit 位图：裁剪（越界按底色补）、叠画（or / copy）、最近邻缩放、转十六进制 |
+| `label-doc.ts` | 标签文档（位图块 + 打印机指令）→ EG 文本 / CG 二进制；下发前自动合并按字节补齐后会互相覆盖的位图 |
+| `text.ts` | 复刻 Android `textToBitmap` / `longTextToBitmap` / `wrapText` / `fittedText`；字体映射；批量量字与「最大放得下字号」搜索 |
+| `format.ts` | 与 Kotlin 同名函数逐条对齐的格式化（价格分拆、五成双、供应商缩写、EAN13 校验…） |
+| `labels.ts` | 6 种标签排版，坐标公式逐条移植自 `HbPrinterModule.kt` |
+| `config.ts` | 每种标签的开关（默认全关）与 EG / CG 下发方式（默认 EG）；运行时覆盖仅供测试 / 对纸 |
+
+要点：
+
+- **字体映射**按 Android 10+ minikin「基础字重 + 300 取最近」：`sans-serif-black`→Black，`sans-serif-light` 加粗→Medium、
+  不加粗→Light，`Arial`（安卓上不存在，回退 sans-serif）加粗→Bold、不加粗→Regular，`sans-serif-condensed` 加粗→
+  **Roboto Condensed Bold（本期补进内置字体，需随下一次原生包）**，旧测试包没有时退回 Bold。
+- **位图口径**：从原生整行位图按 Android 口径裁出（横向从笔触起点、宽 = max(前进宽, 墨迹宽) + 2×padding；纵向只包墨迹）。
+- **二维码**改用打印机自带 `BARCODE QR`（纠错 L），按旧 ZXing 的 64×64 占位框居中放置，排版坐标不变。
+- **接入**：`native.ts` 的 6 个 `printNativeXxxLabel` 先看开关；开关打开且新原生包可用时走 JS 排版。
+  排版 / 序列化阶段出错（还没发任何数据）回退原生排版；开始下发后失败直接抛出，不重放，避免重复出纸。
+  CG 模式遇到非 ASCII 指令（如条码含中文）自动改用 EG。
+- **与旧版一致保留的已知问题**（以后可单独发 OTA 修）：清货签商品名两行时第二行压到二维码；
+  小号普通价签等级「A」固定在 x=300，会和「25%OFF」重叠；普通价签商品名右端贴着 `$`。
+
+P2 对纸：做一个只留本地的测试包，用 `setJsLabelOverrides` 或改开关常量逐种打开，同一商品新旧各打一张比对。
