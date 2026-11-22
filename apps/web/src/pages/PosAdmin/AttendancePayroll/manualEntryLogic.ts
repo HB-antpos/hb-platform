@@ -1,4 +1,10 @@
-import type { AttendanceHoursDayDto, AttendanceHoursEmployeeDto, AttendanceManualEntrySegmentPayload } from '../../../types/attendancePayroll'
+import type {
+  AttendanceHoursDayDto,
+  AttendanceHoursEmployeeDto,
+  AttendanceManualEntrySegmentPayload,
+  AttendanceManualLeavePayload,
+  AttendanceManualLeaveType,
+} from '../../../types/attendancePayroll'
 
 // 手动补录工时的纯逻辑（无界面依赖，便于单测）：表单行校验、请求拼装、哪些格子 / 日期可以补录、未打卡班汇总。
 // 规则以后端为准（权限、周期锁定、可改窗口、重叠、班段数上限都在后端校验）；这里只做「点得开 / 填得完整」的前置判断。
@@ -115,4 +121,62 @@ export function defaultManualRows(day?: AttendanceHoursDayDto): ManualEntryRow[]
 /** 分钟 → 「5.5 h」文本。 */
 export function manualPreviewHoursText(hours: number): string {
   return `${Math.round(hours * 100) / 100} h`
+}
+
+// ---------- 补录带薪假（病假 / 年假 / 年假发放）----------
+
+/** 补录抽屉的模式：补工时，或补三种带薪假之一。 */
+export type ManualEntryMode = 'hours' | AttendanceManualLeaveType
+
+export const MANUAL_ENTRY_MODES: readonly ManualEntryMode[] = ['hours', 'PaidSick', 'PaidAnnual', 'AnnualCashOut']
+
+/** 病假能补录的一天：员工「有排班、没打卡」的班（带排班时间，界面上显示「排 09:00–17:00」）。 */
+export interface SickEligibleDay {
+  date: string
+  start?: string | null
+  end?: string | null
+}
+
+/**
+ * 病假只能补在「有排班、窗口已过、一次打卡都没有」的班上（与员工自己申请的规则一致：按排班算工时）。
+ * 已被病假 / 年假占用的班后端会清掉未打卡标记，这里再防一层；未来的日子不能补。
+ */
+export function collectSickEligibleDays(employee: AttendanceHoursEmployeeDto | undefined, today: string): SickEligibleDay[] {
+  if (!employee) return []
+  return employee.days
+    .filter((day) => day.missingPunch && !day.leave && day.date <= today)
+    .map((day) => ({ date: day.date, start: day.scheduleStart, end: day.scheduleEnd }))
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/** 补录假的表单：病假选若干天，年假 / 年假发放选一个起止区间。 */
+export interface ManualLeaveForm {
+  sickDates: string[]
+  range: [string, string] | null
+}
+
+/** 表单是否填到了可以去预览的程度（原因另算：预览用占位原因，保存才要真实原因）。 */
+export function isManualLeaveFormReady(type: AttendanceManualLeaveType, form: ManualLeaveForm): boolean {
+  return type === 'PaidSick' ? form.sickDates.length > 0 : form.range !== null
+}
+
+/** 年假日期选择：只能选本期内、且不晚于今天的日子（补录是事后记录；其余窗口规则以后端为准）。 */
+export function isManualLeaveDateDisabled(date: string, periodStart: string | undefined, today: string): boolean {
+  return date > today || (periodStart !== undefined && date < periodStart)
+}
+
+/** 拼成后端要的请求：病假带 dates，年假带起止日期（病假的起止日期取最早 / 最晚一天，后端以 dates 为准）。 */
+export function buildManualLeavePayload(input: {
+  storeCode: string
+  userGuid: string
+  type: AttendanceManualLeaveType
+  form: ManualLeaveForm
+  reason: string
+}): AttendanceManualLeavePayload {
+  const { storeCode, userGuid, type, form, reason } = input
+  if (type === 'PaidSick') {
+    const dates = [...form.sickDates].sort()
+    return { storeCode, userGuid, leaveType: type, startDate: dates[0] ?? '', endDate: dates[dates.length - 1] ?? '', dates, reason }
+  }
+  return { storeCode, userGuid, leaveType: type, startDate: form.range?.[0] ?? '', endDate: form.range?.[1] ?? '', reason }
 }

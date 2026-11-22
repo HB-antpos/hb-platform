@@ -50,6 +50,8 @@ namespace BlazorApp.Shared.DTOs
         public decimal Hours { get; set; }
         public bool HasCertificate { get; set; }
         public string? LeaveGuid { get; set; }
+        /// <summary>店长补录建的假：留痕（原因 / 补录人 / 时间），页面显示「补」角标并允许撤销；员工自己申请的为 null。</summary>
+        public AttendancePayrollDayManualEntryDto? ManualEntry { get; set; }
     }
 
     public class AttendancePayrollDayPublicHolidayPayDto

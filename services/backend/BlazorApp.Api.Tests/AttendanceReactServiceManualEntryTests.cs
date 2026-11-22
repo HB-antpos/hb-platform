@@ -390,5 +390,289 @@ namespace BlazorApp.Api.Tests
             Assert.DoesNotContain(current.Data!.Employees, item => item.UserGuid == "staff-user"
                 && item.Days.Any(d => d.MissingPunch));
         }
+
+        // ---------------- 补录带薪假（忘记申请的带薪病假 / 年假 / 年假发放） ----------------
+
+        private static CreateAttendanceManualLeaveDto ManualLeaveRequest(
+            string leaveType,
+            DateTime? start = null,
+            DateTime? end = null,
+            DateTime[]? sickDates = null,
+            string reason = "员工忘记申请，已电话确认",
+            string userGuid = "staff-user")
+        {
+            var from = (start ?? ManualEntryWorkDate).Date;
+            return new CreateAttendanceManualLeaveDto
+            {
+                StoreCode = "BRI",
+                UserGuid = userGuid,
+                LeaveType = leaveType,
+                StartDate = from,
+                EndDate = (end ?? from).Date,
+                Dates = sickDates?.ToList(),
+                Reason = reason,
+            };
+        }
+
+        /// <summary>预览通过后带上版本号再保存，与页面的两步流程一致。</summary>
+        private static async Task<BlazorApp.Shared.DTOs.ApiResponse<AttendanceManualLeaveResultDto>> SaveManualLeaveAsync(
+            AttendanceReactService service,
+            CreateAttendanceManualLeaveDto request)
+        {
+            var preview = await service.PreviewManagedManualLeaveAsync(request);
+            Assert.True(preview.Success, $"{preview.ErrorCode}: {preview.Message}");
+            request.PreviewRevision = preview.Data!.PreviewRevision;
+            return await service.CreateManagedManualLeaveAsync(request);
+        }
+
+        [Fact]
+        public async Task 补录年假_预览_周末不计工时_只算区间内工作日乘8()
+        {
+            await SeedPayrollStoreAsync();
+
+            // 10-15 周四 → 10-18 周日：只有周四、周五是工作日。
+            var preview = await Manager().PreviewManagedManualLeaveAsync(
+                ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 15), new DateTime(2026, 10, 18)));
+
+            Assert.True(preview.Success, $"{preview.ErrorCode}: {preview.Message}");
+            Assert.Equal(16m, preview.Data!.PaidHours);
+            Assert.Equal(new[] { 8m, 8m, 0m, 0m }, preview.Data.Days.Select(item => item.Hours).ToArray());
+            Assert.False(preview.Data.NoCertificate);
+            // 预览不写库。
+            Assert.Empty(await _db.Queryable<AttendanceLeaveRequest>().ToListAsync());
+        }
+
+        [Fact]
+        public async Task 补录年假_保存_直接已批准_自动标不能上班_工时表带补录留痕()
+        {
+            await SeedPayrollStoreAsync();
+
+            var result = await SaveManualLeaveAsync(
+                Manager(), ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 15), new DateTime(2026, 10, 16)));
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var leave = Assert.Single(await _db.Queryable<AttendanceLeaveRequest>().ToListAsync());
+            Assert.Equal("Approved", leave.Status);
+            Assert.Equal(16m, leave.PaidHours);
+            Assert.Equal("manager-user", leave.ReviewedBy);
+            Assert.Equal("补录：员工忘记申请，已电话确认", leave.ReviewRemark);
+            // 不走审批：没有待审批记录。
+            Assert.Empty(await _db.Queryable<AttendanceApproval>().Where(item => item.SourceType == "Leave").ToListAsync());
+            // 与批准带薪年假一致：区间内每天一条「不能上班」。
+            var unavailable = await _db.Queryable<AttendanceAvailability>().Where(item => item.SourceLeaveGuid == leave.LeaveGuid).ToListAsync();
+            Assert.Equal(2, unavailable.Count);
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+            var day = hours.Data!.Employees.Single(item => item.UserGuid == "staff-user").Days
+                .Single(item => item.Date == new DateTime(2026, 10, 15));
+            Assert.Equal("PaidAnnual", day.Leave!.Type);
+            Assert.Equal(8m, day.Leave.Hours);
+            Assert.NotNull(day.Leave.ManualEntry);
+            Assert.Equal("员工忘记申请，已电话确认", day.Leave.ManualEntry!.Reason);
+            Assert.Equal("manager", day.Leave.ManualEntry.CreatedBy);
+        }
+
+        [Fact]
+        public async Task 补录病假_在有排班没打卡的班上补录_工时按排班扣餐_不再算未打卡_标无医嘱()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedScheduleAsync("sched-sick", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
+            var request = ManualLeaveRequest("PaidSick", sickDates: new[] { ManualEntryWorkDate });
+
+            var preview = await Manager().PreviewManagedManualLeaveAsync(request);
+            Assert.True(preview.Success, $"{preview.ErrorCode}: {preview.Message}");
+            // 8 小时扣 1 次餐 → 7.5 h；没有医嘱要提示。
+            Assert.Equal(7.5m, preview.Data!.PaidHours);
+            Assert.True(preview.Data.NoCertificate);
+
+            request.PreviewRevision = preview.Data.PreviewRevision;
+            var result = await Manager().CreateManagedManualLeaveAsync(request);
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+            var day = hours.Data!.Employees.Single(item => item.UserGuid == "staff-user").Days
+                .Single(item => item.Date == ManualEntryWorkDate);
+            Assert.Equal("PaidSick", day.Leave!.Type);
+            Assert.Equal(7.5m, day.Leave.Hours);
+            Assert.False(day.Leave.HasCertificate);
+            Assert.NotNull(day.Leave.ManualEntry);
+            // 病假已经处理了这个班：不再挂在「未打卡」里。
+            Assert.False(day.MissingPunch);
+        }
+
+        [Fact]
+        public async Task 补录病假_不受生病后N天内提交的限制_只要还在可改窗口内()
+        {
+            await SeedPayrollStoreAsync();
+            // 10-12 周一：距今天（10-20）已 8 天，员工自己申请会被「生病后 N 天内提交」拦住；店长补录不受限。
+            var monday = new DateTime(2026, 10, 12);
+            await SeedScheduleAsync("sched-old", "BRI", "staff-user", monday, "Active", new TimeSpan(9, 0, 0), new TimeSpan(13, 0, 0));
+
+            var result = await SaveManualLeaveAsync(Manager(), ManualLeaveRequest("PaidSick", monday, sickDates: new[] { monday }));
+
+            Assert.True(result.Success, $"{result.ErrorCode}: {result.Message}");
+        }
+
+        [Fact]
+        public async Task 补录病假_已有打卡的排班_当天没排班_没选日期_都拒绝()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedScheduleAsync("sched-punched", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
+            await _db.Insertable(
+                CreateStoredPunchForSchedule("p-in", "sched-punched", "BRI", "staff-user", "ClockIn", ManualEntryWorkDate.AddHours(9))
+            ).ExecuteCommandAsync();
+            // 别人当天的排班不能算在 staff-user 头上：按「员工 + 日期」找排班。
+            await SeedBoundStaffAsync("other-staff", EmployeeType.FullTime);
+            await SeedScheduleAsync("sched-other", "BRI", "other-staff", new DateTime(2026, 10, 15), "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
+
+            var punched = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidSick", sickDates: new[] { ManualEntryWorkDate }));
+            var noSchedule = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidSick", sickDates: new[] { new DateTime(2026, 10, 15) }));
+            var none = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidSick"));
+
+            Assert.Equal("SICK_LEAVE_SCHEDULE_PUNCHED", punched.ErrorCode);
+            Assert.Equal("SICK_LEAVE_SCHEDULE_INVALID", noSchedule.ErrorCode);
+            Assert.Equal("SICK_LEAVE_SCHEDULE_REQUIRED", none.ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录年假_休息的工作日已有打卡_拒绝_年假发放不受此限()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedScheduleAsync("sched-worked", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
+            await _db.Insertable(
+                CreateStoredPunchForSchedule("w-in", "sched-worked", "BRI", "staff-user", "ClockIn", ManualEntryWorkDate.AddHours(9))
+            ).ExecuteCommandAsync();
+
+            var rest = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual"));
+            var cashOut = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut"));
+
+            Assert.Equal("ANNUAL_LEAVE_HAS_PUNCHES", rest.ErrorCode);
+            Assert.True(cashOut.Success, $"{cashOut.ErrorCode}: {cashOut.Message}");
+        }
+
+        [Fact]
+        public async Task 补录请假_与已有病假或年假重叠_拒绝_年假发放只和年假发放互斥()
+        {
+            await SeedPayrollStoreAsync();
+            Assert.True((await SaveManualLeaveAsync(
+                Manager(), ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14)))).Success);
+
+            var overlap = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 14), new DateTime(2026, 10, 15)));
+            var cashOut = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14)));
+
+            Assert.Equal("LEAVE_OVERLAP", overlap.ErrorCode);
+            Assert.True(cashOut.Success, $"{cashOut.ErrorCode}: {cashOut.Message}");
+            Assert.True((await SaveManualLeaveAsync(
+                Manager(), ManualLeaveRequest("AnnualCashOut", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14)))).Success);
+            var again = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut", new DateTime(2026, 10, 14)));
+            Assert.Equal("LEAVE_OVERLAP", again.ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录请假_临时工_没有带薪假_拒绝()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedBoundStaffAsync("casual-staff", EmployeeType.Temporary);
+
+            var result = await Manager().PreviewManagedManualLeaveAsync(
+                ManualLeaveRequest("PaidAnnual", userGuid: "casual-staff"));
+
+            Assert.Equal("PAID_LEAVE_NOT_ELIGIBLE", result.ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录请假_未来日期_超出窗口_原因为空_类型无效_都拒绝_Admin不受窗口限制()
+        {
+            await SeedPayrollStoreAsync();
+
+            // 今天是 10-20 周二：明天不能补。
+            var future = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 21)));
+            Assert.Equal("LEAVE_DATE_IN_FUTURE", future.ErrorCode);
+
+            // 10-08 周四：不在「本周 + 周二仍可改的上周」窗口内。
+            var oldDay = new DateTime(2026, 10, 8);
+            var expired = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", oldDay));
+            Assert.Equal("ADJUSTMENT_WINDOW_EXPIRED", expired.ErrorCode);
+            var admin = CreateService("admin-user", "admin", "Admin");
+            var allowed = await admin.PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", oldDay));
+            Assert.True(allowed.Success, $"{allowed.ErrorCode}: {allowed.Message}");
+
+            Assert.Equal("REASON_REQUIRED", (await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", reason: "  "))).ErrorCode);
+            Assert.Equal("INVALID_LEAVE_TYPE", (await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("SickLeave"))).ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录请假_已锁定的周期_员工本人_缺预览版本号_预览之后改了日期_都不能保存()
+        {
+            await SeedPayrollStoreAsync();
+
+            // 员工本人没有管理分店权限。
+            Assert.False((await Staff().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual"))).Success);
+
+            // 缺版本号。
+            Assert.Equal("MANUAL_LEAVE_PREVIEW_STALE", (await Manager().CreateManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual"))).ErrorCode);
+
+            // 预览之后改了日期：版本变化，必须重新预览。
+            var request = ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14));
+            var preview = await Manager().PreviewManagedManualLeaveAsync(request);
+            request.PreviewRevision = preview.Data!.PreviewRevision;
+            request.EndDate = new DateTime(2026, 10, 15);
+            Assert.Equal("MANUAL_LEAVE_PREVIEW_STALE", (await Manager().CreateManagedManualLeaveAsync(request)).ErrorCode);
+            Assert.Empty(await _db.Queryable<AttendanceLeaveRequest>().ToListAsync());
+
+            await _db.Insertable(new AttendancePayPeriod
+            {
+                StoreCode = "BRI", PeriodStart = PayrollPeriodStart, Weeks = 2, Status = "Submitted",
+            }).ExecuteCommandAsync();
+            Assert.Equal("PERIOD_LOCKED", (await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual"))).ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录请假_撤销_改成已撤销_清除不能上班_工时表回到没有请假()
+        {
+            await SeedPayrollStoreAsync();
+            var saved = await SaveManualLeaveAsync(
+                Manager(), ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 15), new DateTime(2026, 10, 16)));
+            var leaveGuid = saved.Data!.LeaveGuid;
+
+            var revoke = await Manager().RevokeManagedManualLeaveAsync(new RevokeAttendanceManualLeaveDto { StoreCode = "BRI", LeaveGuid = leaveGuid });
+
+            Assert.True(revoke.Success, $"{revoke.ErrorCode}: {revoke.Message}");
+            Assert.Equal("Revoked", (await _db.Queryable<AttendanceLeaveRequest>().FirstAsync(item => item.LeaveGuid == leaveGuid)).Status);
+            Assert.Empty(await _db.Queryable<AttendanceAvailability>().Where(item => item.SourceLeaveGuid == leaveGuid && !item.IsDeleted).ToListAsync());
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+            Assert.DoesNotContain(hours.Data!.Employees, item => item.UserGuid == "staff-user"
+                && item.Days.Any(d => d.Leave != null));
+        }
+
+        [Fact]
+        public async Task 补录请假_撤销_员工自己申请的假不是补录_不能在这里撤销_已锁定也拒绝()
+        {
+            await SeedPayrollStoreAsync();
+            // 员工自己申请、已批准的年假：没有「补录：」前缀。
+            await _db.Insertable(new AttendanceLeaveRequest
+            {
+                LeaveGuid = "own-leave",
+                StoreCode = "BRI",
+                UserGuid = "staff-user",
+                LeaveType = "PaidAnnual",
+                StartDate = new DateTime(2026, 10, 15),
+                EndDate = new DateTime(2026, 10, 15),
+                PaidHours = 8m,
+                Status = "Approved",
+                CreatedAt = DateTime.UtcNow,
+            }).ExecuteCommandAsync();
+
+            var own = await Manager().RevokeManagedManualLeaveAsync(new RevokeAttendanceManualLeaveDto { StoreCode = "BRI", LeaveGuid = "own-leave" });
+            Assert.Equal("MANUAL_LEAVE_NOT_FOUND", own.ErrorCode);
+
+            var saved = await SaveManualLeaveAsync(
+                Manager(), ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 13)));
+            await _db.Insertable(new AttendancePayPeriod
+            {
+                StoreCode = "BRI", PeriodStart = PayrollPeriodStart, Weeks = 2, Status = "Submitted",
+            }).ExecuteCommandAsync();
+            var locked = await Manager().RevokeManagedManualLeaveAsync(new RevokeAttendanceManualLeaveDto { StoreCode = "BRI", LeaveGuid = saved.Data!.LeaveGuid });
+            Assert.Equal("PERIOD_LOCKED", locked.ErrorCode);
+        }
     }
 }

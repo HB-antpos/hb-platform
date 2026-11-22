@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
 import type { AttendanceHoursDayDto, AttendanceHoursEmployeeDto } from '../../../types/attendancePayroll'
 import {
+  buildManualLeavePayload,
   buildManualSegments,
   collectMissingPunches,
+  collectSickEligibleDays,
   defaultManualRows,
+  isManualLeaveDateDisabled,
+  isManualLeaveFormReady,
   manualEntryCellKind,
   manualEntryDayState,
   manualEntryErrorText,
@@ -120,3 +124,48 @@ assert.equal(missing[0].start, '09:00')
 assert.deepEqual(collectMissingPunches([]), [])
 
 console.log('manualEntryLogic tests passed')
+
+// ---------- 补录带薪假 ----------
+const sickEmployee = {
+  userGuid: 'u1',
+  userName: 'Alex',
+  days: [
+    { date: '2026-10-12', missingPunch: true, scheduleStart: '09:00', scheduleEnd: '17:00', segments: [], pending: [], approvedMarks: [], otherStores: [], byTier: {}, hasSchedule: true, paidHours: 0 },
+    { date: '2026-10-13', missingPunch: true, scheduleStart: '10:00', scheduleEnd: '14:00', segments: [], pending: [], approvedMarks: [], otherStores: [], byTier: {}, hasSchedule: true, paidHours: 0 },
+    { date: '2026-10-14', missingPunch: false, segments: [{ start: '09:00', end: '12:00' }], pending: [], approvedMarks: [], otherStores: [], byTier: {}, hasSchedule: true, paidHours: 3 },
+    { date: '2026-10-15', missingPunch: true, scheduleStart: '09:00', scheduleEnd: '12:00', leave: { type: 'PaidSick', hours: 3 }, segments: [], pending: [], approvedMarks: [], otherStores: [], byTier: {}, hasSchedule: true, paidHours: 0 },
+    { date: '2026-10-21', missingPunch: true, scheduleStart: '09:00', scheduleEnd: '12:00', segments: [], pending: [], approvedMarks: [], otherStores: [], byTier: {}, hasSchedule: true, paidHours: 0 },
+  ],
+} as unknown as AttendanceHoursEmployeeDto
+
+assert.deepEqual(
+  collectSickEligibleDays(sickEmployee, '2026-10-20'),
+  [
+    { date: '2026-10-12', start: '09:00', end: '17:00' },
+    { date: '2026-10-13', start: '10:00', end: '14:00' },
+  ],
+  '病假只列「有排班、没打卡」的班：已有打卡、已被假占用、未来的班都不列',
+)
+assert.deepEqual(collectSickEligibleDays(undefined, '2026-10-20'), [], '工时统计里没有这个人 = 没有可补病假的班')
+
+assert.equal(isManualLeaveFormReady('PaidSick', { sickDates: [], range: null }), false)
+assert.equal(isManualLeaveFormReady('PaidSick', { sickDates: ['2026-10-12'], range: null }), true)
+assert.equal(isManualLeaveFormReady('PaidAnnual', { sickDates: ['2026-10-12'], range: null }), false, '年假要选区间，选了病假日期不算')
+assert.equal(isManualLeaveFormReady('AnnualCashOut', { sickDates: [], range: ['2026-10-12', '2026-10-14'] }), true)
+
+assert.equal(isManualLeaveDateDisabled('2026-10-21', '2026-10-05', '2026-10-20'), true, '未来日期不能选')
+assert.equal(isManualLeaveDateDisabled('2026-10-04', '2026-10-05', '2026-10-20'), true, '本期之前的日期不能选')
+assert.equal(isManualLeaveDateDisabled('2026-10-20', '2026-10-05', '2026-10-20'), false, '今天可以选')
+assert.equal(isManualLeaveDateDisabled('2026-10-05', '2026-10-05', '2026-10-20'), false, '本期第一天可以选')
+assert.equal(isManualLeaveDateDisabled('2026-10-01', undefined, '2026-10-20'), false, '没有周期信息时只限制未来')
+
+assert.deepEqual(
+  buildManualLeavePayload({ storeCode: 'BRI', userGuid: 'u1', type: 'PaidSick', form: { sickDates: ['2026-10-13', '2026-10-12'], range: null }, reason: '忘记申请' }),
+  { storeCode: 'BRI', userGuid: 'u1', leaveType: 'PaidSick', startDate: '2026-10-12', endDate: '2026-10-13', dates: ['2026-10-12', '2026-10-13'], reason: '忘记申请' },
+  '病假：日期排序后带 dates，起止取最早 / 最晚一天',
+)
+assert.deepEqual(
+  buildManualLeavePayload({ storeCode: 'BRI', userGuid: 'u1', type: 'PaidAnnual', form: { sickDates: [], range: ['2026-10-15', '2026-10-16'] }, reason: '忘记申请' }),
+  { storeCode: 'BRI', userGuid: 'u1', leaveType: 'PaidAnnual', startDate: '2026-10-15', endDate: '2026-10-16', reason: '忘记申请' },
+  '年假：只带起止日期，不带 dates',
+)

@@ -414,6 +414,43 @@
       "addEmployee": "＋ 添加员工补录（含本期一个工时都没有的人）",
       "rowAction": "补录工时",
       "saveFailedPrefix": "保存失败：{{reason}}（改正后可直接再点保存重试）"
+    },
+    "manualLeave": {
+      "title": "补录带薪假",
+      "mode": {
+        "hours": "补录工时",
+        "PaidSick": "带薪病假",
+        "PaidAnnual": "带薪年假",
+        "AnnualCashOut": "年假发放"
+      },
+      "typeHint": {
+        "PaidSick": "员工生病没来、也忘了申请：补在他「有排班、没打卡」的班上，工时按排班算（扣餐）。",
+        "PaidAnnual": "员工休年假、忘了申请：那几天不上班，系统会自动标「不能上班」；工时 = 工作日 × 8 h（周末和公共假期不计）。",
+        "AnnualCashOut": "年假发放：员工照常上班，同时按工作日 × 8 h 领年假工时（周末和公共假期不计）。"
+      },
+      "sickDays": "病假日期（只列「有排班、没打卡」的班，可多选）",
+      "sickNone": "该员工本期没有「有排班、没打卡」的班。病假要按排班补录：没排班请先在排班页排好，已打卡的班请用「修改打卡」。",
+      "pickEmployee": "先选择员工",
+      "sickChip": "排 {{start}}–{{end}}",
+      "range": "日期区间（周末和公共假期不计工时，只能选到今天）",
+      "ineligible": "该员工是临时工，没有带薪假，保存会被拒绝",
+      "previewLoading": "正在计算工时…",
+      "previewFailed": "预览失败，请检查选择的日期",
+      "previewHours": "带薪 {{hours}}",
+      "noCertificate": "没有医嘱：工时表这一格会标「无医嘱」，方便事后核对",
+      "reasonPlaceholder": "例如：员工忘记在系统里申请，已电话确认并核对排班",
+      "total": "合计 {{hours}}",
+      "totalEmpty": "选好日期后这里显示合计",
+      "save": "保存并生效",
+      "saved": "已补录{{type}}，工时与工资已更新",
+      "saveFailed": "保存失败",
+      "revokeConfirm": "撤销后这条假不再计入工时与工资（年假休息自动标的「不能上班」一并清除），确定吗？",
+      "revoked": "补录的假已撤销，工时与工资已更新",
+      "revokeFailed": "撤销失败",
+      "noCertificateBadge": "无医嘱",
+      "traceNoCertificate": "没有医嘱（补录时未上传）",
+      "rangeStart": "开始日期",
+      "rangeEnd": "结束日期"
     }
   }
 }

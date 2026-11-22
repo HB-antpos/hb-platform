@@ -414,6 +414,43 @@
       "addEmployee": "＋ Add an employee (including people with 0 h this period)",
       "rowAction": "Add hours",
       "saveFailedPrefix": "Save failed: {{reason}} (fix it and press Save again)"
+    },
+    "manualLeave": {
+      "title": "Add paid leave",
+      "mode": {
+        "hours": "Add hours",
+        "PaidSick": "Paid sick leave",
+        "PaidAnnual": "Annual leave",
+        "AnnualCashOut": "Annual leave cash-out"
+      },
+      "typeHint": {
+        "PaidSick": "The employee was sick and forgot to apply: record it on a shift they were rostered for but never clocked. Hours follow the roster (meal break deducted).",
+        "PaidAnnual": "The employee took annual leave and forgot to apply: those days are marked unavailable automatically. Hours = working days × 8 h (weekends and public holidays excluded).",
+        "AnnualCashOut": "Annual leave cash-out: the employee works as usual and is also paid annual-leave hours = working days × 8 h (weekends and public holidays excluded)."
+      },
+      "sickDays": "Sick days (only rostered shifts with no clock-in are listed; pick one or more)",
+      "sickNone": "No rostered-but-not-clocked shifts for this employee in this period. Sick leave follows the roster: roster the shift first, or use \"Edit punches\" for shifts that already have punches.",
+      "pickEmployee": "Pick an employee first",
+      "sickChip": "Rostered {{start}}–{{end}}",
+      "range": "Date range (weekends and public holidays carry no hours; up to today)",
+      "ineligible": "This employee is casual and has no paid leave; saving will be rejected",
+      "previewLoading": "Calculating hours…",
+      "previewFailed": "Preview failed, please check the selected dates",
+      "previewHours": "Paid {{hours}}",
+      "noCertificate": "No medical certificate: the cell will be marked \"No certificate\" so it can be checked later",
+      "reasonPlaceholder": "e.g. Employee forgot to apply in the system; confirmed by phone and against the roster",
+      "total": "Total {{hours}}",
+      "totalEmpty": "The total shows here once dates are picked",
+      "save": "Save and apply",
+      "saved": "{{type}} added; hours and pay updated",
+      "saveFailed": "Save failed",
+      "revokeConfirm": "After revoking, this leave no longer counts toward hours or pay (the \"unavailable\" marks set for annual leave are cleared too). Continue?",
+      "revoked": "Leave entry revoked; hours and pay updated",
+      "revokeFailed": "Revoke failed",
+      "noCertificateBadge": "No certificate",
+      "traceNoCertificate": "No medical certificate (not uploaded when added)",
+      "rangeStart": "Start date",
+      "rangeEnd": "End date"
     }
   }
 }

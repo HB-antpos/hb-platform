@@ -34,6 +34,8 @@ interface HoursTabProps {
   manualEntry?: {
     onOpen: (preset?: ManualEntryPreset) => void
     onRevoke: (userGuid: string, date: string) => Promise<void>
+    /** 撤销补录建的假（带薪病假 / 年假）；传的是请假记录的 leaveGuid。 */
+    onRevokeLeave: (leaveGuid: string) => Promise<void>
   }
 }
 
@@ -225,7 +227,7 @@ export default function HoursTab(props: HoursTabProps) {
     const openEntry = () => manualEntry?.onOpen({ userGuid: employee.userGuid, dates: [day.date] })
     if (entryKind === 'missing') classes.push('atp-cell-missing')
     if (entryKind === 'addable') classes.push('atp-cell-addable')
-    if (day.manualEntry) classes.push('atp-cell-manual')
+    if (day.manualEntry || day.leave?.manualEntry) classes.push('atp-cell-manual')
 
     const badges: ReactElement[] = []
     if (header.isPublicHoliday && (day.paidHours ?? 0) > 0) badges.push(<span key="ph" className="atp-badge atp-badge-holiday">{t('attendancePayroll.badges.publicHoliday')}</span>)
@@ -235,6 +237,10 @@ export default function HoursTab(props: HoursTabProps) {
     if (holidayPay?.state === 'Pending') badges.push(<span key="phq" className="atp-badge atp-badge-pending">{t('attendancePayroll.badges.holidayPending')}</span>)
     if (day.leave?.type === 'PaidSick') {
       badges.push(<span key="sick" className="atp-badge atp-badge-sick">{t('attendancePayroll.badges.sick')}{day.leave.hasCertificate ? <PaperClipOutlined /> : null}</span>)
+      // 补录的病假可以没有医嘱：格子上直接标出来，方便事后核对
+      if (day.leave.manualEntry && !day.leave.hasCertificate) {
+        badges.push(<span key="nocert" className="atp-badge atp-badge-pending">{t('attendancePayroll.manualLeave.noCertificateBadge')}</span>)
+      }
     }
     if (day.leave?.type === 'PaidAnnual') badges.push(<span key="annual" className="atp-badge atp-badge-annual">{t('attendancePayroll.badges.annual')}</span>)
     if (day.leave?.type === 'AnnualCashOut') {
@@ -246,8 +252,11 @@ export default function HoursTab(props: HoursTabProps) {
     if (day.isBirthday) badges.push(<span key="bday" className="atp-badge atp-badge-birthday" role="img" aria-label={t('attendancePayroll.legend.birthday')}>🎂</span>)
     if (pending) badges.push(<span key="pend" className="atp-badge atp-badge-pending">{t('attendancePayroll.badges.pending')}</span>)
     if (!pending && day.approvedMarks.length) badges.push(<span key="ok" className="atp-badge atp-badge-ok"><CheckOutlined /></span>)
-    if (day.manualEntry) {
-      const trace = day.manualEntry
+    // 「补」角标：补录的打卡（撤销 = 按员工 + 日期）或补录的假（撤销 = 按请假记录）
+    const manualLeaveGuid = day.leave?.manualEntry ? day.leave.leaveGuid : undefined
+    const manualTrace = day.manualEntry ?? day.leave?.manualEntry
+    if (manualTrace) {
+      const trace = manualTrace
       badges.push(
         <Popover
           key="manual"
@@ -258,12 +267,15 @@ export default function HoursTab(props: HoursTabProps) {
               <div>{t('attendancePayroll.manualEntry.traceReason', { reason: trace.reason ?? '—' })}</div>
               <div>{t('attendancePayroll.manualEntry.traceBy', { by: trace.createdBy ?? '—', at: trace.createdAt ? dayjs(trace.createdAt).format('MM-DD HH:mm') : '—' })}</div>
               {trace.createdSchedule ? <div className="atp-me-trace-sub">{t('attendancePayroll.manualEntry.traceSchedule')}</div> : null}
+              {manualLeaveGuid && day.leave?.type === 'PaidSick' && !day.leave.hasCertificate
+                ? <div className="atp-me-trace-sub">{t('attendancePayroll.manualLeave.traceNoCertificate')}</div>
+                : null}
               {manualEntry ? (
                 <Popconfirm
-                  title={t('attendancePayroll.manualEntry.revokeConfirm')}
+                  title={manualLeaveGuid ? t('attendancePayroll.manualLeave.revokeConfirm') : t('attendancePayroll.manualEntry.revokeConfirm')}
                   okText={t('attendancePayroll.manualEntry.revoke')}
                   cancelText={t('attendancePayroll.manualEntry.cancel')}
-                  onConfirm={() => manualEntry.onRevoke(employee.userGuid, day.date)}
+                  onConfirm={() => (manualLeaveGuid ? manualEntry.onRevokeLeave(manualLeaveGuid) : manualEntry.onRevoke(employee.userGuid, day.date))}
                 >
                   <Button type="link" size="small" danger>{t('attendancePayroll.manualEntry.revoke')}</Button>
                 </Popconfirm>

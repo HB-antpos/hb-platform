@@ -21,6 +21,7 @@ import {
   getAttendancePayrollPay,
   getAttendancePayRates,
   revokeAttendanceManualEntry,
+  revokeAttendanceManualLeave,
   submitAttendancePayPeriod,
   unlockAttendancePayPeriod,
 } from '../../../services/attendancePayrollService'
@@ -46,7 +47,8 @@ import messagesEn from './attendancePayrollMessages.en.json'
 import messagesZh from './attendancePayrollMessages.zh.json'
 import HoursTab from './HoursTab'
 import ManualEntryDrawer, { type ManualEntryPreset } from './ManualEntryDrawer'
-import { manualEntryErrorText } from './manualEntryLogic'
+import { manualEntryErrorText, type ManualEntryMode } from './manualEntryLogic'
+import ManualLeaveDrawer from './ManualLeaveDrawer'
 import MyobPayRateSyncDrawer from './MyobPayRateSyncDrawer'
 import PayTab from './PayTab'
 import RatesTab from './RatesTab'
@@ -280,8 +282,11 @@ export default function AttendancePayrollPage() {
   const manualEntryEnabled = access.canAdjustAttendancePunches && canViewHours && !isSubmitted && Boolean(storeCode)
   const [manualEntryOpen, setManualEntryOpen] = useState(false)
   const [manualEntryPreset, setManualEntryPreset] = useState<ManualEntryPreset | null>(null)
+  // 补录抽屉的模式：补工时，或补带薪病假 / 年假 / 年假发放（两个抽屉按模式二选一打开）
+  const [manualEntryMode, setManualEntryMode] = useState<ManualEntryMode>('hours')
   const openManualEntry = (preset?: ManualEntryPreset) => {
     setManualEntryPreset(preset ?? null)
+    setManualEntryMode('hours')
     setManualEntryOpen(true)
     // 在工资表页签进来时工时数据可能还没加载（抽屉要用它判断每天的状态）
     if (!hours) void loadHours()
@@ -290,6 +295,22 @@ export default function AttendancePayrollPage() {
   const reloadAfterManualEntry = () => {
     void loadHours()
     void loadPay()
+  }
+  /** 抽屉顶部切换模式：带上已选员工，日期 / 时间不带（两种模式要填的东西不一样）。 */
+  const switchManualEntryMode = (mode: ManualEntryMode, userGuid?: string) => {
+    setManualEntryPreset(userGuid ? { userGuid } : null)
+    setManualEntryMode(mode)
+  }
+  /** 撤销补录建的假（工时表格子「补」角标气泡里的按钮）。 */
+  const revokeManualLeave = async (leaveGuid: string) => {
+    if (!storeCode) return
+    try {
+      await revokeAttendanceManualLeave({ storeCode, leaveGuid })
+      message.success(t('attendancePayroll.manualLeave.revoked'))
+      reloadAfterManualEntry()
+    } catch (error) {
+      message.error(manualEntryErrorText(error, t('attendancePayroll.manualLeave.revokeFailed')))
+    }
   }
   const revokeManualEntry = async (userGuid: string, date: string) => {
     if (!storeCode) return
@@ -473,7 +494,7 @@ export default function AttendancePayrollPage() {
           onReload={() => void loadHours()}
           onOpenRates={canViewPay ? () => setActiveTab('rates') : undefined}
           rateReviews={periodRateReviews}
-          manualEntry={manualEntryEnabled ? { onOpen: openManualEntry, onRevoke: revokeManualEntry } : undefined}
+          manualEntry={manualEntryEnabled ? { onOpen: openManualEntry, onRevoke: revokeManualEntry, onRevokeLeave: revokeManualLeave } : undefined}
         />
       ),
     }] : []),
@@ -615,16 +636,31 @@ export default function AttendancePayrollPage() {
       {myobPush.modals}
 
       {manualEntryEnabled && storeCode ? (
-        <ManualEntryDrawer
-          open={manualEntryOpen}
-          storeCode={storeCode}
-          storeName={storeOptions.find((option) => option.value === storeCode)?.label}
-          days={hours?.days ?? []}
-          employees={hours?.employees ?? []}
-          preset={manualEntryPreset}
-          onClose={() => setManualEntryOpen(false)}
-          onSaved={reloadAfterManualEntry}
-        />
+        <>
+          <ManualEntryDrawer
+            open={manualEntryOpen && manualEntryMode === 'hours'}
+            storeCode={storeCode}
+            storeName={storeOptions.find((option) => option.value === storeCode)?.label}
+            days={hours?.days ?? []}
+            employees={hours?.employees ?? []}
+            preset={manualEntryPreset}
+            onClose={() => setManualEntryOpen(false)}
+            onSaved={reloadAfterManualEntry}
+            onSwitchMode={switchManualEntryMode}
+          />
+          <ManualLeaveDrawer
+            open={manualEntryOpen && manualEntryMode !== 'hours'}
+            storeCode={storeCode}
+            storeName={storeOptions.find((option) => option.value === storeCode)?.label}
+            days={hours?.days ?? []}
+            employees={hours?.employees ?? []}
+            leaveType={manualEntryMode === 'hours' ? 'PaidSick' : manualEntryMode}
+            preset={manualEntryPreset}
+            onClose={() => setManualEntryOpen(false)}
+            onSaved={reloadAfterManualEntry}
+            onSwitchMode={switchManualEntryMode}
+          />
+        </>
       ) : null}
 
       <MyobPayRateSyncDrawer

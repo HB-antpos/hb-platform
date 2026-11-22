@@ -12,6 +12,7 @@ import type {
   AttendanceManualEntryPreview,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
+import ManualEntryModeSwitch from './ManualEntryModeSwitch'
 import {
   MANUAL_ENTRY_REASON_MAX,
   buildManualSegments,
@@ -20,6 +21,7 @@ import {
   manualEntryErrorText,
   manualPreviewHoursText,
   validateManualRows,
+  type ManualEntryMode,
   type ManualEntryRow,
 } from './manualEntryLogic'
 import { round2, summarizeEmployeeHours } from './payrollLogic'
@@ -42,6 +44,8 @@ interface ManualEntryDrawerProps {
   onClose: () => void
   /** 至少保存成功了一天：外层据此重载工时与工资。 */
   onSaved: () => void
+  /** 顶部切换到「补带薪假」模式：外层换成补假抽屉，并带上已选员工；不传就不显示切换。 */
+  onSwitchMode?: (mode: ManualEntryMode, userGuid?: string) => void
 }
 
 interface DayForm {
@@ -61,7 +65,7 @@ const PREVIEW_DEBOUNCE_MS = 450
 const toDayjsTime = (value: string) => (value ? dayjs(`2000-01-01T${value}`) : null)
 
 export default function ManualEntryDrawer(props: ManualEntryDrawerProps) {
-  const { open, storeCode, days, employees, preset, onClose, onSaved } = props
+  const { open, storeCode, days, employees, preset, onClose, onSaved, onSwitchMode } = props
   const { t } = useTranslation()
   const [staff, setStaff] = useState<{ userGuid: string; label: string }[]>([])
   const [userGuid, setUserGuid] = useState<string>()
@@ -374,6 +378,8 @@ export default function ManualEntryDrawer(props: ManualEntryDrawerProps) {
       <div className="atp-me-subtitle">
         {t('attendancePayroll.manualEntry.subtitle', { store: props.storeName ?? storeCode, from: days[0]?.date.slice(5), to: days[days.length - 1]?.date.slice(5) })}
       </div>
+
+      {onSwitchMode ? <ManualEntryModeSwitch value="hours" disabled={saving} onChange={(mode) => onSwitchMode(mode, userGuid)} /> : null}
 
       <div className="atp-me-field">
         <div className="atp-me-field-label">{t('attendancePayroll.manualEntry.employee')}</div>
