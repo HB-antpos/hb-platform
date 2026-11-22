@@ -16,12 +16,20 @@ export function BleScannerStatusBridge() {
   const runtime = usePosRuntime();
   const ble = runtime.services?.scanner.ble ?? null;
   const setBleScanner = usePosShellStore((state) => state.setBleScanner);
+  const setBleScannerReconnect = usePosShellStore((state) => state.setBleScannerReconnect);
 
   useEffect(() => {
     if (!ble) {
       setBleScanner(null);
+      setBleScannerReconnect(null);
       return undefined;
     }
+
+    // 顶栏点按重连：控制器会先取消旧的挂起请求再直连，并立即推送「连接中」作为反馈；
+    // 失败只体现在状态上（回到休眠 / 重连中），这里吞掉 rejection 避免未处理的 Promise。
+    setBleScannerReconnect(() => {
+      void ble.reconnect().catch(() => undefined);
+    });
 
     // 控制器状态频繁推送（RSSI、最近扫码时间），只在顶栏关心的字段变化时才写入 store。
     const publish = (status: Parameters<typeof toBleScannerIndicatorSnapshot>[0]) => {
@@ -36,8 +44,9 @@ export function BleScannerStatusBridge() {
     return () => {
       unsubscribe();
       setBleScanner(null);
+      setBleScannerReconnect(null);
     };
-  }, [ble, setBleScanner]);
+  }, [ble, setBleScanner, setBleScannerReconnect]);
 
   return null;
 }

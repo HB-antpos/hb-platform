@@ -343,3 +343,36 @@ test("BLE 扫码枪图标：没有 BLE 服务时不显示，随连接状态切�
   });
   expect(screen.queryByLabelText(/^蓝牙枪:/u)).toBeNull();
 });
+
+test("蓝牙枪休眠时顶栏胶囊可点，点一下即重连；已连接时只读", async () => {
+  const reconnect = jest.fn();
+  const shell = usePosShellStore.getState();
+  shell.setBleScanner({ state: "sleeping", batteryLevel: null, attention: false });
+  shell.setBleScannerReconnect(reconnect);
+
+  const screen = await render(<PosStatusStrip language="zh" />);
+  const button = screen.getByTestId("status-strip-ble-reconnect");
+  expect(screen.getByText("refresh")).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(button);
+  });
+  expect(reconnect).toHaveBeenCalledTimes(1);
+
+  await act(async () => {
+    usePosShellStore
+      .getState()
+      .setBleScanner({ state: "ready", batteryLevel: 80, attention: false });
+  });
+  expect(screen.queryByTestId("status-strip-ble-reconnect")).toBeNull();
+  expect(screen.getByText("已连接 80%")).toBeTruthy();
+});
+
+test("没有注册重连入口时，休眠状态也只显示、不可点", async () => {
+  usePosShellStore
+    .getState()
+    .setBleScanner({ state: "sleeping", batteryLevel: null, attention: false });
+
+  const screen = await render(<PosStatusStrip language="zh" />);
+  expect(screen.queryByTestId("status-strip-ble-reconnect")).toBeNull();
+  expect(screen.getByText("bluetooth")).toBeTruthy();
+});

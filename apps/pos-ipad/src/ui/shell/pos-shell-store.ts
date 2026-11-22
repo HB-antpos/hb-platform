@@ -29,6 +29,8 @@ type PosShellState = {
   scanner: ScannerCaptureStatus;
   /** BLE 扫码枪连接状态；null = 本机没有 BLE 服务，顶栏不显示该图标。 */
   bleScanner: BleScannerIndicatorSnapshot | null;
+  /** 顶栏点按重连 BLE 扫码枪的入口；null = 没有 BLE 服务。由 BleScannerStatusBridge 注册。 */
+  bleScannerReconnect: (() => void) | null;
   display: DisplayStatus;
   terminalPresentation: TerminalPresentation | null;
   setConnectivity(status: ConnectivityStatus): void;
@@ -37,6 +39,7 @@ type PosShellState = {
   setPrinter(status: PrinterStatus): void;
   setScanner(status: ScannerCaptureStatus): void;
   setBleScanner(status: BleScannerIndicatorSnapshot | null): void;
+  setBleScannerReconnect(reconnect: (() => void) | null): void;
   setDisplay(status: DisplayStatus): void;
   setTerminalPresentation(
     terminalPresentation: TerminalPresentation | null,
@@ -51,6 +54,7 @@ const initialStatus = {
   printer: "disconnected",
   scanner: "inactive",
   bleScanner: null,
+  bleScannerReconnect: null,
   display: "disconnected",
   terminalPresentation: null,
 } as const;
@@ -71,6 +75,7 @@ export const usePosShellStore = create<PosShellState>((set) => ({
   setPrinter: (printer) => set({ printer }),
   setScanner: (scanner) => set({ scanner }),
   setBleScanner: (bleScanner) => set({ bleScanner }),
+  setBleScannerReconnect: (bleScannerReconnect) => set({ bleScannerReconnect }),
   setDisplay: (display) => set({ display }),
   setTerminalPresentation: (terminalPresentation) =>
     set({ terminalPresentation }),

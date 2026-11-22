@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   type BleScannerIndicatorSnapshot,
   describeBleScannerIndicator,
+  isBleScannerReconnectable,
   isSameBleScannerIndicator,
   toBleScannerIndicatorSnapshot,
 } from "./ble-scanner-indicator";
@@ -113,4 +114,25 @@ test("投影只取顶栏关心的三个字段；RSSI、最近扫码时间变化�
   );
   assert.equal(isSameBleScannerIndicator(null, first), false);
   assert.equal(isSameBleScannerIndicator(null, null), true);
+});
+
+test("只有休眠 / 重连中 / 已断开时顶栏可点重连", () => {
+  const reconnectable: BleScannerConnectionState[] = ["sleeping", "reconnecting", "disconnected"];
+  const readOnly: BleScannerConnectionState[] = [
+    "ready",
+    "learning",
+    "connecting",
+    "not-paired",
+    "bluetooth-off",
+    "unauthorized",
+    "unsupported",
+  ];
+  for (const state of reconnectable) {
+    assert.equal(isBleScannerReconnectable(snapshot(state)), true, state);
+  }
+  for (const state of readOnly) {
+    assert.equal(isBleScannerReconnectable(snapshot(state)), false, state);
+  }
+  // 重连太久需处理（红色）时也要能点。
+  assert.equal(isBleScannerReconnectable(snapshot("reconnecting", { attention: true })), true);
 });

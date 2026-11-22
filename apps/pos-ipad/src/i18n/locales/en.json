@@ -175,6 +175,8 @@
   "status.bleScanner.bluetooth-off": "Bluetooth off",
   "status.bleScanner.unauthorized": "No Bluetooth access",
   "status.bleScanner.unsupported": "Unsupported",
+  "status.bleScanner.reconnectLabel": "BLE scanner: {{state}}, tap to reconnect",
+  "status.bleScanner.reconnectHint": "If the scanner is asleep, press its trigger first, then tap here to reconnect.",
   "customerDisplay.mode.idle": "Welcome",
   "customerDisplay.mode.cart": "Your order",
   "customerDisplay.mode.payment": "Payment",

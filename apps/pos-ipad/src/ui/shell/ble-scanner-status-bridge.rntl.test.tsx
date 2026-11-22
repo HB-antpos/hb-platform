@@ -39,6 +39,7 @@ function fakeBle(initial: BleScannerStatus) {
       return unsubscribe;
     }),
     push: (next: BleScannerStatus) => listener?.(next),
+    reconnect: jest.fn(async () => undefined),
     unsubscribe,
   };
 }
@@ -95,4 +96,32 @@ test("没有 BLE 服务（旧原生包）时状态保持 null；卸载时退订�
   await screen.unmount();
   expect(ble.unsubscribe).toHaveBeenCalledTimes(1);
   expect(usePosShellStore.getState().bleScanner).toBeNull();
+});
+
+test("注册顶栏重连入口：调用即转给 BLE 服务；重连失败不抛出；卸载时清空", async () => {
+  const ble = fakeBle(status({ state: "sleeping", batteryLevel: null }));
+  mockRuntime = { services: { scanner: { ble } } };
+  const screen = await render(<BleScannerStatusBridge />);
+
+  const reconnect = usePosShellStore.getState().bleScannerReconnect;
+  expect(reconnect).not.toBeNull();
+  reconnect?.();
+  expect(ble.reconnect).toHaveBeenCalledTimes(1);
+
+  ble.reconnect.mockImplementationOnce(async () => {
+    throw new Error("connect-timeout");
+  });
+  expect(() => reconnect?.()).not.toThrow();
+  await act(async () => {
+    await Promise.resolve();
+  });
+
+  await screen.unmount();
+  expect(usePosShellStore.getState().bleScannerReconnect).toBeNull();
+});
+
+test("没有 BLE 服务时不注册重连入口", async () => {
+  mockRuntime = { services: { scanner: { ble: null } } };
+  await render(<BleScannerStatusBridge />);
+  expect(usePosShellStore.getState().bleScannerReconnect).toBeNull();
 });
