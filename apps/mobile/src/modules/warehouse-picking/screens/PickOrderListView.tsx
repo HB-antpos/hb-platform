@@ -158,7 +158,7 @@ export function PickOrderListView({
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.screen}>
-      <PickHeader
+      <PickHeader showBleScanner
         title={t("orders.title")}
         onBack={onBack}
         backLabel={t("actions.back")}

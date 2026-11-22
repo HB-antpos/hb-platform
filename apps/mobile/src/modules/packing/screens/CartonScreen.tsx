@@ -143,7 +143,7 @@ export function CartonScreen({ cartonGuid, justActivated = false }: { cartonGuid
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-      <PickHeader
+      <PickHeader showBleScanner
         title={sealed ? t("sealed.title") : packing ? t("pack.title") : t("carton.title")}
         subtitle={carton?.cartonNo}
         onBack={goBack}

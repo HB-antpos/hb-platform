@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { ActivityIndicator, Button, Icon, IconButton, Text } from "react-native-paper";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 import {
   buildDailyTrend,
   buildWeeklyTrend,
@@ -107,6 +108,8 @@ export function SeasonalProductInsightsView(props: SeasonalProductInsightsViewPr
           iconColor={HB_COLORS.white}
           style={styles.scanButton}
         />
+        {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+        <BleScannerStatusButton variant="icon" />
       </View>
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: HB_SPACING.lg + insets.bottom }]}

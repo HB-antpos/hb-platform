@@ -4,6 +4,7 @@ import { IconButton, Menu, Searchbar, Text } from "react-native-paper";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
 import { extractVisibleBarcodeInput } from "@/modules/scanner/visible-barcode-input";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 
 interface SearchPanelProps {
   value: string;
@@ -22,6 +23,8 @@ interface SearchPanelProps {
   /** 已查到商品时，新建商品收进顶部一行为图标按钮，把首屏整行让给商品信息。 */
   onCreateProduct?: () => void;
   createProductDisabled?: boolean;
+  /** 搜索按钮右侧显示「蓝牙枪」状态图标（仅本机配对过 BLE 扫码枪时出现，休眠时点一下即重连）。 */
+  showBleScanner?: boolean;
 }
 
 /** 窗口宽度低于该值（dp）视为窄屏：刷新 / 打印设置 / 新建商品收进「⋯」菜单，把整行宽度让给搜索框。 */
@@ -44,6 +47,7 @@ export function SearchPanel({
   onOpenPrintSettings,
   onCreateProduct,
   createProductDisabled = false,
+  showBleScanner = false,
 }: SearchPanelProps) {
   const { t } = useAppTranslation(["productQuery", "common"]);
   const searchbarRef = useRef<React.ElementRef<typeof Searchbar>>(null);
@@ -133,6 +137,7 @@ export function SearchPanel({
           onPress={handleSubmit}
           style={styles.searchButton}
         />
+        {showBleScanner ? <BleScannerStatusButton variant="icon" /> : null}
         {compact ? (
           <Menu
             visible={moreVisible}

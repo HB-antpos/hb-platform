@@ -17,6 +17,7 @@ import type {
 } from "@/modules/warehouse-product-insights/types";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 
 export interface WarehouseProductInsightsViewProps {
   query: string;
@@ -137,6 +138,8 @@ export function WarehouseProductInsightsView({
             accessibilityLabel={t("actions.scan")}
             style={styles.searchAction}
           />
+          {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+          <BleScannerStatusButton variant="icon" />
         </View>
         <ScrollView
           contentContainerStyle={[

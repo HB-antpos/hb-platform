@@ -52,6 +52,7 @@ import {
   MovementTrendChart,
   type MovementTrendMode,
 } from "./MovementTrendChart";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 
 export interface ProductInsightsViewProps {
   query: string;
@@ -271,6 +272,8 @@ export function ProductInsightsView({
             accessibilityLabel={t("actions.scan")}
             style={styles.searchAction}
           />
+          {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+          <BleScannerStatusButton variant="icon" />
         </View>
         <View style={styles.body}>
           <ScrollView

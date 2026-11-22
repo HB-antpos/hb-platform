@@ -28,6 +28,10 @@ class FakeController implements BleScannerControllerPort {
   async start(): Promise<void> {
     this.startCalls += 1;
   }
+  pauseCalls = 0;
+  pause(): void {
+    this.pauseCalls += 1;
+  }
   resume(): void {
     this.resumeCalls += 1;
   }
@@ -92,6 +96,7 @@ const router = new HidScannerRouter({ now: () => now });
 const routed: string[] = [];
 router.subscribeRouted((event) => routed.push(`${event.context}:${event.source}:${event.value}`));
 let foregroundListener: (() => void) | null = null;
+let backgroundListener: (() => void) | null = null;
 const logs: BleScannerServiceLogEvent[] = [];
 const service = new BleScannerService({
   controller,
@@ -101,6 +106,12 @@ const service = new BleScannerService({
     foregroundListener = listener;
     return () => {
       foregroundListener = null;
+    };
+  },
+  subscribeBackground: (listener) => {
+    backgroundListener = listener;
+    return () => {
+      backgroundListener = null;
     };
   },
   log: (event) => logs.push(event),
@@ -159,6 +170,10 @@ releaseSales();
 assert.ok(foregroundListener);
 (foregroundListener as () => void)();
 assert.equal(controller.resumeCalls, 1);
+// 进后台：停止唤醒扫描。
+assert.ok(backgroundListener);
+(backgroundListener as () => void)();
+assert.equal(controller.pauseCalls, 1);
 
 // 7) 搜索：排除已保存打印机；排除列表读出前就停止也不会开始扫描。
 void (async () => {

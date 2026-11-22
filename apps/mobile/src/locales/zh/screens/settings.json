@@ -320,6 +320,11 @@
     },
     "notice": {
       "noReceiver": "当前页面不接收扫码"
+    },
+    "indicator": {
+      "statusA11y": "蓝牙扫码枪：{{state}}",
+      "reconnectA11y": "蓝牙扫码枪：{{state}}，点按重新连接",
+      "reconnectHint": "扫码枪休眠时先按一下扳机，长按打开扫码枪设置"
     }
   },
   "offlineData": {

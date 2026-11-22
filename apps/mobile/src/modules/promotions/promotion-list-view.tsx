@@ -32,6 +32,7 @@ import {
 } from "./promotion-screen-model";
 import { Badge, PROMO_COLORS, PromotionScanSheet, RuleBlock, TABULAR } from "./promotion-ui";
 import type { PromotionListItem, PromotionStatusCounts, PromotionStatusFilter } from "./types";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 
 const PAGE_SIZE = 20;
 
@@ -428,6 +429,8 @@ export function PromotionListView({
             style={styles.scanButton}
             iconColor={HB_COLORS.action}
           />
+          {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+          <BleScannerStatusButton variant="icon" />
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segments}>
           {PROMOTION_STATUS_SEGMENTS.map((segment) => {
