@@ -87,7 +87,7 @@ export function LocateScreen() {
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-      <PickHeader title={t("locate.title")} onBack={goBack} backLabel={t("actions.back")}>
+      <PickHeader showBleScanner title={t("locate.title")} onBack={goBack} backLabel={t("actions.back")}>
         <OwnerBar owners={scope.owners} owner={owner} onChange={scope.setOwner} />
         <View style={styles.search}>
           <ScanBar

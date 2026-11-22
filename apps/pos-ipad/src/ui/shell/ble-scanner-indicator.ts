@@ -104,3 +104,16 @@ export function describeBleScannerIndicator(
       return { icon: "bluetooth-off", tone: "danger", labelKey, batteryLevel: null };
   }
 }
+
+/**
+ * 顶栏图标点一下就能重连的状态：休眠、重连中、已断开。
+ * 扫码枪休眠省电后自动重连靠前台唤醒扫描，这里给店员一个不用进设置页的兜底入口；
+ * 其余状态（已连接、连接中、未配对、蓝牙关闭等）点了重连也没有意义，保持只读。
+ */
+export function isBleScannerReconnectable(snapshot: BleScannerIndicatorSnapshot): boolean {
+  return (
+    snapshot.state === "sleeping" ||
+    snapshot.state === "reconnecting" ||
+    snapshot.state === "disconnected"
+  );
+}

@@ -7,6 +7,7 @@ import {
   bleScannerDisplayName,
   buildBleScannerRowSubtitle,
   describeBleRssi,
+  describeBleScannerIndicator,
   maskSensitiveScanValue,
   resolveBleScannerBadge,
 } from "./ble-scanner-presentation";
@@ -76,4 +77,41 @@ test("信号分档与敏感码屏蔽", () => {
   assert.equal(describeBleRssi(-90), "weak");
   assert.equal(maskSensitiveScanValue("HBDEV1-ABC-DEF"), "HBDEV1-••••••");
   assert.equal(maskSensitiveScanValue("9313559558795"), "9313559558795");
+});
+
+test("扫码页状态按钮：没配对不显示；休眠 / 重连中 / 已断开点按直接重连，其余打开设置", () => {
+  assert.equal(describeBleScannerIndicator({ ...base, saved: null, state: "not-paired" }), null, "没配对过不显示");
+  assert.equal(describeBleScannerIndicator({ ...base, state: "unsupported" }), null);
+
+  const ready = describeBleScannerIndicator(base);
+  assert.deepEqual(ready, {
+    icon: "bluetooth-connect",
+    tone: "success",
+    labelKey: "bleScanner.state.ready",
+    batteryLevel: 82,
+    action: "open-settings",
+  });
+  const low = describeBleScannerIndicator({ ...base, batteryLevel: 15, attention: true });
+  assert.equal(low?.tone, "danger", "低电量变红");
+  assert.equal(low?.labelKey, "bleScanner.state.ready", "低电量仍显示已连接");
+  assert.equal(
+    describeBleScannerIndicator({ ...base, state: "sleeping", attention: true })?.labelKey,
+    "bleScanner.state.sleeping",
+    "休眠时低电量不改成需处理",
+  );
+
+  for (const state of ["sleeping", "reconnecting", "disconnected"] as const) {
+    const view = describeBleScannerIndicator({ ...base, state, batteryLevel: null });
+    assert.equal(view?.action, "reconnect", `${state} 点按直接重连`);
+    assert.equal(view?.labelKey, `bleScanner.state.${state}`);
+  }
+  assert.equal(describeBleScannerIndicator({ ...base, state: "sleeping" })?.tone, "neutral", "休眠灰色，不算异常");
+  assert.equal(describeBleScannerIndicator({ ...base, state: "sleeping" })?.batteryLevel, null, "没连上不显示电量");
+  const stuck = describeBleScannerIndicator({ ...base, state: "reconnecting", attention: true });
+  assert.equal(stuck?.tone, "danger");
+  assert.equal(stuck?.labelKey, "bleScanner.state.attention");
+
+  assert.equal(describeBleScannerIndicator({ ...base, state: "connecting" })?.action, "open-settings");
+  assert.equal(describeBleScannerIndicator({ ...base, state: "bluetooth-off" })?.tone, "danger");
+  assert.equal(describeBleScannerIndicator({ ...base, state: "bluetooth-off" })?.action, "open-settings");
 });

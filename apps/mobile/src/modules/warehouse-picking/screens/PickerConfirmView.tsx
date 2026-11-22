@@ -80,7 +80,7 @@ export function PickerConfirmView({
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.screen}>
-      <PickHeader title={t("title")} onBack={onBack} backLabel={t("actions.back")} />
+      <PickHeader showBleScanner title={t("title")} onBack={onBack} backLabel={t("actions.back")} />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.headingBlock}>
           <Text accessibilityRole="header" style={styles.heading}>

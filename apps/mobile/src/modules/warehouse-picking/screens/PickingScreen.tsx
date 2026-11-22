@@ -747,7 +747,7 @@ export function PickingScreen({
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.screen}>
-      <PickHeader
+      <PickHeader showBleScanner
         title={sheet.orderNo || t("title")}
         monoTitle
         subtitle={t("picking.subtitle", { store: sheet.storeName || sheet.storeCode || "—", count: lines.length })}

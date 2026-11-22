@@ -4960,6 +4960,7 @@ function ProductQueryContent() {
             : undefined
         }
         createProductDisabled={createProductBusy}
+        showBleScanner
         onSubmit={() => void handleLookup()}
         onClear={handleClear}
       />

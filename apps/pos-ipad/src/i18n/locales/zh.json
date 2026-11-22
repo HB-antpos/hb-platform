@@ -175,6 +175,8 @@
   "status.bleScanner.bluetooth-off": "蓝牙已关",
   "status.bleScanner.unauthorized": "无蓝牙权限",
   "status.bleScanner.unsupported": "不支持",
+  "status.bleScanner.reconnectLabel": "蓝牙枪：{{state}}，点按重新连接",
+  "status.bleScanner.reconnectHint": "扫码枪休眠时先按一下扳机，再点这里重新连接。",
   "customerDisplay.mode.idle": "欢迎光临",
   "customerDisplay.mode.cart": "您的订单",
   "customerDisplay.mode.payment": "请付款",

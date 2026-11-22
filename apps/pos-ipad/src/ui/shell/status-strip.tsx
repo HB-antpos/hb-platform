@@ -2,7 +2,10 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import { Text, View } from "react-native";
 
-import { describeBleScannerIndicator } from "./ble-scanner-indicator";
+import {
+  describeBleScannerIndicator,
+  isBleScannerReconnectable,
+} from "./ble-scanner-indicator";
 import { usePosShellStore } from "./pos-shell-store";
 
 import { PosPressable } from "@/ui/controls/pos-pressable";
@@ -27,6 +30,14 @@ type PosStatusStripProps = Readonly<{
   /** 在最左侧显示品牌名「HB POS」。 */
   showBrand?: boolean;
 }>;
+
+type ReconnectableIndicatorProps = StatusIndicatorProps &
+  Readonly<{
+    accessibilityHint: string;
+    accessibilityLabel: string;
+    onPress: () => void;
+    testID: string;
+  }>;
 
 type StaticIdentityProps = Readonly<{
   icon: StatusIconName;
@@ -56,6 +67,53 @@ function StatusIndicator({ icon, label, tone, value }: StatusIndicatorProps) {
         {value}
       </Text>
     </View>
+  );
+}
+
+/**
+ * 可点按的状态胶囊：外观与 StatusIndicator 一致，末尾多一个「↻」提示可点。
+ * 目前只用于蓝牙扫码枪休眠 / 断开 / 重连中时的「点一下重连」。
+ */
+function ReconnectableIndicator({
+  accessibilityHint,
+  accessibilityLabel,
+  icon,
+  onPress,
+  testID,
+  tone,
+  value,
+}: ReconnectableIndicatorProps) {
+  return (
+    <PosPressable
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      hitSlop={6}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.indicator,
+        styles.indicatorPressable,
+        pressed && styles.indicatorPressed,
+      ]}
+      testID={testID}
+    >
+      <View style={[styles.dot, toneStyles[tone]]} />
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors.chromeMuted}
+        name={icon}
+        size={16}
+      />
+      <Text numberOfLines={1} style={styles.value}>
+        {value}
+      </Text>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={posColors.chromeInk}
+        name="refresh"
+        size={15}
+      />
+    </PosPressable>
   );
 }
 
@@ -116,6 +174,7 @@ export function PosStatusStrip({
   const {
     connectivity,
     bleScanner,
+    bleScannerReconnect,
     deviceGate,
     display,
     pendingSync,
@@ -125,6 +184,16 @@ export function PosStatusStrip({
   } = usePosShellStore();
   // 没有 BLE 服务（旧原生包）或本机不支持蓝牙时为 null，不显示图标。
   const bleIndicator = bleScanner ? describeBleScannerIndicator(bleScanner) : null;
+  const bleValue = bleIndicator
+    ? bleIndicator.batteryLevel === null
+      ? t(bleIndicator.labelKey)
+      : `${t(bleIndicator.labelKey)} ${bleIndicator.batteryLevel}%`
+    : "";
+  // 休眠 / 重连中 / 已断开时顶栏图标可点：点一下直接重连，不用进设置页。
+  const bleReconnect =
+    bleScanner && bleScannerReconnect && isBleScannerReconnectable(bleScanner)
+      ? bleScannerReconnect
+      : null;
   const currentLanguage =
     language ?? i18n.resolvedLanguage ?? i18n.language;
   const targetLanguageGlyph = currentLanguage
@@ -208,16 +277,23 @@ export function PosStatusStrip({
         tone={scanner === "capturing" || scanner === "camera" ? "good" : "neutral"}
         value={t(`status.scanner.${scanner}`)}
       />
-      {bleIndicator ? (
+      {bleIndicator && bleReconnect ? (
+        <ReconnectableIndicator
+          accessibilityHint={t("status.bleScanner.reconnectHint")}
+          accessibilityLabel={t("status.bleScanner.reconnectLabel", { state: bleValue })}
+          icon={bleIndicator.icon}
+          label={t("status.bleScanner")}
+          onPress={bleReconnect}
+          testID="status-strip-ble-reconnect"
+          tone={bleIndicator.tone}
+          value={bleValue}
+        />
+      ) : bleIndicator ? (
         <StatusIndicator
           icon={bleIndicator.icon}
           label={t("status.bleScanner")}
           tone={bleIndicator.tone}
-          value={
-            bleIndicator.batteryLevel === null
-              ? t(bleIndicator.labelKey)
-              : `${t(bleIndicator.labelKey)} ${bleIndicator.batteryLevel}%`
-          }
+          value={bleValue}
         />
       ) : null}
       <StatusIndicator
@@ -322,6 +398,13 @@ const styles = createPosStyles((colors) => ({
     minHeight: 32,
     minWidth: 0,
     paddingHorizontal: 10,
+  },
+  indicatorPressable: {
+    borderColor: colors.chromeBorder,
+    borderWidth: 1,
+  },
+  indicatorPressed: {
+    opacity: 0.6,
   },
   languageButton: {
     alignItems: "center",

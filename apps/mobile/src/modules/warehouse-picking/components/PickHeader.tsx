@@ -4,6 +4,7 @@ import { Text } from "react-native-paper";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { MONO_FONT, PICK_COLORS } from "./pick-theme";
 import { pickerInitials } from "../pick-view-model";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 
 export function PickHeader({
   title,
@@ -12,6 +13,7 @@ export function PickHeader({
   onBack,
   backLabel,
   right,
+  showBleScanner = false,
   children,
 }: {
   title: string;
@@ -20,6 +22,8 @@ export function PickHeader({
   onBack: () => void;
   backLabel: string;
   right?: ReactNode;
+  /** 扫码页传 true：标题右侧显示「蓝牙枪」状态（仅本机配对过 BLE 扫码枪时出现，休眠时点一下即重连）。 */
+  showBleScanner?: boolean;
   children?: ReactNode;
 }) {
   return (
@@ -44,6 +48,7 @@ export function PickHeader({
             </Text>
           ) : null}
         </View>
+        {showBleScanner ? <BleScannerStatusButton /> : null}
         {right}
       </View>
       {children}

@@ -361,7 +361,7 @@ export function PalletScreen({ palletGuid }: { palletGuid: string }) {
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-      <PickHeader
+      <PickHeader showBleScanner
         title={sealed ? t("palletSealed.title") : building ? t("pallet.title") : t("pallet.titleReadonly")}
         subtitle={pallet?.palletNo}
         onBack={goBack}

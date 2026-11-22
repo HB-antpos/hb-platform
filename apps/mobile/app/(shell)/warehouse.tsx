@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
 import { ActivityIndicator, Button, Card, IconButton, Menu, Modal, Portal, Searchbar, SegmentedButtons, Snackbar, Switch, Text, TextInput } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { BleScannerStatusButton } from "@/modules/scanner/ble/BleScannerStatusButton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { CameraScanSheet } from "@/components/ui/CameraScanSheet";
@@ -1921,8 +1922,12 @@ export default function WarehouseScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={["top", "left", "right"]}>
-      <View style={[styles.header, isPdaProductLayout ? styles.headerCompact : null]}>
-        <Text variant="headlineSmall">{t("title")}</Text>
+      <View style={[styles.header, styles.headerRow, isPdaProductLayout ? styles.headerCompact : null]}>
+        <Text variant="headlineSmall" style={styles.headerTitle}>
+          {t("title")}
+        </Text>
+        {/* 蓝牙枪状态：仅配对过 BLE 扫码枪时显示，休眠时点一下即重连。 */}
+        <BleScannerStatusButton />
       </View>
 
       <SegmentedButtons
@@ -2920,6 +2925,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 12,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  headerTitle: {
+    flex: 1,
+    minWidth: 0,
   },
   headerCompact: {
     paddingHorizontal: 12,

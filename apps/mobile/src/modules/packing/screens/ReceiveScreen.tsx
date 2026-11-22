@@ -379,7 +379,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-      <PickHeader title={t("receive.title")} onBack={goBack} backLabel={t("actions.back")}>
+      <PickHeader showBleScanner title={t("receive.title")} onBack={goBack} backLabel={t("actions.back")}>
         <OwnerBar owners={scope.owners} owner={owner} onChange={scope.setOwner} suffix={t("receive.ownerSuffix")} />
       </PickHeader>
 

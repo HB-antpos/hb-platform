@@ -361,7 +361,7 @@ export function PackLaterScreen({ orderGuid, focusProductCode }: { orderGuid: st
 
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={styles.screen}>
-      <PickHeader
+      <PickHeader showBleScanner
         title={t("packLater.title")}
         subtitle={progress.orderNo}
         onBack={goBack}

@@ -55,6 +55,8 @@ async function run() {
     useWindowDimensions: () => ({ width: 800, height: 600, scale: 1, fontScale: 1 }),
     View: "View",
   });
+  // 蓝牙枪状态按钮会连带加载 ble-plx 原生封装；本测试只验证搜索框焦点交接，用空组件替代。
+  mockModule(require.resolve("./ble/BleScannerStatusButton"), { BleScannerStatusButton: () => null });
   mockModule("react-native-paper", {
     Searchbar: FakeSearchbar,
     Menu: Object.assign((props: Record<string, unknown>) => React.createElement("Menu", props), {

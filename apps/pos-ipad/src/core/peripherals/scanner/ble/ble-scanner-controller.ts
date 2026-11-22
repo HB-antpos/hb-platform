@@ -5,7 +5,7 @@
  * 由 apps/mobile/src/modules/scanner/ble/ble-shared-sync.test.ts 校验一致。
  *
  * 职责：搜索、连接、选数据通道（已知型号直连，未知型号嗅探学习）、订阅拼帧、
- * 读电量、断开后挂起式重连、休眠判断。不负责把码投给页面——那是各端路由的事。
+ * 读电量、断开后重连（挂起式请求 + 前台唤醒扫描）、休眠判断。不负责把码投给页面——那是各端路由的事。
  */
 import {
   BLE_BATTERY_LEVEL_UUID,
@@ -51,8 +51,9 @@ export interface BleScannerTransport {
     onError: (error: Error) => void,
   ): () => void;
   /**
-   * 连接。**不设超时**：iOS 的 connect 本身不超时，Android 用 autoConnect=true，
-   * 扫码枪休眠时请求一直挂着，按扳机唤醒后由系统接上。
+   * 连接。**不设超时**：iOS 的 connect 本身不超时。
+   * pending=true（断开后挂起等设备回来）：Android 用 autoConnect=true，由系统在设备重新广播时接上；
+   * pending=false（用户主动连接 / 刚扫到广播）：Android 直连，比 autoConnect 快得多。
    */
   connect(id: string, options: Readonly<{ pending: boolean }>): Promise<void>;
   cancelConnection(id: string): Promise<void>;
@@ -126,18 +127,34 @@ export type BleScannerControllerOptions = Readonly<{
   clearTimer?: (handle: unknown) => void;
   setRepeatingTimer?: (callback: () => void, ms: number) => unknown;
   clearRepeatingTimer?: (handle: unknown) => void;
+  /** 唤醒扫描每轮扫多久。 */
+  wakeScanWindowMs?: number;
+  /** 两轮唤醒扫描之间停多久。 */
+  wakeScanIntervalMs?: number;
+  /** 直连（用户点重连 / 扫到广播）多久没连上就放弃，回到休眠 / 重连中继续唤醒扫描。 */
+  directConnectTimeoutMs?: number;
 }>;
 
 export const BLE_SLEEP_AFTER_MS = 50_000;
 export const BLE_ATTENTION_AFTER_MS = 60_000;
 export const BLE_BATTERY_POLL_MS = 5 * 60_000;
 export const BLE_LOW_BATTERY_LEVEL = 20;
+/**
+ * 唤醒扫描：休眠 / 重连中且 App 在前台时，每 8 秒扫 3 秒，扫到本机扫码枪的广播就重新连。
+ * 一轮 8 秒是为了避开 Android「30 秒内最多开始 5 次扫描」的系统限制（超了会静默扫不到）。
+ */
+export const BLE_WAKE_SCAN_WINDOW_MS = 3_000;
+export const BLE_WAKE_SCAN_INTERVAL_MS = 5_000;
+/** 直连看门狗：iOS 的 connect 不超时，扫码枪睡着时点「重新连接」不能一直卡在「连接中」。 */
+export const BLE_DIRECT_CONNECT_TIMEOUT_MS = 15_000;
 
 type Session = {
   id: string;
   generation: number;
   cleanups: (() => void)[];
   assemblers: BleScanFrameAssembler[];
+  /** 链路已建立（onConnected 已开始）：唤醒扫描不得再拆这条会话。 */
+  linked: boolean;
 };
 
 export class BleScannerController {
@@ -168,7 +185,17 @@ export class BleScannerController {
   private adapterEventReceived = false;
   private adapterRetryCount = 0;
   private adapterRetryTimer: unknown = null;
+  /** 设置页「搜索扫码枪」的停止函数；非 null 表示搜索进行中。 */
   private stopScan: (() => void) | null = null;
+  private readonly wakeScanWindowMs: number;
+  private readonly wakeScanIntervalMs: number;
+  private readonly directConnectTimeoutMs: number;
+  /** App 是否在前台。只有前台才做唤醒扫描（后台扫描耗电，iOS 也没声明蓝牙后台模式）。 */
+  private foreground = true;
+  /** 唤醒扫描循环是否在运行（扫描中或等下一轮）。 */
+  private wakeLoopActive = false;
+  private wakeTimer: unknown = null;
+  private stopWakeScan: (() => void) | null = null;
   /** 排队执行蓝牙操作，避免搜索、连接、断开交错。 */
   private queue: Promise<unknown> = Promise.resolve();
 
@@ -180,6 +207,9 @@ export class BleScannerController {
     this.attentionAfterMs = options.attentionAfterMs ?? BLE_ATTENTION_AFTER_MS;
     this.batteryPollMs = options.batteryPollMs ?? BLE_BATTERY_POLL_MS;
     this.lowBatteryLevel = options.lowBatteryLevel ?? BLE_LOW_BATTERY_LEVEL;
+    this.wakeScanWindowMs = options.wakeScanWindowMs ?? BLE_WAKE_SCAN_WINDOW_MS;
+    this.wakeScanIntervalMs = options.wakeScanIntervalMs ?? BLE_WAKE_SCAN_INTERVAL_MS;
+    this.directConnectTimeoutMs = options.directConnectTimeoutMs ?? BLE_DIRECT_CONNECT_TIMEOUT_MS;
     this.setTimer = options.setTimer ?? ((callback, ms) => setTimeout(callback, ms));
     this.clearTimer =
       options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
@@ -234,18 +264,33 @@ export class BleScannerController {
     this.handleAdapterState(this.adapterEventReceived ? this.adapterState : adapterState);
   }
 
-  /** App 回到前台：如果之前在重连 / 休眠，重新挂一次连接请求。 */
+  /**
+   * App 回到前台。休眠 / 重连中：立即补一轮唤醒扫描，**不**再对同一设备叠加连接请求
+   * （iOS ble-plx 对同一设备重复 connect 会把前一个请求连带取消，新请求可能永远等不到回调）。
+   * 没有挂着的请求（如之前被 stop 断开过）才重新发起连接。
+   */
   resume(): void {
+    this.foreground = true;
     const saved = this.status.saved;
     if (!this.started || !saved?.autoReconnect || this.adapterState !== "on") return;
-    if (this.status.state === "ready" || this.status.state === "connecting" || this.status.state === "learning") {
+    const state = this.status.state;
+    if (state === "ready" || state === "connecting" || state === "learning") return;
+    if ((state === "sleeping" || state === "reconnecting") && this.session) {
+      this.syncWakeScan({ immediate: true });
       return;
     }
     void this.enqueue(() => this.connectSaved(true));
   }
 
+  /** App 进后台：停止唤醒扫描（挂着的连接请求保留，回前台再继续扫）。 */
+  pause(): void {
+    this.foreground = false;
+    this.syncWakeScan();
+  }
+
   dispose(): void {
     this.started = false;
+    this.stopWakeLoop();
     this.stopDiscovery();
     this.stopAdapterListener?.();
     this.stopAdapterListener = null;
@@ -264,6 +309,8 @@ export class BleScannerController {
     options: Readonly<{ excludeIds?: readonly string[] }> = {},
   ): () => void {
     this.stopDiscovery();
+    // ble-plx 同一时刻只能有一个扫描，且停止扫描是全局的：先让唤醒扫描彻底退出，再开始搜索。
+    this.stopWakeLoop();
     const exclude = new Set(options.excludeIds ?? []);
     const found = new Map<string, BleDiscoveredDevice>();
     const emit = () => {
@@ -291,6 +338,8 @@ export class BleScannerController {
     const stop = this.stopScan;
     this.stopScan = null;
     stop?.();
+    // 搜索结束：需要的话恢复唤醒扫描（下一轮按间隔开始）。
+    if (stop) this.syncWakeScan();
   }
 
   /* ---------------- 配对 / 断开 ---------------- */
@@ -356,8 +405,17 @@ export class BleScannerController {
     });
   }
 
+  /** 用户点「重新连接」：先取消挂着的旧请求 / 旧链路，再重新连，保证同一设备只有一个连接请求。 */
   reconnect(): Promise<void> {
-    return this.enqueue(() => this.connectWhenAdapterReady());
+    return this.enqueue(async () => {
+      const session = this.session;
+      if (session) {
+        // 先作废会话：旧请求被取消时的失败回调不会再触发重连。
+        this.teardownSession();
+        await this.transport.cancelConnection(session.id).catch(() => undefined);
+      }
+      await this.connectWhenAdapterReady();
+    });
   }
 
   setAlias(alias: string | null): Promise<void> {
@@ -456,6 +514,10 @@ export class BleScannerController {
     }, 1000);
   }
 
+  /**
+   * 发起连接。pending=true：断开后挂起等设备回来（状态保持休眠 / 重连中）；
+   * pending=false：用户主动连接或刚扫到广播，显示「连接中」并直连。
+   */
   private async connectSaved(pending: boolean): Promise<void> {
     const saved = this.status.saved;
     if (!saved || this.adapterState !== "on") return;
@@ -465,12 +527,19 @@ export class BleScannerController {
       generation: ++this.generation,
       cleanups: [],
       assemblers: [],
+      linked: false,
     };
     this.session = session;
     if (!pending || this.status.state === "not-paired" || this.status.state === "disconnected") {
       this.update({ state: "connecting" });
     }
-    const connecting = this.transport.connect(saved.peripheralId, { pending: true });
+    if (!pending) {
+      const watchdog = this.setTimer(() => {
+        void this.enqueue(() => this.abandonDirectConnect(session));
+      }, this.directConnectTimeoutMs);
+      session.cleanups.push(() => this.clearTimer(watchdog));
+    }
+    const connecting = this.transport.connect(saved.peripheralId, { pending });
     // 挂起的连接可能很久才完成；不 await 在队列里，避免堵住后续操作。
     void connecting.then(
       () => this.onConnected(session),
@@ -484,6 +553,9 @@ export class BleScannerController {
 
   private async onConnected(session: Session): Promise<void> {
     if (!this.isCurrent(session)) return;
+    session.linked = true;
+    // 链路已建立：唤醒扫描立即停（不等 discover 完成、状态变成 ready）。
+    this.syncWakeScan();
     this.reconnectingSince = null;
     this.clearAttentionTimer();
     session.cleanups.push(
@@ -656,11 +728,26 @@ export class BleScannerController {
     }
   }
 
+  /** 直连超时：先作废会话再取消请求（取消引起的失败回调不再触发重连），然后按断开处理。 */
+  private async abandonDirectConnect(session: Session): Promise<void> {
+    if (!this.isCurrent(session) || session.linked) return;
+    this.teardownSession();
+    await this.transport.cancelConnection(session.id).catch(() => undefined);
+    if (this.session) return; // 取消期间已有新的连接流程接手
+    this.update({ lastErrorCode: "connect-timeout" });
+    this.enterReconnectWait();
+  }
+
   /** 链路断开：判断是休眠还是异常，然后挂起新的连接请求。 */
   private onLinkLost(session: Session): void {
     if (!this.isCurrent(session)) return;
-    const saved = this.status.saved;
     this.teardownSession();
+    this.enterReconnectWait();
+  }
+
+  /** 会话已拆除后：进入休眠 / 重连中，挂起新的连接请求并启用唤醒扫描。 */
+  private enterReconnectWait(): void {
+    const saved = this.status.saved;
     if (!saved || this.adapterState !== "on") return;
     if (!saved.autoReconnect) {
       this.update({ state: "disconnected" });
@@ -671,7 +758,143 @@ export class BleScannerController {
     this.update({ state: sleeping ? "sleeping" : "reconnecting" });
     if (!sleeping) this.startAttentionTimer();
     // 不排队：断开回调可能发生在队列任务内部。
+    // 挂起请求是系统级的兜底（部分设备 / 系统版本上它能自己接上）；
+    // 真正可靠的路径是下面的唤醒扫描：扫到广播后取消它、重新直连。
     void this.connectSaved(true);
+  }
+
+  /* ---------------- 内部：唤醒扫描 ---------------- */
+
+  /** 现在是否应该做唤醒扫描。 */
+  private shouldWakeScan(): boolean {
+    const saved = this.status.saved;
+    const state = this.status.state;
+    return (
+      this.started &&
+      this.foreground &&
+      this.adapterState === "on" &&
+      Boolean(saved?.autoReconnect) &&
+      (state === "sleeping" || state === "reconnecting") &&
+      // 与设置页搜索互斥：搜索期间不扫。
+      this.stopScan === null &&
+      // 链路已建立（正在 discover）时不扫，免得拆掉刚连上的会话。
+      !this.session?.linked
+    );
+  }
+
+  /**
+   * 按当前条件启停唤醒扫描循环。状态、前台、搜索、会话变化后都调用一次。
+   * immediate：回前台时立即扫一轮，不等间隔。
+   */
+  private syncWakeScan(options: Readonly<{ immediate?: boolean }> = {}): void {
+    if (!this.shouldWakeScan()) {
+      this.stopWakeLoop();
+      return;
+    }
+    if (options.immediate) {
+      if (this.stopWakeScan) return; // 正在扫，不用重开
+      this.clearWakeTimer();
+      this.wakeLoopActive = true;
+      this.runWakeScanWindow();
+      return;
+    }
+    if (this.wakeLoopActive) return;
+    this.wakeLoopActive = true;
+    // 刚断开时扫码枪多半刚睡着，不急着扫：等一个间隔再开始第一轮。
+    this.scheduleNextWakeScan();
+  }
+
+  private scheduleNextWakeScan(): void {
+    this.clearWakeTimer();
+    this.wakeTimer = this.setTimer(() => {
+      this.wakeTimer = null;
+      if (!this.wakeLoopActive) return;
+      if (!this.shouldWakeScan()) {
+        this.stopWakeLoop();
+        return;
+      }
+      this.runWakeScanWindow();
+    }, this.wakeScanIntervalMs);
+  }
+
+  /** 扫一轮：只认已保存的 peripheralId；扫到就停扫并排队重连，扫不到窗口结束后等下一轮。 */
+  private runWakeScanWindow(): void {
+    const saved = this.status.saved;
+    if (!saved) return;
+    const targetId = saved.peripheralId;
+    let finished = false;
+    let stop: (() => void) | undefined;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      this.endWakeScanWindow(stop);
+    };
+    stop = this.transport.startScan(
+      (device) => {
+        if (finished || device.id !== targetId) return;
+        finish();
+        this.wakeLoopActive = false;
+        this.clearWakeTimer();
+        void this.enqueue(() => this.reconnectAfterWake(targetId));
+      },
+      () => {
+        // 扫描出错（权限、蓝牙忙等）：结束本轮，按间隔再试。
+        if (finished) return;
+        finish();
+        if (this.wakeLoopActive) this.scheduleNextWakeScan();
+      },
+    );
+    if (finished) {
+      // 回调同步触发时 stop 还没赋值，这里补停一次。
+      this.endWakeScanWindow(stop);
+      return;
+    }
+    this.stopWakeScan = finish;
+    this.clearWakeTimer();
+    this.wakeTimer = this.setTimer(() => {
+      this.wakeTimer = null;
+      finish();
+      if (this.wakeLoopActive) this.scheduleNextWakeScan();
+    }, this.wakeScanWindowMs);
+  }
+
+  private endWakeScanWindow(stop: (() => void) | undefined): void {
+    if (this.stopWakeScan) this.stopWakeScan = null;
+    // 搜索已经接管了扫描时不能再调停止（ble-plx 的停止是全局的，会把搜索也停掉）。
+    if (this.stopScan === null) stop?.();
+  }
+
+  private stopWakeLoop(): void {
+    this.wakeLoopActive = false;
+    this.clearWakeTimer();
+    const stop = this.stopWakeScan;
+    this.stopWakeScan = null;
+    stop?.();
+  }
+
+  private clearWakeTimer(): void {
+    if (this.wakeTimer !== null) {
+      this.clearTimer(this.wakeTimer);
+      this.wakeTimer = null;
+    }
+  }
+
+  /**
+   * 扫到了本机扫码枪的广播（它醒着）：先作废并取消挂着的旧请求，再直连。
+   * 保证同一设备同时只有一个连接请求。
+   */
+  private async reconnectAfterWake(id: string): Promise<void> {
+    const saved = this.status.saved;
+    const state = this.status.state;
+    if (!this.started || !saved || saved.peripheralId !== id || this.adapterState !== "on") return;
+    if (state !== "sleeping" && state !== "reconnecting") return;
+    if (this.session?.linked) return;
+    // 先切到「连接中」：唤醒扫描据此不会再启动；再作废旧会话，旧请求被取消时的失败回调就不会再触发重连。
+    this.update({ state: "connecting" });
+    this.teardownSession();
+    await this.transport.cancelConnection(id).catch(() => undefined);
+    if (this.session || this.status.saved?.peripheralId !== id || this.status.state !== "connecting") return;
+    await this.connectSaved(false);
   }
 
   private startAttentionTimer(): void {
@@ -739,6 +962,8 @@ export class BleScannerController {
     if (shallowEqualStatus(status, this.status)) return;
     this.status = status;
     this.statusListeners.forEach((listener) => listener(status));
+    // 进入 / 离开休眠、重连中时启停唤醒扫描。
+    this.syncWakeScan();
   }
 }
 

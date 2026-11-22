@@ -31,10 +31,17 @@ export function createBleScannerService(
       ? { loadExcludedPeripheralIds: input.loadExcludedPeripheralIds }
       : {}),
     ...(input.log ? { log: input.log } : {}),
-    // 回到前台重新挂一次连接请求（扫码枪休眠期间 App 可能被系统挂起过）。
+    // 回到前台：休眠 / 重连中的扫码枪立即补一轮唤醒扫描（扫码枪休眠期间 App 可能被系统挂起过）。
     subscribeForeground: (listener) => {
       const subscription = AppState.addEventListener("change", (state) => {
         if (state === "active") listener();
+      });
+      return () => subscription.remove();
+    },
+    // 进后台（含 inactive）：停止唤醒扫描，回前台再继续。
+    subscribeBackground: (listener) => {
+      const subscription = AppState.addEventListener("change", (state) => {
+        if (state !== "active") listener();
       });
       return () => subscription.remove();
     },
