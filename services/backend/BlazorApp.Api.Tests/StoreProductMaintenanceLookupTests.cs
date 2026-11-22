@@ -166,6 +166,66 @@ public sealed class StoreProductMaintenanceLookupTests : IDisposable
         Assert.Equal(expected, BlazorApp.Api.Utils.BarcodeVariants.GetLeadingZeroVariant(keyword));
     }
 
+    [Theory]
+    // 生产实例：KFC Uncle Bills 外箱 ITF-14 19333527854091，单件 XK0000052 条码 9333527854094。
+    [InlineData("19333527854091", "9333527854094")]
+    [InlineData("09333527854094", "9333527854094")]
+    [InlineData("10810812024524", "0810812024527")]
+    [InlineData("19333527854092", null)] // 14 位校验位不对
+    [InlineData("99333527854098", null)] // 指示符 9 是变量计量商品
+    [InlineData("9333527854094", null)]
+    [InlineData("1933352785409A", null)]
+    [InlineData(null, null)]
+    public void BarcodeVariants_箱码换算单件条码(string? code, string? expected)
+    {
+        Assert.Equal(expected, BlazorApp.Api.Utils.BarcodeVariants.GetCaseCodeItemBarcode(code));
+    }
+
+    [Fact]
+    public void BarcodeVariants_回退顺序为前导零再箱码()
+    {
+        Assert.Equal(new[] { "0810812024527" }, BlazorApp.Api.Utils.BarcodeVariants.GetLookupFallbacks("810812024527"));
+        Assert.Equal(new[] { "9333527854094" }, BlazorApp.Api.Utils.BarcodeVariants.GetLookupFallbacks("19333527854091"));
+        Assert.Equal(
+            new[] { "0810812024527", "810812024527" },
+            BlazorApp.Api.Utils.BarcodeVariants.GetLookupFallbacks("10810812024524")
+        );
+        Assert.Empty(BlazorApp.Api.Utils.BarcodeVariants.GetLookupFallbacks("XK0000052"));
+    }
+
+    [Fact]
+    public async Task Lookup_扫箱码找到单件商品()
+    {
+        await SeedProduct("unit", "XK0000052", "9333527854094");
+        var item = Assert.Single(await Lookup("19333527854091"));
+        Assert.Equal("unit", item.ProductCode);
+        Assert.Equal("ProductBarcode", item.MatchSource);
+        Assert.Equal("9333527854094", item.Barcode);
+    }
+
+    [Fact]
+    public async Task Lookup_箱码换算后单件按12位存放也能找到()
+    {
+        await SeedProduct("upc", "UPC1", "810812024527");
+        Assert.Equal("upc", Assert.Single(await Lookup("10810812024524")).ProductCode);
+    }
+
+    [Fact]
+    public async Task Lookup_库里登记了14位码时精确命中优先_不换算()
+    {
+        // 生产库有 200 多个商品直接把 14 位码登记成条码：扫这个码必须仍然命中它自己。
+        await SeedProduct("registered-case", "CASE", "19333527854091");
+        await SeedProduct("unit", "XK0000052", "9333527854094");
+        Assert.Equal("registered-case", Assert.Single(await Lookup("19333527854091")).ProductCode);
+    }
+
+    [Fact]
+    public async Task Lookup_箱码换算只比条码_不命中数字货号()
+    {
+        await SeedProduct("by-item-number", "9333527854094");
+        Assert.Empty(await Lookup("19333527854091"));
+    }
+
     [Fact]
     public async Task Lookup_普通无空格货号和条码保持可查询()
     {

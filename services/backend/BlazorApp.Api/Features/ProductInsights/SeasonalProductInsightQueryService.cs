@@ -48,11 +48,15 @@ public sealed class SeasonalProductInsightQueryService(
         var matchMode = "barcode";
         if (codes.Count == 0)
         {
-            // iOS 相机会把 0 开头的 EAN-13 去成 12 位；精确条码没有结果才回退前导 0 的另一种写法。
-            var barcodeVariant = BarcodeVariants.GetLeadingZeroVariant(normalized);
-            if (barcodeVariant != null)
+            // iOS 相机会把 0 开头的 EAN-13 去成 12 位；扫外箱会得到 14 位箱码（ITF-14）。
+            // 精确条码没有结果才依次回退前导 0 写法、箱码换算出的单件条码，命中即停。
+            foreach (var barcodeVariant in BarcodeVariants.GetLookupFallbacks(normalized))
             {
                 codes = await FindBarcodeMatchesAsync(barcodeVariant, limit);
+                if (codes.Count > 0)
+                {
+                    break;
+                }
             }
         }
         if (codes.Count == 0)

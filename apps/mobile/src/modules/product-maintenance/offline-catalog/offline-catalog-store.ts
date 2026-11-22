@@ -25,7 +25,7 @@ import {
   OfflineCatalogSyncService,
   type OfflineCatalogRefreshResult,
 } from "./offline-catalog-sync-service";
-import { getLeadingZeroBarcodeVariant } from "@/modules/scanner/barcode-variants";
+import { getLookupFallbackBarcodes } from "@/modules/scanner/barcode-variants";
 import { normalizeOfflineLookupCode, type ActiveOfflineCatalogMetadata } from "./types";
 
 interface OfflineCatalogRuntime {
@@ -189,11 +189,12 @@ export const useOfflineCatalogStore = create<OfflineCatalogState>((set, get) => 
       if (rows.length === 0) {
         // 精确匹配没有结果才回退到前导 0 的另一种写法：库里可能同时存在 12 位 X 与 13 位 0+X 两个不同商品，
         // 精确命中必须优先；回退只认条码来源，避免纯数字货号被变体误命中。
-        const variant = getLeadingZeroBarcodeVariant(normalizedKeyword);
-        if (variant) {
+        // 扫到外箱的 14 位箱码（ITF-14）时同理：没登记这个箱码才换算成单件条码再查，命中即停。
+        for (const variant of getLookupFallbackBarcodes(normalizedKeyword)) {
           rows = (await runtime.repository.lookup(storeCode, variant)).filter(
             (row) => row.matchSource.endsWith("Barcode"),
           );
+          if (rows.length > 0) break;
         }
       }
       return buildOfflineLookupItems(rows, keyword);

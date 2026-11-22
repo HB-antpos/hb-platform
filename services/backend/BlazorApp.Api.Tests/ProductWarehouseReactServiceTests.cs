@@ -3508,6 +3508,35 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task LookupMobileProductsAsync_扫外箱箱码没登记时换算成单件条码再查()
+        {
+            await _db.Insertable(new Product
+            {
+                UUID = "product-uuid-case-1",
+                ProductCode = "P-CASE-001",
+                ProductName = "Bauble Drink Jar with Straw Asst",
+                ItemNumber = "XK0000052",
+                Barcode = "9333527854094",
+                IsActive = true,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+            await _db.Insertable(new WarehouseProduct
+            {
+                ProductCode = "P-CASE-001",
+                IsActive = true,
+                StockQuantity = 12,
+                IsDeleted = false,
+            }).ExecuteCommandAsync();
+
+            var service = CreateService();
+
+            var item = Assert.Single(await service.LookupMobileProductsAsync("19333527854091"));
+            Assert.Equal("P-CASE-001", item.ProductCode);
+            // 校验位不对的 14 位码不是标准箱码，不换算。
+            Assert.Empty(await service.LookupMobileProductsAsync("19333527854092"));
+        }
+
+        [Fact]
         public async Task LookupMobileProductsAsync_MatchesChineseEnglishCaseAndLocationCodes()
         {
             await SeedMobileLookupScenarioAsync(_db);

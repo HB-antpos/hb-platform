@@ -116,6 +116,17 @@ internal sealed class ProductWarehouseMobileSlice
             .Take(50)
             .ToListAsync();
 
+        if (rows.Count == 0)
+        {
+            // 扫到外箱 / 中包的 14 位箱码（ITF-14）且库里没登记时，换算成单件条码再查一次；
+            // 换算结果是 13 位，不会再被当成箱码，递归只有一层。
+            var itemBarcode = BlazorApp.Api.Utils.BarcodeVariants.GetCaseCodeItemBarcode(trimmed);
+            if (itemBarcode != null)
+            {
+                return await LookupMobileProductsAsync(itemBarcode);
+            }
+        }
+
         return rows
             .GroupBy(row => row.ProductCode)
             .Select(group => group.First())
