@@ -20,11 +20,11 @@ const jsRender = read("src/modules/printer/label-render.ts");
 const FONT_DIR = "plugins/printer-assets/printer-fonts";
 
 function kotlinFonts() {
-  return [...kotlinRenderer.matchAll(/"(roboto-[a-z]+)" to "([^"]+)\.ttf"/g)].map(([, key, file]) => ({ key, file }));
+  return [...kotlinRenderer.matchAll(/"(roboto-[a-z-]+)" to "([^"]+)\.ttf"/g)].map(([, key, file]) => ({ key, file }));
 }
 
 function swiftFonts() {
-  return [...swiftRenderer.matchAll(/\("(roboto-[a-z]+)", "([^"]+)"\)/g)].map(([, key, file]) => ({ key, file }));
+  return [...swiftRenderer.matchAll(/\("(roboto-[a-z-]+)", "([^"]+)"\)/g)].map(([, key, file]) => ({ key, file }));
 }
 
 function jsFonts() {
@@ -35,7 +35,7 @@ function jsFonts() {
 
 test("内置字体键在 Android / iOS / JS 三处一致（含顺序），且字体文件都在共用目录里", () => {
   const kotlin = kotlinFonts();
-  assert.equal(kotlin.length, 5);
+  assert.equal(kotlin.length, 6);
   assert.deepEqual(swiftFonts(), kotlin);
   assert.deepEqual(jsFonts(), kotlin.map((font) => font.key));
   for (const { file } of kotlin) {

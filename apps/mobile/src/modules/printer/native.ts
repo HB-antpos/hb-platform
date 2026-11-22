@@ -19,6 +19,17 @@ import {
   type LabelTextItem,
   type LabelTextMetrics,
 } from "@/modules/printer/label-render";
+import { isJsLabelLayoutEnabled, jsLabelGraphicsMode, type JsLabelKind } from "@/modules/printer/label-layout/config";
+import { labelDocToCgBytes, labelDocToEgCommand, type LabelDoc } from "@/modules/printer/label-layout/label-doc";
+import {
+  buildBigDiscountLabelDoc,
+  buildClearanceLabelDoc,
+  buildDiscountLabelDoc,
+  buildProductLabelDoc,
+  buildWarehouseLocationLabelDoc,
+  buildWarehouseProductLabelDoc,
+  type LabelBuildContext,
+} from "@/modules/printer/label-layout/labels";
 import type {
   NativeLinkEvent,
   PrinterDevice,
@@ -324,8 +335,50 @@ export async function printRawBytes(bytes: Uint8Array) {
   return module.writeBytes(encodeBase64(bytes));
 }
 
+/**
+ * 按开关改走 JS 排版：开关关闭、旧原生包没有渲染能力时返回 null，调用方继续走原生排版。
+ * 排版 / 序列化阶段出错时还没发出任何数据，同样返回 null 安全回退；一旦开始下发，失败直接抛出，不重放，避免重复出纸。
+ */
+async function printWithJsLayout(
+  kind: JsLabelKind,
+  build: (context: LabelBuildContext) => Promise<LabelDoc>
+): Promise<boolean | null> {
+  if (!isJsLabelLayoutEnabled(kind)) return null;
+  const info = await getLabelRenderInfo();
+  if (!info || !nativeModule) return null;
+
+  let send: () => Promise<boolean>;
+  try {
+    const doc = await build({
+      renderer: { fonts: info.fonts, measure: measureLabelTexts, render: renderLabelTexts },
+      now: new Date(),
+    });
+    const egCommand = () => labelDocToEgCommand(doc);
+    if (jsLabelGraphicsMode() === "CG" && typeof nativeModule.writeBytes === "function") {
+      let bytes: Uint8Array | null = null;
+      try {
+        bytes = labelDocToCgBytes(doc);
+      } catch {
+        // CG 只接受 ASCII 指令（如条码含中文）：改用 EG 文本，经 GB18030 编码下发。
+        bytes = null;
+      }
+      const command = bytes ? null : egCommand();
+      send = bytes ? () => printRawBytes(bytes) : () => printRawCommand(command!);
+    } else {
+      const command = egCommand();
+      send = () => printRawCommand(command);
+    }
+  } catch (error) {
+    console.warn(`[printer] JS label layout failed for ${kind}; falling back to native layout.`, error);
+    return null;
+  }
+  return send();
+}
+
 export async function printNativeProductLabel(payload: ProductLabelPrintPayload, printType?: string | null) {
   await ensureBluetoothPermissions();
+  const viaJs = await printWithJsLayout("product", (context) => buildProductLabelDoc(payload, printType, context));
+  if (viaJs !== null) return viaJs;
   if (Platform.OS === "ios") {
     try {
       // 新 iOS 包走 Swift 位图文本渲染，布局和 Android 普通商品标签保持一致。
@@ -342,6 +395,8 @@ export async function printNativeProductLabel(payload: ProductLabelPrintPayload,
 
 export async function printNativeDiscountLabel(payload: ProductLabelPrintPayload, printType?: string | null) {
   await ensureBluetoothPermissions();
+  const viaJs = await printWithJsLayout("discount", (context) => buildDiscountLabelDoc(payload, printType, context));
+  if (viaJs !== null) return viaJs;
   if (Platform.OS === "ios") {
     const module = getModule();
     if (typeof module.printDiscountLabel !== "function") {
@@ -363,6 +418,8 @@ export async function printNativeDiscountLabel(payload: ProductLabelPrintPayload
 
 export async function printNativeClearanceLabel(payload: ProductLabelPrintPayload) {
   await ensureBluetoothPermissions();
+  const viaJs = await printWithJsLayout("clearance", (context) => buildClearanceLabelDoc(payload, context));
+  if (viaJs !== null) return viaJs;
   if (Platform.OS === "ios") {
     return printIosCpclLabel(buildClearanceLabelCommand(payload));
   }
@@ -374,6 +431,8 @@ export async function printNativeBigDiscountLabel(
   printType?: string | null
 ) {
   await ensureBluetoothPermissions();
+  const viaJs = await printWithJsLayout("bigDiscount", (context) => buildBigDiscountLabelDoc(payload, printType, context));
+  if (viaJs !== null) return viaJs;
   if (Platform.OS === "ios") {
     const module = getModule();
     if (typeof module.printBigDiscountLabel !== "function") {
@@ -395,6 +454,8 @@ export async function printNativeBigDiscountLabel(
 
 export async function printNativeWarehouseProductLabel(payload: WarehouseProductLabelPrintPayload) {
   await ensureBluetoothPermissions();
+  const viaJs = await printWithJsLayout("warehouseProduct", (context) => buildWarehouseProductLabelDoc(payload, context));
+  if (viaJs !== null) return viaJs;
   if (Platform.OS === "ios") {
     const module = getModule();
     if (typeof module.printWarehouseProductLabel !== "function") {
@@ -416,6 +477,8 @@ export async function printNativeWarehouseProductLabel(payload: WarehouseProduct
 
 export async function printNativeWarehouseLocationLabel(payload: WarehouseLocationLabelPrintPayload) {
   await ensureBluetoothPermissions();
+  const viaJs = await printWithJsLayout("warehouseLocation", (context) => buildWarehouseLocationLabelDoc(payload, context));
+  if (viaJs !== null) return viaJs;
   if (Platform.OS === "ios") {
     const module = getModule();
     if (typeof module.printWarehouseLocationLabel !== "function") {

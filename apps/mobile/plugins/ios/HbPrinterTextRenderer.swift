@@ -49,6 +49,8 @@ final class HbPrinterTextRenderer {
     ("roboto-medium", "HbPrinter-Roboto-Medium"),
     ("roboto-bold", "HbPrinter-Roboto-Bold"),
     ("roboto-black", "HbPrinter-Roboto-Black"),
+    // 安卓旧排版的 sans-serif-condensed 加粗（大折扣标签的原价 / 省下金额 / %）。
+    ("roboto-condensed-bold", "HbPrinter-RobotoCondensed-Bold"),
   ]
 
   private let lock = NSLock()

@@ -1,4 +1,4 @@
-Roboto fonts (Regular / Light / Medium / Bold / Black), copied unmodified from the Android SDK
+Roboto fonts (Regular / Light / Medium / Bold / Black) and Roboto Condensed Bold, copied unmodified from the Android SDK
 platforms/android-29/data/fonts and renamed with the "HbPrinter-" prefix.
 Copyright 2011 Google Inc. All Rights Reserved. Licensed under the Apache License, Version 2.0.
 
