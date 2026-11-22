@@ -28,6 +28,8 @@ type NativePrinterModule = {
   /** 新安卓原生包才有：取走原生层缓冲的蓝牙链路事件；旧包没有这个方法。 */
   drainLinkDiagnostics?(): Promise<unknown>;
   disconnect(): Promise<boolean>;
+  /** 新 iOS 原生包才有：下发 BLE 写入策略；旧包没有这个方法时原生层维持旧的逐包有应答写入。 */
+  configureWrite?(options: IosBleWriteOptions): Promise<boolean>;
   print(command: string, encoding?: string): Promise<boolean>;
   printProductLabel(payload: ProductLabelPrintPayload, printType?: string | null): Promise<boolean>;
   printDiscountLabel(payload: ProductLabelPrintPayload, printType?: string | null): Promise<boolean>;
@@ -137,9 +139,36 @@ export function isBlePrintingSupported() {
   return Platform.OS === "android" && typeof nativeModule?.connectWithTransport === "function";
 }
 
+export type IosBleWriteOptions = {
+  /** fast：无应答写入连发 + 定期有应答栅栏；reliable：旧的全部有应答长写（慢但最保守）。 */
+  mode: "fast" | "reliable";
+  /** fast 模式下每隔多少字节插一包有应答写入，原生层夹在 256–16384。 */
+  ackIntervalBytes: number;
+};
+
+/**
+ * iOS 标签打印 BLE 写入策略。默认值与原生层一致；若某型号打印机在 fast 下丢数据（缺字、半张、乱码），
+ * 改成 { mode: "reliable", ... } 或调小 ackIntervalBytes 后发 OTA 即可回退，无需重新上架原生包。
+ */
+export const IOS_BLE_WRITE_OPTIONS: IosBleWriteOptions = { mode: "fast", ackIntervalBytes: 2048 };
+
+/** 下发写入策略只是调速，失败或旧包没有方法都不能挡住连接。 */
+async function applyIosBleWriteOptions(module: NativePrinterModule) {
+  if (Platform.OS !== "ios" || typeof module.configureWrite !== "function") {
+    return;
+  }
+  try {
+    await module.configureWrite(IOS_BLE_WRITE_OPTIONS);
+  } catch {
+    // 原生层保持当前策略继续连接。
+  }
+}
+
 export async function connectPrinter(address: string, transport?: PrinterTransport | null) {
   await ensureBluetoothPermissions();
   const module = getModule();
+  // 每次连接（含 App 启动自动连接）前下发一次，热连接直写路径不再重复调用。
+  await applyIosBleWriteOptions(module);
   if (Platform.OS === "android" && typeof module.connectWithTransport === "function") {
     return module.connectWithTransport(address, transport ?? null);
   }

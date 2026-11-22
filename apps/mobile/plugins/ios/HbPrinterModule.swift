@@ -13,6 +13,11 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     let decimal: String
   }
 
+  private struct PendingWriteChunk {
+    let data: Data
+    let type: CBCharacteristicWriteType
+  }
+
   private struct PrinterBitmap {
     let width: Int
     let height: Int
@@ -48,11 +53,19 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
   private var pendingCharacteristicServiceCount = 0
   private var printResolve: RCTPromiseResolveBlock?
   private var printReject: RCTPromiseRejectBlock?
-  private var pendingWriteChunks: [Data] = []
-  private var pendingWriteType: CBCharacteristicWriteType?
+  private var pendingWriteChunks: [PendingWriteChunk] = []
   private var pendingWriteCharacteristic: CBCharacteristic?
+  /// 有应答写入已发出、尚未收到 didWriteValueFor；期间 peripheralIsReady 也不能推进下一包。
+  private var awaitingWriteResponse = false
+  private var pendingWriteStartedAt: Date?
+  private var pendingWritePerfSummary = ""
   private var printTimeoutWorkItem: DispatchWorkItem?
   private var hasStatusListeners = false
+  /// BLE 写入策略（JS 可在连接前经 configureWrite 下发，便于 OTA 回退）：
+  /// - fast：无应答写入连发，每约 writeAckIntervalBytes 字节插一包有应答写入当栅栏，最后一包也要应答；
+  /// - reliable：旧行为，特征值支持有应答就全部有应答写入（每包 512 字节长写，最慢但最保守）。
+  private var writeMode = "fast"
+  private var writeAckIntervalBytes = 2048
 
   override init() {
     super.init()
@@ -205,6 +218,25 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     }
   }
 
+  /// JS 下发 BLE 写入策略；未知取值忽略并保留当前值。只影响之后开始的打印，不打断在途写入。
+  @objc(configureWrite:resolver:rejecter:)
+  func configureWrite(
+    _ options: NSDictionary,
+    resolver resolve: @escaping RCTPromiseResolveBlock,
+    rejecter reject: @escaping RCTPromiseRejectBlock
+  ) {
+    bluetoothQueue.async {
+      if let mode = options["mode"] as? String, mode == "fast" || mode == "reliable" {
+        self.writeMode = mode
+      }
+      if let interval = (options["ackIntervalBytes"] as? NSNumber)?.intValue {
+        // 栅栏间隔太小等于退回逐包应答，太大则在途数据过多，可能冲爆打印机缓冲。
+        self.writeAckIntervalBytes = min(16384, max(256, interval))
+      }
+      self.resolve(resolve, true)
+    }
+  }
+
   @objc(print:encoding:resolver:rejecter:)
   func print(
     _ command: String,
@@ -225,7 +257,10 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
     bluetoothQueue.async {
+      let startedAt = Date()
       let command = self.buildProductLabelCommand(payload, printType: printType)
+      // 与安卓 HbPrinterPerf 对齐：位图渲染耗时单独记录，和下面写入耗时一起用于真机对比。
+      NSLog("HbPrinterPerf ios productLabel buildMs=%d", Int(Date().timeIntervalSince(startedAt) * 1000))
       self.writePrinterCommand(command, encoding: "GB18030", resolver: resolve, rejecter: reject)
     }
   }
@@ -431,6 +466,11 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
       failPendingWrite("PRINT_ERROR", error.localizedDescription)
       return
     }
+    // 只有本次打印在等的那包应答才能推进；多余回调不得跳过栅栏。
+    guard awaitingWriteResponse else {
+      return
+    }
+    awaitingWriteResponse = false
 
     flushPendingWrites()
   }
@@ -467,13 +507,12 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
         return
       }
 
-      let writeType: CBCharacteristicWriteType = characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
-      let chunkSize = max(20, peripheral.maximumWriteValueLength(for: writeType))
-      pendingWriteChunks = stride(from: 0, to: data.count, by: chunkSize).map { offset in
-        data.subdata(in: offset..<min(offset + chunkSize, data.count))
-      }
-      pendingWriteType = writeType
+      pendingWriteChunks = planWriteChunks(data, peripheral: peripheral, characteristic: characteristic)
       pendingWriteCharacteristic = characteristic
+      awaitingWriteResponse = false
+      let ackCount = pendingWriteChunks.filter { $0.type == .withResponse }.count
+      pendingWriteStartedAt = Date()
+      pendingWritePerfSummary = "mode=\(writeMode) bytes=\(data.count) chunks=\(pendingWriteChunks.count) acks=\(ackCount) chunkBytes=\(pendingWriteChunks.first?.data.count ?? 0)"
       printResolve = resolve
       printReject = reject
 
@@ -491,6 +530,48 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
       flushPendingWrites()
     } catch {
       self.reject(reject, "PRINT_ERROR", error.localizedDescription)
+    }
+  }
+
+  /// 把一次打印的数据切成 BLE 写入包，并决定每包用有应答还是无应答写入。
+  ///
+  /// 慢的根因：旧逻辑只要特征值支持 .write 就全部有应答写入，且 iOS 对有应答写入报的最大长度固定是 512，
+  /// 超过 ATT MTU 时 CoreBluetooth 会拆成 Prepare Write + Execute Write 长写——每 (MTU-5) 字节就要等一次
+  /// 打印机应答（还要原样回传数据）。一张位图价签约 15KB 的 EG 十六进制，要往返上百次，秒级耗时。
+  /// 安卓 PDA 多数走经典蓝牙 RFCOMM 流式写入，没有这层逐包往返，所以快得多。
+  private func planWriteChunks(
+    _ data: Data,
+    peripheral: CBPeripheral,
+    characteristic: CBCharacteristic
+  ) -> [PendingWriteChunk] {
+    func split(_ size: Int) -> [Data] {
+      stride(from: 0, to: data.count, by: size).map { offset in
+        data.subdata(in: offset..<min(offset + size, data.count))
+      }
+    }
+
+    let supportsWithResponse = characteristic.properties.contains(.write)
+    let supportsWithoutResponse = characteristic.properties.contains(.writeWithoutResponse)
+    guard writeMode == "fast", supportsWithoutResponse else {
+      // reliable 或特征值不支持无应答写入：保持旧行为。
+      let writeType: CBCharacteristicWriteType = supportsWithResponse ? .withResponse : .withoutResponse
+      let chunkSize = max(20, peripheral.maximumWriteValueLength(for: writeType))
+      return split(chunkSize).map { PendingWriteChunk(data: $0, type: writeType) }
+    }
+
+    // 无应答写入的最大长度就是 MTU-3，单包不会触发长写；栅栏包也用同样大小，保持一次往返。
+    let chunkSize = max(20, peripheral.maximumWriteValueLength(for: .withoutResponse))
+    let chunks = split(chunkSize)
+    guard supportsWithResponse else {
+      return chunks.map { PendingWriteChunk(data: $0, type: .withoutResponse) }
+    }
+
+    // 每 chunksPerAck 包插一次有应答写入：限制未确认的在途数据量，给不做链路层流控的打印机留缓冲余量；
+    // 最后一包必须有应答，确保打印机真正收齐后才向 JS 报成功。
+    let chunksPerAck = max(1, writeAckIntervalBytes / chunkSize)
+    return chunks.enumerated().map { index, chunk in
+      let isBarrier = (index + 1) % chunksPerAck == 0 || index == chunks.count - 1
+      return PendingWriteChunk(data: chunk, type: isBarrier ? .withResponse : .withoutResponse)
     }
   }
 
@@ -564,20 +645,25 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
   private func flushPendingWrites() {
     guard let peripheral = connectedPeripheral,
           peripheral.state == .connected,
-          let characteristic = pendingWriteCharacteristic,
-          let writeType = pendingWriteType else {
+          let characteristic = pendingWriteCharacteristic else {
       failPendingWrite("PRINT_ERROR", "No Bluetooth printer is connected.")
       return
     }
+    // 栅栏包在途时 peripheralIsReady 仍可能回调；此时必须等应答，否则栅栏形同虚设。
+    if awaitingWriteResponse {
+      return
+    }
 
-    while !pendingWriteChunks.isEmpty {
-      if writeType == .withoutResponse && !peripheral.canSendWriteWithoutResponse {
+    while let chunk = pendingWriteChunks.first {
+      if chunk.type == .withoutResponse && !peripheral.canSendWriteWithoutResponse {
+        // 本机发送缓冲满了，等 peripheralIsReady 再继续。
         return
       }
 
-      let chunk = pendingWriteChunks.removeFirst()
-      peripheral.writeValue(chunk, for: characteristic, type: writeType)
-      if writeType == .withResponse {
+      pendingWriteChunks.removeFirst()
+      peripheral.writeValue(chunk.data, for: characteristic, type: chunk.type)
+      if chunk.type == .withResponse {
+        awaitingWriteResponse = true
         return
       }
     }
@@ -587,13 +673,18 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
 
   private func finishPendingPrint() {
     let resolve = printResolve
+    if let startedAt = pendingWriteStartedAt {
+      // 真机验证用：Xcode / Console.app 过滤 HbPrinterPerf 即可看到每张标签的写入字节数、包数与耗时。
+      NSLog("HbPrinterPerf ios write %@ writeMs=%d", pendingWritePerfSummary, Int(Date().timeIntervalSince(startedAt) * 1000))
+    }
     printTimeoutWorkItem?.cancel()
     printTimeoutWorkItem = nil
     printResolve = nil
     printReject = nil
     pendingWriteChunks.removeAll()
-    pendingWriteType = nil
     pendingWriteCharacteristic = nil
+    awaitingWriteResponse = false
+    pendingWriteStartedAt = nil
     self.resolve(resolve, true)
   }
 
@@ -618,8 +709,9 @@ class HbPrinterModule: RCTEventEmitter, CBCentralManagerDelegate, CBPeripheralDe
     printResolve = nil
     printReject = nil
     pendingWriteChunks.removeAll()
-    pendingWriteType = nil
     pendingWriteCharacteristic = nil
+    awaitingWriteResponse = false
+    pendingWriteStartedAt = nil
     self.reject(reject, code, message)
   }
 

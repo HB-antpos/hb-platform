@@ -38,7 +38,9 @@ function buildHarness(source) {
     ["  func connect("],
     ["  func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?)"],
     ["  func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral)"],
+    ["  func configureWrite("],
     ["  private func writePrinterCommand("],
+    ["  private func planWriteChunks("],
     ["  private func printTimeoutSeconds(forByteCount byteCount: Int)"],
     ["  private func ensureBluetoothReady(_ reject: @escaping RCTPromiseRejectBlock)"],
     ["  private func failPendingConnect("],
@@ -115,6 +117,10 @@ test("iOS 原生写失败会退役旧会话并隔离迟到 ACK", { skip: skipRea
     assert.match(run.stdout, /PASS didWrite error retires old session/);
     assert.match(run.stdout, /PASS readiness without active print keeps healthy session/);
     assert.match(run.stdout, /PASS encoding failure keeps healthy session/);
+    assert.match(run.stdout, /PASS fast mode streams without response and waits at barriers/);
+    assert.match(run.stdout, /PASS fast mode honors local send buffer/);
+    assert.match(run.stdout, /PASS reliable mode keeps legacy with-response writes/);
+    assert.match(run.stdout, /PASS without-response-only characteristic still streams/);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
   }
