@@ -4,7 +4,11 @@ import type {
   AttendanceManualEntryPayload,
   AttendanceManualEntryPreview,
   AttendanceManualEntryResult,
+  AttendanceManualLeavePayload,
+  AttendanceManualLeavePreview,
+  AttendanceManualLeaveResult,
   RevokeAttendanceManualEntryPayload,
+  RevokeAttendanceManualLeavePayload,
   AttendanceHoursResultDto,
   AttendanceLeaveApprovalDto,
   AttendancePayCashBucketDto,
@@ -231,6 +235,25 @@ export async function createAttendanceManualEntry(payload: AttendanceManualEntry
 /** 撤销某员工某天的补录（补录新建的排班一并取消）。 */
 export async function revokeAttendanceManualEntry(payload: RevokeAttendanceManualEntryPayload): Promise<void> {
   unwrapAttendanceApiData(await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-entries/revoke`, payload))
+}
+
+/** 补录带薪假预览：算出带薪工时与每天明细（不写库）。 */
+export async function previewAttendanceManualLeave(payload: AttendanceManualLeavePayload): Promise<AttendanceManualLeavePreview> {
+  return unwrapAttendanceApiData<AttendanceManualLeavePreview>(
+    await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-leaves/preview`, payload),
+  )
+}
+
+/** 保存：直接生效（不走审批）；payload.previewRevision 必须是刚预览返回的值。 */
+export async function createAttendanceManualLeave(payload: AttendanceManualLeavePayload): Promise<AttendanceManualLeaveResult> {
+  return unwrapAttendanceApiData<AttendanceManualLeaveResult>(
+    await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-leaves`, payload),
+  )
+}
+
+/** 撤销补录建的假（员工自己申请的假不能在这里撤销）。 */
+export async function revokeAttendanceManualLeave(payload: RevokeAttendanceManualLeavePayload): Promise<void> {
+  unwrapAttendanceApiData(await request.post<ApiResponse<unknown>>(`${API_BASE}/managed/manual-leaves/revoke`, payload))
 }
 
 /** 提交并锁定：后端校验本期待处理为 0（PERIOD_HAS_PENDING），锁定后各写接口返回 PERIOD_LOCKED。 */

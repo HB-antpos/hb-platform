@@ -323,6 +323,17 @@ namespace BlazorApp.Api.Services.React
             return result;
         }
 
+        /// <summary>补录建的假（已批准且备注带「补录：」前缀）的留痕；员工自己申请的返回 null。</summary>
+        private static AttendancePayrollDayManualEntryDto? ManualLeaveTrace(AttendanceLeaveRequest leave) =>
+            leave.ReviewRemark?.StartsWith(ManualLeaveRemarkPrefix, StringComparison.Ordinal) == true
+                ? new AttendancePayrollDayManualEntryDto
+                {
+                    Reason = leave.Reason,
+                    CreatedBy = leave.CreatedBy,
+                    CreatedAt = leave.CreatedAt,
+                }
+                : null;
+
         /// <summary>病假当天带薪工时 = 排班工时扣餐（按排班时长推算的用餐次数全扣）。</summary>
         internal static decimal SickLeaveHoursForSchedule(AttendanceSchedule schedule)
         {
@@ -546,7 +557,10 @@ namespace BlazorApp.Api.Services.React
                                 Hours = hours,
                                 HasCertificate = hasCertificate,
                                 LeaveGuid = leave.LeaveGuid,
+                                ManualEntry = ManualLeaveTrace(leave),
                             };
+                            // 这天的班已经用病假处理了，不再算「有排班没打卡」（否则补录后还会挂在未打卡提示里）。
+                            day.MissingPunch = false;
                             employee.SickItems.Add(new PayrollLeaveItem(date, hours));
                         }
                     }
@@ -569,7 +583,13 @@ namespace BlazorApp.Api.Services.React
                         Hours = hours,
                         HasCertificate = hasCertificate,
                         LeaveGuid = leave.LeaveGuid,
+                        ManualEntry = ManualLeaveTrace(leave),
                     };
+                    // 带薪年假休息的工作日同样不再算「有排班没打卡」；年假发放照常上班，不动。
+                    if (leave.LeaveType == PaidAnnualLeaveType && hours > 0)
+                    {
+                        day.MissingPunch = false;
+                    }
                     if (hours > 0)
                     {
                         var target = leave.LeaveType == PaidAnnualLeaveType ? employee.AnnualByDay : employee.CashOutByDay;

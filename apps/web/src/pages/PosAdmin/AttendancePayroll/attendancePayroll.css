@@ -1099,3 +1099,25 @@
     flex-basis: 100%;
   }
 }
+
+/* 补录带薪假：模式切换与预览里的每日明细 */
+.atp-me-mode {
+  margin-bottom: 8px;
+}
+
+.atp-ml-type-hint {
+  margin: 0 0 14px;
+}
+
+.atp-ml-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #475467;
+}
+
+.atp-ml-day.is-zero {
+  color: #c0c5cf;
+}

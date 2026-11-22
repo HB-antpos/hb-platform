@@ -36,6 +36,10 @@ namespace BlazorApp.Api.Interfaces.React
         Task<ApiResponse<AttendanceManualEntryPreviewDto>> PreviewManagedManualEntryAsync(CreateAttendanceManualEntryDto request);
         Task<ApiResponse<AttendanceManualEntryResultDto>> CreateManagedManualEntryAsync(CreateAttendanceManualEntryDto request);
         Task<ApiResponse<bool>> RevokeManagedManualEntryAsync(RevokeAttendanceManualEntryDto request);
+        // 补录带薪假（忘记申请的带薪病假 / 年假 / 年假发放）：直接生效，预览 → 保存 → 撤销
+        Task<ApiResponse<AttendanceManualLeavePreviewDto>> PreviewManagedManualLeaveAsync(CreateAttendanceManualLeaveDto request);
+        Task<ApiResponse<AttendanceManualLeaveResultDto>> CreateManagedManualLeaveAsync(CreateAttendanceManualLeaveDto request);
+        Task<ApiResponse<bool>> RevokeManagedManualLeaveAsync(RevokeAttendanceManualLeaveDto request);
         Task<ApiResponse<AttendanceQrResolveDto>> ResolveAttendanceQrAsync(AttendanceQrResolveRequestDto request);
         Task<ApiResponse<AttendanceLocationSampleDto>> CreateLocationSampleAsync(AttendanceLocationSampleRequestDto request);
         Task<ApiResponse<AttendanceLocationSampleBatchResultDto>> CreateLocationSamplesBatchAsync(AttendanceLocationSampleBatchRequestDto request);

@@ -194,6 +194,25 @@ namespace BlazorApp.Api.Controllers.React
             [FromBody] RevokeAttendanceManualEntryDto request
         ) => Ok(await _service.RevokeManagedManualEntryAsync(request));
 
+        // 补录带薪假：与补录工时同一个入口、同一个权限（修改打卡）；直接生效，不走审批。
+        [HttpPost("managed/manual-leaves/preview")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> PreviewManagedManualLeave(
+            [FromBody] CreateAttendanceManualLeaveDto request
+        ) => Ok(await _service.PreviewManagedManualLeaveAsync(request));
+
+        [HttpPost("managed/manual-leaves")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> CreateManagedManualLeave(
+            [FromBody] CreateAttendanceManualLeaveDto request
+        ) => Ok(await _service.CreateManagedManualLeaveAsync(request));
+
+        [HttpPost("managed/manual-leaves/revoke")]
+        [Authorize(Policy = Permissions.Attendance.Punch.AdjustManagedStore)]
+        public async Task<IActionResult> RevokeManagedManualLeave(
+            [FromBody] RevokeAttendanceManualLeaveDto request
+        ) => Ok(await _service.RevokeManagedManualLeaveAsync(request));
+
         [HttpPost("qr/resolve")]
         [Authorize(Policy = Permissions.Attendance.Punch.Self)]
         public async Task<IActionResult> ResolveQr([FromBody] AttendanceQrResolveRequestDto request) =>

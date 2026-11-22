@@ -62,6 +62,8 @@ export interface AttendanceHoursDayDto {
     hours: number
     hasCertificate?: boolean
     leaveGuid?: string
+    /** 店长补录建的假：留痕（原因 / 补录人 / 时间），「补」角标与撤销用；员工自己申请的没有。 */
+    manualEntry?: AttendanceManualEntryTrace | null
   }
   publicHolidayPay?: {
     state: AttendancePublicHolidayPayState
@@ -453,4 +455,45 @@ export interface RevokeAttendanceManualEntryPayload {
   storeCode: string
   userGuid: string
   workDate: string
+}
+
+// ===== 补录带薪假（POST /managed/manual-leaves/preview | / | /revoke）=====
+
+/** 补录支持的假：带薪病假 / 带薪年假（休息）/ 年假发放。 */
+export type AttendanceManualLeaveType = 'PaidSick' | 'PaidAnnual' | 'AnnualCashOut'
+
+export interface AttendanceManualLeavePayload {
+  storeCode: string
+  userGuid: string
+  leaveType: AttendanceManualLeaveType
+  /** 年假 / 年假发放的区间（YYYY-MM-DD）；病假不用，但字段仍要传。 */
+  startDate: string
+  endDate: string
+  /** 带薪病假要补录的日期（每天必须有本店已发布、没打卡的排班）。 */
+  dates?: string[]
+  reason: string
+  /** 保存必须带回预览返回的版本号。 */
+  previewRevision?: string
+}
+
+export interface AttendanceManualLeavePreview {
+  previewRevision: string
+  leaveType: AttendanceManualLeaveType
+  startDate: string
+  endDate: string
+  paidHours: number
+  /** 每天的带薪工时（周末 / 公共假期的年假日为 0）。 */
+  days: { date: string; hours: number }[]
+  /** 病假没有医嘱：工时表该格会标「无医嘱」。 */
+  noCertificate: boolean
+}
+
+export interface AttendanceManualLeaveResult {
+  leaveGuid: string
+  paidHours: number
+}
+
+export interface RevokeAttendanceManualLeavePayload {
+  storeCode: string
+  leaveGuid: string
 }
