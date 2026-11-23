@@ -278,7 +278,7 @@ export function WeeklyComboChart({ weeks, stock, accessibilityLabel, clipNote }:
               <>
                 <Circle cx={x(lastIndex)} cy={yStock(stock[lastIndex])} r={3.5} fill={COLORS.stockLine} />
                 {/* 终点数值带白色描边：压在柱和别的标签上时仍然读得清。 */}
-                <SvgText x={x(lastIndex) - 6} y={yStock(stock[lastIndex]) - 7} fontSize={10} fontWeight="800" fill="#FFFFFF" stroke="#FFFFFF" strokeWidth={3} textAnchor="end">
+                <SvgText x={x(lastIndex) - 6} y={yStock(stock[lastIndex]) - 7} fontSize={10} fontWeight="800" fill="#FFFFFF" stroke="#FFFFFF" strokeWidth={3} strokeLinejoin="round" textAnchor="end">
                   {formatQuantity(stock[lastIndex])}
                 </SvgText>
                 <SvgText x={x(lastIndex) - 6} y={yStock(stock[lastIndex]) - 7} fontSize={10} fontWeight="800" fill="#101828" textAnchor="end">
