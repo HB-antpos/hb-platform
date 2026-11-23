@@ -304,7 +304,10 @@
         "pin": "Pin to left",
         "footHint": "↑↓ to move · Enter to switch · last store remembered",
         "footHintNoMemory": "↑↓ to move · Enter to switch",
-        "empty": "No matching store"
+        "empty": "No matching store",
+        "multi": "Multi",
+        "multiLabel": "{{count}} stores",
+        "footHintMulti": "Tick several stores · Enter to toggle"
       },
       "weekNav": {
         "thisWeek": "This week",

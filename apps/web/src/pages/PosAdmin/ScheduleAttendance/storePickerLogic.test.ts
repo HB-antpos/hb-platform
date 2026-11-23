@@ -5,6 +5,7 @@ import {
   STORE_SIDEBAR_DOCK_MIN_WIDTH,
   STORE_SIDEBAR_TABLE_DOCK_MIN_WIDTH,
   buildStoreSections,
+  collapseToSingleStore,
   filterStoreOptions,
   getRelativeWeekOffset,
   moveActiveIndex,
@@ -15,6 +16,7 @@ import {
   safeStorageGet,
   safeStorageSet,
   shouldDockSidebar,
+  toggleStoreCode,
 } from './storePickerLogic'
 
 const stores = [
@@ -112,5 +114,15 @@ const memory = new Map<string, string>()
 const store = { getItem: (k: string) => memory.get(k) ?? null, setItem: (k: string, v: string) => { memory.set(k, v) } }
 safeStorageSet(store, 'k', 'v')
 assert.equal(safeStorageGet(store, 'k'), 'v')
+
+// 多选：点选切换（保持点选顺序、不改原数组）；关掉多选时收回成单选
+const picked = ['1014', '1011']
+assert.deepEqual(toggleStoreCode(picked, '1017'), ['1014', '1011', '1017'], '没选的加到末尾')
+assert.deepEqual(toggleStoreCode(picked, '1014'), ['1011'], '已选的取消')
+assert.deepEqual(toggleStoreCode([], '1014'), ['1014'])
+assert.deepEqual(picked, ['1014', '1011'], '不改原数组')
+assert.deepEqual(collapseToSingleStore(['1014', '1011']), ['1014'], '多家只留第一家')
+assert.deepEqual(collapseToSingleStore(['1011']), ['1011'], '只选一家不变')
+assert.deepEqual(collapseToSingleStore([]), [], '没选（不限分店）不变')
 
 console.log('storePickerLogic tests passed')

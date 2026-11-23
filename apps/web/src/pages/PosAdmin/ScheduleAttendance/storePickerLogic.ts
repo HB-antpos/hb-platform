@@ -45,6 +45,16 @@ export function pushRecentStore(recent: readonly string[], storeCode: string | u
   return [storeCode, ...recent.filter((code) => code !== storeCode)].slice(0, limit)
 }
 
+/** 多选模式下点一家：已选就取消，没选就加到末尾（保持点选顺序）。不改原数组。 */
+export function toggleStoreCode(selected: readonly string[], storeCode: string): string[] {
+  return selected.includes(storeCode) ? selected.filter((code) => code !== storeCode) : [...selected, storeCode]
+}
+
+/** 关掉多选时收回成单选：已选多家就只留第一家（点选顺序里最早的），没选或只选一家不变。 */
+export function collapseToSingleStore(selected: readonly string[]): string[] {
+  return selected.length > 1 ? [selected[0]] : [...selected]
+}
+
 export interface StoreSections<T extends StorePickerOption> {
   /** 最近使用（只保留仍在可选列表里的，按使用先后）；搜索时为空。 */
   recent: T[]
