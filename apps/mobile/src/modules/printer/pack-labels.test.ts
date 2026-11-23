@@ -6,30 +6,34 @@ import {
   buildPackPalletLabelSpec,
 } from "./cpcl-labels";
 
-/** 把指令拆成行；TEXT 行解析出字体、坐标、当前 SETMAG 倍率与内容，便于断言不越界。 */
+/**
+ * 把指令拆成行；TEXT 行解析出字体、坐标、当前 SETMAG 倍率与内容，便于断言不越界。
+ * VTEXT（左侧类型条的竖排文字，逆时针转 90° 自下而上读）单独放进 vtexts。
+ */
 function parse(command: string) {
   const rows = command.split("\r\n").filter(Boolean);
   let mag: [number, number] = [1, 1];
   const texts: { font: number; x: number; y: number; scaleX: number; scaleY: number; value: string }[] = [];
+  const vtexts: { font: number; x: number; y: number; scaleX: number; scaleY: number; value: string }[] = [];
   for (const row of rows) {
     const magMatch = row.match(/^SETMAG (\d+) (\d+)$/);
     if (magMatch) {
       mag = [Math.max(1, Number(magMatch[1])), Math.max(1, Number(magMatch[2]))];
       continue;
     }
-    const textMatch = row.match(/^TEXT (\d+) 0 (\d+) (\d+) (.*)$/);
+    const textMatch = row.match(/^(V?)TEXT (\d+) 0 (\d+) (\d+) (.*)$/);
     if (textMatch) {
-      texts.push({
-        font: Number(textMatch[1]),
-        x: Number(textMatch[2]),
-        y: Number(textMatch[3]),
+      (textMatch[1] ? vtexts : texts).push({
+        font: Number(textMatch[2]),
+        x: Number(textMatch[3]),
+        y: Number(textMatch[4]),
         scaleX: mag[0],
         scaleY: mag[1],
-        value: textMatch[4],
+        value: textMatch[5],
       });
     }
   }
-  return { rows, texts };
+  return { rows, texts, vtexts };
 }
 
 function right(textRow: { font: number; x: number; scaleX: number; value: string }) {
@@ -60,8 +64,12 @@ const cartonParsed = parse(cartonCommand);
 assert.ok(cartonCommand.startsWith("! 0 200 200 208 1\r\nPAGE-WIDTH 570\r\n"), "箱标签页高 208、页宽 570");
 assert.ok(cartonCommand.endsWith("PRINT\r\n"), "箱标签必须发送 PRINT");
 assert.ok(cartonParsed.rows.includes("BARCODE-TEXT OFF"), "不继承上一张标签的条码可读数字");
-assert.ok(cartonParsed.texts.some((row) => row.value === "BOX"), "左侧类型条写 BOX");
-assert.ok(cartonParsed.texts.some((row) => row.value === "CARTON"), "类型条下方写 CARTON");
+assert.ok(cartonParsed.vtexts.some((row) => row.value === "BOX"), "左侧类型条竖排写 BOX");
+assert.ok(cartonParsed.vtexts.some((row) => row.value === "CARTON"), "类型条里竖排写 CARTON（不再横排超出黑条）");
+assert.ok(!cartonParsed.texts.some((row) => row.value === "BOX" || row.value === "CARTON"), "BOX / CARTON 不再用横排 TEXT 打印");
+const cartonVtextBox = cartonParsed.vtexts.find((row) => row.value === "BOX");
+const cartonVtextCaption = cartonParsed.vtexts.find((row) => row.value === "CARTON");
+assert.ok(cartonVtextBox && cartonVtextCaption && cartonVtextBox.y > cartonVtextCaption.y, "自下而上读：BOX 在下、CARTON 在上");
 assert.ok(cartonParsed.rows.includes("INVERSE-LINE 0 0 70 0 208"), "左侧整条反白成黑条");
 assert.ok(!cartonParsed.rows.some((row) => row.startsWith("BOX ")), "箱标签没有外框");
 assert.ok(
@@ -78,7 +86,7 @@ const cartonTail = cartonParsed.texts.find((row) => row.value === "0042");
 assert.ok(cartonPrefix && cartonTail, "编号拆成前 8 位与流水尾号");
 assert.deepEqual([cartonPrefix.scaleX, cartonTail.scaleX], [1, 2], "前 8 位小字、尾号大字");
 assert.ok(cartonParsed.texts.some((row) => row.value === "5 SKU - 86 PCS"), "数量为 N SKU - M PCS");
-assert.ok(cartonParsed.rows.includes("BARCODE 128 2 1 46 80 144 BX2611130042"), "底部 Code128 内容是完整箱号");
+assert.ok(!cartonParsed.rows.some((row) => row.startsWith("BARCODE 128")), "箱标签不再印一维码");
 assert.ok(cartonCommand.includes("BARCODE QR 457 6 M 2 U 5\r\nMA,BX2611130042\r\nENDQR"), "右上二维码内容是完整箱号");
 assert.ok(!cartonParsed.texts.some((row) => row.value.startsWith("ORDER")), "没有订货单时不打订货单号");
 assert.ok(cartonParsed.texts.some((row) => row.value === "13 NOV 14:32 LILY"), "右下时间与操作人");
@@ -89,8 +97,8 @@ assert.ok(
 
 /** 所有文字不越过右边界和安全高度；二维码范围内的文字不得压到二维码。 */
 function assertWithinBounds(command: string, width: number, label: string) {
-  const { rows, texts } = parse(command);
-  const qr = rows.map((row) => row.match(/^BARCODE QR (\d+) (\d+) M 2 U (\d+)$/)).find(Boolean);
+  const { rows, texts, vtexts } = parse(command);
+  const qr =rows.map((row) => row.match(/^BARCODE QR (\d+) (\d+) M 2 U (\d+)$/)).find(Boolean);
   assert.ok(qr, `${label}：必须有二维码`);
   const qrX = Number(qr[1]);
   const qrBottom = Number(qr[2]) + 21 * Number(qr[3]);
@@ -102,13 +110,21 @@ function assertWithinBounds(command: string, width: number, label: string) {
       assert.ok(right(row) <= qrX - 8, `${label}：「${row.value}」不压二维码`);
     }
   }
-  const barcode = rows.map((row) => row.match(/^BARCODE 128 (\d) 1 (\d+) (\d+) (\d+) (\S+)$/)).find(Boolean);
-  assert.ok(barcode, `${label}：必须有 Code128`);
-  const barcodeRight = Number(barcode[3]) + ((barcode[5].length + 2) * 11 + 13) * Number(barcode[1]);
-  const barcodeTop = Number(barcode[4]);
-  assert.ok(barcodeTop + Number(barcode[2]) <= 196, `${label}：条码在单张安全高度内`);
-  for (const row of texts.filter((item) => bottom(item) > barcodeTop && item.x > 80)) {
-    assert.ok(row.x >= barcodeRight + 8, `${label}：「${row.value}」不压条码`);
+  assert.ok(!rows.some((row) => row.startsWith("BARCODE 128")), `${label}：不再印一维码`);
+
+  // 左侧类型条的竖排文字：VTEXT 逆时针转 90°，文字起点 (x, y) 在最下端，向上占 字数×字宽×倍率，向右占 24×倍率（font 7）。
+  // 整个文字框必须落在 INVERSE-LINE 反白出来的黑条里，否则超出的部分会印成白底黑字。
+  const bar = rows.map((row) => row.match(/^INVERSE-LINE (\d+) (\d+) (\d+) \d+ (\d+)$/)).find(Boolean);
+  assert.ok(bar, `${label}：必须有反白黑条`);
+  const [barLeft, barTop, barRight] = [Number(bar[1]), Number(bar[2]), Number(bar[3])];
+  const barBottom = barTop + Number(bar[4]);
+  assert.ok(vtexts.length >= 2, `${label}：类型条有两行竖排文字`);
+  for (const row of vtexts) {
+    assert.equal(row.font, 7, `${label}：竖排文字用 font 7（12×24，宽度已知）`);
+    const length = row.value.length * 12 * row.scaleX;
+    const across = 24 * row.scaleY;
+    assert.ok(row.x >= barLeft && row.x + across <= barRight, `${label}：「${row.value}」横向不超出黑条`);
+    assert.ok(row.y - length >= barTop && row.y <= barBottom, `${label}：「${row.value}」纵向不超出黑条`);
   }
 }
 assertWithinBounds(cartonCommand, 570, "箱标签");
@@ -161,7 +177,7 @@ assert.equal(longDestination.scaleX, 1, "去向放不下时先缩一号");
 assert.ok(longDestination.value.length < "SUNNYBANK HILLS SHOPPING TOWN LEVEL TWO EXTENSION".length, "缩号后仍放不下则截断");
 const longFrom = longParsed.texts.find((row) => row.value.startsWith("FROM "));
 assert.ok(longFrom && longFrom.value.length < 70, "超长发出地截断");
-assert.ok(longParsed.rows.includes("BARCODE 128 2 1 46 80 144 BX2611130042"), "截断不影响条码内容");
+assert.ok(longCommand.includes("MA,BX2611130042\r\nENDQR"), "截断不影响二维码内容");
 assert.equal(longParsed.rows.filter((row) => row === "PRINT").length, 1, "截断不产生多余行");
 
 // 稍长的分店名：缩一号后完整保留，不截断。
@@ -177,7 +193,8 @@ assert.ok(smallCartonCommand.startsWith("! 0 200 200 208 1\r\nPAGE-WIDTH 472\r\n
 assertWithinBounds(smallCartonCommand, 472, "小箱标签");
 const smallCarton = parse(smallCartonCommand);
 assert.ok(smallCarton.rows.includes("INVERSE-LINE 0 0 58 0 208"), "小标签类型条收窄到 58 点");
-assert.ok(smallCarton.rows.includes("BARCODE 128 1 1 46 68 144 BX2611130042"), "小标签条码退到 1 点窄条，给右下文字留位置");
+assert.ok(!smallCarton.rows.some((row) => row.startsWith("BARCODE 128")), "小标签同样不印一维码");
+assert.ok(smallCarton.vtexts.some((row) => row.value === "BOX") && smallCarton.vtexts.some((row) => row.value === "CARTON"), "小标签 58 点黑条里也竖排 BOX / CARTON");
 assert.ok(smallCartonCommand.includes("MA,BX2611130042\r\nENDQR"));
 
 // ---- 托盘标签 · 总仓发往分店，经运输公司 ----
@@ -199,8 +216,8 @@ const pallet = {
 const palletCommand = buildPackPalletLabelCommand(pallet);
 const palletParsed = parse(palletCommand);
 assert.ok(palletCommand.startsWith("! 0 200 200 208 1\r\nPAGE-WIDTH 570\r\n"), "托盘标签页高 208、页宽 570");
-assert.ok(palletParsed.texts.some((row) => row.value === "PLT"), "左侧类型条写 PLT");
-assert.ok(palletParsed.texts.some((row) => row.value === "PALLET"));
+assert.ok(palletParsed.vtexts.some((row) => row.value === "PLT"), "左侧类型条竖排写 PLT");
+assert.ok(palletParsed.vtexts.some((row) => row.value === "PALLET"), "类型条里竖排写 PALLET");
 assert.ok(palletParsed.rows.includes("BOX 0 0 569 207 6"), "托盘标签整圈粗黑框");
 assert.ok(palletParsed.rows.includes("INVERSE-LINE 6 6 70 6 196"), "类型条只反白框内部分");
 assert.ok(
@@ -214,7 +231,7 @@ assert.ok(palletParsed.texts.some((row) => row.value === "5 CTN - 366 PCS"), "�
 assert.ok(palletParsed.texts.some((row) => row.value === "CN BEX 4471 0932 18"), "右下第一行运单号（consignmentNo）");
 assert.ok(palletParsed.texts.some((row) => row.value === "1/2" && row.font === 7), "托盘带 1/2 张数");
 assert.ok(palletParsed.texts.some((row) => row.value.startsWith("13 NOV 15:06")), "右下时间完整");
-assert.ok(palletParsed.rows.some((row) => /^BARCODE 128 2 1 46 80 144 PL261113007$/.test(row)), "Code128 内容是完整托盘号");
+assert.ok(!palletParsed.rows.some((row) => row.startsWith("BARCODE 128")), "托盘标签不再印一维码");
 assert.ok(palletCommand.includes("MA,PL261113007\r\nENDQR"), "二维码内容是完整托盘号");
 assertWithinBounds(palletCommand, 570 - 6, "托盘标签");
 

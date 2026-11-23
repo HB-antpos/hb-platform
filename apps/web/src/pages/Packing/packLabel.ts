@@ -32,7 +32,7 @@ export interface PackLabelFields {
   direct: boolean
   /** 去向：其他分店 / 总仓取名称大写；本地存放 STORAGE；未指定 UNASSIGNED。 */
   to: string
-  /** 完整编号：二维码和 Code128 的内容。 */
+  /** 完整编号：二维码的内容（箱 / 托盘标签不再印一维码）。 */
   code: string
   /** 编号前 8 位（小字）。 */
   codePrefix: string
@@ -129,7 +129,7 @@ export function buildCartonLabelFields(carton: PackCartonSummary, now: Date = ne
 }
 
 /**
- * 空箱标 DTO → 标签字段：和内容标同一个箱号（条码 / 二维码内容一致），但不印 SKU / PCS。
+ * 空箱标 DTO → 标签字段：和内容标同一个箱号（二维码内容一致），但不印 SKU / PCS。
  * 去向还没指定时 to 为空串（标签上 TO 后画横线，装箱 / 发出时再选）；右下角 LABEL i / n 取批内序号 / 批内总数，
  * 没有批内信息（旧数据）时用 fallbackSeq（本次打印里的位置）。时间取创建时间、操作人取建箱人，补打时不变。
  */
@@ -261,7 +261,7 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
-/** 底部一维码（Code128）：一个 path 的 SVG，横向拉伸到固定宽度。内容无法编码时不出条码。 */
+/** 底部一维码（Code128）：一个 path 的 SVG，横向拉伸到固定宽度。内容无法编码时不出条码。只有存放位置标签还在用（箱 / 托盘标签已去掉一维码）。 */
 export function buildLabelBarcodeSvg(code: string): string {
   const modules = encodeBarcodeModules(code, 'CODE128')
   if (!modules) {
@@ -304,7 +304,8 @@ export function buildPackLabelHtml(fields: PackLabelFields): string {
     (fields.stat ? `<span class="pkl-stat">${escapeHtml(fields.stat)}</span>` : '') +
     '</div>' +
     `</div>${buildLabelQrSvg(fields.code)}</div>` +
-    `<div class="pkl-bot">${buildLabelBarcodeSvg(fields.code)}<div class="pkl-meta">${metaLines.join('<br>')}${copy}</div></div>` +
+    // 底部只剩右对齐的订货单号 / 时间 / 操作人（箱、托盘标签不印一维码，二维码是唯一的码）。
+    `<div class="pkl-bot"><div class="pkl-meta">${metaLines.join('<br>')}${copy}</div></div>` +
     '</div></div>'
   )
 }
@@ -332,6 +333,10 @@ export const PACK_LABEL_CSS = `
 .pkl-kind{width:70px;background:#000;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;flex:none}
 .pkl-kind b{font-size:27px;font-weight:900;letter-spacing:1px;line-height:1}
 .pkl-kind i{font-style:normal;font-size:10.5px;font-weight:700;letter-spacing:1px;margin-top:6px}
+.pkl-carton .pkl-kind,.pkl-pallet .pkl-kind{flex-direction:column-reverse}
+.pkl-carton .pkl-kind b,.pkl-pallet .pkl-kind b,.pkl-carton .pkl-kind i,.pkl-pallet .pkl-kind i{writing-mode:vertical-rl;transform:rotate(180deg);white-space:nowrap}
+.pkl-carton .pkl-kind b,.pkl-pallet .pkl-kind b{font-size:34px;letter-spacing:2px}
+.pkl-carton .pkl-kind i,.pkl-pallet .pkl-kind i{font-size:15px;letter-spacing:2px;margin-top:0;margin-bottom:12px}
 .pkl-main{flex:1;min-width:0;display:flex;flex-direction:column;padding:7px 10px 7px 12px}
 .pkl-pallet .pkl-main{padding:3px 6px 3px 10px}
 .pkl-top{display:flex;gap:8px;flex:1;min-height:0}
