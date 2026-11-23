@@ -7,6 +7,7 @@ import {
   PERIOD_PRESETS,
   birthdayRateReviews,
   calculatePay,
+  isPublicHolidayTransferOnly,
   cellHoursText,
   findRatesBelowMinimum,
   formatHours,
@@ -64,6 +65,33 @@ assert.equal(jack.transfer.amount, 1816.92)
 assert.equal(jack.cash.hours, 5.88)
 assert.equal(jack.cash.amount, 167.58)
 assert.equal(jack.grossPay, 1964.5)
+
+// 新规则（11-23 起的周期）：转账 + 现金，公假先占限额、整档进转账，其余档位装剩下的额度
+const ph = {
+  hours: { sunday: 3, saturday: 4, leave: 6, publicHoliday: 5, weekday: 8 },
+  payMode: 'Mixed' as const,
+  fixedTransferHoursPerWeek: 14,
+  weeks: 1,
+  rates: { transferWeekdayRate: 20, transferSaturdayRate: 30, transferSundayRate: 40, transferPublicHolidayRate: 50, cashRate: 18 },
+}
+const phNew = calculatePay({ ...ph, periodStart: '2026-11-23' })
+assert.deepEqual(phNew.transfer.buckets, { sunday: 3, saturday: 4, leave: 2, publicHoliday: 5, weekday: 0 })
+assert.equal(phNew.cash.buckets.publicHoliday, 0, '新规则公假没有现金部分')
+assert.equal(phNew.transfer.amount, 530)
+assert.equal(phNew.cash.amount, 216)
+// 公假超过限额：照样全进转账，其它档位全部落现金（额度不会变成负数）
+const phOver = calculatePay({ ...ph, fixedTransferHoursPerWeek: 4, periodStart: '2026-11-23' })
+assert.equal(phOver.transfer.buckets.publicHoliday, 5)
+assert.equal(phOver.transfer.hours, 5)
+assert.equal(phOver.cash.hours, 21)
+// 生效日之前 / 不传周期：旧顺序（公假排在带薪假后，装不下的落现金）
+assert.equal(calculatePay({ ...ph, periodStart: '2026-11-16' }).cash.buckets.publicHoliday, 4)
+assert.equal(calculatePay(ph).cash.buckets.publicHoliday, 4)
+// 只对转账 + 现金生效
+assert.equal(isPublicHolidayTransferOnly('Mixed', '2026-11-22'), false)
+assert.equal(isPublicHolidayTransferOnly('Mixed', '2026-11-23'), true)
+assert.equal(isPublicHolidayTransferOnly('Cash', '2026-12-07'), false)
+assert.equal(isPublicHolidayTransferOnly('Transfer', '2026-12-07'), false)
 
 // 全现金：所有工时（含带薪假）× 现金单一价
 const mia = calculatePay({

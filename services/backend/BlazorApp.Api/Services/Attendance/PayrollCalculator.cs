@@ -142,7 +142,8 @@ public sealed class PayrollPayResult
 /// - 扣餐 = max(0, min(排班有效次数, ⌊实际工时 / 4h⌋) − 段间满 30 分钟空档数) × 30；
 /// - 小时 = round(分钟 / 60, 2)，金额 = round(小时 × 时薪, 2)，逐档相加，一律四舍五入（AwayFromZero）；
 /// - 周末、公假按实际工时不乘系数，转账时薪分四档，带薪假用平日转账时薪；现金时薪只有一个价；
-/// - 转账 + 现金：转账容量 = 固定工时/周 × 周数，按 周日 → 周六 → 带薪假 → 公假 → 平日 依次装入，剩下的 × 现金时薪，再 ± 补贴。
+/// - 转账 + 现金：转账容量 = 固定工时/周 × 周数，按 周日 → 周六 → 带薪假 → 公假 → 平日 依次装入，剩下的 × 现金时薪，再 ± 补贴；
+///   2026-11-23 起的周期，公假上班先装且整档进转账（可超出限额、按公假倍率价、不落现金），见 <see cref="IsPublicHolidayTransferOnly"/>。
 /// 不读数据库，所有输入由服务层准备好。
 /// </summary>
 public static class PayrollCalculator
@@ -170,6 +171,20 @@ public static class PayrollCalculator
         PayrollBucket.PublicHoliday,
         PayrollBucket.Weekday,
     };
+
+    /// <summary>
+    /// 「公假上班一律走转账」新规则的生效周期（2026-11-23 定）：周期起始日不早于这一天才生效，更早的周期（含已提交的）保持旧算法，
+    /// 否则工资表是每次打开实时重算的，历史周期的数字会被悄悄改掉。
+    /// </summary>
+    public static readonly DateTime PublicHolidayTransferOnlyFrom = new(2026, 11, 23);
+
+    /// <summary>
+    /// 这个周期、这种发放方式下，公假上班工时是否「先占转账限额并全部进转账、按公假倍率价付，不落现金」。
+    /// 只有「转账 + 现金」才有意义：全转账本来就全进转账；全现金没有公假价（保存时存空），公假工时仍按现金时薪付，不变。
+    /// 工资表（<see cref="CalculatePay"/>）与 MYOB 推送规划器必须用同一个判断，两边转账总工时才一致。
+    /// </summary>
+    public static bool IsPublicHolidayTransferOnly(string? payMode, DateTime periodStart) =>
+        payMode == PayModeMixed && periodStart.Date >= PublicHolidayTransferOnlyFrom;
 
     public static bool IsValidPayMode(string? payMode) =>
         payMode is PayModeTransfer or PayModeCash or PayModeMixed;
@@ -371,16 +386,26 @@ public static class PayrollCalculator
         var transferAmount = 0m;
         // 现金工时按（档位，时薪记录）记下来：先全部记录，装填结束后再决定哪些档位被手填金额覆盖。
         var cashByBucketAndRate = new Dictionary<(PayrollBucket Bucket, string RateKey), (PayrollRate? Rate, decimal Hours)>();
-        foreach (var bucket in TransferFillOrder)
+        // 新规则（见 IsPublicHolidayTransferOnly）：公假上班先装、整档进转账（按公假倍率价），装完仍占用转账限额，
+        // 其余档位按原顺序装剩下的额度；公假超过限额时额度记为 0，其它档位全部落现金，但公假本身一分钱现金都没有。
+        var publicHolidayFirst = IsPublicHolidayTransferOnly(payMode, input.PeriodStart);
+        var fillOrder = publicHolidayFirst
+            ? TransferFillOrder.Where(item => item == PayrollBucket.PublicHoliday)
+                .Concat(TransferFillOrder.Where(item => item != PayrollBucket.PublicHoliday))
+                .ToList()
+            : TransferFillOrder;
+        foreach (var bucket in fillOrder)
         {
             // 同一档内按时薪记录的生效先后装入（多条记录时早的先进转账）。
             foreach (var group in groups.Values
                 .Where(item => item.Bucket == bucket)
                 .OrderBy(item => item.Rate?.EffectiveFrom ?? DateTime.MaxValue))
             {
-                var take = Round2(Math.Min(group.Hours, Math.Max(0, left)));
+                var forcedTransfer = publicHolidayFirst && bucket == PayrollBucket.PublicHoliday;
+                var take = forcedTransfer ? group.Hours : Round2(Math.Min(group.Hours, Math.Max(0, left)));
                 var cash = Round2(group.Hours - take);
-                left -= take;
+                // 强制转账的公假可以超出限额：剩余额度最低扣到 0，不能变成负数去影响后面的档位。
+                left = forcedTransfer ? Math.Max(0m, left - take) : left - take;
                 transferHours.Add(bucket, take);
                 cashHours.Add(bucket, cash);
                 if (take > 0)

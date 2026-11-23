@@ -118,9 +118,12 @@ internal static class MyobTimesheetPlanner
     /// <param name="weeks">工资周期周数（1 或 2）：固定转账容量 = 每周工时 × 周数。</param>
     /// <param name="items">员工本期在所有公司名下的全部工时（分钟）；分钟 ≤ 0 的忽略。</param>
     /// <param name="isCasual">员工是临时工（Casual）：周六 / 周日 / 公共假期推送到临时工专用的 MYOB 类别；其余类别不受影响。</param>
+    /// <param name="periodStart">工资周期起始日：用来判断是否适用「公假上班先占限额并整档进转账」的新规则（<see cref="PayrollCalculator.IsPublicHolidayTransferOnly"/>）；不传按旧规则。</param>
     public static MyobPlanResult Plan(
-        string payMode, decimal fixedTransferHoursPerWeek, int weeks, IEnumerable<MyobWorkItem> items, bool isCasual = false)
+        string payMode, decimal fixedTransferHoursPerWeek, int weeks, IEnumerable<MyobWorkItem> items, bool isCasual = false,
+        DateTime? periodStart = null)
     {
+        var publicHolidayFirst = periodStart.HasValue && PayrollCalculator.IsPublicHolidayTransferOnly(payMode, periodStart.Value);
         var positive = items.Where(item => item.Minutes > 0).ToList();
         var byCompany = positive
             .GroupBy(item => item.ConnectionGuid, StringComparer.OrdinalIgnoreCase)
@@ -131,7 +134,7 @@ internal static class MyobTimesheetPlanner
         var result = new MyobPlanResult();
         foreach (var (connection, companyItems) in byCompany.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
         {
-            result.Companies[connection] = PlanCompany(connection, companyItems, capacity[connection], isCasual);
+            result.Companies[connection] = PlanCompany(connection, companyItems, capacity[connection], isCasual, publicHolidayFirst);
         }
 
         return result;
@@ -211,7 +214,8 @@ internal static class MyobTimesheetPlanner
         return result;
     }
 
-    private static MyobCompanyPlan PlanCompany(string connection, List<MyobWorkItem> items, int capacityMinutes, bool isCasual)
+    private static MyobCompanyPlan PlanCompany(
+        string connection, List<MyobWorkItem> items, int capacityMinutes, bool isCasual, bool publicHolidayFirst)
     {
         var actualByDayKind = new Dictionary<(DateTime, MyobWorkKind), int>();
         foreach (var item in items)
@@ -220,24 +224,34 @@ internal static class MyobTimesheetPlanner
             actualByDayKind[key] = actualByDayKind.GetValueOrDefault(key) + item.Minutes;
         }
 
+        // 新规则：公假上班先装、整档进转账（可超出分到的额度），与工资表同口径；其余种类按原顺序装剩下的额度。
+        var fillOrder = publicHolidayFirst
+            ? FillOrder.Where(kind => kind == MyobWorkKind.PublicHolidayWork)
+                .Concat(FillOrder.Where(kind => kind != MyobWorkKind.PublicHolidayWork))
+                .ToList()
+            : FillOrder;
+        var publicHolidayMinutes = publicHolidayFirst
+            ? items.Where(item => item.Kind == MyobWorkKind.PublicHolidayWork).Sum(item => item.Minutes)
+            : 0;
         var left = capacityMinutes;
         var pushedByKey = new Dictionary<(DateTime Date, string Category), int>();
         var transferByDayKind = new Dictionary<(DateTime, MyobWorkKind), int>();
         var cashOutTransfer = 0;
-        foreach (var kind in FillOrder)
+        foreach (var kind in fillOrder)
         {
+            var forcedTransfer = publicHolidayFirst && kind == MyobWorkKind.PublicHolidayWork;
             foreach (var item in items
                          .Where(item => item.Kind == kind)
                          .OrderBy(item => item.Date)
                          .ThenBy(item => item.StoreCode, StringComparer.OrdinalIgnoreCase))
             {
-                if (left <= 0)
+                if (left <= 0 && !forcedTransfer)
                 {
                     break;
                 }
 
-                var take = Math.Min(item.Minutes, left);
-                left -= take;
+                var take = forcedTransfer ? item.Minutes : Math.Min(item.Minutes, left);
+                left = forcedTransfer ? Math.Max(0, left - take) : left - take;
                 var dayKind = (item.Date.Date, kind);
                 transferByDayKind[dayKind] = transferByDayKind.GetValueOrDefault(dayKind) + take;
                 var category = CategoryOf(kind, isCasual);
@@ -266,7 +280,8 @@ internal static class MyobTimesheetPlanner
         {
             ConnectionGuid = connection,
             ActualMinutes = items.Sum(item => item.Minutes),
-            CapacityMinutes = capacityMinutes,
+            // 公假超出额度时，实际进转账的总量就是公假本身；容量自检（推送合计 = 额度）按这个值核对。
+            CapacityMinutes = Math.Max(capacityMinutes, publicHolidayMinutes),
             CashOutTransferMinutes = cashOutTransfer,
             Pushed = pushedByKey
                 .OrderBy(pair => pair.Key.Date)
