@@ -212,8 +212,8 @@ assertEqual(resolveToFontSize('TOOWOOMBA'), 33, '含 W / M 的长名缩一号（
 assertEqual(resolveToFontSize('UNASSIGNED'), 33, 'UNASSIGNED 缩一号')
 assertEqual(resolveToFontSize('SURFERS PARADISE'), 21, '很长的名字用最小字')
 
-// ---- 条码、二维码 ----
-const barcode = buildLabelBarcodeSvg('BX2611130042')
+// ---- 条码、二维码（一维码只剩存放位置标签在用；箱 / 托盘标签只印二维码）----
+const barcode =buildLabelBarcodeSvg('BX2611130042')
 assertIncludes(barcode, 'preserveAspectRatio="none"', '一维码横向拉伸到固定宽度')
 assertEqual(/<path d="M[\dMhvz. -]+" fill="#000"\/>/.test(barcode), true, '一维码是单个纯黑 path')
 assertEqual(buildLabelBarcodeSvg('中文'), '', 'Code128 无法编码时不出条码')
@@ -232,8 +232,12 @@ assertIncludes(cartonHtml, '<span>BX261113</span><b>0042</b>', '编号前缀小�
 assertIncludes(cartonHtml, '5 SKU · 86 PCS', '数量')
 assertIncludes(cartonHtml, '13 NOV 14:32 LILY', '右下时间和操作人')
 assertEqual(cartonHtml.includes('pkl-copy'), false, '箱标签没有张数')
+assertEqual(cartonHtml.includes('pkl-bc'), false, '箱标签不印一维码')
+assertIncludes(cartonHtml, 'class="pkl-qr"', '箱标签只印二维码')
 
 const palletHtml = buildPackLabelHtml(palletFields)
+assertEqual(palletHtml.includes('pkl-bc'), false, '托盘标签不印一维码')
+assertIncludes(palletHtml, 'class="pkl-qr"', '托盘标签只印二维码')
 assertIncludes(palletHtml, 'class="pkl pkl-pallet"', '托盘标签样式类（整圈粗黑框）')
 assertIncludes(palletHtml, 'FROM <b>HB WAREHOUSE</b> · VIA <b>BORDER EXPRESS</b>', '托盘 FROM 行带 VIA')
 assertIncludes(palletHtml, '<b class="pkl-copy">1/2</b>', '托盘张数')
@@ -260,6 +264,10 @@ assertIncludes(documentHtml, '@page{size:70mm 26mm;margin:0}', '纸张 70×26 mm
 assertEqual(documentHtml.split('<div class="pkl-page">').length - 1, 3, '一张标签一页')
 assertIncludes(documentHtml, '.pkl-page{width:70mm;height:26mm;overflow:hidden;break-after:page', '每页固定标签尺寸并分页')
 assertIncludes(documentHtml, `transform:scale(${PACK_LABEL_PRINT_SCALE})`, '570 点缩放到 70 mm')
+// 箱 / 托盘标签的黑条文字竖排（自下而上读），CARTON 不再超出黑条；存放位置标签的黑条保持横排。
+assertIncludes(documentHtml, '.pkl-carton .pkl-kind,.pkl-pallet .pkl-kind{flex-direction:column-reverse}', '箱 / 托盘黑条里 BOX 在下、CARTON 在上')
+assertIncludes(documentHtml, 'writing-mode:vertical-rl;transform:rotate(180deg)', '箱 / 托盘黑条文字竖排')
+assertEqual(/\.pkl-location[^{]*\.pkl-kind[^{]*\{[^}]*writing-mode/.test(documentHtml), false, '存放位置标签黑条不竖排')
 assertEqual(Math.abs(PACK_LABEL_PRINT_SCALE * 570 - (70 / 25.4) * 96) < 0.01, true, '缩放后宽度等于 70 mm')
 assertEqual(PACK_LABEL_PRINT_SCALE * 208 <= (26 / 25.4) * 96, true, '缩放后高度不超过 26 mm')
 // 只用纯黑纯白：样式和内容里不应出现其他颜色
@@ -325,7 +333,7 @@ assertIncludes(blankHtml, 'class="pkl pkl-carton pkl-blank"', '空箱标样式�
 assertIncludes(blankHtml, '<em>TO</em><i class="pkl-toline"></i>', '没有去向时 TO 后画横线')
 assertIncludes(blankHtml, 'LABEL 02 / 20<br>', '右下角 LABEL i / n 在时间上一行')
 assertIncludes(blankHtml, 'class="pkl-qr"', '二维码')
-assertIncludes(blankHtml, 'class="pkl-bc"', '条码')
+assertEqual(blankHtml.includes('pkl-bc'), false, '空箱标不印一维码')
 assertEqual(blankHtml.includes('pkl-stat'), false, '不印 SKU / PCS')
 assertEqual(blankHtml.includes('ORDER'), false, '不印订货单号')
 const blankToStoreHtml = buildPackLabelHtml(blankToStore)

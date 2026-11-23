@@ -3,11 +3,22 @@ import QRCode from "react-native-qrcode-svg";
 import { splitPackNumber, type LabelPreviewContent } from "../packing-logic";
 import { MONO_FONT } from "./pack-ui";
 
-// 预览按 570×208 打印点等比缩小；条码只是示意条纹（真实内容由打印机按编号生成），二维码是真实可扫的。
+// 预览按 570×208 打印点等比缩小；二维码是真实可扫的（箱 / 托盘标签不再印一维码）。
 const SCALE = 0.54;
 const WIDTH = Math.round(570 * SCALE);
 const HEIGHT = Math.round(208 * SCALE);
-const STRIPES = [2, 1, 1, 3, 1, 2, 2, 1, 3, 1, 1, 2, 1, 3, 2, 1, 1, 2, 3, 1, 2, 1, 1, 3, 1, 2, 2, 1, 1, 3, 2, 1];
+const KIND_BAR_WIDTH = Math.round(70 * SCALE);
+
+/** 黑条里的竖排文字：先给一个「窄而高」的盒子占位，再把横排文字居中旋转 −90°（自下而上读），与打印出来的 VTEXT 一致。 */
+function VerticalText({ value, length, fontSize, style }: { value: string; length: number; fontSize: number; style: object }) {
+  return (
+    <View style={{ width: fontSize + 2, height: length, alignItems: "center", justifyContent: "center" }}>
+      <Text numberOfLines={1} style={[style, { width: length, textAlign: "center", transform: [{ rotate: "-90deg" }] }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
 
 /** 封箱 / 封托弹层里的标签预览：版式与打印出来的英文标签一致，标签上固定是英文，不随界面语言变化。 */
 export function LabelPreview({ content, accessibilityLabel }: { content: LabelPreviewContent; accessibilityLabel: string }) {
@@ -17,8 +28,9 @@ export function LabelPreview({ content, accessibilityLabel }: { content: LabelPr
   return (
     <View accessible accessibilityRole="image" accessibilityLabel={accessibilityLabel} style={[styles.label, framed ? styles.framed : null]}>
       <View style={styles.kind}>
-        <Text style={styles.kindText}>{content.kind}</Text>
-        <Text style={styles.kindCaption}>{framed ? "PALLET" : "CARTON"}</Text>
+        {/* 竖排自下而上读：CARTON / PALLET 在上、BOX / PLT 在下，与打印出来的版式一致。 */}
+        <VerticalText value={framed ? "PALLET" : "CARTON"} length={46} fontSize={7} style={styles.kindCaption} />
+        <VerticalText value={content.kind} length={44} fontSize={15} style={styles.kindText} />
       </View>
       <View style={styles.main}>
         <View style={styles.top}>
@@ -50,11 +62,6 @@ export function LabelPreview({ content, accessibilityLabel }: { content: LabelPr
           <QRCode value={content.number || "-"} size={Math.round(105 * SCALE)} backgroundColor="#FFFFFF" color="#000000" />
         </View>
         <View style={styles.bottom}>
-          <View style={styles.barcode}>
-            {STRIPES.map((unit, index) => (
-              <View key={index} style={{ width: unit * 1.6, backgroundColor: index % 2 === 0 ? "#000000" : "#FFFFFF" }} />
-            ))}
-          </View>
           <View style={styles.meta}>
             {content.referenceLine ? (
               <Text numberOfLines={1} style={styles.metaText}>
@@ -85,9 +92,9 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   framed: { borderWidth: 3, borderColor: "#000000" },
-  kind: { width: Math.round(70 * SCALE), backgroundColor: "#000000", alignItems: "center", justifyContent: "center" },
-  kindText: { color: "#FFFFFF", fontSize: 13, fontWeight: "900" },
-  kindCaption: { color: "#FFFFFF", fontSize: 6, fontWeight: "700", marginTop: 2 },
+  kind: { width: KIND_BAR_WIDTH, backgroundColor: "#000000", alignItems: "center", justifyContent: "center", gap: 6 },
+  kindText: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
+  kindCaption: { color: "#FFFFFF", fontSize: 7, fontWeight: "700" },
   main: { flex: 1, minWidth: 0, paddingHorizontal: 6, paddingVertical: 4, justifyContent: "space-between" },
   top: { flexDirection: "row", gap: 4 },
   texts: { flex: 1, minWidth: 0 },
@@ -101,8 +108,7 @@ const styles = StyleSheet.create({
   codePrefix: { fontFamily: MONO_FONT, fontSize: 10, fontWeight: "700", color: "#000000" },
   codeTail: { fontFamily: MONO_FONT, fontSize: 20, lineHeight: 24, fontWeight: "800", color: "#000000" },
   stat: { flexShrink: 1, fontSize: 8, fontWeight: "800", color: "#000000", marginLeft: 2 },
-  bottom: { flexDirection: "row", alignItems: "flex-end", gap: 6 },
-  barcode: { height: 24, flexDirection: "row", overflow: "hidden" },
+  bottom: { flexDirection: "row", alignItems: "flex-end" },
   meta: { flex: 1, minWidth: 0, alignItems: "flex-end" },
   metaText: { fontSize: 7, lineHeight: 10, fontWeight: "600", color: "#000000" },
   sheet: { fontFamily: MONO_FONT, fontSize: 10, fontWeight: "900" },
