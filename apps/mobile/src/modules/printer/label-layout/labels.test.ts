@@ -49,7 +49,7 @@ function assertPrintable(doc: LabelDoc) {
   }
 }
 
-test("普通商品标签：坐标按 Kotlin 公式；合法 EAN13 走 EAN13 且 x=30；小号纸 472×320", async () => {
+test("普通商品标签：坐标按 Kotlin 公式；合法 EAN13 走 EAN13 且 x=14（首位数字与货号左对齐）；小号纸 472×320", async () => {
   const { renderer, calls } = ctx();
   const doc = await buildProductLabelDoc(product, null, { renderer, now });
   assert.equal(doc.width, 570);
@@ -57,7 +57,7 @@ test("普通商品标签：坐标按 Kotlin 公式；合法 EAN13 走 EAN13 且 
   const [name, item, supplier] = bitmaps(doc);
   assert.deepEqual([name.x, name.y, item.x, item.y], [5, 5, 5, 120]);
   assert.deepEqual([supplier.x, supplier.y], [5 + item.bitmap.width + 10, 118]);
-  assert.deepEqual(commands(doc), ["BARCODE-TEXT 7 0 5", "BARCODE EAN13 1 2 30 30 145 9313559558795"]);
+  assert.deepEqual(commands(doc), ["BARCODE-TEXT 7 0 5", "BARCODE EAN13 1 2 30 14 145 9313559558795"]);
   // 价格的小数贴右边：x = 宽 - 小数宽，y = 30。
   const decimal = bitmaps(doc).find((entry) => entry.y === 30 && entry.x + entry.bitmap.width === 570);
   assert.ok(decimal, "decimal part should be right-aligned at y=30");
