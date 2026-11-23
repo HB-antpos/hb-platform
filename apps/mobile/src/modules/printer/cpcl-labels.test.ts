@@ -190,8 +190,8 @@ assert.ok(productCommand.includes("TEXT 4 0 5 120 HB013-108"), "普通商品标�
 assert.ok(productCommand.includes("TEXT 4 0 123 118 H.B.S"), "普通商品标签供应商缩写对齐货号右侧");
 assert.ok(productCommand.includes("BARCODE-TEXT 7 0 5"), "普通商品标签启用条码文本");
 assert.ok(
-  productCommand.includes("BARCODE EAN13 1 2 30 30 145 9300605123458"),
-  "合法 EAN13 条码右移留出左侧首位数字的位置，否则首位被标签左边界裁掉"
+  productCommand.includes("BARCODE EAN13 1 2 30 14 145 9300605123458"),
+  "合法 EAN13 条码 x=14：首位数字（印在竖线左侧外面）与货号左对齐，又不会被标签左边界裁掉"
 );
 assert.equal(productCommand.includes("BARCODE EAN13 1 2 30 5 145"), false, "EAN13 不得再贴着左边界打印");
 assert.ok(productCommand.includes("TEXT 4 0 466 30 $"), "普通商品标签价格货币符号右上对齐");

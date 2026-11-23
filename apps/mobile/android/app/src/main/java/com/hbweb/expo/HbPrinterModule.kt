@@ -840,8 +840,8 @@ class HbPrinterModule(
     if (barcode.isNotBlank()) {
       val barcodeType = if (isValidEan13(barcode)) "EAN13" else "128"
       commands += "BARCODE-TEXT 7 0 5"
-      // EAN13 的首位数字印在条码左侧外面：x=5 会被挤出标签左边界裁掉，必须留出位置（与 TS / Swift 一致）。
-      val barcodeX = if (barcodeType == "EAN13") 30 else 5
+      // EAN13 的首位数字印在条码竖线左侧外面约 8 点：x=5 会被裁掉，取 14 让首位数字与货号左对齐（与 TS / Swift 一致）。
+      val barcodeX = if (barcodeType == "EAN13") 14 else 5
       commands += "BARCODE $barcodeType 1 2 30 $barcodeX 145 $barcode"
     }
 

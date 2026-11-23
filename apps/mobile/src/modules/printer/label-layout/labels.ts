@@ -182,8 +182,8 @@ export async function buildProductLabelDoc(
   const items: LabelDocItem[] = [bitmapItem(5, 5, name), bitmapItem(5, 120, item), bitmapItem(5 + item.width + 10, 118, supplier)];
   if (barcode) {
     const kind = isValidEan13(barcode) ? "EAN13" : "128";
-    // EAN13 的首位数字印在条码左侧外面：x=5 会被裁掉，必须留出位置（与原生 / TS 一致）。
-    const barcodeX = kind === "EAN13" ? 30 : 5;
+    // EAN13 的首位数字印在条码竖线左侧外面约 8 点：x=5 会被裁掉，取 14 让首位数字与货号（x=5）左对齐（与原生 / TS 一致）。
+    const barcodeX = kind === "EAN13" ? 14 : 5;
     items.push(commandItem("BARCODE-TEXT 7 0 5", `BARCODE ${kind} 1 2 30 ${barcodeX} 145 ${barcode}`));
   }
   if (discount) items.push(bitmapItem(w - discount.width - date.width - 20, 175, discount));
