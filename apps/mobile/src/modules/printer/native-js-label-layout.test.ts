@@ -77,8 +77,21 @@ async function run() {
     };
   });
 
-  test("开关默认全关：即使是新原生包也走原生排版", async () => {
+  test("默认开关：安卓新原生包走 JS 排版（11-23 已对纸）", async () => {
     installNewNativePackage();
+    assert.equal(await native.printNativeProductLabel(product, null), true);
+    assert.equal(await native.printNativeDiscountLabel(product, null), true);
+    assert.deepEqual(calls, ["print:! 0 200 200 400 1", "print:! 0 200 200 400 1"]);
+  });
+
+  test("默认开关：iOS 新原生包仍走原生排版（iPhone 未对纸）", async () => {
+    platform.OS = "ios";
+    installNewNativePackage();
+    assert.equal(await native.printNativeProductLabel(product, null), true);
+    assert.deepEqual(calls, ["native:product"]);
+  });
+
+  test("默认开关：安卓旧原生包（没有渲染能力）继续走原生排版", async () => {
     assert.equal(await native.printNativeProductLabel(product, null), true);
     assert.deepEqual(calls, ["native:product"]);
   });
