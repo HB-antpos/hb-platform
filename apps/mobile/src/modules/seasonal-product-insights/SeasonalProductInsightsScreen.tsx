@@ -5,7 +5,6 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useIsFocused } from "@react-navigation/native";
 import { ActivityIndicator, Button, Text } from "react-native-paper";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { SeasonalCandidateSheet } from "@/components/seasonal-product-insights/SeasonalCandidateSheet";
 import { SeasonalProductInsightsView } from "@/components/seasonal-product-insights/SeasonalProductInsightsView";
 import { SeasonalRangeSheet } from "@/components/seasonal-product-insights/SeasonalRangeSheet";
 import { BusinessSheet } from "@/components/ui/BusinessSheet";
@@ -207,8 +206,10 @@ function Content({
   );
 
   const search = useCallback(
-    async (value: string) => {
+    async (value: string, overrideRanges?: SeasonalRanges) => {
       const keyword = value.trim();
+      // 刚在区间弹层里改了区间时，state 还没更新，用调用方传入的新区间。
+      const effectiveRanges = overrideRanges ?? ranges;
       if (!keyword) return;
       const lease = gate.begin();
       retryProduct.current = "";
@@ -223,12 +224,12 @@ function Content({
       setLoading(true);
       setEmptyState("initial");
       try {
-        const result = await lookupSeasonalProducts(store.storeCode, keyword, ranges, lease.signal);
+        const result = await lookupSeasonalProducts(store.storeCode, keyword, effectiveRanges, lease.signal);
         if (!lease.isCurrent()) return;
-        rememberRanges(result.ranges, ranges);
+        rememberRanges(result.ranges, effectiveRanges);
         setMatchMode(result.matchMode);
         setLookupKeyword(keyword);
-        // 唯一命中直接加载详情；多个命中弹窗选择。
+        // 唯一命中直接加载详情；多个命中在页面里列成进销卡片供选择。
         if (result.items.length === 1) {
           await loadProduct(result.items[0].productCode, result.ranges);
           return;
@@ -288,7 +289,7 @@ function Content({
     }
   };
   const hid = useHidBarcodeScanner({
-    enabled: focused && !queryFocused && !cameraVisible && !rangeVisible && !pickerVisible && !lookup && !loading,
+    enabled: focused && !queryFocused && !cameraVisible && !rangeVisible && !pickerVisible && !loading,
     onScan: search,
   });
   useEffect(() => {
@@ -303,6 +304,8 @@ function Content({
     setRangeVisible(false);
     setRanges(next);
     if (retryProduct.current) void loadProduct(retryProduct.current, next);
+    // 还停在候选列表上：按新区间重新检索，进货 / 销量 / 售罄率随之刷新。
+    else if (lookup && lookupKeyword) void search(lookupKeyword, next);
   };
 
   return (
@@ -318,6 +321,7 @@ function Content({
           onSelectedProductCode("");
           setQuery(value);
           setData(null);
+          setLookup(null);
           setMatchMode(null);
           setLoading(false);
           setError(null);
@@ -334,6 +338,12 @@ function Content({
         onSearch={() => void search(query)}
         onScan={() => void openCamera()}
         data={data}
+        lookup={lookup}
+        lookupKeyword={lookupKeyword}
+        onSelectCandidate={(code) => {
+          const selectedRanges = lookup?.ranges ?? ranges;
+          void loadProduct(code, selectedRanges);
+        }}
         today={today}
         loading={loading}
         error={error}
@@ -351,25 +361,15 @@ function Content({
       {hid.textInputProps ? (
         <TextInput {...hid.textInputProps} style={styles.hiddenInput} accessible={false} importantForAccessibility="no-hide-descendants" />
       ) : null}
-      {data && today ? (
+      {(data || lookup) && today ? (
         <SeasonalRangeSheet
           visible={rangeVisible}
-          ranges={data.ranges}
+          ranges={(data ?? lookup)!.ranges}
           today={today}
           onClose={() => setRangeVisible(false)}
           onApply={applyRanges}
         />
       ) : null}
-      <SeasonalCandidateSheet
-        keyword={lookupKeyword}
-        result={lookup}
-        onClose={() => setLookup(null)}
-        onSelect={(code) => {
-          const selectedRanges = lookup?.ranges ?? ranges;
-          setLookup(null);
-          void loadProduct(code, selectedRanges);
-        }}
-      />
       <BusinessSheet
         visible={cameraVisible && focused}
         title={t("camera.title")}

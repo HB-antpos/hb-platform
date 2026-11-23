@@ -130,6 +130,10 @@ public sealed class SeasonalProductInsightQueryServiceTests : IDisposable
         var item = Assert.Single(result.Items);
         Assert.Equal("P1", item.ProductCode);
         Assert.Equal(7m, item.TheoreticalStock);
+        // 候选卡片要同时显示进货与销量：只统计当前分店 S1（S2 的 50 件不能混入），并附最早进货日。
+        Assert.Equal(12m, item.InboundQuantity);
+        Assert.Equal(5m, item.SalesQuantity);
+        Assert.Equal(new DateTime(2026, 9, 1), item.FirstInboundDate);
         Assert.False(result.Truncated);
     }
 
@@ -178,6 +182,26 @@ public sealed class SeasonalProductInsightQueryServiceTests : IDisposable
         Assert.Equal(new[] { "P3", "P2", "P1" }, result.Items.Select(item => item.ProductCode));
         Assert.Equal(6m, result.Items[0].TheoreticalStock);
         Assert.Equal(0m, result.Items[1].TheoreticalStock);
+        // 仓库商品按出库配货计进货；区间内完全没有进销的商品，进货 / 销量为 0 且没有最早进货日。
+        Assert.Equal((6m, 0m), (result.Items[0].InboundQuantity, result.Items[0].SalesQuantity));
+        Assert.NotNull(result.Items[0].FirstInboundDate);
+        Assert.Equal((0m, 0m), (result.Items[1].InboundQuantity, result.Items[1].SalesQuantity));
+        Assert.Null(result.Items[1].FirstInboundDate);
+    }
+
+    [Fact]
+    public async Task 检索_销量大于进货时理论存货为负且进货销量分别返回()
+    {
+        await SeedStoresAsync();
+        await SeedProductAsync("P1", "LED3M", null, "L100");
+        // 区间内没有进货、只有销量：进货 0、销量 6、存货 −6，用于前端标「负库存待核对」。
+        await SeedSaleAsync("S1", "P1", new DateTime(2026, 9, 2), 6, "L100");
+
+        var result = await CreateService().LookupAsync("S1", "LED3M", InboundRange, SalesRange);
+
+        var item = Assert.Single(result.Items);
+        Assert.Equal((0m, 6m, -6m), (item.InboundQuantity, item.SalesQuantity, item.TheoreticalStock));
+        Assert.Null(item.FirstInboundDate);
     }
 
     [Fact]

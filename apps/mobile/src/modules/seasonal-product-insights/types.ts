@@ -16,6 +16,13 @@ export interface SeasonalCandidate {
   barcode: string | null;
   productImage: string | null;
   theoreticalStock: number;
+  /**
+   * 当前分店的累计进货 / 累计销量 / 区间内最早进货日。
+   * 旧版后端不返回这三项，此时为 null，界面只显示理论存货、不算售罄率。
+   */
+  inboundQuantity: number | null;
+  salesQuantity: number | null;
+  firstInboundDate: string | null;
 }
 
 export interface SeasonalLookupResult {
@@ -82,6 +89,28 @@ export interface DailyTrendPoint {
   date: string;
   quantity: number;
 }
+
+/** 候选卡片上的状态标签。 */
+export type SeasonalCandidateFlag = "negative" | "hot" | "slow";
+
+export type SeasonalCandidateSort = "sellThrough" | "stock" | "itemNumber";
+
+/** 「按周进销」的一行：每周的进货、销量，以及（两个区间一致时）周末理论存货。 */
+export interface WeeklyLedgerRow {
+  startDate: string;
+  endDate: string;
+  partial: boolean;
+  inboundQuantity: number;
+  salesQuantity: number;
+  /** 从区间起点累计到本周末的「进货 − 销量」；进货与销售区间不一致时为 null。 */
+  endStock: number | null;
+  documentNos: string[];
+}
+
+/** 一周展开后的当天明细：进货单与日销量按日期混排。 */
+export type LedgerDayEntry =
+  | { kind: "sales"; date: string; quantity: number }
+  | { kind: "inbound"; date: string; documentNo: string; quantity: number };
 
 export interface WeeklyTrendPoint {
   /** 该周在销售区间内的第一天。 */

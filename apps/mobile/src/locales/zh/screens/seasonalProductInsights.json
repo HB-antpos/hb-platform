@@ -69,24 +69,18 @@
   },
   "kpi": {
     "inbound": "累计进货",
-    "inboundHint": "{{count}} 张单据",
     "sales": "累计销量",
-    "salesHint": "售罄率 {{percent}}%",
-    "salesHintNoInbound": "区间内无进货",
-    "stock": "理论存货",
-    "stockHint": "进货 − 销量"
+    "stock": "理论存货"
   },
   "trend": {
-    "title": "销售趋势",
+    "title": "进销走势",
     "granularity": "趋势粒度",
     "day": "日",
     "week": "周",
     "legendDaily": "日销量",
-    "legendWeekly": "周销量",
     "legendInbound": "进货",
-    "legendWeeklyInbound": "绿色数字 = 当周进货",
     "legendToday": "今日未结束",
-    "legendPartialWeek": "不完整周",
+    "legendPartialWeek": "不足一周",
     "today": "今日",
     "dailyA11y": "日销量柱状图，共 {{days}} 天有销售记录",
     "weeklyA11y": "周销量柱状图，共 {{weeks}} 周",
@@ -95,24 +89,10 @@
     "recordedDaysValue": "{{recorded}} / {{total}} 天",
     "dailyAverage": "日均（有销售日）",
     "dailyPeak": "单日峰值",
-    "weeklyAverage": "完整周均",
-    "weeklyBest": "最高周",
-    "weekOverWeek": "上周环比"
-  },
-  "records": {
-    "title": "明细",
-    "inboundTab": "进货记录 {{count}}",
-    "salesTab": "日销量 {{count}}",
-    "date": "日期",
-    "invoice": "进货单号",
-    "warehouseDocument": "仓库出库单号",
-    "quantity": "数量",
-    "inboundTotal": "进货区间合计",
-    "inboundEmpty": "进货区间内没有进货记录",
-    "salesEmpty": "销售区间内没有销售记录",
-    "salesHint": "只列有销售记录的日期",
-    "todayOpen": "今日未结束",
-    "showAll": "查看全部 {{count}} 天"
+    "legendWeeklyInboundBar": "每周进货",
+    "legendWeeklySalesBar": "每周销量",
+    "legendStockLine": "周末存货（右轴）",
+    "clipNote": "柱高超过 {{max}} 截断，柱顶标实际进货数"
   },
   "branches": {
     "title": "其他分店库存",
@@ -121,13 +101,30 @@
     "total": "合计 {{count}} 家",
     "empty": "进货区间内其他分店没有进货记录",
     "negativeHint": "红色为负数：销量大于进货，进销数据待核对",
-    "rowA11y": "{{store}}，累计进货 {{inbound}}，累计销量 {{sales}}，理论存货 {{stock}}"
+    "rowA11y": "{{store}}，累计进货 {{inbound}}，累计销量 {{sales}}，理论存货 {{stock}}",
+    "sellThrough": "售罄"
   },
   "candidates": {
     "title": "找到 {{count}} 个商品",
     "byItemNumber": "货号包含「{{keyword}}」，点选查看",
     "byBarcode": "条码「{{keyword}}」对应多个商品，点选查看",
-    "truncated": "仅显示前 {{count}} 个，请输入更完整的货号"
+    "truncated": "仅显示前 {{count}} 个，请输入更完整的货号",
+    "sortLabel": "排序",
+    "sort": {
+      "sellThrough": "售罄率",
+      "stock": "存货",
+      "itemNumber": "货号"
+    },
+    "inbound": "进货",
+    "sales": "销量",
+    "sellThrough": "售罄率",
+    "progress": "已售 {{sales}} / 进 {{inbound}}",
+    "noInbound": "进货区间内无进货，销量来自区间前的存货",
+    "flags": {
+      "hot": "快售罄",
+      "slow": "动销慢",
+      "negative": "负库存 待核对"
+    }
   },
   "weekdays": {
     "0": "周日",
@@ -137,5 +134,40 @@
     "4": "周四",
     "5": "周五",
     "6": "周六"
+  },
+  "overview": {
+    "title": "进销概览",
+    "subtitle": "理论存货 = 进货 − 销量",
+    "inbound": "进货",
+    "sales": "销量",
+    "stock": "理论存货",
+    "docs": "{{count}} 张单据",
+    "unit": "件",
+    "stackA11y": "售罄率 {{percent}}",
+    "stackSold": "已售 {{sold}} · 售罄率 {{percent}}",
+    "stackLeft": "剩余 {{left}} · {{percent}}",
+    "stackOver": "销量比进货多 {{over}} 件：可能在卖区间开始前的存货",
+    "stackNone": "进货区间内无进货，无法计算售罄率",
+    "pace": "近 {{weeks}} 周日均卖 {{recent}} 件（整季 {{season}} 件），按此速度剩余约 {{days}} 天卖完",
+    "paceNoStock": "近 {{weeks}} 周日均卖 {{recent}} 件（整季 {{season}} 件）",
+    "lastInbound": " · 上次进货 {{days}} 天前",
+    "lastInboundToday": " · 今天到货"
+  },
+  "ledger": {
+    "title": "按周进销",
+    "subtitle": "点一周看每天进货与销量",
+    "week": "周（周一起）",
+    "inbound": "进货",
+    "sales": "销量",
+    "endStock": "周末存货",
+    "empty": "区间内没有进销记录",
+    "showEarlier": "展开更早 {{count}} 周",
+    "total": "区间合计",
+    "todayOpen": "含今天 · {{count}} 天",
+    "partial": "不足一周 · {{count}} 天",
+    "oneDoc": "1 张进货单 · {{doc}}",
+    "docs": "{{count}} 张进货单",
+    "inboundTag": "进货",
+    "rowA11y": "{{week}}，进货 {{inbound}}，销量 {{sales}}，点击展开每天明细"
   }
 }
