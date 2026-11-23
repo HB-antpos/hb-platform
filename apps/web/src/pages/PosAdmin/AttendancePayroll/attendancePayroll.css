@@ -996,6 +996,40 @@
   cursor: not-allowed;
 }
 
+/* 快捷班次：一排小按钮，选中态与日期按钮同色 */
+.atp-me-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.atp-me-quick-btn {
+  padding: 3px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #fff;
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.atp-me-quick-btn:hover:not(:disabled) {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+
+.atp-me-quick-btn.is-on {
+  border-color: #1677ff;
+  background: #e6f4ff;
+  color: #1677ff;
+  font-weight: 600;
+}
+
+.atp-me-quick-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .atp-me-day {
   margin-bottom: 14px;
   padding: 10px 12px;

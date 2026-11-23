@@ -12,17 +12,22 @@ import type {
   AttendanceManualEntryPreview,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
+// 复用排班页的固定常用班次（所有门店一致），不另造一套
+import { SHIFT_PRESETS } from '../ScheduleAttendance/scheduleCellEditorLogic'
 import ManualEntryModeSwitch from './ManualEntryModeSwitch'
 import {
   MANUAL_ENTRY_REASON_MAX,
+  applyShiftToRows,
   buildManualSegments,
   defaultManualRows,
   manualEntryDayState,
   manualEntryErrorText,
   manualPreviewHoursText,
+  rowsMatchShift,
   validateManualRows,
   type ManualEntryMode,
   type ManualEntryRow,
+  type ManualShiftPreset,
 } from './manualEntryLogic'
 import { round2, summarizeEmployeeHours } from './payrollLogic'
 
@@ -153,6 +158,19 @@ export default function ManualEntryDrawer(props: ManualEntryDrawerProps) {
   const updateRow = (date: string, index: number, patch: Partial<ManualEntryRow>) => {
     const rows = (forms[date]?.rows ?? []).map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row))
     updateForm(date, { rows })
+  }
+
+  // 快捷班次：一次套用到所有已选日期（每天按 applyShiftToRows 的规则填），之后各天仍可单独手改；
+  // 只改 rows，校验、实时预览、保存都沿用原来的流程（预览由 forms 变化自动触发）。
+  const applyShiftToSelected = (shift: ManualShiftPreset) => {
+    setForms((current) => {
+      const next = { ...current }
+      for (const date of selected) {
+        const form = current[date] ?? { rows: defaultManualRows(dayOf(date)), meal: null }
+        next[date] = { ...form, rows: applyShiftToRows(form.rows, shift) }
+      }
+      return next
+    })
   }
 
   const buildPayload = useCallback(
@@ -441,6 +459,30 @@ export default function ManualEntryDrawer(props: ManualEntryDrawerProps) {
         </div>
         <div className="atp-me-hint">{t('attendancePayroll.manualEntry.daysHint')}</div>
       </div>
+
+      {selected.length > 0 ? (
+        <div className="atp-me-field">
+          <div className="atp-me-field-label">{t('attendancePayroll.manualEntry.quickShift')}</div>
+          <div className="atp-me-quick">
+            {SHIFT_PRESETS.map((preset) => {
+              // 所有已选日期都正好是这个班次时高亮
+              const on = selected.every((date) => forms[date] && rowsMatchShift(forms[date].rows, preset))
+              return (
+                <button
+                  key={`${preset.start}-${preset.end}`}
+                  type="button"
+                  disabled={saving}
+                  className={`atp-me-quick-btn${on ? ' is-on' : ''}`}
+                  onClick={() => applyShiftToSelected(preset)}
+                >
+                  {`${preset.start}–${preset.end}`}
+                </button>
+              )
+            })}
+          </div>
+          <div className="atp-me-hint">{t('attendancePayroll.manualEntry.quickShiftHint')}</div>
+        </div>
+      ) : null}
 
       {selected.map(renderDay)}
 

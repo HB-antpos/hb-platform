@@ -132,6 +132,29 @@ export function defaultManualRows(day?: AttendanceHoursDayDto): ManualEntryRow[]
   return [{ start: day?.missingPunch ? day.scheduleStart ?? '' : '', end: day?.missingPunch ? day.scheduleEnd ?? '' : '' }]
 }
 
+/** 快捷班次：一组固定的上班 / 下班时间（HH:mm）。 */
+export interface ManualShiftPreset {
+  start: string
+  end: string
+}
+
+/**
+ * 点快捷班次后一天的新班段：
+ * - 有「还没填完整」的班段（上班或下班缺一个，含默认的空白段）→ 填进第一个这样的班段，其它段不动；
+ * - 每一段都已填完整（例如未打卡班预填了排班时间、或已手填过）→ 整天重置为这一个班次（单段）。
+ * 用餐次数不在这里处理（保持原值，仍按时长自动）；分段班（上午 + 下午）用「加一段」手填。
+ */
+export function applyShiftToRows(rows: readonly ManualEntryRow[], shift: ManualShiftPreset): ManualEntryRow[] {
+  const blankIndex = rows.findIndex((row) => !row.start.trim() || !row.end.trim())
+  if (blankIndex < 0) return [{ start: shift.start, end: shift.end }]
+  return rows.map((row, index) => (index === blankIndex ? { start: shift.start, end: shift.end } : { ...row }))
+}
+
+/** 这个班次是否正是这一天当前的班段（单段且时间一致）：用来给快捷班次按钮高亮。 */
+export function rowsMatchShift(rows: readonly ManualEntryRow[], shift: ManualShiftPreset): boolean {
+  return rows.length === 1 && rows[0].start === shift.start && rows[0].end === shift.end
+}
+
 /** 分钟 → 「5.5 h」文本。 */
 export function manualPreviewHoursText(hours: number): string {
   return `${Math.round(hours * 100) / 100} h`
