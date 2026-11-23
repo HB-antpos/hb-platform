@@ -107,6 +107,7 @@ export default function RatesTab({ rates, pay, loading, storeCode, canEdit, onSa
       payMode: draft.payMode,
       fixedTransferHoursPerWeek: draft.fixedTransferHoursPerWeek,
       weeks: pay.weeks,
+      periodStart: pay.periodStart,
       // 公假价留空按平日价试算，与后端保存时的默认一致
       rates: resolvePublicHolidayRate(draft),
       allowance: draft.cashAllowancePerPeriod,

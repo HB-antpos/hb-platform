@@ -541,6 +541,111 @@ public sealed class PayrollCalculatorTests
         Assert.DoesNotContain(PayrollCalculator.WarningCashOverrideIgnored, applied.Warnings);
     }
 
+    // ---------------- 公假上班一律走转账（2026-11-23 起的周期） ----------------
+
+    /// <summary>新规则生效后的第一个周期起始日（周一）。</summary>
+    private static readonly DateTime NewRulePeriodStart = new(2026, 11, 23);
+
+    private static PayrollPayResult CalculateMixedWithPublicHoliday(
+        DateTime periodStart, decimal fixedPerWeek, int publicHolidayMinutes, decimal? publicHolidayCashOverride = null) =>
+        PayrollCalculator.CalculatePay(new PayrollPayInput
+        {
+            PeriodStart = periodStart,
+            Weeks = 1,
+            Rates = new[] { Mixed(fixedPerWeek, 20m, 30m, 40m, 50m, cash: 18m) },
+            WorkItems = new[]
+            {
+                new PayrollWorkItem(periodStart, PayrollBucket.PublicHoliday, publicHolidayMinutes),
+                new PayrollWorkItem(periodStart.AddDays(1), PayrollBucket.Weekday, 480),     // 8 h
+                new PayrollWorkItem(periodStart.AddDays(5), PayrollBucket.Saturday, 240),    // 4 h
+                new PayrollWorkItem(periodStart.AddDays(6), PayrollBucket.Sunday, 180),      // 3 h
+            },
+            LeaveItems = new[] { new PayrollLeaveItem(periodStart.AddDays(2), 6m) },
+            PublicHolidayCashOverride = publicHolidayCashOverride,
+        });
+
+    [Fact]
+    public void 新规则_转账加现金_公假先占限额且整档进转账_其余档位装剩下的额度()
+    {
+        var result = CalculateMixedWithPublicHoliday(NewRulePeriodStart, 14m, 300);   // 公假 5 h
+
+        // 限额 14 h：公假 5 先装 → 剩 9：日 3 → 六 4 → 带薪假 2（剩 4 走现金）→ 平日 0（8 走现金）。
+        Assert.Equal(5m, result.TransferHours.PublicHoliday);
+        Assert.Equal(0m, result.CashHours.PublicHoliday);
+        Assert.Equal(3m, result.TransferHours.Sunday);
+        Assert.Equal(4m, result.TransferHours.Saturday);
+        Assert.Equal(2m, result.TransferHours.Leave);
+        Assert.Equal(4m, result.CashHours.Leave);
+        Assert.Equal(8m, result.CashHours.Weekday);
+        // 转账：5×50（公假倍率价）+ 3×40 + 4×30 + 2×20 = 530；现金：12 h × 18 = 216，没有任何公假现金。
+        Assert.Equal(530m, result.TransferAmount);
+        Assert.Equal(216m, result.CashAmount);
+        Assert.Equal(0m, result.PublicHolidayCashSystemAmount);
+        Assert.Equal(746m, result.GrossPay);
+    }
+
+    [Fact]
+    public void 新规则_公假超过转账限额_公假仍全部进转账_其余档位全落现金()
+    {
+        var result = CalculateMixedWithPublicHoliday(NewRulePeriodStart, 4m, 300);    // 限额 4 h，公假 5 h
+
+        Assert.Equal(5m, result.TransferHours.PublicHoliday);
+        Assert.Equal(0m, result.CashHours.PublicHoliday);
+        // 剩余额度不能扣成负数：其它档一律没有转账，全部走现金（日 3 + 六 4 + 假 6 + 平 8 = 21 h）。
+        Assert.Equal(0m, result.TransferHours.Sunday + result.TransferHours.Saturday + result.TransferHours.Leave + result.TransferHours.Weekday);
+        Assert.Equal(250m, result.TransferAmount);
+        Assert.Equal(378m, result.CashAmount);
+        Assert.DoesNotContain(PayrollCalculator.WarningMissingTransferRate, result.Warnings);
+    }
+
+    [Fact]
+    public void 新规则_以前手填的公假现金不再生效_并提示()
+    {
+        var result = CalculateMixedWithPublicHoliday(NewRulePeriodStart, 14m, 300, publicHolidayCashOverride: 100m);
+
+        Assert.False(result.PublicHolidayCashOverridden);
+        Assert.Equal(216m, result.CashAmount);
+        Assert.Contains(PayrollCalculator.WarningCashOverrideIgnored, result.Warnings);
+    }
+
+    [Fact]
+    public void 新规则_生效日之前的周期保持旧算法_公假排在带薪假后面_装不下的落现金()
+    {
+        var result = CalculateMixedWithPublicHoliday(new DateTime(2026, 11, 16), 14m, 300);
+
+        // 与旧规则一致：容量 14 h：日 3 → 六 4 → 假 6 → 公 1，公假剩 4 h 走现金。
+        Assert.Equal(1m, result.TransferHours.PublicHoliday);
+        Assert.Equal(4m, result.CashHours.PublicHoliday);
+        Assert.Equal(410m, result.TransferAmount);
+    }
+
+    [Fact]
+    public void 新规则_全现金没有公假价_公假仍按现金时薪付_不受影响()
+    {
+        var result = PayrollCalculator.CalculatePay(new PayrollPayInput
+        {
+            PeriodStart = NewRulePeriodStart,
+            Weeks = 1,
+            Rates = new[] { Cash(18m) },
+            WorkItems = new[] { new PayrollWorkItem(NewRulePeriodStart, PayrollBucket.PublicHoliday, 300) },
+        });
+
+        Assert.Equal(0m, result.TransferHours.PublicHoliday);
+        Assert.Equal(5m, result.CashHours.PublicHoliday);
+        Assert.Equal(90m, result.CashAmount);
+        Assert.Equal(0m, result.TransferAmount);
+    }
+
+    [Fact]
+    public void 新规则_只对转账加现金生效_生效日边界()
+    {
+        Assert.False(PayrollCalculator.IsPublicHolidayTransferOnly(PayrollCalculator.PayModeMixed, new DateTime(2026, 11, 22)));
+        Assert.True(PayrollCalculator.IsPublicHolidayTransferOnly(PayrollCalculator.PayModeMixed, new DateTime(2026, 11, 23)));
+        Assert.False(PayrollCalculator.IsPublicHolidayTransferOnly(PayrollCalculator.PayModeCash, new DateTime(2026, 12, 7)));
+        Assert.False(PayrollCalculator.IsPublicHolidayTransferOnly(PayrollCalculator.PayModeTransfer, new DateTime(2026, 12, 7)));
+        Assert.False(PayrollCalculator.IsPublicHolidayTransferOnly(null, new DateTime(2026, 12, 7)));
+    }
+
     [Fact]
     public void 期中调薪_系统值按当天有效的现金时薪分别算_手填只取代带薪假那一档()
     {

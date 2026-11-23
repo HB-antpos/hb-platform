@@ -478,7 +478,7 @@ internal sealed class MyobTimesheetPreviewService : IMyobTimesheetPreviewService
         var isCasual = string.Equals(profile?.EmploymentType, "Casual", StringComparison.OrdinalIgnoreCase);
         var plan = payMode is null
             ? null
-            : MyobTimesheetPlanner.Plan(payMode, rate!.FixedTransferHoursPerWeek, weeks, items, isCasual);
+            : MyobTimesheetPlanner.Plan(payMode, rate!.FixedTransferHoursPerWeek, weeks, items, isCasual, start);
         if (payMode is null && items.Count > 0)
         {
             blockers.Add(new MyobPreviewBlockerDto { Code = MyobBlockerCodes.NoRate, Message = "本期没有生效的时薪记录，无法确定转账 / 现金分配" });

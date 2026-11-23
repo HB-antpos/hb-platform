@@ -18,6 +18,17 @@ import type {
 export const TRANSFER_FILL_ORDER = ['sunday', 'saturday', 'leave', 'publicHoliday', 'weekday'] as const
 export type PayBucketKey = (typeof TRANSFER_FILL_ORDER)[number]
 
+/** 「公假上班一律走转账」新规则的生效周期（周期起始日不早于它才生效；与后端 PayrollCalculator.PublicHolidayTransferOnlyFrom 一致）。 */
+export const PUBLIC_HOLIDAY_TRANSFER_ONLY_FROM = '2026-11-23'
+
+/**
+ * 新规则：转账 + 现金的员工，公假上班先装、整档进转账（可超出转账限额，按公假倍率价），不落现金；
+ * 全转账本来就全进转账，全现金没有公假价、公假仍按现金时薪，所以只对 Mixed 生效。更早的周期保持旧顺序。
+ */
+export function isPublicHolidayTransferOnly(payMode: AttendancePayMode, periodStart?: string | null): boolean {
+  return payMode === 'Mixed' && Boolean(periodStart) && (periodStart as string) >= PUBLIC_HOLIDAY_TRANSFER_ONLY_FROM
+}
+
 /**
  * 工时页员工姓名下的类型标签颜色：全职蓝、兼职绿、临时紫、店长洋红，一眼分得清。
  * 避开已有语义色：未成年（金）、多店（青）、公共假期（橙）、异常（红）。
@@ -79,6 +90,8 @@ export interface PayCalculationInput {
   weeks: number
   rates: PayRates
   allowance?: number
+  /** 工资周期起始日（YYYY-MM-DD）：用来判断是否适用「公假先占限额并整档进转账」的新规则；不传按旧规则。 */
+  periodStart?: string | null
 }
 
 export interface PayCalculationResult {
@@ -116,12 +129,18 @@ export function calculatePay(input: PayCalculationInput): PayCalculationResult {
   const transferBuckets = emptyBuckets()
   const cashBuckets = emptyBuckets()
   let left = capacity
-  for (const key of TRANSFER_FILL_ORDER) {
+  // 新规则：公假先装、整档进转账（装完仍占用限额，但剩余额度最低扣到 0）；其余档位按原顺序装剩下的额度。
+  const publicHolidayFirst = isPublicHolidayTransferOnly(payMode, input.periodStart)
+  const fillOrder = publicHolidayFirst
+    ? (['publicHoliday', ...TRANSFER_FILL_ORDER.filter((key) => key !== 'publicHoliday')] as PayBucketKey[])
+    : TRANSFER_FILL_ORDER
+  for (const key of fillOrder) {
     const bucketHours = round2(hours[key])
-    const take = round2(Math.min(bucketHours, Math.max(0, left)))
+    const forcedTransfer = publicHolidayFirst && key === 'publicHoliday'
+    const take = forcedTransfer ? bucketHours : round2(Math.min(bucketHours, Math.max(0, left)))
     transferBuckets[key] = take
     cashBuckets[key] = round2(bucketHours - take)
-    left -= take
+    left = forcedTransfer ? Math.max(0, left - take) : left - take
   }
 
   const missingRates: string[] = []

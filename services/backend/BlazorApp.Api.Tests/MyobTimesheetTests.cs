@@ -188,6 +188,60 @@ public sealed class MyobTimesheetTests : IDisposable
     }
 
     [Fact]
+    public void 规划_公假新规则_转账加现金_公假先装且整档进转账_其余装剩下的额度()
+    {
+        var items = new[]
+        {
+            W(Inv, "1013", "2026-11-23", MyobWorkKind.PublicHolidayWork, 6),
+            W(Inv, "1013", "2026-11-24", MyobWorkKind.Weekday, 8),
+            W(Inv, "1013", "2026-11-28", MyobWorkKind.Saturday, 4),
+        };
+        var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 10m, 1, items, periodStart: new DateTime(2026, 11, 23)).Companies[Inv];
+
+        Assert.Equal(600, plan.CapacityMinutes);
+        Assert.Equal(360, Minutes(plan, MyobPayCategoryKeys.PublicHoliday));   // 公假 6h 先装
+        Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.Saturday));        // 剩 4h 给周六
+        Assert.Equal(0, Minutes(plan, MyobPayCategoryKeys.Weekday));
+        Assert.False(plan.CashByDayKind.ContainsKey((new DateTime(2026, 11, 23), MyobWorkKind.PublicHolidayWork)));
+        Assert.Equal(plan.CapacityMinutes, plan.PushedMinutes + plan.CashOutTransferMinutes);
+    }
+
+    [Fact]
+    public void 规划_公假新规则_公假超过额度_仍全部推送_容量自检按实际转账总量()
+    {
+        var items = new[]
+        {
+            W(Inv, "1013", "2026-11-23", MyobWorkKind.PublicHolidayWork, 6),
+            W(Inv, "1013", "2026-11-24", MyobWorkKind.Weekday, 8),
+        };
+        var plan = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 4m, 1, items, periodStart: new DateTime(2026, 11, 23)).Companies[Inv];
+
+        Assert.Equal(360, Minutes(plan, MyobPayCategoryKeys.PublicHoliday));
+        Assert.Equal(0, Minutes(plan, MyobPayCategoryKeys.Weekday));
+        Assert.Equal(480, plan.CashByDayKind[(new DateTime(2026, 11, 24), MyobWorkKind.Weekday)]);
+        Assert.Equal(360, plan.CapacityMinutes);
+        Assert.Equal(plan.CapacityMinutes, plan.PushedMinutes + plan.CashOutTransferMinutes);
+    }
+
+    [Fact]
+    public void 规划_公假新规则_不传周期或生效日之前仍按旧顺序_公假排在周六之后()
+    {
+        var items = new[]
+        {
+            W(Inv, "1013", "2026-11-16", MyobWorkKind.PublicHolidayWork, 6),
+            W(Inv, "1013", "2026-11-21", MyobWorkKind.Saturday, 4),
+        };
+        var legacy = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 5m, 1, items).Companies[Inv];
+        var beforeCutoff = MyobTimesheetPlanner.Plan(PayrollCalculator.PayModeMixed, 5m, 1, items, periodStart: new DateTime(2026, 11, 16)).Companies[Inv];
+
+        foreach (var plan in new[] { legacy, beforeCutoff })
+        {
+            Assert.Equal(240, Minutes(plan, MyobPayCategoryKeys.Saturday));
+            Assert.Equal(60, Minutes(plan, MyobPayCategoryKeys.PublicHoliday));   // 额度 5h：周六 4 + 公假 1
+        }
+    }
+
+    [Fact]
     public void 规划_跨公司按工时比例分摊固定转账工时_3比1_再各自装填()
     {
         var items = new[]
