@@ -28,6 +28,15 @@ public sealed class SeasonalInsightCandidateDto
     public string? ProductImage { get; set; }
     /// <summary>当前分店在请求区间内的理论存货（累计进货 − 累计销量）。</summary>
     public decimal TheoreticalStock { get; set; }
+
+    /// <summary>进货区间内当前分店的累计进货（本地进货单或仓库出库配货），与理论存货同口径。</summary>
+    public decimal InboundQuantity { get; set; }
+
+    /// <summary>销售区间内当前分店的累计销量。</summary>
+    public decimal SalesQuantity { get; set; }
+
+    /// <summary>进货区间内最早一笔进货的日期，没有进货时为空；前端据此判断是否「到货满 28 天仍没卖动」。</summary>
+    public DateTime? FirstInboundDate { get; set; }
 }
 
 public sealed class SeasonalInsightLookupDto

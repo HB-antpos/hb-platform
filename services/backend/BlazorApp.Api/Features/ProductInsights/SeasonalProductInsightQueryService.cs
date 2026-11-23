@@ -101,7 +101,10 @@ public sealed class SeasonalProductInsightQueryService(
                 ItemNumber = row.ItemNumber,
                 Barcode = row.Barcode,
                 ProductImage = row.ProductImage,
-                TheoreticalStock = stocks.GetValueOrDefault(row.ProductCode),
+                TheoreticalStock = stocks.GetValueOrDefault(row.ProductCode)?.TheoreticalStock ?? 0m,
+                InboundQuantity = stocks.GetValueOrDefault(row.ProductCode)?.InboundQuantity ?? 0m,
+                SalesQuantity = stocks.GetValueOrDefault(row.ProductCode)?.SalesQuantity ?? 0m,
+                FirstInboundDate = stocks.GetValueOrDefault(row.ProductCode)?.FirstInboundDate,
             }).ToList(),
         };
     }
@@ -292,7 +295,15 @@ public sealed class SeasonalProductInsightQueryService(
     }
 
     /// <summary>候选列表用：批量计算当前分店多个商品的理论存货。</summary>
-    private async Task<Dictionary<string, decimal>> LoadStoreStocksAsync(
+    /// <summary>候选商品在当前分店的进销汇总：进货与销量各按自己的区间，理论存货 = 进货 − 销量。</summary>
+    private sealed record CandidateStock(
+        decimal InboundQuantity,
+        decimal SalesQuantity,
+        decimal TheoreticalStock,
+        DateTime? FirstInboundDate
+    );
+
+    private async Task<Dictionary<string, CandidateStock>> LoadStoreStocksAsync(
         string storeCode,
         List<ProductRow> products,
         (DateTime Start, DateTime End) inboundRange,
@@ -300,7 +311,7 @@ public sealed class SeasonalProductInsightQueryService(
         CancellationToken cancellationToken
     )
     {
-        var result = new Dictionary<string, decimal>(StringComparer.Ordinal);
+        var result = new Dictionary<string, CandidateStock>(StringComparer.Ordinal);
         if (products.Count == 0)
         {
             return result;
@@ -321,9 +332,17 @@ public sealed class SeasonalProductInsightQueryService(
 
         foreach (var product in products)
         {
-            var inQuantity = inbound.Where(line => line.ProductCode == product.ProductCode).Sum(line => line.Quantity);
+            var productInbound = inbound.Where(line => line.ProductCode == product.ProductCode).ToList();
+            var inQuantity = productInbound.Sum(line => line.Quantity);
             var soldQuantity = sales.Where(line => line.ProductCode == product.ProductCode).Sum(line => (decimal)line.Quantity);
-            result[product.ProductCode] = SeasonalProductInsightRules.TheoreticalStock(inQuantity, soldQuantity);
+            // 最早进货日用于前端判断「到货满多少天仍没卖动」；区间内没有进货时为空。
+            DateTime? firstInbound = productInbound.Count == 0 ? null : productInbound.Min(line => line.Date).Date;
+            result[product.ProductCode] = new CandidateStock(
+                inQuantity,
+                soldQuantity,
+                SeasonalProductInsightRules.TheoreticalStock(inQuantity, soldQuantity),
+                firstInbound
+            );
         }
         return result;
     }

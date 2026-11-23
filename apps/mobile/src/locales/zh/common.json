@@ -503,5 +503,13 @@
     "caption": "快捷数量（起订 {{step}} 的倍数）",
     "clear": "清零",
     "set": "设为 {{quantity}}"
+  },
+  "imagePreview": {
+    "open": "查看大图：{{name}}",
+    "close": "关闭预览",
+    "hint": "双指缩放 · 双击放大 · 下滑关闭",
+    "zoomedHint": "双击还原 · 单指拖动查看细节",
+    "loadFailed": "图片加载失败",
+    "imageLabel": "{{name}} 的大图"
   }
 }

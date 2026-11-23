@@ -503,5 +503,13 @@
     "caption": "Quick quantities (multiples of MOQ {{step}})",
     "clear": "Clear",
     "set": "Set to {{quantity}}"
+  },
+  "imagePreview": {
+    "open": "View larger image: {{name}}",
+    "close": "Close preview",
+    "hint": "Pinch to zoom · Double-tap to enlarge · Swipe down to close",
+    "zoomedHint": "Double-tap to reset · Drag to pan",
+    "loadFailed": "Image failed to load",
+    "imageLabel": "{{name}}, enlarged"
   }
 }

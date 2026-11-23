@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -22,6 +21,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { DateRangePickerModal } from "@/components/ui/DateRangePickerModal";
+import { PreviewableImage } from "@/components/ui/PreviewableImage";
 import { isValidProductInsightRange } from "@/modules/product-insights/logic";
 import {
   buildDailyFlow,
@@ -528,13 +528,13 @@ function ProductHeader({ data, t }: { data: StoreProductInsight; t: Translate })
   const warehouse = data.sourceType === "warehouse";
   return (
     <View style={styles.product}>
-      <View style={styles.imageWrap}>
-        {p.productImage ? (
-          <Image source={{ uri: p.productImage }} style={styles.image} />
-        ) : (
-          <Icon source="package-variant" size={28} color="#98A2B3" />
-        )}
-      </View>
+      <PreviewableImage
+        uri={p.productImage}
+        size={56}
+        label={p.productName}
+        caption={[`${t("labels.itemNumber")} ${p.itemNumber ?? "—"}`, p.barcode].filter(Boolean).join(" · ")}
+        placeholderIcon="package-variant"
+      />
       <View style={styles.productMeta}>
         <Text variant="titleSmall" numberOfLines={2} style={styles.productName}>
           {p.productName}
@@ -1486,16 +1486,6 @@ const styles = StyleSheet.create({
     borderColor: HB_COLORS.outlineMuted,
     borderRadius: HB_RADIUS.surface,
   },
-  imageWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: HB_RADIUS.control,
-    overflow: "hidden",
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: HB_COLORS.surfaceMuted,
-  },
-  image: { width: "100%", height: "100%", resizeMode: "cover" },
   productMeta: { flex: 1, minWidth: 0, gap: 3 },
   productName: { color: HB_COLORS.textPrimary, fontWeight: "800" },
   metaRow: { flexDirection: "row", alignItems: "center", gap: 6 },

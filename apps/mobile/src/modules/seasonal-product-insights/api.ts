@@ -29,6 +29,10 @@ const lookupSchema = z.object({
       barcode: nullableText,
       productImage: nullableText,
       theoreticalStock: number,
+      // 进货 / 销量 / 最早进货日是后加字段：旧后端没有时按「未知」处理，不能补成 0 冒充没有进销。
+      inboundQuantity: number.nullish().transform((value) => value ?? null),
+      salesQuantity: number.nullish().transform((value) => value ?? null),
+      firstInboundDate: nullableText,
     }),
   ),
 });
