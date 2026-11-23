@@ -134,6 +134,8 @@ import { formatStoreOrderVolume } from './volumeFormat'
 import { applyFlowStatusToOrderList, subscribeStoreOrderFlowStatusChanged } from './storeOrderFlowStatusSync'
 import './compact.css'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+import StoreSidebarLayout from '../../PosAdmin/ScheduleAttendance/StoreSidebarLayout'
+import { useStoreSidebar } from '../../PosAdmin/ScheduleAttendance/useStoreSidebar'
 
 // 列表页改版新增文案随页面懒注册，不进入首屏全局语言包。
 registerPageMessages({ zh: storeOrdersMessagesZh, en: storeOrdersMessagesEn })
@@ -992,7 +994,8 @@ export default function StoreOrdersPage() {
     [branches],
   )
 
-  const storeFilterOptions = useMemo(
+  // 左侧分店列表的选项：按店名排序，列表里名字在前、编码在后（编码由列表组件按 value 显示）
+  const sidebarStoreOptions = useMemo(
     () =>
       [...branches]
         .sort((left, right) => {
@@ -1001,7 +1004,7 @@ export default function StoreOrdersPage() {
         })
         .map((item) => ({
           value: item.code,
-          label: `${item.code} - ${item.name}`,
+          label: item.name || item.code,
         })),
     [branches],
   )
@@ -1227,6 +1230,16 @@ export default function StoreOrdersPage() {
     void loadData({ pageNumber: 1, storeCodes: nextStoreCodes.length ? nextStoreCodes : undefined })
   }
 
+  // 左侧分店列表：默认单选（点一下切换，「全部分店」= 不限）；列表头部的「多选」开关打开后可勾选多家一起看。
+  // 筛选状态仍是 selectedStoreCodes：单选 = 恰好一家，多选 = 任意家，空 = 全部分店。
+  const storeSidebar = useStoreSidebar({
+    options: sidebarStoreOptions,
+    value: selectedStoreCodes.length === 1 ? selectedStoreCodes[0] : undefined,
+    onSelect: (code) => handleStoreCodesChange(code ? [code] : []),
+    allowAll: true,
+    multi: { values: selectedStoreCodes, onChange: handleStoreCodesChange },
+  })
+
   const handleDateRangeChange = (nextRange: RangeValue) => {
     setDateRange(nextRange)
     void loadData({
@@ -1262,14 +1275,13 @@ export default function StoreOrdersPage() {
   }, [keyword, keywordInput])
 
   // 「清空全部」清掉已生效筛选条里列出的条件（分店、订单日期、更多筛选）；状态页签、搜索词和排序保持不变。
+  // 分店在左侧列表里选、不在筛选条里显示，所以「清除全部」不动分店（要看全部分店点列表里的「全部分店」）
   const clearAllFilters = () => {
-    setSelectedStoreCodes([])
     setDateRange(null)
     setColumnFilters({})
     setMoreFiltersDraft({})
     void loadData({
       pageNumber: 1,
-      storeCodes: undefined,
       startDate: undefined,
       endDate: undefined,
       columnFilters: undefined,
@@ -2117,22 +2129,6 @@ export default function StoreOrdersPage() {
 
   // 已生效筛选条：顶部分店、订单日期与收进「更多筛选」的条件都在这里显示，可逐个移除。
   const activeFilterItems: ActiveFilterItem[] = []
-  if (selectedStoreCodes.length) {
-    const storeNames = selectedStoreCodes.map((code) => branchMap[code] || code)
-    activeFilterItems.push({
-      key: 'stores',
-      label: t('warehouseUi.storeOrders.storeLabel'),
-      value: storeNames.length > 2
-        ? t('warehouseUi.storeOrders.storeChipMany', {
-            first: storeNames.slice(0, 2).join('、'),
-            count: storeNames.length,
-            rest: storeNames.length - 2,
-          })
-        : storeNames.join('、'),
-      source: 'toolbar',
-      onRemove: () => handleStoreCodesChange([]),
-    })
-  }
   const orderDateSummary = formatStoreOrderDateRange(
     dateRange?.[0]?.startOf('day').toISOString(),
     dateRange?.[1]?.endOf('day').toISOString(),
@@ -2333,6 +2329,8 @@ export default function StoreOrdersPage() {
         </div>
       }
     >
+      {/* 左侧分店列表 + 右侧订单面板（窄屏 / 收起时只有面板，分店按钮在工具栏里） */}
+      <StoreSidebarLayout docked={storeSidebar.docked} sidebar={storeSidebar.sidebar}>
       <section className="wh-orders-panel" aria-label={t('storeOrders.title')}>
         <div className="wh-orders-tabs">
           <StatusTabs
@@ -2354,21 +2352,8 @@ export default function StoreOrdersPage() {
             onChange={(event) => setKeywordInput(event.target.value)}
             onPressEnter={() => commitKeyword(keywordInput)}
           />
-          <Select
-            mode="multiple"
-            className="wh-orders-store-select"
-            prefix={<span className="wh-orders-field-prefix">{t('warehouseUi.storeOrders.storeLabel')}</span>}
-            aria-label={t('warehouseUi.storeOrders.storeLabel')}
-            value={selectedStoreCodes}
-            allowClear
-            showSearch
-            maxTagCount="responsive"
-            placeholder={t('storeOrders.allStores')}
-            optionFilterProp="label"
-            filterOption={filterStoreOption}
-            options={storeFilterOptions}
-            onChange={handleStoreCodesChange}
-          />
+          {/* 左侧列表收起（窄屏 / 用户点了收起）时，分店按钮就放在原来分店下拉的位置 */}
+          {storeSidebar.switcher}
           <DatePicker.RangePicker
             className={`wh-orders-date-range${orderDateSummary ? ' is-active' : ''}`}
             prefix={<span className="wh-orders-field-prefix">{t('warehouseUi.storeOrders.orderDateLabel')}</span>}
@@ -2521,6 +2506,7 @@ export default function StoreOrdersPage() {
           </SortableContext>
         </DndContext>
       </section>
+      </StoreSidebarLayout>
 
       <StorePickerModal
         open={storePickerOpen}

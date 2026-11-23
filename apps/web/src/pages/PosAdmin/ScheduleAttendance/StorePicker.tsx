@@ -1,5 +1,5 @@
 import { DoubleLeftOutlined, PushpinOutlined, SearchOutlined } from '@ant-design/icons'
-import { Input, Tooltip } from 'antd'
+import { Checkbox, Input, Switch, Tooltip } from 'antd'
 import type { InputRef } from 'antd'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -14,6 +14,21 @@ import './registerScheduleAttendanceMessages'
  * 分店列表：侧栏（docked）和工具栏按钮弹出的弹层（floating）共用。
  * 点一下即切换；「最近使用」置顶；可按名称 / 编码搜索，↑↓ 移动、回车选中。
  */
+/**
+ * 可选的「多选」模式（默认不传 = 只能单选，其他页面不受影响）：
+ * 头部多一个「多选」开关；开着时每家分店前有勾选框，点一下勾选 / 取消，「全部分店」= 清空选择（不限分店）。
+ */
+export interface StorePickerMulti {
+  enabled: boolean
+  /** 已勾选的分店代码（按点选顺序）。 */
+  selected: readonly string[]
+  onEnabledChange: (enabled: boolean) => void
+  /** 勾选 / 取消勾选一家。 */
+  onToggle: (storeCode: string) => void
+  /** 点了「全部分店」：清空选择。 */
+  onClear: () => void
+}
+
 interface StorePickerProps {
   variant: 'docked' | 'floating'
   options: readonly StorePickerOption[]
@@ -33,6 +48,8 @@ interface StorePickerProps {
   badges?: Readonly<Record<string, ReactNode>>
   /** 是否记住「上次所选分店」：排班考勤类页面会记，底部提示才写「记住上次分店」；设备管理等页面不记，传 false。 */
   remembersLastStore?: boolean
+  /** 多选模式；不传则只能单选。 */
+  multi?: StorePickerMulti
 }
 
 interface FlatItem {
@@ -44,7 +61,8 @@ interface FlatItem {
 
 const ALL_KEY = '__all__'
 
-export default function StorePicker({ variant, options, value, recent, allowAll, onSelect, onToggleDock, autoFocus, badges, remembersLastStore = true }: StorePickerProps) {
+export default function StorePicker({ variant, options, value, recent, allowAll, onSelect, onToggleDock, autoFocus, badges, remembersLastStore = true, multi }: StorePickerProps) {
+  const multiOn = multi?.enabled === true
   const { t } = useTranslation()
   const [keyword, setKeyword] = useState('')
   const [activeIndex, setActiveIndex] = useState(-1)
@@ -79,6 +97,12 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
 
   const choose = (item: FlatItem | undefined) => {
     if (!item) return
+    if (multi && multiOn) {
+      // 多选：勾选 / 取消 / 清空；不清搜索词，方便连着勾几家
+      if (item.value === undefined) multi.onClear()
+      else multi.onToggle(item.value)
+      return
+    }
     onSelect(item.value)
     setKeyword('')
   }
@@ -94,7 +118,10 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
   }
 
   const renderItem = (item: FlatItem, index: number) => {
-    const selected = item.value === value
+    // 多选开着：「全部分店」= 一家都没勾；其余按是否已勾选。单选：与所选值相等。
+    const selected = multi && multiOn
+      ? item.value === undefined ? multi.selected.length === 0 : multi.selected.includes(item.value)
+      : item.value === value
     const badge = badges?.[item.value ?? ALL_STORES_TOKEN]
     return (
       <button
@@ -107,6 +134,8 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
         onClick={() => choose(item)}
         onMouseEnter={() => setActiveIndex(index)}
       >
+        {/* 勾选框只是状态展示，点击由整行按钮处理（不参与 Tab 顺序） */}
+        {multiOn && item.value !== undefined ? <Checkbox checked={selected} tabIndex={-1} style={{ pointerEvents: 'none' }} /> : null}
         <span className="ssp-item-name">{item.label}</span>
         {item.code ? <span className="ssp-item-code">{item.code}</span> : null}
         {/* 数字 0 也要显示（某家店 0 台 / 0 条）：只排除没给、null、false */}
@@ -124,6 +153,12 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
       <div className="ssp-head">
         <span className="ssp-title">{t('posAdmin.scheduleAttendance.storePicker.title')}</span>
         <span className="ssp-count">{options.length}</span>
+        {multi ? (
+          <label className="ssp-multi">
+            <Switch size="small" checked={multiOn} onChange={multi.onEnabledChange} aria-label={t('posAdmin.scheduleAttendance.storePicker.multi')} />
+            <span>{t('posAdmin.scheduleAttendance.storePicker.multi')}</span>
+          </label>
+        ) : null}
         {variant === 'docked' ? (
           <Tooltip title={t('posAdmin.scheduleAttendance.storePicker.collapse')}>
             <button type="button" className="ssp-dock-toggle" aria-label={t('posAdmin.scheduleAttendance.storePicker.collapse')} onClick={onToggleDock}>
@@ -165,7 +200,13 @@ export default function StorePicker({ variant, options, value, recent, allowAll,
           keyword.trim() ? <div className="ssp-empty">{t('posAdmin.scheduleAttendance.storePicker.empty')}</div> : null
         )}
       </div>
-      {variant === 'docked' ? <div className="ssp-foot">{t(remembersLastStore ? 'posAdmin.scheduleAttendance.storePicker.footHint' : 'posAdmin.scheduleAttendance.storePicker.footHintNoMemory')}</div> : null}
+      {variant === 'docked' ? (
+        <div className="ssp-foot">
+          {t(multiOn
+            ? 'posAdmin.scheduleAttendance.storePicker.footHintMulti'
+            : remembersLastStore ? 'posAdmin.scheduleAttendance.storePicker.footHint' : 'posAdmin.scheduleAttendance.storePicker.footHintNoMemory')}
+        </div>
+      ) : null}
     </div>
   )
 }

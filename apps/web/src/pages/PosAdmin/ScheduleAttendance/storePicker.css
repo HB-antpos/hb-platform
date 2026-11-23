@@ -60,6 +60,21 @@
   align-items: center;
   justify-content: center;
 }
+.ssp-multi {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  user-select: none;
+}
+/* 有「多选」开关时，开关占右对齐，后面的收起 / 固定按钮只留一点间距 */
+.ssp-multi + .ssp-dock-toggle,
+.ssp-multi + .ssp-pin {
+  margin-left: 8px;
+}
 .ssp-dock-toggle:hover {
   color: #1677ff;
   border-color: #91caff;

@@ -5,14 +5,17 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import StorePicker from './StorePicker'
+import type { StorePickerMulti } from './StorePicker'
 import {
   STORAGE_KEYS,
+  collapseToSingleStore,
   getBrowserStorage,
   parseRecentStores,
   parseSidebarPreference,
   pushRecentStore,
   safeStorageGet,
   safeStorageSet,
+  toggleStoreCode,
 } from './storePickerLogic'
 import type { SidebarPreference, StorePickerOption } from './storePickerLogic'
 
@@ -28,6 +31,15 @@ interface UseStoreSidebarInput {
   badges?: Readonly<Record<string, ReactNode>>
   /** 收起后分店按钮上的文字；缺省按所选分店 / 「全部分店」显示。当前筛选不是单店也不是全部（例如旧链接带了多家）时用它说明。 */
   valueLabel?: string
+  /**
+   * 可选的多选模式（不传 = 只能单选，其他页面不变）：列表头部出现「多选」开关，默认关闭、不记忆。
+   * 开着时勾选多家，values 是已选的分店代码、onChange 收到新的完整选择（空数组 = 不限分店）；
+   * 关掉开关时若已选多家，只保留第一家（再走 onChange）。单选的 value / onSelect 仍照常使用。
+   */
+  multi?: {
+    values: readonly string[]
+    onChange: (storeCodes: string[]) => void
+  }
 }
 
 export interface StoreSidebar {
@@ -44,7 +56,7 @@ export interface StoreSidebar {
  * 组件与样式沿用排班考勤的 StorePicker，并共用其「最近使用」「侧栏收起 / 固定」两项界面偏好，
  * 各页切换时习惯不丢；但**不读写「上次所选分店」**——这些页默认就该看全部分店，不能被考勤页上次选的店带偏。
  */
-export function useStoreSidebar({ options, value, onSelect, allowAll, badges, valueLabel }: UseStoreSidebarInput): StoreSidebar {
+export function useStoreSidebar({ options, value, onSelect, allowAll, badges, valueLabel, multi }: UseStoreSidebarInput): StoreSidebar {
   const { t } = useTranslation()
   const storage = useMemo(() => getBrowserStorage(), [])
   const screens = Grid.useBreakpoint()
@@ -62,6 +74,34 @@ export function useStoreSidebar({ options, value, onSelect, allowAll, badges, va
       return next
     })
   }, [onSelect, storage])
+
+  // 多选开关：每次进页面都是关闭，不写存储（用户要求默认关闭）
+  const [multiEnabled, setMultiEnabled] = useState(false)
+  const multiProps = useMemo<StorePickerMulti | undefined>(() => {
+    if (!multi) return undefined
+    return {
+      enabled: multiEnabled,
+      selected: multi.values,
+      onEnabledChange: (next) => {
+        setMultiEnabled(next)
+        // 关掉多选：已选多家只留第一家，避免单选模式下出现「选了多家」的状态
+        if (!next && multi.values.length > 1) multi.onChange(collapseToSingleStore(multi.values))
+      },
+      onToggle: (code) => {
+        const next = toggleStoreCode(multi.values, code)
+        multi.onChange(next)
+        // 新勾上的分店记入「最近使用」
+        if (next.includes(code)) {
+          setRecentStores((previous) => {
+            const recent = pushRecentStore(previous, code)
+            safeStorageSet(storage, STORAGE_KEYS.recentStores, JSON.stringify(recent))
+            return recent
+          })
+        }
+      },
+      onClear: () => multi.onChange([]),
+    }
+  }, [multi, multiEnabled, storage])
 
   const setDock = useCallback((next: Exclude<SidebarPreference, null>) => {
     setPreference(next)
@@ -81,14 +121,18 @@ export function useStoreSidebar({ options, value, onSelect, allowAll, badges, va
       allowAll={allowAll}
       badges={badges}
       remembersLastStore={false}
+      multi={multiProps}
       onSelect={select}
       onToggleDock={() => setDock('floating')}
     />
   ) : null
 
-  const label = valueLabel ?? (value
-    ? options.find((option) => option.value === value)?.label ?? value
-    : t('posAdmin.scheduleAttendance.storePicker.allStores'))
+  const label = valueLabel
+    ?? (multi && multi.values.length > 1
+      ? t('posAdmin.scheduleAttendance.storePicker.multiLabel', { count: multi.values.length })
+      : value
+        ? options.find((option) => option.value === value)?.label ?? value
+        : t('posAdmin.scheduleAttendance.storePicker.allStores'))
   const switcher = !docked && options.length > 1 ? (
     <Popover
       trigger="click"
@@ -108,6 +152,7 @@ export function useStoreSidebar({ options, value, onSelect, allowAll, badges, va
           allowAll={allowAll}
           badges={badges}
           remembersLastStore={false}
+          multi={multiProps}
           onSelect={select}
           onToggleDock={() => setDock('docked')}
         />
