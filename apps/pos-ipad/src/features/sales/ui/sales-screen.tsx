@@ -52,6 +52,7 @@ import {
   SalesSearchKeyboard,
   type SalesSearchKey,
 } from "./sales-search-keyboard";
+import { useDelayedVisibility } from "./use-delayed-visibility";
 
 import type { CartLine, CartSnapshot } from "@/core/contracts";
 import type { NewTransactionGate } from "@/core/contracts/app-updates";
@@ -89,6 +90,8 @@ import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
+const CATALOG_VERIFYING_SHOW_DELAY_MS = 300;
+const CATALOG_VERIFYING_MIN_VISIBLE_MS = 500;
 const QUICK_DISCOUNTS = [0, 1_000, 2_000, 3_000, 4_000, 5_000] as const;
 const QUICK_ORDER_DISCOUNTS = [1_000, 2_000, 3_000, 4_000, 5_000] as const;
 const AVERAGE_CART_LINE_HEIGHT = 128;
@@ -333,6 +336,16 @@ export function SalesScreen({
   const newTransactionBlocked =
     cartEmpty && newTransactionGate?.canStartNewTransaction === false;
   const checkoutVerifying = state.phase === "verifying-checkout";
+  // 在线时每扫一枪都会后台核验（本地命中也要校准单价），通常几百毫秒就结束：
+  // 超过 300ms 才显示、显示后至少停 500ms，避免每枪都闪；点结账等待时立即显示。
+  const catalogVerifyingVisible = useDelayedVisibility(
+    state.pendingLookupCount > 0 || checkoutVerifying,
+    {
+      immediate: checkoutVerifying,
+      minVisibleMs: CATALOG_VERIFYING_MIN_VISIBLE_MS,
+      showDelayMs: CATALOG_VERIFYING_SHOW_DELAY_MS,
+    },
+  );
   const cameraScannerActive = cameraScanner?.active === true;
   const closeCameraScanner = cameraScanner?.onClose;
   const transactionActionsDisabled =
@@ -1501,21 +1514,34 @@ export function SalesScreen({
                 </View>
               </View>
             ) : null}
-            {state.pendingLookupCount > 0 || checkoutVerifying ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={styles.verifyingMessage}
-                testID="sales-catalog-verifying"
-              >
-                {t("catalog.verifying")}
-              </Text>
-            ) : null}
               </>
             )}
 
-            <Text style={styles.functionSectionTitle}>
-              {t("functions.saleActions")}
-            </Text>
+            {/* 核验提示放在标题行右侧：这一行高度固定，提示出现 / 消失不会推动下面的交易功能区。 */}
+            <View
+              style={styles.functionSectionHeader}
+              testID="sales-function-section-header"
+            >
+              <Text style={styles.functionSectionTitle}>
+                {t("functions.saleActions")}
+              </Text>
+              {catalogVerifyingVisible ? (
+                <View
+                  style={styles.verifyingIndicator}
+                  testID="sales-catalog-verifying-indicator"
+                >
+                  <ActivityIndicator color={posColors.mutedInk} size="small" />
+                  <Text
+                    accessibilityLiveRegion="polite"
+                    numberOfLines={1}
+                    style={styles.verifyingMessage}
+                    testID="sales-catalog-verifying"
+                  >
+                    {t("catalog.verifying")}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
             <View
               style={styles.functionGrid}
               testID="sales-transaction-functions"
@@ -3972,6 +3998,14 @@ const styles = createPosStyles((colors) => ({
     gap: 10,
     paddingBottom: 4,
   },
+  // 固定行高 = 小号转圈的高度：核验提示出现 / 消失时这一行不变高，下面的按钮区不跳动。
+  functionSectionHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+    minHeight: 20,
+  },
   functionSectionTitle: {
     color: colors.mutedInk,
     fontSize: 12.5,
@@ -4552,11 +4586,17 @@ const styles = createPosStyles((colors) => ({
     borderColor: colors.orange,
     color: colors.yellowInk,
   },
+  verifyingIndicator: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexShrink: 1,
+    gap: 6,
+    height: 20,
+  },
   verifyingMessage: {
     color: colors.mutedInk,
+    flexShrink: 1,
     fontSize: 12,
-    paddingVertical: 4,
-    textAlign: "center",
   },
   totalRule: {
     backgroundColor: colors.inverseSurface,
