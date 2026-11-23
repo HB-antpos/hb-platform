@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   waitFor,
+  within,
 } from "@testing-library/react-native";
 import { FlatList, ScrollView, StyleSheet, TextInput } from "react-native";
 
@@ -2978,15 +2979,18 @@ describe("SalesScreen", () => {
       />,
     );
 
-    expect(screen.getByTestId("sales-catalog-verifying").props.children).toBe(
-      "正在核验商品…",
-    );
+    // 后台核验刚开始：在延迟期内不显示，免得每扫一枪都闪。
+    expect(screen.queryByTestId("sales-catalog-verifying")).toBeNull();
     await fireEvent.press(screen.getByTestId("sales-open-payment"));
     await act(async () => {
       await Promise.resolve();
     });
 
     expect(salesPresenter.getState().phase).toBe("verifying-checkout");
+    // 点了结账在等结果：立即显示。
+    expect(screen.getByTestId("sales-catalog-verifying").props.children).toBe(
+      "正在核验商品…",
+    );
     expect(screen.getByTestId("sales-search-input").props.editable).toBe(false);
     expect(
       screen.getByTestId("sales-open-payment").props.accessibilityState,
@@ -3017,6 +3021,95 @@ describe("SalesScreen", () => {
 
     salesPresenter.destroy();
     await screen.unmount();
+  });
+
+  it("扫码后台核验提示延迟 300ms 出现、至少停留 500ms，且放在固定高度的标题行里不推动交易功能区", async () => {
+    usePosShellStore.getState().setConnectivity("online");
+    let pendingCount = 0;
+    const pendingListeners = new Set<() => void>();
+    const setPending = async (count: number) => {
+      await act(async () => {
+        pendingCount = count;
+        pendingListeners.forEach((listener) => listener());
+      });
+    };
+    const advance = async (ms: number) => {
+      await act(async () => {
+        jest.advanceTimersByTime(ms);
+      });
+    };
+    const salesPresenter = presenter(new ScreenCartPort(cartSnapshot()), {
+      workflow: {
+        ...workflow(),
+        getPendingCatalogWorkCount: () => pendingCount,
+        subscribePendingCatalogWork(listener) {
+          pendingListeners.add(listener);
+          return () => pendingListeners.delete(listener);
+        },
+      },
+    });
+    jest.useFakeTimers();
+    try {
+      const screen = await render(
+        <SalesScreen
+          locale="zh"
+          presenter={salesPresenter}
+          showStatusStrip={false}
+        />,
+      );
+
+      // 提示挂在「交易功能」标题行里，而不是功能区里单独一行：出现 / 消失都不会改变按钮区的位置。
+      const header = screen.getByTestId("sales-function-section-header");
+      expect(within(header).getByText("交易功能")).toBeTruthy();
+      expect(StyleSheet.flatten(header.props.style)).toMatchObject({
+        minHeight: 20,
+      });
+
+      // 1. 很快结束的核验（< 300ms）：从头到尾都不显示。
+      await setPending(1);
+      await advance(200);
+      expect(screen.queryByTestId("sales-catalog-verifying")).toBeNull();
+      await setPending(0);
+      await advance(1_000);
+      expect(screen.queryByTestId("sales-catalog-verifying")).toBeNull();
+
+      // 2. 超过 300ms 才显示，且就在标题行里。
+      await setPending(1);
+      await advance(299);
+      expect(screen.queryByTestId("sales-catalog-verifying")).toBeNull();
+      await advance(1);
+      expect(
+        within(header).getByTestId("sales-catalog-verifying-indicator"),
+      ).toBeTruthy();
+      expect(screen.getByTestId("sales-catalog-verifying").props.children).toBe(
+        "正在核验商品…",
+      );
+
+      // 3. 显示 100ms 后核验结束：补足 500ms 再消失。
+      await advance(100);
+      await setPending(0);
+      await advance(399);
+      expect(screen.getByTestId("sales-catalog-verifying")).toBeTruthy();
+      await advance(1);
+      expect(screen.queryByTestId("sales-catalog-verifying")).toBeNull();
+
+      // 4. 隐藏倒计时期间又扫了一枪：继续显示，不先灭再亮。
+      await setPending(1);
+      await advance(300);
+      expect(screen.getByTestId("sales-catalog-verifying")).toBeTruthy();
+      await advance(500);
+      await setPending(0);
+      await setPending(1);
+      await advance(1_000);
+      expect(screen.getByTestId("sales-catalog-verifying")).toBeTruthy();
+      await setPending(0);
+      expect(screen.queryByTestId("sales-catalog-verifying")).toBeNull();
+
+      salesPresenter.destroy();
+      await screen.unmount();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("购物车行默认隐藏删除操作，左滑后才可删除", async () => {
