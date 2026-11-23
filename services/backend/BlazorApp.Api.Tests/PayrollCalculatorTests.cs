@@ -598,6 +598,40 @@ public sealed class PayrollCalculatorTests
     }
 
     [Fact]
+    public void 年假合计小时数摊算_整除_有余数_空合计_公假与周末不分摊()
+    {
+        var none = new HashSet<DateTime>();
+        // 11-17 周二 ~ 11-20 周五共 4 个工作日：合计 10 h → 每天 2.5 h。
+        var even = PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 11, 17), new DateTime(2026, 11, 20), none, 10m);
+        Assert.Equal(4, even.Count);
+        Assert.All(even.Values, hours => Assert.Equal(2.5m, hours));
+
+        // 合计 10.01 h：前三天向下取 2.50，余数补到最后一天 2.51，总和不变。
+        var remainder = PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 11, 17), new DateTime(2026, 11, 20), none, 10.01m);
+        Assert.Equal(10.01m, remainder.Values.Sum());
+        Assert.Equal(2.51m, remainder[new DateTime(2026, 11, 20)]);
+        Assert.Equal(2.5m, remainder[new DateTime(2026, 11, 17)]);
+
+        // 合计 38 h 摊 5 个工作日（含跨周末的区间）：每天 7.6，周末不出现。
+        var spanWeekend = PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 11, 16), new DateTime(2026, 11, 22), none, 38m);
+        Assert.Equal(5, spanWeekend.Count);
+        Assert.All(spanWeekend.Values, hours => Assert.Equal(7.6m, hours));
+        Assert.DoesNotContain(new DateTime(2026, 11, 21), spanWeekend.Keys);
+
+        // 旧数据没记合计：每个工作日 8 h，与改造前一致；老数据合计 = 工作日 × 8 摊出来也是每天 8。
+        var legacy = PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 11, 17), new DateTime(2026, 11, 20), none, null);
+        Assert.All(legacy.Values, hours => Assert.Equal(8m, hours));
+        var legacyTotal = PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 11, 17), new DateTime(2026, 11, 20), none, 32m);
+        Assert.All(legacyTotal.Values, hours => Assert.Equal(8m, hours));
+
+        // 公共假期的工作日不分摊；没有工作日时结果为空。
+        var withHoliday = PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 10, 5), new DateTime(2026, 10, 7), PublicHolidays, 12m);
+        Assert.Equal(2, withHoliday.Count);
+        Assert.Equal(12m, withHoliday.Values.Sum());
+        Assert.Empty(PayrollCalculator.SpreadAnnualLeaveHours(new DateTime(2026, 10, 10), new DateTime(2026, 10, 11), PublicHolidays, 8m));
+    }
+
+    [Fact]
     public void 病假工时_排班工时扣餐()
     {
         // 设计稿：10-19 09:00–15:00 → 5.5 h。

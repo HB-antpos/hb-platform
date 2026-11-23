@@ -459,18 +459,22 @@ export interface RevokeAttendanceManualEntryPayload {
 
 // ===== 补录带薪假（POST /managed/manual-leaves/preview | / | /revoke）=====
 
-/** 补录支持的假：带薪病假 / 带薪年假（休息）/ 年假发放。 */
-export type AttendanceManualLeaveType = 'PaidSick' | 'PaidAnnual' | 'AnnualCashOut'
+/** 补录支持的假：带薪病假 / 带薪年假。年假发放已取消（历史记录仍可能出现在工时表里，类型见 AttendancePaidLeaveType）。 */
+export type AttendanceManualLeaveType = 'PaidSick' | 'PaidAnnual'
 
 export interface AttendanceManualLeavePayload {
   storeCode: string
   userGuid: string
   leaveType: AttendanceManualLeaveType
-  /** 年假 / 年假发放的区间（YYYY-MM-DD）；病假不用，但字段仍要传。 */
+  /** 年假的区间（YYYY-MM-DD）；病假不用，但字段仍要传。 */
   startDate: string
   endDate: string
   /** 带薪病假要补录的日期（每天必须有本店已发布、没打卡的排班）。 */
   dates?: string[]
+  /** 带薪年假的合计小时数（整段区间的总数，不是每天）；不传 = 区间内工作日 × 8 h。 */
+  totalHours?: number
+  /** 带薪年假当天员工是否休息；不传按休息。false = 照常上班、年假另外加算。 */
+  restsOnLeaveDays?: boolean
   reason: string
   /** 保存必须带回预览返回的版本号。 */
   previewRevision?: string
@@ -482,7 +486,11 @@ export interface AttendanceManualLeavePreview {
   startDate: string
   endDate: string
   paidHours: number
-  /** 每天的带薪工时（周末 / 公共假期的年假日为 0）。 */
+  /** 带薪年假的默认合计（区间内工作日 × 8 h），用来预填合计小时数；病假为 0。 */
+  defaultPaidHours: number
+  /** 带薪年假当天是否休息（预览回显）。 */
+  restsOnLeaveDays: boolean
+  /** 每天的带薪工时（年假为合计摊出来的每天小时数；周末 / 公共假期为 0）。 */
   days: { date: string; hours: number }[]
   /** 病假没有医嘱：工时表该格会标「无医嘱」。 */
   noCertificate: boolean

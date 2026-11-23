@@ -123,12 +123,12 @@ export function manualPreviewHoursText(hours: number): string {
   return `${Math.round(hours * 100) / 100} h`
 }
 
-// ---------- 补录带薪假（病假 / 年假 / 年假发放）----------
+// ---------- 补录带薪假（病假 / 年假；年假发放已取消）----------
 
-/** 补录抽屉的模式：补工时，或补三种带薪假之一。 */
+/** 补录抽屉的模式：补工时，或补两种带薪假之一。 */
 export type ManualEntryMode = 'hours' | AttendanceManualLeaveType
 
-export const MANUAL_ENTRY_MODES: readonly ManualEntryMode[] = ['hours', 'PaidSick', 'PaidAnnual', 'AnnualCashOut']
+export const MANUAL_ENTRY_MODES: readonly ManualEntryMode[] = ['hours', 'PaidSick', 'PaidAnnual']
 
 /** 病假能补录的一天：员工「有排班、没打卡」的班（带排班时间，界面上显示「排 09:00–17:00」）。 */
 export interface SickEligibleDay {
@@ -149,11 +149,17 @@ export function collectSickEligibleDays(employee: AttendanceHoursEmployeeDto | u
     .sort((a, b) => a.date.localeCompare(b.date))
 }
 
-/** 补录假的表单：病假选若干天，年假 / 年假发放选一个起止区间。 */
+/** 补录假的表单：病假选若干天，年假选一个起止区间，另填合计小时数、员工当天是否休息。 */
 export interface ManualLeaveForm {
   sickDates: string[]
   range: [string, string] | null
+  /** 年假的合计小时数（整段区间的总数）；null = 没手填，用后端预览返回的默认值（工作日 × 8 h）。 */
+  totalHours: number | null
+  /** 年假当天员工是否休息；默认 true，关掉表示照常上班、年假另外加算。 */
+  rests: boolean
 }
+
+export const EMPTY_MANUAL_LEAVE_FORM: ManualLeaveForm = { sickDates: [], range: null, totalHours: null, rests: true }
 
 /** 表单是否填到了可以去预览的程度（原因另算：预览用占位原因，保存才要真实原因）。 */
 export function isManualLeaveFormReady(type: AttendanceManualLeaveType, form: ManualLeaveForm): boolean {
@@ -178,5 +184,15 @@ export function buildManualLeavePayload(input: {
     const dates = [...form.sickDates].sort()
     return { storeCode, userGuid, leaveType: type, startDate: dates[0] ?? '', endDate: dates[dates.length - 1] ?? '', dates, reason }
   }
-  return { storeCode, userGuid, leaveType: type, startDate: form.range?.[0] ?? '', endDate: form.range?.[1] ?? '', reason }
+  // 年假：没手填合计就不传（后端按工作日 × 8 h）；不休息才显式传 false，休息沿用后端默认。
+  return {
+    storeCode,
+    userGuid,
+    leaveType: type,
+    startDate: form.range?.[0] ?? '',
+    endDate: form.range?.[1] ?? '',
+    reason,
+    ...(form.totalHours !== null ? { totalHours: form.totalHours } : {}),
+    ...(form.rests ? {} : { restsOnLeaveDays: false }),
+  }
 }

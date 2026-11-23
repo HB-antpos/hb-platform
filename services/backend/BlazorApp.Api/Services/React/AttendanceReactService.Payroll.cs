@@ -325,7 +325,7 @@ namespace BlazorApp.Api.Services.React
 
         /// <summary>补录建的假（已批准且备注带「补录：」前缀）的留痕；员工自己申请的返回 null。</summary>
         private static AttendancePayrollDayManualEntryDto? ManualLeaveTrace(AttendanceLeaveRequest leave) =>
-            leave.ReviewRemark?.StartsWith(ManualLeaveRemarkPrefix, StringComparison.Ordinal) == true
+            IsManualLeave(leave)
                 ? new AttendancePayrollDayManualEntryDto
                 {
                     Reason = leave.Reason,
@@ -568,14 +568,22 @@ namespace BlazorApp.Api.Services.React
                 }
 
                 var isAnnual = leave.LeaveType is PaidAnnualLeaveType or AnnualCashOutLeaveType;
+                // 年假的合计小时数摊到整段区间的工作日（区间可能跨出本期，公共假期要按整段区间取，才能和保存时算的一致）。
+                // 老数据合计 = 工作日 × 8，摊出来仍是每天 8。
+                IReadOnlyDictionary<DateTime, decimal> annualSpread = new Dictionary<DateTime, decimal>();
+                if (isAnnual)
+                {
+                    var leaveStart = leave.StartDate.Date;
+                    var leaveEnd = leave.EndDate.Date;
+                    var leaveHolidays = leaveStart >= periodStart && leaveEnd <= periodEnd
+                        ? publicHolidaySet
+                        : (await LoadStorePublicHolidaysAsync(storeCode, leaveStart, leaveEnd)).Keys.ToHashSet();
+                    annualSpread = PayrollCalculator.SpreadAnnualLeaveHours(leaveStart, leaveEnd, leaveHolidays, leave.PaidHours);
+                }
                 for (var date = Max(leave.StartDate.Date, periodStart); date <= Min(leave.EndDate.Date, periodEnd); date = date.AddDays(1))
                 {
                     var day = employee.Days[date];
-                    var hours = isAnnual
-                        && date.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday
-                        && !publicHolidaySet.Contains(date)
-                            ? PayrollCalculator.AnnualLeaveHoursPerWorkday
-                            : 0m;
+                    var hours = annualSpread.GetValueOrDefault(date);
                     // 年假发放照常上班：当天已有病假 / 年假标记时不覆盖，只另计工时。
                     day.Leave ??= new AttendancePayrollDayLeaveDto
                     {
@@ -585,8 +593,8 @@ namespace BlazorApp.Api.Services.React
                         LeaveGuid = leave.LeaveGuid,
                         ManualEntry = ManualLeaveTrace(leave),
                     };
-                    // 带薪年假休息的工作日同样不再算「有排班没打卡」；年假发放照常上班，不动。
-                    if (leave.LeaveType == PaidAnnualLeaveType && hours > 0)
+                    // 带薪年假休息的工作日同样不再算「有排班没打卡」；年假发放、补录时选了「不休息」的年假照常上班，不动。
+                    if (leave.LeaveType == PaidAnnualLeaveType && hours > 0 && !IsManualNoRestAnnual(leave))
                     {
                         day.MissingPunch = false;
                     }

@@ -399,7 +399,9 @@ namespace BlazorApp.Api.Tests
             DateTime? end = null,
             DateTime[]? sickDates = null,
             string reason = "员工忘记申请，已电话确认",
-            string userGuid = "staff-user")
+            string userGuid = "staff-user",
+            decimal? totalHours = null,
+            bool? rests = null)
         {
             var from = (start ?? ManualEntryWorkDate).Date;
             return new CreateAttendanceManualLeaveDto
@@ -411,6 +413,8 @@ namespace BlazorApp.Api.Tests
                 EndDate = (end ?? from).Date,
                 Dates = sickDates?.ToList(),
                 Reason = reason,
+                TotalHours = totalHours,
+                RestsOnLeaveDays = rests,
             };
         }
 
@@ -534,7 +538,7 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
-        public async Task 补录年假_休息的工作日已有打卡_拒绝_年假发放不受此限()
+        public async Task 补录年假_休息的工作日已有打卡_拒绝_选了不休息则不受此限()
         {
             await SeedPayrollStoreAsync();
             await SeedScheduleAsync("sched-worked", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
@@ -543,28 +547,117 @@ namespace BlazorApp.Api.Tests
             ).ExecuteCommandAsync();
 
             var rest = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual"));
-            var cashOut = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut"));
+            var noRest = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", rests: false));
 
             Assert.Equal("ANNUAL_LEAVE_HAS_PUNCHES", rest.ErrorCode);
-            Assert.True(cashOut.Success, $"{cashOut.ErrorCode}: {cashOut.Message}");
+            Assert.True(noRest.Success, $"{noRest.ErrorCode}: {noRest.Message}");
+            Assert.False(noRest.Data!.RestsOnLeaveDays);
         }
 
         [Fact]
-        public async Task 补录请假_与已有病假或年假重叠_拒绝_年假发放只和年假发放互斥()
+        public async Task 补录请假_与已有病假或年假重叠_拒绝_不休息的年假同样占天()
         {
             await SeedPayrollStoreAsync();
             Assert.True((await SaveManualLeaveAsync(
                 Manager(), ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14)))).Success);
 
             var overlap = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 14), new DateTime(2026, 10, 15)));
-            var cashOut = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14)));
+            var overlapNoRest = await Manager().PreviewManagedManualLeaveAsync(
+                ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14), rests: false));
 
             Assert.Equal("LEAVE_OVERLAP", overlap.ErrorCode);
-            Assert.True(cashOut.Success, $"{cashOut.ErrorCode}: {cashOut.Message}");
-            Assert.True((await SaveManualLeaveAsync(
-                Manager(), ManualLeaveRequest("AnnualCashOut", new DateTime(2026, 10, 13), new DateTime(2026, 10, 14)))).Success);
-            var again = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut", new DateTime(2026, 10, 14)));
-            Assert.Equal("LEAVE_OVERLAP", again.ErrorCode);
+            Assert.Equal("LEAVE_OVERLAP", overlapNoRest.ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录年假_指定合计小时数_平均摊到每个工作日_工资表与保存金额一致()
+        {
+            await SeedPayrollStoreAsync();
+            // 10-13 周二 ~ 10-16 周五共 4 个工作日；默认 32 h，这里指定合计 10.01 h（不是每天）。
+            var request = ManualLeaveRequest("PaidAnnual", new DateTime(2026, 10, 13), new DateTime(2026, 10, 16), totalHours: 10.01m);
+            var preview = await Manager().PreviewManagedManualLeaveAsync(request);
+
+            Assert.True(preview.Success, $"{preview.ErrorCode}: {preview.Message}");
+            Assert.Equal(10.01m, preview.Data!.PaidHours);
+            Assert.Equal(32m, preview.Data.DefaultPaidHours);
+            Assert.Equal(10.01m, preview.Data.Days.Sum(item => item.Hours));
+            Assert.Equal(2.51m, preview.Data.Days.Last().Hours);
+
+            var saved = await SaveManualLeaveAsync(Manager(), request);
+            Assert.True(saved.Success, $"{saved.ErrorCode}: {saved.Message}");
+            Assert.Equal(10.01m, saved.Data!.PaidHours);
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+            var staff = hours.Data!.Employees.Single(item => item.UserGuid == "staff-user");
+            Assert.Equal(2.5m, staff.Days.Single(item => item.Date == new DateTime(2026, 10, 13)).Leave!.Hours);
+            Assert.Equal(2.51m, staff.Days.Single(item => item.Date == new DateTime(2026, 10, 16)).Leave!.Hours);
+            Assert.Equal(10.01m, staff.Days.Where(item => item.Leave?.Type == "PaidAnnual").Sum(item => item.Leave!.Hours));
+        }
+
+        [Fact]
+        public async Task 补录年假_合计小时数必须大于0且不超过区间天数乘24()
+        {
+            await SeedPayrollStoreAsync();
+            var from = new DateTime(2026, 10, 13);
+            var to = new DateTime(2026, 10, 14);
+
+            Assert.Equal("ANNUAL_LEAVE_HOURS_INVALID",
+                (await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", from, to, totalHours: 0m))).ErrorCode);
+            Assert.Equal("ANNUAL_LEAVE_HOURS_INVALID",
+                (await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", from, to, totalHours: -1m))).ErrorCode);
+            // 2 天 × 24 = 48：48 可以，48.01 不行。
+            Assert.True((await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", from, to, totalHours: 48m))).Success);
+            Assert.Equal("ANNUAL_LEAVE_HOURS_TOO_MANY",
+                (await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("PaidAnnual", from, to, totalHours: 48.01m))).ErrorCode);
+        }
+
+        [Fact]
+        public async Task 补录年假_选不休息_不标不能上班_不清未打卡_仍按小时数计入_撤销可用()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedScheduleAsync("sched-work", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
+
+            var saved = await SaveManualLeaveAsync(
+                Manager(), ManualLeaveRequest("PaidAnnual", totalHours: 4m, rests: false));
+
+            Assert.True(saved.Success, $"{saved.ErrorCode}: {saved.Message}");
+            var leave = Assert.Single(await _db.Queryable<AttendanceLeaveRequest>().ToListAsync());
+            Assert.Equal("补录（不休息）：员工忘记申请，已电话确认", leave.ReviewRemark);
+            Assert.Equal(4m, leave.PaidHours);
+            // 不休息：不写「不能上班」。
+            Assert.Empty(await _db.Queryable<AttendanceAvailability>().Where(item => item.SourceLeaveGuid == leave.LeaveGuid).ToListAsync());
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+            var day = hours.Data!.Employees.Single(item => item.UserGuid == "staff-user").Days
+                .Single(item => item.Date == ManualEntryWorkDate);
+            Assert.Equal(4m, day.Leave!.Hours);
+            Assert.NotNull(day.Leave.ManualEntry);
+            // 员工照常上班：排班没打卡仍然提示未打卡（休息的年假才会清掉）。
+            Assert.True(day.MissingPunch);
+
+            // 同样能用补录的撤销入口撤销。
+            var revoke = await Manager().RevokeManagedManualLeaveAsync(new RevokeAttendanceManualLeaveDto { StoreCode = "BRI", LeaveGuid = leave.LeaveGuid });
+            Assert.True(revoke.Success, $"{revoke.ErrorCode}: {revoke.Message}");
+            Assert.Equal("Revoked", await _db.Queryable<AttendanceLeaveRequest>()
+                .Where(item => item.LeaveGuid == leave.LeaveGuid).Select(item => item.Status).FirstAsync());
+        }
+
+        [Fact]
+        public async Task 年假发放已取消_补录与员工申请都拒绝ANNUAL_CASH_OUT_RETIRED()
+        {
+            await SeedPayrollStoreAsync();
+
+            var manual = await Manager().PreviewManagedManualLeaveAsync(ManualLeaveRequest("AnnualCashOut"));
+            Assert.Equal("ANNUAL_CASH_OUT_RETIRED", manual.ErrorCode);
+
+            var employee = await Staff().CreateMyLeaveRequestAsync(new CreateAttendanceLeaveRequestDto
+            {
+                StoreCode = "BRI",
+                LeaveType = "AnnualCashOut",
+                StartDate = new DateTime(2026, 11, 17),
+                EndDate = new DateTime(2026, 11, 18),
+            });
+            Assert.False(employee.Success);
+            Assert.Equal("ANNUAL_CASH_OUT_RETIRED", employee.ErrorCode);
+            Assert.Empty(await _db.Queryable<AttendanceLeaveRequest>().ToListAsync());
         }
 
         [Fact]

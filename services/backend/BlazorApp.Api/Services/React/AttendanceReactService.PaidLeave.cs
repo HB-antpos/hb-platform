@@ -178,27 +178,18 @@ namespace BlazorApp.Api.Services.React
             var start = request.StartDate.Date;
             var end = request.EndDate.Date;
             var days = (end - start).Days + 1;
-            if (leaveType == PaidAnnualLeaveType)
+            // 年假发放已取消：新申请一律拒绝（旧版手机端仍可能提交，这里统一挡住）；历史记录不受影响。
+            if (leaveType == AnnualCashOutLeaveType)
             {
-                if (start < storeToday.AddDays(Math.Max(0, settings.AnnualLeaveLeadWeeks) * 7))
-                {
-                    return Fail($"带薪年假须提前 {settings.AnnualLeaveLeadWeeks} 周以上申请", "ANNUAL_LEAVE_LEAD_TIME");
-                }
-                if (days > Math.Max(1, settings.AnnualLeaveMaxWeeks) * 7)
-                {
-                    return Fail($"带薪年假单次最多 {settings.AnnualLeaveMaxWeeks} 周", "ANNUAL_LEAVE_TOO_LONG");
-                }
+                return Fail("年假发放已取消，请改为申请带薪年假", "ANNUAL_CASH_OUT_RETIRED");
             }
-            else
+            if (start < storeToday.AddDays(Math.Max(0, settings.AnnualLeaveLeadWeeks) * 7))
             {
-                if (start < storeToday.AddDays(Math.Max(0, settings.AnnualCashOutLeadDays)))
-                {
-                    return Fail($"年假发放须提前 {settings.AnnualCashOutLeadDays} 天以上申请", "ANNUAL_CASH_OUT_LEAD_TIME");
-                }
-                if (days > Math.Max(1, settings.AnnualCashOutMaxWeeks) * 7)
-                {
-                    return Fail($"年假发放单次最多 {settings.AnnualCashOutMaxWeeks} 周", "ANNUAL_CASH_OUT_TOO_LONG");
-                }
+                return Fail($"带薪年假须提前 {settings.AnnualLeaveLeadWeeks} 周以上申请", "ANNUAL_LEAVE_LEAD_TIME");
+            }
+            if (days > Math.Max(1, settings.AnnualLeaveMaxWeeks) * 7)
+            {
+                return Fail($"带薪年假单次最多 {settings.AnnualLeaveMaxWeeks} 周", "ANNUAL_LEAVE_TOO_LONG");
             }
             if (attachments.Count > MaxLeaveCertificatePhotos)
             {
