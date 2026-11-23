@@ -343,7 +343,7 @@ async function printWithJsLayout(
   kind: JsLabelKind,
   build: (context: LabelBuildContext) => Promise<LabelDoc>
 ): Promise<boolean | null> {
-  if (!isJsLabelLayoutEnabled(kind)) return null;
+  if (!isJsLabelLayoutEnabled(kind, Platform.OS)) return null;
   const info = await getLabelRenderInfo();
   if (!info || !nativeModule) return null;
 

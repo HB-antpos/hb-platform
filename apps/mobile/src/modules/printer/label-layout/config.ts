@@ -2,18 +2,31 @@ import type { LabelGraphicsMode } from "./label-doc";
 
 export type JsLabelKind = "product" | "discount" | "clearance" | "bigDiscount" | "warehouseProduct" | "warehouseLocation";
 
+export type JsLabelPlatform = "android" | "ios";
+
 /**
- * 每种标签是否改走 JS 排版（P1：全部关闭，线上仍是原生排版）。
- * 真机对纸确认某种标签与旧版一致后，把它改成 true 发 OTA 即可；有问题改回 false 再发 OTA 回退。
+ * 每个平台、每种标签是否改走 JS 排版。真机对纸确认与旧版一致后改成 true 发 OTA；有问题改回 false 再发 OTA 回退。
  * 只在新原生包（getLabelRenderInfo 可用）上生效，旧包始终走原生排版。
+ * - 安卓：2026-11-23 TC26 对纸包（每次先 JS 后原生两张）6 种全部一致，已全开；
+ * - iOS：还没在 iPhone 上对纸，先保持原生排版，等 iOS 新包进 TestFlight 对纸后再开。
  */
-export const JS_LABEL_LAYOUT: Readonly<Record<JsLabelKind, boolean>> = {
-  product: false,
-  discount: false,
-  clearance: false,
-  bigDiscount: false,
-  warehouseProduct: false,
-  warehouseLocation: false,
+export const JS_LABEL_LAYOUT: Readonly<Record<JsLabelPlatform, Readonly<Record<JsLabelKind, boolean>>>> = {
+  android: {
+    product: true,
+    discount: true,
+    clearance: true,
+    bigDiscount: true,
+    warehouseProduct: true,
+    warehouseLocation: true,
+  },
+  ios: {
+    product: false,
+    discount: false,
+    clearance: false,
+    bigDiscount: false,
+    warehouseProduct: false,
+    warehouseLocation: false,
+  },
 };
 
 /**
@@ -34,8 +47,12 @@ export function setJsLabelOverrides(next: JsLabelOverrides) {
   overrides = { layout: { ...next.layout }, graphicsMode: next.graphicsMode };
 }
 
-export function isJsLabelLayoutEnabled(kind: JsLabelKind) {
-  return overrides.layout?.[kind] ?? JS_LABEL_LAYOUT[kind];
+/** platform 取 Platform.OS；安卓 / iOS 以外（web 等）一律不走 JS 排版。运行时覆盖不分平台（只供测试 / 对纸）。 */
+export function isJsLabelLayoutEnabled(kind: JsLabelKind, platform: string) {
+  const override = overrides.layout?.[kind];
+  if (override !== undefined) return override;
+  if (platform !== "android" && platform !== "ios") return false;
+  return JS_LABEL_LAYOUT[platform][kind];
 }
 
 export function jsLabelGraphicsMode(): LabelGraphicsMode {
