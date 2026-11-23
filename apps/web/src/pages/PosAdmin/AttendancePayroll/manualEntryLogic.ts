@@ -84,6 +84,20 @@ export function collectMissingPunches(employees: readonly AttendanceHoursEmploye
   return items.sort((a, b) => a.date.localeCompare(b.date) || a.userName.localeCompare(b.userName))
 }
 
+/**
+ * 补录抽屉用的工时数据必须就是「所看周期」的：只有周期起点和周数都对得上才返回，否则返回 null。
+ * 在「工资表」页签翻期只会重载工资数据，工时数据（hours）可能还停在之前那一期；
+ * 直接喂给抽屉会让日期可选范围、每天的状态、员工的排班全是旧一期的（比如切到上周后只能选本周的今天）。
+ */
+export function pickHoursInView<T extends { periodStart: string; weeks: number }>(
+  hours: T | null | undefined,
+  periodStart: string | undefined,
+  weeks: number,
+): T | null {
+  if (!hours || !periodStart) return null
+  return hours.periodStart === periodStart && hours.weeks === weeks ? hours : null
+}
+
 export type ManualEntryCellKind = 'missing' | 'addable' | 'none'
 
 /**
