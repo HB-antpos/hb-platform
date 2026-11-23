@@ -17,26 +17,40 @@ const createStoreCatchStart = storePickerSource.indexOf('} catch (error) {', cre
 const createStoreFinallyStart = storePickerSource.indexOf('} finally {', createStoreCatchStart)
 const createStoreCatchSource = storePickerSource.slice(createStoreCatchStart, createStoreFinallyStart)
 
+// 分店筛选已改为页面左侧的分店列表（单选为主，列表头部「多选」开关默认关闭）：选项先构建稳定排序结果，列表里名字在前、编码另行显示
 assert(
-  source.includes('const storeFilterOptions = useMemo('),
-  '分店筛选选项应先构建稳定排序结果',
+  source.includes('const sidebarStoreOptions = useMemo('),
+  '左侧分店列表选项应先构建稳定排序结果',
 )
 assert(
   source.includes("localeCompare(right.name || '', 'zh-Hans-CN', { numeric: true, sensitivity: 'base' })"),
-  '分店筛选选项应按分店名称优先排序',
+  '左侧分店列表选项应按分店名称优先排序',
 )
 assert(
-  source.includes("label: `${item.code} - ${item.name}`"),
-  '分店筛选 label 应保留 code - name 以支持代码和名称搜索',
+  source.includes('label: item.name || item.code'),
+  '左侧分店列表 label 只放店名（编码由列表组件按 value 单独显示，搜索同时支持名称和编码）',
 )
-assert(source.includes('showSearch'), '分店筛选 Select 应支持输入搜索')
+assert(
+  source.includes('useStoreSidebar({') && source.includes('multi: { values: selectedStoreCodes, onChange: handleStoreCodesChange }'),
+  '订货列表应接入共用的左侧分店列表，并带可开关的多选（多选状态仍是 selectedStoreCodes）',
+)
+assert(
+  source.includes('<StoreSidebarLayout docked={storeSidebar.docked} sidebar={storeSidebar.sidebar}>') && source.includes('{storeSidebar.switcher}'),
+  '订货列表应用左侧分店列表布局，收起时分店按钮放在工具栏里',
+)
+assert(
+  !source.includes('wh-orders-store-select'),
+  '工具栏里的分店多选下拉应已移除（分店改在左侧列表里选）',
+)
+// 未匹配分店弹窗里的「目标分店」下拉仍用关键字过滤函数
+assert(source.includes('showSearch'), '未匹配分店弹窗的目标分店 Select 应支持输入搜索')
 assert(
   source.includes('optionFilterProp="label"'),
-  '分店筛选 Select 应基于 label 过滤',
+  '未匹配分店弹窗的目标分店 Select 应基于 label 过滤',
 )
 assert(
   source.includes('filterOption={filterStoreOption}'),
-  '分店筛选 Select 应使用关键字过滤函数',
+  '未匹配分店弹窗的目标分店 Select 应使用关键字过滤函数',
 )
 assert(storePickerStart >= 0 && storePickerEnd > storePickerStart, '应能定位创建订单分店选择弹窗')
 assert(
