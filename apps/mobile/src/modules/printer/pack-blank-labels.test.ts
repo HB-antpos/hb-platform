@@ -66,7 +66,7 @@ assert.ok(textValues(content).includes("5 SKU - 86 PCS"), "内容标照旧印 SK
 // ---- 有去向：照印去向，不画横线 ----
 const toStore = buildPackCartonLabelCommand({ ...base, destinationType: 2, destinationName: "Inala" });
 assert.ok(textValues(toStore).includes("INALA"), "有去向则照印去向");
-assert.ok(textValues(toStore).includes("FROM TESTSTORE - DIRECT"), "要发出的去向沿用 FROM 行的 DIRECT 规则");
+assert.ok(textValues(toStore).includes("FROM TESTSTORE") && textValues(toStore).includes("DIRECT"), "要发出的去向沿用 DIRECT 规则（底部左侧）");
 assert.ok(!rows(toStore).some((row) => row.startsWith("LINE ")), "有去向不画横线");
 const toStorage = buildPackCartonLabelCommand({ ...base, destinationType: 1 });
 assert.ok(textValues(toStorage).includes("STORAGE") && !rows(toStorage).some((row) => row.startsWith("LINE ")), "本地存放印 STORAGE");

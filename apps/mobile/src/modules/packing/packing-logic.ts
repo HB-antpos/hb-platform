@@ -516,6 +516,8 @@ export interface LabelPreviewContent {
   kind: "BOX" | "PLT";
   number: string;
   fromLine: string;
+  /** VIA <承运商> / DIRECT；本地存放和未指定为空。打在标签底部左侧。 */
+  routeLine: string;
   destinationName: string;
   statLine: string;
   referenceLine: string;
@@ -531,6 +533,7 @@ function previewOf(spec: PackLabelSpec): LabelPreviewContent {
     kind: spec.kind,
     number: spec.number.trim().toUpperCase(),
     fromLine: spec.fromLine,
+    routeLine: spec.routeLine,
     destinationName: spec.destinationName,
     statLine: spec.statLine,
     referenceLine: spec.referenceLine,
