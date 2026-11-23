@@ -1,7 +1,8 @@
 import { memo, useState } from "react";
-import { Image, Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Card, Icon, IconButton, Text } from "react-native-paper";
 import { ProductBarcodeImage } from "@/components/product-maintenance/ProductBarcodeImage";
+import { PreviewableImage } from "@/components/ui/PreviewableImage";
 import { resolveBarcodeDisclosure } from "@/modules/product-maintenance/product-query-presentation";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS, HB_SPACING } from "@/shared/theme/tokens";
@@ -63,6 +64,11 @@ export const ProductHeroCard = memo(function ProductHeroCard({
     : t("hero.productType.unknown");
   const supplierLine = [supplierCode, supplierName].filter(Boolean).join(" ") || t("common:na");
   const name = productName || t("hero.unnamedProduct");
+  // 大图预览底部的副标题：货号 · 条码。
+  const previewCaption = [
+    itemNumber ? `${t("hero.itemNumberLabel")} ${itemNumber}` : null,
+    barcode || null,
+  ].filter(Boolean).join(" · ");
 
   const editNameButton = onPressEditName ? (
     <Pressable
@@ -101,11 +107,14 @@ export const ProductHeroCard = memo(function ProductHeroCard({
     return (
       <Card style={styles.card} mode="contained">
         <View style={styles.compactRow}>
-          {imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={styles.compactImage} resizeMode="cover" />
-          ) : (
-            <View style={styles.compactImage} />
-          )}
+          <PreviewableImage
+            uri={imageUrl}
+            size={40}
+            radius={6}
+            label={name}
+            caption={previewCaption}
+            placeholderIcon={null}
+          />
           <View style={styles.meta}>
             <View style={styles.compactNameRow}>
               <Text style={[styles.compactName, styles.compactNameText]} numberOfLines={1}>{name}</Text>
@@ -124,11 +133,14 @@ export const ProductHeroCard = memo(function ProductHeroCard({
     <Card style={styles.card} mode="contained">
       <View style={styles.content}>
         <View style={styles.heroRow}>
-          {imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
-          ) : (
-            <View style={styles.image} />
-          )}
+          <PreviewableImage
+            uri={imageUrl}
+            size={60}
+            label={name}
+            caption={previewCaption}
+            placeholderIcon={null}
+            introHint
+          />
           <View style={styles.meta}>
             <View style={styles.nameRow}>
               <Text style={[styles.name, styles.nameText]} numberOfLines={2}>{name}</Text>
@@ -211,12 +223,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: HB_SPACING.sm,
-  },
-  image: {
-    width: 60,
-    height: 60,
-    borderRadius: HB_RADIUS.control,
-    backgroundColor: HB_COLORS.surfaceMuted,
   },
   meta: {
     flex: 1,
@@ -340,12 +346,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: HB_SPACING.sm,
     paddingVertical: HB_SPACING.xs,
-  },
-  compactImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 6,
-    backgroundColor: HB_COLORS.surfaceMuted,
   },
   compactName: {
     fontSize: 14,

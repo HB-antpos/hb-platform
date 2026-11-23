@@ -69,22 +69,16 @@
   },
   "kpi": {
     "inbound": "Inbound",
-    "inboundHint": "{{count}} documents",
     "sales": "Sold",
-    "salesHint": "Sell-through {{percent}}%",
-    "salesHintNoInbound": "No inbound in range",
-    "stock": "Est. stock",
-    "stockHint": "Inbound − sold"
+    "stock": "Est. stock"
   },
   "trend": {
-    "title": "Sales trend",
+    "title": "Inbound & sales trend",
     "granularity": "Trend granularity",
     "day": "Day",
     "week": "Week",
     "legendDaily": "Daily sales",
-    "legendWeekly": "Weekly sales",
     "legendInbound": "Inbound",
-    "legendWeeklyInbound": "Green = inbound that week",
     "legendToday": "Today (in progress)",
     "legendPartialWeek": "Partial week",
     "today": "Today",
@@ -95,24 +89,10 @@
     "recordedDaysValue": "{{recorded}} / {{total}} days",
     "dailyAverage": "Avg per sales day",
     "dailyPeak": "Best day",
-    "weeklyAverage": "Avg full week",
-    "weeklyBest": "Best week",
-    "weekOverWeek": "vs last week"
-  },
-  "records": {
-    "title": "Details",
-    "inboundTab": "Inbound {{count}}",
-    "salesTab": "Daily sales {{count}}",
-    "date": "Date",
-    "invoice": "Invoice no.",
-    "warehouseDocument": "Warehouse dispatch no.",
-    "quantity": "Qty",
-    "inboundTotal": "Inbound range total",
-    "inboundEmpty": "No inbound in the inbound range",
-    "salesEmpty": "No sales in the sales range",
-    "salesHint": "Only days with sales are listed",
-    "todayOpen": "in progress",
-    "showAll": "Show all {{count}} days"
+    "legendWeeklyInboundBar": "Weekly inbound",
+    "legendWeeklySalesBar": "Weekly sold",
+    "legendStockLine": "End-of-week stock (right axis)",
+    "clipNote": "Bars taller than {{max}} are cut off; the label on top shows the real inbound"
   },
   "branches": {
     "title": "Other stores' stock",
@@ -121,13 +101,30 @@
     "total": "Total {{count}} stores",
     "empty": "No other store received this product in the inbound range",
     "negativeHint": "Red means negative: sold more than received, check the inbound and sales records",
-    "rowA11y": "{{store}}, inbound {{inbound}}, sold {{sales}}, estimated stock {{stock}}"
+    "rowA11y": "{{store}}, inbound {{inbound}}, sold {{sales}}, estimated stock {{stock}}",
+    "sellThrough": "Sold %"
   },
   "candidates": {
     "title": "{{count}} products found",
     "byItemNumber": "Item numbers containing \"{{keyword}}\" — tap one to view",
     "byBarcode": "Barcode \"{{keyword}}\" matches several products — tap one to view",
-    "truncated": "Showing the first {{count}} — enter a more complete item number"
+    "truncated": "Showing the first {{count}} — enter a more complete item number",
+    "sortLabel": "Sort",
+    "sort": {
+      "sellThrough": "Sell-through",
+      "stock": "Stock",
+      "itemNumber": "Item no."
+    },
+    "inbound": "Inbound",
+    "sales": "Sold",
+    "sellThrough": "Sell-through",
+    "progress": "Sold {{sales}} / in {{inbound}}",
+    "noInbound": "No inbound in the range — sales come from stock received before it",
+    "flags": {
+      "hot": "Selling out",
+      "slow": "Slow mover",
+      "negative": "Negative stock — check"
+    }
   },
   "weekdays": {
     "0": "Sun",
@@ -137,5 +134,40 @@
     "4": "Thu",
     "5": "Fri",
     "6": "Sat"
+  },
+  "overview": {
+    "title": "Inbound & sales",
+    "subtitle": "Est. stock = inbound − sold",
+    "inbound": "Inbound",
+    "sales": "Sold",
+    "stock": "Est. stock",
+    "docs": "{{count}} documents",
+    "unit": "units",
+    "stackA11y": "Sell-through {{percent}}",
+    "stackSold": "Sold {{sold}} · sell-through {{percent}}",
+    "stackLeft": "Left {{left}} · {{percent}}",
+    "stackOver": "Sold {{over}} more than received: likely stock from before the range",
+    "stackNone": "No inbound in the range, so sell-through can't be calculated",
+    "pace": "Last {{weeks}} wks avg {{recent}}/day (season {{season}}/day) — about {{days}} days of stock left",
+    "paceNoStock": "Last {{weeks}} wks avg {{recent}}/day (season {{season}}/day)",
+    "lastInbound": " · last inbound {{days}} days ago",
+    "lastInboundToday": " · received today"
+  },
+  "ledger": {
+    "title": "Weekly inbound & sales",
+    "subtitle": "Tap a week for daily detail",
+    "week": "Week (from Mon)",
+    "inbound": "Inbound",
+    "sales": "Sold",
+    "endStock": "End-of-week stock",
+    "empty": "No inbound or sales in the range",
+    "showEarlier": "Show {{count}} earlier weeks",
+    "total": "Range total",
+    "todayOpen": "Includes today · {{count}} days",
+    "partial": "Partial week · {{count}} days",
+    "oneDoc": "1 invoice · {{doc}}",
+    "docs": "{{count}} invoices",
+    "inboundTag": "Inbound",
+    "rowA11y": "{{week}}, inbound {{inbound}}, sold {{sales}}, tap to expand daily detail"
   }
 }
