@@ -510,6 +510,8 @@
     "hint": "Pinch to zoom · Double-tap to enlarge · Swipe down to close",
     "zoomedHint": "Double-tap to reset · Drag to pan",
     "loadFailed": "Image failed to load",
-    "imageLabel": "{{name}}, enlarged"
+    "imageLabel": "{{name}}, enlarged",
+    "tooltip": "Tap the photo to view it full screen",
+    "tooltipDismiss": "Got it"
   }
 }

@@ -183,7 +183,7 @@ function InsightBody({
     <>
       <View style={styles.card}>
         <View style={styles.productRow}>
-          <ProductImageBox uri={product.productImage} size={72} label={product.productName} caption={caption} />
+          <ProductImageBox uri={product.productImage} size={72} label={product.productName} caption={caption} introHint />
           <View style={styles.productMeta}>
             <Text style={styles.productName} numberOfLines={2}>
               {product.productName}
