@@ -3,6 +3,8 @@ import type { AttendanceHoursDayDto, AttendanceHoursEmployeeDto } from '../../..
 import {
   EMPTY_MANUAL_LEAVE_FORM,
   MANUAL_ENTRY_MODES,
+  applyShiftToRows,
+  rowsMatchShift,
   buildManualLeavePayload,
   buildManualSegments,
   collectMissingPunches,
@@ -103,6 +105,29 @@ assert.equal(manualEntryDayState(day({ leave: { type: 'PaidAnnual', hours: 8 } }
 assert.deepEqual(defaultManualRows(day({ missingPunch: true, scheduleStart: '09:00', scheduleEnd: '15:30' })), [{ start: '09:00', end: '15:30' }])
 assert.deepEqual(defaultManualRows(day()), [{ start: '', end: '' }], '没排班不替人猜时间')
 assert.deepEqual(defaultManualRows(), [{ start: '', end: '' }])
+
+// ---------- 快捷班次 ----------
+const SHIFT = { start: '09:00', end: '17:00' }
+assert.deepEqual(applyShiftToRows([{ start: '', end: '' }], SHIFT), [{ start: '09:00', end: '17:00' }], '默认空白段直接填入')
+assert.deepEqual(applyShiftToRows([{ start: '10:00', end: '' }], SHIFT), [{ start: '09:00', end: '17:00' }], '只填了一半的段也算空白，整段覆盖')
+assert.deepEqual(
+  applyShiftToRows([{ start: '09:00', end: '13:00' }, { start: '', end: '' }], { start: '16:00', end: '17:30' }),
+  [{ start: '09:00', end: '13:00' }, { start: '16:00', end: '17:30' }],
+  '有空白段只填第一个空白段，已填的段不动',
+)
+assert.deepEqual(applyShiftToRows([{ start: '09:00', end: '15:30' }], SHIFT), [{ start: '09:00', end: '17:00' }], '未打卡班预填的排班时间被整天重置')
+assert.deepEqual(
+  applyShiftToRows([{ start: '09:00', end: '13:00' }, { start: '16:00', end: '17:30' }], SHIFT),
+  [{ start: '09:00', end: '17:00' }],
+  '每段都填全时整天重置为单段',
+)
+const untouched = [{ start: '', end: '' }]
+applyShiftToRows(untouched, SHIFT)
+assert.deepEqual(untouched, [{ start: '', end: '' }], '不改入参')
+assert.equal(validateManualRows(applyShiftToRows([{ start: '', end: '' }], SHIFT)), null, '套用后能直接过校验去预览')
+assert.equal(rowsMatchShift([{ start: '09:00', end: '17:00' }], SHIFT), true)
+assert.equal(rowsMatchShift([{ start: '09:00', end: '17:30' }], SHIFT), false)
+assert.equal(rowsMatchShift([{ start: '09:00', end: '17:00' }, { start: '18:00', end: '19:00' }], SHIFT), false, '多段不算匹配')
 
 // ---------- 未打卡班汇总 ----------
 const employee = (userGuid: string, userName: string, days: AttendanceHoursDayDto[]): AttendanceHoursEmployeeDto => ({

@@ -365,6 +365,8 @@
         "hasPunches": "This day already has punches or a manual entry — use “Edit punches”",
         "leave": "This day is paid leave"
       },
+      "quickShift": "Quick shifts",
+      "quickShiftHint": "Click to fill clock-in / clock-out for all selected days above; you can still edit each day. For split shifts, use “Add segment”.",
       "missingTag": "No punches",
       "clockIn": "In",
       "to": "to",
