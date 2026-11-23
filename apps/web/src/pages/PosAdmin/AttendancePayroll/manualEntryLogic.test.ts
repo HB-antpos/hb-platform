@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import type { AttendanceHoursDayDto, AttendanceHoursEmployeeDto } from '../../../types/attendancePayroll'
 import {
+  EMPTY_MANUAL_LEAVE_FORM,
+  MANUAL_ENTRY_MODES,
   buildManualLeavePayload,
   buildManualSegments,
   collectMissingPunches,
@@ -148,10 +150,13 @@ assert.deepEqual(
 )
 assert.deepEqual(collectSickEligibleDays(undefined, '2026-10-20'), [], '工时统计里没有这个人 = 没有可补病假的班')
 
-assert.equal(isManualLeaveFormReady('PaidSick', { sickDates: [], range: null }), false)
-assert.equal(isManualLeaveFormReady('PaidSick', { sickDates: ['2026-10-12'], range: null }), true)
-assert.equal(isManualLeaveFormReady('PaidAnnual', { sickDates: ['2026-10-12'], range: null }), false, '年假要选区间，选了病假日期不算')
-assert.equal(isManualLeaveFormReady('AnnualCashOut', { sickDates: [], range: ['2026-10-12', '2026-10-14'] }), true)
+assert.equal(isManualLeaveFormReady('PaidSick', { ...EMPTY_MANUAL_LEAVE_FORM }), false)
+assert.equal(isManualLeaveFormReady('PaidSick', { ...EMPTY_MANUAL_LEAVE_FORM, sickDates: ['2026-10-12'] }), true)
+assert.equal(isManualLeaveFormReady('PaidAnnual', { ...EMPTY_MANUAL_LEAVE_FORM, sickDates: ['2026-10-12'] }), false, '年假要选区间，选了病假日期不算')
+assert.equal(isManualLeaveFormReady('PaidAnnual', { ...EMPTY_MANUAL_LEAVE_FORM, range: ['2026-10-12', '2026-10-14'] }), true)
+
+// 年假发放已取消：补录抽屉只剩 补工时 / 病假 / 年假 三个模式
+assert.deepEqual([...MANUAL_ENTRY_MODES], ['hours', 'PaidSick', 'PaidAnnual'])
 
 assert.equal(isManualLeaveDateDisabled('2026-10-21', '2026-10-05', '2026-10-20'), true, '未来日期不能选')
 assert.equal(isManualLeaveDateDisabled('2026-10-04', '2026-10-05', '2026-10-20'), true, '本期之前的日期不能选')
@@ -160,12 +165,21 @@ assert.equal(isManualLeaveDateDisabled('2026-10-05', '2026-10-05', '2026-10-20')
 assert.equal(isManualLeaveDateDisabled('2026-10-01', undefined, '2026-10-20'), false, '没有周期信息时只限制未来')
 
 assert.deepEqual(
-  buildManualLeavePayload({ storeCode: 'BRI', userGuid: 'u1', type: 'PaidSick', form: { sickDates: ['2026-10-13', '2026-10-12'], range: null }, reason: '忘记申请' }),
+  buildManualLeavePayload({ storeCode: 'BRI', userGuid: 'u1', type: 'PaidSick', form: { ...EMPTY_MANUAL_LEAVE_FORM, sickDates: ['2026-10-13', '2026-10-12'] }, reason: '忘记申请' }),
   { storeCode: 'BRI', userGuid: 'u1', leaveType: 'PaidSick', startDate: '2026-10-12', endDate: '2026-10-13', dates: ['2026-10-12', '2026-10-13'], reason: '忘记申请' },
   '病假：日期排序后带 dates，起止取最早 / 最晚一天',
 )
 assert.deepEqual(
-  buildManualLeavePayload({ storeCode: 'BRI', userGuid: 'u1', type: 'PaidAnnual', form: { sickDates: [], range: ['2026-10-15', '2026-10-16'] }, reason: '忘记申请' }),
+  buildManualLeavePayload({ storeCode: 'BRI', userGuid: 'u1', type: 'PaidAnnual', form: { ...EMPTY_MANUAL_LEAVE_FORM, range: ['2026-10-15', '2026-10-16'] }, reason: '忘记申请' }),
   { storeCode: 'BRI', userGuid: 'u1', leaveType: 'PaidAnnual', startDate: '2026-10-15', endDate: '2026-10-16', reason: '忘记申请' },
-  '年假：只带起止日期，不带 dates',
+  '年假：只带起止日期，不带 dates；没手填合计、默认休息时不带 totalHours / restsOnLeaveDays',
+)
+assert.deepEqual(
+  buildManualLeavePayload({
+    storeCode: 'BRI', userGuid: 'u1', type: 'PaidAnnual',
+    form: { ...EMPTY_MANUAL_LEAVE_FORM, range: ['2026-10-13', '2026-10-16'], totalHours: 10.5, rests: false },
+    reason: '忘记申请',
+  }),
+  { storeCode: 'BRI', userGuid: 'u1', leaveType: 'PaidAnnual', startDate: '2026-10-13', endDate: '2026-10-16', reason: '忘记申请', totalHours: 10.5, restsOnLeaveDays: false },
+  '年假：手填合计小时数（整段总数）与「不休息」会带给后端',
 )

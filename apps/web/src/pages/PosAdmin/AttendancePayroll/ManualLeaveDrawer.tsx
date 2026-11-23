@@ -1,4 +1,4 @@
-import { Avatar, Button, DatePicker, Drawer, Input, Select, Spin, Tag, message } from 'antd'
+import { Avatar, Button, DatePicker, Drawer, Input, InputNumber, Select, Spin, Switch, Tag, message } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -14,6 +14,7 @@ import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
 import type { ManualEntryPreset } from './ManualEntryDrawer'
 import ManualEntryModeSwitch from './ManualEntryModeSwitch'
 import {
+  EMPTY_MANUAL_LEAVE_FORM,
   MANUAL_ENTRY_REASON_MAX,
   buildManualLeavePayload,
   collectSickEligibleDays,
@@ -38,7 +39,7 @@ interface ManualLeaveDrawerProps {
   onClose: () => void
   /** 保存成功：外层据此重载工时与工资。 */
   onSaved: () => void
-  /** 顶部切换模式（补工时 / 三种假）：外层换成对应的抽屉，并带上已选员工。 */
+  /** 顶部切换模式（补工时 / 病假 / 年假）：外层换成对应的抽屉，并带上已选员工。 */
   onSwitchMode: (mode: ManualEntryMode, userGuid?: string) => void
 }
 
@@ -51,7 +52,7 @@ type PreviewState =
 /** 预览防抖：连续改日期时只发最后一次。 */
 const PREVIEW_DEBOUNCE_MS = 450
 
-const EMPTY_FORM: ManualLeaveForm = { sickDates: [], range: null }
+const EMPTY_FORM = EMPTY_MANUAL_LEAVE_FORM
 
 export default function ManualLeaveDrawer(props: ManualLeaveDrawerProps) {
   const { open, storeCode, days, employees, leaveType, preset, onClose, onSaved, onSwitchMode } = props
@@ -86,8 +87,8 @@ export default function ManualLeaveDrawer(props: ManualLeaveDrawerProps) {
     setUserGuid(preset?.userGuid)
     const dates = [...(preset?.dates ?? [])].sort()
     setForm(leaveType === 'PaidSick'
-      ? { sickDates: dates, range: null }
-      : { sickDates: [], range: dates.length > 0 ? [dates[0], dates[dates.length - 1]] : null })
+      ? { ...EMPTY_FORM, sickDates: dates }
+      : { ...EMPTY_FORM, range: dates.length > 0 ? [dates[0], dates[dates.length - 1]] : null })
     getAttendanceEmployees(storeCode)
       .then((list) => {
         if (cancelled) return
@@ -111,7 +112,7 @@ export default function ManualLeaveDrawer(props: ManualLeaveDrawerProps) {
     }
     // 预览用占位原因，真正保存时会带上填写的原因重新预览一次
     const payload = buildManualLeavePayload({ storeCode, userGuid, type: leaveType, form, reason: '—' })
-    const next = JSON.stringify([payload.userGuid, payload.leaveType, payload.startDate, payload.endDate, payload.dates])
+    const next = JSON.stringify([payload.userGuid, payload.leaveType, payload.startDate, payload.endDate, payload.dates, payload.totalHours, payload.restsOnLeaveDays])
     if (signature.current === next) return
     signature.current = next
     setSaveError(undefined)
@@ -207,11 +208,59 @@ export default function ManualLeaveDrawer(props: ManualLeaveDrawerProps) {
         placeholder={[t('attendancePayroll.manualLeave.rangeStart'), t('attendancePayroll.manualLeave.rangeEnd')]}
         value={form.range ? [dayjs(form.range[0]), dayjs(form.range[1])] : null}
         disabledDate={(date) => isManualLeaveDateDisabled(date.format('YYYY-MM-DD'), periodStart, today)}
+        // 换区间后合计小时数回到默认（新区间的工作日 × 8 h）：旧的手填值对新区间没有意义
         onChange={(value) => setForm((current) => ({
           ...current,
           range: value?.[0] && value?.[1] ? [value[0].format('YYYY-MM-DD'), value[1].format('YYYY-MM-DD')] : null,
+          totalHours: null,
         }))}
       />
+    )
+  }
+
+  // 年假的合计小时数与「员工当天休息」开关：合计是整段区间的总数，后端平均摊到每个工作日。
+  const renderAnnualOptions = () => {
+    if (leaveType !== 'PaidAnnual' || !userGuid || !form.range) return null
+    const defaultHours = preview.status === 'ok' ? preview.data.defaultPaidHours : null
+    const shownHours = form.totalHours ?? defaultHours
+    return (
+      <>
+        <div className="atp-me-field">
+          <div className="atp-me-field-label">{t('attendancePayroll.manualLeave.totalHoursLabel')}</div>
+          <div className="atp-me-hint atp-me-hint-top">{t('attendancePayroll.manualLeave.totalHoursHint')}</div>
+          <InputNumber
+            style={{ width: 180 }}
+            min={0.01}
+            step={0.5}
+            precision={2}
+            addonAfter="h"
+            value={shownHours}
+            disabled={defaultHours === null && form.totalHours === null}
+            onChange={(value) => setForm((current) => ({
+              ...current,
+              // 清空输入框 = 回到默认；0 或负数不接受（min 已限制，这里兜底）
+              totalHours: typeof value === 'number' && value > 0 ? value : null,
+            }))}
+          />
+          {defaultHours !== null && form.totalHours !== null && form.totalHours !== defaultHours ? (
+            <Button type="link" size="small" onClick={() => setForm((current) => ({ ...current, totalHours: null }))}>
+              {t('attendancePayroll.manualLeave.totalHoursReset', { hours: manualPreviewHoursText(defaultHours) })}
+            </Button>
+          ) : null}
+        </div>
+        <div className="atp-me-field">
+          <div className="atp-me-field-label">{t('attendancePayroll.manualLeave.restsLabel')}</div>
+          <Switch
+            checked={form.rests}
+            checkedChildren={t('attendancePayroll.manualLeave.restsOn')}
+            unCheckedChildren={t('attendancePayroll.manualLeave.restsOff')}
+            onChange={(checked) => setForm((current) => ({ ...current, rests: checked }))}
+          />
+          <div className="atp-me-hint atp-me-hint-top">
+            {form.rests ? t('attendancePayroll.manualLeave.restsOnHint') : t('attendancePayroll.manualLeave.restsOffHint')}
+          </div>
+        </div>
+      </>
     )
   }
 
@@ -280,6 +329,8 @@ export default function ManualLeaveDrawer(props: ManualLeaveDrawerProps) {
         {renderDates()}
         {renderPreview()}
       </div>
+
+      {renderAnnualOptions()}
 
       <div className="atp-me-field">
         <div className="atp-me-field-label">{t('attendancePayroll.manualEntry.reason')} <span className="atp-me-required">*</span></div>

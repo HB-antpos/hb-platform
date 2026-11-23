@@ -211,6 +211,49 @@ public static class PayrollCalculator
     public static decimal AnnualLeaveRequestedHours(DateTime startDate, DateTime endDate, ISet<DateTime> publicHolidays) =>
         CountLeaveWorkdays(startDate, endDate, publicHolidays) * AnnualLeaveHoursPerWorkday;
 
+    /// <summary>
+    /// 把带薪年假的「合计小时数」摊到区间内的每个工作日（周末 / 公共假期为 0，不出现在结果里）。
+    /// - 合计为空（旧数据没记）：每个工作日 8 h，与改造前一致；
+    /// - 否则平均摊，每天向下取到 2 位小数，余数全部补到最后一个工作日，保证各天相加正好等于合计
+    ///   （老数据合计 = 工作日 × 8，摊出来仍是每天 8，历史工资不变）。
+    /// 工资表与 MYOB 推送都按这里摊出的每天小时数走，所以摊算必须只有这一处实现。
+    /// </summary>
+    public static IReadOnlyDictionary<DateTime, decimal> SpreadAnnualLeaveHours(
+        DateTime startDate, DateTime endDate, ISet<DateTime> publicHolidays, decimal? totalHours)
+    {
+        var workdays = new List<DateTime>();
+        for (var day = startDate.Date; day <= endDate.Date; day = day.AddDays(1))
+        {
+            if (day.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday && !publicHolidays.Contains(day))
+            {
+                workdays.Add(day);
+            }
+        }
+        var result = new Dictionary<DateTime, decimal>();
+        if (workdays.Count == 0)
+        {
+            return result;
+        }
+        if (totalHours is not { } total)
+        {
+            foreach (var day in workdays)
+            {
+                result[day] = AnnualLeaveHoursPerWorkday;
+            }
+            return result;
+        }
+        var perDay = Math.Floor(total / workdays.Count * 100m) / 100m;
+        var allocated = 0m;
+        for (var index = 0; index < workdays.Count; index++)
+        {
+            var isLast = index == workdays.Count - 1;
+            var hours = isLast ? Round2(total - allocated) : perDay;
+            result[workdays[index]] = hours;
+            allocated += hours;
+        }
+        return result;
+    }
+
     /// <summary>当天计薪分钟。PaidMinutes（排班 DTO 上的旧字段）的含义不变，这里是工资口径的独立计算。</summary>
     public static PayrollDayResult CalculateDay(PayrollDayInput input)
     {

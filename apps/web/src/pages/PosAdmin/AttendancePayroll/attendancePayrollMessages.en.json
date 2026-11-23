@@ -420,14 +420,20 @@
       "mode": {
         "hours": "Add hours",
         "PaidSick": "Paid sick leave",
-        "PaidAnnual": "Annual leave",
-        "AnnualCashOut": "Annual leave cash-out"
+        "PaidAnnual": "Annual leave"
       },
       "typeHint": {
         "PaidSick": "The employee was sick and forgot to apply: record it on a shift they were rostered for but never clocked. Hours follow the roster (meal break deducted).",
-        "PaidAnnual": "The employee took annual leave and forgot to apply: those days are marked unavailable automatically. Hours = working days × 8 h (weekends and public holidays excluded).",
-        "AnnualCashOut": "Annual leave cash-out: the employee works as usual and is also paid annual-leave hours = working days × 8 h (weekends and public holidays excluded)."
+        "PaidAnnual": "The employee took annual leave and forgot to apply: pick a date range, then enter the total hours for the whole range (default working days × 8 h, weekends and public holidays excluded). The total is spread evenly over the working days."
       },
+      "totalHoursLabel": "Total hours",
+      "totalHoursHint": "The total for the whole range, not per day; it is spread evenly over the working days in the range.",
+      "totalHoursReset": "Reset to default {{hours}}",
+      "restsLabel": "Employee rests on these days",
+      "restsOn": "Rests",
+      "restsOff": "Works",
+      "restsOnHint": "The employee is off on these days: they are marked unavailable automatically, and days that already have punches cannot be added.",
+      "restsOffHint": "The employee works as usual: no unavailable mark; the annual-leave hours are added on top and do not affect that day's punches or hours.",
       "sickDays": "Sick days (only rostered shifts with no clock-in are listed; pick one or more)",
       "sickNone": "No rostered-but-not-clocked shifts for this employee in this period. Sick leave follows the roster: roster the shift first, or use \"Edit punches\" for shifts that already have punches.",
       "pickEmployee": "Pick an employee first",

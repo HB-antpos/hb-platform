@@ -6,17 +6,35 @@ using BlazorApp.Shared.Models;
 
 namespace BlazorApp.Api.Services.React
 {
-    // partial：店长 / Admin 在「工时统计 / 工资表」为「忘记申请」的员工补录带薪假（带薪病假 / 带薪年假 / 年假发放）。
+    // partial：店长 / Admin 在「工时统计 / 工资表」为「忘记申请」的员工补录带薪假（带薪病假 / 带薪年假）。
+    // 年假发放（AnnualCashOut）已取消：不再接收新的补录与员工申请，历史记录保持原计算口径。
     // 不新建表、不加列：补录就是一条直接「已批准」的 AttendanceLeaveRequest，工资计算沿用现成的请假口径；
-    // 靠 ReviewRemark 的「补录：」前缀识别它是补录的（页面据此显示「补」角标、允许撤销）。
+    // 靠 ReviewRemark 的「补录：」前缀识别它是补录的（页面据此显示「补」角标、允许撤销）；
+    // 带薪年假选了「员工当天不休息」时，前缀改为「补录（不休息）：」——同样是补录，但不标「不能上班」、不查打卡。
+    // 带薪年假的合计小时数存在 PaidHours，按区间内工作日平均摊（见 PayrollCalculator.SpreadAnnualLeaveHours）。
     // 与员工自己申请的区别：事后记录、直接生效（不走审批）、不受「提前申请 / 生病后 N 天内提交」限制、医嘱可不传（原因必填）。
     // 其余校验沿用代补卡 / 补录工时：权限与管理分店、周期锁定、可改窗口、不能补未来、全职 / 兼职才有带薪假。
     public partial class AttendanceReactService
     {
         /// <summary>补录请假的审批备注前缀；撤销与页面角标据此判断「这条假是补录建的」。</summary>
         internal const string ManualLeaveRemarkPrefix = "补录：";
+        /// <summary>补录带薪年假且员工当天不休息（照常上班）的备注前缀；其余行为同补录。</summary>
+        internal const string ManualLeaveNoRestRemarkPrefix = "补录（不休息）：";
         /// <summary>原因最长 400：审批备注要加前缀，备注列上限 500。</summary>
         private const int ManualLeaveReasonMaxLength = 400;
+        /// <summary>带薪年假合计小时数的上限：区间自然日数 × 24，挡住明显填错（比如多打一个 0）。</summary>
+        private const int ManualLeaveMaxHoursPerCalendarDay = 24;
+
+        /// <summary>这条假是不是补录建的（休息 / 不休息两种前缀都算）。</summary>
+        private static bool IsManualLeave(AttendanceLeaveRequest leave) =>
+            leave.ReviewRemark is { } remark
+            && (remark.StartsWith(ManualLeaveRemarkPrefix, StringComparison.Ordinal)
+                || remark.StartsWith(ManualLeaveNoRestRemarkPrefix, StringComparison.Ordinal));
+
+        /// <summary>补录的带薪年假且员工当天不休息：不写「不能上班」、不检查打卡、不清「未打卡」提示。</summary>
+        private static bool IsManualNoRestAnnual(AttendanceLeaveRequest leave) =>
+            leave.LeaveType == PaidAnnualLeaveType
+            && leave.ReviewRemark?.StartsWith(ManualLeaveNoRestRemarkPrefix, StringComparison.Ordinal) == true;
 
         private sealed class ManualLeaveContext
         {
@@ -85,9 +103,9 @@ namespace BlazorApp.Api.Services.React
                 leave.CreatedAt = now;
                 leave.CreatedBy = username;
                 await _db.Insertable(leave).ExecuteCommandAsync();
-                if (leave.LeaveType == PaidAnnualLeaveType)
+                if (leave.LeaveType == PaidAnnualLeaveType && !IsManualNoRestAnnual(leave))
                 {
-                    // 与批准带薪年假（休息）一致：区间内每天自动标「不能上班」，排班时被拦。
+                    // 与批准带薪年假（休息）一致：区间内每天自动标「不能上班」，排班时被拦；选了「不休息」的不标。
                     await ApplyAnnualLeaveUnavailabilityAsync(leave, now, username);
                 }
                 await _db.Ado.CommitTranAsync();
@@ -133,7 +151,7 @@ namespace BlazorApp.Api.Services.React
                 .FirstAsync(item => !item.IsDeleted && item.LeaveGuid == leaveGuid && item.StoreCode == storeCode);
             if (leave == null
                 || leave.Status != "Approved"
-                || leave.ReviewRemark?.StartsWith(ManualLeaveRemarkPrefix, StringComparison.Ordinal) != true)
+                || !IsManualLeave(leave))
             {
                 return ApiResponse<bool>.Error("这一条不是补录生效的假，不能在这里撤销", "MANUAL_LEAVE_NOT_FOUND");
             }
@@ -169,7 +187,11 @@ namespace BlazorApp.Api.Services.React
                 return ManualLeaveContext.Error($"补录原因不能超过 {ManualLeaveReasonMaxLength} 个字", "REASON_TOO_LONG");
             }
             var leaveType = NormalizeManagedLeaveType(request.LeaveType);
-            if (leaveType is not (PaidSickLeaveType or PaidAnnualLeaveType or AnnualCashOutLeaveType))
+            if (leaveType == AnnualCashOutLeaveType)
+            {
+                return ManualLeaveContext.Error("年假发放已取消，不能再补录", "ANNUAL_CASH_OUT_RETIRED");
+            }
+            if (leaveType is not (PaidSickLeaveType or PaidAnnualLeaveType))
             {
                 return ManualLeaveContext.Error("请假类型无效", "INVALID_LEAVE_TYPE");
             }
@@ -209,6 +231,10 @@ namespace BlazorApp.Api.Services.React
             DateTime start;
             DateTime end;
             decimal paidHours;
+            // 带薪年假的默认合计（工作日 × 8）；病假不用。
+            var defaultPaidHours = 0m;
+            // 病假恒为 true；带薪年假没传按休息（与历史一致）。
+            var restsOnLeaveDays = leaveType == PaidSickLeaveType || request.RestsOnLeaveDays != false;
             var days = new List<AttendanceManualLeaveDayDto>();
             var scheduleGuids = new List<string>();
             if (leaveType == PaidSickLeaveType)
@@ -270,21 +296,33 @@ namespace BlazorApp.Api.Services.React
                     return ManualLeaveContext.Error("结束日期不能早于开始日期", "INVALID_DATE_RANGE");
                 }
                 // 单次上限沿用设置里的「年假单次最多 N 周」，防止误选一个超长区间。
-                var maxWeeks = leaveType == PaidAnnualLeaveType ? settings.AnnualLeaveMaxWeeks : settings.AnnualCashOutMaxWeeks;
-                if ((end - start).Days + 1 > Math.Max(1, maxWeeks) * 7)
+                var calendarDays = (end - start).Days + 1;
+                if (calendarDays > Math.Max(1, settings.AnnualLeaveMaxWeeks) * 7)
                 {
-                    return ManualLeaveContext.Error($"单次最多补录 {Math.Max(1, maxWeeks)} 周", "ANNUAL_LEAVE_TOO_LONG");
+                    return ManualLeaveContext.Error($"单次最多补录 {Math.Max(1, settings.AnnualLeaveMaxWeeks)} 周", "ANNUAL_LEAVE_TOO_LONG");
                 }
                 var holidaySet = (await LoadStorePublicHolidaysAsync(storeCode, start, end)).Keys.ToHashSet();
-                paidHours = PayrollCalculator.AnnualLeaveRequestedHours(start, end, holidaySet);
-                if (paidHours <= 0)
+                defaultPaidHours = PayrollCalculator.AnnualLeaveRequestedHours(start, end, holidaySet);
+                if (defaultPaidHours <= 0)
                 {
                     return ManualLeaveContext.Error("所选日期没有工作日（周末和公共假期不计年假）", "ANNUAL_LEAVE_NO_WORKDAY");
                 }
+                // 合计小时数是整段区间的总数（不是每天）：不填默认 工作日 × 8；填了则按工作日平均摊。
+                paidHours = request.TotalHours is { } requestedTotal ? PayrollCalculator.Round2(requestedTotal) : defaultPaidHours;
+                if (paidHours <= 0)
+                {
+                    return ManualLeaveContext.Error("年假小时数必须大于 0", "ANNUAL_LEAVE_HOURS_INVALID");
+                }
+                if (paidHours > calendarDays * ManualLeaveMaxHoursPerCalendarDay)
+                {
+                    return ManualLeaveContext.Error(
+                        $"年假小时数不能超过 {calendarDays * ManualLeaveMaxHoursPerCalendarDay}（所选 {calendarDays} 天 × 24 小时）",
+                        "ANNUAL_LEAVE_HOURS_TOO_MANY");
+                }
+                var spread = PayrollCalculator.SpreadAnnualLeaveHours(start, end, holidaySet, paidHours);
                 for (var date = start; date <= end; date = date.AddDays(1))
                 {
-                    var isWorkday = date.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday && !holidaySet.Contains(date);
-                    days.Add(new AttendanceManualLeaveDayDto { Date = date, Hours = isWorkday ? PayrollCalculator.AnnualLeaveHoursPerWorkday : 0m });
+                    days.Add(new AttendanceManualLeaveDayDto { Date = date, Hours = spread.GetValueOrDefault(date) });
                 }
             }
 
@@ -303,7 +341,8 @@ namespace BlazorApp.Api.Services.React
             }
 
             // 带薪年假（休息）：有工时的工作日不能已有打卡（休了假就不该上班；真上了班应改成补录工时 / 修改打卡）。
-            if (leaveType == PaidAnnualLeaveType)
+            // 选了「不休息」（照常上班、年假另外加算）的不查打卡。
+            if (leaveType == PaidAnnualLeaveType && restsOnLeaveDays)
             {
                 var workdays = days.Where(item => item.Hours > 0).Select(item => item.Date).ToList();
                 var dayEnd = end.AddDays(1);
@@ -325,7 +364,8 @@ namespace BlazorApp.Api.Services.React
                 }
             }
 
-            // 与员工已有的请假冲突：病假 / 年假休息互相占天；年假发放只和年假发放互斥（照常上班、同时领年假工时）。
+            // 与员工已有的请假冲突：病假 / 带薪年假互相占天（不休息的年假也算，免得同一天被记两份带薪工时）。
+            // 历史的年假发放记录不参与冲突判断（它本来就照常上班）。
             var overlapping = await _db.Queryable<AttendanceLeaveRequest>()
                 .Where(item => !item.IsDeleted && item.StoreCode == storeCode && item.UserGuid == userGuid
                     && (item.Status == "Pending" || item.Status == "Approved")
@@ -334,10 +374,7 @@ namespace BlazorApp.Api.Services.React
             var coveredDates = days.Select(item => item.Date).ToHashSet();
             foreach (var existing in overlapping)
             {
-                var conflictsByType = leaveType == AnnualCashOutLeaveType
-                    ? existing.LeaveType == AnnualCashOutLeaveType
-                    : existing.LeaveType is PaidSickLeaveType or PaidAnnualLeaveType;
-                if (!conflictsByType)
+                if (existing.LeaveType is not (PaidSickLeaveType or PaidAnnualLeaveType))
                 {
                     continue;
                 }
@@ -361,7 +398,7 @@ namespace BlazorApp.Api.Services.React
                 Reason = reason,
                 Status = "Approved",
                 // 前缀只用来识别「补录建的」；理由本身在 Reason 里。
-                ReviewRemark = ManualLeaveRemarkPrefix + reason,
+                ReviewRemark = (restsOnLeaveDays ? ManualLeaveRemarkPrefix : ManualLeaveNoRestRemarkPrefix) + reason,
                 PaidHours = paidHours,
                 ScheduleGuids = leaveType == PaidSickLeaveType ? SerializeStringList(scheduleGuids) : null,
             };
@@ -371,10 +408,12 @@ namespace BlazorApp.Api.Services.React
                 StartDate = start,
                 EndDate = end,
                 PaidHours = paidHours,
+                DefaultPaidHours = defaultPaidHours,
+                RestsOnLeaveDays = restsOnLeaveDays,
                 Days = days,
                 NoCertificate = leaveType == PaidSickLeaveType,
             };
-            // 版本只取「决定这次补录结果的输入」：员工 / 类型 / 日期或所选排班 / 原因。请假 Guid 每次预览都是新的，不进版本。
+            // 版本只取「决定这次补录结果的输入」：员工 / 类型 / 日期或所选排班 / 原因 / 合计小时数 / 是否休息。请假 Guid 每次预览都是新的，不进版本。
             var revisionSource = string.Join(
                 "|",
                 userGuid,
@@ -384,7 +423,8 @@ namespace BlazorApp.Api.Services.React
                 end.ToString("yyyy-MM-dd"),
                 string.Join(",", scheduleGuids.OrderBy(item => item, StringComparer.OrdinalIgnoreCase)),
                 reason,
-                paidHours.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                paidHours.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                restsOnLeaveDays ? "rest" : "work");
             preview.PreviewRevision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(revisionSource)));
             return ManualLeaveContext.OK(leave, preview);
         }
