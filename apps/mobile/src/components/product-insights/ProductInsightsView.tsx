@@ -534,6 +534,7 @@ function ProductHeader({ data, t }: { data: StoreProductInsight; t: Translate })
         label={p.productName}
         caption={[`${t("labels.itemNumber")} ${p.itemNumber ?? "—"}`, p.barcode].filter(Boolean).join(" · ")}
         placeholderIcon="package-variant"
+        introHint
       />
       <View style={styles.productMeta}>
         <Text variant="titleSmall" numberOfLines={2} style={styles.productName}>

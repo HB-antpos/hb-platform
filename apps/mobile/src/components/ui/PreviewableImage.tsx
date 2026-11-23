@@ -1,6 +1,16 @@
-import { Fragment, useEffect, useState } from "react";
-import { Image, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
-import { Icon } from "react-native-paper";
+import { Fragment, useEffect, useRef, useState } from "react";
+import {
+  Image,
+  Modal,
+  Pressable,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
+import { Icon, Text } from "react-native-paper";
+import { claimImageTooltip, markImageTooltipSeen } from "@/modules/image-preview/preview-hint";
 import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { HB_COLORS, HB_RADIUS } from "@/shared/theme/tokens";
 import { ImagePreviewModal } from "./ImagePreviewModal";
@@ -15,6 +25,11 @@ export interface PreviewableImageProps {
   radius?: number;
   /** 没有图片或加载失败时的占位图标；传 null 则只显示灰色底。 */
   placeholderIcon?: string | null;
+  /**
+   * 主商品图传 true：每台设备第一次看到时，在图下方弹一次「点图片可全屏查看」气泡，点任意处消失。
+   * 列表里的小缩略图不要传，避免同屏出现一排气泡。
+   */
+  introHint?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -36,13 +51,41 @@ export function PreviewableImage({
   caption,
   radius = HB_RADIUS.control,
   placeholderIcon = "image-outline",
+  introHint = false,
   style,
 }: PreviewableImageProps) {
   const { t } = useAppTranslation("common");
+  const { width: windowWidth } = useWindowDimensions();
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
+  const [bubble, setBubble] = useState<{ x: number; y: number; h: number } | null>(null);
+  const anchor = useRef<View>(null);
   // 换了一张图就清掉上一张的失败标记。
   useEffect(() => setFailed(false), [uri]);
+
+  const canPreview = Boolean(uri) && !failed;
+  // 首次引导气泡：先到先得地领取本次启动唯一的名额，等布局稳定后量出图片在屏幕上的位置再弹出。
+  useEffect(() => {
+    if (!introHint || !canPreview) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    void claimImageTooltip().then((allowed) => {
+      if (!alive || !allowed) return;
+      timer = setTimeout(() => {
+        anchor.current?.measureInWindow((x, y, _w, h) => {
+          if (alive && h > 0) setBubble({ x, y, h });
+        });
+      }, 600);
+    });
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [canPreview, introHint]);
+  const dismissBubble = () => {
+    setBubble(null);
+    void markImageTooltipSeen();
+  };
 
   const boxStyle = [styles.box, { width: size, height: size, borderRadius: radius }, style];
   if (!uri || failed) {
@@ -61,6 +104,8 @@ export function PreviewableImage({
   return (
     <Fragment>
       <Pressable
+        ref={anchor}
+        collapsable={false}
         accessibilityRole="imagebutton"
         accessibilityLabel={t("imagePreview.open", { name: label })}
         hitSlop={slop}
@@ -72,12 +117,54 @@ export function PreviewableImage({
           <Icon source="magnify-plus-outline" size={Math.round(badge * 0.62)} color={HB_COLORS.white} />
         </View>
       </Pressable>
+      {bubble ? (
+        <Modal visible transparent animationType="fade" statusBarTranslucent onRequestClose={dismissBubble}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={dismissBubble} accessibilityLabel={t("imagePreview.tooltipDismiss")}>
+            <View
+              style={[
+                styles.bubble,
+                // 贴着图片左边缘，右侧留 12pt 安全边距；箭头对准图片中心。
+                { top: bubble.y + bubble.h + 10, left: Math.min(Math.max(bubble.x, 12), Math.max(12, windowWidth - 232)) },
+              ]}
+            >
+              <View style={[styles.arrow, { left: Math.max(14, bubble.x + size / 2 - Math.min(Math.max(bubble.x, 12), Math.max(12, windowWidth - 232)) - 6) }]} />
+              <Text style={styles.bubbleText}>{t("imagePreview.tooltip")}</Text>
+              <Text style={styles.bubbleAction}>{t("imagePreview.tooltipDismiss")}</Text>
+            </View>
+          </Pressable>
+        </Modal>
+      ) : null}
       {open ? <ImagePreviewModal uri={uri} title={label} subtitle={caption} onClose={() => setOpen(false)} /> : null}
     </Fragment>
   );
 }
 
 const styles = StyleSheet.create({
+  bubble: {
+    position: "absolute",
+    maxWidth: 220,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 8,
+    backgroundColor: "#101828",
+  },
+  arrow: {
+    position: "absolute",
+    top: -6,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderBottomWidth: 6,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    borderBottomColor: "#101828",
+  },
+  bubbleText: { flexShrink: 1, color: HB_COLORS.white, fontSize: 12.5, fontWeight: "600" },
+  bubbleAction: { color: "#9CC2FF", fontSize: 12.5, fontWeight: "600" },
   box: {
     backgroundColor: HB_COLORS.surfaceMuted,
     alignItems: "center",

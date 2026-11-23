@@ -6,12 +6,15 @@ export function ProductImageBox({
   size,
   label,
   caption,
+  introHint,
 }: {
   uri: string | null;
   size: number;
   label: string;
   /** 大图预览底部副标题，例如「货号 XM2405 · 条码」。 */
   caption?: string | null;
+  /** 详情页主商品图传 true，首次出现「点图片可全屏查看」气泡。 */
+  introHint?: boolean;
 }) {
-  return <PreviewableImage uri={uri} size={size} label={label} caption={caption} />;
+  return <PreviewableImage uri={uri} size={size} label={label} caption={caption} introHint={introHint} />;
 }

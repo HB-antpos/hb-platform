@@ -510,6 +510,8 @@
     "hint": "双指缩放 · 双击放大 · 下滑关闭",
     "zoomedHint": "双击还原 · 单指拖动查看细节",
     "loadFailed": "图片加载失败",
-    "imageLabel": "{{name}} 的大图"
+    "imageLabel": "{{name}} 的大图",
+    "tooltip": "点图片可全屏查看",
+    "tooltipDismiss": "知道了"
   }
 }

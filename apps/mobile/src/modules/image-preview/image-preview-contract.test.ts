@@ -28,6 +28,13 @@ assert.match(seasonalBox, /<PreviewableImage/, "ProductImageBox 必须委托给 
 assert.match(seasonalView, /<ProductImageBox/);
 assert.match(seasonalList, /<ProductImageBox/);
 
+// 首次引导气泡只挂在主商品图上（三页各一处），列表缩略图不挂。
+assert.match(hero, /introHint/, "商品查询完整版商品图要带首次气泡");
+assert.match(insights, /introHint/, "商品进销查询商品头要带首次气泡");
+assert.match(seasonalView, /introHint/, "季节详情主商品图要带首次气泡");
+assert.doesNotMatch(seasonalList, /introHint/, "候选列表的缩略图不能带首次气泡");
+assert.match(previewable, /claimImageTooltip/, "气泡必须走「每台设备一次」的领取逻辑");
+
 // 没图或加载失败时不可点、不显示放大角标；有图时点击打开预览层。
 assert.match(previewable, /if \(!uri \|\| failed\)/, "没有图片 / 加载失败要走不可点的占位分支");
 assert.match(previewable, /accessibilityRole="imagebutton"/);

@@ -139,6 +139,7 @@ export const ProductHeroCard = memo(function ProductHeroCard({
             label={name}
             caption={previewCaption}
             placeholderIcon={null}
+            introHint
           />
           <View style={styles.meta}>
             <View style={styles.nameRow}>
