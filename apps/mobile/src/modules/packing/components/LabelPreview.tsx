@@ -62,17 +62,19 @@ export function LabelPreview({ content, accessibilityLabel }: { content: LabelPr
           <QRCode value={content.number || "-"} size={Math.round(105 * SCALE)} backgroundColor="#FFFFFF" color="#000000" />
         </View>
         <View style={styles.bottom}>
-          <View style={styles.meta}>
-            {content.referenceLine ? (
-              <Text numberOfLines={1} style={styles.metaText}>
-                {content.referenceLine}
-              </Text>
-            ) : null}
+          {/* 与打印版式一致：第一行 靠左 VIA <承运商> / DIRECT、靠右 订货单号 / 运单号；第二行 靠右 时间 + 操作人（托盘带张数）。 */}
+          <View style={styles.routeRow}>
+            <Text numberOfLines={1} style={[styles.metaText, styles.route]}>
+              {content.routeLine}
+            </Text>
             <Text numberOfLines={1} style={styles.metaText}>
-              {content.timeLine}
-              {content.sheetText ? <Text style={styles.sheet}>{`  ${content.sheetText}`}</Text> : null}
+              {content.referenceLine}
             </Text>
           </View>
+          <Text numberOfLines={1} style={[styles.metaText, styles.timeText]}>
+            {content.timeLine}
+            {content.sheetText ? <Text style={styles.sheet}>{`  ${content.sheetText}`}</Text> : null}
+          </Text>
         </View>
       </View>
     </View>
@@ -108,8 +110,10 @@ const styles = StyleSheet.create({
   codePrefix: { fontFamily: MONO_FONT, fontSize: 10, fontWeight: "700", color: "#000000" },
   codeTail: { fontFamily: MONO_FONT, fontSize: 20, lineHeight: 24, fontWeight: "800", color: "#000000" },
   stat: { flexShrink: 1, fontSize: 8, fontWeight: "800", color: "#000000", marginLeft: 2 },
-  bottom: { flexDirection: "row", alignItems: "flex-end" },
-  meta: { flex: 1, minWidth: 0, alignItems: "flex-end" },
+  bottom: { minWidth: 0 },
+  routeRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 6, minHeight: 10 },
+  route: { flexShrink: 1, fontWeight: "800" },
+  timeText: { alignSelf: "flex-end" },
   metaText: { fontSize: 7, lineHeight: 10, fontWeight: "600", color: "#000000" },
   sheet: { fontFamily: MONO_FONT, fontSize: 10, fontWeight: "900" },
 });

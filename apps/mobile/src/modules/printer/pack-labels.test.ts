@@ -36,12 +36,14 @@ function parse(command: string) {
   return { rows, texts, vtexts };
 }
 
+// 打包标签的文字只用 font 7（ASCII 12×24 点，按 SETMAG 放大）。不用 font 0：设计时按 8×9 点排版，
+// 2026-11-23 TC26 + 蓝牙标签机首次真机打印实测它约 12 点宽、更高，导致 FROM 压到 TO、右下文字被裁出页边。
 function right(textRow: { font: number; x: number; scaleX: number; value: string }) {
-  return textRow.x + textRow.value.length * (textRow.font === 0 ? 8 : 12) * textRow.scaleX;
+  return textRow.x + textRow.value.length * 12 * textRow.scaleX;
 }
 
 function bottom(textRow: { font: number; y: number; scaleY: number }) {
-  return textRow.y + (textRow.font === 0 ? 9 : 24) * textRow.scaleY;
+  return textRow.y + 24 * textRow.scaleY;
 }
 
 // 去向类型与后端 PackDestinationTypes 一致：0 未指定、1 本地存放、2 其他分店、3 总仓。
@@ -72,10 +74,8 @@ const cartonVtextCaption = cartonParsed.vtexts.find((row) => row.value === "CART
 assert.ok(cartonVtextBox && cartonVtextCaption && cartonVtextBox.y > cartonVtextCaption.y, "自下而上读：BOX 在下、CARTON 在上");
 assert.ok(cartonParsed.rows.includes("INVERSE-LINE 0 0 70 0 208"), "左侧整条反白成黑条");
 assert.ok(!cartonParsed.rows.some((row) => row.startsWith("BOX ")), "箱标签没有外框");
-assert.ok(
-  cartonParsed.texts.some((row) => row.value === "FROM SUNNYBANK - DIRECT"),
-  "FROM 取后端返回的发出地（分店名），要发出且没有运输公司打 DIRECT"
-);
+assert.ok(cartonParsed.texts.some((row) => row.value === "FROM SUNNYBANK"), "FROM 取后端返回的发出地（分店名）");
+assert.ok(cartonParsed.texts.some((row) => row.value === "DIRECT"), "要发出且没有运输公司：底部左侧打 DIRECT");
 assert.ok(!cartonCommand.includes("HB WAREHOUSE"), "不再写死总仓名");
 assert.ok(cartonParsed.texts.some((row) => row.value === "TO"), "第二行有 TO");
 const cartonDestination = cartonParsed.texts.find((row) => row.value === "INALA");
@@ -103,11 +103,26 @@ function assertWithinBounds(command: string, width: number, label: string) {
   const qrX = Number(qr[1]);
   const qrBottom = Number(qr[2]) + 21 * Number(qr[3]);
   assert.ok(qrX + 21 * Number(qr[3]) <= width - 8, `${label}：二维码不越过右边界`);
+  assert.ok(
+    texts.every((row) => row.font === 7),
+    `${label}：文字一律用 font 7（font 0 在真机上约 12 点宽、更高，不是 8×9）`
+  );
   for (const row of texts) {
     assert.ok(right(row) <= width - 8, `${label}：「${row.value}」不越过右边界`);
     assert.ok(bottom(row) <= 196, `${label}：「${row.value}」在单张安全高度内`);
     if (row.y < qrBottom) {
       assert.ok(right(row) <= qrX - 8, `${label}：「${row.value}」不压二维码`);
+    }
+  }
+  // 文字框两两不重叠（真机首印时 FROM 行压到 TO 行、右下两行互压都是这类问题），也不与二维码框相交。
+  type Box = { value: string; left: number; top: number; right: number; bottom: number };
+  const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const boxes: Box[] = texts.map((row) => ({ value: row.value, left: row.x, top: row.y, right: right(row), bottom: bottom(row) }));
+  const qrBox: Box = { value: "二维码", left: qrX, top: Number(qr[2]), right: qrX + 21 * Number(qr[3]), bottom: qrBottom };
+  for (let i = 0; i < boxes.length; i++) {
+    assert.ok(!overlaps(boxes[i], qrBox), `${label}：「${boxes[i].value}」不与二维码框相交`);
+    for (let j = i + 1; j < boxes.length; j++) {
+      assert.ok(!overlaps(boxes[i], boxes[j]), `${label}：「${boxes[i].value}」与「${boxes[j].value}」文字框重叠`);
     }
   }
   assert.ok(!rows.some((row) => row.startsWith("BARCODE 128")), `${label}：不再印一维码`);
@@ -150,13 +165,15 @@ assert.ok(
 const viaCarrier = parse(
   buildPackCartonLabelCommand({ ...carton, destinationType: 3, destinationName: "Warehouse", carrierName: "Border Express" })
 );
-assert.ok(viaCarrier.texts.some((row) => row.value === "FROM SUNNYBANK - VIA BORDER EXPRESS"), "有运输公司打 VIA");
+assert.ok(viaCarrier.texts.some((row) => row.value === "FROM SUNNYBANK"), "FROM 行只留发出地");
+assert.ok(viaCarrier.texts.some((row) => row.value === "VIA BORDER EXPRESS"), "有运输公司：底部左侧打完整的 VIA <承运商>");
 assert.ok(viaCarrier.texts.some((row) => row.value === "WAREHOUSE"), "总仓作为收货方打总仓名");
 // 总仓发出的箱：FROM 取总仓名；订货单号打在右下
 const fromWarehouse = parse(
   buildPackCartonLabelCommand({ ...carton, originName: "HB Warehouse", orderNo: "2026-0412" })
 );
-assert.ok(fromWarehouse.texts.some((row) => row.value === "FROM HB WAREHOUSE - DIRECT"));
+assert.ok(fromWarehouse.texts.some((row) => row.value === "FROM HB WAREHOUSE"));
+assert.ok(fromWarehouse.texts.some((row) => row.value === "DIRECT"));
 assert.ok(fromWarehouse.texts.some((row) => row.value === "ORDER 2026-0412"), "有订货单时右下打订货单号");
 
 // ---- 箱标签 · 超长字段截断而不是溢出 ----
@@ -224,7 +241,8 @@ assert.ok(
   palletParsed.rows.indexOf("BOX 0 0 569 207 6") < palletParsed.rows.indexOf("INVERSE-LINE 6 6 70 6 196"),
   "先画框再反白，避免把框线反成白色"
 );
-assert.ok(palletParsed.texts.some((row) => row.value === "FROM HB WAREHOUSE - VIA BORDER EXPRESS"), "经运输公司加 VIA");
+assert.ok(palletParsed.texts.some((row) => row.value === "FROM HB WAREHOUSE"), "托盘 FROM 行只留发出地");
+assert.ok(palletParsed.texts.some((row) => row.value === "VIA BORDER EXPRESS"), "经运输公司：底部左侧打完整的 VIA <承运商>（放在 FROM 行会被截断）");
 assert.ok(palletParsed.texts.some((row) => row.value === "CAIRNS"));
 assert.ok(palletParsed.texts.some((row) => row.value === "PL261113") && palletParsed.texts.some((row) => row.value === "007"));
 assert.ok(palletParsed.texts.some((row) => row.value === "5 CTN - 366 PCS"), "数量为 N CTN - M PCS");
@@ -247,7 +265,8 @@ const direct = parse(
     sheetIndex: 2,
   })
 );
-assert.ok(direct.texts.some((row) => row.value === "FROM SUNNYBANK - DIRECT"), "自己送 / 对方来取打 DIRECT");
+assert.ok(direct.texts.some((row) => row.value === "FROM SUNNYBANK"));
+assert.ok(direct.texts.some((row) => row.value === "DIRECT"), "自己送 / 对方来取打 DIRECT");
 assert.ok(direct.texts.some((row) => row.value === "ORDER 2026-0398"), "没有运单号时右下打订货单号");
 assert.ok(direct.texts.some((row) => row.value === "2/2"));
 
@@ -273,8 +292,9 @@ const smallPallet = parse(smallPalletCommand);
 assert.ok(smallPalletCommand.includes("PAGE-WIDTH 472"));
 assert.ok(smallPallet.rows.includes("BOX 0 0 471 207 6"));
 assertWithinBounds(smallPalletCommand, 472 - 6, "小托盘标签");
-const smallFrom = smallPallet.texts.find((row) => row.value.startsWith("FROM HB WAREHOUSE - VIA BORDER"));
-assert.ok(smallFrom && !smallFrom.value.includes("LINEHAUL"), "承运商名称超过宽度时截断");
+const smallRoute = smallPallet.texts.find((row) => row.value.startsWith("VIA BORDER"));
+assert.ok(smallRoute && !smallRoute.value.includes("LINEHAUL"), "承运商名称超过宽度时截断");
+assert.ok(smallPallet.texts.some((row) => row.value === "FROM HB WAREHOUSE"), "小托盘 FROM 行只留发出地");
 assert.ok(smallPallet.texts.some((row) => row.value === "13 NOV 15:06"), "小托盘标签只打时间");
 assert.ok(!smallPallet.texts.some((row) => row.value.includes("LILY")), "小托盘标签不打操作人");
 assert.ok(smallPallet.texts.some((row) => row.value === "1/2"));
@@ -291,7 +311,8 @@ assert.equal(parse(injected).rows.filter((row) => row === "PRINT").length, 1, "�
 
 // ---- 版面内容（打印与弹层预览同源）----
 const cartonSpec = buildPackCartonLabelSpec(carton);
-assert.equal(cartonSpec.fromLine, "FROM SUNNYBANK - DIRECT");
+assert.equal(cartonSpec.fromLine, "FROM SUNNYBANK");
+assert.equal(cartonSpec.routeLine, "DIRECT");
 assert.equal(cartonSpec.destinationName, "INALA");
 assert.equal(cartonSpec.sheetText, "");
 const palletSpec = buildPackPalletLabelSpec(pallet);

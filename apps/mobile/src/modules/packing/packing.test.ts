@@ -470,7 +470,8 @@ assert.deepEqual(cartonLabel, {
 assert.equal(buildCartonLabelPayload(carton, labelTime).operatorName, "Lily", "没有封箱人时用建箱人");
 const cartonPreview = cartonLabelPreview(cartonLabel);
 assert.equal(cartonPreview.statLine, "2 SKU - 36 PCS");
-assert.equal(cartonPreview.fromLine, "FROM SUNNYBANK - VIA BORDER EXPRESS", "预览与打印同源");
+assert.equal(cartonPreview.fromLine, "FROM SUNNYBANK", "预览与打印同源");
+assert.equal(cartonPreview.routeLine, "VIA BORDER EXPRESS", "路线行与打印同源");
 assert.equal(cartonPreview.destinationName, "INALA");
 assert.equal(cartonLabelPreview({ ...cartonLabel, destinationType: 0, destinationName: null, carrierName: null }).destinationName, "UNASSIGNED");
 assert.equal(cartonLabelPreview({ ...cartonLabel, destinationType: 1, destinationName: null, carrierName: null }).destinationName, "STORAGE");
@@ -483,14 +484,16 @@ assert.equal(palletLabel.originName, "HB Warehouse", "FROM 取后端返回的发
 assert.equal(palletLabel.consignmentNo, "BEX 4471 0932 18");
 assert.equal(palletLabel.orderNo, null, "托盘上的箱订货单不一致时不打单号");
 const palletPreview = palletLabelPreview(palletLabel, 2);
-assert.equal(palletPreview.fromLine, "FROM HB WAREHOUSE - VIA BORDER EXPRESS");
+assert.equal(palletPreview.fromLine, "FROM HB WAREHOUSE");
+assert.equal(palletPreview.routeLine, "VIA BORDER EXPRESS");
 assert.equal(palletPreview.referenceLine, "CN BEX 4471 0932 18");
 assert.equal(palletPreview.sheetText, "1/2");
 const directPallet = buildPalletLabelPayload(
   { ...pallet, destination: { ...pallet.destination, carrierGuid: null, carrierName: null }, consignmentNo: null },
   labelTime,
 );
-assert.equal(palletLabelPreview(directPallet, 1).fromLine, "FROM HB WAREHOUSE - DIRECT", "要发出且没有运输公司打 DIRECT");
+assert.equal(palletLabelPreview(directPallet, 1).fromLine, "FROM HB WAREHOUSE");
+assert.equal(palletLabelPreview(directPallet, 1).routeLine, "DIRECT", "要发出且没有运输公司打 DIRECT");
 assert.equal(sharedOrderNo([{ orderNo: "A" }, { orderNo: "B" }]), null, "多张订货单混装不打单号");
 assert.equal(sharedOrderNo([{ orderNo: "A" }, { orderNo: null }]), null);
 assert.equal(sharedOrderNo([{ orderNo: "A" }, { orderNo: "A" }]), "A");

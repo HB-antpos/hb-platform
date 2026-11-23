@@ -582,7 +582,10 @@ export interface PackLabelSpec {
   kind: "BOX" | "PLT";
   kindCaption: "CARTON" | "PALLET";
   number: string;
+  /** 第一行：FROM <发出地>。 */
   fromLine: string;
+  /** 路线：VIA <承运商> / DIRECT；本地存放和未指定为空。打在底部左侧（承运商名字较长，放在 FROM 行会被截断）。 */
+  routeLine: string;
   destinationName: string;
   statLine: string;
   /** 右下第一行：订货单号或运单号；可空。 */
@@ -597,18 +600,23 @@ export interface PackLabelSpec {
   toRule: boolean;
 }
 
-// CPCL 固定字体：font 0 为 8×9 点，font 7 为 12×24 点，SETMAG 按倍数放大；非 ASCII 保守按双宽。
-function packTextWidth(value: string, font: 0 | 7, scaleX = 1) {
+// 打包标签的文字只用 CPCL font 7：ASCII 12×24 点（SETMAG 按倍数放大），非 ASCII 保守按双宽。
+// 不用 font 0：设计时按 8×9 点排版，2026-11-23 TC26 + 蓝牙标签机首次真机打印实测它约 12 点宽、放大 1×2 后约 36 点高，
+// 结果 FROM 行压到 TO 行、右下两行按 8 点宽右对齐被裁出页边、行高超出底边压到托盘黑框线。font 7 的 12×24 已由同一张纸上的编号 / 去向大字验证。
+const PACK_CHAR_WIDTH = 12;
+const PACK_CHAR_HEIGHT = 24;
+
+function packTextWidth(value: string, scaleX = 1) {
   return Array.from(value).reduce(
-    (total, char) => total + ((char.codePointAt(0) ?? 0) > 127 ? 2 : 1) * (font === 0 ? 8 : 12) * scaleX,
+    (total, char) => total + ((char.codePointAt(0) ?? 0) > 127 ? 2 : 1) * PACK_CHAR_WIDTH * scaleX,
     0
   );
 }
 
 /** 超宽时直接截断（不换行），保证不压到二维码或标签边缘。 */
-function packFit(value: string, maxWidth: number, font: 0 | 7, scaleX = 1) {
+function packFit(value: string, maxWidth: number, scaleX = 1) {
   const chars = Array.from(value);
-  while (chars.length && packTextWidth(chars.join(""), font, scaleX) > maxWidth) chars.pop();
+  while (chars.length && packTextWidth(chars.join(""), scaleX) > maxWidth) chars.pop();
   return chars.join("").trimEnd();
 }
 
@@ -648,8 +656,8 @@ function buildPackLabelCommand(spec: PackLabelSpec, printType?: string | null) {
     // BARCODE-TEXT 会跨标签保持：显式关闭，避免继承上一张商品标签的可读数字。
     "BARCODE-TEXT OFF",
   ];
-  const addText = (font: 0 | 7, x: number, y: number, value: string, scaleX = 1, scaleY = 1) => {
-    if (value) lines.push(`SETMAG ${scaleX} ${scaleY}`, text(font, Math.round(x), Math.round(y), value));
+  const addText = (x: number, y: number, value: string, scaleX = 1, scaleY = 1) => {
+    if (value) lines.push(`SETMAG ${scaleX} ${scaleY}`, text(7, Math.round(x), Math.round(y), value));
   };
 
   // 左侧类型条：BOX / CARTON（托盘 PLT / PALLET）竖排，自下而上读——BOX 在下、CARTON 在上；先印黑字，最后整条反白成黑底白字。
@@ -657,30 +665,34 @@ function buildPackLabelCommand(spec: PackLabelSpec, printType?: string | null) {
   // 条宽可用部分在托盘粗框内要扣掉 frame；够宽（≥56）时大字放大 2 倍（横跨 48 点），否则 1 倍（横跨 24 点）。
   const kindInner = kindWidth - frame;
   const kindMag = kindInner >= 56 ? 2 : 1;
-  const kindLength = packTextWidth(spec.kind, 7, kindMag);
-  const captionLength = packTextWidth(spec.kindCaption, 7);
+  const kindLength = packTextWidth(spec.kind, kindMag);
+  const captionLength = packTextWidth(spec.kindCaption);
   const kindGap = 14;
   const stackTop = Math.round((height - (kindLength + kindGap + captionLength)) / 2);
   const addVText = (x: number, y: number, value: string, mag: number) => {
     lines.push(`SETMAG ${mag} ${mag}`, vtext(7, Math.round(x), Math.round(y), value));
   };
-  addVText(frame + (kindInner - 24 * kindMag) / 2, stackTop + captionLength + kindGap + kindLength, spec.kind, kindMag);
-  addVText(frame + (kindInner - 24) / 2, stackTop + captionLength, spec.kindCaption, 1);
+  addVText(
+    frame + (kindInner - PACK_CHAR_HEIGHT * kindMag) / 2,
+    stackTop + captionLength + kindGap + kindLength,
+    spec.kind,
+    kindMag
+  );
+  addVText(frame + (kindInner - PACK_CHAR_HEIGHT) / 2, stackTop + captionLength, spec.kindCaption, 1);
 
-  // 第一行：发出地（托盘带承运商 / DIRECT）。
-  addText(0, mainX, frame + 8, packFit(spec.fromLine, textMaxWidth, 0), 1, 2);
+  // 第一行：FROM <发出地>。24 点高，托盘从粗黑框内侧（frame+4）起也不会碰到第二行（y=34）。
+  addText(mainX, frame + 4, packFit(spec.fromLine, textMaxWidth));
 
   // 第二行：TO + 去向大字；放不下先缩一号，再截断。
   const toY = 34;
-  addText(7, mainX, toY + 20, "TO");
+  addText(mainX, toY + 20, "TO");
   const destinationX = mainX + 32;
   const destinationMaxWidth = textMaxWidth - 32;
-  const destinationScaleX = packTextWidth(spec.destinationName, 7, 2) <= destinationMaxWidth ? 2 : 1;
+  const destinationScaleX = packTextWidth(spec.destinationName, 2) <= destinationMaxWidth ? 2 : 1;
   addText(
-    7,
     destinationX,
     toY,
-    packFit(spec.destinationName, destinationMaxWidth, 7, destinationScaleX),
+    packFit(spec.destinationName, destinationMaxWidth, destinationScaleX),
     destinationScaleX,
     2
   );
@@ -689,34 +701,35 @@ function buildPackLabelCommand(spec: PackLabelSpec, printType?: string | null) {
     lines.push(`LINE ${destinationX} ${toY + 40} ${qrX - 12} ${toY + 40} 2`);
   }
 
-  // 第三行：编号前 8 位小字 + 流水尾号大字 + 数量。
+  // 第三行：编号前 8 位小字 + 流水尾号大字；数量放在二维码下沿以下（y≥120），可以一直排到右边缘，不用再和二维码抢宽度。
   const codeY = 86;
   const prefix = number.length > 8 ? number.slice(0, 8) : "";
   const tail = number.length > 8 ? number.slice(8) : number;
-  const tailX = mainX + (prefix ? packTextWidth(prefix, 7) + 8 : 0);
-  const tailScale = packTextWidth(tail, 7, 2) <= textMaxWidth - (tailX - mainX) ? 2 : 1;
-  addText(7, mainX, codeY + 22, prefix);
-  const fittedTail = packFit(tail, textMaxWidth - (tailX - mainX), 7, tailScale);
-  addText(7, tailX, tailScale === 2 ? codeY : codeY + 22, fittedTail, tailScale, tailScale);
-  const statX = tailX + packTextWidth(fittedTail, 7, tailScale) + 10;
-  addText(0, statX, codeY + 26, packFit(spec.statLine, qrX - 8 - statX, 0), 1, 2);
+  const tailX = mainX + (prefix ? packTextWidth(prefix) + 8 : 0);
+  const tailScale = packTextWidth(tail, 2) <= textMaxWidth - (tailX - mainX) ? 2 : 1;
+  addText(mainX, codeY + 22, prefix);
+  const fittedTail = packFit(tail, textMaxWidth - (tailX - mainX), tailScale);
+  addText(tailX, tailScale === 2 ? codeY : codeY + 22, fittedTail, tailScale, tailScale);
+  const statX = tailX + packTextWidth(fittedTail, tailScale) + 10;
+  addText(statX, 120, packFit(spec.statLine, rightEdge - statX));
 
-  // 底部：右下两行（订货单号 / 运单号，时间与操作人）右对齐。箱 / 托盘标签不再印一维码，二维码是唯一的码，
-  // 所以底部整行宽度都归文字用（只需给左边的文字栏让出 10 点间距）。
-  const metaY = 144;
-  const sheetWidth = spec.sheetText ? packTextWidth(spec.sheetText, 7) + 8 : 0;
+  // 底部：右下两行（订货单号 / 运单号，时间与操作人）右对齐，各 24 点高，最低到 y=196（托盘黑框内侧 202）。
+  // 箱 / 托盘标签不再印一维码，二维码是唯一的码，所以底部整行宽度都归文字用（只需给左边的文字栏让出 10 点间距）。
+  const referenceY = 148;
+  const timeY = 172;
+  const sheetWidth = spec.sheetText ? packTextWidth(spec.sheetText) + 8 : 0;
   const metaWidth = rightEdge - (mainX + 10);
-  const referenceLine = packFit(spec.referenceLine, metaWidth, 0);
-  addText(0, rightEdge - packTextWidth(referenceLine, 0), metaY + 4, referenceLine, 1, 2);
+  const referenceLine = packFit(spec.referenceLine, metaWidth);
+  addText(rightEdge - packTextWidth(referenceLine), referenceY, referenceLine);
+  // 路线（VIA <承运商> / DIRECT）：和订货单号 / 运单号同一行、靠左；一维码去掉后这里是空的，承运商名字不用再被 FROM 行截断。
+  // 可用宽度 = 订货单号 / 运单号左边留 12 点；放不下才截断。
+  const routeMaxWidth = (referenceLine ? rightEdge - packTextWidth(referenceLine) - 12 : rightEdge) - mainX;
+  addText(mainX, referenceY, packFit(spec.routeLine, routeMaxWidth));
   // 小标签的托盘右下只打时间，不打操作人（宽度不够）。
   const withOperator = Boolean(spec.operatorName) && !(small && spec.framed);
-  const timeLine = packFit(
-    withOperator ? `${spec.printedAt} ${spec.operatorName}` : spec.printedAt,
-    metaWidth - sheetWidth,
-    0
-  );
-  addText(0, rightEdge - sheetWidth - packTextWidth(timeLine, 0), metaY + 28, timeLine, 1, 2);
-  addText(7, rightEdge - packTextWidth(spec.sheetText, 7), metaY + 23, spec.sheetText);
+  const timeLine = packFit(withOperator ? `${spec.printedAt} ${spec.operatorName}` : spec.printedAt, metaWidth - sheetWidth);
+  addText(rightEdge - sheetWidth - packTextWidth(timeLine), timeY, timeLine);
+  addText(rightEdge - packTextWidth(spec.sheetText), timeY, spec.sheetText);
 
   lines.push(`BARCODE QR ${qrX} ${qrY} M 2 U ${qrUnit}`, `MA,${number}`, "ENDQR");
   if (spec.framed) {
@@ -743,8 +756,9 @@ function packToText(destinationType: number, destinationName: string | null | un
 }
 
 /**
- * FROM 一行：FROM <发出地>；有运输公司时加 " - VIA <公司>"；要发出（其他分店 / 总仓）且没有运输公司时加 " - DIRECT"；
- * 本地存放和未指定不加。
+ * FROM 行 + 路线行：FROM <发出地>；要发出（其他分店 / 总仓）时路线行为 VIA <公司>（有运输公司）或 DIRECT（没有）；
+ * 本地存放和未指定没有路线行。路线单独成行，因为发出地 + 承运商（如 FROM HB WAREHOUSE - VIA BORDER EXPRESS）
+ * 按 12 点字宽放不进 FROM 行，会把承运商名字截掉。
  */
 function packFromText(
   destinationType: number,
@@ -754,8 +768,10 @@ function packFromText(
   const origin = packUpper(originName) || "--";
   const carrier = packUpper(carrierName);
   const shippable = PACK_DESTINATION_SHIPPABLE.includes(destinationType);
-  if (!shippable) return `FROM ${origin}`;
-  return carrier ? `FROM ${origin} - VIA ${carrier}` : `FROM ${origin} - DIRECT`;
+  return {
+    fromLine: `FROM ${origin}`,
+    routeLine: !shippable ? "" : carrier ? `VIA ${carrier}` : "DIRECT",
+  };
 }
 
 /** 箱标签的版面内容（打印与弹层预览共用，保证所见即所得）。 */
@@ -765,7 +781,7 @@ export function buildPackCartonLabelSpec(payload: PackCartonLabelPrintPayload): 
     kind: "BOX",
     kindCaption: "CARTON",
     number: payload.cartonNo,
-    fromLine: packFromText(payload.destinationType, payload.originName, payload.carrierName),
+    ...packFromText(payload.destinationType, payload.originName, payload.carrierName),
     destinationName: packToText(payload.destinationType, payload.destinationName),
     statLine: `${packCount(payload.skuCount)} SKU - ${packCount(payload.pieceCount)} PCS`,
     referenceLine: orderNo ? `ORDER ${orderNo}` : "",
@@ -812,7 +828,7 @@ export function buildPackPalletLabelSpec(payload: PackPalletLabelPrintPayload): 
     kind: "PLT",
     kindCaption: "PALLET",
     number: payload.palletNo,
-    fromLine: packFromText(payload.destinationType, payload.originName, payload.carrierName),
+    ...packFromText(payload.destinationType, payload.originName, payload.carrierName),
     destinationName: packToText(payload.destinationType, payload.destinationName),
     statLine: `${packCount(payload.cartonCount)} CTN - ${packCount(payload.pieceCount)} PCS`,
     referenceLine: consignmentNo ? `CN ${consignmentNo}` : orderNo ? `ORDER ${orderNo}` : "",
