@@ -210,6 +210,6 @@ const styles = StyleSheet.create({
   track: { flex: 1, height: 6, borderRadius: 3, backgroundColor: MOVEMENT_COLORS.inSoft, overflow: "hidden" },
   fill: { height: 6, borderRadius: 3, backgroundColor: MOVEMENT_COLORS.salesBar },
   // 固定文字宽度，各卡片的进度条长度才一致。
-  progressText: { minWidth: 104, textAlign: "right", fontSize: 10.5, color: "#667085", fontVariant: ["tabular-nums"] },
+  progressText: { minWidth: 124, textAlign: "right", fontSize: 10.5, color: "#667085", fontVariant: ["tabular-nums"] },
   noInbound: { fontSize: 11, color: HB_COLORS.danger },
 });

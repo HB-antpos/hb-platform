@@ -92,6 +92,8 @@ export function ImagePreviewModal({ uri, title, subtitle, onClose }: ImagePrevie
     dragY: 0,
     pinch: null as PinchStart | null,
   });
+  // 双击缩放动画是否还在进行；transform.current 始终记着动画的「目标状态」。
+  const zoomAnimation = useRef({ id: 0, running: false });
   const lastTap = useRef<TapRecord | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closing = useRef(false);
@@ -122,11 +124,16 @@ export function ImagePreviewModal({ uri, title, subtitle, onClose }: ImagePrevie
       transform.current = { scale, x, y };
       syncZoomLabel();
       const config = { duration: reduceMotion.current ? 0 : 200, easing: Easing.out(Easing.cubic), useNativeDriver: true };
+      const id = ++zoomAnimation.current.id;
+      zoomAnimation.current.running = true;
       Animated.parallel([
         Animated.timing(scaleV, { toValue: scale, ...config }),
         Animated.timing(txV, { toValue: x, ...config }),
         Animated.timing(tyV, { toValue: y, ...config }),
-      ]).start();
+      ]).start(() => {
+        // 只有最新一次动画结束才清除标记，被打断的旧动画回调不能覆盖。
+        if (zoomAnimation.current.id === id) zoomAnimation.current.running = false;
+      });
     },
     [scaleV, syncZoomLabel, txV, tyV],
   );
@@ -293,10 +300,15 @@ export function ImagePreviewModal({ uri, title, subtitle, onClose }: ImagePrevie
         g.moved = 0;
         g.multi = touches.length > 1;
         g.pinch = null;
-        // 打断进行中的动画，并把 JS 镜像同步成动画停下时的真实值。
-        scaleV.stopAnimation((value) => (transform.current.scale = value));
-        txV.stopAnimation((value) => (transform.current.x = value));
-        tyV.stopAnimation((value) => (transform.current.y = value));
+        // 手指落下时若缩放动画还在进行，直接跳到它的目标状态（setValue 会停掉动画）。
+        // 不再用 stopAnimation 的回调读回当前值：原生驱动下回调是异步的，快速连点时
+        // 它可能晚于紧接着的 animateTo，把镜像写回旧值，导致第二次双击判断错误。
+        if (zoomAnimation.current.running) {
+          zoomAnimation.current.running = false;
+          zoomAnimation.current.id++;
+          const { scale, x, y } = transform.current;
+          apply(scale, x, y);
+        }
       },
       onPanResponderMove: (event: GestureResponderEvent) => {
         const g = gesture.current;
