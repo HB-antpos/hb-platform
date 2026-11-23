@@ -47,7 +47,7 @@ import messagesEn from './attendancePayrollMessages.en.json'
 import messagesZh from './attendancePayrollMessages.zh.json'
 import HoursTab from './HoursTab'
 import ManualEntryDrawer, { type ManualEntryPreset } from './ManualEntryDrawer'
-import { manualEntryErrorText, type ManualEntryMode } from './manualEntryLogic'
+import { manualEntryErrorText, pickHoursInView, type ManualEntryMode } from './manualEntryLogic'
 import ManualLeaveDrawer from './ManualLeaveDrawer'
 import MyobPayRateSyncDrawer from './MyobPayRateSyncDrawer'
 import PayTab from './PayTab'
@@ -284,12 +284,17 @@ export default function AttendancePayrollPage() {
   const [manualEntryPreset, setManualEntryPreset] = useState<ManualEntryPreset | null>(null)
   // 补录抽屉的模式：补工时，或补带薪病假 / 年假 / 年假发放（两个抽屉按模式二选一打开）
   const [manualEntryMode, setManualEntryMode] = useState<ManualEntryMode>('hours')
+  // 抽屉只能用「所看周期」的工时数据：在工资表页签翻期只重载工资数据，hours 可能还停在旧的一期，
+  // 直接给抽屉会让日期范围 / 每天状态 / 员工排班全是旧期的（切到上周后日期只能选本周今天就是这个原因）。
+  const hoursInView = pickHoursInView(hours, periodStart, weeks)
+  useEffect(() => {
+    // 工时统计页签自己会随翻期重载，不用补载；其它页签打开抽屉时，工时数据缺失或周期对不上就补载一次
+    if (manualEntryOpen && activeTab !== 'hours' && !hoursInView) void loadHours()
+  }, [activeTab, hoursInView, loadHours, manualEntryOpen])
   const openManualEntry = (preset?: ManualEntryPreset) => {
     setManualEntryPreset(preset ?? null)
     setManualEntryMode('hours')
     setManualEntryOpen(true)
-    // 在工资表页签进来时工时数据可能还没加载（抽屉要用它判断每天的状态）
-    if (!hours) void loadHours()
   }
   /** 补录 / 撤销后：工时统计与工资表都要重算，两边一起重载。 */
   const reloadAfterManualEntry = () => {
@@ -641,8 +646,8 @@ export default function AttendancePayrollPage() {
             open={manualEntryOpen && manualEntryMode === 'hours'}
             storeCode={storeCode}
             storeName={storeOptions.find((option) => option.value === storeCode)?.label}
-            days={hours?.days ?? []}
-            employees={hours?.employees ?? []}
+            days={hoursInView?.days ?? []}
+            employees={hoursInView?.employees ?? []}
             preset={manualEntryPreset}
             onClose={() => setManualEntryOpen(false)}
             onSaved={reloadAfterManualEntry}
@@ -652,8 +657,8 @@ export default function AttendancePayrollPage() {
             open={manualEntryOpen && manualEntryMode !== 'hours'}
             storeCode={storeCode}
             storeName={storeOptions.find((option) => option.value === storeCode)?.label}
-            days={hours?.days ?? []}
-            employees={hours?.employees ?? []}
+            days={hoursInView?.days ?? []}
+            employees={hoursInView?.employees ?? []}
             leaveType={manualEntryMode === 'hours' ? 'PaidSick' : manualEntryMode}
             preset={manualEntryPreset}
             onClose={() => setManualEntryOpen(false)}

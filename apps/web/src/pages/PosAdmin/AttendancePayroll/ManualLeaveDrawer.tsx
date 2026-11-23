@@ -205,6 +205,8 @@ export default function ManualLeaveDrawer(props: ManualLeaveDrawerProps) {
       <DatePicker.RangePicker
         style={{ width: '100%' }}
         allowClear
+        // 本期的工时数据还没就绪（补载中）时不让选：此刻没有周期起点，会把本期之前的日子也放开
+        disabled={days.length === 0}
         placeholder={[t('attendancePayroll.manualLeave.rangeStart'), t('attendancePayroll.manualLeave.rangeEnd')]}
         value={form.range ? [dayjs(form.range[0]), dayjs(form.range[1])] : null}
         disabledDate={(date) => isManualLeaveDateDisabled(date.format('YYYY-MM-DD'), periodStart, today)}

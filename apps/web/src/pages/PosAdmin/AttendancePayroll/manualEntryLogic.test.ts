@@ -15,6 +15,7 @@ import {
   manualEntryErrorText,
   manualPreviewHoursText,
   parseClock,
+  pickHoursInView,
   validateManualRows,
 } from './manualEntryLogic'
 
@@ -126,6 +127,14 @@ assert.equal(missing[0].start, '09:00')
 assert.deepEqual(collectMissingPunches([]), [])
 
 console.log('manualEntryLogic tests passed')
+
+// ---------- 抽屉用的工时数据必须是所看周期的 ----------
+const hoursOfThisWeek = { periodStart: '2026-11-23', weeks: 1 as const, tag: 'this-week' }
+assert.equal(pickHoursInView(hoursOfThisWeek, '2026-11-23', 1), hoursOfThisWeek, '周期起点与周数都对得上才用')
+assert.equal(pickHoursInView(hoursOfThisWeek, '2026-11-16', 1), null, '在工资表页签切到上周：工时数据还是本周的，不能给抽屉')
+assert.equal(pickHoursInView(hoursOfThisWeek, '2026-11-23', 2), null, '周数不同（1 周 / 2 周）也算对不上')
+assert.equal(pickHoursInView(hoursOfThisWeek, undefined, 1), null, '还没解析出所看周期时不用')
+assert.equal(pickHoursInView(null, '2026-11-23', 1), null, '工时数据还没加载')
 
 // ---------- 补录带薪假 ----------
 const sickEmployee = {
