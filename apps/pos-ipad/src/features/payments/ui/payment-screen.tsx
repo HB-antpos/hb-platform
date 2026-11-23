@@ -120,9 +120,10 @@ const PAYMENT_METHOD_VISUALS: Readonly<
   >
 > = Object.freeze({
   cash: { icon: "cash", color: "green", hintKey: "method.cash.hint" },
+  // 三个集成刷卡通道与 WPF 一样用同一个银行卡图标，供应商靠角标区分。
   square: {
-    icon: "square-rounded-outline",
-    color: "ink",
+    icon: "credit-card-outline",
+    color: "blue",
     hintKey: "method.square.hint",
   },
   "linkly-cloud": {
@@ -131,8 +132,8 @@ const PAYMENT_METHOD_VISUALS: Readonly<
     hintKey: "method.linkly-cloud.hint",
   },
   zeller: {
-    icon: "contactless-payment",
-    color: "ink",
+    icon: "credit-card-outline",
+    color: "blue",
     hintKey: "method.zeller.hint",
   },
   "manual-card": {
@@ -146,6 +147,17 @@ const PAYMENT_METHOD_VISUALS: Readonly<
     hintKey: "method.voucher.hint",
   },
 });
+
+/**
+ * 集成刷卡通道的供应商角标（与 WPF CardProviderBadgeText 一致）：Linkly 通道接的是 ANZ 刷卡机，所以显示 ANZ。
+ * 品牌名不翻译。这三个通道的按钮标题统一为「信用/储蓄卡」，靠角标区分供应商。
+ */
+const CARD_PROVIDER_BADGES: Readonly<Partial<Record<PaymentUiMethod, string>>> =
+  Object.freeze({
+    square: "Square",
+    "linkly-cloud": "ANZ",
+    zeller: "Zeller",
+  });
 
 /** 纸币快捷键面额（澳元纸币）。 */
 const QUICK_CASH_NOTES = [5, 10, 20, 50, 100] as const;
@@ -1706,9 +1718,14 @@ function PaymentSummary({
           ).map((method) => {
             const active = state.selectedMethod === method;
             const disabled = !canSelectPaymentMethod(state, method);
+            const providerBadge = CARD_PROVIDER_BADGES[method];
             return (
               <PaymentMethodButton
                 active={active}
+                badge={providerBadge}
+                badgeTestID={
+                  providerBadge ? `payment-method-${method}-provider` : undefined
+                }
                 disabled={disabled}
                 // 橙框只在右栏正在为这个方式录入金额时出现，和“可以输入”保持同一个含义。
                 highlighted={active && entryArmed}
@@ -1720,7 +1737,11 @@ function PaymentSummary({
                 icon={PAYMENT_METHOD_VISUALS[method].icon}
                 iconColor={PAYMENT_METHOD_VISUALS[method].color}
                 key={method}
-                label={t(paymentMethodCopyKey(method))}
+                label={t(
+                  providerBadge
+                    ? "method.integratedCard"
+                    : paymentMethodCopyKey(method),
+                )}
                 onPress={() => onSelectMethod(method)}
                 testID={`payment-method-${method}`}
               />
@@ -2431,6 +2452,8 @@ function SummaryAmount({
 
 function PaymentMethodButton({
   active,
+  badge,
+  badgeTestID,
   disabled,
   highlighted,
   hint,
@@ -2442,6 +2465,9 @@ function PaymentMethodButton({
 }: Readonly<{
   /** presenter 当前选中的付款方式（无障碍 selected 状态沿用它）。 */
   active: boolean;
+  /** 刷卡供应商角标（ANZ / Zeller / Square），只有集成刷卡通道才有。 */
+  badge?: string | undefined;
+  badgeTestID?: string | undefined;
   disabled: boolean;
   /** 右栏正在为这个方式录入金额。 */
   highlighted: boolean;
@@ -2483,15 +2509,31 @@ function PaymentMethodButton({
         >
           {label}
         </Text>
-        <Text
-          numberOfLines={2}
-          style={[
-            styles.methodHint,
-            disabled && styles.methodTextDisabled,
-          ]}
-        >
-          {hint}
-        </Text>
+        {/* 角标放在说明行开头而不是右上角：右上角留给选中时的 ✓，且不挤占标题宽度（英文标题较长）。 */}
+        <View style={styles.methodHintRow}>
+          {badge ? (
+            <View
+              style={[
+                styles.methodBadge,
+                disabled && styles.methodBadgeDisabled,
+              ]}
+              testID={badgeTestID}
+            >
+              <Text numberOfLines={1} style={styles.methodBadgeText}>
+                {badge}
+              </Text>
+            </View>
+          ) : null}
+          <Text
+            numberOfLines={2}
+            style={[
+              styles.methodHint,
+              disabled && styles.methodTextDisabled,
+            ]}
+          >
+            {hint}
+          </Text>
+        </View>
       </View>
       {highlighted ? (
         <MaterialCommunityIcons
@@ -3183,11 +3225,32 @@ const styles = createPosStyles((colors) => ({
     fontSize: 19,
     fontWeight: "900",
   },
-  methodHint: {
+  methodHintRow: {
     marginTop: 3,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  methodHint: {
+    flexShrink: 1,
     color: colors.mutedInk,
     fontSize: 12.5,
     fontWeight: "600",
+  },
+  methodBadge: {
+    flexShrink: 0,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 9,
+    backgroundColor: colors.blue,
+  },
+  methodBadgeDisabled: {
+    backgroundColor: colors.disabledInk,
+  },
+  methodBadgeText: {
+    color: colors.surface,
+    fontSize: 11,
+    fontWeight: "900",
   },
   methodTextDisabled: {
     color: colors.disabledInk,

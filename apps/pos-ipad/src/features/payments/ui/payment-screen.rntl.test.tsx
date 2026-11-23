@@ -317,6 +317,42 @@ test("现金无权限时隐藏现金入口，已启用礼券仍可使用", async
   expect(screen.getByTestId("payment-method-voucher")).toBeTruthy();
 });
 
+test.each([
+  ["linkly-cloud", "ANZ"],
+  ["zeller", "Zeller"],
+  ["square", "Square"],
+] as const)(
+  "刷卡按钮与 WPF 一致：标题统一为信用/储蓄卡，%s 通道用角标显示供应商 %s",
+  async (card, badge) => {
+    const { presenter } = createUiPresenter({
+      selectedMethod: "cash",
+      providers: [providerAvailability(card), providerAvailability("manual-card")],
+    });
+    const screen = await render(
+      <PaymentScreen locale="zh" presenter={presenter} showStatusStrip={false} />,
+    );
+    const button = screen.getByTestId(`payment-method-${card}`);
+    expect(within(button).getByText("信用/储蓄卡")).toBeTruthy();
+    expect(
+      within(screen.getByTestId(`payment-method-${card}-provider`)).getByText(badge),
+    ).toBeTruthy();
+    // 现金、手动刷卡没有供应商角标。
+    expect(screen.queryByTestId("payment-method-cash-provider")).toBeNull();
+    expect(screen.queryByTestId("payment-method-manual-card-provider")).toBeNull();
+    expect(within(screen.getByTestId("payment-method-manual-card")).getByText("手动刷卡")).toBeTruthy();
+    await screen.unmount();
+
+    const english = await render(
+      <PaymentScreen locale="en" presenter={presenter} showStatusStrip={false} />,
+    );
+    expect(
+      within(english.getByTestId(`payment-method-${card}`)).getByText("Credit/Debit Card"),
+    ).toBeTruthy();
+    expect(english.getByTestId(`payment-method-${card}-provider`)).toBeTruthy();
+    await english.unmount();
+  },
+);
+
 test("设置里启用 Zeller 后收银页出现 Zeller 支付方式，没启用时不出现", async () => {
   const enabled = createUiPresenter({ providers: [providerAvailability("zeller")] });
   const screen = await render(

@@ -51,6 +51,8 @@ export const paymentEnglishCopy = {
   "method.title": "Tender method",
   "method.cash": "Cash",
   "method.card": "Card",
+  // 集成刷卡通道（ANZ / Zeller / Square）按钮的统一标题，与 WPF 一致；供应商名放在按钮上的角标里。
+  "method.integratedCard": "Credit/Debit Card",
   "method.square": "Square",
   "method.linkly-cloud": "Linkly",
   "method.zeller": "Zeller",
@@ -274,6 +276,7 @@ const paymentChineseCopy = {
   "method.title": "付款方式",
   "method.cash": "现金",
   "method.card": "银行卡",
+  "method.integratedCard": "信用/储蓄卡",
   "method.square": "Square",
   "method.linkly-cloud": "Linkly",
   "method.zeller": "Zeller",
