@@ -229,6 +229,6 @@ assert.equal(
 )
 
 requireSource('buildStoreOverrideDenials', '功能权限页应识别账号级有效、但被分店收银权限覆盖关闭的 POS 权限')
-requireSource("t('system.users.storeOverrideBlockedTag', '分店已关闭')", '被分店覆盖关闭的权限应在权限树里显示「分店已关闭」标签')
+requireSource("t('system.usersWorkspace.storeOverrideBlockedTag', '分店已关闭')", '被分店覆盖关闭的权限应在权限树里显示「分店已关闭」标签')
 requireSource('getUserStorePosTerminalPermissions(editingUserGuid, store.storeGUID)', '覆盖提示应按该用户的分店逐店读取覆盖快照')
 requireSource('Promise.allSettled', '逐店读取覆盖快照时单店失败（如店长越权分店）不能影响其余分店和权限编辑')

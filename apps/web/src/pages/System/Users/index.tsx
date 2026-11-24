@@ -1906,13 +1906,13 @@ export default function SystemUsersPage() {
             {storeOverrideDenials[p.name] ? (
               <Tooltip
                 title={t(
-                  'system.users.storeOverrideBlockedTooltip',
+                  'system.usersWorkspace.storeOverrideBlockedTooltip',
                   '该权限在 {{stores}} 被分店「收银权限」显式关闭，这些分店的 POS 上仍然无效；请到该用户的「收银权限」页打开。',
                   { stores: storeOverrideDenials[p.name].join('、') },
                 )}
               >
                 <Tag color="orange" style={{ fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>
-                  {t('system.users.storeOverrideBlockedTag', '分店已关闭')}
+                  {t('system.usersWorkspace.storeOverrideBlockedTag', '分店已关闭')}
                 </Tag>
               </Tooltip>
             ) : null}
@@ -2706,7 +2706,7 @@ export default function SystemUsersPage() {
                     type="warning"
                     showIcon
                     message={t(
-                      'system.users.storeOverrideBlockedAlert',
+                      'system.usersWorkspace.storeOverrideBlockedAlert',
                       '有 {{count}} 项权限在部分分店被「收银权限」覆盖关闭，这些分店的 POS 上不会生效；详见带「分店已关闭」标签的权限。',
                       { count: Object.keys(storeOverrideDenials).length },
                     )}
