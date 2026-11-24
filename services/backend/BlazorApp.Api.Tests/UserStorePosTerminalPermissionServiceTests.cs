@@ -525,6 +525,71 @@ public sealed class UserStorePosTerminalPermissionServiceTests : IDisposable
             new FakeCurrentUserService()
         );
 
+    [Fact]
+    public async Task 保存只记录与账号级继承不同的项_未改动项继续跟随账号直授()
+    {
+        await SeedActorAndTargetAsync();
+        var service = CreateService("store-a");
+        var order20 = Permissions.PosTerminal.Sales.OrderQuickDiscount20Percent;
+        var lineManual = Permissions.PosTerminal.Sales.LineManualDiscount;
+        await _db.Insertable(new SysUserPermission
+        {
+            Id = "target-direct-order20",
+            UserGuid = "target",
+            PermissionCode = order20,
+        }).ExecuteCommandAsync();
+
+        // 页面勾选与继承结果完全一致：不应产生任何覆盖行，仍是继承模式。
+        var unchanged = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest { GrantedPermissionCodes = [order20] }
+        );
+        Assert.True(unchanged.Success);
+        Assert.Equal("Inherited", unchanged.Data!.Mode);
+        Assert.Empty(await _db.Queryable<SysUserStorePosPermission>()
+            .Where(item => item.UserGuid == "target" && item.StoreGuid == "store-a")
+            .ToListAsync());
+
+        // 之后在账号级新增直授：因为该店没有专门关闭它，必须立即对这家店生效。
+        await _db.Insertable(new SysUserPermission
+        {
+            Id = "target-direct-line-manual",
+            UserGuid = "target",
+            PermissionCode = lineManual,
+        }).ExecuteCommandAsync();
+        var afterDirectGrant = await service.GetAsync("target", "store-a");
+        Assert.Contains(lineManual, afterDirectGrant.Data!.EffectivePermissionCodes);
+
+        // 显式取消勾选继承来的项：才会留下「不授权」覆盖行。
+        var denied = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest { GrantedPermissionCodes = [order20] }
+        );
+        Assert.True(denied.Success);
+        Assert.Equal("Override", denied.Data!.Mode);
+        Assert.Equal([lineManual], denied.Data.OverriddenPermissionCodes);
+        Assert.DoesNotContain(lineManual, denied.Data.EffectivePermissionCodes);
+        Assert.Contains(order20, denied.Data.EffectivePermissionCodes);
+
+        // 重新勾回与继承一致：覆盖行软删除，回到继承模式，再次跟随账号直授。
+        var restored = await service.UpdateAsync(
+            "target",
+            "store-a",
+            new UpdateUserStorePosTerminalPermissionsRequest { GrantedPermissionCodes = [order20, lineManual] }
+        );
+        Assert.True(restored.Success);
+        Assert.Equal("Inherited", restored.Data!.Mode);
+        Assert.Contains(lineManual, restored.Data.EffectivePermissionCodes);
+        Assert.All(
+            await _db.Queryable<SysUserStorePosPermission>()
+                .Where(item => item.UserGuid == "target" && item.StoreGuid == "store-a")
+                .ToListAsync(),
+            item => Assert.True(item.IsDeleted)
+        );
+    }
+
     private async Task SeedActorAndTargetAsync()
     {
         await SeedStoreAsync("store-a");
