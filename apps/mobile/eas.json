@@ -32,6 +32,9 @@
         "env": {
           "EXPO_PUBLIC_RUNTIME_VERSION": "1.0.14"
         }
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2"
       }
     },
     "production": {
