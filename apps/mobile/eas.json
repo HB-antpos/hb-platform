@@ -37,6 +37,13 @@
         "image": "macos-tahoe-26.6-xcode-27.2"
       }
     },
+    "preview-simulator": {
+      "extends": "preview",
+      "autoIncrement": false,
+      "ios": {
+        "simulator": true
+      }
+    },
     "production": {
       "channel": "production",
       "environment": "production",
