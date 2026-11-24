@@ -11,6 +11,9 @@
       "environment": "development",
       "env": {
         "EXPO_PUBLIC_HBPOS_BUILD_PROFILE": "development"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2"
       }
     },
     "development-simulator": {
@@ -25,6 +28,9 @@
       "environment": "preview",
       "env": {
         "EXPO_PUBLIC_HBPOS_BUILD_PROFILE": "preview"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2"
       }
     },
     "production": {
@@ -36,6 +42,9 @@
         "EXPO_PUBLIC_HBPOS_BUILD_PROFILE": "production",
         "EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID": "b6491153-83a0-4fe0-9016-49e61e69ed97",
         "EXPO_PUBLIC_HBPOS_UPDATES_URL": "https://u.expo.dev/b6491153-83a0-4fe0-9016-49e61e69ed97"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2"
       }
     },
     "production-zeller": {
@@ -48,6 +57,9 @@
         "EXPO_PUBLIC_HBPOS_EAS_PROJECT_ID": "b6491153-83a0-4fe0-9016-49e61e69ed97",
         "EXPO_PUBLIC_HBPOS_UPDATES_URL": "https://u.expo.dev/b6491153-83a0-4fe0-9016-49e61e69ed97",
         "EXPO_PUBLIC_HBPOS_ENABLE_ZELLER": "1"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.6-xcode-27.2"
       }
     }
   },
