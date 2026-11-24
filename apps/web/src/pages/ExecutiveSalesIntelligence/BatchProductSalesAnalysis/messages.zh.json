@@ -135,6 +135,7 @@
       "unavailablePointAria": "{{date}}，净销量 {{quantity}}，销售额 {{amount}}，折扣拆分不可用"
       ,"uncomputed": "尚无已完成统计"
       ,"uncomputedPointAria": "{{date}}：尚无已完成统计"
+      ,"showValues": "显示数值"
     },
     "statisticsPending": "所选日期的销量统计尚未就绪，请稍后重新查询。",
     "dataNotes": "数据说明",

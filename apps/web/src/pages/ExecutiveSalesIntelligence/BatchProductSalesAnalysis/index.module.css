@@ -113,9 +113,15 @@
 :global(.batch-product-sales-chart) { display: block; width: 100%; height: auto; overflow: visible; }
 :global(.batch-product-sales-chart g[role="graphics-symbol"]) { cursor: crosshair; outline: none; }
 :global(.batch-product-sales-chart g[role="graphics-symbol"]:focus rect[fill="transparent"]) { stroke: #1677ff; stroke-width: 1.5; stroke-dasharray: 3 2; }
-:global(.batch-product-sales-chart-legend) { display: flex; align-items: center; gap: 14px; margin: -1px 0 4px; color: #607087; font-size: 12px; }
+/* 图例在左、「显示数值」开关在右；窄屏换行。 */
+:global(.batch-product-sales-chart-toolbar) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; margin: -1px 0 4px; }
+:global(.batch-product-sales-chart-legend) { display: flex; align-items: center; gap: 14px; margin: 0; color: #607087; font-size: 12px; }
 :global(.batch-product-sales-chart-legend span) { display: inline-flex; align-items: center; gap: 5px; }
 :global(.batch-product-sales-chart-legend i) { width: 8px; height: 8px; border-radius: 50%; }
+:global(.batch-product-sales-chart-values-toggle) { display: inline-flex; align-items: center; gap: 6px; color: #5b6b82; font-size: 12px; cursor: pointer; user-select: none; }
+:global(.batch-product-sales-chart-number) { font-variant-numeric: tabular-nums; }
+/* 数值标签、日期胶囊、提示框都不接收鼠标，只有日期槽热区响应悬停（防止叠加层抢指针造成 mouseleave 循环闪烁）。 */
+:global(.batch-product-sales-chart [pointer-events="none"]) { pointer-events: none; }
 
 /* 桌面端在商品列表之外始终均分两个分析区，确保总销量与分店趋势各占 50%。 */
 @media (max-width: 1439px) and (min-width: 1344px) { .metrics { gap: 6px 9px; } }

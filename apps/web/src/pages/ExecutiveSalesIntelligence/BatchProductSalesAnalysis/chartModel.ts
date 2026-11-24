@@ -46,6 +46,8 @@ export interface DiscountChartModel {
   plotRight: number
   plotTop: number
   plotBottom: number
+  /** 每个日期槽的宽度；数值标注按它判断疏密。 */
+  slotWidth: number
   minValue: number
   maxValue: number
   points: DiscountChartPoint[]
@@ -158,6 +160,7 @@ export function buildDiscountDailyChartModel(data: DiscountChartDaily[], width =
 
   return {
     width, height, zeroY, plotLeft, plotRight, plotTop, plotBottom,
+    slotWidth,
     minValue: axisMin,
     maxValue: axisMax,
     points,
@@ -173,4 +176,101 @@ export function buildDiscountDailyChartModel(data: DiscountChartDaily[], width =
         : []
     }),
   }
+}
+
+/** 图上的一块矩形区域（SVG 坐标），用于标签避让与提示框定位。 */
+export interface ChartBox { x1: number; x2: number; y1: number; y2: number }
+
+export interface DiscountChartValueLabel {
+  index: number
+  /** 完整千分位数字；两侧邻柱之间放不下且 |值| ≥ 1000 时改用 1.2k 缩写，提示框仍显示完整数。 */
+  text: string
+  x: number
+  /** 文字基线 y。 */
+  y: number
+  /** 当前图中 |净销量| 最大的日期，标签加粗。 */
+  peak: boolean
+  box: ChartBox
+}
+
+const labelNumberFormatter = new Intl.NumberFormat('en-AU')
+const boxesOverlap = (a: ChartBox, b: ChartBox) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2
+
+/** 按 10px 系统字体（含加粗）偏宽估算标签宽度，宁可少标也不重叠；不依赖 DOM，便于单测。 */
+export function estimateValueLabelWidth(text: string) {
+  let width = 0
+  for (const char of text) width += /\d/.test(char) ? 6 : char === ',' || char === '.' ? 2.9 : char === 'k' ? 5.6 : 3.8
+  return width
+}
+
+function compactQuantity(value: number) {
+  const abs = Math.abs(value)
+  if (abs < 1000) return labelNumberFormatter.format(value)
+  return `${(value / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, '')}k`
+}
+
+/**
+ * 柱顶数值标注（贪心避让）：
+ * 1. 只标已统计且净销量非 0 的日期；按 |值| 从大到小、同值取较新日期依次尝试放置；
+ * 2. 与已放标签、其他日期的柱子、或调用方传入的避让区（悬浮提示框）相交就跳过——永不重叠、不压邻柱；
+ * 3. 按柱槽疏密分档：≥24px 全标；9–24px 不标低于峰值 5% 的；<9px（约 80 天以上）只标 ≥ 峰值 20% 的；
+ * 4. 正值标在柱顶上方，负值（退货）标在柱底下方；下方空间会碰到 x 轴日期文字时就不标。
+ */
+export function buildValueLabels(model: DiscountChartModel, options: { avoid?: ChartBox | null; measure?: (text: string) => number } = {}): DiscountChartValueLabel[] {
+  const measure = options.measure ?? estimateValueLabelWidth
+  const floorRatio = model.slotWidth >= 24 ? 0 : model.slotWidth >= 9 ? 0.05 : 0.2
+  const barBoxes = model.points.map((point) => {
+    const visible = point.segments.filter((segment) => segment.height > 0)
+    if (!visible.length) return null
+    return {
+      x1: visible[0].x,
+      x2: visible[0].x + visible[0].width,
+      y1: Math.min(...visible.map((segment) => segment.y)),
+      y2: Math.max(...visible.map((segment) => segment.y + segment.height)),
+    }
+  })
+  const maxAbs = Math.max(0, ...model.points.map((point) => (point.unavailable ? 0 : Math.abs(point.quantity))))
+  if (maxAbs === 0) return []
+  const candidates = model.points
+    .map((point, index) => ({ point, index }))
+    .filter(({ point, index }) => !point.unavailable && point.quantity !== 0 && barBoxes[index] && Math.abs(point.quantity) >= maxAbs * floorRatio)
+    .sort((left, right) => Math.abs(right.point.quantity) - Math.abs(left.point.quantity) || right.index - left.index)
+  const placed: DiscountChartValueLabel[] = []
+  for (const { point, index } of candidates) {
+    const bar = barBoxes[index]!
+    const full = labelNumberFormatter.format(point.quantity)
+    // 当前柱两侧邻柱内缘之间的可用宽度；完整数字放得下才用完整写法。
+    const room = 2 * model.slotWidth - (bar.x2 - bar.x1) - 4
+    const text = measure(full) <= room ? full : compactQuantity(point.quantity)
+    const width = measure(text)
+    const positive = point.quantity > 0
+    const y = positive ? Math.max(9, bar.y1 - 4) : bar.y2 + 11
+    // 退货柱底常贴近坐标轴最小刻度：允许标签略低于绘图区，但不能碰到下方 x 轴日期文字（其顶部约在 plotBottom + 9）。
+    if (!positive && y > model.plotBottom + 7) continue
+    const x = Math.min(Math.max(point.x, model.plotLeft + width / 2), model.plotRight - width / 2)
+    const box = { x1: x - width / 2 - 1, x2: x + width / 2 + 1, y1: y - 8, y2: y + 1 }
+    if (options.avoid && boxesOverlap(options.avoid, box)) continue
+    if (placed.some((label) => boxesOverlap(label.box, box))) continue
+    if (barBoxes.some((other, otherIndex) => other && otherIndex !== index && boxesOverlap(other, box))) continue
+    placed.push({ index, text, x, y, peak: Math.abs(point.quantity) === maxAbs, box })
+  }
+  return placed
+}
+
+/**
+ * 悬浮提示框定位：先放在日期槽右侧，超出图宽就翻到左侧，永远不压回当前列；
+ * 两侧都放不下（极窄图）才贴边。提示框本身不接收鼠标（pointer-events: none），即使重叠也不会触发 mouseleave 闪烁。
+ */
+export function placeChartTooltip(model: DiscountChartModel, index: number, size: { width: number; height: number }, gap = 6): ChartBox & { side: 'right' | 'left' | 'edge' } {
+  const point = model.points[index]
+  const right = point.hitX + point.hitWidth + gap
+  const left = point.hitX - gap - size.width
+  // 贴着绘图区顶端放，让最高的完整提示框也在 x 轴日期胶囊之上结束，不遮挡悬停日期。
+  const y1 = Math.max(2, model.plotTop - 16)
+  let x1: number
+  let side: 'right' | 'left' | 'edge'
+  if (right + size.width <= model.width - 2) { x1 = right; side = 'right' }
+  else if (left >= 2) { x1 = left; side = 'left' }
+  else { x1 = Math.max(2, Math.min(right, model.width - size.width - 2)); side = 'edge' }
+  return { x1, x2: x1 + size.width, y1, y2: y1 + size.height, side }
 }
