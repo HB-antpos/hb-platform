@@ -390,8 +390,22 @@
     "description": "{{name}}（{{code}}）的自动零售价有更新。",
     "currentRetail": "当前零售价：{{value}}",
     "nextRetail": "新零售价：{{value}}",
-    "discountHint": "确认后会同步更新零售价，并按新价格更新普通标签。",
-    "confirm": "更新价格并更新标签"
+    "labelHeading": "「保存并打印」使用的标签",
+    "labelShort": {
+      "product": "普通",
+      "small": "小标签",
+      "discount": "折扣",
+      "bigDiscount": "大标签"
+    },
+    "labelName": {
+      "product": "普通标签",
+      "small": "小标签",
+      "discount": "折扣标签",
+      "bigDiscount": "大标签"
+    },
+    "willPrint": "保存后打印 {{count}} 张{{label}}",
+    "saveOnly": "仅保存",
+    "saveAndPrint": "保存并打印"
   },
   "warehousePriceSync": {
     "currentPriceUnavailable": "当前门店售价无法确认，请重新扫码后再打印。",

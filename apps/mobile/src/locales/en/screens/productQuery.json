@@ -390,8 +390,22 @@
     "description": "The automatic retail price for {{name}} ({{code}}) has changed.",
     "currentRetail": "Current retail: {{value}}",
     "nextRetail": "New retail: {{value}}",
-    "discountHint": "Confirm to update the retail price and refresh the regular label.",
-    "confirm": "Update price and label"
+    "labelHeading": "Label for Save & print",
+    "labelShort": {
+      "product": "Reg",
+      "small": "Small",
+      "discount": "Disc",
+      "bigDiscount": "Large"
+    },
+    "labelName": {
+      "product": "Regular label",
+      "small": "Small label",
+      "discount": "Discount label",
+      "bigDiscount": "Large label"
+    },
+    "willPrint": "Prints {{count}} × {{label}} after saving",
+    "saveOnly": "Save only",
+    "saveAndPrint": "Save & print"
   },
   "warehousePriceSync": {
     "currentPriceUnavailable": "The current store price could not be verified. Scan again before printing.",
