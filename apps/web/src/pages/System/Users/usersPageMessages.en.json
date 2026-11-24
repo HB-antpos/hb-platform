@@ -85,7 +85,10 @@
       "middleName": "Middle name",
       "nickname": "Nickname",
       "nicknameHint": "Shown on receipts and staff codes. Defaults to the given name for new users.",
-      "fullNameAutoHint": "When you fill in or change the family, given or middle name below, the full name is regenerated on save"
+      "fullNameAutoHint": "When you fill in or change the family, given or middle name below, the full name is regenerated on save",
+      "storeOverrideBlockedTag": "Closed by store",
+      "storeOverrideBlockedTooltip": "Explicitly turned off by the store POS permissions for {{stores}}, so it still has no effect on POS there. Open it on the user's POS permissions page.",
+      "storeOverrideBlockedAlert": "{{count}} permission(s) are turned off by store POS permissions in some stores and will not take effect on POS there. See items tagged \"Closed by store\"."
     },
     "usersBatch": {
       "sendNotification": "Send notification",

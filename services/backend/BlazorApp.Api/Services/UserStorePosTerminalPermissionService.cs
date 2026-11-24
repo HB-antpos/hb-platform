@@ -129,19 +129,30 @@ public sealed class UserStorePosTerminalPermissionService(
             var rowsToUpdate = new List<SysUserStorePosPermission>();
             var rowsToInsert = new List<SysUserStorePosPermission>();
 
+            // 关键逻辑：覆盖只记录「与账号级继承结果不同」的项。
+            // 与继承一致的项不留覆盖行（已有的软删除），继续跟随角色 + 账号直授，
+            // 这样之后在账号级加权限，对没有被专门关闭的分店立即生效。
+            var targetIsAdmin = (await GetActiveRoleNamesAsync(userGuid)).Any(Permissions.IsSuperAdminRole);
+            var inheritedSet = (await GetInheritedPosCodesAsync(userGuid, targetIsAdmin))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             foreach (var code in assignableCodeList)
             {
+                var wantGranted = grantedCodes.Contains(code, StringComparer.OrdinalIgnoreCase);
+                var differsFromInherited = wantGranted != inheritedSet.Contains(code);
                 if (existingByCode.TryGetValue(code, out var existing))
                 {
                     // 复用原始审计行和唯一键墓碑，重复保存不会换主键或撞唯一索引。
-                    existing.IsGranted = grantedCodes.Contains(
-                        code,
-                        StringComparer.OrdinalIgnoreCase
-                    );
-                    existing.IsDeleted = false;
+                    existing.IsGranted = wantGranted;
+                    existing.IsDeleted = !differsFromInherited;
                     existing.UpdatedAt = now;
                     existing.UpdatedBy = actor;
                     rowsToUpdate.Add(existing);
+                    continue;
+                }
+
+                if (!differsFromInherited)
+                {
                     continue;
                 }
 
@@ -151,7 +162,7 @@ public sealed class UserStorePosTerminalPermissionService(
                     UserGuid = userGuid,
                     StoreGuid = storeGuid,
                     PermissionCode = code,
-                    IsGranted = grantedCodes.Contains(code, StringComparer.OrdinalIgnoreCase),
+                    IsGranted = wantGranted,
                     CreatedAt = now,
                     CreatedBy = actor,
                     UpdatedAt = now,
@@ -384,44 +395,7 @@ public sealed class UserStorePosTerminalPermissionService(
         var db = context.Db;
         var targetRoleNames = await GetActiveRoleNamesAsync(userGuid);
         var isAdminTarget = targetRoleNames.Any(Permissions.IsSuperAdminRole);
-        var allPosCodes = PermissionSeedData.AllPermissions
-            .Where(item => item.Code.StartsWith("Permissions.PosTerminal.", StringComparison.OrdinalIgnoreCase))
-            .Select(item => item.Code)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        List<string> inheritedCodes;
-        if (isAdminTarget)
-        {
-            inheritedCodes = allPosCodes;
-        }
-        else
-        {
-            var roleGuids = await db.Queryable<UserRole>()
-                .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
-                .Where((userRole, role) =>
-                    userRole.UserGUID == userGuid
-                    && !userRole.IsDeleted
-                    && role.IsActive
-                    && !role.IsDeleted
-                )
-                .Select((userRole, role) => role.RoleGUID)
-                .ToListAsync();
-            var roleCodes = roleGuids.Count == 0
-                ? new List<string>()
-                : await db.Queryable<SysRolePermission>()
-                    .Where(item => roleGuids.Contains(item.RoleGuid) && !item.IsDeleted)
-                    .Select(item => item.PermissionCode)
-                    .ToListAsync();
-            var directCodes = await db.Queryable<SysUserPermission>()
-                .Where(item => item.UserGuid == userGuid && !item.IsDeleted)
-                .Select(item => item.PermissionCode)
-                .ToListAsync();
-            inheritedCodes = Permissions.ExpandPermissionCodes(roleCodes.Concat(directCodes))
-                .Where(code => allPosCodes.Contains(code, StringComparer.OrdinalIgnoreCase))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-        }
+        var inheritedCodes = await GetInheritedPosCodesAsync(userGuid, isAdminTarget);
 
         var allOverrideRows = await db.Queryable<SysUserStorePosPermission>()
             .Where(item =>
@@ -468,6 +442,49 @@ public sealed class UserStorePosTerminalPermissionService(
                 .OrderBy(code => code)
                 .ToList(),
         };
+    }
+
+    /// <summary>
+    /// 账号级继承结果：角色权限 ∪ 账号直授（含别名展开），只保留 POS 码；管理员目标视为全部 POS 权限。
+    /// 「收银权限」页展示与保存时的差异比较共用这一处，保证两边口径一致。
+    /// </summary>
+    private async Task<List<string>> GetInheritedPosCodesAsync(string userGuid, bool isAdminTarget)
+    {
+        var db = context.Db;
+        var allPosCodes = PermissionSeedData.AllPermissions
+            .Where(item => item.Code.StartsWith("Permissions.PosTerminal.", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Code)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (isAdminTarget)
+        {
+            return allPosCodes;
+        }
+
+        var roleGuids = await db.Queryable<UserRole>()
+            .InnerJoin<Role>((userRole, role) => userRole.RoleGUID == role.RoleGUID)
+            .Where((userRole, role) =>
+                userRole.UserGUID == userGuid
+                && !userRole.IsDeleted
+                && role.IsActive
+                && !role.IsDeleted
+            )
+            .Select((userRole, role) => role.RoleGUID)
+            .ToListAsync();
+        var roleCodes = roleGuids.Count == 0
+            ? new List<string>()
+            : await db.Queryable<SysRolePermission>()
+                .Where(item => roleGuids.Contains(item.RoleGuid) && !item.IsDeleted)
+                .Select(item => item.PermissionCode)
+                .ToListAsync();
+        var directCodes = await db.Queryable<SysUserPermission>()
+            .Where(item => item.UserGuid == userGuid && !item.IsDeleted)
+            .Select(item => item.PermissionCode)
+            .ToListAsync();
+        return Permissions.ExpandPermissionCodes(roleCodes.Concat(directCodes))
+            .Where(code => allPosCodes.Contains(code, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<List<string>> GetActiveRoleNamesAsync(string userGuid)

@@ -4,6 +4,7 @@ import {
   buildEffectivePermissionCodes,
   buildFallbackUserPermissionState,
   buildPosPermissionSections,
+  buildStoreOverrideDenials,
   canMutateLoadedAssignment,
   deriveDirectPermissionKeysFromChecked,
   buildPermissionSourceMap,
@@ -462,4 +463,52 @@ assertEqual(
   canMutateLoadedAssignment('ready', true),
   false,
   'An assignment draft must be immutable while its save request is running',
+)
+
+// 账号级直授单行六折，但 1042 店覆盖把它显式关闭：必须被识别为「被覆盖压住」。
+const posLine40 = 'Permissions.PosTerminal.Sales.LineQuickDiscount40Percent'
+const posLine10 = 'Permissions.PosTerminal.Sales.LineQuickDiscount10Percent'
+const posOrder40 = 'Permissions.PosTerminal.Sales.OrderQuickDiscount40Percent'
+const storeOverrideDenials = buildStoreOverrideDenials(
+  [
+    {
+      storeGuid: 'store-1042',
+      storeName: 'TestStore',
+      overriddenPermissionCodes: [posLine10, posLine40, posOrder40],
+      grantedPermissionCodes: [posLine10],
+    },
+    {
+      storeGuid: 'store-1020',
+      storeName: 'Wallsend',
+      overriddenPermissionCodes: [posLine40],
+      grantedPermissionCodes: [],
+    },
+  ],
+  [posLine10, posLine40],
+)
+
+assertArrayEqual(
+  storeOverrideDenials[posLine40] ?? [],
+  ['TestStore', 'Wallsend'],
+  'An account-level permission that is explicitly turned off by a store override must list every blocking store',
+)
+assertEqual(
+  storeOverrideDenials[posLine10],
+  undefined,
+  'A permission that the store override also grants must not be flagged',
+)
+assertEqual(
+  storeOverrideDenials[posOrder40],
+  undefined,
+  'A store-level denial of a permission the account does not have is not a conflict and must not be flagged',
+)
+assertEqual(
+  Object.keys(
+    buildStoreOverrideDenials(
+      [{ storeGuid: 's', storeName: 'S', overriddenPermissionCodes: ['Orders.View'], grantedPermissionCodes: [] }],
+      ['Orders.View'],
+    ),
+  ).length,
+  0,
+  'Non-POS permission codes are never subject to store overrides',
 )

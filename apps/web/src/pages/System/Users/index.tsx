@@ -103,6 +103,7 @@ import {
   buildEffectivePermissionCodes,
   buildPosPermissionSections,
   buildPermissionSourceMap,
+  buildStoreOverrideDenials,
   canMutateLoadedAssignment,
   getEditablePosPermissionCodes,
   getPosPermissionGroupSelectionState,
@@ -113,7 +114,7 @@ import {
   shouldEnablePosPermissionSave,
   splitPermissionCategoriesByPlatform,
 } from './userPermissions'
-import type { AssignmentLoadStatus, PosPermissionRequestTarget } from './userPermissions'
+import type { AssignmentLoadStatus, PosPermissionRequestTarget, StorePosOverrideSnapshot } from './userPermissions'
 import { getCreateUserErrorFeedback, getLevelDeniedMessage, getUpdateUserFieldError } from './createUserFeedback'
 import { NewStaffBirthdayAndGuardian, NewStaffPhoneItem, formatBirthdayValue } from './NewStaffProfileFields'
 import type { NewStaffFormInputs } from './NewStaffProfileFields'
@@ -1797,6 +1798,64 @@ export default function SystemUsersPage() {
     return buildPermissionSourceMap(permissionState?.inheritedSources ?? [])
   }, [permissionState])
 
+  // 「分店已关闭」提示数据：账号级 POS 权限在 POS 上还要被各分店「收银权限」覆盖改写，
+  // 账号级勾上、某店覆盖却显式关闭的权限在那家店无效。切到功能权限页签的 POS 视图时按该用户的分店读取覆盖快照。
+  const [storeOverrideSnapshots, setStoreOverrideSnapshots] = useState<StorePosOverrideSnapshot[]>([])
+  const editingUserGuid = editingUser?.userGUID
+  useEffect(() => {
+    setStoreOverrideSnapshots([])
+    if (!editOpen || editTab !== 'permissions' || permissionPlatform !== 'pos') return
+    if (!editingUserGuid || !canManagePosTerminalPermissions || !permissionState || isPermissionStateReadOnly) return
+
+    let cancelled = false
+    const loadStoreOverrides = async () => {
+      try {
+        const userStores = await getUserStores(editingUserGuid)
+        // 店长只能读取自己可管理分店的覆盖；超出范围的分店接口会拒绝，逐店容错即可。
+        const scopedStores = isCurrentUserScoped
+          ? filterStoresForManager(userStores, managedStores)
+          : userStores
+        const results = await Promise.allSettled(
+          scopedStores.map(async (store) => {
+            const state = await getUserStorePosTerminalPermissions(editingUserGuid, store.storeGUID)
+            return {
+              storeGuid: store.storeGUID,
+              storeName: store.storeName,
+              overriddenPermissionCodes: state.overriddenPermissionCodes,
+              grantedPermissionCodes: state.grantedPermissionCodes,
+            } satisfies StorePosOverrideSnapshot
+          }),
+        )
+        if (cancelled) return
+        setStoreOverrideSnapshots(
+          results.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : [])),
+        )
+      } catch (error) {
+        // 提示只是辅助信息，读取失败不打扰操作者，也不影响权限编辑本身。
+        console.error(error)
+      }
+    }
+    void loadStoreOverrides()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    canManagePosTerminalPermissions,
+    editOpen,
+    editTab,
+    editingUserGuid,
+    isCurrentUserScoped,
+    isPermissionStateReadOnly,
+    managedStores,
+    permissionPlatform,
+    permissionState,
+  ])
+
+  const storeOverrideDenials = useMemo(
+    () => buildStoreOverrideDenials(storeOverrideSnapshots, effectivePermSet),
+    [effectivePermSet, storeOverrideSnapshots],
+  )
+
   const hasDirectPermChanges = useMemo(() => {
     return !arePermissionSetsEqual(directPermKeys, originalDirectPermKeys)
   }, [directPermKeys, originalDirectPermKeys])
@@ -1844,11 +1903,24 @@ export default function SystemUsersPage() {
                 {t('system.users.directPermissionTag', '直接授权')}
               </Tag>
             ) : null}
+            {storeOverrideDenials[p.name] ? (
+              <Tooltip
+                title={t(
+                  'system.usersWorkspace.storeOverrideBlockedTooltip',
+                  '该权限在 {{stores}} 被分店「收银权限」显式关闭，这些分店的 POS 上仍然无效；请到该用户的「收银权限」页打开。',
+                  { stores: storeOverrideDenials[p.name].join('、') },
+                )}
+              >
+                <Tag color="orange" style={{ fontSize: 11, lineHeight: '18px', padding: '0 4px' }}>
+                  {t('system.usersWorkspace.storeOverrideBlockedTag', '分店已关闭')}
+                </Tag>
+              </Tooltip>
+            ) : null}
           </Space>
         ),
       })),
     }))
-  }, [directPermSet, inheritedPermSet, isPermTreeFiltered, permCategoryGrantedCounts, permissionSourceMap, t, visiblePermissionCategories])
+  }, [directPermSet, inheritedPermSet, isPermTreeFiltered, permCategoryGrantedCounts, permissionSourceMap, storeOverrideDenials, t, visiblePermissionCategories])
 
   const checkedPermKeys = useMemo(() => {
     return visiblePermissionCodes.filter((permissionCode) => effectivePermSet.has(permissionCode))
@@ -2628,6 +2700,18 @@ export default function SystemUsersPage() {
                         'Web 端包含网页与 HbwebExpo 共用的非 POS 账号权限。',
                       )}
                 />
+
+                {permissionPlatform === 'pos' && Object.keys(storeOverrideDenials).length > 0 ? (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    message={t(
+                      'system.usersWorkspace.storeOverrideBlockedAlert',
+                      '有 {{count}} 项权限在部分分店被「收银权限」覆盖关闭，这些分店的 POS 上不会生效；详见带「分店已关闭」标签的权限。',
+                      { count: Object.keys(storeOverrideDenials).length },
+                    )}
+                  />
+                ) : null}
 
                 <div className="users-ws-perm-filter">
                   <Input

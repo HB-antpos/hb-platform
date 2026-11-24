@@ -377,3 +377,40 @@ export function arePermissionSetsEqual(left: string[], right: string[]): boolean
 
   return true
 }
+
+/** 单个分店的收银权限覆盖快照：只保留构造「被覆盖压住」提示所需的字段。 */
+export interface StorePosOverrideSnapshot {
+  storeGuid: string
+  storeName: string
+  /** 该用户在该店存在覆盖行的权限码（授权或不授权都算）。 */
+  overriddenPermissionCodes: string[]
+  /** 覆盖行里明确授权的权限码；覆盖了但不在此列表里 = 在该店被显式关闭。 */
+  grantedPermissionCodes: string[]
+}
+
+/**
+ * 找出「账号级有效、但在某些分店被分店收银权限覆盖关闭」的 POS 权限。
+ *
+ * 关键逻辑：POS 登录快照 = 角色权限 + 账号直授，再被分店覆盖逐项改写，覆盖里显式关闭的项会被删掉。
+ * 所以账号级勾上了、某店却被关闭的权限，在那家店的 POS 上是无效的，必须提示，否则容易误以为已经生效。
+ * 只统计 accountEffectiveCodes（角色继承 + 直授）里存在的 POS 码；返回 权限码 → 被关闭的分店名列表。
+ */
+export function buildStoreOverrideDenials(
+  snapshots: StorePosOverrideSnapshot[],
+  accountEffectiveCodes: Iterable<string>,
+): Record<string, string[]> {
+  const effectiveCodes = new Set(accountEffectiveCodes)
+  const denials: Record<string, string[]> = {}
+
+  snapshots.forEach((snapshot) => {
+    const grantedCodes = new Set(snapshot.grantedPermissionCodes)
+    snapshot.overriddenPermissionCodes.forEach((permissionCode) => {
+      if (!permissionCode.startsWith(POS_TERMINAL_PREFIX)) return
+      if (grantedCodes.has(permissionCode)) return
+      if (!effectiveCodes.has(permissionCode)) return
+      denials[permissionCode] = [...(denials[permissionCode] ?? []), snapshot.storeName]
+    })
+  })
+
+  return denials
+}
