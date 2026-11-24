@@ -97,3 +97,71 @@ const partialCoverage = buildDiscountDailyChartModel([
 assert(partialCoverage.points[1].unavailable && partialCoverage.points[1].segments.length === 0, '未完成日期必须保留日期轴断点，不能补零或画柱')
 assert(partialCoverage.points[1].hitWidth > 0, '未完成日期即使没有柱形也必须保留可悬停和键盘聚焦的日期槽')
 assert(!partialCoverage.points[2].unavailable && partialCoverage.points[2].segments.every((segment) => segment.height === 0), '已完成日期才可以作为真实零值')
+
+// ---------- 柱顶数值标注 ----------
+const { buildValueLabels, placeChartTooltip } = await import('./chartModel')
+type Box = { x1: number; x2: number; y1: number; y2: number }
+const boxesHit = (a: Box, b: Box) => a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2
+function dailySeries(values: (number | null)[]) {
+  return values.map((quantity, index) => ({
+    date: new Date(Date.UTC(2026, 3, 1 + index)).toISOString().slice(0, 10),
+    metrics: quantity === null ? null : metrics({ quantity, regularQuantity: quantity }),
+  }))
+}
+function barBox(point: ReturnType<typeof buildDiscountDailyChartModel>['points'][number]): Box | null {
+  const visible = point.segments.filter((segment) => segment.height > 0)
+  if (!visible.length) return null
+  return { x1: visible[0].x, x2: visible[0].x + visible[0].width, y1: Math.min(...visible.map((s) => s.y)), y2: Math.max(...visible.map((s) => s.y + s.height)) }
+}
+// 与线上截图同形态：41 天，前段零星小值，末段 230 / 170 / 362 高峰
+const greenhills = [6, 3, 0, 2, 0, 0, 0, 6, 10, 22, 13, 4, 2, 3, 2, 6, 7, 20, 25, 16, 8, 5, 8, 21, 26, 0, 35, 31, 18, 22, 40, 58, 52, 60, 85, 79, 230, 170, 362, 38, 0]
+for (const width of [260, 500, 776, 1100]) {
+  const model = buildDiscountDailyChartModel(dailySeries(greenhills), width, 186)
+  const labels = buildValueLabels(model)
+  assert(labels.some((label) => label.peak && model.points[label.index].quantity === 362), `宽 ${width}px 时峰值必须标注并加粗`)
+  assert(labels.every((label, index) => labels.every((other, otherIndex) => otherIndex === index || !boxesHit(label.box, other.box))), `宽 ${width}px 时数值标签不得互相重叠`)
+  assert(labels.every((label) => model.points.every((point, pointIndex) => {
+    const bar = barBox(point)
+    return pointIndex === label.index || !bar || !boxesHit(label.box, bar)
+  })), `宽 ${width}px 时数值标签不得压住其他日期的柱子`)
+  assert(labels.every((label) => label.box.x1 >= model.plotLeft - 1 && label.box.x2 <= model.plotRight + 1), `宽 ${width}px 时数值标签不得超出绘图区左右边界`)
+  assert(labels.every((label) => model.points[label.index].quantity !== 0), '净销量为 0 的日期不标数值')
+}
+const denseGreenhills = buildDiscountDailyChartModel(dailySeries(greenhills), 776, 186)
+const denseGreenhillsLabels = buildValueLabels(denseGreenhills)
+assert(denseGreenhills.slotWidth < 24 && denseGreenhillsLabels.every((label) => Math.abs(denseGreenhills.points[label.index].quantity) >= 362 * 0.05),
+  '柱子较密时不标低于峰值 5% 的小值，避免底部一排数字')
+assert(denseGreenhillsLabels.find((label) => denseGreenhills.points[label.index].quantity === 230)?.text === '230'
+  && denseGreenhillsLabels.some((label) => denseGreenhills.points[label.index].quantity === 170), '相邻的 230 / 170 / 362 高峰都应标出')
+
+const sparse = buildDiscountDailyChartModel(dailySeries(greenhills.slice(27)), 500, 186)
+assert(sparse.slotWidth >= 24 && buildValueLabels(sparse).length === sparse.points.filter((point) => point.quantity !== 0).length,
+  '柱槽宽松（约 30 天以内）时所有非零日期都应标注')
+
+const thousands = [30, 35, 10, 15, 8, 5, 20, 25, 60, 110, 140, 120, 95, 100, 120, 150, 170, 140, 130, 160, 165, 175, 230, 260, 210, 30, 270, 300, 310, 380, 450, 520, 560, 600, 760, 1000, 1850, 2150, 3300, 700, 30]
+const denseThousands = buildDiscountDailyChartModel(dailySeries(thousands), 776, 186)
+assert(buildValueLabels(denseThousands).find((label) => label.index === 38)?.text === '3.3k', '两侧邻柱间放不下完整四位数时改用 k 缩写')
+const wideThousands = buildDiscountDailyChartModel(dailySeries([600, 3300, 700]), 720, 186)
+assert(buildValueLabels(wideThousands).find((label) => label.index === 1)?.text === '3,300', '放得下时保留千分位完整数字')
+
+const withReturns = buildDiscountDailyChartModel(dailySeries([8, -4, 6]), 720, 186)
+const returnLabel = buildValueLabels(withReturns).find((label) => label.index === 1)
+assert(returnLabel?.text === '-4' && returnLabel.y > withReturns.zeroY, '退货（负净销量）标在零线下方的柱底')
+assert(!buildValueLabels(buildDiscountDailyChartModel(dailySeries([5, null, 7]), 720, 186)).some((label) => label.index === 1), '未统计日期不得标数值')
+assert(buildValueLabels(denseGreenhills, { avoid: { x1: 0, x2: 9999, y1: 0, y2: 9999 } }).length === 0, '与避让区（悬浮提示框）相交的标签必须隐藏')
+assert(buildValueLabels(buildDiscountDailyChartModel(dailySeries([0, 0]), 720, 186)).length === 0, '全为 0 时不标任何数值')
+
+// ---------- 悬浮提示框定位 ----------
+for (const [index, point] of denseGreenhills.points.entries()) {
+  const box = placeChartTooltip(denseGreenhills, index, { width: 176, height: 166 })
+  assert(box.x1 >= 0 && box.x2 <= denseGreenhills.width, `第 ${index} 天提示框不得超出图表`)
+  assert(!(box.x1 < point.hitX + point.hitWidth && point.hitX < box.x2), `第 ${index} 天提示框不得盖住当前日期槽（光标所在列），否则会抢走鼠标造成闪烁`)
+}
+assert(placeChartTooltip(denseGreenhills, 0, { width: 176, height: 150 }).y2 <= denseGreenhills.plotBottom + 5, '完整提示框须在 x 轴日期胶囊上方结束，不遮挡悬停日期')
+assert(placeChartTooltip(denseGreenhills, 0, { width: 176, height: 166 }).side === 'right', '左侧日期的提示框放在右边')
+assert(placeChartTooltip(denseGreenhills, 38, { width: 176, height: 166 }).side === 'left', '右缘高峰日期的提示框翻到左边，不再夹回压住当前列')
+const narrow = buildDiscountDailyChartModel(dailySeries(greenhills), 260, 186)
+assert(narrow.points.every((_, index) => {
+  const box = placeChartTooltip(narrow, index, { width: 176, height: 166 })
+  return box.x1 >= 0 && box.x2 <= narrow.width
+}), '极窄图两侧都放不下时贴边显示，但不得超出图表')

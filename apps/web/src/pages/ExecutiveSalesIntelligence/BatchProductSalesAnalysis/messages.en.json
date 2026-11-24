@@ -134,7 +134,8 @@
       "totalPointAria": "{{date}}, net quantity {{quantity}}, sales {{amount}}, discounts pending",
       "unavailablePointAria": "{{date}}, net quantity {{quantity}}, sales {{amount}}, discount breakdown unavailable",
       "uncomputed": "No completed statistics yet",
-      "uncomputedPointAria": "{{date}}: no completed statistics yet"
+      "uncomputedPointAria": "{{date}}: no completed statistics yet",
+      "showValues": "Show values"
     },
     "statisticsPending": "Sales statistics for these dates are not ready. Please try again later.",
     "dataNotes": "Data notes",
