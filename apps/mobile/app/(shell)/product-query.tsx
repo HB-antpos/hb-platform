@@ -142,6 +142,13 @@ import {
   type ScannedCodeFocus,
 } from "@/modules/product-maintenance/scan-label";
 import {
+  AUTO_PRICING_LABEL_KINDS,
+  isAutoPricingLabelKindAvailable,
+  resolveAutoPricingLabelPlan,
+  resolveAutoPricingLabelSelection,
+  type AutoPricingLabelKind,
+} from "@/modules/product-maintenance/auto-pricing-label";
+import {
   createProductDetailRequestCoordinator,
   createProductHqSyncMutationCoordinator,
   getHqSyncDisplayState,
@@ -214,6 +221,12 @@ interface SendProductLabelOptions {
    * - "only"：自动打印专用，有折扣时只打折扣标签、不打普通标签；没有折扣照常打普通标签。
    */
   withDiscountLabel?: DiscountLabelMode;
+  /**
+   * 只打折扣类标签（自动调价弹窗「保存并打印」选了 Disc / Large）：打 labelKind 指定的那一种，
+   * 份数取打印设置里的「打印数量」；折扣率不大于 0 时拒绝打印，不静默改打别的标签。
+   * 设置后忽略 withDiscountLabel。
+   */
+  labelKind?: "discount" | "bigDiscount";
 }
 
 type DiscountLabelMode = boolean | "only";
@@ -282,6 +295,18 @@ function normalizeDiscountRateValue(value?: number | null) {
   }
 
   return null;
+}
+
+/**
+ * 自动调价弹窗里这次新价有没有折扣：评估结果的折扣率优先，缺省回退当前门店价折扣
+ * （与「更新价格」写库时取折扣率的口径一致）。决定 Disc / Large 能不能选。
+ */
+function hasAutoPricingDialogDiscount(dialog: AutoPricingDialogState) {
+  return shouldAutoPrintDiscountLabel(
+    normalizeDiscountRateValue(
+      dialog.evaluation.discountRate ?? dialog.detail.storePrice?.discountRate,
+    ),
+  );
 }
 
 function getDiscountedRetailPrice(
@@ -709,6 +734,13 @@ function ProductQueryContent() {
   const [autoPricingDialog, setAutoPricingDialog] =
     useState<AutoPricingDialogState | null>(null);
   const [autoPricingDialogSaving, setAutoPricingDialogSaving] = useState(false);
+  // 弹窗里「保存并打印」要打的标签；每次打开弹窗时按上次选择与是否有折扣重新决定。
+  const [autoPricingLabelKind, setAutoPricingLabelKind] =
+    useState<AutoPricingLabelKind>("product");
+  // 哪个键正在忙：只用来让被点的那个键转圈，闸门仍是 autoPricingDialogSaving。
+  const [autoPricingSavingMode, setAutoPricingSavingMode] = useState<
+    "save" | "saveAndPrint" | null
+  >(null);
   const [createProductVisible, setCreateProductVisible] = useState(false);
   const [createSupplierPickerVisible, setCreateSupplierPickerVisible] =
     useState(false);
@@ -848,6 +880,8 @@ function ProductQueryContent() {
   const autoPricingDialogResolverRef = useRef<
     ((result: AutoPricingDialogResolution) => void) | null
   >(null);
+  // 本页上次在弹窗里选的标签：下次弹窗默认沿用（只在本页会话内记住，不持久化）。
+  const lastAutoPricingLabelKindRef = useRef<AutoPricingLabelKind | null>(null);
   const numericInputConfirmRef = useRef<((value: string) => void) | null>(null);
   const lookupSelectionOpenRef = useRef(false);
   const lookupRequestInFlightRef = useRef(false);
@@ -2065,6 +2099,7 @@ function ProductQueryContent() {
     (result: AutoPricingDialogResolution) => {
       setAutoPricingDialog(null);
       setAutoPricingDialogSaving(false);
+      setAutoPricingSavingMode(null);
       const resolve = autoPricingDialogResolverRef.current;
       autoPricingDialogResolverRef.current = null;
       resolve?.(result);
@@ -2108,6 +2143,14 @@ function ProductQueryContent() {
     (state: AutoPricingDialogState) =>
       new Promise<AutoPricingDialogResolution>((resolve) => {
         autoPricingDialogResolverRef.current = resolve;
+        // 默认沿用上次选的标签；这次新价没有折扣时，折扣类标签选不了，回到普通标签。
+        setAutoPricingLabelKind(
+          resolveAutoPricingLabelSelection(
+            lastAutoPricingLabelKindRef.current,
+            hasAutoPricingDialogDiscount(state),
+          ),
+        );
+        setAutoPricingSavingMode(null);
         setAutoPricingDialog(state);
       }),
     [],
@@ -2148,6 +2191,32 @@ function ProductQueryContent() {
       const discountRate = options?.discountRate ?? targetDetail.storePrice?.discountRate;
       const hasDiscount = shouldAutoPrintDiscountLabel(discountRate);
       try {
+        if (options?.labelKind) {
+          // 弹窗「保存并打印」选了 Disc / Large：价格已经保存，折扣却没了就明确提示，不静默改打别的标签。
+          if (!hasDiscount) {
+            setSnackbarMessage(t("messages.discountPrintUnavailable"));
+            playQueryFeedback("error");
+            return false;
+          }
+          console.log("[product-query] sendDiscountKindLabel", { action, labelKind: options.labelKind });
+          const overrides = {
+            barcode: options.barcode,
+            retailPrice: options.retailPrice,
+            discountRate: options.discountRate,
+          };
+          for (let i = 0; i < printQuantity; i++) {
+            if (options.labelKind === "bigDiscount") {
+              await printBigDiscountLabel(targetDetail, undefined, overrides);
+            } else {
+              await printDiscountLabel(targetDetail, options.printType, overrides);
+            }
+          }
+          setSnackbarMessage(t("messages.printSuccess"));
+          if (quantitySingleUse && printQuantity > 1) {
+            setPrintQuantity(1);
+          }
+          return true;
+        }
         if (options?.withDiscountLabel === "only" && hasDiscount) {
           // 自动打印 + 有折扣：只打折扣标签（份数与普通标签一致），不再先打普通标签。
           console.log("[product-query] sendDiscountLabelOnly", { action, printType: options.printType });
@@ -2262,6 +2331,8 @@ function ProductQueryContent() {
       withDiscountLabel: DiscountLabelMode = false,
       /** 价格页签的按钮打子码时仍按 product / small 记忙碌态，让转圈落在按下的那个按钮上而不是码表行。 */
       actionOverride?: PrintAction,
+      /** 只打折扣类标签（自动调价弹窗选了 Disc / Large）。 */
+      labelKind?: "discount" | "bigDiscount",
     ) => {
       if (target.retailPrice == null || !Number.isFinite(target.retailPrice)) {
         setSnackbarMessage(t(target.kind === "set"
@@ -2277,6 +2348,8 @@ function ProductQueryContent() {
         action: actionOverride ?? `${target.kind}:${target.codeId}`,
         printType,
         withDiscountLabel,
+        // 只有选了折扣类标签才带 labelKind：其余调用方（自动打印、码表行等）传给 sendProductLabel 的参数形状保持不变。
+        ...(labelKind ? { labelKind } : {}),
       });
     },
     [playQueryFeedback, sendProductLabel, t],
@@ -2285,30 +2358,49 @@ function ProductQueryContent() {
   /**
    * 自动调价确认后的打印：扫的是套装 / 多码子项时打子项标签，不能一律打主档条码和价格。
    * 多码价跟随主档，必须用保存后的新主档价，不能用调价前服务器给的 printTarget 价格。
+   *
+   * labelKind 是弹窗「保存并打印」选的标签（默认普通标签，免确认的自动打印路径不传）：
+   * 套装 / 多码子项与主档共用同一份标签类型换算，子项只换条码与价格，标签种类不变。
    */
   const sendAutoPricingLabel = useCallback(
-    async (savedDetail: ProductDetail, dialog: AutoPricingDialogState) => {
-      const printType = smallLabel ? "small" : null;
+    async (
+      savedDetail: ProductDetail,
+      dialog: AutoPricingDialogState,
+      labelKind: AutoPricingLabelKind = "product",
+    ) => {
+      const plan = resolveAutoPricingLabelPlan(labelKind, smallLabel);
+      const printType = plan.printType;
+      // 小标签按钮沿用 handlePrint 的做法：busy 态记成 small，普通 / 折扣类交给子项默认值。
+      const codeActionOverride = plan.action === "small" ? "small" : undefined;
       const target = dialog.printTarget;
       // 「自动打印」开着时有折扣只打折扣标签；折扣率是否大于 0 由 sendProductLabel 判定。
       const withDiscountLabel: DiscountLabelMode = dialog.autoPrintEnabled === true ? "only" : false;
+      const sendCode = (codeTarget: CodeLabelTarget) =>
+        sendCodeLabel(
+          savedDetail,
+          codeTarget,
+          printType,
+          withDiscountLabel,
+          codeActionOverride,
+          plan.discountKind,
+        );
       if (target?.kind === "set" && target.codeId) {
-        return sendCodeLabel(savedDetail, {
+        return sendCode({
           kind: "set",
           codeId: target.codeId,
           barcode: target.barcode,
           retailPrice: target.retailPrice,
           // 套装子码的折扣跟保存后的主档门店价（套装行没有折扣字段），与多码同口径。
           discountRate: savedDetail.storePrice?.discountRate ?? 0,
-        }, printType, withDiscountLabel);
+        });
       }
       if (target?.kind === "multi" && target.codeId) {
-        return sendCodeLabel(savedDetail, {
+        return sendCode({
           kind: "multi",
           codeId: target.codeId,
           barcode: target.barcode,
           ...resolveMultiCodeLabelPrice(savedDetail),
-        }, printType, withDiscountLabel);
+        });
       }
       // 没有服务端目标时用扫码焦点（本地码表 / 码表加载后补解析）：快路径的 dialog.detail 不含码表，
       // 不能只靠下面按关键字在 dialog.detail 里重新匹配。
@@ -2319,7 +2411,7 @@ function ProductQueryContent() {
           focus,
         );
         if (focusTarget) {
-          return sendCodeLabel(savedDetail, focusTarget, printType, withDiscountLabel);
+          return sendCode(focusTarget);
         }
       }
       const keyword = dialog.scanKeyword?.trim();
@@ -2334,14 +2426,19 @@ function ProductQueryContent() {
           keyword,
         );
         if (resolved?.kind === "set" || resolved?.kind === "multi") {
-          return sendCodeLabel(savedDetail, resolved, printType, withDiscountLabel);
+          return sendCode(resolved);
         }
         if (!resolved) {
           setSnackbarMessage(t("messages.codesLoadFailed"));
           return false;
         }
       }
-      return sendProductLabel(savedDetail, { withDiscountLabel });
+      return sendProductLabel(savedDetail, {
+        withDiscountLabel,
+        printType,
+        action: plan.action,
+        ...(plan.discountKind ? { labelKind: plan.discountKind } : {}),
+      });
     },
     [sendCodeLabel, sendProductLabel, smallLabel, t],
   );
@@ -4582,6 +4679,75 @@ function ProductQueryContent() {
     setPrintSettingsVisible(true);
   }, []);
 
+  const handleSelectAutoPricingLabelKind = useCallback((kind: AutoPricingLabelKind) => {
+    setAutoPricingLabelKind(kind);
+    // 记住这次选择，下次弹窗默认沿用（折扣类标签没有折扣可打时会回退普通标签）。
+    lastAutoPricingLabelKindRef.current = kind;
+  }, []);
+
+  /**
+   * 自动调价弹窗的两个确认键共用同一保存流程，区别只在保存之后：
+   * - 仅保存（withPrint=false）：只写价格，不出纸；
+   * - 保存并打印（withPrint=true）：写价格成功后按所选标签打印。
+   * 保存失败时不打印，恢复扫码并以 failed 结束（persistStorePrice 已提示原因）；
+   * 打印失败时价格已经保存，仍按 confirmed 结束，失败提示与重试由打印层给出。
+   * 保存期间沿用 autoPricingDialogSaving 闸门，连点或中途切标签都不会触发第二次写库。
+   */
+  const confirmAutoPricingDialog = useCallback(
+    async (withPrint: boolean) => {
+      const dialog = autoPricingDialog;
+      if (!dialog || autoPricingDialogSaving) {
+        return;
+      }
+
+      setAutoPricingDialogSaving(true);
+      setAutoPricingSavingMode(withPrint ? "saveAndPrint" : "save");
+      const keepCameraOpen = shouldRestoreCameraScan(dialog.scanSource);
+      const savedDetail = await persistStorePrice(dialog.detail, {
+        retailPrice:
+          dialog.evaluation.recalculatedRetailPrice ??
+          dialog.detail.storePrice?.retailPrice ??
+          null,
+        discountRate: normalizeDiscountRateValue(
+          dialog.evaluation.discountRate ?? dialog.detail.storePrice?.discountRate,
+        ),
+        isAutoPricing: true,
+      });
+
+      if (!savedDetail) {
+        restoreScanAbility(dialog.scanSource);
+        finishAutoPricingDialog({
+          status: "failed",
+          keepCameraOpen,
+          labelPrinted: false,
+          updatedDetail: dialog.detail,
+        });
+        return;
+      }
+
+      const labelPrinted = withPrint
+        ? await sendAutoPricingLabel(savedDetail, dialog, autoPricingLabelKind)
+        : false;
+      restoreScanAbility(dialog.scanSource);
+      finishAutoPricingDialog({
+        status: "confirmed",
+        keepCameraOpen,
+        labelPrinted,
+        updatedDetail: savedDetail,
+      });
+    },
+    [
+      autoPricingDialog,
+      autoPricingDialogSaving,
+      autoPricingLabelKind,
+      finishAutoPricingDialog,
+      persistStorePrice,
+      restoreScanAbility,
+      sendAutoPricingLabel,
+      shouldRestoreCameraScan,
+    ],
+  );
+
   const handleSaveAndPrint = useCallback(async () => {
     if (savingAndPrinting || saving || printingAction || !detail?.storePrice) {
       return;
@@ -5624,9 +5790,57 @@ function ProductQueryContent() {
                       })}
                     </Text>
                   </View>
-                  <Text variant="bodySmall" style={styles.autoPricingHint}>
-                    {t("autoPricingConfirm.discountHint")}
-                  </Text>
+                  <View style={styles.autoPricingLabelSection}>
+                    <Text variant="labelMedium" style={styles.autoPricingLabelHeading}>
+                      {t("autoPricingConfirm.labelHeading")}
+                    </Text>
+                    <View style={styles.autoPricingLabelChips} accessibilityRole="radiogroup">
+                      {AUTO_PRICING_LABEL_KINDS.map((kind) => {
+                        const selected = autoPricingLabelKind === kind;
+                        // Disc / Large 只有新价带折扣时才有内容可打，与底部打印条同一规则。
+                        const available = isAutoPricingLabelKindAvailable(
+                          kind,
+                          hasAutoPricingDialogDiscount(autoPricingDialog),
+                        );
+                        const disabled = !available || autoPricingDialogSaving;
+                        return (
+                          <Pressable
+                            key={kind}
+                            accessibilityRole="radio"
+                            accessibilityLabel={t(`autoPricingConfirm.labelName.${kind}`)}
+                            accessibilityState={{ selected, disabled }}
+                            disabled={disabled}
+                            onPress={() => handleSelectAutoPricingLabelKind(kind)}
+                            style={[
+                              styles.autoPricingLabelChip,
+                              selected && styles.autoPricingLabelChipSelected,
+                              !available && styles.autoPricingLabelChipUnavailable,
+                              available && autoPricingDialogSaving && styles.autoPricingLabelChipBusy,
+                            ]}
+                          >
+                            <Text
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.8}
+                              style={[
+                                styles.autoPricingLabelChipText,
+                                selected && styles.autoPricingLabelChipTextSelected,
+                              ]}
+                            >
+                              {selected ? "✓ " : ""}
+                              {t(`autoPricingConfirm.labelShort.${kind}`)}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Text variant="bodySmall" style={styles.autoPricingHint}>
+                      {t("autoPricingConfirm.willPrint", {
+                        count: printQuantity,
+                        label: t(`autoPricingConfirm.labelName.${autoPricingLabelKind}`),
+                      })}
+                    </Text>
+                  </View>
                   {selectedStoreCode ? (
                     <View style={styles.autoPricingStoreTag}>
                       <Text variant="labelMedium" style={styles.autoPricingStoreTagText}>
@@ -5653,82 +5867,48 @@ function ProductQueryContent() {
                   <View style={styles.autoPricingActions}>
                     <Button
                       mode="outlined"
-                      onPress={() => {
-                        if (!autoPricingDialog) {
-                          return;
-                        }
-
-                        const keepCameraOpen = shouldRestoreCameraScan(
-                          autoPricingDialog.scanSource,
-                        );
-                        restoreScanAbility(autoPricingDialog.scanSource);
-                        finishAutoPricingDialog({
-                          status: "cancelled",
-                          keepCameraOpen,
-                          labelPrinted: false,
-                          updatedDetail: autoPricingDialog.detail,
-                        });
-                      }}
+                      style={styles.autoPricingActionButton}
+                      labelStyle={styles.autoPricingActionLabel}
+                      loading={autoPricingSavingMode === "save"}
                       disabled={autoPricingDialogSaving}
+                      onPress={() => void confirmAutoPricingDialog(false)}
                     >
-                      {t("common:actions.cancel")}
+                      {t("autoPricingConfirm.saveOnly")}
                     </Button>
                     <Button
                       mode="contained"
-                      loading={autoPricingDialogSaving}
+                      style={styles.autoPricingActionButton}
+                      labelStyle={styles.autoPricingActionLabel}
+                      loading={autoPricingSavingMode === "saveAndPrint"}
                       disabled={autoPricingDialogSaving}
-                      onPress={async () => {
-                        if (!autoPricingDialog) {
-                          return;
-                        }
-
-                        setAutoPricingDialogSaving(true);
-                        const keepCameraOpen = shouldRestoreCameraScan(
-                          autoPricingDialog.scanSource,
-                        );
-                        const savedDetail = await persistStorePrice(
-                          autoPricingDialog.detail,
-                          {
-                            retailPrice:
-                              autoPricingDialog.evaluation
-                                .recalculatedRetailPrice ??
-                              autoPricingDialog.detail.storePrice
-                                ?.retailPrice ??
-                              null,
-                            discountRate: normalizeDiscountRateValue(
-                              autoPricingDialog.evaluation.discountRate ??
-                                autoPricingDialog.detail.storePrice
-                                  ?.discountRate,
-                            ),
-                            isAutoPricing: true,
-                          },
-                        );
-
-                        if (!savedDetail) {
-                          restoreScanAbility(autoPricingDialog.scanSource);
-                          finishAutoPricingDialog({
-                            status: "failed",
-                            keepCameraOpen,
-                            labelPrinted: false,
-                            updatedDetail: autoPricingDialog.detail,
-                          });
-                          return;
-                        }
-
-                        const labelPrinted =
-                          await sendAutoPricingLabel(savedDetail, autoPricingDialog);
-                        restoreScanAbility(autoPricingDialog.scanSource);
-                        finishAutoPricingDialog({
-                          status: "confirmed",
-                          keepCameraOpen,
-                          labelPrinted,
-                          updatedDetail: savedDetail,
-                        });
-                      }}
+                      onPress={() => void confirmAutoPricingDialog(true)}
                     >
-                      {t("autoPricingConfirm.confirm")}
+                      {t("autoPricingConfirm.saveAndPrint")}
                     </Button>
                   </View>
+                  <Button
+                    mode="text"
+                    style={styles.autoPricingCancelButton}
+                    onPress={() => {
+                      if (!autoPricingDialog) {
+                        return;
+                      }
+
+                      const keepCameraOpen = shouldRestoreCameraScan(
+                        autoPricingDialog.scanSource,
+                      );
+                      restoreScanAbility(autoPricingDialog.scanSource);
+                      finishAutoPricingDialog({
+                        status: "cancelled",
+                        keepCameraOpen,
+                        labelPrinted: false,
+                        updatedDetail: autoPricingDialog.detail,
+                      });
+                    }}
+                    disabled={autoPricingDialogSaving}
+                  >
+                    {t("common:actions.cancel")}
+                  </Button>
                 </View>
               ) : null}
             </Modal>
@@ -6289,10 +6469,66 @@ const styles = StyleSheet.create({
   autoPricingStoreTagText: {
     color: "#0958D9",
   },
+  autoPricingLabelSection: {
+    gap: 8,
+  },
+  autoPricingLabelHeading: {
+    color: "#667085",
+    fontWeight: "700",
+  },
+  autoPricingLabelChips: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  autoPricingLabelChip: {
+    // 四个选项在 Zebra 小屏（约 360dp）弹窗里一行排下，文字过宽时按比例缩小而不是换行。
+    flex: 1,
+    minWidth: 0,
+    minHeight: 40,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    borderRadius: HB_RADIUS.surface,
+    borderWidth: 1,
+    borderColor: HB_COLORS.outline,
+    backgroundColor: HB_COLORS.surface,
+  },
+  autoPricingLabelChipSelected: {
+    borderWidth: 1.5,
+    borderColor: HB_COLORS.brand,
+    backgroundColor: "#E8F1FF",
+  },
+  // 新价没有折扣时 Disc / Large 置灰；保存中其余选项也压暗，防止中途改标签。
+  autoPricingLabelChipUnavailable: {
+    opacity: 0.38,
+  },
+  autoPricingLabelChipBusy: {
+    opacity: 0.55,
+  },
+  autoPricingLabelChipText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: HB_COLORS.textPrimary,
+  },
+  autoPricingLabelChipTextSelected: {
+    fontWeight: "700",
+    color: HB_COLORS.action,
+  },
   autoPricingActions: {
     flexDirection: "row",
-    justifyContent: "flex-end",
     gap: 8,
+  },
+  autoPricingActionButton: {
+    flex: 1,
+    minWidth: 0,
+  },
+  autoPricingActionLabel: {
+    // 两个键各约一半宽，收紧 Paper 默认的左右边距，避免 “Save & print” 在字体放大时被截断。
+    marginHorizontal: 8,
+    fontSize: 14,
+  },
+  autoPricingCancelButton: {
+    alignSelf: "center",
   },
   productTypeModal: {
     marginHorizontal: 18,
