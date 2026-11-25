@@ -166,8 +166,14 @@ namespace BlazorApp.Api.Tests
             };
             var ipadAndAndroidOff = new DeviceActivationOptions
             {
-                LegacyRegistrationEnabled = new LegacyRegistrationOptions { IpadOS = false, Android = false },
+                LegacyRegistrationEnabled = new LegacyRegistrationOptions { IpadOS = false, Android = false, AndroidTablet = true },
             };
+
+            // 默认配置下安卓平板只能走激活码，旧注册关闭；其余平台默认仍开启。
+            var defaults = new DeviceActivationOptions();
+            Assert.False(defaults.IsLegacyRegistrationEnabled("AndroidTablet"));
+            Assert.True(defaults.IsLegacyRegistrationEnabled("iPadOS"));
+            Assert.True(defaults.IsLegacyRegistrationEnabled("Android"));
 
             Assert.True(DeviceActivationOptions.TryNormalizeDeviceSystem(" AndroidTablet ", out var normalized));
             Assert.Equal("AndroidTablet", normalized);

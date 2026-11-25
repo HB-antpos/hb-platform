@@ -42,5 +42,6 @@ public sealed class LegacyRegistrationOptions
     public bool IpadOS { get; set; } = true;
     public bool Android { get; set; } = true;
     public bool IOS { get; set; } = true;
-    public bool AndroidTablet { get; set; } = true;
+    // 安卓平板是新平台、没有存量旧客户端：默认只允许激活码注册（11-25 用户拍板），需要时再用配置显式打开。
+    public bool AndroidTablet { get; set; } = false;
 }
