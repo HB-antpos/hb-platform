@@ -152,3 +152,29 @@ test("恢复通道自身加载失败时显示失败提示而不影响启动页",
   );
   expect(screen.queryByTestId("startup-ota-recovery-check")).toBeNull();
 });
+
+test("下载完成后提示重开 App，不再显示安装按钮，也不再让启动页保持忙碌", async () => {
+  const { recovery, apply } = createRecovery({
+    apply: async () => ({ state: "downloaded", reason: null }),
+  });
+  const busy: boolean[] = [];
+  const screen = await render(
+    <StartupOtaRecoveryPanel
+      load={async () => recovery}
+      onBusyChange={(value) => busy.push(value)}
+    />,
+  );
+
+  await waitFor(() =>
+    expect(screen.getByTestId("startup-ota-recovery-apply")).toBeTruthy(),
+  );
+  fireEvent.press(screen.getByTestId("startup-ota-recovery-apply"));
+
+  await waitFor(() =>
+    expect(screen.getByTestId("startup-ota-recovery-downloaded")).toBeTruthy(),
+  );
+  expect(screen.getByText("bootstrap.otaRecovery.downloaded")).toBeTruthy();
+  expect(screen.queryByTestId("startup-ota-recovery-apply")).toBeNull();
+  expect(apply).toHaveBeenCalledTimes(1);
+  expect(busy.at(-1)).toBe(false);
+});

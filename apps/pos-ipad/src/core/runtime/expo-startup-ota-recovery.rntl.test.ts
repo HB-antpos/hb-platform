@@ -155,9 +155,10 @@ describe("loadExpoStartupOtaRecovery", () => {
     mockTransportFactory.mockClear();
     mockUpdates.setUpdateRequestHeadersOverride.mockClear();
     mockUpdates.reloadAsync.mockClear();
+    mockUpdates.fetchUpdateAsync.mockClear();
   });
 
-  it("只用 Keychain 设备凭据请求受控 OTA 策略，套用后 reload 且不清除本地数据", async () => {
+  it("只用 Keychain 设备凭据请求受控 OTA 策略，只下载不 reload，且不清除本地数据", async () => {
     await seedRegisteredDevice();
     const before = new Map(mockSecureValues);
     const recovery = await loadExpoStartupOtaRecovery({
@@ -169,7 +170,7 @@ describe("loadExpoStartupOtaRecovery", () => {
       requirement: "required",
       releaseMessage: null,
     });
-    await recovery.apply();
+    await expect(recovery.apply()).resolves.toEqual({ phase: "downloaded" });
 
     const [baseUrl, , , failureHandler] =
       mockTransportFactory.mock.calls[0] ?? [];
@@ -193,14 +194,16 @@ describe("loadExpoStartupOtaRecovery", () => {
         },
       },
     });
-    // iPad 执行端口在核验期间定向分店 channel，reload 前已清除覆盖。
+    // iPad 执行端口在核验期间定向分店 channel，下载后已清除覆盖。
     expect(mockUpdates.setUpdateRequestHeadersOverride).toHaveBeenCalledWith({
       "expo-channel-name": "pos-ipad-production-store-1013",
     });
     expect(mockUpdates.setUpdateRequestHeadersOverride).toHaveBeenLastCalledWith(
       null,
     );
-    expect(mockUpdates.reloadAsync).toHaveBeenCalledTimes(1);
+    expect(mockUpdates.fetchUpdateAsync).toHaveBeenCalledTimes(1);
+    // expo-modules-core 3.0.30 在进程内 reload 拆运行时会闪退：生产装配必须从不调用。
+    expect(mockUpdates.reloadAsync).not.toHaveBeenCalled();
     expect(mockSecureValues).toEqual(before);
   });
 

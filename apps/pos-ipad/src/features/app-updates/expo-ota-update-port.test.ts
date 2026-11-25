@@ -35,7 +35,6 @@ test("Updates 启用时启动即 best-effort 清除持久化 channel，禁用或
           async fetchUpdateAsync() {
             return { isNew: false };
           },
-          async reloadAsync() {},
         },
       }),
   );
@@ -58,14 +57,13 @@ test("Updates 启用时启动即 best-effort 清除持久化 channel，禁用或
             async fetchUpdateAsync() {
               return { isNew: false };
             },
-            async reloadAsync() {},
           },
         }),
     );
   }
 });
 
-test("命中策略后才覆盖 channel，且 check/fetch 双重验证 runtime/updateId 后 reload", async () => {
+test("命中策略后才覆盖 channel，check/fetch 双重验证 runtime/updateId 后只下载、等冷启动生效", async () => {
   const trace: string[] = [];
   const manifest = {
     id: policy.iosUpdateId,
@@ -91,14 +89,11 @@ test("命中策略后才覆盖 channel，且 check/fetch 双重验证 runtime/up
         trace.push("fetch");
         return { isNew: true, manifest };
       },
-      async reloadAsync() {
-        trace.push("reload");
-      },
     },
   });
 
   assert.deepEqual(await port.apply(policy), {
-    state: "reloaded",
+    state: "downloaded",
     reason: null,
   });
   assert.deepEqual(trace, [
@@ -107,7 +102,6 @@ test("命中策略后才覆盖 channel，且 check/fetch 双重验证 runtime/up
     "check",
     "fetch",
     "override:clear",
-    "reload",
   ]);
 });
 
@@ -115,7 +109,6 @@ test("channel setter 部分持久化后抛错时仍清理并 fail-closed", async
   const trace: string[] = [];
   let persistedChannel: string | null = null;
   let checks = 0;
-  let reloads = 0;
   const port = new ExpoOtaUpdatePort({
     enabled: true,
     runtimeVersion: policy.runtimeVersion,
@@ -135,9 +128,6 @@ test("channel setter 部分持久化后抛错时仍清理并 fail-closed", async
       async fetchUpdateAsync() {
         throw new Error("must not fetch");
       },
-      async reloadAsync() {
-        reloads += 1;
-      },
     },
   });
 
@@ -152,13 +142,11 @@ test("channel setter 部分持久化后抛错时仍清理并 fail-closed", async
   ]);
   assert.equal(persistedChannel, null);
   assert.equal(checks, 0);
-  assert.equal(reloads, 0);
 });
 
-test("channel 清理抛错时返回稳定失败且绝不 reload", async () => {
+test("channel 清理抛错时返回稳定失败，不报下载成功", async () => {
   let overrideSet = false;
   let clearCalls = 0;
-  let reloads = 0;
   const manifest = {
     id: policy.iosUpdateId,
     runtimeVersion: policy.runtimeVersion,
@@ -183,9 +171,6 @@ test("channel 清理抛错时返回稳定失败且绝不 reload", async () => {
       async fetchUpdateAsync() {
         return { isNew: true, manifest };
       },
-      async reloadAsync() {
-        reloads += 1;
-      },
     },
   });
 
@@ -194,12 +179,10 @@ test("channel 清理抛错时返回稳定失败且绝不 reload", async () => {
     reason: "channel-clear-failed",
   });
   assert.equal(clearCalls, 2);
-  assert.equal(reloads, 0);
 });
 
-test("检查与 channel 清理同时抛错时仍以清理失败优先并绝不 reload", async () => {
+test("检查与 channel 清理同时抛错时仍以清理失败优先", async () => {
   let overrideSet = false;
-  let reloads = 0;
   const port = new ExpoOtaUpdatePort({
     enabled: true,
     runtimeVersion: policy.runtimeVersion,
@@ -219,9 +202,6 @@ test("检查与 channel 清理同时抛错时仍以清理失败优先并绝不 r
       async fetchUpdateAsync() {
         throw new Error("must not fetch");
       },
-      async reloadAsync() {
-        reloads += 1;
-      },
     },
   });
 
@@ -229,10 +209,9 @@ test("检查与 channel 清理同时抛错时仍以清理失败优先并绝不 r
     state: "rejected",
     reason: "channel-clear-failed",
   });
-  assert.equal(reloads, 0);
 });
 
-test("runtime 或 updateId 不匹配时 fail-closed，清理 override 且绝不 fetch/reload", async () => {
+test("runtime 或 updateId 不匹配时 fail-closed，清理 override 且绝不 fetch", async () => {
   for (const [runtimeVersion, manifest] of [
     [
       "9.9.9",
@@ -267,9 +246,6 @@ test("runtime 或 updateId 不匹配时 fail-closed，清理 override 且绝不 
           trace.push("fetch");
           return { isNew: true, manifest };
         },
-        async reloadAsync() {
-          trace.push("reload");
-        },
       },
     });
 
@@ -280,7 +256,6 @@ test("runtime 或 updateId 不匹配时 fail-closed，清理 override 且绝不 
         result.reason === "update-id-mismatch",
     );
     assert.equal(trace.includes("fetch"), false);
-    assert.equal(trace.includes("reload"), false);
     if (trace.includes("override:set")) {
       assert.equal(trace.at(-1), "override:clear");
     }
@@ -295,7 +270,6 @@ test("Expo manifest 未承诺的 group metadata 缺失或变化不影响 runtime
   ] as const;
 
   for (const updateGroupId of groupCandidates) {
-    let reloads = 0;
     const manifest = {
       id: policy.iosUpdateId,
       runtimeVersion: policy.runtimeVersion,
@@ -323,21 +297,16 @@ test("Expo manifest 未承诺的 group metadata 缺失或变化不影响 runtime
         }> {
           return { isNew: true, manifest };
         },
-        async reloadAsync() {
-          reloads += 1;
-        },
       },
     });
 
     const result: ExpoOtaUpdateApplyResult = await port.apply(policy);
-    assert.deepEqual(result, { state: "reloaded", reason: null });
-    assert.equal(reloads, 1);
+    assert.deepEqual(result, { state: "downloaded", reason: null });
   }
 });
 
-test("expo-updates 未启用或服务器无匹配更新时不覆盖错误 channel、不 reload", async () => {
+test("expo-updates 未启用或服务器无匹配更新时不覆盖错误 channel", async () => {
   let checks = 0;
-  let reloads = 0;
   const disabled = new ExpoOtaUpdatePort({
     enabled: false,
     runtimeVersion: "1.2.3",
@@ -351,9 +320,6 @@ test("expo-updates 未启用或服务器无匹配更新时不覆盖错误 channe
       },
       async fetchUpdateAsync() {
         throw new Error("must not fetch");
-      },
-      async reloadAsync() {
-        reloads += 1;
       },
     },
   });
@@ -374,9 +340,6 @@ test("expo-updates 未启用或服务器无匹配更新时不覆盖错误 channe
       async fetchUpdateAsync() {
         throw new Error("must not fetch");
       },
-      async reloadAsync() {
-        reloads += 1;
-      },
     },
   });
   assert.deepEqual(await unavailable.apply(policy), {
@@ -384,10 +347,9 @@ test("expo-updates 未启用或服务器无匹配更新时不覆盖错误 channe
     reason: "not-available",
   });
   assert.equal(checks, 1);
-  assert.equal(reloads, 0);
 });
 
-test("fetch 完成后 reload 前复核失败时清理 channel 且绝不调用 reload", async () => {
+test("下载前复核失败时不 fetch、清理 channel（下载即等于下次冷启动生效）", async () => {
   const trace: string[] = [];
   const manifest = {
     id: policy.iosUpdateId,
@@ -408,9 +370,6 @@ test("fetch 完成后 reload 前复核失败时清理 channel 且绝不调用 re
         trace.push("fetch");
         return { isNew: true, manifest };
       },
-      async reloadAsync() {
-        trace.push("reload");
-      },
     },
   });
 
@@ -425,7 +384,6 @@ test("fetch 完成后 reload 前复核失败时清理 channel 且绝不调用 re
     "override:clear",
     "override:set",
     "check",
-    "fetch",
     "override:clear",
   ]);
 });
@@ -490,23 +448,52 @@ test("连续应用不同 release channel 时每次都独立覆盖并清理，不
             : undefined,
         };
       },
-      async reloadAsync() {
-        trace.push("reload");
-      },
     },
   });
 
-  assert.equal((await port.apply(first)).state, "reloaded");
+  assert.equal((await port.apply(first)).state, "downloaded");
   assert.equal(activeChannel, null);
-  assert.equal((await port.apply(second)).state, "reloaded");
+  assert.equal((await port.apply(second)).state, "downloaded");
   assert.equal(activeChannel, null);
   assert.deepEqual(trace, [
     "clear",
     `set:${first.channel}`,
     "clear",
-    "reload",
     `set:${second.channel}`,
     "clear",
-    "reload",
   ]);
+});
+
+test("回归：即使原生对象带 reloadAsync，下载成功后也绝不在进程内 reload", async () => {
+  // 2026-11-25 build 18 真机：Updates.reloadAsync() 拆旧 Hermes 运行时时
+  // expo-modules-core 3.0.30 的 SharedObjectRegistry 后台析构 jsi::WeakObject 闪退。
+  const manifest = {
+    id: policy.iosUpdateId,
+    runtimeVersion: policy.runtimeVersion,
+  };
+  let reloads = 0;
+  // 用变量而不是对象字面量传入，模拟直接把 expo-updates 模块整个交给端口。
+  const nativeUpdates = {
+    setUpdateRequestHeadersOverride() {},
+    async checkForUpdateAsync() {
+      return { isAvailable: true, manifest };
+    },
+    async fetchUpdateAsync() {
+      return { isNew: true, manifest };
+    },
+    async reloadAsync() {
+      reloads += 1;
+    },
+  };
+  const port = new ExpoOtaUpdatePort({
+    enabled: true,
+    runtimeVersion: policy.runtimeVersion,
+    updates: nativeUpdates,
+  });
+
+  assert.deepEqual(await port.apply(policy), {
+    state: "downloaded",
+    reason: null,
+  });
+  assert.equal(reloads, 0);
 });
