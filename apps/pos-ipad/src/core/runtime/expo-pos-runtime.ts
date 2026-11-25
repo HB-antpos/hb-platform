@@ -795,7 +795,6 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
           Updates.setUpdateRequestHeadersOverride(headers),
         checkForUpdateAsync: () => Updates.checkForUpdateAsync(),
         fetchUpdateAsync: () => Updates.fetchUpdateAsync(),
-        reloadAsync: () => Updates.reloadAsync(),
       },
     });
     const otaAppUpdates = new OtaUpdateCoordinator({

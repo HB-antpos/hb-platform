@@ -330,7 +330,7 @@ test("原生 App Store handoff 完成前持续持有 transition lease", async ()
   assert.equal(transition.isTransitionActive(), false);
 });
 
-test("OTA 使用冻结策略，并在 fetch 后 reload 前发现策略替换时拒绝", async () => {
+test("OTA 使用冻结策略，并在下载前发现策略替换时拒绝", async () => {
   const native = new FakeNative(nativeEnabled);
   const ota = new FakeOta(otaRequired);
   const transition = configuredTransition();
@@ -348,7 +348,7 @@ test("OTA 使用冻结策略，并在 fetch 后 reload 前发现策略替换时�
       getSafetySnapshot: () => safeSnapshot(),
     },
   });
-  ota.onApply = async (selected, beforeReload) => {
+  ota.onApply = async (selected, beforeDownload) => {
     assert.deepEqual(selected, otaRequired);
     ota.setPolicy(
       Object.freeze({
@@ -357,8 +357,8 @@ test("OTA 使用冻结策略，并在 fetch 后 reload 前发现策略替换时�
         iosUpdateId: "323e4567-e89b-42d3-a456-426614174000",
       }),
     );
-    return (await beforeReload()) === true
-      ? { state: "reloaded", reason: null }
+    return (await beforeDownload()) === true
+      ? { state: "downloaded", reason: null }
       : { state: "rejected", reason: "selection-changed" };
   };
 
@@ -372,7 +372,7 @@ test("OTA 使用冻结策略，并在 fetch 后 reload 前发现策略替换时�
   assert.equal(transition.isTransitionActive(), false);
 });
 
-test("OTA fetch 期间安全状态变坏时 reload 前再次核验并拒绝", async () => {
+test("OTA 检查期间安全状态变坏时下载前再次核验并拒绝", async () => {
   let safe = true;
   const native = new FakeNative(nativeEnabled);
   const ota = new FakeOta(otaRequired);
@@ -394,11 +394,11 @@ test("OTA fetch 期间安全状态变坏时 reload 前再次核验并拒绝", as
       }),
     },
   });
-  ota.onApply = async (_selected, beforeReload) => {
+  ota.onApply = async (_selected, beforeDownload) => {
     safe = false;
-    const decision = await beforeReload();
+    const decision = await beforeDownload();
     return decision === true
-      ? { state: "reloaded", reason: null }
+      ? { state: "downloaded", reason: null }
       : { state: "rejected", reason: decision };
   };
 
@@ -410,6 +410,90 @@ test("OTA fetch 期间安全状态变坏时 reload 前再次核验并拒绝", as
     },
   });
   assert.equal(transition.isTransitionActive(), false);
+});
+
+test("OTA 下载完成后提示重开：可选更新可收起、不重复安装", async () => {
+  const ota = new FakeOta(otaOptional);
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0",
+    native: new FakeNative(nativeEnabled),
+    ota,
+    transition: configuredTransition(),
+    appStore: {
+      async open() {
+        throw new Error("OTA must not open App Store");
+      },
+    },
+    safety: {
+      getSafetySnapshot: () => safeSnapshot(),
+    },
+  });
+  let applies = 0;
+  ota.onApply = async (_selected, beforeDownload) => {
+    applies += 1;
+    assert.equal(await beforeDownload(), true);
+    return { state: "downloaded", reason: null };
+  };
+
+  assert.equal(orchestrator.getPresentation().phase, "prompt");
+  assert.deepEqual(await orchestrator.performSelectedUpdate(), {
+    action: "ota",
+    result: { state: "downloaded", reason: null },
+  });
+  const pending = orchestrator.getPresentation();
+  assert.equal(pending.phase, "restart-pending");
+  assert.equal(pending.blocking, false);
+  assert.equal(orchestrator.getGate().canStartNewTransaction, true);
+
+  // 再点一次只确认「已下载」，不再设置 channel 覆盖或重复下载。
+  assert.deepEqual(await orchestrator.performSelectedUpdate(), {
+    action: "ota",
+    result: { state: "downloaded", reason: null },
+  });
+  assert.equal(applies, 1);
+
+  // 前台刷新拿到同一目标时仍保持「请重开」。
+  await orchestrator.refreshOnForeground();
+  assert.equal(orchestrator.getPresentation().phase, "restart-pending");
+});
+
+test("强制 OTA 下载完成后仍全屏阻断新交易，直到重开换上新版本", async () => {
+  const ota = new FakeOta(otaRequired);
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0",
+    native: new FakeNative(nativeEnabled),
+    ota,
+    transition: configuredTransition(),
+    appStore: {
+      async open() {
+        throw new Error("OTA must not open App Store");
+      },
+    },
+    safety: {
+      getSafetySnapshot: () => safeSnapshot(),
+    },
+  });
+  ota.onApply = async () => ({ state: "downloaded", reason: null });
+
+  await orchestrator.performSelectedUpdate();
+  const pending = orchestrator.getPresentation();
+  assert.equal(pending.phase, "restart-pending");
+  assert.equal(pending.blocking, true);
+  assert.equal(orchestrator.getGate().canStartNewTransaction, false);
+  assert.deepEqual(await orchestrator.restartIfSafe(), {
+    canRestart: true,
+    reason: null,
+  });
+
+  // 后台改投新目标时，旧的「已下载」不能冒充新目标。
+  ota.setPolicy(
+    Object.freeze({
+      ...otaRequired,
+      policyVersion: "policy-next",
+      iosUpdateId: "423e4567-e89b-42d3-a456-426614174000",
+    }),
+  );
+  assert.notEqual(orchestrator.getPresentation().phase, "restart-pending");
 });
 
 class FakeNative {
@@ -455,7 +539,7 @@ class FakeOta {
   public onApply:
     | ((
         policy: PosIpadOtaUpdatePolicy,
-        beforeReload: () =>
+        beforeDownload: () =>
           | true
           | "selection-changed"
           | "restart-unsafe"
@@ -463,7 +547,7 @@ class FakeOta {
               true | "selection-changed" | "restart-unsafe"
             >,
       ) => Promise<
-        | { state: "reloaded"; reason: null }
+        | { state: "downloaded"; reason: null }
         | { state: "unavailable"; reason: "not-available" }
         | {
             state: "rejected";
@@ -500,13 +584,13 @@ class FakeOta {
 
   public async apply(
     policy: PosIpadOtaUpdatePolicy,
-    beforeReload: () =>
+    beforeDownload: () =>
       | true
       | "selection-changed"
       | "restart-unsafe"
       | Promise<true | "selection-changed" | "restart-unsafe">,
   ) {
-    if (this.onApply) return this.onApply(policy, beforeReload);
+    if (this.onApply) return this.onApply(policy, beforeDownload);
     return { state: "unavailable" as const, reason: "not-available" as const };
   }
 

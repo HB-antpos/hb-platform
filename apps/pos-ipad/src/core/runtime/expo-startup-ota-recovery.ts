@@ -98,7 +98,6 @@ export async function loadExpoStartupOtaRecovery(
           Updates.setUpdateRequestHeadersOverride(headers),
         checkForUpdateAsync: () => Updates.checkForUpdateAsync(),
         fetchUpdateAsync: () => Updates.fetchUpdateAsync(),
-        reloadAsync: () => Updates.reloadAsync(),
       },
     }),
   });

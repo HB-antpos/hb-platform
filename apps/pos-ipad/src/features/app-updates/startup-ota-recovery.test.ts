@@ -63,25 +63,27 @@ function createHarness(
       return next;
     },
   };
+  // 以变量传入并保留 reloadAsync 探针：端口必须永不在进程内 reload（expo SDK 54 运行时拆除竞态会闪退）。
+  const nativeUpdates = {
+    setUpdateRequestHeadersOverride(headers: Record<string, string> | null) {
+      overrides.push(headers);
+    },
+    async checkForUpdateAsync() {
+      calls.push("native:check");
+      return { isAvailable: true, manifest };
+    },
+    async fetchUpdateAsync() {
+      calls.push("native:fetch");
+      return { isNew: true, manifest };
+    },
+    async reloadAsync() {
+      calls.push("native:reload");
+    },
+  };
   const installer = new ExpoOtaUpdatePort({
     enabled: true,
     runtimeVersion: options.installedRuntimeVersion ?? "1.0.7",
-    updates: {
-      setUpdateRequestHeadersOverride(headers) {
-        overrides.push(headers);
-      },
-      async checkForUpdateAsync() {
-        calls.push("native:check");
-        return { isAvailable: true, manifest };
-      },
-      async fetchUpdateAsync() {
-        calls.push("native:fetch");
-        return { isNew: true, manifest };
-      },
-      async reloadAsync() {
-        calls.push("native:reload");
-      },
-    },
+    updates: nativeUpdates,
   });
   const enabled = options.enabled ?? true;
   const coordinator = new OtaUpdateCoordinator({
@@ -174,16 +176,26 @@ test("卡死设备可检查并套用受控 OTA：安装前复核策略，channel
     "remote:1.0.7",
     "native:check",
     "native:fetch",
-    "native:reload",
   ]);
-  // 构造时清除遗留覆盖 → 核验时定向 channel → 核验后清除，reload 前不再保留分店 channel。
+  // 构造时清除遗留覆盖 → 核验时定向 channel → 核验后清除；只下载，不在进程内 reload。
   assert.deepEqual(harness.overrides, [
     null,
     { "expo-channel-name": RELEASE_CHANNEL },
     null,
   ]);
-  assert.deepEqual(observed, ["checking", "available", "applying"]);
-  assert.equal(harness.recovery.getState().phase, "applying");
+  assert.deepEqual(observed, [
+    "checking",
+    "available",
+    "applying",
+    "downloaded",
+  ]);
+  assert.equal(harness.recovery.getState().phase, "downloaded");
+  // 已下载后再点安装不会重复下载。
+  assert.deepEqual(await harness.recovery.apply(), { phase: "downloaded" });
+  assert.equal(
+    harness.calls.filter((call) => call === "native:fetch").length,
+    1,
+  );
 });
 
 test("检查后后台撤回或替换目标时放弃安装", async () => {
@@ -226,7 +238,7 @@ test("首次成功后再次检查失败不回退到内存旧策略", async () =>
   assert.deepEqual(await harness.recovery.apply(), state);
 });
 
-test("runtime 已被重试拉起时拒绝 reload，并清除 channel 覆盖", async () => {
+test("runtime 已被重试拉起时拒绝下载，并清除 channel 覆盖", async () => {
   const harness = createHarness();
   await harness.recovery.check();
   harness.setCanReload(false);
@@ -234,7 +246,7 @@ test("runtime 已被重试拉起时拒绝 reload，并清除 channel 覆盖", as
   const state = await harness.recovery.apply();
 
   assert.deepEqual(state, { phase: "failed", reason: "restart-unsafe" });
-  assert.equal(harness.calls.includes("native:reload"), false);
+  assert.equal(harness.calls.includes("native:fetch"), false);
   assert.equal(harness.overrides.at(-1), null);
 });
 
@@ -248,7 +260,7 @@ test("策略 runtimeVersion 与本机安装包不符时在原生检查前拒绝"
   assert.equal(harness.calls.some((call) => call.startsWith("native:")), false);
 });
 
-test("服务器返回的 manifest 与策略 updateId 不符时不 reload", async () => {
+test("服务器返回的 manifest 与策略 updateId 不符时不下载", async () => {
   const harness = createHarness();
   harness.setManifest({ id: "other-update", runtimeVersion: "1.0.7" });
   await harness.recovery.check();
@@ -256,20 +268,21 @@ test("服务器返回的 manifest 与策略 updateId 不符时不 reload", async
   const state = await harness.recovery.apply();
 
   assert.deepEqual(state, { phase: "failed", reason: "update-id-mismatch" });
-  assert.equal(harness.calls.includes("native:reload"), false);
+  assert.equal(harness.calls.includes("native:fetch"), false);
   assert.equal(harness.overrides.at(-1), null);
 });
 
-test("重复点击安装只执行一次原生下载与 reload", async () => {
+test("重复点击安装只执行一次原生下载，且从不 reload", async () => {
   const harness = createHarness();
   await harness.recovery.check();
 
   await Promise.all([harness.recovery.apply(), harness.recovery.apply()]);
 
   assert.equal(
-    harness.calls.filter((call) => call === "native:reload").length,
+    harness.calls.filter((call) => call === "native:fetch").length,
     1,
   );
+  assert.equal(harness.calls.includes("native:reload"), false);
 });
 
 test("恢复通道的策略库不返回任何缓存", async () => {

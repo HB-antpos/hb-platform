@@ -295,3 +295,47 @@ function updateService(presentation: any): any {
     })),
   };
 }
+
+test("OTA 已下载等待重开：可选提示只剩「知道了」，不再提供安装按钮", async () => {
+  const updates = updateService({
+    key: "ota:optional:policy-42:update-id",
+    kind: "ota",
+    requirement: "optional",
+    phase: "restart-pending",
+    blocking: false,
+    releaseMessage: "修复扫码提示。",
+    appStoreUrl: null,
+  });
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  expect(screen.getByTestId("app-update-optional-prompt")).toBeTruthy();
+  expect(screen.getByText("更新已下载，重开 HB POS 后生效")).toBeTruthy();
+  expect(screen.queryByTestId("app-update-action")).toBeNull();
+
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("app-update-dismiss"));
+  });
+  expect(screen.queryByTestId("app-update-optional-prompt")).toBeNull();
+  expect(updates.performSelectedUpdate).not.toHaveBeenCalled();
+});
+
+test("强制 OTA 已下载等待重开：保持全屏阻断与只读入口，但没有安装按钮", async () => {
+  const updates = updateService({
+    key: "ota:required:policy-42:update-id",
+    kind: "ota",
+    requirement: "required",
+    phase: "restart-pending",
+    blocking: true,
+    releaseMessage: null,
+    appStoreUrl: null,
+  });
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  expect(screen.getByTestId("app-update-blocking-gate")).toBeTruthy();
+  expect(screen.getByText("更新已下载，重开 HB POS 后生效")).toBeTruthy();
+  expect(screen.getByTestId("app-update-settings-entry")).toBeTruthy();
+  expect(screen.queryByTestId("app-update-action")).toBeNull();
+  expect(screen.queryByTestId("app-update-dismiss")).toBeNull();
+});

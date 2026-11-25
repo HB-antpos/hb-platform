@@ -1,6 +1,6 @@
 import type { AppUpdateRefreshReason } from "./app-update-coordinator";
 import type {
-  ExpoOtaBeforeReloadDecision,
+  ExpoOtaBeforeDownloadDecision,
   ExpoOtaUpdateApplyResult,
 } from "./expo-ota-update-port";
 import type {
@@ -29,9 +29,9 @@ export type OtaUpdateCoordinatorOptions = Readonly<{
   installer?: Readonly<{
     apply(
       policy: PosIpadOtaUpdatePolicy,
-      beforeReload?: () =>
-        | ExpoOtaBeforeReloadDecision
-        | Promise<ExpoOtaBeforeReloadDecision>,
+      beforeDownload?: () =>
+        | ExpoOtaBeforeDownloadDecision
+        | Promise<ExpoOtaBeforeDownloadDecision>,
     ): Promise<ExpoOtaUpdateApplyResult>;
   }>;
 }>;
@@ -109,13 +109,13 @@ export class OtaUpdateCoordinator {
 
   public apply(
     policy: PosIpadOtaUpdatePolicy,
-    beforeReload: () =>
-      | ExpoOtaBeforeReloadDecision
-      | Promise<ExpoOtaBeforeReloadDecision>,
+    beforeDownload: () =>
+      | ExpoOtaBeforeDownloadDecision
+      | Promise<ExpoOtaBeforeDownloadDecision>,
   ): Promise<ExpoOtaUpdateApplyResult> {
     if (this.installInFlight) return this.installInFlight;
     const selected = normalizePosIpadOtaUpdatePolicy(policy);
-    const operation = this.applyOnce(selected, beforeReload).finally(() => {
+    const operation = this.applyOnce(selected, beforeDownload).finally(() => {
       if (this.installInFlight === operation) this.installInFlight = null;
     });
     this.installInFlight = operation;
@@ -124,9 +124,9 @@ export class OtaUpdateCoordinator {
 
   private async applyOnce(
     policy: PosIpadOtaUpdatePolicy,
-    beforeReload: () =>
-      | ExpoOtaBeforeReloadDecision
-      | Promise<ExpoOtaBeforeReloadDecision>,
+    beforeDownload: () =>
+      | ExpoOtaBeforeDownloadDecision
+      | Promise<ExpoOtaBeforeDownloadDecision>,
   ): Promise<ExpoOtaUpdateApplyResult> {
     if (!this.options.installer) {
       return Object.freeze({
@@ -140,7 +140,7 @@ export class OtaUpdateCoordinator {
         reason: "no-update",
       });
     }
-    return this.options.installer.apply(policy, beforeReload);
+    return this.options.installer.apply(policy, beforeDownload);
   }
 
   private async refreshOnce(

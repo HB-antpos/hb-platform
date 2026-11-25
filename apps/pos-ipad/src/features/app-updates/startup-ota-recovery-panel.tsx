@@ -130,6 +130,16 @@ export function StartupOtaRecoveryPanel({
           />
         </>
       ) : null}
+      {state.phase === "downloaded" ? (
+        // 不在进程内 reload（会触发 expo 运行时拆除竞态闪退），只提示店员重开 App。
+        <Text
+          accessibilityRole="alert"
+          style={styles.highlight}
+          testID="startup-ota-recovery-downloaded"
+        >
+          {t("bootstrap.otaRecovery.downloaded")}
+        </Text>
+      ) : null}
       {state.phase === "up-to-date" ||
       state.phase === "unavailable" ||
       state.phase === "failed" ||
