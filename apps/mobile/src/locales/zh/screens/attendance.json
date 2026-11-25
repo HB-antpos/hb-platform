@@ -302,6 +302,10 @@
         "title": "漏下班待处理",
         "detail": "{{workDate}} 排班结束后仍存在未闭合班段。"
       },
+      "NoShow": {
+        "title": "缺勤待确认",
+        "detail": "{{workDate}} 有排班但整班没有打卡。"
+      },
       "MealBreak": {
         "title": "用餐未休息加工时"
       }
@@ -345,6 +349,7 @@
         "PunchAdjustment": "补卡",
         "Overtime": "加班",
         "MissingClockOut": "漏下班",
+        "NoShow": "缺勤",
         "MealBreak": "用餐",
         "Leave": "请假",
         "Punch": "打卡",
@@ -406,6 +411,7 @@
       "openDetail": {
         "overtime": "看时间轴并审批",
         "missingClockOut": "填实际下班时间",
+        "noShow": "确认缺勤",
         "sickLeave": "看医嘱并审批"
       },
       "result": {
@@ -463,6 +469,29 @@
         "exclude": "不计这段",
         "resolve": "按 {{time}} 补下班并处理",
         "resolved": "已按 {{time}} 补下班卡并结案"
+      },
+      "noShow": {
+        "title": "缺勤确认",
+        "cardLine": "{{schedule}}，整班没有打卡",
+        "cardLineNoSchedule": "有排班但整班没有打卡",
+        "cardHint": "确认后该班按 0 工时计；员工其实来了请补录打卡",
+        "confirmedLine": "已确认缺勤，该班按 0 工时计",
+        "alertTitle": "整班没有打卡",
+        "alertBody": "{{name}} {{date}} {{schedule}}，一次打卡都没有。",
+        "scheduleUnknown": "有排班",
+        "shiftTitle": "排班",
+        "dateLabel": "日期",
+        "scheduleLabel": "排班时段",
+        "punchLabel": "当天打卡",
+        "punchNone": "无",
+        "explainTitle": "确认前请核实",
+        "explainZeroHours": "确认后该班按 0 工时计，不能驳回。",
+        "explainCameIn": "员工其实来上班了：请补录打卡。",
+        "explainLeave": "员工请假了：请补录带薪假。补录后这条待审会自动取消。",
+        "remarkPlaceholder": "备注（可选）",
+        "confirm": "确认缺勤",
+        "resolvedError": "该班已有打卡、请假或排班已删除，这条缺勤待审已自动取消",
+        "rejectNotAllowed": "缺勤待审不能驳回；员工其实来了请补录打卡，请假了请补录带薪假"
       },
       "sick": {
         "title": "病假审核",
@@ -986,6 +1015,7 @@
     "PunchAdjustment": "补卡",
     "Overtime": "加班",
     "MissingClockOut": "漏下班",
+    "NoShow": "缺勤",
     "MealBreak": "用餐",
     "PublicHolidayPay": "带薪公假"
   },

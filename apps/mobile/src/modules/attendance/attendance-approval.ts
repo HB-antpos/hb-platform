@@ -9,7 +9,8 @@ export type KnownAttendanceApprovalSourceType =
   | "Overtime"
   | "MissingClockOut"
   | "MealBreak"
-  | "PublicHolidayPay";
+  | "PublicHolidayPay"
+  | "NoShow";
 
 export type OvertimeApprovalValidationError =
   | "outOfRange"
@@ -25,12 +26,34 @@ const knownSourceTypes = new Set<KnownAttendanceApprovalSourceType>([
   "MealBreak",
   // 带薪公假确认（卡 B）：批准体带 approvedPaidHours，拒绝＝不适用。
   "PublicHolidayPay",
+  // 缺勤（有排班但整班没打卡）：只能「确认缺勤」，后端不允许驳回。
+  "NoShow",
 ]);
 
 export function isKnownAttendanceApprovalSourceType(
   value: string,
 ): value is KnownAttendanceApprovalSourceType {
   return knownSourceTypes.has(value as KnownAttendanceApprovalSourceType);
+}
+
+/** 缺勤待审不能驳回：卡片 / 详情都不显示驳回按钮（后端驳回返回 NO_SHOW_REJECT_NOT_ALLOWED）。 */
+export function canRejectAttendanceApproval(sourceType: string) {
+  return sourceType !== "NoShow";
+}
+
+/** 审核接口错误码 → 文案 key（attendance:approvals.board.*）；不认识的返回 undefined，沿用后端 message。 */
+const APPROVAL_ERROR_KEYS: Record<string, string> = {
+  NO_SHOW_RESOLVED: "approvals.board.noShow.resolvedError",
+  NO_SHOW_REJECT_NOT_ALLOWED: "approvals.board.noShow.rejectNotAllowed",
+};
+
+export function getAttendanceApprovalErrorKey(errorCode?: string) {
+  return errorCode ? APPROVAL_ERROR_KEYS[errorCode] : undefined;
+}
+
+/** 这些错误码表示后端已自动取消该待审：提示后要刷新列表，让卡片消失。 */
+export function shouldRefreshAfterApprovalError(errorCode?: string) {
+  return errorCode === "NO_SHOW_RESOLVED";
 }
 
 export function getSupplementalAttendanceApprovalDetail(input: {

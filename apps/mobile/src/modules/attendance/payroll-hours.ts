@@ -205,6 +205,8 @@ export function pendingLabelKey(type: string): string {
       return "leave";
     case "PublicHolidayPay":
       return "publicHolidayPay";
+    case "NoShow":
+      return "noShow";
     default:
       return "other";
   }
@@ -218,6 +220,7 @@ export type PayrollDayKind =
   | "sickLeave" // 病假：红色
   | "annualLeave" // 年假休息：紫色
   | "publicHoliday" // 公假当天没上班，有带薪公假（已确认或待确认）
+  | "noShow" // 店长已确认缺勤：0 工时，灰色「缺勤」
   | "pending" // 没有计薪工时，但有待审事项（如待审补卡）
   | "scheduled" // 有排班但没有计薪工时
   | "worked"; // 有计薪工时
@@ -235,7 +238,8 @@ export interface PayrollDayDisplay {
 
 /**
  * 判定某天怎么显示。优先级：有计薪工时 → worked；否则病假 / 年假休息 → 对应假别；
- * 公假带薪（含待确认）→ publicHoliday；不能上班 → unavailable；有待审 → pending；有排班 → scheduled；其余 rest。
+ * 公假带薪（含待确认）→ publicHoliday；不能上班 → unavailable；已确认缺勤 → noShow；有待审 → pending；
+ * 有排班 → scheduled；其余 rest。
  */
 export function resolveDayDisplay(day: PayrollHoursDay): PayrollDayDisplay {
   const base = {
@@ -252,6 +256,8 @@ export function resolveDayDisplay(day: PayrollHoursDay): PayrollDayDisplay {
     return { ...base, kind: "publicHoliday", hours: day.publicHolidayPay.state === "Confirmed" ? (day.publicHolidayPay.hours ?? 0) : 0 };
   }
   if (day.isUnavailable) return { ...base, kind: "unavailable", hours: 0 };
+  // 已确认缺勤：当天没有其他计薪工时时显示「缺勤」（同天另有待审仍保留待审边框）。
+  if (day.noShowConfirmed) return { ...base, kind: "noShow", hours: 0 };
   if (day.pending.length > 0) return { ...base, kind: "pending", hours: 0 };
   if (day.isScheduled) return { ...base, kind: "scheduled", hours: 0 };
   return { ...base, kind: "rest", hours: 0 };
@@ -451,6 +457,7 @@ function normalizeDay(raw: RawRecord): PayrollHoursDay | undefined {
     isUnavailable: asBoolean(pick(raw, "isUnavailable", "IsUnavailable")),
     isScheduled: isScheduledRaw === undefined ? undefined : asBoolean(isScheduledRaw),
     segments: normalizeSegments(pick(raw, "segments", "Segments")),
+    noShowConfirmed: asBoolean(pick(raw, "noShowConfirmed", "NoShowConfirmed")),
   };
 }
 
