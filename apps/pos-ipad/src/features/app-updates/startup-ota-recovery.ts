@@ -1,5 +1,5 @@
 import type {
-  ExpoOtaBeforeReloadDecision,
+  ExpoOtaBeforeDownloadDecision,
   ExpoOtaUpdateApplyResult,
 } from "./expo-ota-update-port";
 import type { OtaUpdateRefreshResult } from "./ota-update-coordinator";
@@ -18,7 +18,7 @@ export type StartupOtaRecoveryFailureReason =
   | "check-failed"
   | "selection-changed"
   | "restart-unsafe"
-  | Exclude<ExpoOtaUpdateApplyResult, { state: "reloaded" }>["reason"];
+  | Exclude<ExpoOtaUpdateApplyResult, { state: "downloaded" }>["reason"];
 
 export type StartupOtaRecoveryState =
   | Readonly<{ phase: "idle" }>
@@ -34,6 +34,8 @@ export type StartupOtaRecoveryState =
       releaseMessage: string | null;
     }>
   | Readonly<{ phase: "applying" }>
+  // 更新已下载并核验，等用户关闭并重新打开 HB POS 后由冷启动加载（不在进程内 reload）。
+  | Readonly<{ phase: "downloaded" }>
   | Readonly<{
       phase: "failed";
       reason: StartupOtaRecoveryFailureReason;
@@ -43,9 +45,9 @@ export type StartupOtaRecoveryCoordinatorPort = Readonly<{
   refresh(reason: "startup" | "foreground"): Promise<OtaUpdateRefreshResult>;
   apply(
     policy: PosIpadOtaUpdatePolicy,
-    beforeReload: () =>
-      | ExpoOtaBeforeReloadDecision
-      | Promise<ExpoOtaBeforeReloadDecision>,
+    beforeDownload: () =>
+      | ExpoOtaBeforeDownloadDecision
+      | Promise<ExpoOtaBeforeDownloadDecision>,
   ): Promise<ExpoOtaUpdateApplyResult>;
 }>;
 
@@ -56,7 +58,7 @@ export type StartupOtaRecoveryOptions = Readonly<{
   hasDeviceCredentials(): Promise<boolean>;
   /** 复用既有 OtaUpdateCoordinator：策略合同、runtimeVersion 与 manifest 核验均由它与 Expo 执行端口完成。 */
   coordinator: StartupOtaRecoveryCoordinatorPort;
-  /** reload 前最后一次确认 runtime 仍处于失败态（未被"重试"拉起、SQLite 已关闭）。 */
+  /** 下载前最后一次确认 runtime 仍处于失败态（未被"重试"拉起、SQLite 已关闭）。 */
   canReload(): boolean;
 }>;
 
@@ -72,7 +74,8 @@ export type StartupOtaRecoveryListener = (
  * - 只接受本次远端实时返回的策略，绝不使用缓存或内存旧策略；
  * - 安装前重新拉取策略，目标被撤回或替换即放弃；
  * - 下载、manifest 校验和 channel 覆盖清理全部沿用 ExpoOtaUpdatePort；
- * - reload 前确认 runtime 仍处于失败态，SQLite 已在失败收尾中关闭。
+ * - 下载前确认 runtime 仍处于失败态，SQLite 已在失败收尾中关闭；
+ * - 下载完成后只提示重开 App，不在进程内 reload（见 ExpoOtaUpdatePort 注释）。
  * 整个流程不读写本地账本，不清除任何本地数据。
  */
 export class StartupOtaRecovery {
@@ -164,9 +167,10 @@ export class StartupOtaRecovery {
     } catch {
       return this.setState({ phase: "failed", reason: "update-check-failed" });
     }
-    if (result.state === "reloaded") {
-      // reloadAsync 成功后 JS 即将被替换，保持 applying 避免重复点击。
-      return this.state;
+    if (result.state === "downloaded") {
+      // 已下载：下次冷启动生效。不再允许重复安装，界面改为提示重开 App。
+      this.policy = null;
+      return this.setState({ phase: "downloaded" });
     }
     return this.setState({ phase: "failed", reason: result.reason });
   }

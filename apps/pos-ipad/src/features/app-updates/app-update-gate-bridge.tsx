@@ -105,7 +105,7 @@ export function AppUpdateGateBridge() {
       }
       if (
         result.action !== "ota" ||
-        result.result.state !== "reloaded"
+        result.result.state !== "downloaded"
       ) {
         setErrorKey("error.unavailable");
       }
@@ -131,14 +131,17 @@ export function AppUpdateGateBridge() {
   }
 
   const required = presentation.requirement === "required";
+  // 已下载、等冷启动生效：不再给「安装」按钮，只提示店员重开 App。
+  const restartPending = presentation.phase === "restart-pending";
   const normalizedPath = normalizePathname(pathname);
   const preserveRecoveryAccess =
     required && RECOVERY_ACCESS_PATHS.has(normalizedPath);
   const docked =
     preserveRecoveryAccess && normalizedPath === RECOVERY_DOCK_PATH;
   const blocking = required && !preserveRecoveryAccess;
-  const titleKey: AppUpdateCopyKey =
-    presentation.kind === "native"
+  const titleKey: AppUpdateCopyKey = restartPending
+    ? "restartPending.title"
+    : presentation.kind === "native"
       ? required
         ? "required.nativeTitle"
         : "optional.nativeTitle"
@@ -165,8 +168,10 @@ export function AppUpdateGateBridge() {
         numberOfLines={docked ? 3 : undefined}
         style={[styles.body, !blocking && styles.bodyCompact]}
       >
-        {presentation.releaseMessage ??
-          copy[required ? "required.body" : "optional.body"]}
+        {restartPending
+          ? copy["restartPending.body"]
+          : presentation.releaseMessage ??
+            copy[required ? "required.body" : "optional.body"]}
       </Text>
       {errorKey ? (
         <Text accessibilityRole="alert" style={styles.error}>
@@ -177,7 +182,7 @@ export function AppUpdateGateBridge() {
   );
 
   // 主按钮：这一层里唯一的主操作色按钮。执行中禁用并换成「正在更新…」。
-  const primaryAction = (
+  const primaryAction = restartPending ? null : (
     <PosButton
       disabled={working}
       icon={actionIcon}
@@ -300,7 +305,7 @@ export function AppUpdateGateBridge() {
             <View style={styles.actions}>
               {!required ? (
                 <PosButton
-                  label={copy["action.later"]}
+                  label={copy[restartPending ? "action.gotIt" : "action.later"]}
                   onPress={() => setDismissedKey(presentation.key)}
                   sound="navigate"
                   style={styles.laterAction}

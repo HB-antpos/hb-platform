@@ -5,7 +5,7 @@ import {
   type AppUpdateRestartSafetySnapshot,
 } from "./app-update-coordinator";
 import type {
-  ExpoOtaBeforeReloadDecision,
+  ExpoOtaBeforeDownloadDecision,
   ExpoOtaUpdateApplyResult,
 } from "./expo-ota-update-port";
 
@@ -24,7 +24,9 @@ export type AppUpdatePresentation = Readonly<{
     | "hidden"
     | "prompt"
     | "waiting-for-safe"
-    | "blocking";
+    | "blocking"
+    // OTA 已下载并核验，等店员关闭并重新打开 App 由冷启动加载（不在进程内 reload）。
+    | "restart-pending";
   blocking: boolean;
   releaseMessage: string | null;
   appStoreUrl: string | null;
@@ -63,9 +65,9 @@ type OtaUpdateCoordinatorPort = Readonly<{
   refreshOnNetworkAvailable(): Promise<unknown>;
   apply(
     policy: PosIpadOtaUpdatePolicy,
-    beforeReload: () =>
-      | ExpoOtaBeforeReloadDecision
-      | Promise<ExpoOtaBeforeReloadDecision>,
+    beforeDownload: () =>
+      | ExpoOtaBeforeDownloadDecision
+      | Promise<ExpoOtaBeforeDownloadDecision>,
   ): Promise<ExpoOtaUpdateApplyResult>;
 }>;
 
@@ -100,6 +102,8 @@ export class AppUpdateOrchestrator {
   private gate: NewTransactionGate;
   private safeSelectionKey: string | null = null;
   private safeForCompletion: boolean | null = null;
+  /** 本进程已下载完成的 OTA 展示 key；同一目标不再重复安装，只提示重开。 */
+  private downloadedOtaKey: string | null = null;
   private safetyInFlight: Promise<AppUpdatePresentation> | null = null;
   private refreshInFlight: Promise<AppUpdatePresentation> | null = null;
   private readonly gateListeners = new Set<GateListener>();
@@ -236,6 +240,13 @@ export class AppUpdateOrchestrator {
     if (selected.kind === "none") {
       return Object.freeze({ action: "none", reason: "no-update" });
     }
+    if (selected.phase === "restart-pending") {
+      // 已下载过：再点也只是等重开，不重复设置 channel 覆盖或下载。
+      return Object.freeze({
+        action: "ota",
+        result: Object.freeze({ state: "downloaded", reason: null }),
+      });
+    }
     const selectedOtaPolicy =
       selected.kind === "ota" ? this.options.ota.getPolicy() : null;
     return this.options.transition.runTransition(async () => {
@@ -277,22 +288,24 @@ export class AppUpdateOrchestrator {
           reason: "selection-changed",
         });
       }
-      return Object.freeze({
-        action: "ota",
-        result: await this.options.ota.apply(
-          selectedOtaPolicy,
-          async () => {
-            if (!this.selectionMatches(selected, selectedOtaPolicy)) {
-              return "selection-changed";
-            }
-            const finalSafety = await this.readSafetyDecision();
-            if (!this.selectionMatches(selected, selectedOtaPolicy)) {
-              return "selection-changed";
-            }
-            return finalSafety.canRestart ? true : "restart-unsafe";
-          },
-        ),
-      });
+      const result = await this.options.ota.apply(
+        selectedOtaPolicy,
+        async () => {
+          if (!this.selectionMatches(selected, selectedOtaPolicy)) {
+            return "selection-changed";
+          }
+          const finalSafety = await this.readSafetyDecision();
+          if (!this.selectionMatches(selected, selectedOtaPolicy)) {
+            return "selection-changed";
+          }
+          return finalSafety.canRestart ? true : "restart-unsafe";
+        },
+      );
+      if (result.state === "downloaded") {
+        this.downloadedOtaKey = selected.key;
+        this.recompute();
+      }
+      return Object.freeze({ action: "ota", result });
     });
   }
 
@@ -301,7 +314,7 @@ export class AppUpdateOrchestrator {
     const action = await this.performSelectedUpdate();
     if (
       action.action === "ota" &&
-      action.result.state === "reloaded"
+      action.result.state === "downloaded"
     ) {
       return Object.freeze({ canRestart: true, reason: null });
     }
@@ -423,6 +436,17 @@ export class AppUpdateOrchestrator {
             blocking: true,
           })
         : next;
+    if (
+      this.presentation.kind === "ota" &&
+      this.presentation.key === this.downloadedOtaKey
+    ) {
+      // 已下载的目标保持「请重开」；强制更新仍全屏阻断，可选更新可收起。
+      this.presentation = Object.freeze({
+        ...this.presentation,
+        phase: "restart-pending",
+        blocking: this.presentation.requirement === "required",
+      });
+    }
     this.recomputeGate();
     for (const listener of this.gateListeners) this.notifyGate(listener);
     for (const listener of this.presentationListeners) {
