@@ -242,6 +242,11 @@ namespace BlazorApp.Api.Services.React
                 timeZones[storeCode] = await ResolveStoreTimeZoneAsync(storeCode, null);
             }
             var nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            // 收银机设备码：打卡投影（AttendancePunchProjection）刻意不带设备字段，这里按打卡 GUID 回查实体，只取收银机设备码
+            var posDeviceByPunch = punches
+                .Where(item => !string.IsNullOrWhiteSpace(item.PosDeviceCode))
+                .GroupBy(item => item.PunchGuid, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First().PosDeviceCode!, StringComparer.OrdinalIgnoreCase);
 
             foreach (var schedule in schedules)
             {
@@ -302,6 +307,10 @@ namespace BlazorApp.Api.Services.React
                                 ? "24:00"
                                 : item.ClockOut.PunchTimeLocal.ToString("HH:mm", CultureInfo.InvariantCulture),
                         IsAutoClockOut = item.ClockOut?.IsSystemAutoClockOut == true,
+                        // 来源与收银机设备码（气泡展示）；只给收银机设备码，不暴露手机设备标识
+                        InSource = item.ClockIn.Source,
+                        OutSource = item.ClockOut?.Source,
+                        DeviceCode = posDeviceByPunch.GetValueOrDefault(item.ClockIn.PunchGuid),
                     })
                     .ToList();
                 // 未打卡班：排班窗口已过去却一次打卡都没有（目前按 0 工时计），页面据此提示并可补录。
@@ -481,6 +490,19 @@ namespace BlazorApp.Api.Services.React
                 day.HasSchedule = true;
                 day.IsScheduled = true;
                 day.Segments.AddRange(pay.Segments);
+                // 气泡明细：每个排班一项（排班窗口 + 打卡段 + 用餐扣除 / 加班），分钟数就是工资计算用的那一份
+                day.Shifts.Add(new AttendancePayrollShiftDto
+                {
+                    ScheduleStart = pay.Schedule.StartTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture),
+                    ScheduleEnd = pay.Schedule.EndTime.ToString(@"hh\:mm", CultureInfo.InvariantCulture),
+                    WorkedMinutes = pay.Pay.WorkedMinutes,
+                    InScheduleMinutes = pay.Pay.InScheduleMinutes,
+                    MealDeductionMinutes = pay.Pay.MealDeductionMinutes,
+                    MealAddBackMinutes = pay.Pay.MealAddBackMinutes,
+                    OvertimeMinutes = pay.Pay.OvertimeMinutes,
+                    PaidMinutes = pay.Pay.PaidMinutes,
+                    Segments = pay.Segments,
+                });
                 if (pay.MissingPunch)
                 {
                     day.MissingPunch = true;

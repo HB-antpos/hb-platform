@@ -154,9 +154,10 @@ export default function AttendancePayrollPage() {
     [includePending, mergeStores, requested, storeCode],
   )
 
-  const loadHours = useCallback(async () => {
+  // silent：后台补载（工资表页签为逐日明细气泡、补录抽屉准备数据），不触发页面级的加载转圈
+  const loadHours = useCallback(async (options?: { silent?: boolean }) => {
     if (!periodQuery || !canViewHours) return
-    setLoading(true)
+    if (!options?.silent) setLoading(true)
     try {
       const result = await getAttendancePayrollHours(periodQuery)
       setHours(result)
@@ -164,7 +165,7 @@ export default function AttendancePayrollPage() {
     } catch (error) {
       message.error(error instanceof Error ? error.message : t('attendancePayroll.messages.loadFailed'))
     } finally {
-      setLoading(false)
+      if (!options?.silent) setLoading(false)
     }
   }, [canViewHours, periodQuery, t])
 
@@ -288,9 +289,16 @@ export default function AttendancePayrollPage() {
   // 直接给抽屉会让日期范围 / 每天状态 / 员工排班全是旧期的（切到上周后日期只能选本周今天就是这个原因）。
   const hoursInView = pickHoursInView(hours, periodStart, weeks)
   useEffect(() => {
-    // 工时统计页签自己会随翻期重载，不用补载；其它页签打开抽屉时，工时数据缺失或周期对不上就补载一次
-    if (manualEntryOpen && activeTab !== 'hours' && !hoursInView) void loadHours()
+    // 工时统计页签自己会随翻期重载，不用补载；其它页签（工资表要给应付工时数字弹逐日明细气泡、补录抽屉要用）
+    // 工时数据缺失或周期对不上就静默补载一次
+    if ((manualEntryOpen || activeTab === 'pay') && activeTab !== 'hours' && !hoursInView) void loadHours({ silent: true })
   }, [activeTab, hoursInView, loadHours, manualEntryOpen])
+  // 工资表气泡里点某一天：切到工时统计并让那一格闪一下（nonce 保证同一格连点也能再闪）
+  const [flashCell, setFlashCell] = useState<{ userGuid: string; date: string; nonce: number } | null>(null)
+  const showDayInHours = (userGuid: string, date: string) => {
+    setFlashCell({ userGuid, date, nonce: Date.now() })
+    setActiveTab('hours')
+  }
   const openManualEntry = (preset?: ManualEntryPreset) => {
     setManualEntryPreset(preset ?? null)
     setManualEntryMode('hours')
@@ -500,6 +508,7 @@ export default function AttendancePayrollPage() {
           onOpenRates={canViewPay ? () => setActiveTab('rates') : undefined}
           rateReviews={periodRateReviews}
           manualEntry={manualEntryEnabled ? { onOpen: openManualEntry, onRevoke: revokeManualEntry, onRevokeLeave: revokeManualLeave } : undefined}
+          flashCell={flashCell}
         />
       ),
     }] : []),
@@ -518,6 +527,8 @@ export default function AttendancePayrollPage() {
             onOpenRates={() => setActiveTab('rates')}
             myobPush={myobPush.cells}
             onManualEntry={manualEntryEnabled ? (userGuid) => openManualEntry(userGuid ? { userGuid } : undefined) : undefined}
+            dayDetail={hoursInView}
+            onShowDay={canViewHours ? showDayInHours : undefined}
           />
         ),
       },

@@ -459,6 +459,84 @@
       "traceNoCertificate": "没有医嘱（补录时未上传）",
       "rangeStart": "开始日期",
       "rangeEnd": "结束日期"
+    },
+    "cellDetail": {
+      "title": "{{name}}",
+      "subtitle": "周{{weekday}} {{date}}",
+      "punches": "打卡记录（{{count}} 个班段）",
+      "noPunches": "没有打卡记录",
+      "schedule": "排班",
+      "clockIn": "上班",
+      "clockOut": "下班",
+      "openEnd": "未下班",
+      "autoOut": "系统自动下班（24:00 不计薪）",
+      "paid": "计薪工时",
+      "deviation": "偏差",
+      "meal": "用餐扣除",
+      "mealAddBack": "批准加回 {{text}}",
+      "overtime": "已批准加班 {{text}}",
+      "source": "来源",
+      "deviceCode": "设备 {{code}}",
+      "late": "晚到 {{text}}",
+      "early": "早到 {{text}}",
+      "earlyLeave": "早走 {{text}}",
+      "lateLeave": "晚走 {{text}}",
+      "onTime": "准时",
+      "units": {
+        "hour": "小时",
+        "minute": "分钟"
+      },
+      "tier": {
+        "weekday": "平日档",
+        "saturday": "周六档",
+        "sunday": "周日档",
+        "publicHoliday": "公假档"
+      },
+      "sources": {
+        "pos": "收银机扫码",
+        "adjusted": "店长修改",
+        "manual": "补录",
+        "autoOut": "系统自动下班",
+        "app": "手机 App",
+        "other": "其他"
+      },
+      "missingText": "已过排班时间，一次打卡都没有，目前按 0 h 计。",
+      "missingAction": "补录工时",
+      "otherStore": "其他分店",
+      "otherStoreValue": "{{name}} {{hours}} h（不计入本店）",
+      "leaveSick": "带薪病假 {{hours}} h",
+      "leaveAnnual": "带薪年假 {{hours}} h",
+      "leaveCashOut": "年假发放 {{hours}} h",
+      "leaveUnpaid": "请假（无薪）",
+      "holidayPay": "带薪公假 {{hours}} h",
+      "holidayPending": "带薪公假待确认",
+      "approved": "已核对 · 本格无待处理事项",
+      "pending": "本格有待处理事项（审批中）",
+      "birthday": "生日"
+    },
+    "breakdown": {
+      "title": "{{name}} · {{label}}",
+      "tierDays": "{{count}} 天",
+      "leave": "带薪假",
+      "total": "合计",
+      "sum": "合计",
+      "mismatch": "这里的合计与表中数字不一致（年假以财务核定为准），以表中数字为准。",
+      "jump": "点某一天 → 跳到工时统计并定位到那一格",
+      "empty": "本期没有对应的天",
+      "tierName": {
+        "weekday": "平日",
+        "saturday": "周六",
+        "sunday": "周日",
+        "publicHoliday": "公假"
+      },
+      "leaveType": {
+        "PaidSick": "病假",
+        "PaidAnnual": "年假",
+        "AnnualCashOut": "年假发放",
+        "PublicHolidayPay": "带薪公假",
+        "AnnualLeave": "无薪年假",
+        "SickLeave": "无薪病假"
+      }
     }
   }
 }

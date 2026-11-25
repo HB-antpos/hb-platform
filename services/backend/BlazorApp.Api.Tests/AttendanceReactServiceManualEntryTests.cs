@@ -504,6 +504,56 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task 工时统计_日明细带排班窗口_打卡段来源与设备码_用餐扣除_分钟数与计薪一致()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedScheduleAsync("sched-shift", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(9, 0, 0), new TimeSpan(17, 0, 0));
+            var clockIn = CreateStoredPunchForSchedule("sh-in", "sched-shift", "BRI", "staff-user", "ClockIn", ManualEntryWorkDate.AddHours(9).AddMinutes(2));
+            clockIn.Source = "PosQr";
+            clockIn.PosDeviceCode = "POS_1003_1308";
+            clockIn.DeviceId = "phone-device-should-not-leak";
+            var clockOut = CreateStoredPunchForSchedule("sh-out", "sched-shift", "BRI", "staff-user", "ClockOut", ManualEntryWorkDate.AddHours(17).AddMinutes(1));
+            clockOut.Source = "ManualAdjustment";
+            await _db.Insertable(new[] { clockIn, clockOut }).ExecuteCommandAsync();
+
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+
+            var day = hours.Data!.Employees.Single(item => item.UserGuid == "staff-user").Days
+                .Single(item => item.Date == ManualEntryWorkDate);
+            var shift = Assert.Single(day.Shifts);
+            Assert.Equal("09:00", shift.ScheduleStart);
+            Assert.Equal("17:00", shift.ScheduleEnd);
+            var segment = Assert.Single(shift.Segments);
+            Assert.Equal("09:02", segment.Start);
+            Assert.Equal("17:01", segment.End);
+            Assert.Equal("PosQr", segment.InSource);
+            Assert.Equal("ManualAdjustment", segment.OutSource);
+            Assert.Equal("POS_1003_1308", segment.DeviceCode);
+            // 用餐扣除与计薪分钟就是工资计算用的那一份：展示的数字不会和工时格对不上。
+            Assert.True(shift.MealDeductionMinutes > 0);
+            Assert.Equal(day.PaidMinutes, shift.PaidMinutes);
+            Assert.Equal(day.Segments.Count, shift.Segments.Count);
+        }
+
+        [Fact]
+        public async Task 工时统计_未打卡的班也有日明细_有排班窗口_没有打卡段()
+        {
+            await SeedPayrollStoreAsync();
+            await SeedScheduleAsync("sched-none", "BRI", "staff-user", ManualEntryWorkDate, "Active", new TimeSpan(12, 30, 0), new TimeSpan(17, 30, 0));
+
+            var hours = await Manager().GetPayrollHoursAsync(PayrollQuery());
+
+            var day = hours.Data!.Employees.Single(item => item.UserGuid == "staff-user").Days
+                .Single(item => item.Date == ManualEntryWorkDate);
+            Assert.True(day.MissingPunch);
+            var shift = Assert.Single(day.Shifts);
+            Assert.Equal("12:30", shift.ScheduleStart);
+            Assert.Equal("17:30", shift.ScheduleEnd);
+            Assert.Empty(shift.Segments);
+            Assert.Equal(0, shift.WorkedMinutes);
+        }
+
+        [Fact]
         public async Task 补录病假_不受生病后N天内提交的限制_只要还在可改窗口内()
         {
             await SeedPayrollStoreAsync();

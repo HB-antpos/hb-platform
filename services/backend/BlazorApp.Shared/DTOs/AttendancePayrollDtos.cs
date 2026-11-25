@@ -40,6 +40,37 @@ namespace BlazorApp.Shared.DTOs
         /// <summary>HH:mm；系统午夜自动下班为 24:00，未闭合为 null。</summary>
         public string? End { get; set; }
         public bool IsAutoClockOut { get; set; }
+        /// <summary>上班打卡的来源（PosQr 收银机扫码 / ManualAdjustment 店长修改 / ManualEntry 补录 / App …）；页面气泡显示用。</summary>
+        public string? InSource { get; set; }
+        /// <summary>下班打卡的来源；未闭合为 null。</summary>
+        public string? OutSource { get; set; }
+        /// <summary>上班打卡的收银机设备码（如 POS_1003_1308），非收银机打卡为 null。不含手机设备标识。</summary>
+        public string? DeviceCode { get; set; }
+    }
+
+    /// <summary>
+    /// 一个排班在工时统计格子上的明细（气泡展示用）：排班窗口、各班段打卡、用餐扣除与加班。
+    /// 一天有几个排班就有几项；未打卡的班 Segments 为空。分钟数口径与工资计算完全一致（同一次 CalculateDay 的结果）。
+    /// </summary>
+    public class AttendancePayrollShiftDto
+    {
+        /// <summary>排班开始 HH:mm（门店本地）。</summary>
+        public string ScheduleStart { get; set; } = string.Empty;
+        /// <summary>排班结束 HH:mm；跨午夜的班为次日的时刻。</summary>
+        public string ScheduleEnd { get; set; } = string.Empty;
+        /// <summary>实际打卡工作分钟（所有闭合班段之和）。</summary>
+        public int WorkedMinutes { get; set; }
+        /// <summary>落在排班窗口内的分钟。</summary>
+        public int InScheduleMinutes { get; set; }
+        /// <summary>扣除的用餐分钟。</summary>
+        public int MealDeductionMinutes { get; set; }
+        /// <summary>批准的用餐加回分钟。</summary>
+        public int MealAddBackMinutes { get; set; }
+        /// <summary>已批准计入的加班分钟。</summary>
+        public int OvertimeMinutes { get; set; }
+        /// <summary>该排班最终计薪分钟。</summary>
+        public int PaidMinutes { get; set; }
+        public List<AttendancePayrollSegmentDto> Segments { get; set; } = new();
     }
 
     public class AttendancePayrollDayLeaveDto
@@ -91,6 +122,8 @@ namespace BlazorApp.Shared.DTOs
         public List<AttendancePayrollOtherStoreHoursDto> OtherStores { get; set; } = new();
         public bool IsBirthday { get; set; }
         public List<AttendancePayrollSegmentDto> Segments { get; set; } = new();
+        /// <summary>当天每个排班的明细（排班窗口 / 打卡段与来源 / 用餐扣除 / 加班），气泡展示用；没有排班的天为空。</summary>
+        public List<AttendancePayrollShiftDto> Shifts { get; set; } = new();
         /// <summary>有排班、排班窗口已过去、却一次打卡都没有（目前按 0 工时计）；可在页面上补录。</summary>
         public bool MissingPunch { get; set; }
         /// <summary>未打卡班的排班窗口（HH:mm），补录表单预填用；只在 MissingPunch 时返回。</summary>

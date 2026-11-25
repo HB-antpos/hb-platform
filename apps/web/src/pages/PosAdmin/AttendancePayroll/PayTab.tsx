@@ -1,5 +1,5 @@
 import { UndoOutlined } from '@ant-design/icons'
-import { Avatar, Button, Empty, Input, InputNumber, Spin, Tag, Tooltip, message } from 'antd'
+import { Avatar, Button, Empty, Input, InputNumber, Popover, Spin, Tag, Tooltip, message } from 'antd'
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -10,12 +10,15 @@ import type {
   AttendancePayBuckets,
   AttendancePayCashBucketDto,
   AttendancePayResultDto,
+  AttendanceHoursResultDto,
   AttendancePayRowDto,
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
 import { formatMyobTime } from '../Myob/myobLogic'
 
 import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
+import { BreakdownContent } from './HoursCellPopover'
+import { breakdownMismatch, buildBreakdown, type BreakdownKey } from './hoursCellDetailLogic'
 import {
   CASH_OVERRIDE_BUCKETS,
   TRANSFER_FILL_ORDER,
@@ -48,6 +51,13 @@ interface PayTabProps {
    * （本期一个工时都没有的人不在工资表里，只能走这个入口）。
    */
   onManualEntry?: (userGuid?: string) => void
+  /**
+   * 同一周期的工时统计数据：应付工时各数字悬停时弹出「这个数字是哪几天、各多少小时」。
+   * 没有（没权限 / 还没加载 / 周期对不上）就不弹气泡，表格照常。
+   */
+  dayDetail?: AttendanceHoursResultDto | null
+  /** 点气泡里的某一天：跳到工时统计并定位到那一格。 */
+  onShowDay?: (userGuid: string, date: string) => void
 }
 
 const HOUR_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday'] as const
@@ -233,9 +243,39 @@ function CashBucketInput(props: {
   )
 }
 
-export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates, myobPush, onManualEntry }: PayTabProps) {
+export default function PayTab({ data, loading, weeks, canEdit, onReload, rateReviews, onOpenRates, myobPush, onManualEntry, dayDetail, onShowDay }: PayTabProps) {
   const { t } = useTranslation()
   const rows = data?.rows ?? []
+  const detailByUser = useMemo(() => new Map((dayDetail?.employees ?? []).map((employee) => [employee.userGuid, employee])), [dayDetail])
+
+  /** 数字悬停气泡：逐日明细；拿不到工时统计数据或这个数字没有对应的天就原样返回。 */
+  const withBreakdown = (row: AttendancePayRowDto, key: BreakdownKey, node: ReactElement) => {
+    const employee = detailByUser.get(row.userGuid)
+    if (!employee) return node
+    const breakdown = buildBreakdown(employee, key)
+    if (breakdown.items.length === 0) return node
+    const tableValue = key === 'leave' ? row.hours.leave : key === 'total' ? row.hours.total : row.hours[key]
+    return (
+      <Popover
+        trigger="hover"
+        placement="bottom"
+        mouseEnterDelay={0.35}
+        destroyOnHidden
+        classNames={{ root: 'atp-cell-pop' }}
+        content={(
+          <BreakdownContent
+            employeeName={row.userName}
+            breakdownKey={key}
+            breakdown={breakdown}
+            mismatch={breakdownMismatch(breakdown, tableValue)}
+            onShowDay={onShowDay ? (date) => onShowDay(row.userGuid, date) : undefined}
+          />
+        )}
+      >
+        {node}
+      </Popover>
+    )
+  }
 
   const totals = useMemo(() => {
     const sum = (pick: (row: AttendancePayRowDto) => number) => round2(rows.reduce((acc, row) => acc + pick(row), 0))
@@ -324,7 +364,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
     if (cashOut) parts.push(approvalPart(cashOut, 'attendancePayroll.pay.leaveCashOut'))
     return (
       <div className="atp-pay-cell">
-        <span>{formatHours(row.hours.leave)}</span>
+        {withBreakdown(row, 'leave', <span className="atp-bd-trigger">{formatHours(row.hours.leave)}</span>)}
         {parts.length ? <span className="atp-pay-sub">{parts.reduce<(ReactElement | string)[]>((acc, part, index) => (index ? [...acc, ' · ', part] : [part]), [])}</span> : null}
       </div>
     )
@@ -461,9 +501,9 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                         </div>
                       </div>
                     </td>
-                    {HOUR_KEYS.map((key) => <td key={key} className="atp-num">{formatHours(row.hours[key])}</td>)}
+                    {HOUR_KEYS.map((key) => <td key={key} className="atp-num">{withBreakdown(row, key, <span className="atp-bd-trigger">{formatHours(row.hours[key])}</span>)}</td>)}
                     <td className="atp-num">{renderLeave(row)}</td>
-                    <td className="atp-num atp-num-strong">{formatHours(row.hours.total)}</td>
+                    <td className="atp-num atp-num-strong">{withBreakdown(row, 'total', <span className="atp-bd-trigger">{formatHours(row.hours.total)}</span>)}</td>
                     <td className="atp-num atp-week-divider atp-col-transfer">
                       <div className="atp-pay-cell">
                         <span>{formatHours(row.transfer.hours)}</span>
