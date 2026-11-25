@@ -15,6 +15,8 @@
     "eas-build-post-install": "npm run test:react-native-scheduler",
     "ios": "npm run test:react-native-scheduler && expo run:ios",
     "prebuild:ios": "expo prebuild --platform ios",
+    "android": "npm run test:react-native-scheduler && expo run:android",
+    "prebuild:android": "expo prebuild --platform android",
     "export:ios": "expo export --platform ios",
     "verify:metro-bundle": "node ../../scripts/performance/verify-expo-metro-bundle.mjs --platform ios",
     "ota:publish": "node scripts/publish-ota-release.mjs",
@@ -95,7 +97,8 @@
     "test:e2e": "node --test e2e/payment/payment-fault-matrix.fixture.test.mjs && tsx --test e2e/payment/*.e2e.test.ts",
     "test:react-native-scheduler": "node --test scripts/check-react-native-scheduler-patch.test.mjs",
     "test:shared-core": "npm --prefix ../.. run test:pos-packages",
-    "test:project": "npm run test:react-native-scheduler && node scripts/check-project-contract.test.mjs && node scripts/check-parity-matrix.test.mjs && node scripts/check-payment-recovery-contract.test.mjs",
+    "test:project": "npm run test:react-native-scheduler && node scripts/check-project-contract.test.mjs && node scripts/check-parity-matrix.test.mjs && node scripts/check-payment-recovery-contract.test.mjs && npm run test:android-native",
+    "test:android-native": "node --test scripts/check-android-native-config.test.mjs",
     "test": "npm run test:shared-core && npm run test:project && npm run test:app-update-config && npm run test:ota-release-script && npm run test:e2e && npm run test:contracts && npm run test:printer && npm run test:scanner && npm run test:camera-scanner && npm run test:display && npm run test:customer-display && npm run test:app-updates && npm run test:app-update-ui && npm run test:attendance-security && npm run test:attendance-audit && npm run test:logging && npm run test:performance && npm run test:ui-shell && npm run test:ui-preferences && npm run test:ui-controls && npm run test:keyboard-avoidance && npm run test:runtime && npm run test:sync && npm run test:sync-history && npm run test:catalog && npm run test:catalog-maintenance && npm run test:routes && npm run test:pricing && npm run test:sales-ui && npm run test:sales-runtime && npm run test:receipts && npm run test:registration && npm run test:cashier-login && npm run test:cashier-lock && npm run test:operation-authorization && npm run test:held-orders && npm run test:cash && npm run test:fulfilment && npm run test:payments && npm run test:payment-fault-matrix && npm run test:payment-runtime && npm run test:payment-ui && npm run test:mixed-payments && npm run test:square && npm run test:linkly && npm run test:voucher && npm run test:returns && npm run test:remote-history && npm run test:local-history && npm run test:special-products && npm run test:daily-close && npm run test:cash-movement && npm run test:installments && npm run test:settings && npm run test:locale-parity && npm run test:core-api-security && npm run test:db && npm run test:codegen && npm run typecheck && npm run lint"
   },
   "dependencies": {

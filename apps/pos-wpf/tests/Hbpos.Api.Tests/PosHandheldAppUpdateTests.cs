@@ -148,6 +148,7 @@ public sealed class PosHandheldAppUpdateTests
     [Theory]
     [InlineData("Windows")]
     [InlineData("iPadOS")]
+    [InlineData("AndroidTablet")]
     [InlineData("watchOS")]
     public async Task Non_handheld_platform_claim_fails_closed(string platform)
     {

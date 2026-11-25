@@ -70,6 +70,13 @@ public sealed class PosIpadAppUpdateController : ControllerBase
                     "Authenticated POS device store scope is required."));
         }
 
+        if (HasAndroidTabletDeviceSystem())
+        {
+            // 关键逻辑：安卓平板第一阶段靠手动安装 APK 升级；iPad 中央策略是 App Store 构建策略，
+            // 不能套用到安卓构建，因此直接返回中性结果，只保留交易开关。
+            return Ok(ApiResult<PosIpadAppUpdateResponse>.Ok(BuildAndroidTabletNeutralResponse()));
+        }
+
         if (!HasIpadDeviceSystem())
         {
             return Forbid();
@@ -140,12 +147,30 @@ public sealed class PosIpadAppUpdateController : ControllerBase
 
     private bool HasIpadDeviceSystem()
     {
-        // 只信任认证 handler 签发且精确匹配的 iPadOS claim，缺失或其他平台均拒绝访问 iPad 更新路由。
+        // 只信任认证 handler 签发且精确匹配的 iPadOS claim，缺失或其他平台均拒绝访问 iPad 更新路由（OTA 路由连 AndroidTablet 也拒绝）。
         return string.Equals(
             User.FindFirstValue(DeviceAuthConstants.DeviceSystemClaim),
             DeviceSystems.IpadOs,
             StringComparison.Ordinal);
     }
+
+    private bool HasAndroidTabletDeviceSystem()
+    {
+        // 与 iPadOS 一样只信任认证 handler 签发的精确 claim 值。
+        return string.Equals(
+            User.FindFirstValue(DeviceAuthConstants.DeviceSystemClaim),
+            DeviceSystems.AndroidTablet,
+            StringComparison.Ordinal);
+    }
+
+    private PosIpadAppUpdateResponse BuildAndroidTabletNeutralResponse() =>
+        new(
+            Enabled: AllowsTransactions(),
+            MinimumSupportedVersion: null,
+            LatestVersion: null,
+            ForceUpdate: false,
+            AppStoreUrl: null,
+            ReleaseMessage: null);
 
     private PosIpadAppUpdateResponse BuildLegacyResponse(
         string? version,

@@ -135,6 +135,7 @@ public sealed class PosSettingMergerTests
     [InlineData("windows ", "wpf")]
     [InlineData("iPadOS", "ipad")]
     [InlineData("iOS", "ipad")]
+    [InlineData("AndroidTablet", "ipad")]
     [InlineData("Android", "handheld")]
     [InlineData("Linux", "other")]
     [InlineData(null, "other")]

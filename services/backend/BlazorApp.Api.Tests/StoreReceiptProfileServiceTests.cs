@@ -354,6 +354,7 @@ public sealed class StoreReceiptProfileServiceTests : IDisposable
     [InlineData("ipados", "ipad")]
     [InlineData("iOS", "ipad")]
     [InlineData("IOS", "ipad")]
+    [InlineData("AndroidTablet", "ipad")]
     [InlineData("Android", "handheld")]
     [InlineData("android", "handheld")]
     [InlineData("Mac", "other")]

@@ -258,7 +258,9 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         var legacyNull = CreateAudit("legacy-null", "BRI", now.AddMinutes(-3));
         var legacyEmpty = CreateAudit("legacy-empty", "BRI", now.AddMinutes(-4));
         legacyEmpty.DeviceSystem = string.Empty;
-        await _db.Insertable(new[] { windows, ipad, legacyNull, legacyEmpty }).ExecuteCommandAsync();
+        var androidTablet = CreateAudit("android-tablet", "BRI", now.AddMinutes(-5));
+        androidTablet.DeviceSystem = "AndroidTablet";
+        await _db.Insertable(new[] { windows, ipad, legacyNull, legacyEmpty, androidTablet }).ExecuteCommandAsync();
         var service = CreateService("Admin");
 
         var windowsResult = await service.QueryAsync(
@@ -270,6 +272,9 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         var unknownResult = await service.QueryAsync(
             new OperationAuditQueryDto { DeviceSystem = "Unknown" },
             now);
+        var androidTabletResult = await service.QueryAsync(
+            new OperationAuditQueryDto { DeviceSystem = "AndroidTablet" },
+            now);
         var unsupportedResult = await service.QueryAsync(
             new OperationAuditQueryDto { DeviceSystem = "Android" },
             now);
@@ -278,6 +283,8 @@ public sealed class OperationAuditQueryServiceTests : IDisposable
         Assert.Equal("Windows", windowsResult.Items[0].DeviceSystem);
         Assert.Equal(ipad.EventId, Assert.Single(ipadResult.Items).EventId);
         Assert.Equal("iPadOS", ipadResult.Items[0].DeviceSystem);
+        Assert.Equal(androidTablet.EventId, Assert.Single(androidTabletResult.Items).EventId);
+        Assert.Equal("AndroidTablet", androidTabletResult.Items[0].DeviceSystem);
         Assert.Equal(
             new[] { legacyNull.EventId, legacyEmpty.EventId }.Order(),
             unknownResult.Items.Select(item => item.EventId).Order());

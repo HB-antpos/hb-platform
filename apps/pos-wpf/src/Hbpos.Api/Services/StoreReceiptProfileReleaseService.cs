@@ -73,8 +73,10 @@ public static class StoreReceiptProfileClientKinds
             return Wpf;
         }
 
+        // 关键逻辑：AndroidTablet 是同一个大屏收银 App 的安卓构建，归入 ipad 端类型，不能落到手持端。
         if (string.Equals(value, DeviceSystems.IpadOs, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(value, DeviceSystems.Ios, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(value, DeviceSystems.Ios, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, DeviceSystems.AndroidTablet, StringComparison.OrdinalIgnoreCase))
         {
             return Ipad;
         }

@@ -3395,6 +3395,7 @@
       "hardwareId": "硬件标识",
       "deviceType": "设备类型",
       "deviceSystem": "系统",
+      "deviceSystemAndroidTablet": "安卓平板",
       "onlineStatus": "在线状态",
       "online": "在线",
       "offline": "离线",
@@ -3995,6 +3996,7 @@
     "platforms": {
       "Windows": "Windows",
       "iPadOS": "iPadOS",
+      "AndroidTablet": "安卓平板",
       "Unknown": "未知"
     },
     "outcomes": {

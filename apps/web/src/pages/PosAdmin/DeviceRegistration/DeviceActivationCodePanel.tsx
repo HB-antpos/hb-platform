@@ -41,9 +41,12 @@ import {
   runLatestGuardedRequest,
 } from '../../../utils/latestRequestGuard'
 
+import { formatDeviceSystemLabel } from './deviceSystemOptions'
+
 const PAGE_SIZE = 30
 const EMPTY_VALUE = '--'
-const POS_DEVICE_SYSTEMS: DeviceActivationSystem[] = ['Windows', 'iPadOS', 'Android', 'iOS']
+// AndroidTablet = 安卓平板大屏收银，与 iPadOS 分开签发开通码（平台须精确匹配）。
+const POS_DEVICE_SYSTEMS: DeviceActivationSystem[] = ['Windows', 'iPadOS', 'AndroidTablet', 'Android', 'iOS']
 const MOBILE_DEVICE_SYSTEMS: DeviceActivationSystem[] = ['Android', 'iOS']
 const STATUSES: DeviceActivationStatus[] = ['Available', 'Consumed', 'Expired', 'Revoked']
 type ActivationType = 'POS' | 'Mobile'
@@ -353,7 +356,7 @@ export default function DeviceActivationCodePanel({
       title: t('posAdmin.devices.deviceSystem'),
       dataIndex: 'deviceSystem',
       width: 110,
-      render: (value: DeviceActivationSystem) => <Tag color="geekblue">{value}</Tag>,
+      render: (value: DeviceActivationSystem) => <Tag color="geekblue">{formatDeviceSystemLabel(value, t)}</Tag>,
     },
     {
       title: t('posAdmin.devices.activation.targetAccount'),
@@ -469,7 +472,7 @@ export default function DeviceActivationCodePanel({
           style={{ width: 150 }}
           value={deviceSystem}
           onChange={(value) => { setPage(1); setDeviceSystem(value) }}
-          options={currentDeviceSystems.map((value) => ({ label: value, value }))}
+          options={currentDeviceSystems.map((value) => ({ label: formatDeviceSystemLabel(value, t), value }))}
         />
         <Select<DeviceActivationStatus>
           allowClear
@@ -572,7 +575,7 @@ export default function DeviceActivationCodePanel({
             label={t('posAdmin.devices.deviceSystem')}
             rules={[{ required: true, message: t('posAdmin.devices.deviceSystemRequired') }]}
           >
-            <Select options={createDeviceSystems.map((value) => ({ label: value, value }))} />
+            <Select options={createDeviceSystems.map((value) => ({ label: formatDeviceSystemLabel(value, t), value }))} />
           </Form.Item>
           {createActivationType === 'Mobile' ? (
             <>
@@ -653,7 +656,7 @@ export default function DeviceActivationCodePanel({
                 {createdGrant.storeCode} / {createdGrant.storeName || storeNameMap[createdGrant.storeCode] || EMPTY_VALUE}
               </Descriptions.Item>
               <Descriptions.Item label={t('posAdmin.devices.deviceSystem')}>
-                {createdGrant.deviceSystem}
+                {formatDeviceSystemLabel(createdGrant.deviceSystem, t)}
               </Descriptions.Item>
               {createdGrant.activationType === 'Mobile' ? (
                 <Descriptions.Item label={t('posAdmin.devices.activation.targetAccount')}>

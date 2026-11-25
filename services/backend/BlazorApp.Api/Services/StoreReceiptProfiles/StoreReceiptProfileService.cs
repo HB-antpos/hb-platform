@@ -535,7 +535,7 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
 
     /// <summary>
     /// 由设备系统推导客户端类型，与 Hbpos.Api 写回执时由认证声明 hbpos_device_system 推导的口径一致：
-    /// Windows→wpf，iPadOS/iOS→ipad，Android→handheld，其余→other（大小写不敏感）。
+    /// Windows→wpf，iPadOS/iOS/AndroidTablet→ipad，Android→handheld，其余→other（大小写不敏感）。
     /// </summary>
     internal static string ResolveClientKind(string? deviceSystem)
     {
@@ -548,6 +548,8 @@ public sealed class StoreReceiptProfileService : IStoreReceiptProfileService
         if (
             string.Equals(system, "iPadOS", StringComparison.OrdinalIgnoreCase)
             || string.Equals(system, "iOS", StringComparison.OrdinalIgnoreCase)
+            // 安卓平板大屏收银与 iPad 是同一个 App，归 ipad 端，不能落到手持端。
+            || string.Equals(system, "AndroidTablet", StringComparison.OrdinalIgnoreCase)
         )
         {
             return PosReceiptProfileAck.ClientKindIpad;

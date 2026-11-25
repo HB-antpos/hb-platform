@@ -619,7 +619,7 @@ export default function PosAdminOperationLogsPage({ header }: { header?: Employe
 
   const deviceSystemLabel = useCallback(
     (deviceSystem?: string | null) => {
-      if (deviceSystem === 'Windows' || deviceSystem === 'iPadOS') {
+      if (deviceSystem === 'Windows' || deviceSystem === 'iPadOS' || deviceSystem === 'AndroidTablet') {
         return t(`operationLogs.platforms.${deviceSystem}`)
       }
       return t('operationLogs.platforms.Unknown')

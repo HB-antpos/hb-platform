@@ -7,6 +7,10 @@ namespace BlazorApp.Shared.DTOs
     {
         public const string Windows = "Windows";
         public const string IpadOs = "iPadOS";
+
+        /// <summary>安卓平板上运行的大屏收银 App，业务类别等同 iPadOS（不是手持端）。</summary>
+        public const string AndroidTablet = "AndroidTablet";
+
         public const string Other = "Other";
 
         /// <summary>

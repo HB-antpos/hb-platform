@@ -3395,6 +3395,7 @@
       "hardwareId": "Hardware ID",
       "deviceType": "Device Type",
       "deviceSystem": "System",
+      "deviceSystemAndroidTablet": "Android tablet",
       "onlineStatus": "Online",
       "online": "Online",
       "offline": "Offline",
@@ -3995,6 +3996,7 @@
     "platforms": {
       "Windows": "Windows",
       "iPadOS": "iPadOS",
+      "AndroidTablet": "Android tablet",
       "Unknown": "Unknown"
     },
     "outcomes": {

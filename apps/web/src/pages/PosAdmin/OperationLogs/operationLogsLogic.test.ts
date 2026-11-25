@@ -177,6 +177,17 @@ assertEqual(
 
 assertEqual(
   buildSystemLogLink({
+    deviceCode: 'TAB-01',
+    deviceSystem: 'AndroidTablet',
+    traceId: 'trace-tablet',
+    occurredAtUtc: '2026-07-10T01:02:03.000Z',
+  }),
+  '/system/center-logs?projectCode=hbpos_ipad&deviceCode=TAB-01&traceId=trace-tablet&fromUtc=2026-07-10T00%3A57%3A03.000Z&toUtc=2026-07-10T01%3A07%3A03.000Z',
+  '安卓平板与 iPad 是同一个大屏收银 App，日志跳转同样限定到 hbpos_ipad 项目',
+)
+
+assertEqual(
+  buildSystemLogLink({
     deviceCode: 'POS-UNKNOWN',
     deviceSystem: null,
     traceId: 'trace-unknown',
@@ -340,6 +351,13 @@ assertEqual(
   zhLocale.operationLogs.platforms.iPadOS,
   'iPadOS',
   'iPadOS 应提供中文平台文案',
+)
+assertEqual(zhLocale.operationLogs.platforms.AndroidTablet, '安卓平板', '安卓平板应提供中文平台文案')
+assertEqual(enLocale.operationLogs.platforms.AndroidTablet, 'Android tablet', '安卓平板应提供英文平台文案')
+assertEqual(
+  operationLogsLogic.OPERATION_AUDIT_DEVICE_SYSTEM_OPTIONS.includes('AndroidTablet'),
+  true,
+  '操作日志平台筛选应包含安卓平板',
 )
 assertEqual(
   enLocale.operationLogs.platforms.Unknown,

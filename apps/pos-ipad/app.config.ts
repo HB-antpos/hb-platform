@@ -185,7 +185,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   version: posIpadAppVersion,
   icon: "./assets/icon.png",
   scheme: "hbpos-ipad",
-  platforms: ["ios"],
+  // 同一个大屏收银 App 同时出 iPad 与安卓平板；安卓第一阶段不含客显（外接屏）。
+  platforms: ["ios", "android"],
   orientation: "landscape",
   userInterfaceStyle: "light",
   newArchEnabled: true,
@@ -207,6 +208,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       NSCameraUsageDescription: "HB POS 使用相机作为条码扫描备用方式。",
       NSLocalNetworkUsageDescription: "HB POS 需要访问受支持的门店支付终端。",
     },
+  },
+  android: {
+    // 与 iOS bundleIdentifier 同名；安卓平板与手持端（com.hbweb.poshandheld）是两个独立 App。
+    package: "com.hbweb.posipad",
+    versionCode: 1,
+    // POS 不允许系统或云端恢复任何应用数据，避免凭据与业务状态跨设备复制。
+    allowBackup: false,
+    adaptiveIcon: {
+      foregroundImage: "./assets/icon.png",
+      backgroundColor: "#F4F1EA",
+    },
+    blockedPermissions: [
+      "android.permission.RECORD_AUDIO",
+      "android.permission.ACCESS_BACKGROUND_LOCATION",
+    ],
   },
   plugins: [
     "expo-router",
@@ -250,6 +266,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           buildReactNativeFromSource: true,
           deploymentTarget: "17.0",
         },
+        android: {
+          // 与手持端一致支持 Android 10+；打印机与考勤原生模块对 Android 12/13 新 API 均有版本分支。
+          minSdkVersion: 29,
+        },
       },
     ],
     "./plugins/with-rn-fmt-xcode26",
@@ -262,12 +282,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     ],
     "./plugins/with-hb-external-display",
+    "./plugins/with-android-platform-contract",
     [
       // BLE 扫码枪（GATT notify）。只在前台使用：不开后台蓝牙模式、不加 UIBackgroundModes。
       "react-native-ble-plx",
       {
         isBackgroundEnabled: false,
         modes: [],
+        // Android 12+ 扫描声明不用于定位，免去定位权限弹窗；Android 11 及以下仍按系统要求申请定位。
+        neverForLocation: true,
         bluetoothAlwaysPermission: "HB POS 使用蓝牙连接门店小票打印机、钱箱和蓝牙扫码枪。",
       },
     ],
@@ -283,7 +306,6 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       businessTimeZone:
         process.env.EXPO_PUBLIC_HBPOS_BUSINESS_TIME_ZONE?.trim() ??
         "Australia/Brisbane",
-      deviceSystem: "iPadOS",
       buildProfile: ota.buildProfile,
       automaticOtaChecks: ota.automaticOtaChecks,
       logCenter,

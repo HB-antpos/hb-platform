@@ -507,7 +507,44 @@ public sealed class DeviceActivationCodeContractTests
         DeviceSystems.IpadOs,
         DeviceSystems.Android,
         DeviceSystems.Ios,
+        DeviceSystems.AndroidTablet,
     };
+
+    [Theory]
+    [InlineData(DeviceSystems.AndroidTablet, DeviceSystems.IpadOs)]
+    [InlineData(DeviceSystems.IpadOs, DeviceSystems.AndroidTablet)]
+    [InlineData(DeviceSystems.AndroidTablet, DeviceSystems.Android)]
+    [InlineData(DeviceSystems.Android, DeviceSystems.AndroidTablet)]
+    public void AndroidTabletGrant_IsNotInterchangeableWithIpadOrHandheldAndroid(
+        string grantDeviceSystem,
+        string requestedDeviceSystem)
+    {
+        // 安卓平板与 iPad 虽是同一个大屏收银 App，但开通码仍须平台精确匹配，不能互相借用。
+        var now = new DateTime(2026, 8, 27, 0, 0, 0, DateTimeKind.Utc);
+        var grant = Grant(expiresAtUtc: now.AddMinutes(30));
+        grant.DeviceSystem = grantDeviceSystem;
+        var material = DeviceActivationCodeCodec.Create();
+        grant.SecretHash = material.SecretHash;
+        Assert.True(DeviceActivationCodeCodec.TryParse(material.ActivationCode, out var parsed));
+
+        var preview = DeviceActivationCodeService.EvaluatePreviewGrantGate(
+            grant,
+            parsed.Secret,
+            requestedDeviceSystem,
+            now);
+        var redeem = DeviceActivationCodeService.EvaluateRedeemGrantGate(
+            grant,
+            "HW-1",
+            platformIsValid: true,
+            requestedDeviceSystem,
+            now,
+            recoveryOnly: false);
+
+        Assert.False(preview.IsAllowed);
+        Assert.Equal(DeviceActivationReasonCodes.PlatformMismatch, preview.ReasonCode);
+        Assert.False(redeem.IsAllowed);
+        Assert.Equal(DeviceActivationReasonCodes.PlatformMismatch, redeem.ReasonCode);
+    }
 
     [Theory]
     [MemberData(nameof(SupportedDeviceSystems))]

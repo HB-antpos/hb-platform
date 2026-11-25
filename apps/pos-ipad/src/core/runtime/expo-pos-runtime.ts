@@ -43,6 +43,7 @@ import {
   type HbposRequestCredentials,
 } from "../api/axios-transport";
 import {
+  HBPOS_DEVICE_SYSTEM,
   HbposCashierApi,
   HbposDeviceApi,
 } from "../api/hbpos-api";
@@ -803,6 +804,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
         automaticChecksConfigured:
           publicExtra?.hbpos?.automaticOtaChecks === true,
         updatesEnabled: Updates.isEnabled,
+        deviceSystem: HBPOS_DEVICE_SYSTEM,
       }),
       metadata: {
         runtimeVersion,
@@ -1202,7 +1204,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
             throwIfRuntimeAborted(signal);
             if (
               response.isAllowed !== true ||
-              response.deviceSystem !== "iPadOS"
+              response.deviceSystem !== HBPOS_DEVICE_SYSTEM
             ) {
               throw new Error("SETTINGS_DEVICE_ACTIVATION_PREVIEW_REJECTED");
             }

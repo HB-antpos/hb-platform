@@ -25,6 +25,7 @@ namespace BlazorApp.Api.Services.React
                 "Android",
                 "iOS",
                 DeviceRegistrationDeviceSystems.IpadOs,
+                DeviceRegistrationDeviceSystems.AndroidTablet,
                 "Mac",
                 DeviceRegistrationDeviceSystems.Windows,
             };
@@ -136,6 +137,9 @@ namespace BlazorApp.Api.Services.React
                                                     != DeviceRegistrationDeviceSystems.Windows
                                                 && d.设备系统.Trim()
                                                     != DeviceRegistrationDeviceSystems.IpadOs
+                                                // 安卓平板有独立筛选项，不再归入「其他」。
+                                                && d.设备系统.Trim()
+                                                    != DeviceRegistrationDeviceSystems.AndroidTablet
                                             );
                                         }
                                         else

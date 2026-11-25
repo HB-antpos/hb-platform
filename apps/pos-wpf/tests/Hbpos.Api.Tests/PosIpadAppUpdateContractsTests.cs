@@ -199,6 +199,80 @@ public sealed class PosIpadAppUpdateContractsTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AndroidTablet_native_check_returns_neutral_result_without_querying_ipad_policy(
+        bool allowTransactions)
+    {
+        var gateway = new CountingNativeGateway();
+        var controller = AuthenticateController(
+            new PosIpadAppUpdateController(
+                Options.Create(new PosIpadOptions
+                {
+                    MinimumSupportedVersion = "9.9.9",
+                    LatestVersion = "9.9.9",
+                    AppStoreUrl = "https://apps.apple.com/app/id1",
+                    ReleaseMessage = "iPad only"
+                }),
+                Options.Create(new AppUpdateOptions { CentralPolicyEnabled = true }),
+                gateway),
+            DeviceSystems.AndroidTablet,
+            allowTransactions);
+
+        var response = GetResponse(await controller.Check(
+            "0.0.1",
+            "1",
+            "0.0.1",
+            CancellationToken.None));
+
+        // 安卓平板不能套用 iPad App Store 策略：不查中央网关，也不带出 iPad 配置的版本 / 商店地址。
+        Assert.Equal(0, gateway.NativeCalls);
+        Assert.Equal(allowTransactions, response.Enabled);
+        Assert.Null(response.MinimumSupportedVersion);
+        Assert.Null(response.LatestVersion);
+        Assert.False(response.ForceUpdate);
+        Assert.Null(response.AppStoreUrl);
+        Assert.Null(response.ReleaseMessage);
+    }
+
+    [Theory]
+    [InlineData(DeviceSystems.AndroidTablet)]
+    [InlineData("androidtablet")]
+    public async Task AndroidTablet_is_forbidden_from_ipad_ota_endpoint(string deviceSystem)
+    {
+        var gateway = new CapturingOtaGateway();
+        var controller = AuthenticateController(
+            new PosIpadAppUpdateController(
+                Options.Create(new PosIpadOptions()),
+                Options.Create(new AppUpdateOptions()),
+                gateway),
+            deviceSystem);
+
+        var otaResult = await controller.CheckOta(
+            "1.0.0",
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(otaResult.Result);
+        Assert.Null(gateway.LastOtaRequest);
+    }
+
+    [Fact]
+    public async Task Noncanonical_android_tablet_claim_is_forbidden_from_native_check()
+    {
+        var controller = CreateAuthenticatedController("androidtablet");
+
+        var nativeResult = await controller.Check(
+            "1.0.0",
+            "1",
+            "1.0.0",
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(nativeResult.Result);
+    }
+
+    [Theory]
     [InlineData(DeviceSystems.Ios)]
     [InlineData(DeviceSystems.Android)]
     [InlineData(DeviceSystems.Windows)]
@@ -273,6 +347,30 @@ public sealed class PosIpadAppUpdateContractsTests
             LastOtaRequest = request;
             return Task.FromResult<PosIpadOtaUpdateResponse?>(null);
         }
+    }
+
+    private sealed class CountingNativeGateway : IPosIpadUpdateDecisionGateway
+    {
+        public int NativeCalls { get; private set; }
+
+        public Task<PosIpadNativeUpdateDecision?> GetNativeDecisionAsync(
+            PosIpadNativeUpdateDecisionRequest request,
+            CancellationToken cancellationToken)
+        {
+            NativeCalls++;
+            return Task.FromResult<PosIpadNativeUpdateDecision?>(new(
+                State: "required",
+                PolicyVersion: "policy-1",
+                MinimumSupportedVersion: "9.9.9",
+                LatestVersion: "9.9.9",
+                AppStoreUrl: "https://apps.apple.com/app/id1",
+                ReleaseMessage: "iPad only"));
+        }
+
+        public Task<PosIpadOtaUpdateResponse?> GetOtaDecisionAsync(
+            PosIpadOtaUpdateDecisionRequest request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult<PosIpadOtaUpdateResponse?>(null);
     }
 
     private static PosIpadAppUpdateController CreateController(PosIpadOptions configuration)

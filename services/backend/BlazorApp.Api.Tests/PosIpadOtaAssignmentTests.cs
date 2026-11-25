@@ -116,6 +116,7 @@ public sealed class PosIpadOtaAssignmentTests : IDisposable
         var deviceRelease = await SeedReleaseAsync("33333333");
         var device = await SeedDeviceAsync("hw-1", "IPAD-1", "BRI");
         await SeedDeviceAsync("hw-win", "WIN-1", "BRI", system: "Windows");
+        await SeedDeviceAsync("hw-tab", "TAB-1", "BRI", system: "AndroidTablet");
         var service = CreateService();
         Assert.True((await service.CreateAssignmentAsync(StoreAssignment(bri, storeRelease), "admin")).Success);
         Assert.True((await service.CreateAssignmentAsync(DeviceAssignment(device, deviceRelease), "admin")).Success);
@@ -123,11 +124,13 @@ public sealed class PosIpadOtaAssignmentTests : IDisposable
         var wrongCode = await service.GetDecisionAsync(Decision("BRI", "IPAD-9", "hw-1"));
         var wrongStore = await service.GetDecisionAsync(Decision("SYD", "IPAD-1", "hw-1"));
         var windowsDevice = await service.GetDecisionAsync(Decision("BRI", "WIN-1", "hw-win"));
+        var androidTabletDevice = await service.GetDecisionAsync(Decision("BRI", "TAB-1", "hw-tab"));
 
         Assert.Equal(storeRelease.IosUpdateId, wrongCode.IosUpdateId);
         // 设备注册在 BRI，却用 SYD 的身份来问：设备层和 BRI 的分店层都不能命中。
         Assert.Equal(AppUpdateStates.None, wrongStore.State);
         Assert.Equal(storeRelease.IosUpdateId, windowsDevice.IosUpdateId);
+        Assert.Equal(storeRelease.IosUpdateId, androidTabletDevice.IosUpdateId);
     }
 
     [Fact]
@@ -254,8 +257,11 @@ public sealed class PosIpadOtaAssignmentTests : IDisposable
         var release = await SeedReleaseAsync("22222222");
         var windows = await SeedDeviceAsync("hw-win", "WIN-1", "BRI", system: "Windows");
         var disabled = await SeedDeviceAsync("hw-off", "IPAD-OFF", "BRI", status: 0);
+        var androidTablet = await SeedDeviceAsync("hw-tab", "TAB-1", "BRI", system: "AndroidTablet");
         var service = CreateService();
 
+        var androidTabletResult = await service.CreateAssignmentAsync(DeviceAssignment(androidTablet, release), "admin");
+        Assert.Equal("TARGET_DEVICES_INVALID", androidTabletResult.ErrorCode);
         var windowsResult = await service.CreateAssignmentAsync(DeviceAssignment(windows, release), "admin");
         var disabledResult = await service.CreateAssignmentAsync(DeviceAssignment(disabled, release), "admin");
         var missingResult = await service.CreateAssignmentAsync(DeviceAssignment(9999, release), "admin");
@@ -274,6 +280,8 @@ public sealed class PosIpadOtaAssignmentTests : IDisposable
         var latest = await SeedDeviceAsync("hw-1", "IPAD-1", "BRI");
         await SeedDeviceAsync("hw-2", "IPAD-2", "SYD");
         await SeedDeviceAsync("hw-win", "WIN-1", "BRI", system: "Windows");
+        // 安卓平板走手动 APK 升级，不能出现在 iPad OTA 设备选项里。
+        await SeedDeviceAsync("hw-tab", "TAB-1", "BRI", system: "AndroidTablet");
         var service = CreateService();
 
         var all = await service.GetTargetDeviceOptionsAsync(null, null, 1, 20);

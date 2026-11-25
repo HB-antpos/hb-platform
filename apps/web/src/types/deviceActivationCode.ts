@@ -1,6 +1,7 @@
 import type { StoreOption } from './deviceRegistration'
 
-export type DeviceActivationSystem = 'Windows' | 'iPadOS' | 'Android' | 'iOS'
+/** AndroidTablet：安卓平板上的大屏收银 App（与 iPadOS 同一个 App），开通码与 iPadOS 分开签发。 */
+export type DeviceActivationSystem = 'Windows' | 'iPadOS' | 'AndroidTablet' | 'Android' | 'iOS'
 export type DeviceActivationStatus = 'Available' | 'Expired' | 'Revoked' | 'Consumed'
 export type DeviceActivationConsumptionKind = 'Initial' | 'Rebind'
 

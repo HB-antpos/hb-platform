@@ -6,6 +6,11 @@ import {
   type HbposTransport,
 } from "@hb/pos-api-client/transport";
 
+import {
+  CURRENT_DEVICE_SYSTEM,
+  type DeviceSystem,
+} from "../contracts/security";
+
 export { HbposApiError, unwrapHbposEnvelope };
 export { isHbposNonApiResponse } from "@hb/pos-api-client/transport";
 export type {
@@ -16,7 +21,8 @@ export type {
   HbposTransportResponse,
 } from "@hb/pos-api-client/transport";
 
-export const HBPOS_DEVICE_SYSTEM = "iPadOS" as const;
+// iPad 报 iPadOS，安卓平板报 AndroidTablet；激活码与注册都要求和后端登记的平台精确一致。
+export const HBPOS_DEVICE_SYSTEM: DeviceSystem = CURRENT_DEVICE_SYSTEM;
 
 export type DeviceRegisterRequest = components["schemas"]["DeviceRegisterRequest"];
 export type DeviceRegisterResponse = components["schemas"]["DeviceRegisterResponse"];

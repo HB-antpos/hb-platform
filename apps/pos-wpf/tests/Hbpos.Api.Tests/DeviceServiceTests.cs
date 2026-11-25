@@ -169,6 +169,36 @@ public sealed class DeviceServiceTests
     }
 
     [Fact]
+    public async Task RegisterAsync_WhenAndroidTabletPlatformIsRequested_CreatesAndroidTabletRegistration()
+    {
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(repository, LoadStoreAsync, () => new DateTime(2026, 7, 10, 11, 1, 0));
+
+        await service.RegisterAsync(
+            new DeviceRegisterRequest("1003", "HW-TAB-001", "Android tablet counter", "AndroidTablet"),
+            CancellationToken.None);
+
+        Assert.Equal("AndroidTablet", Assert.Single(repository.CreatedRegistrations).DeviceSystem);
+    }
+
+    [Theory]
+    [InlineData("androidtablet")]
+    [InlineData(" AndroidTablet ")]
+    public async Task RegisterAsync_WhenAndroidTabletPlatformIsNotExact_RejectsWithoutWrites(string deviceSystem)
+    {
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.RegisterAsync(
+            new DeviceRegisterRequest("1003", "HW-TAB-001", "Android tablet counter", deviceSystem),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.Equal("deviceSystem is invalid", response.Message);
+        Assert.Empty(repository.CreatedRegistrations);
+    }
+
+    [Fact]
     public async Task RegisterAsync_WhenReviewGateAndProvisioningCodeAreValid_AutoApprovesNewIpad()
     {
         var now = new DateTime(2026, 8, 18, 12, 0, 0);
@@ -328,6 +358,30 @@ public sealed class DeviceServiceTests
         Assert.Equal(3, response.DeviceStatus);
         Assert.Equal(0, repository.ActiveOrLockedCountCalls);
         Assert.Empty(repository.CreatedRegistrations);
+    }
+
+    [Fact]
+    public async Task RegisterForAppReviewAsync_WhenPlatformIsAndroidTablet_RejectsWithoutWrites()
+    {
+        // App Review 门禁只服务 App Store 审核的 iPad 构建，安卓平板即使带正确开通码也不能自动批准。
+        var utcNow = new DateTimeOffset(2026, 8, 18, 2, 0, 0, TimeSpan.Zero);
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(
+            repository,
+            LoadStoreAsync,
+            appReviewOptions: CreateReviewOptions("OPEN-REVIEW-DEVICE", utcNow.AddDays(7)),
+            utcNowProvider: () => utcNow);
+
+        var response = await service.RegisterForAppReviewAsync(
+            new DeviceRegisterRequest("1003", "TAB-REVIEW-001", "App Review", "AndroidTablet", "OPEN-REVIEW-DEVICE"),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.Equal(3, response.DeviceStatus);
+        Assert.Null(response.AuthorizationCode);
+        Assert.Equal(0, repository.ActiveOrLockedCountCalls);
+        Assert.Empty(repository.CreatedRegistrations);
+        Assert.Empty(repository.AppReviewGrantConsumptions);
     }
 
     [Fact]
@@ -732,8 +786,10 @@ public sealed class DeviceServiceTests
     [Theory]
     [InlineData("iOS", 1, true)]
     [InlineData("Android", 1, true)]
+    [InlineData("AndroidTablet", 1, true)]
     [InlineData("iOS", 0, false)]
     [InlineData("Android", 0, false)]
+    [InlineData("AndroidTablet", 0, false)]
     public async Task VerifyAsync_WhenHandheldExactHardwareMatches_reports_exact_identity_for_reset_recovery(
         string deviceSystem,
         int deviceStatus,
@@ -768,6 +824,39 @@ public sealed class DeviceServiceTests
         Assert.Equal(expectedAllowed, response.IsAllowed);
         Assert.Equal(expectedAllowed ? "AUTH-EXPECTED" : null, response.AuthorizationCode);
         Assert.True(response.ExactIdentityMatched);
+    }
+
+    [Theory]
+    [InlineData("iPadOS", "AndroidTablet")]
+    [InlineData("AndroidTablet", "iPadOS")]
+    [InlineData("Android", "AndroidTablet")]
+    [InlineData("AndroidTablet", "Android")]
+    public async Task VerifyAsync_WhenAndroidTabletAndOtherPlatformDiffer_RejectsWithoutAuthorizationCode(
+        string registeredDeviceSystem,
+        string submittedDeviceSystem)
+    {
+        // 安卓平板与 iPad / 手持 Android 是不同认证平台，跨平台 verify 不能拿到授权码。
+        var repository = new FakeDeviceRegistrationRepository
+        {
+            DeviceByExactIdentity = new DeviceRegistrationRecord
+            {
+                DeviceCode = "POS_1003_1011",
+                StoreCode = "1003",
+                HardwareId = "HW-EXPECTED",
+                DeviceStatus = 1,
+                DeviceSystem = registeredDeviceSystem,
+                AuthorizationCode = "AUTH-EXPECTED"
+            }
+        };
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        var response = await service.VerifyAsync(
+            new DeviceVerifyRequest("POS_1003_1011", "1003", "HW-EXPECTED", "counter", submittedDeviceSystem),
+            CancellationToken.None);
+
+        Assert.False(response.IsAllowed);
+        Assert.Equal("Device system does not match existing registration.", response.Message);
+        Assert.Null(response.AuthorizationCode);
     }
 
     [Fact]
@@ -1566,6 +1655,20 @@ public sealed class DeviceServiceTests
             CancellationToken.None);
 
         Assert.Equal("iPadOS", Assert.Single(repository.CreatedRegistrations).DeviceSystem);
+    }
+
+    [Fact]
+    public async Task ReregisterAsync_InheritsAndroidTabletPlatformFromAuthenticatedDeviceContext()
+    {
+        var repository = new FakeDeviceRegistrationRepository();
+        var service = new DeviceService(repository, LoadStoreAsync);
+
+        await service.ReregisterAsync(
+            new DeviceReregisterRequest("1003", "HW-TAB-001", "Android tablet counter"),
+            new DeviceReregisterContext("POS_1002_0800", "1002", "HW-TAB-001", "AndroidTablet"),
+            CancellationToken.None);
+
+        Assert.Equal("AndroidTablet", Assert.Single(repository.CreatedRegistrations).DeviceSystem);
     }
 
     [Fact]

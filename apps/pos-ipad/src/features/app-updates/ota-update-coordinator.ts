@@ -14,6 +14,10 @@ import {
   type PosIpadOtaUpdatePolicy,
   type PosIpadOtaUpdatePolicyStorePort,
 } from "@/core/contracts/ota-app-updates";
+import {
+  DEVICE_SYSTEM_ANDROID_TABLET,
+  type DeviceSystem,
+} from "@/core/contracts/security";
 
 export type OtaUpdateRefreshResult = Readonly<{
   reason: AppUpdateRefreshReason;
@@ -44,8 +48,12 @@ export function shouldCheckOtaPolicy(
   input: Readonly<{
     automaticChecksConfigured: boolean;
     updatesEnabled: boolean;
+    deviceSystem?: DeviceSystem;
   }>,
 ): boolean {
+  // 安卓平板第一阶段只靠手动装 APK 升级：后端 iPad OTA 策略只服务 iPadOS，
+  // 安卓端调用会被拒（403），不能把它当成「策略不可用」去拦交易。
+  if (input.deviceSystem === DEVICE_SYSTEM_ANDROID_TABLET) return false;
   // 执行器损坏不等于后台没有 required 策略；生产仍必须检查并失败关闭。
   return input.automaticChecksConfigured;
 }

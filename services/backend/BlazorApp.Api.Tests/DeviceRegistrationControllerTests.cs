@@ -157,6 +157,29 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public void LegacyRegistrationGate_TreatsAndroidTabletAsSeparateSwitch()
+        {
+            // 安卓平板与 iPadOS / 手持 Android 各自独立开关，关闭其一不影响另一方。
+            var tabletOff = new DeviceActivationOptions
+            {
+                LegacyRegistrationEnabled = new LegacyRegistrationOptions { AndroidTablet = false },
+            };
+            var ipadAndAndroidOff = new DeviceActivationOptions
+            {
+                LegacyRegistrationEnabled = new LegacyRegistrationOptions { IpadOS = false, Android = false },
+            };
+
+            Assert.True(DeviceActivationOptions.TryNormalizeDeviceSystem(" AndroidTablet ", out var normalized));
+            Assert.Equal("AndroidTablet", normalized);
+            Assert.False(tabletOff.IsLegacyRegistrationEnabled("AndroidTablet"));
+            Assert.True(tabletOff.IsLegacyRegistrationEnabled("iPadOS"));
+            Assert.True(tabletOff.IsLegacyRegistrationEnabled("Android"));
+            Assert.True(ipadAndAndroidOff.IsLegacyRegistrationEnabled("AndroidTablet"));
+            Assert.False(ipadAndAndroidOff.IsLegacyRegistrationEnabled("iPadOS"));
+            Assert.False(ipadAndAndroidOff.IsLegacyRegistrationEnabled("Android"));
+        }
+
+        [Fact]
         public async Task RegisterDevice_NonPosDeviceIsNotAffectedByLegacyPosGate()
         {
             var service = new Mock<IDeviceRegistrationService>();

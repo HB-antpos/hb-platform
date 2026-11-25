@@ -45,10 +45,20 @@ async function readLocalNetwork(): Promise<NetworkLocalInfo> {
 
 /** 设备描述：设备名（门店多台 iPad 时便于认出是哪台）+ 系统版本。 */
 export function describeNetworkCheckDevice(): string {
-  const kind = Platform.OS === "ios" && Platform.isPad ? "iPad" : Platform.OS;
+  const kind =
+    Platform.OS === "ios" && Platform.isPad
+      ? "iPad"
+      : Platform.OS === "android"
+        ? "Android tablet"
+        : Platform.OS;
   const deviceName =
     typeof Constants.deviceName === "string" ? Constants.deviceName.trim() : "";
   const name = deviceName && deviceName !== kind ? `${deviceName} (${kind})` : kind;
+  if (Platform.OS === "android") {
+    // Android 的 Platform.Version 是 API 级别，门店排查更需要系统版本号（如 14），两者都带上。
+    const release = String(Platform.constants?.Release ?? "").trim();
+    return `${name} · Android ${release || "?"} (API ${String(Platform.Version)})`;
+  }
   const system = Platform.OS === "ios" ? "iPadOS" : Platform.OS;
   return `${name} · ${system} ${String(Platform.Version)}`;
 }

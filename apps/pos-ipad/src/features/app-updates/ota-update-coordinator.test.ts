@@ -63,6 +63,25 @@ test("生产策略检查不因 expo-updates 执行器失效而被绕过", () => 
   );
 });
 
+test("安卓平板不查 iPad OTA 策略，iPad 保持原行为", () => {
+  assert.equal(
+    shouldCheckOtaPolicy({
+      automaticChecksConfigured: true,
+      updatesEnabled: true,
+      deviceSystem: "AndroidTablet",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldCheckOtaPolicy({
+      automaticChecksConfigured: true,
+      updatesEnabled: true,
+      deviceSystem: "iPadOS",
+    }),
+    true,
+  );
+});
+
 test("OTA 启动/前台/联网刷新 single-flight，远端与缓存状态独立保存", async () => {
   let calls = 0;
   let release!: () => void;

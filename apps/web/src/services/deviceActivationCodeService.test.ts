@@ -52,6 +52,40 @@ assertEqual(normalized.items[0]?.storeName, 'Brisbane', 'Should normalize store 
 assertEqual(normalized.items[0]?.status, 'Available', 'Should normalize grant status')
 assertEqual(normalized.total, 1, 'Should normalize pagination total')
 
+// 安卓平板大屏收银的开通码必须保留在列表里，不能因平台未知被丢弃；大小写变体仍按未知丢弃。
+const normalizedAndroidTablet = normalizeDeviceActivationCodeListResponse({
+  success: true,
+  data: {
+    Items: [
+      {
+        GrantId: 'tablet-grant-1',
+        StoreCode: 'S01',
+        DeviceSystem: 'AndroidTablet',
+        Status: 'Available',
+        CreatedAtUtc: '2026-08-27T01:00:00Z',
+        CreatedBy: 'admin',
+        Reason: 'android tablet',
+        ExpiresAtUtc: '2026-08-28T01:00:00Z',
+      },
+      {
+        GrantId: 'tablet-grant-2',
+        StoreCode: 'S01',
+        DeviceSystem: 'androidtablet',
+        Status: 'Available',
+        CreatedAtUtc: '2026-08-27T01:00:00Z',
+        CreatedBy: 'admin',
+        Reason: 'bad case',
+        ExpiresAtUtc: '2026-08-28T01:00:00Z',
+      },
+    ],
+    Total: 2,
+    Page: 1,
+    PageSize: 20,
+  },
+})
+assertEqual(normalizedAndroidTablet.items.length, 1, 'Only the exact AndroidTablet grant should be kept')
+assertEqual(normalizedAndroidTablet.items[0]?.deviceSystem, 'AndroidTablet', 'AndroidTablet grant should keep its platform')
+
 const normalizedMobile = normalizeDeviceActivationCodeListResponse({
   success: true,
   data: {
