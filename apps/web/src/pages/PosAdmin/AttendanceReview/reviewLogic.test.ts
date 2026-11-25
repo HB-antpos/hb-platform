@@ -4,6 +4,7 @@ import type { AttendanceApprovalDto, AttendanceScheduleDto } from '../../../type
 import {
   buildDayPreviewFromRecord,
   buildTimelineModel,
+  canRejectCategory,
   canReviewItem,
   canSelectForBatch,
   countByCategory,
@@ -12,6 +13,7 @@ import {
   getReviewCategory,
   initialsOf,
   isBatchableCategory,
+  isSystemGenerated,
   pickNextApprovalGuid,
   summarizePending,
   tierOfWorkDate,
@@ -37,10 +39,18 @@ assert.equal(getReviewCategory(item({ sourceType: 'PublicHolidayPay' })), 'Publi
 
 // 批量只开放给补卡、请假、打卡异常
 assert.deepEqual(
-  (['PunchAdjustment', 'Leave', 'Punch', 'Overtime', 'MealBreak', 'MissingClockOut', 'PaidSick', 'PaidAnnual', 'AnnualCashOut', 'PublicHolidayPay'] as const)
+  (['PunchAdjustment', 'Leave', 'Punch', 'Overtime', 'MealBreak', 'MissingClockOut', 'NoShow', 'PaidSick', 'PaidAnnual', 'AnnualCashOut', 'PublicHolidayPay'] as const)
     .filter(isBatchableCategory),
   ['PunchAdjustment', 'Leave', 'Punch'],
 )
+
+// 缺勤（整班未打卡）：独立分类、系统生成、只能确认不能驳回、不能批量
+const noShow = item({ sourceType: 'NoShow', scheduleStartTime: '09:00', scheduleEndTime: '17:00' })
+assert.equal(getReviewCategory(noShow), 'NoShow')
+assert.equal(isSystemGenerated(noShow), true)
+assert.equal(canRejectCategory('NoShow'), false)
+assert.equal(canRejectCategory('MissingClockOut'), true)
+assert.equal(canSelectForBatch(noShow, MANAGER), false)
 
 // 本人申请：不能勾选批量；没有 ReviewSelf 不能审，有则可逐条审（GUID 大小写不敏感）
 const own = item({ applicantUserGuid: 'u-manager' })

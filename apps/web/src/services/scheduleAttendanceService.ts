@@ -218,6 +218,8 @@ export function normalizeAttendanceApproval(value: unknown): AttendanceApprovalD
     createdAt: readCompat<string>(source, 'createdAt', 'CreatedAt'),
     candidateOvertimeMinutes: readCompat<number>(source, 'candidateOvertimeMinutes', 'CandidateOvertimeMinutes'),
     approvedOvertimeMinutes: readCompat<number>(source, 'approvedOvertimeMinutes', 'ApprovedOvertimeMinutes'),
+    scheduleStartTime: readCompat<string>(source, 'scheduleStartTime', 'ScheduleStartTime'),
+    scheduleEndTime: readCompat<string>(source, 'scheduleEndTime', 'ScheduleEndTime'),
     adjustment: adjustment ? normalizeAttendanceAdjustment(adjustment) : undefined,
     mealClaim: normalizeAttendanceMealClaim(readCompat<unknown>(source, 'mealClaim', 'MealClaim')),
     isSelfReview: readCompat<boolean>(source, 'isSelfReview', 'IsSelfReview'),
@@ -350,6 +352,8 @@ const PAYROLL_SETTING_KEYS = [
   'employeeSegmentLimit',
   'managerSegmentLimit',
   'autoClockOutAtMidnight',
+  'noShowApprovalEnabled',
+  'noShowGraceMinutes',
 ] as const satisfies readonly (keyof AttendanceSettingsDto)[]
 
 function normalizeAttendancePayrollSettings(source: UnknownRecord): Partial<AttendanceSettingsDto> {

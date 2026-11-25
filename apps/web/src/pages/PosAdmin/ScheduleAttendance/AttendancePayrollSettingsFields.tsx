@@ -80,6 +80,22 @@ export default function AttendancePayrollSettingsFields() {
             <Switch />
           </Form.Item>
         </Col>
+        {/* 缺勤待审：开关 + 宽限分钟（排班结束后多久仍零打卡才生成，15–720） */}
+        <Col xs={24} sm={12}>
+          <Form.Item name="noShowApprovalEnabled" label={t('posAdmin.scheduleAttendance.payrollSettings.noShowApprovalEnabled')} tooltip={t('posAdmin.scheduleAttendance.payrollSettings.noShowApprovalEnabledHint')} valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Col>
+        <Col xs={24} sm={12}>
+          <Form.Item
+            name="noShowGraceMinutes"
+            label={t('posAdmin.scheduleAttendance.payrollSettings.noShowGraceMinutes')}
+            tooltip={t('posAdmin.scheduleAttendance.payrollSettings.noShowGraceMinutesHint')}
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={15} max={720} precision={0} style={{ width: '100%' }} addonAfter={t('posAdmin.scheduleAttendance.payrollSettings.minutesUnit')} />
+          </Form.Item>
+        </Col>
       </Row>
     </>
   )

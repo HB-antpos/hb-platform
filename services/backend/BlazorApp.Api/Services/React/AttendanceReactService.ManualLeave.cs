@@ -108,6 +108,8 @@ namespace BlazorApp.Api.Services.React
                     // 与批准带薪年假（休息）一致：区间内每天自动标「不能上班」，排班时被拦；选了「不休息」的不标。
                     await ApplyAnnualLeaveUnavailabilityAsync(leave, now, username);
                 }
+                // 补录了带薪假：被它覆盖的班的缺勤待审自动取消。
+                await CancelNoShowApprovalsCoveredByLeaveAsync(leave);
                 await _db.Ado.CommitTranAsync();
 
                 return ApiResponse<AttendanceManualLeaveResultDto>.OK(

@@ -22,6 +22,7 @@ import { breakdownMismatch, buildBreakdown, type BreakdownKey } from './hoursCel
 import {
   CASH_OVERRIDE_BUCKETS,
   TRANSFER_FILL_ORDER,
+  employeeDisplayName,
   formatHours,
   formatMoney,
   formatSignedMoney,
@@ -264,7 +265,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
         classNames={{ root: 'atp-cell-pop' }}
         content={(
           <BreakdownContent
-            employeeName={row.userName}
+            employeeName={employeeDisplayName(row.userName, row.nickname)}
             breakdownKey={key}
             breakdown={breakdown}
             mismatch={breakdownMismatch(breakdown, tableValue)}
@@ -470,7 +471,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                         <Avatar size={30} style={{ background: avatarColorOf(row.userName), fontSize: 12 }}>{initialsOf(row.userName)}</Avatar>
                         <div>
                           <div className="atp-person-name">
-                            {row.userName}{' '}
+                            {employeeDisplayName(row.userName, row.nickname)}{' '}
                             <span className="atp-muted atp-small">
                               {row.employmentType ? t(`attendancePayroll.employmentType.${row.employmentType}`) : ''}
                               {showsAgeBadge(row.ageYears) ? ` · ${t('attendancePayroll.ageYears', { age: row.ageYears })}` : ''}

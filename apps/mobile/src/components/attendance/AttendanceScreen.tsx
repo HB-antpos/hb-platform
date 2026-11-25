@@ -88,6 +88,10 @@ import {
   updateAvailability,
 } from "@/modules/attendance/api";
 import {
+  getAttendanceApprovalErrorKey,
+  shouldRefreshAfterApprovalError,
+} from "@/modules/attendance/attendance-approval";
+import {
   applyAttendanceTrackingLifecycle,
   buildAttendanceQrPunchPayload,
   getAttendancePunchErrorCode,
@@ -618,6 +622,18 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       ),
   });
 
+  // 审核失败：认识的错误码（缺勤已自动取消 / 缺勤不能驳回）给本地文案；
+  // 后端已自动取消的待审（NO_SHOW_RESOLVED）顺手刷新列表，让卡片消失。
+  const handleApprovalError = (error: unknown) => {
+    const code = getAttendancePunchErrorCode(error);
+    const key = getAttendanceApprovalErrorKey(code);
+    showMessage(key ? t(key) : getErrorMessage(error, "messages.approvalFailed"));
+    if (shouldRefreshAfterApprovalError(code)) {
+      void queryClient.invalidateQueries({ queryKey: ["attendance", "approvals"] });
+      void invalidateEmployeeData();
+    }
+  };
+
   const approveMutation = useMutation({
     mutationFn: approveAttendanceApproval,
     onSuccess: async () => {
@@ -628,10 +644,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       await invalidateEmployeeData();
       showMessage(t("messages.approvalApproved"));
     },
-    onError: (error) =>
-      showMessage(
-        getErrorMessage(error, "messages.approvalFailed"),
-      ),
+    onError: (error) => handleApprovalError(error),
   });
 
   const rejectMutation = useMutation({
@@ -644,10 +657,7 @@ export function AttendanceScreen({ mode = "combined" }: AttendanceScreenProps) {
       await invalidateEmployeeData();
       showMessage(t("messages.approvalRejected"));
     },
-    onError: (error) =>
-      showMessage(
-        getErrorMessage(error, "messages.approvalFailed"),
-      ),
+    onError: (error) => handleApprovalError(error),
   });
 
   const createScheduleMutation = useMutation({

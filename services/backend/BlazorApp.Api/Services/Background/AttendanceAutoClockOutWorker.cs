@@ -60,6 +60,26 @@ public sealed class AttendanceAutoClockOutWorker : BackgroundService
                 _logger.LogError(ex, "午夜自动下班定时任务失败");
             }
 
+            // 缺勤待审检测与自动下班同一节拍，但各自独立：一边失败不影响另一边。开关在考勤设置 NoShowApprovalEnabled。
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<IAttendanceReactService>();
+                var candidates = await service.RunNoShowDetectionAsync(stoppingToken);
+                if (candidates > 0)
+                {
+                    _logger.LogInformation("本轮缺勤待审对账排班 {Count} 个", candidates);
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "缺勤待审检测定时任务失败");
+            }
+
             await DelayAsync(TimeSpan.FromMinutes(intervalMinutes), stoppingToken);
         }
     }

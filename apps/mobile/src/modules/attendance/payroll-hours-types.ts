@@ -30,7 +30,7 @@ export interface PayrollPublicHolidayPay {
   count?: number;
 }
 
-/** 当天未处理事项：PunchAdjustment / Overtime / MissingClockOut / MealBreak / Leave / PublicHolidayPay 等。 */
+/** 当天未处理事项：PunchAdjustment / Overtime / MissingClockOut / MealBreak / Leave / PublicHolidayPay / NoShow 等。 */
 export interface PayrollDayPending {
   type: string;
   sourceGuid?: string;
@@ -62,6 +62,8 @@ export interface PayrollHoursDay {
   /** 当天是否有有效排班。 */
   isScheduled?: boolean;
   segments?: PayrollDaySegment[];
+  /** 店长已确认缺勤（NoShow 待审已批准）：该班 0 工时，格子显示「缺勤」。 */
+  noShowConfirmed?: boolean;
 }
 
 export interface PayrollHoursEmployee {

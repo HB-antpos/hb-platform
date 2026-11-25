@@ -84,6 +84,13 @@ assert.equal(resolveDayDisplay(day("2026-10-05", { publicHolidayPay: { state: "N
 assert.equal(resolveDayDisplay(day("2026-10-18", { pending: [{ type: "PunchAdjustment" }] })).kind, "pending");
 const sunday = resolveDayDisplay(day("2026-10-18", { paidHours: 3.5, pending: [{ type: "PunchAdjustment" }] }));
 assert.deepEqual([sunday.kind, sunday.hours, sunday.isPending, sunday.isWeekend], ["worked", 3.5, true, true]);
+// 缺勤：待确认算待审；店长确认后（noShowConfirmed）显示「缺勤」0 工时，不再算待审。
+const noShowPending = resolveDayDisplay(day("2026-10-14", { isScheduled: true, pending: [{ type: "NoShow" }] }));
+assert.deepEqual([noShowPending.kind, noShowPending.isPending], ["pending", true]);
+const noShowConfirmed = resolveDayDisplay(day("2026-10-14", { isScheduled: true, noShowConfirmed: true }));
+assert.deepEqual([noShowConfirmed.kind, noShowConfirmed.hours, noShowConfirmed.isPending], ["noShow", 0, false]);
+assert.equal(resolveDayDisplay(day("2026-10-14", { paidHours: 4, noShowConfirmed: true })).kind, "worked", "同天另有计薪工时仍按上班显示");
+assert.equal(resolveDayDisplay(day("2026-10-14", { noShowConfirmed: true, leave: { type: "PaidSick", hours: 8, hasCertificate: false } })).kind, "sickLeave");
 const cashOut = resolveDayDisplay(day("2026-10-12", { paidHours: 5.5, approvedMarks: ["AnnualCashOut"] }));
 assert.deepEqual([cashOut.kind, cashOut.isCashOut, cashOut.isWeekend], ["worked", true, false], "年假发放照常上班，只打角标");
 
@@ -98,6 +105,7 @@ assert.deepEqual(tierSummaryParts({ weekday: 0, saturday: 0, sunday: 0, publicHo
 // ── 待审类型 → 文案 key ──
 assert.equal(pendingLabelKey("PunchAdjustment"), "punchAdjustment");
 assert.equal(pendingLabelKey("Late"), "late");
+assert.equal(pendingLabelKey("NoShow"), "noShow");
 assert.equal(pendingLabelKey("Whatever"), "other");
 
 // ── 头像首字母 ──
@@ -144,6 +152,26 @@ assert.equal(personA.hasOtherStores, false);
 assert.deepEqual(personA.days[0].pending.map((item) => item.type), ["Late"], "字符串形式的待审也接受");
 assert.deepEqual(normalized.totals, { paidHours: 21.48, weekendHours: 3.5, publicHolidayHours: 0, leaveHours: 8, pendingCount: 1 });
 assert.deepEqual(normalized.alerts.map((alert) => [alert.type, alert.count]), [["Pending", 1]]);
+assert.equal(personA.days[0].noShowConfirmed, false, "缺字段时按未确认缺勤");
+
+// 缺勤字段：PascalCase / camelCase 都认，pending 里的 NoShow 原样保留。
+const noShowReport = normalizePayrollHoursReport(
+  {
+    employees: [{
+      userGuid: "u-ns",
+      days: [
+        { date: "2026-10-14", paidHours: 0, pending: ["NoShow"], missingPunch: true },
+        { Date: "2026-10-15", PaidHours: 0, NoShowConfirmed: true, MissingPunch: false },
+      ],
+    }],
+  },
+  { storeCode: "S1", periodStart: "2026-10-12", weeks: 1 },
+);
+const [noShowDay1, noShowDay2] = noShowReport.employees[0].days;
+assert.deepEqual(noShowDay1.pending.map((item) => item.type), ["NoShow"]);
+assert.equal(noShowDay1.noShowConfirmed, false);
+assert.equal(noShowDay2.noShowConfirmed, true);
+assert.equal(resolveDayDisplay(noShowDay2).kind, "noShow");
 
 const empty = normalizePayrollHoursReport(null, { storeCode: "S2", periodStart: "2026-10-05", weeks: 2 });
 assert.deepEqual([empty.storeCode, empty.periodStart, empty.periodEnd, empty.weeks, empty.employees.length], ["S2", "2026-10-05", "2026-10-18", 2, 0]);

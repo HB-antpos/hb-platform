@@ -1,7 +1,7 @@
 {
   "attendanceReview": {
     "title": "考勤审核",
-    "reconciledHint": "打开时已核对近 14 天排班，生成漏下班与加班待处理 · {{time}}",
+    "reconciledHint": "打开时已核对近 14 天排班，生成漏下班、加班与缺勤待处理 · {{time}}",
     "outsidePending": "所选日期以外还有 {{count}} 条待审核",
     "outsidePendingShow": "一起显示",
     "allStores": "全部管理分店",
@@ -17,6 +17,7 @@
       "PunchAdjustment": "补卡",
       "Overtime": "加班",
       "MissingClockOut": "漏下班",
+      "NoShow": "缺勤",
       "MealBreak": "用餐",
       "Leave": "请假",
       "Punch": "打卡异常",
@@ -31,7 +32,7 @@
       "selected": "已选 {{count}} 项",
       "approve": "批量批准",
       "reject": "批量拒绝",
-      "hint": "仅补卡、请假、打卡异常可批量；加班、用餐、漏下班和带薪假要逐条看",
+      "hint": "仅补卡、请假、打卡异常可批量；加班、用餐、漏下班、缺勤和带薪假要逐条看",
       "rejectTitle": "批量拒绝 {{count}} 项"
     },
     "columns": {
@@ -92,7 +93,10 @@
       "attachments": "附件 {{count}}",
       "conflicts": "与已发布排班冲突 {{count}} 天（{{detail}}）",
       "publicHolidayPay": "{{name}} 当天没排班",
-      "publicHolidayPaySub": "过去 {{weeks}} 周同一星期几排班 {{count}} 次，建议带薪 {{hours}} h"
+      "publicHolidayPaySub": "过去 {{weeks}} 周同一星期几排班 {{count}} 次，建议带薪 {{hours}} h",
+      "noShow": "排班 {{start}}–{{end}} 整班没有打卡",
+      "noShowNoSchedule": "有排班但整班没有打卡",
+      "noShowSub": "确认缺勤后该班按 0 工时计"
     },
     "detail": {
       "dayPunches": "当天打卡",
@@ -147,7 +151,10 @@
       "tierLabel": "时薪档",
       "paidAfterHint": "计薪工时批准后由系统重算（扣餐、加班按口径）",
       "hasPunch": "当天已打卡",
-      "workedNow": "现在 {{value}} h"
+      "workedNow": "现在 {{value}} h",
+      "noShow": "缺勤确认",
+      "noShowRule": "排班结束后仍一次卡都没打，也没有请假。确认缺勤后该班按 0 工时计，结案后不再重开。",
+      "noShowFixHint": "员工其实来上班了：去「工时统计」点该格补录打卡；请了病假 / 年假：补录带薪假。保存后这条会自动取消。"
     },
     "actions": {
       "previous": "上一条",
@@ -156,7 +163,8 @@
       "notApplicable": "不适用",
       "approveNext": "批准并下一条",
       "excludeSegment": "不计这段",
-      "closeMissingClockOut": "补下班卡并下一条"
+      "closeMissingClockOut": "补下班卡并下一条",
+      "confirmNoShow": "确认缺勤并下一条"
     },
     "validation": {
       "remarkRequired": "拒绝必须填写审核备注",

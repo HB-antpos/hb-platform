@@ -279,6 +279,12 @@
   background: #fff8f1;
 }
 
+/* 已确认缺勤：和休息格一样是 0 工时，但用浅红字提示「缺勤」以免看成休息 */
+.atp-cell-noshow .atp-cell-rest-text {
+  color: #d92d20;
+  font-weight: 600;
+}
+
 .atp-cell-pending {
   border: 1.5px dashed #f79009;
   background: #fffaeb;

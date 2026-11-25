@@ -78,6 +78,11 @@ const HoursDayCell = memo(function HoursDayCell({ day }: { day: PayrollHoursDay 
       value = t("cell.unavailable");
       toneStyle = styles.cellUnavailable;
       break;
+    case "noShow":
+      // 已确认缺勤：灰色「缺勤」，0 工时。
+      value = t("cell.noShow");
+      valueStyle = styles.valueNoShow;
+      break;
     case "scheduled":
     case "pending":
       value = "—";
@@ -247,6 +252,7 @@ const styles = StyleSheet.create({
   valueSick: { color: HOURS_COLORS.sickText },
   valueAnnual: { color: HOURS_COLORS.annualText },
   valueHoliday: { color: HOURS_COLORS.holidayText },
+  valueNoShow: { color: HB_COLORS.textSecondary, fontSize: 12.5 },
   cornerBadges: { position: "absolute", top: -7, right: -3, flexDirection: "row", alignItems: "center", gap: 1 },
   birthday: { fontSize: 11 },
   cashOut: {

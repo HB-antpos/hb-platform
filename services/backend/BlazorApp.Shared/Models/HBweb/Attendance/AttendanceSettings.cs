@@ -88,5 +88,16 @@ namespace BlazorApp.Shared.Models
         /// </summary>
         [SugarColumn(IsNullable = false)]
         public int OvertimeThresholdMinutes { get; set; } = 15;
+
+        /// <summary>
+        /// 整班未打卡（缺勤）是否生成待审给店长（默认开）。关掉后不再生成新的，已有待审保留。
+        /// 由迁移 20261125.001-attendance-no-show-approval 添加。
+        /// </summary>
+        [SugarColumn(IsNullable = false)]
+        public bool NoShowApprovalEnabled { get; set; } = true;
+
+        /// <summary>排班结束后多少分钟仍零打卡才算缺勤（默认 60，15–720）。由同一迁移添加。</summary>
+        [SugarColumn(IsNullable = false)]
+        public int NoShowGraceMinutes { get; set; } = 60;
     }
 }

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import {
   buildAttendanceApprovalReviewRequest,
+  canRejectAttendanceApproval,
+  getAttendanceApprovalErrorKey,
+  shouldRefreshAfterApprovalError,
   getSupplementalAttendanceApprovalDetail,
   isKnownAttendanceApprovalSourceType,
   parsePublicHolidayPayHours,
@@ -135,5 +138,18 @@ assert.equal(parsePublicHolidayPayHours("0"), null);
 assert.equal(parsePublicHolidayPayHours("24.5"), null);
 assert.equal(parsePublicHolidayPayHours("abc"), null);
 assert.equal(parsePublicHolidayPayHours(" "), null);
+
+// 缺勤（NoShow）：已知类型；不能驳回；两个错误码有本地文案，已自动取消的要刷新列表。
+assert.equal(isKnownAttendanceApprovalSourceType("NoShow"), true);
+assert.equal(canRejectAttendanceApproval("NoShow"), false);
+assert.equal(canRejectAttendanceApproval("MissingClockOut"), true);
+assert.equal(canRejectAttendanceApproval("PublicHolidayPay"), true);
+assert.equal(getAttendanceApprovalErrorKey("NO_SHOW_RESOLVED"), "approvals.board.noShow.resolvedError");
+assert.equal(getAttendanceApprovalErrorKey("NO_SHOW_REJECT_NOT_ALLOWED"), "approvals.board.noShow.rejectNotAllowed");
+assert.equal(getAttendanceApprovalErrorKey("MISSING_CLOCK_OUT_RESOLVED"), undefined, "其他错误码沿用后端文案");
+assert.equal(getAttendanceApprovalErrorKey(undefined), undefined);
+assert.equal(shouldRefreshAfterApprovalError("NO_SHOW_RESOLVED"), true);
+assert.equal(shouldRefreshAfterApprovalError("NO_SHOW_REJECT_NOT_ALLOWED"), false);
+assert.equal(buildAttendanceApprovalReviewRequest({ approvalGuid: "ns", remark: "" }).reviewRemark, undefined, "确认缺勤备注可空");
 
 console.log("attendance-approval.test.ts: ok");
