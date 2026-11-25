@@ -73,12 +73,19 @@ const branchesSchema = z.object({
   includedStoreCount: z.number().int().nonnegative(),
   quantity: number,
   amount: number,
+  // 进货字段由新版主 API 返回；旧版缺省时解析为 null，不能当成 0 件进货。
+  purchaseSource: z
+    .enum(["local", "warehouse"])
+    .nullish()
+    .transform((value) => value ?? null),
+  purchaseQuantity: number.nullish().transform((value) => value ?? null),
   rows: z.array(
     z.object({
       storeCode: text.min(1),
       storeName: text,
       quantity: number,
       amount: number,
+      purchaseQuantity: number.nullish().transform((value) => value ?? null),
     }),
   ),
 });
@@ -115,6 +122,19 @@ export function normalizeProductBranchSales(
     throw Object.assign(new Error("Incomplete product branch sales response"), {
       code: "PRODUCT_INSIGHT_INVALID_RESPONSE",
     });
+  }
+  // 进货数据要么整份可用、要么整份不可用：口径、合计和每行缺一项都视为未返回，避免半份数据被误读成 0。
+  const purchaseComplete =
+    result.purchaseSource !== null &&
+    result.purchaseQuantity !== null &&
+    result.rows.every((row) => row.purchaseQuantity !== null);
+  if (!purchaseComplete) {
+    return {
+      ...result,
+      purchaseSource: null,
+      purchaseQuantity: null,
+      rows: result.rows.map((row) => ({ ...row, purchaseQuantity: null })),
+    };
   }
   return result;
 }
