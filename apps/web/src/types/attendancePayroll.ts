@@ -112,6 +112,8 @@ export interface AttendanceHoursDayDto {
   shifts?: AttendanceHoursShiftDto[]
   /** 有排班、排班窗口已过去、却一次打卡都没有（目前按 0 工时计）：可补录。 */
   missingPunch?: boolean
+  /** 店长已确认缺勤（NoShow 待审已批准）：该班 0 工时，格子显示「缺勤」，此时 missingPunch 为 false。 */
+  noShowConfirmed?: boolean
   /** 未打卡班的排班窗口（HH:mm），补录表单预填用；只在 missingPunch 时有值。 */
   scheduleStart?: string | null
   scheduleEnd?: string | null
@@ -142,6 +144,8 @@ export interface AttendanceHoursTotalsDto extends AttendanceTierHours {
 export interface AttendanceHoursEmployeeDto {
   userGuid: string
   userName: string
+  /** 员工昵称；页面显示为「全名（昵称）」。 */
+  nickname?: string | null
   /** 员工资料没填时为 null。 */
   employmentType?: AttendanceEmploymentType | null
   isManager?: boolean
@@ -246,6 +250,8 @@ export interface AttendancePayCashBucketDto {
 export interface AttendancePayRowDto {
   userGuid: string
   userName: string
+  /** 员工昵称；页面显示为「全名（昵称）」。 */
+  nickname?: string | null
   employmentType?: AttendanceEmploymentType | null
   ageYears?: number | null
   /** 还没有时薪记录时为 null。 */

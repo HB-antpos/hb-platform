@@ -1,7 +1,7 @@
 {
   "attendanceReview": {
     "title": "Attendance review",
-    "reconciledHint": "Schedules for the last 14 days were reconciled on open; missed clock-outs and overtime added · {{time}}",
+    "reconciledHint": "Schedules for the last 14 days were reconciled on open; missed clock-outs, overtime and no-shows added · {{time}}",
     "outsidePending": "{{count}} more pending outside the selected dates",
     "outsidePendingShow": "Show them",
     "allStores": "All managed stores",
@@ -17,6 +17,7 @@
       "PunchAdjustment": "Punch fix",
       "Overtime": "Overtime",
       "MissingClockOut": "Missed clock-out",
+      "NoShow": "No-show",
       "MealBreak": "Meal break",
       "Leave": "Leave",
       "Punch": "Punch exception",
@@ -31,7 +32,7 @@
       "selected": "{{count}} selected",
       "approve": "Approve selected",
       "reject": "Reject selected",
-      "hint": "Only punch fixes, leave and punch exceptions can be batched; overtime, meal breaks, missed clock-outs and paid leave are reviewed one by one",
+      "hint": "Only punch fixes, leave and punch exceptions can be batched; overtime, meal breaks, missed clock-outs, no-shows and paid leave are reviewed one by one",
       "rejectTitle": "Reject {{count}} items"
     },
     "columns": {
@@ -92,7 +93,10 @@
       "attachments": "{{count}} attachment(s)",
       "conflicts": "Clashes with the published roster on {{count}} day(s) ({{detail}})",
       "publicHolidayPay": "Not rostered on {{name}}",
-      "publicHolidayPaySub": "Rostered {{count}} times on this weekday in the last {{weeks}} weeks; suggested {{hours}} h paid"
+      "publicHolidayPaySub": "Rostered {{count}} times on this weekday in the last {{weeks}} weeks; suggested {{hours}} h paid",
+      "noShow": "Rostered {{start}}–{{end}}, no clock-ins",
+      "noShowNoSchedule": "Rostered but no clock-ins",
+      "noShowSub": "Confirming counts the shift as 0 h"
     },
     "detail": {
       "dayPunches": "Punches that day",
@@ -147,7 +151,10 @@
       "tierLabel": "Rate tier",
       "paidAfterHint": "Paid hours are recalculated after approval (meal breaks and overtime per the rules)",
       "hasPunch": "Punched that day",
-      "workedNow": "now {{value}} h"
+      "workedNow": "now {{value}} h",
+      "noShow": "Confirm no-show",
+      "noShowRule": "No clock-ins and no leave after the shift ended. Confirming counts the shift as 0 h and closes it for good.",
+      "noShowFixHint": "If they did work, add the punches from the Hours cell; if they were on sick / annual leave, add the paid leave there. This item is cancelled automatically once saved."
     },
     "actions": {
       "previous": "Previous",
@@ -156,7 +163,8 @@
       "notApplicable": "Not applicable",
       "approveNext": "Approve & next",
       "excludeSegment": "Don't count it",
-      "closeMissingClockOut": "Add clock-out & next"
+      "closeMissingClockOut": "Add clock-out & next",
+      "confirmNoShow": "Confirm no-show & next"
     },
     "validation": {
       "remarkRequired": "Enter a remark to reject",

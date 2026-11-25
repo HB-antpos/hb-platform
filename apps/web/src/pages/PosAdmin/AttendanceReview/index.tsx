@@ -63,6 +63,7 @@ import {
   avatarColorOf,
   buildDayPreviewFromRecord,
   buildTimelineModel,
+  canRejectCategory,
   canReviewItem,
   canSelectForBatch,
   countByCategory,
@@ -86,6 +87,7 @@ const CATEGORY_COLORS: Record<ReviewCategory | 'Other', string> = {
   PunchAdjustment: 'blue',
   Overtime: 'orange',
   MissingClockOut: 'red',
+  NoShow: 'volcano',
   MealBreak: 'cyan',
   Leave: 'purple',
   Punch: 'default',
@@ -309,6 +311,11 @@ export default function AttendanceReviewPage({ embedded = false, shared }: Atten
     if (category === 'MissingClockOut') {
       main = t('attendanceReview.summary.missingClockOut')
       sub = t('attendanceReview.summary.missingClockOutSub')
+    } else if (category === 'NoShow') {
+      main = item.scheduleStartTime
+        ? t('attendanceReview.summary.noShow', { start: item.scheduleStartTime, end: item.scheduleEndTime ?? '' })
+        : t('attendanceReview.summary.noShowNoSchedule')
+      sub = t('attendanceReview.summary.noShowSub')
     } else if (category === 'PunchAdjustment' && item.adjustment) {
       const punchLabel = t(`attendanceReview.punchType.${item.adjustment.punchType ?? 'ClockIn'}`)
       main = (
@@ -687,6 +694,19 @@ export default function AttendanceReviewPage({ embedded = false, shared }: Atten
         </section>
       )
     }
+    if (category === 'NoShow') {
+      // 缺勤只能确认；纠错走工时统计里的补录打卡 / 补录带薪假，保存后这条会被系统自动取消。
+      return (
+        <section className="atr-section">
+          <strong>{t('attendanceReview.detail.noShow')}</strong>
+          {item.scheduleStartTime ? (
+            <div>{t('attendanceReview.detail.scheduleRange', { start: item.scheduleStartTime, end: item.scheduleEndTime ?? '' })}</div>
+          ) : null}
+          <div>{t('attendanceReview.detail.noShowRule')}</div>
+          <Alert type="info" showIcon className="atr-inline-alert" message={t('attendanceReview.detail.noShowFixHint')} />
+        </section>
+      )
+    }
     if (category === 'MealBreak' && item.mealClaim) {
       return (
         <section className="atr-section">
@@ -883,20 +903,26 @@ export default function AttendanceReviewPage({ embedded = false, shared }: Atten
           <Button disabled={index <= 0} onClick={() => setSelectedGuid(visibleItems[index - 1]?.approvalGuid)}>{t('attendanceReview.actions.previous')}</Button>
           {selected.reviewStatus === 'Pending' ? (
             <Space>
-              <Button danger disabled={!editable} loading={submitting} onClick={() => void handleReview('reject')}>
-                {category === 'PublicHolidayPay'
-                  ? t('attendanceReview.actions.notApplicable')
-                  : category === 'MissingClockOut'
-                    ? t('attendanceReview.actions.excludeSegment')
-                    : t('attendanceReview.actions.reject')}
-              </Button>
+              {canRejectCategory(category) ? (
+                <Button danger disabled={!editable} loading={submitting} onClick={() => void handleReview('reject')}>
+                  {category === 'PublicHolidayPay'
+                    ? t('attendanceReview.actions.notApplicable')
+                    : category === 'MissingClockOut'
+                      ? t('attendanceReview.actions.excludeSegment')
+                      : t('attendanceReview.actions.reject')}
+                </Button>
+              ) : null}
               <Button
                 type="primary"
                 disabled={!editable || (category === 'MissingClockOut' && !access.canAdjustAttendancePunches)}
                 loading={submitting}
                 onClick={() => void handleReview('approve')}
               >
-                {category === 'MissingClockOut' ? t('attendanceReview.actions.closeMissingClockOut') : t('attendanceReview.actions.approveNext')}
+                {category === 'MissingClockOut'
+                  ? t('attendanceReview.actions.closeMissingClockOut')
+                  : category === 'NoShow'
+                    ? t('attendanceReview.actions.confirmNoShow')
+                    : t('attendanceReview.actions.approveNext')}
               </Button>
             </Space>
           ) : (

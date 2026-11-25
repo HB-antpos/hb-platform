@@ -15,6 +15,16 @@ import type {
 // - 转账 + 现金：转账容量 = 固定转账工时/周 × 周数，按 周日 → 周六 → 带薪假 → 公假 → 平日 依次装入；
 // - 各档用该档转账时薪，带薪假用平日转账时薪；剩余工时合计 × 现金时薪（现金只有一个价）；
 // - 先把各档工时舍到 2 位小数再乘时薪，金额舍到分，逐档相加；再 ± 每期现金补贴。
+/**
+ * 工时表 / 工资表员工姓名：有昵称时显示「全名（昵称）」，用全角括号；
+ * 昵称为空或与全名相同（忽略大小写）时只显示全名，避免「Zhan Chen（Zhan Chen）」。
+ */
+export function employeeDisplayName(name: string, nickname?: string | null): string {
+  const nick = nickname?.trim()
+  if (!nick || nick.toLowerCase() === name.trim().toLowerCase()) return name
+  return `${name}（${nick}）`
+}
+
 export const TRANSFER_FILL_ORDER = ['sunday', 'saturday', 'leave', 'publicHoliday', 'weekday'] as const
 export type PayBucketKey = (typeof TRANSFER_FILL_ORDER)[number]
 

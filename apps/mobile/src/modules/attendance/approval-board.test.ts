@@ -142,6 +142,26 @@ async function run() {
     // 没有排班窗口（如无排班打卡）不画。
     assert.equal(board.buildPunchDayStrip([earlyOut]), undefined);
   }
+
+  // 缺勤：没有打卡时间，按排班开始时间排进同人同天的顺序；不在时间条上画刻度。
+  {
+    const day = "2026-11-16";
+    const noShowMorning = approval({
+      approvalGuid: "ns-am", sourceType: "NoShow", sourceGuid: "sch-am", applicantUserGuid: "u1", workDate: day,
+      scheduleStartTime: "09:00", scheduleEndTime: "13:00",
+    });
+    const lateEvening = approval({
+      approvalGuid: "late-pm", sourceType: "Punch", applicantUserGuid: "u1", workDate: day,
+      punch: { punchGuid: "p-pm", punchType: "ClockIn", punchTimeLocal: `${day}T17:10:00`, status: "Late", lateMinutes: 10, hasLocation: true },
+    });
+    assert.equal(board.approvalEventMinutes(noShowMorning), 540);
+    assert.equal(board.approvalEventMinutes(approval({ sourceType: "NoShow", workDate: day })), undefined, "没有排班时段就不参与排序");
+    const persons = board.groupApprovalsByPerson([lateEvening, noShowMorning]);
+    assert.deepEqual(persons[0].items.map((item) => item.approvalGuid), ["ns-am", "late-pm"]);
+    assert.equal(board.buildPunchDayStrip([noShowMorning]), undefined);
+    const groups = board.groupApprovalsByWorkDate([noShowMorning]);
+    assert.deepEqual([groups[0].workDate, groups[0].tier], [day, "weekday"]);
+  }
 }
 
 void run();

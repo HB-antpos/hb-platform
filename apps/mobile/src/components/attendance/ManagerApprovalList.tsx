@@ -25,6 +25,7 @@ import { ApprovalCard, type ApprovalDetailKind } from "./approvals/ApprovalCard"
 import { ApprovalPersonCard } from "./approvals/ApprovalPersonCard";
 import { PunchReviewDetail } from "./approvals/PunchReviewDetail";
 import { MissingClockOutDetail } from "./approvals/MissingClockOutDetail";
+import { NoShowDetail } from "./approvals/NoShowDetail";
 import { OvertimeReviewDetail } from "./approvals/OvertimeReviewDetail";
 import { SickLeaveReviewDetail } from "./approvals/SickLeaveReviewDetail";
 import { useApprovalDateLabels } from "./approvals/use-approval-labels";
@@ -37,6 +38,7 @@ const FILTER_TYPES: KnownAttendanceApprovalSourceType[] = [
   "PunchAdjustment",
   "Overtime",
   "MissingClockOut",
+  "NoShow",
   "MealBreak",
   "Leave",
   "PublicHolidayPay",
@@ -46,7 +48,7 @@ const FILTER_TYPES: KnownAttendanceApprovalSourceType[] = [
 /**
  * 店长审核看板（移动端）：待审核 / 已处理两个页签。
  * 待审核顶部显示打开时对账新增了几条，列表按工作日分组（最近的在上），
- * 加班、漏下班、带薪病假进整页详情处理，其余在卡片上一键处理。
+ * 加班、漏下班、带薪病假、缺勤进整页详情处理，其余在卡片上一键处理。
  */
 export function ManagerApprovalList({
   approvals,
@@ -305,6 +307,15 @@ export function ManagerApprovalList({
           onClose={() => setDetail(undefined)}
           onReject={onReject}
           onResolved={onMissingClockOutResolved}
+        />
+      ) : null}
+      {detail && detailApproval && detail.kind === "noShow" ? (
+        <NoShowDetail
+          approval={detailApproval}
+          canReview={canReview && (!isSelfApproval(detailApproval, currentUserGuid) || canReviewSelf)}
+          isBusy={isBusy}
+          onClose={() => setDetail(undefined)}
+          onApprove={onApprove}
         />
       ) : null}
       {punchDetailApproval ? (

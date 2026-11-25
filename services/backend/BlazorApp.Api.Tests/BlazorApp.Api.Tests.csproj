@@ -171,6 +171,7 @@
     <Compile Include="AttendanceReactServiceUnscheduledAdoptionTests.cs" />
     <Compile Include="PayrollCalculatorTests.cs" />
     <Compile Include="AttendanceReactServicePayrollTests.cs" />
+    <Compile Include="AttendanceReactServiceNoShowTests.cs" />
     <Compile Include="AttendanceApproverResolverTests.cs" />
     <Compile Include="AttendanceMealBreakRulesTests.cs" />
     <Compile Include="AutoPricingServiceTests.cs" />

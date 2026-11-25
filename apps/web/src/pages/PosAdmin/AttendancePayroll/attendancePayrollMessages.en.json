@@ -125,6 +125,7 @@
       "sundayRate": "Sun rate",
       "rest": "Off",
       "unavailable": "Can't work",
+      "noShow": "No-show",
       "footer": "Total · {{count}} staff",
       "statPaid": "Paid hours",
       "statPaidSub": "{{people}} staff · {{weeks}} wk · actual hours · ",
@@ -139,6 +140,7 @@
       "pendingCount": "{{count}} items",
       "goReview": "Review →",
       "pendingSub": "Incl. {{count}} public holiday confirmation(s); clear all before submitting",
+      "pendingSubWithNoShow": "Incl. {{count}} public holiday and {{noShow}} no-show confirmation(s); clear all before submitting",
       "pendingClear": "Nothing pending; ready to submit"
     },
     "legend": {

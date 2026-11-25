@@ -18,7 +18,7 @@ import { CellDetailContent } from './HoursCellPopover'
 import { buildCellDetail } from './hoursCellDetailLogic'
 import type { ManualEntryPreset } from './ManualEntryDrawer'
 import { collectMissingPunches, manualEntryCellKind } from './manualEntryLogic'
-import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours, type BirthdayRateReview } from './payrollLogic'
+import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, employeeDisplayName, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours, type BirthdayRateReview } from './payrollLogic'
 
 interface HoursTabProps {
   data: AttendanceHoursResultDto | null
@@ -101,6 +101,11 @@ export default function HoursTab(props: HoursTabProps) {
   const missingPunches = useMemo(() => collectMissingPunches(employees), [employees])
   const publicHolidayPending = useMemo(
     () => employees.reduce((count, employee) => count + employee.days.filter((day) => day.publicHolidayPay?.state === 'Pending').length, 0),
+    [employees],
+  )
+  // 待确认的缺勤（整班未打卡）条数：一天按一条算，和待处理卡片的说明对应
+  const noShowPending = useMemo(
+    () => employees.reduce((count, employee) => count + employee.days.filter((day) => day.pending.includes('NoShow')).length, 0),
     [employees],
   )
 
@@ -273,7 +278,8 @@ export default function HoursTab(props: HoursTabProps) {
     }
     if (day.isBirthday) badges.push(<span key="bday" className="atp-badge atp-badge-birthday" role="img" aria-label={t('attendancePayroll.legend.birthday')}>🎂</span>)
     if (pending) badges.push(<span key="pend" className="atp-badge atp-badge-pending">{t('attendancePayroll.badges.pending')}</span>)
-    if (!pending && day.approvedMarks.length) badges.push(<span key="ok" className="atp-badge atp-badge-ok"><CheckOutlined /></span>)
+    // 已确认的缺勤直接显示「缺勤」文字，不再叠一个 ✓
+    if (!pending && day.approvedMarks.some((type) => type !== 'NoShow')) badges.push(<span key="ok" className="atp-badge atp-badge-ok"><CheckOutlined /></span>)
     // 「补」角标：补录的打卡（撤销 = 按员工 + 日期）或补录的假（撤销 = 按请假记录）；
     // 原因 / 补录人 / 时间与撤销按钮都在单元格气泡里（鼠标放在格子上就能看到）
     const manualLeaveGuid = day.leave?.manualEntry ? day.leave.leaveGuid : undefined
@@ -282,7 +288,10 @@ export default function HoursTab(props: HoursTabProps) {
       badges.push(<span key="manual" className="atp-badge atp-badge-manual">{t('attendancePayroll.manualEntry.badge')}</span>)
     }
 
-    const restText = day.isUnavailable ? t('attendancePayroll.hours.unavailable') : t('attendancePayroll.hours.rest')
+    const restText = day.noShowConfirmed
+      ? t('attendancePayroll.hours.noShow')
+      : day.isUnavailable ? t('attendancePayroll.hours.unavailable') : t('attendancePayroll.hours.rest')
+    if (day.noShowConfirmed && value === null) classes.push('atp-cell-noshow')
     const flashKey = `${employee.userGuid}|${day.date}`
     const cellNode = (
       <div
@@ -320,7 +329,7 @@ export default function HoursTab(props: HoursTabProps) {
             classNames={{ root: 'atp-cell-pop' }}
             content={(
               <CellDetailContent
-                employeeName={employee.userName}
+                employeeName={employeeDisplayName(employee.userName, employee.nickname)}
                 day={day}
                 trace={manualTrace}
                 noCertificate={Boolean(manualLeaveGuid && day.leave?.type === 'PaidSick' && !day.leave.hasCertificate)}
@@ -433,7 +442,9 @@ export default function HoursTab(props: HoursTabProps) {
             </strong>
             <span className="atp-stat-sub">
               {data.pendingCount > 0
-                ? t('attendancePayroll.hours.pendingSub', { count: publicHolidayPending })
+                ? noShowPending > 0
+                  ? t('attendancePayroll.hours.pendingSubWithNoShow', { count: publicHolidayPending, noShow: noShowPending })
+                  : t('attendancePayroll.hours.pendingSub', { count: publicHolidayPending })
                 : t('attendancePayroll.hours.pendingClear')}
             </span>
           </div>
@@ -489,7 +500,7 @@ export default function HoursTab(props: HoursTabProps) {
                         <div className="atp-person">
                           <Avatar size={30} style={{ background: avatarColorOf(employee.userName), fontSize: 12 }}>{initialsOf(employee.userName)}</Avatar>
                           <div>
-                            <div className="atp-person-name">{employee.userName}</div>
+                            <div className="atp-person-name">{employeeDisplayName(employee.userName, employee.nickname)}</div>
                             <Space size={4} wrap>
                               {typeLabel(employee) ? <Tag color={employee.employmentType ? EMPLOYMENT_TYPE_TAG_COLORS[employee.employmentType] : undefined} className="atp-tag">{typeLabel(employee)}</Tag> : null}
                               {employee.isManager ? <Tag color={MANAGER_TAG_COLOR} className="atp-tag">{t('attendancePayroll.manager')}</Tag> : null}

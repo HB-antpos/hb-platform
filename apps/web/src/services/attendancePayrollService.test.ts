@@ -149,8 +149,13 @@ const settings = normalizeAttendanceSettings({
   managerSegmentLimit: 6,
   autoClockOutAtMidnight: true,
   overtimeThresholdMinutes: 30,
+  NoShowApprovalEnabled: false,
+  NoShowGraceMinutes: 90,
 })
 assert.equal(settings.overtimeThresholdMinutes, 30)
+// 缺勤待审设置：兼容 PascalCase，false 也要保留（不能被当成「没传」丢掉）
+assert.equal(settings.noShowApprovalEnabled, false)
+assert.equal(settings.noShowGraceMinutes, 90)
 assert.equal(settings.defaultPeriodWeeks, 2)
 assert.equal(settings.fortnightAnchorDate, '2026-10-05')
 assert.equal(settings.managerSegmentLimit, 6)
@@ -163,6 +168,8 @@ for (const field of [
   'LeaveDetail', 'RequestedHours', 'ApprovedHours', 'FixedTransferHoursPerWeek', 'Allowance', 'GrossPay', 'Warnings',
   'TransferWeekdayRate', 'TransferSaturdayRate', 'TransferSundayRate', 'TransferPublicHolidayRate', 'CashRate',
   'CashAllowancePerPeriod', 'MinimumRate', 'EffectiveFrom', 'BirthdayReviewHint', 'BirthdayReviewDate', 'BirthdayReviewAge', 'RateReview',
+  // 缺勤确认与昵称（工时表 / 工资表姓名后括号显示）
+  'NoShowConfirmed', 'Nickname',
 ]) {
   assert.ok(new RegExp(`public [^\\n]* ${field} \\{`).test(backendPayroll), `后端 AttendancePayrollDtos 缺字段 ${field}`)
 }

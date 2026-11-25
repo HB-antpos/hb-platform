@@ -10,6 +10,7 @@ export const REVIEW_CATEGORIES = [
   'PunchAdjustment',
   'Overtime',
   'MissingClockOut',
+  'NoShow',
   'MealBreak',
   'Leave',
   'Punch',
@@ -20,11 +21,18 @@ export const REVIEW_CATEGORIES = [
 ] as const
 export type ReviewCategory = (typeof REVIEW_CATEGORIES)[number]
 
-/** 只有不需要填数的类型能批量：补卡、请假（不带薪）、打卡异常；加班、用餐、漏下班和带薪类逐条处理。 */
+/** 只有不需要填数的类型能批量：补卡、请假（不带薪）、打卡异常；加班、用餐、漏下班、缺勤和带薪类逐条处理。 */
 const BATCHABLE_CATEGORIES: ReadonlySet<ReviewCategory> = new Set(['PunchAdjustment', 'Leave', 'Punch'])
 
 /** 系统生成的待处理，提交人显示「系统」。 */
-const SYSTEM_SOURCE_TYPES: ReadonlySet<string> = new Set(['MissingClockOut', 'Overtime', 'Punch', 'PublicHolidayPay'])
+const SYSTEM_SOURCE_TYPES: ReadonlySet<string> = new Set(['MissingClockOut', 'NoShow', 'Overtime', 'Punch', 'PublicHolidayPay'])
+
+/**
+ * 缺勤（整班未打卡）只能「确认缺勤」，没有驳回：员工其实来了就补录打卡、请假了就补录带薪假，后端会自动取消这条。
+ */
+export function canRejectCategory(category: ReviewCategory | 'Other'): boolean {
+  return category !== 'NoShow'
+}
 
 export function getReviewCategory(item: Pick<AttendanceApprovalDto, 'sourceType' | 'leave'>): ReviewCategory | 'Other' {
   if (item.sourceType === 'Leave') {

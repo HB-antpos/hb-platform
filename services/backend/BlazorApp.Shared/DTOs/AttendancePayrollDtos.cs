@@ -115,7 +115,7 @@ namespace BlazorApp.Shared.DTOs
         public string? HolidayName { get; set; }
         public AttendancePayrollDayLeaveDto? Leave { get; set; }
         public AttendancePayrollDayPublicHolidayPayDto? PublicHolidayPay { get; set; }
-        /// <summary>当天待处理的审批类型码（Punch / PunchAdjustment / Overtime / MissingClockOut / MealBreak / Leave / PublicHolidayPay）。</summary>
+        /// <summary>当天待处理的审批类型码（Punch / PunchAdjustment / Overtime / MissingClockOut / MealBreak / Leave / PublicHolidayPay / NoShow）。</summary>
         public List<string> Pending { get; set; } = new();
         /// <summary>当天已批准的审批类型码。</summary>
         public List<string> ApprovedMarks { get; set; } = new();
@@ -126,6 +126,8 @@ namespace BlazorApp.Shared.DTOs
         public List<AttendancePayrollShiftDto> Shifts { get; set; } = new();
         /// <summary>有排班、排班窗口已过去、却一次打卡都没有（目前按 0 工时计）；可在页面上补录。</summary>
         public bool MissingPunch { get; set; }
+        /// <summary>店长已确认缺勤（NoShow 待审已批准）：该班 0 工时，格子显示「缺勤」，MissingPunch 置 false。</summary>
+        public bool NoShowConfirmed { get; set; }
         /// <summary>未打卡班的排班窗口（HH:mm），补录表单预填用；只在 MissingPunch 时返回。</summary>
         public string? ScheduleStart { get; set; }
         public string? ScheduleEnd { get; set; }
@@ -152,6 +154,8 @@ namespace BlazorApp.Shared.DTOs
     {
         public string UserGuid { get; set; } = string.Empty;
         public string UserName { get; set; } = string.Empty;
+        /// <summary>员工昵称；页面显示为「全名（昵称）」，没填为 null。</summary>
+        public string? Nickname { get; set; }
         /// <summary>FullTime / PartTime / Casual；员工资料没填时为 null。</summary>
         public string? EmploymentType { get; set; }
         public bool IsManager { get; set; }
@@ -303,6 +307,8 @@ namespace BlazorApp.Shared.DTOs
     {
         public string UserGuid { get; set; } = string.Empty;
         public string UserName { get; set; } = string.Empty;
+        /// <summary>员工昵称；页面显示为「全名（昵称）」，没填为 null。</summary>
+        public string? Nickname { get; set; }
         public string? EmploymentType { get; set; }
         public int? AgeYears { get; set; }
         /// <summary>Transfer / Cash / Mixed；还没有时薪记录时为 null。</summary>

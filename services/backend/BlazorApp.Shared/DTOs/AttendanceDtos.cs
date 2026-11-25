@@ -780,6 +780,10 @@ namespace BlazorApp.Shared.DTOs
         public int? BirthdayRemindDays { get; set; }
         /// <summary>早到 / 晚走满多少分钟才产生加班候选（0–120 整数）；null＝不修改。</summary>
         public int? OvertimeThresholdMinutes { get; set; }
+        /// <summary>整班未打卡是否生成缺勤待审；null＝不修改。</summary>
+        public bool? NoShowApprovalEnabled { get; set; }
+        /// <summary>排班结束后多少分钟仍零打卡算缺勤（15–720 整数）；null＝不修改。</summary>
+        public int? NoShowGraceMinutes { get; set; }
     }
 
     public class AttendanceSettingsDto : UpdateAttendanceSettingsDto { }

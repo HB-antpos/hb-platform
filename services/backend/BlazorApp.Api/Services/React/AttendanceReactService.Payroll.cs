@@ -96,7 +96,7 @@ namespace BlazorApp.Api.Services.React
                 : (await _db.Queryable<AttendancePunchAdjustment>().Where(item => adjustmentGuids.Contains(item.AdjustmentGuid)).ToListAsync())
                     .GroupBy(item => item.AdjustmentGuid, StringComparer.OrdinalIgnoreCase)
                     .ToDictionary(group => group.Key, group => group.First().RequestedPunchTimeLocal.Date, StringComparer.OrdinalIgnoreCase);
-            var scheduleGuids = GuidsOf("Overtime", "MissingClockOut");
+            var scheduleGuids = GuidsOf("Overtime", "MissingClockOut", NoShowSourceType);
             var scheduleDates = scheduleGuids.Count == 0
                 ? new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase)
                 : (await _db.Queryable<AttendanceSchedule>().Where(item => scheduleGuids.Contains(item.ScheduleGuid)).ToListAsync())
@@ -125,7 +125,7 @@ namespace BlazorApp.Api.Services.React
                 {
                     "Punch" => punchDates.TryGetValue(approval.SourceGuid, out var d1) ? d1 : null,
                     "PunchAdjustment" => adjustmentDates.TryGetValue(approval.SourceGuid, out var d2) ? d2 : null,
-                    "Overtime" or "MissingClockOut" => scheduleDates.TryGetValue(approval.SourceGuid, out var d3) ? d3 : null,
+                    "Overtime" or "MissingClockOut" or NoShowSourceType => scheduleDates.TryGetValue(approval.SourceGuid, out var d3) ? d3 : null,
                     "MealBreak" => claimDates.TryGetValue(approval.SourceGuid, out var d4) ? d4 : null,
                     PublicHolidayPaySourceType => holidayPayDates.TryGetValue(approval.SourceGuid, out var d5) ? d5 : null,
                     _ => null,
@@ -148,6 +148,8 @@ namespace BlazorApp.Api.Services.React
         {
             public string UserGuid { get; init; } = string.Empty;
             public string UserName { get; set; } = string.Empty;
+            /// <summary>员工昵称（User.Nickname）；工时表 / 工资表在姓名后用全角括号展示，没填为 null。</summary>
+            public string? Nickname { get; set; }
             public string? EmploymentType { get; set; }
             public bool IsManager { get; set; }
             public int? AgeYears { get; set; }
@@ -409,6 +411,16 @@ namespace BlazorApp.Api.Services.React
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
             var names = await ResolveUserDisplayNamesAsync(userGuids);
+            // 昵称单独取：姓名列仍用全名（导出、MYOB 推送都按全名），页面再拼成「全名（昵称）」。
+            var nicknames = userGuids.Count == 0
+                ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                : (await _db.Queryable<User>()
+                        .Where(item => userGuids.Contains(item.UserGUID))
+                        .Select(item => new { item.UserGUID, item.Nickname })
+                        .ToListAsync())
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Nickname))
+                    .GroupBy(item => item.UserGUID, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First().Nickname!.Trim(), StringComparer.OrdinalIgnoreCase);
             var profiles = (await _db.Queryable<EmployeeProfile>()
                     .Where(item => !item.IsDeleted && userGuids.Contains(item.UserGUID))
                     .ToListAsync())
@@ -455,6 +467,7 @@ namespace BlazorApp.Api.Services.React
                 {
                     UserGuid = userGuid,
                     UserName = names.GetValueOrDefault(userGuid) ?? userGuid,
+                    Nickname = nicknames.GetValueOrDefault(userGuid),
                     EmploymentType = ToEmploymentTypeCode(profile?.EmployeeType),
                     IsManager = limit == managerLimit && managerLimit != ResolveEmployeeSegmentLimit(settings),
                     AgeYears = ResolveMinorAge(birthday, periodEnd),
@@ -703,6 +716,12 @@ namespace BlazorApp.Api.Services.React
                     {
                         employee.Days[date].ApprovedMarks.Add(approval.SourceType);
                     }
+                    // 店长已确认缺勤：不再是「未打卡待补录」，格子改显示「缺勤」。
+                    if (approval.SourceType == NoShowSourceType)
+                    {
+                        employee.Days[date].NoShowConfirmed = true;
+                        employee.Days[date].MissingPunch = false;
+                    }
                 }
             }
 
@@ -764,8 +783,8 @@ namespace BlazorApp.Api.Services.React
         private static bool HasHoursOrPending(PayrollEmployeeSnapshot employee) =>
             employee.PendingCount > 0
             || BuildTotals(employee).Total > 0
-            // 只有「未打卡班」的人也要列出来，否则店长看不到该补录的人。
-            || employee.Days.Values.Any(day => day.MissingPunch);
+            // 只有「未打卡班」的人也要列出来，否则店长看不到该补录的人；已确认缺勤的也列出，格子显示「缺勤」。
+            || employee.Days.Values.Any(day => day.MissingPunch || day.NoShowConfirmed);
 
         /// <summary>生日已过多少天内仍提示「时薪没按新年龄更新」；超过就不再提示（避免历史生日永远挂着）。</summary>
         internal const int BirthdayRateReviewLookbackDays = 60;
@@ -936,6 +955,8 @@ namespace BlazorApp.Api.Services.React
             }
             // 带薪公假确认在店长打开工时统计时生成；失败只记日志，不阻断统计。
             await GeneratePublicHolidayPayApprovalsAsync(storeCode, periodStart, periodStart.AddDays(weeks * 7 - 1));
+            // 缺勤待审同样在打开工时统计时补生成（回溯旧周靠这里）；失败只记日志。
+            await GenerateNoShowApprovalsForStorePeriodAsync(storeCode, periodStart, periodStart.AddDays(weeks * 7 - 1));
             var snapshot = await BuildPayrollSnapshotAsync(
                 storeCode, periodStart, weeks, query.IncludePending, query.MergeStores, onlyWithHours: true);
             var result = new AttendancePayrollHoursDto
@@ -969,6 +990,7 @@ namespace BlazorApp.Api.Services.React
                 {
                     UserGuid = employee.UserGuid,
                     UserName = employee.UserName,
+                    Nickname = employee.Nickname,
                     EmploymentType = employee.EmploymentType,
                     IsManager = employee.IsManager,
                     IsStoreManager = employee.IsManager,
@@ -1101,6 +1123,7 @@ namespace BlazorApp.Api.Services.React
                 {
                     UserGuid = employee.UserGuid,
                     UserName = employee.UserName,
+                    Nickname = employee.Nickname,
                     EmploymentType = employee.EmploymentType,
                     AgeYears = employee.AgeYears,
                     PayMode = pay.PayMode,
@@ -1837,6 +1860,8 @@ namespace BlazorApp.Api.Services.React
             var periodEnd = periodStart.AddDays(request.Weeks * 7 - 1);
             // 提交前也补一次带薪公假确认，避免漏掉还没生成的待处理就锁了期。
             await GeneratePublicHolidayPayApprovalsAsync(storeCode, periodStart, periodEnd);
+            // 缺勤待审同理：提交前补一次，刚到点的缺勤也要先处理（新生成的会让 PendingCount > 0 挡住提交）。
+            await GenerateNoShowApprovalsForStorePeriodAsync(storeCode, periodStart, periodEnd);
             var snapshot = await BuildPayrollSnapshotAsync(storeCode, periodStart, request.Weeks, includePending: false, mergeStores: false);
             if (snapshot.PeriodStatus == PayPeriodStatusSubmitted)
             {

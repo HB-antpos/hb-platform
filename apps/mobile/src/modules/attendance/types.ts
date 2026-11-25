@@ -544,7 +544,7 @@ export interface AttendanceLeaveAttachmentUploadResult {
 export interface AttendanceApproval {
   approvalGuid: string;
   sourceGuid: string;
-  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | "PublicHolidayPay" | string;
+  sourceType: "Punch" | "Leave" | "PunchAdjustment" | "Overtime" | "MissingClockOut" | "MealBreak" | "PublicHolidayPay" | "NoShow" | string;
   employeeName?: string;
   storeCode?: string;
   storeName?: string;

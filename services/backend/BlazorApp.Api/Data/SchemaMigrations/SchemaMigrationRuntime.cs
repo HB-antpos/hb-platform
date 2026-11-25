@@ -336,6 +336,10 @@ internal interface ISchemaMigrationRuntime
 
     Task VerifyAttendanceOvertimeThresholdAsync(CancellationToken cancellationToken);
 
+    Task ApplyAttendanceNoShowApprovalAsync(CancellationToken cancellationToken);
+
+    Task VerifyAttendanceNoShowApprovalAsync(CancellationToken cancellationToken);
+
     Task ApplyMyobPayslipAsync(CancellationToken cancellationToken);
 
     Task VerifyMyobPayslipAsync(CancellationToken cancellationToken);
@@ -2148,6 +2152,28 @@ internal sealed class SqlServerSchemaMigrationRuntime : ISchemaMigrationRuntime
         await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
             _mainDatabase.ConnectionString,
             AttendanceOvertimeThresholdSchema.VerifySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+    }
+
+    public async Task ApplyAttendanceNoShowApprovalAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceNoShowApprovalSchema.ApplySql,
+            _commandTimeoutSeconds,
+            cancellationToken
+        );
+        // 列签名通过后协调器才登记账本。
+        await VerifyAttendanceNoShowApprovalAsync(cancellationToken);
+    }
+
+    public async Task VerifyAttendanceNoShowApprovalAsync(CancellationToken cancellationToken)
+    {
+        await SqlServerSchemaMigrationStore.ExecuteReadOnlyBatchAsync(
+            _mainDatabase.ConnectionString,
+            AttendanceNoShowApprovalSchema.VerifySql,
             _commandTimeoutSeconds,
             cancellationToken
         );

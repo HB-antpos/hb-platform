@@ -115,6 +115,12 @@ export const HoursDayRow = memo(function HoursDayRow({ day }: { day: PayrollHour
         ))}
       </Text>,
     );
+  } else if (display.kind === "noShow") {
+    lines.push(
+      <Text key="no-show" style={styles.subtle}>
+        {t("detail.noShowConfirmed")}
+      </Text>,
+    );
   } else if (display.kind === "scheduled" || display.kind === "pending") {
     lines.push(
       <Text key="no-punch" style={styles.subtle}>
@@ -135,6 +141,14 @@ export const HoursDayRow = memo(function HoursDayRow({ day }: { day: PayrollHour
       <View key="cash-out" style={styles.cashOutTag}>
         <Text style={styles.cashOutText}>{t("detail.cashOut", { hours: formatHours(hours) })}</Text>
       </View>,
+    );
+  }
+  // 同一天另有计薪工时（如两个班只缺了一个）时，已确认缺勤只打一个灰标签。
+  if (day.noShowConfirmed && display.kind !== "noShow") {
+    tags.push(
+      <Text key="no-show-tag" style={styles.subtle}>
+        {t("detail.noShowConfirmed")}
+      </Text>,
     );
   }
   for (const [index, pending] of day.pending.entries()) {

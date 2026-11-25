@@ -10,6 +10,7 @@ const card = read("approvals/ApprovalCard.tsx");
 const overtime = read("approvals/OvertimeReviewDetail.tsx");
 const missing = read("approvals/MissingClockOutDetail.tsx");
 const sick = read("approvals/SickLeaveReviewDetail.tsx");
+const noShow = read("approvals/NoShowDetail.tsx");
 
 // 列表：按工作日分组、本人申请判定、只认已知类型做筛选、显示打开时对账新增条数。
 assert.match(list, /groupApprovalsByWorkDate/);
@@ -41,5 +42,14 @@ assert.match(missing, /previewRevision: fresh\.previewRevision/);
 // 病假：医嘱可点开大图；拒绝必须写原因。
 assert.match(sick, /maximumZoomScale/);
 assert.match(sick, /approvals\.board\.sick\.rejectReasonRequired/);
+
+// 缺勤：卡片进详情；详情只有「确认缺勤」（走批准），没有驳回入口；列表筛选认 NoShow。
+assert.match(card, /item\.sourceType === "NoShow"\) return "noShow"/);
+assert.match(card, /canRejectAttendanceApproval\(item\.sourceType\)/);
+assert.match(list, /detail\.kind === "noShow"/);
+assert.match(list, /"NoShow",/);
+assert.match(noShow, /onApprove\(\{ approvalGuid: approval\.approvalGuid/);
+assert.match(noShow, /approvals\.board\.noShow\.confirm/);
+assert.doesNotMatch(noShow, /onReject/);
 
 console.log("manager-approval-list-contract.test.ts: ok");

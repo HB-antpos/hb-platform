@@ -125,6 +125,7 @@
       "sundayRate": "周日时薪",
       "rest": "休",
       "unavailable": "不能上班",
+      "noShow": "缺勤",
       "footer": "合计 · {{count}} 人",
       "statPaid": "计薪工时合计",
       "statPaidSub": "{{people}} 人 · {{weeks}} 周 · 实际工时 · ",
@@ -139,6 +140,7 @@
       "pendingCount": "{{count}} 项",
       "goReview": "去审核 →",
       "pendingSub": "含 {{count}} 条公假确认；清零后才能提交",
+      "pendingSubWithNoShow": "含 {{count}} 条公假确认、{{noShow}} 条缺勤确认；清零后才能提交",
       "pendingClear": "没有待处理，可以提交"
     },
     "legend": {
