@@ -21,6 +21,7 @@ public interface IProductBranchSalesService
 public sealed class ProductBranchSalesService(
     SqlSugarContext context,
     POSMSqlSugarContext posmContext,
+    StoreProductInsightQueryService storeInsightQuery,
     TimeProvider timeProvider
 ) : IProductBranchSalesService
 {
@@ -82,6 +83,15 @@ public sealed class ProductBranchSalesService(
                 SalesStatisticLastUpdatedAt = SqlFunc.AggregateMax(row.UpdateTime),
             })
             .ToListAsync();
+        // 进货量复用单店进销页的查询口径，保证同一分店两处看到的进货数一致。
+        var purchases = await storeInsightQuery.GetBranchPurchasesAsync(
+            normalizedProductCode,
+            storeCodes,
+            start,
+            endDate.ToDateTime(TimeOnly.MinValue),
+            cancellationToken
+        );
+        result.PurchaseSource = purchases.SourceType;
 
         var byStore = aggregates
             .Where(row => !string.IsNullOrWhiteSpace(row.StoreCode))
@@ -111,6 +121,7 @@ public sealed class ProductBranchSalesService(
                     StoreName = store.StoreName,
                     Quantity = sale?.Quantity ?? 0,
                     Amount = sale?.Amount ?? 0m,
+                    PurchaseQuantity = purchases.QuantityByStore.GetValueOrDefault(store.StoreCode),
                 };
             })
             .OrderByDescending(row => row.Quantity)
@@ -120,6 +131,7 @@ public sealed class ProductBranchSalesService(
             .ToList();
         result.Quantity = result.Rows.Sum(row => row.Quantity);
         result.Amount = result.Rows.Sum(row => row.Amount);
+        result.PurchaseQuantity = result.Rows.Sum(row => row.PurchaseQuantity);
         result.SalesStatisticLastUpdatedAt = aggregates
             .Where(row => row.SalesStatisticLastUpdatedAt.HasValue)
             .Select(row => row.SalesStatisticLastUpdatedAt)

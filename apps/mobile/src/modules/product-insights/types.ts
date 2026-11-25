@@ -69,7 +69,12 @@ export interface ProductBranchSalesRow {
   storeName: string;
   quantity: number;
   amount: number;
+  /** 本区间进货（或配货）数量；旧版服务器未返回时为 null，界面显示「—」。 */
+  purchaseQuantity: number | null;
 }
+
+/** 进货口径：local = 本地进货单；warehouse = 仓库已出库配货。null 表示服务器未返回进货数据。 */
+export type ProductBranchPurchaseSource = "local" | "warehouse";
 
 export interface ProductBranchSales {
   range: ProductInsightRange;
@@ -81,5 +86,7 @@ export interface ProductBranchSales {
   includedStoreCount: number;
   quantity: number;
   amount: number;
+  purchaseSource: ProductBranchPurchaseSource | null;
+  purchaseQuantity: number | null;
   rows: ProductBranchSalesRow[];
 }
