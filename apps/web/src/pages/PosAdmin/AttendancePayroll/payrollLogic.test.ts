@@ -7,6 +7,7 @@ import {
   PERIOD_PRESETS,
   birthdayRateReviews,
   calculatePay,
+  employeeDisplayName,
   isPublicHolidayTransferOnly,
   cellHoursText,
   findRatesBelowMinimum,
@@ -310,6 +311,15 @@ assert.deepEqual(Object.keys(EMPLOYMENT_TYPE_TAG_COLORS).sort(), ['Casual', 'Ful
   assert.deepEqual(find(restored.rows, 'mock-liam').cash.publicHoliday.isManual, false)
   assert.equal(find(restored.rows, 'mock-liam').grossPay, base.grossPay)
   assert.deepEqual(summarizeCashOverrides(restored.rows), { count: 0, delta: 0 })
+}
+
+// 工时表 / 工资表员工姓名：有昵称用全角括号拼在全名后，空昵称或与全名相同只显示全名
+{
+  assert.equal(employeeDisplayName('Zhan Chen', 'Zoe'), 'Zhan Chen（Zoe）')
+  assert.equal(employeeDisplayName('Zhan Chen', '  Zoe  '), 'Zhan Chen（Zoe）')
+  assert.equal(employeeDisplayName('Zhan Chen', null), 'Zhan Chen')
+  assert.equal(employeeDisplayName('Zhan Chen', '   '), 'Zhan Chen')
+  assert.equal(employeeDisplayName('Zhan Chen', 'zhan chen'), 'Zhan Chen')
 }
 
 console.log('payrollLogic.test.ts: ok')

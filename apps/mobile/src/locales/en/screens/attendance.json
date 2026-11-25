@@ -302,6 +302,10 @@
         "title": "Missing clock-out",
         "detail": "Still clocked in after the rostered finish on {{workDate}}."
       },
+      "NoShow": {
+        "title": "No-show to confirm",
+        "detail": "Rostered on {{workDate}} but never clocked in."
+      },
       "MealBreak": {
         "title": "Missed meal break"
       }
@@ -345,6 +349,7 @@
         "PunchAdjustment": "Corrections",
         "Overtime": "Overtime",
         "MissingClockOut": "Missing clock-out",
+        "NoShow": "No-show",
         "MealBreak": "Meal break",
         "Leave": "Leave",
         "Punch": "Punch",
@@ -406,6 +411,7 @@
       "openDetail": {
         "overtime": "Review timeline",
         "missingClockOut": "Enter actual finish time",
+        "noShow": "Confirm no-show",
         "sickLeave": "Review certificate"
       },
       "result": {
@@ -463,6 +469,29 @@
         "exclude": "Don't pay this",
         "resolve": "Clock out at {{time}} and close",
         "resolved": "Clocked out at {{time}} and closed"
+      },
+      "noShow": {
+        "title": "No-show",
+        "cardLine": "{{schedule}}, no clock-ins for the whole shift",
+        "cardLineNoSchedule": "Rostered but no clock-ins for the whole shift",
+        "cardHint": "Confirming pays this shift as 0 hours. If they did work, add their clock-ins instead",
+        "confirmedLine": "No-show confirmed, shift paid as 0 hours",
+        "alertTitle": "No clock-ins for the whole shift",
+        "alertBody": "{{name}} was rostered on {{date}} ({{schedule}}) but never clocked in.",
+        "scheduleUnknown": "times unknown",
+        "shiftTitle": "Roster",
+        "dateLabel": "Date",
+        "scheduleLabel": "Rostered hours",
+        "punchLabel": "Clock-ins",
+        "punchNone": "None",
+        "explainTitle": "Check before confirming",
+        "explainZeroHours": "Confirming pays this shift as 0 hours. It can’t be rejected.",
+        "explainCameIn": "If they did come in, add their clock-ins.",
+        "explainLeave": "If they were on leave, add paid leave. Either way this no-show is cancelled automatically.",
+        "remarkPlaceholder": "Note (optional)",
+        "confirm": "Confirm no-show",
+        "resolvedError": "This shift now has clock-ins or leave, or the roster was removed, so the no-show was cancelled",
+        "rejectNotAllowed": "A no-show can’t be rejected. Add their clock-ins if they worked, or paid leave if they were off"
       },
       "sick": {
         "title": "Sick leave review",
@@ -986,6 +1015,7 @@
     "PunchAdjustment": "Punch correction",
     "Overtime": "Overtime",
     "MissingClockOut": "Missing clock-out",
+    "NoShow": "No-show",
     "MealBreak": "Meal break",
     "PublicHolidayPay": "Public holiday pay"
   },

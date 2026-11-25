@@ -301,6 +301,8 @@ export function approvalEventMinutes(item: AttendanceApproval) {
   if (item.sourceType === "PunchAdjustment" && item.adjustment) {
     return minutesFromWorkDay(item.adjustment.originalPunchTimeLocal ?? item.adjustment.requestedPunchTimeLocal, workDate);
   }
+  // 缺勤：没有打卡时间，按排班开始时间排进同人同天的顺序里。
+  if (item.sourceType === "NoShow") return clockToMinutes(item.scheduleStartTime);
   return undefined;
 }
 

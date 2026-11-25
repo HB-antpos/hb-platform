@@ -16,7 +16,7 @@ export type AttendancePunchStatus =
   | 'PendingApproval'
   | 'Approved'
   | 'Rejected'
-export type AttendanceApprovalSourceType = 'Punch' | 'Leave' | 'PunchAdjustment' | 'Overtime' | 'MissingClockOut' | 'MealBreak' | 'PublicHolidayPay'
+export type AttendanceApprovalSourceType = 'Punch' | 'Leave' | 'PunchAdjustment' | 'Overtime' | 'MissingClockOut' | 'MealBreak' | 'PublicHolidayPay' | 'NoShow'
 export type AttendanceReviewStatus = 'Pending' | 'Approved' | 'Rejected' | 'Cancelled'
 export type AttendanceScheduleState = 'NotStarted' | 'InProgress' | 'Completed' | 'MissingClockOut' | string
 export type AttendanceSegmentStatus = 'NotStarted' | 'Open' | 'Completed' | 'MissingClockOut' | string
@@ -227,6 +227,9 @@ export interface AttendanceApprovalDto {
   createdAt?: string
   candidateOvertimeMinutes?: number
   approvedOvertimeMinutes?: number
+  /** 关联排班的时段（HH:mm）；缺勤 / 漏下班 / 加班 / 打卡异常有值。 */
+  scheduleStartTime?: string
+  scheduleEndTime?: string
   adjustment?: AttendanceAdjustmentDetailDto
   /** sourceType 为 MealBreak 时的用餐声明。 */
   mealClaim?: AttendanceMealClaimDto
@@ -407,6 +410,10 @@ export interface AttendanceSettingsDto {
   employeeSegmentLimit?: number
   managerSegmentLimit?: number
   autoClockOutAtMidnight?: boolean
+  /** 整班未打卡（缺勤）是否生成待审给店长。 */
+  noShowApprovalEnabled?: boolean
+  /** 排班结束后多少分钟仍零打卡算缺勤（15–720）。 */
+  noShowGraceMinutes?: number
 }
 
 export type SaveAttendanceSettingsPayload = Pick<
@@ -436,6 +443,8 @@ export type SaveAttendanceSettingsPayload = Pick<
   | 'employeeSegmentLimit'
   | 'managerSegmentLimit'
   | 'autoClockOutAtMidnight'
+  | 'noShowApprovalEnabled'
+  | 'noShowGraceMinutes'
 >>
 
 export type AttendancePagedResult<T> = PagedResult<T>

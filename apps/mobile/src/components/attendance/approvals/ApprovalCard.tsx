@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Button, Icon, Text, TextInput } from "react-native-paper";
 import {
+  canRejectAttendanceApproval,
   parsePublicHolidayPayHours,
   validateAttendanceMealBreakApproval,
   type OvertimeApprovalAction,
@@ -15,10 +16,11 @@ import type { AttendanceStatusTone } from "../AdjustmentFormControls";
 import { PersonAvatar, SELF_REVIEW_TONE, TypeTag } from "./approval-ui";
 import { punchClock, punchMetaLine, punchReason } from "./punch-labels";
 
-export type ApprovalDetailKind = "overtime" | "missingClockOut" | "sickLeave";
+export type ApprovalDetailKind = "overtime" | "missingClockOut" | "sickLeave" | "noShow";
 
 const TYPE_TONES: Record<string, AttendanceStatusTone> = {
   MissingClockOut: "danger",
+  NoShow: "danger",
   PunchAdjustment: "accent",
   Overtime: "warning",
   MealBreak: "success",
@@ -29,10 +31,12 @@ const TYPE_TONES: Record<string, AttendanceStatusTone> = {
 
 const LEAVE_RANGE_PATTERN = /^\s*(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})(?:\s*·\s*(.+))?$/;
 
-/** 卡片需要进详情处理的类型：加班（选分钟）、漏下班（填时间）、带薪病假（看医嘱）。 */
+/** 卡片需要进详情处理的类型：加班（选分钟）、漏下班（填时间）、带薪病假（看医嘱）、缺勤（看说明后确认）。 */
 export function resolveApprovalDetailKind(item: AttendanceApproval): ApprovalDetailKind | undefined {
   if (item.sourceType === "Overtime") return "overtime";
   if (item.sourceType === "MissingClockOut") return "missingClockOut";
+  // 缺勤只有「确认缺勤」一个动作，进详情先看清后果（按 0 工时计）再确认。
+  if (item.sourceType === "NoShow") return "noShow";
   if (item.sourceType === "Leave" && (item.leave?.leaveType ?? item.title) === "PaidSick") return "sickLeave";
   return undefined;
 }
@@ -145,6 +149,20 @@ export function ApprovalCard({
               : t("approvals.board.missingClockOut.cardLineNoTime")}
           </Text>
           {!processed ? <Text variant="bodyMedium" style={styles.bodySecondary}>{t("approvals.board.missingClockOut.cardHint")}</Text> : null}
+        </>
+      );
+    }
+    if (item.sourceType === "NoShow") {
+      return (
+        <>
+          <Text variant="bodyLarge" style={styles.bodyLine}>
+            {processed
+              ? t("approvals.board.noShow.confirmedLine")
+              : scheduleText
+                ? t("approvals.board.noShow.cardLine", { schedule: scheduleText })
+                : t("approvals.board.noShow.cardLineNoSchedule")}
+          </Text>
+          {!processed ? <Text variant="bodyMedium" style={styles.bodySecondary}>{t("approvals.board.noShow.cardHint")}</Text> : null}
         </>
       );
     }
@@ -318,7 +336,13 @@ export function ApprovalCard({
     }
     if (!canReview) return null;
     if (detailKind) {
-      const icon = detailKind === "missingClockOut" ? "clock-edit-outline" : detailKind === "sickLeave" ? "file-image-outline" : "chart-timeline-variant";
+      const icon = detailKind === "missingClockOut"
+        ? "clock-edit-outline"
+        : detailKind === "sickLeave"
+          ? "file-image-outline"
+          : detailKind === "noShow"
+            ? "account-off-outline"
+            : "chart-timeline-variant";
       return (
         <Button mode="contained" icon={icon} disabled={isBusy} style={grouped ? styles.groupedIndent : undefined} onPress={() => onOpenDetail(detailKind)}>
           {t(`approvals.board.openDetail.${detailKind}`)}
@@ -327,15 +351,18 @@ export function ApprovalCard({
     }
     return (
       <View style={[styles.actionRow, grouped ? styles.groupedIndent : null]}>
-        <Button
-          mode="outlined"
-          textColor={HB_COLORS.danger}
-          style={[styles.actionButton, styles.rejectButton]}
-          disabled={isBusy || !canAct}
-          onPress={() => void quickSubmit("reject")}
-        >
-          {item.sourceType === "PublicHolidayPay" ? t("approvals.board.holidayPay.notApplicable") : t("actions.reject")}
-        </Button>
+        {/* 兜底：不允许驳回的类型（缺勤）不画驳回按钮；正常情况下缺勤走详情页，不会到这里。 */}
+        {canRejectAttendanceApproval(item.sourceType) ? (
+          <Button
+            mode="outlined"
+            textColor={HB_COLORS.danger}
+            style={[styles.actionButton, styles.rejectButton]}
+            disabled={isBusy || !canAct}
+            onPress={() => void quickSubmit("reject")}
+          >
+            {item.sourceType === "PublicHolidayPay" ? t("approvals.board.holidayPay.notApplicable") : t("actions.reject")}
+          </Button>
+        ) : null}
         <Button
           mode="contained"
           buttonColor={selfReview ? SELF_REVIEW_TONE.text : undefined}
