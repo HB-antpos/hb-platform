@@ -8,8 +8,22 @@ export const SCAN_MIN_LENGTH = 8;
 const SCAN_MAX_LENGTH = 50;
 // 部分扫码枪在条码和回车之间有额外延迟，收尾键放宽。
 const SCAN_TERMINATOR_GAP_MS = 200;
+// 蓝牙扫码枪（尤其 HID 键盘模式）传输偶尔卡顿，一次扫码中间会冒出一两次 100～300ms 的停顿。
+// 旧逻辑超过 80ms 就清空重来，结果把后半截（只要 ≥8 位）当成完整条码去查。
+// 现在这个范围内的停顿视为同一次扫码接着拼，最多拼 SCAN_MAX_STALLS 次。
+const SCAN_STALL_GAP_MS = 300;
+// 前面已以扫码速度收到这么多字符才算「正在扫码」；此时再被打断，后面的残码整次作废。
+const SCAN_MIN_BURST_LENGTH = 4;
+const SCAN_MAX_STALLS = 2;
+// 停顿超过这个时长就当作上一次输入已彻底结束，连「作废」标记一起清掉。
+const SCAN_IDLE_RESET_MS = 1000;
 const SCAN_CODE_PATTERN = /^[0-9A-Za-z._-]+$/;
 const TERMINATOR_KEYS = new Set(['Enter', 'Tab']);
+// 扫码枪设成「回车换行」时，键盘模式下换行会被模拟成第二个回车或 Ctrl+J。
+// 识别出条码后这么短时间内跟来的收尾键属于同一次扫码，一并拦下，
+// 否则第二个回车会触发网站提交表单，Ctrl+J 会让 Windows 上的 Chrome / Edge 打开「下载」页。
+const SCAN_TRAILING_KEY_WINDOW_MS = 150;
+const SCAN_MAX_TRAILING_KEYS = 2;
 
 export const SCAN_REPEAT_WINDOW_MS = 1500;
 
@@ -17,13 +31,28 @@ export function createScanDetector({
   minLength = SCAN_MIN_LENGTH,
   maxKeyGapMs = SCAN_MAX_KEY_GAP_MS,
   terminatorGapMs = SCAN_TERMINATOR_GAP_MS,
+  stallGapMs = SCAN_STALL_GAP_MS,
 } = {}) {
   let buffer = '';
   let lastAt = 0;
+  let stalls = 0;
+  // 扫码中途断得太久时置位：后半截也是扫码速度、可能凑够 8 位，但它不是完整条码，收尾时整次作废。
+  let broken = false;
 
   function reset() {
     buffer = '';
     lastAt = 0;
+    stalls = 0;
+    broken = false;
+  }
+
+  // 扫码中途被打断（停太久、夹进非字符键）：前半截已经丢了，后面那段即便凑够 8 位也只是残码。
+  // 置 broken 让本次扫码在收尾时整体作废，而不是拿后半截去查。
+  function interrupt(timeStamp) {
+    broken = broken || buffer.length >= SCAN_MIN_BURST_LENGTH;
+    buffer = '';
+    stalls = 0;
+    lastAt = timeStamp;
   }
 
   // 用事件自带的 timeStamp 而不是当前时间：页面主线程繁忙时事件会排队，当前时间会把间隔拉长。
@@ -38,17 +67,31 @@ export function createScanDetector({
     if (TERMINATOR_KEYS.has(event.key)) {
       const code = buffer;
       const gap = event.timeStamp - lastAt;
+      const incomplete = broken;
       reset();
+      if (incomplete) return null;
       if (code.length < minLength || code.length > SCAN_MAX_LENGTH) return null;
       if (gap > terminatorGapMs || !SCAN_CODE_PATTERN.test(code)) return null;
       return code;
     }
 
     if (typeof event.key !== 'string' || event.key.length !== 1) {
-      reset();
+      interrupt(event.timeStamp);
       return null;
     }
-    if (buffer && event.timeStamp - lastAt > maxKeyGapMs) buffer = '';
+    const gap = event.timeStamp - lastAt;
+    if (gap > SCAN_IDLE_RESET_MS) {
+      // 空闲够久，上一次输入已彻底结束，作废标记一并清掉。
+      reset();
+    } else if (buffer && gap > maxKeyGapMs) {
+      if (gap <= stallGapMs && stalls < SCAN_MAX_STALLS) {
+        // 传输卡顿：停顿后接着拼，不丢前半截。卡顿可能发生在开头一两个字符之后，所以不要求前段长度；
+        // 人手打字要连续多个键都快于 80ms 才可能凑够 8 位，最多 2 次中等停顿不足以让慢速打字被误判。
+        stalls += 1;
+      } else {
+        interrupt(event.timeStamp);
+      }
+    }
     buffer += event.key;
     lastAt = event.timeStamp;
     return null;
@@ -93,21 +136,47 @@ export function submitSupplierSearchForm(doc, search, itemNumber) {
 
 export function attachBarcodeScanner(target, { onScan, isEnabled = () => true, detectorOptions } = {}) {
   const detector = createScanDetector(detectorOptions);
+  // 上一次识别出条码（或拦下尾随收尾键）的时间，以及已拦下的尾随键个数。
+  let trailingFrom = null;
+  let trailingCount = 0;
+  const swallow = (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
   const handler = (event) => {
     if (!isEnabled()) {
       detector.reset();
+      trailingFrom = null;
       return;
+    }
+    if (trailingFrom !== null) {
+      const withinWindow = event.timeStamp - trailingFrom <= SCAN_TRAILING_KEY_WINDOW_MS;
+      if (withinWindow && trailingCount < SCAN_MAX_TRAILING_KEYS && isTrailingTerminator(event)) {
+        swallow(event);
+        trailingFrom = event.timeStamp;
+        trailingCount += 1;
+        return;
+      }
+      trailingFrom = null;
     }
     const code = detector.handle(event);
     if (!code) return;
     // 只拦截收尾键：拦下后供应商页面不会把回车当成提交表单。
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    swallow(event);
+    trailingFrom = event.timeStamp;
+    trailingCount = 0;
     removeScannedText(event.composedPath?.()[0] ?? event.target, code);
     onScan(code);
   };
   target.addEventListener('keydown', handler, true);
   return () => target.removeEventListener('keydown', handler, true);
+}
+
+// 「回车换行」里换行的几种键盘模拟：再一个回车 / Tab，或 Ctrl+J（ASCII 换行符 0x0A 的控制键写法）。
+function isTrailingTerminator(event) {
+  if (event.metaKey || event.altKey) return false;
+  if (TERMINATOR_KEYS.has(event.key)) return !event.ctrlKey;
+  return !!event.ctrlKey && typeof event.key === 'string' && event.key.toLowerCase() === 'j';
 }
 
 // 同一个码短时间内连扫只处理一次，防止手抖或扫码枪连发。

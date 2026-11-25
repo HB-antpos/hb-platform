@@ -46,6 +46,55 @@ test('中途长停顿会重新开始计数', () => {
   assert.equal(feed(detector, '93111925', { start: 5000 }), '93111925');
 });
 
+// 模拟蓝牙传输卡顿：在第 index 个字符前额外停顿 stall 毫秒。
+function feedWithStalls(detector, text, stalls, { gap = 15, start = 1000 } = {}) {
+  let at = start;
+  [...text].forEach((key, index) => {
+    at += stalls[index] ?? 0;
+    assert.equal(detector.handle({ key, timeStamp: at }), null);
+    at += gap;
+  });
+  return detector.handle({ key: 'Enter', timeStamp: at });
+}
+
+test('扫码中途传输卡顿 300ms 以内时拼回完整条码，不只取后半截', () => {
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 4: 120 }), '9311192573830');
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 4: 250, 9: 180 }), '9311192573830');
+  // 卡顿发生在开头一两个字符之后也要拼回。
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 1: 150 }), '9311192573830');
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 3: 90 }), '9311192573830');
+});
+
+test('扫码中途卡顿过久时整次作废，不把后半截当成条码', () => {
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 4: 500 }), null);
+  // 卡顿次数超过上限同样作废。
+  assert.equal(feedWithStalls(createScanDetector(), '93111925738301234', { 4: 120, 8: 120, 12: 120 }), null);
+});
+
+test('扫码中途夹进非字符键时整次作废', () => {
+  const detector = createScanDetector();
+  let at = 1000;
+  for (const key of '9311') detector.handle({ key, timeStamp: (at += 15) });
+  detector.handle({ key: 'Unidentified', timeStamp: (at += 15) });
+  for (const key of '192573830') detector.handle({ key, timeStamp: (at += 15) });
+  assert.equal(detector.handle({ key: 'Enter', timeStamp: (at += 15) }), null);
+});
+
+test('作废的扫码收尾后，紧接着重扫可以正常识别', () => {
+  const detector = createScanDetector();
+  assert.equal(feedWithStalls(detector, '9311192573830', { 4: 500 }), null);
+  assert.equal(feedWithStalls(detector, '9311192573830', {}, { start: 2000 }), '9311192573830');
+});
+
+test('人手敲了几个键、停一会儿再扫码：不拼进条码，扫码也不被作废', () => {
+  assert.equal(feedWithStalls(createScanDetector(), 'ab93111925', { 2: 400 }), '93111925');
+});
+
+test('人工打字中偶有快速连击也不会被拼成扫码', () => {
+  assert.equal(feedWithStalls(createScanDetector(), 'abcdefgh', { 2: 150, 4: 150, 6: 150 }), null);
+  assert.equal(feedWithStalls(createScanDetector(), 'abcdefgh', { 1: 200, 2: 200, 3: 200, 4: 200, 5: 200, 6: 200, 7: 200 }), null);
+});
+
 test('带组合键或收尾键过晚都不算扫码', () => {
   const detector = createScanDetector();
   detector.handle({ key: '9', timeStamp: 0 });
@@ -123,6 +172,61 @@ test('识别成功时只拦截收尾键，并在捕获阶段监听', () => {
   const calls = fireScan(target, '93111925', { tagName: 'DIV' });
   assert.deepEqual(scans, ['93111925']);
   assert.deepEqual(calls, { prevented: 1, stopped: 1 });
+});
+
+// 扫完条码后接着按 tail 里的键，返回每个尾随键是否被拦下。
+function fireScanWithTail(target, text, tail, { tailGap = 10 } = {}) {
+  let at = 1000;
+  const fire = (event, gap) => {
+    let prevented = false;
+    let stopped = false;
+    target.fire({
+      ...event,
+      timeStamp: (at += gap),
+      target: { tagName: 'DIV' },
+      preventDefault: () => { prevented = true; },
+      stopImmediatePropagation: () => { stopped = true; },
+    });
+    assert.equal(prevented, stopped);
+    return prevented;
+  };
+  for (const key of text) fire({ key }, 10);
+  assert.equal(fire({ key: 'Enter' }, 10), true);
+  return tail.map((event) => fire(event, tailGap));
+}
+
+test('「回车换行」多出来的第二个回车或 Ctrl+J 一并拦下，不漏给网页', () => {
+  for (const tail of [[{ key: 'Enter' }], [{ key: 'j', ctrlKey: true }], [{ key: 'Tab' }], [{ key: 'Enter' }, { key: 'Enter' }]]) {
+    const target = fakeTarget();
+    const scans = [];
+    attachBarcodeScanner(target, { onScan: (code) => scans.push(code) });
+    assert.deepEqual(fireScanWithTail(target, '9311192573830', tail), tail.map(() => true));
+    assert.deepEqual(scans, ['9311192573830']);
+  }
+});
+
+test('尾随收尾键只拦紧跟着的：过了时间窗口、超过个数或换成别的键都放行', () => {
+  const late = fakeTarget();
+  attachBarcodeScanner(late, { onScan: () => {} });
+  assert.deepEqual(fireScanWithTail(late, '9311192573830', [{ key: 'Enter' }], { tailGap: 400 }), [false]);
+
+  const many = fakeTarget();
+  attachBarcodeScanner(many, { onScan: () => {} });
+  assert.deepEqual(
+    fireScanWithTail(many, '9311192573830', [{ key: 'Enter' }, { key: 'Enter' }, { key: 'Enter' }]),
+    [true, true, false],
+  );
+
+  // 扫完紧接着的普通字符、Cmd+J 都不是换行，照常交给页面。
+  const other = fakeTarget();
+  attachBarcodeScanner(other, { onScan: () => {} });
+  assert.deepEqual(
+    fireScanWithTail(other, '9311192573830', [{ key: 'a' }, { key: 'Enter' }]),
+    [false, false],
+  );
+  const meta = fakeTarget();
+  attachBarcodeScanner(meta, { onScan: () => {} });
+  assert.deepEqual(fireScanWithTail(meta, '9311192573830', [{ key: 'j', metaKey: true }]), [false]);
 });
 
 test('未启用时完全不拦截，卸载后不再监听', () => {
