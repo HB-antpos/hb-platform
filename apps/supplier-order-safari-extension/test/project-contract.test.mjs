@@ -15,7 +15,7 @@ test('iOS Safari 项目版本、bundle ID 与部署目标保持一致', () => {
 
   assert.equal(pkg.version, sharedPkg.version);
   assert.equal(project.match(new RegExp(`MARKETING_VERSION = ${pkg.version.replaceAll('.', '\\.')};`, 'g'))?.length, 4);
-  assert.equal(project.match(/CURRENT_PROJECT_VERSION = 7;/g)?.length, 4);
+  assert.equal(project.match(/CURRENT_PROJECT_VERSION = 8;/g)?.length, 4);
   assert.ok(!project.includes('MACOSX_DEPLOYMENT_TARGET'));
   assert.ok(!project.includes('SDKROOT = macosx'));
   assert.ok(!project.includes('IPHONEOS_DEPLOYMENT_TARGET = 15.0'));
@@ -135,8 +135,8 @@ test('TestFlight 发布配置包含宿主元数据、公开入口、更新说明
     bundleId: 'com.hotbargain.supplierorder.safari',
     extensionBundleId: 'com.hotbargain.supplierorder.safari.Extension',
     sku: 'HB-SUPPLIER-ORDER-IOS-2026',
-    version: '1.7.0',
-    buildNumber: 7,
+    version: '1.7.1',
+    buildNumber: 8,
     primaryLanguage: 'en-AU',
     category: 'BUSINESS',
     territories: ['AUS'],
