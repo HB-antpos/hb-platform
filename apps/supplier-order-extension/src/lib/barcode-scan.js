@@ -19,6 +19,11 @@ const SCAN_MAX_STALLS = 2;
 const SCAN_IDLE_RESET_MS = 1000;
 const SCAN_CODE_PATTERN = /^[0-9A-Za-z._-]+$/;
 const TERMINATOR_KEYS = new Set(['Enter', 'Tab']);
+// 扫码枪设成「回车换行」时，键盘模式下换行会被模拟成第二个回车或 Ctrl+J。
+// 识别出条码后这么短时间内跟来的收尾键属于同一次扫码，一并拦下，
+// 否则第二个回车会触发网站提交表单，Ctrl+J 会让 Windows 上的 Chrome / Edge 打开「下载」页。
+const SCAN_TRAILING_KEY_WINDOW_MS = 150;
+const SCAN_MAX_TRAILING_KEYS = 2;
 
 export const SCAN_REPEAT_WINDOW_MS = 1500;
 
@@ -131,21 +136,47 @@ export function submitSupplierSearchForm(doc, search, itemNumber) {
 
 export function attachBarcodeScanner(target, { onScan, isEnabled = () => true, detectorOptions } = {}) {
   const detector = createScanDetector(detectorOptions);
+  // 上一次识别出条码（或拦下尾随收尾键）的时间，以及已拦下的尾随键个数。
+  let trailingFrom = null;
+  let trailingCount = 0;
+  const swallow = (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
   const handler = (event) => {
     if (!isEnabled()) {
       detector.reset();
+      trailingFrom = null;
       return;
+    }
+    if (trailingFrom !== null) {
+      const withinWindow = event.timeStamp - trailingFrom <= SCAN_TRAILING_KEY_WINDOW_MS;
+      if (withinWindow && trailingCount < SCAN_MAX_TRAILING_KEYS && isTrailingTerminator(event)) {
+        swallow(event);
+        trailingFrom = event.timeStamp;
+        trailingCount += 1;
+        return;
+      }
+      trailingFrom = null;
     }
     const code = detector.handle(event);
     if (!code) return;
     // 只拦截收尾键：拦下后供应商页面不会把回车当成提交表单。
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    swallow(event);
+    trailingFrom = event.timeStamp;
+    trailingCount = 0;
     removeScannedText(event.composedPath?.()[0] ?? event.target, code);
     onScan(code);
   };
   target.addEventListener('keydown', handler, true);
   return () => target.removeEventListener('keydown', handler, true);
+}
+
+// 「回车换行」里换行的几种键盘模拟：再一个回车 / Tab，或 Ctrl+J（ASCII 换行符 0x0A 的控制键写法）。
+function isTrailingTerminator(event) {
+  if (event.metaKey || event.altKey) return false;
+  if (TERMINATOR_KEYS.has(event.key)) return !event.ctrlKey;
+  return !!event.ctrlKey && typeof event.key === 'string' && event.key.toLowerCase() === 'j';
 }
 
 // 同一个码短时间内连扫只处理一次，防止手抖或扫码枪连发。

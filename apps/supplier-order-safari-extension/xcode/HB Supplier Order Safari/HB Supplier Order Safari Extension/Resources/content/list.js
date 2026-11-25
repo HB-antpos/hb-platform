@@ -3252,20 +3252,43 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   }
   function attachBarcodeScanner(target, { onScan, isEnabled = () => true, detectorOptions } = {}) {
     const detector = createScanDetector(detectorOptions);
+    let trailingFrom = null;
+    let trailingCount = 0;
+    const swallow = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
     const handler = (event) => {
       if (!isEnabled()) {
         detector.reset();
+        trailingFrom = null;
         return;
+      }
+      if (trailingFrom !== null) {
+        const withinWindow = event.timeStamp - trailingFrom <= SCAN_TRAILING_KEY_WINDOW_MS;
+        if (withinWindow && trailingCount < SCAN_MAX_TRAILING_KEYS && isTrailingTerminator(event)) {
+          swallow(event);
+          trailingFrom = event.timeStamp;
+          trailingCount += 1;
+          return;
+        }
+        trailingFrom = null;
       }
       const code = detector.handle(event);
       if (!code) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      swallow(event);
+      trailingFrom = event.timeStamp;
+      trailingCount = 0;
       removeScannedText(event.composedPath?.()[0] ?? event.target, code);
       onScan(code);
     };
     target.addEventListener("keydown", handler, true);
     return () => target.removeEventListener("keydown", handler, true);
+  }
+  function isTrailingTerminator(event) {
+    if (event.metaKey || event.altKey) return false;
+    if (TERMINATOR_KEYS.has(event.key)) return !event.ctrlKey;
+    return !!event.ctrlKey && typeof event.key === "string" && event.key.toLowerCase() === "j";
   }
   function createRepeatGuard(windowMs = SCAN_REPEAT_WINDOW_MS) {
     let lastCode = null;
@@ -3298,7 +3321,7 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   function normalizeScanItemNumber(value) {
     return String(value ?? "").trim().toUpperCase();
   }
-  var SCAN_MAX_KEY_GAP_MS, SCAN_MIN_LENGTH, SCAN_MAX_LENGTH, SCAN_TERMINATOR_GAP_MS, SCAN_STALL_GAP_MS, SCAN_MIN_BURST_LENGTH, SCAN_MAX_STALLS, SCAN_IDLE_RESET_MS, SCAN_CODE_PATTERN, TERMINATOR_KEYS, SCAN_REPEAT_WINDOW_MS;
+  var SCAN_MAX_KEY_GAP_MS, SCAN_MIN_LENGTH, SCAN_MAX_LENGTH, SCAN_TERMINATOR_GAP_MS, SCAN_STALL_GAP_MS, SCAN_MIN_BURST_LENGTH, SCAN_MAX_STALLS, SCAN_IDLE_RESET_MS, SCAN_CODE_PATTERN, TERMINATOR_KEYS, SCAN_TRAILING_KEY_WINDOW_MS, SCAN_MAX_TRAILING_KEYS, SCAN_REPEAT_WINDOW_MS;
   var init_barcode_scan = __esm({
     "src/lib/barcode-scan.js"() {
       SCAN_MAX_KEY_GAP_MS = 80;
@@ -3311,6 +3334,8 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       SCAN_IDLE_RESET_MS = 1e3;
       SCAN_CODE_PATTERN = /^[0-9A-Za-z._-]+$/;
       TERMINATOR_KEYS = /* @__PURE__ */ new Set(["Enter", "Tab"]);
+      SCAN_TRAILING_KEY_WINDOW_MS = 150;
+      SCAN_MAX_TRAILING_KEYS = 2;
       SCAN_REPEAT_WINDOW_MS = 1500;
     }
   });

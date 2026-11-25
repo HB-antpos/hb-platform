@@ -174,6 +174,61 @@ test('识别成功时只拦截收尾键，并在捕获阶段监听', () => {
   assert.deepEqual(calls, { prevented: 1, stopped: 1 });
 });
 
+// 扫完条码后接着按 tail 里的键，返回每个尾随键是否被拦下。
+function fireScanWithTail(target, text, tail, { tailGap = 10 } = {}) {
+  let at = 1000;
+  const fire = (event, gap) => {
+    let prevented = false;
+    let stopped = false;
+    target.fire({
+      ...event,
+      timeStamp: (at += gap),
+      target: { tagName: 'DIV' },
+      preventDefault: () => { prevented = true; },
+      stopImmediatePropagation: () => { stopped = true; },
+    });
+    assert.equal(prevented, stopped);
+    return prevented;
+  };
+  for (const key of text) fire({ key }, 10);
+  assert.equal(fire({ key: 'Enter' }, 10), true);
+  return tail.map((event) => fire(event, tailGap));
+}
+
+test('「回车换行」多出来的第二个回车或 Ctrl+J 一并拦下，不漏给网页', () => {
+  for (const tail of [[{ key: 'Enter' }], [{ key: 'j', ctrlKey: true }], [{ key: 'Tab' }], [{ key: 'Enter' }, { key: 'Enter' }]]) {
+    const target = fakeTarget();
+    const scans = [];
+    attachBarcodeScanner(target, { onScan: (code) => scans.push(code) });
+    assert.deepEqual(fireScanWithTail(target, '9311192573830', tail), tail.map(() => true));
+    assert.deepEqual(scans, ['9311192573830']);
+  }
+});
+
+test('尾随收尾键只拦紧跟着的：过了时间窗口、超过个数或换成别的键都放行', () => {
+  const late = fakeTarget();
+  attachBarcodeScanner(late, { onScan: () => {} });
+  assert.deepEqual(fireScanWithTail(late, '9311192573830', [{ key: 'Enter' }], { tailGap: 400 }), [false]);
+
+  const many = fakeTarget();
+  attachBarcodeScanner(many, { onScan: () => {} });
+  assert.deepEqual(
+    fireScanWithTail(many, '9311192573830', [{ key: 'Enter' }, { key: 'Enter' }, { key: 'Enter' }]),
+    [true, true, false],
+  );
+
+  // 扫完紧接着的普通字符、Cmd+J 都不是换行，照常交给页面。
+  const other = fakeTarget();
+  attachBarcodeScanner(other, { onScan: () => {} });
+  assert.deepEqual(
+    fireScanWithTail(other, '9311192573830', [{ key: 'a' }, { key: 'Enter' }]),
+    [false, false],
+  );
+  const meta = fakeTarget();
+  attachBarcodeScanner(meta, { onScan: () => {} });
+  assert.deepEqual(fireScanWithTail(meta, '9311192573830', [{ key: 'j', metaKey: true }]), [false]);
+});
+
 test('未启用时完全不拦截，卸载后不再监听', () => {
   const target = fakeTarget();
   const scans = [];
