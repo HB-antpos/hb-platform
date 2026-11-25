@@ -917,6 +917,7 @@ public sealed class DeviceActivationCodeSqlServerIntegrationTests(
     [InlineData(DeviceSystems.IpadOs)]
     [InlineData(DeviceSystems.Android)]
     [InlineData(DeviceSystems.Ios)]
+    [InlineData(DeviceSystems.AndroidTablet)]
     public async Task PreviewAndInitialRedeemSupportEveryApprovedPlatform(string deviceSystem)
     {
         await fixture.ResetAsync();

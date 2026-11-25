@@ -8,7 +8,7 @@ import type {
 } from './legacyEmployeeLog'
 
 export type OperationAuditOutcome = 'Succeeded' | 'Denied' | 'Failed' | 'Skipped'
-export type OperationAuditDeviceSystem = 'Windows' | 'iPadOS' | 'Unknown'
+export type OperationAuditDeviceSystem = 'Windows' | 'iPadOS' | 'AndroidTablet' | 'Unknown'
 export type OperationAuditSortField =
   | 'occurredAtUtc'
   | 'storeCode'

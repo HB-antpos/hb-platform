@@ -24,6 +24,7 @@ import { serverConnectionPanelCopy } from "./server-connection-copy";
 import { ServerConnectionPanel } from "./server-connection-panel";
 
 import {
+  HBPOS_DEVICE_SYSTEM,
   HbposApiError,
   type DeviceActivationPreviewResponse,
   type DeviceRegistrationStore,
@@ -222,7 +223,8 @@ export function DeviceRegistrationScreen({
       const storeCode = response.storeCode?.trim() ?? "";
       const storeName = response.storeName?.trim() ?? "";
       const expiresAtUtc = response.expiresAtUtc?.trim() ?? "";
-      const platformMatches = response.deviceSystem === "iPadOS";
+      // 激活码绑定平台：iPad 只认 iPadOS 的码，安卓平板只认 AndroidTablet 的码。
+      const platformMatches = response.deviceSystem === HBPOS_DEVICE_SYSTEM;
       if (
         !response.isAllowed ||
         !storeCode ||

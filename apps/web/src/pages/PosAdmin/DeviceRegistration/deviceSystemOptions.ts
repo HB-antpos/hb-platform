@@ -1,8 +1,11 @@
-export const REGISTERED_DEVICE_SYSTEM_OPTIONS = ['Windows', 'iPadOS', 'Other'] as const
+/** 安卓平板上运行的大屏收银 App；业务上等同 iPadOS，不是手持端。 */
+export const ANDROID_TABLET_DEVICE_SYSTEM = 'AndroidTablet'
+
+export const REGISTERED_DEVICE_SYSTEM_OPTIONS = ['Windows', 'iPadOS', 'AndroidTablet', 'Other'] as const
 
 export const APP_DEVICE_SYSTEM_OPTIONS = ['Android', 'iOS', 'iPadOS', 'Windows', 'Mac'] as const
 
-export const EDITABLE_DEVICE_SYSTEM_OPTIONS = ['Android', 'iOS', 'iPadOS', 'Windows', 'Mac'] as const
+export const EDITABLE_DEVICE_SYSTEM_OPTIONS = ['Android', 'iOS', 'iPadOS', 'AndroidTablet', 'Windows', 'Mac'] as const
 
 const LEGACY_IOS_CANONICALIZATION_OPTIONS = ['iOS', 'iPadOS'] as const
 
@@ -14,6 +17,7 @@ export function supportsTransactionGate(
   return (
     deviceType?.trim().toLowerCase() === 'pos' &&
     (normalizedSystem === 'ipados' ||
+      normalizedSystem === 'androidtablet' ||
       normalizedSystem === 'ios' ||
       normalizedSystem === 'android')
   )
@@ -50,4 +54,15 @@ export function getRegisteredDeviceSystemEditOptions(
   }
 
   return EDITABLE_DEVICE_SYSTEM_OPTIONS
+}
+
+/**
+ * 设备系统展示名：AndroidTablet 显示「安卓平板 / Android tablet」，其余值本身就是展示名，原样返回。
+ */
+export function formatDeviceSystemLabel(
+  deviceSystem: string | null | undefined,
+  t: (key: string) => string,
+): string {
+  const value = deviceSystem?.trim() ?? ''
+  return value === ANDROID_TABLET_DEVICE_SYSTEM ? t('posAdmin.devices.deviceSystemAndroidTablet') : value
 }

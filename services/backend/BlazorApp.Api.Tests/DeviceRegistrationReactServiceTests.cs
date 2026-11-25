@@ -203,11 +203,13 @@ public sealed class DeviceRegistrationReactServiceTests : IDisposable
             CreateDevice(5, "hardware-unknown", "VisionOS"),
             CreateDevice(6, "hardware-windows-spaced", " Windows "),
             CreateDevice(7, "hardware-ipados-spaced", " iPadOS "),
+            CreateDevice(8, "hardware-android-tablet", "AndroidTablet"),
         }).ExecuteCommandAsync();
         var service = CreateService();
 
         var windows = await service.GetGridDataAsync(CreateSystemFilterRequest("Windows"));
         var ipados = await service.GetGridDataAsync(CreateSystemFilterRequest("iPadOS"));
+        var androidTablet = await service.GetGridDataAsync(CreateSystemFilterRequest("AndroidTablet"));
         var other = await service.GetGridDataAsync(CreateSystemFilterRequest("Other"));
 
         Assert.True(windows.Success);
@@ -216,6 +218,8 @@ public sealed class DeviceRegistrationReactServiceTests : IDisposable
         Assert.True(ipados.Success);
         Assert.Equal(2, ipados.Total);
         Assert.All(ipados.Items!, item => Assert.Equal("iPadOS", item.设备系统));
+        Assert.True(androidTablet.Success);
+        Assert.Equal("AndroidTablet", Assert.Single(androidTablet.Items!).设备系统);
         Assert.True(other.Success);
         Assert.Equal(2, other.Total);
         Assert.Equal(

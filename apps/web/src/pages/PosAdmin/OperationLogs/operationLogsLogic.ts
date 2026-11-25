@@ -50,7 +50,7 @@ export const OPERATION_AUDIT_SORT_FIELDS = [
   'outcome',
 ] as const satisfies readonly OperationAuditSortField[]
 
-export const OPERATION_AUDIT_DEVICE_SYSTEM_OPTIONS = ['Windows', 'iPadOS', 'Unknown'] as const
+export const OPERATION_AUDIT_DEVICE_SYSTEM_OPTIONS = ['Windows', 'iPadOS', 'AndroidTablet', 'Unknown'] as const
 
 export const DEFAULT_OPERATION_AUDIT_SORT = {
   sortBy: 'occurredAtUtc',
@@ -271,7 +271,8 @@ export function buildSystemLogLink(_input: {
   const occurredAt = new Date(_input.occurredAtUtc)
   const projectCode = _input.deviceSystem === 'Windows'
     ? 'hbpos_win'
-    : _input.deviceSystem === 'iPadOS'
+    // 安卓平板与 iPad 是同一个大屏收银 App，系统日志同样写在 hbpos_ipad 项目下。
+    : _input.deviceSystem === 'iPadOS' || _input.deviceSystem === 'AndroidTablet'
       ? 'hbpos_ipad'
       : undefined
   const traceId = _input.traceId?.trim()

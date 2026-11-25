@@ -2,6 +2,7 @@ import {
   APP_DEVICE_SYSTEM_OPTIONS,
   canEditRegisteredDeviceSystem,
   EDITABLE_DEVICE_SYSTEM_OPTIONS,
+  formatDeviceSystemLabel,
   getRegisteredDeviceSystemEditOptions,
   isEnabledLegacyIosPos,
   REGISTERED_DEVICE_SYSTEM_OPTIONS,
@@ -18,7 +19,7 @@ function assertDeepEqual(actual: unknown, expected: unknown, label: string) {
 
 assertDeepEqual(
   REGISTERED_DEVICE_SYSTEM_OPTIONS,
-  ['Windows', 'iPadOS', 'Other'],
+  ['Windows', 'iPadOS', 'AndroidTablet', 'Other'],
   'Registered device filter should expose the platform categories',
 )
 assertDeepEqual(
@@ -28,8 +29,8 @@ assertDeepEqual(
 )
 assertDeepEqual(
   EDITABLE_DEVICE_SYSTEM_OPTIONS,
-  ['Android', 'iOS', 'iPadOS', 'Windows', 'Mac'],
-  'Existing device edit workflow should allow iPadOS',
+  ['Android', 'iOS', 'iPadOS', 'AndroidTablet', 'Windows', 'Mac'],
+  'Existing device edit workflow should allow iPadOS and AndroidTablet',
 )
 assertDeepEqual(
   canEditRegisteredDeviceSystem(-1, 'Windows', 'POS'),
@@ -84,10 +85,11 @@ assertDeepEqual(
 assertDeepEqual(
   [
     supportsTransactionGate('iPadOS', 'POS'),
+    supportsTransactionGate('AndroidTablet', 'POS'),
     supportsTransactionGate('iOS', 'POS'),
     supportsTransactionGate('Android', 'POS'),
   ],
-  [true, true, true],
+  [true, true, true, true],
   'iPad POS and iOS or Android handheld POS should support the transaction gate',
 )
 assertDeepEqual(
@@ -98,6 +100,19 @@ assertDeepEqual(
   ],
   [false, false, false],
   'Windows POS and non-POS registrations should not expose the transaction gate',
+)
+
+const fakeT = (key: string) => `t:${key}`
+assertDeepEqual(
+  [
+    formatDeviceSystemLabel('AndroidTablet', fakeT),
+    formatDeviceSystemLabel(' AndroidTablet ', fakeT),
+    formatDeviceSystemLabel('iPadOS', fakeT),
+    formatDeviceSystemLabel('Android', fakeT),
+    formatDeviceSystemLabel(null, fakeT),
+  ],
+  ['t:posAdmin.devices.deviceSystemAndroidTablet', 't:posAdmin.devices.deviceSystemAndroidTablet', 'iPadOS', 'Android', ''],
+  'AndroidTablet should use the translated label while other systems keep their raw names',
 )
 
 console.log('deviceSystemOptions.test: ok')

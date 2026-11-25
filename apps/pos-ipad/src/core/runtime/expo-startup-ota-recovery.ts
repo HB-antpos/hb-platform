@@ -2,12 +2,16 @@ import Constants from "expo-constants";
 
 import { ExpoOtaUpdatePort } from "../../features/app-updates/expo-ota-update-port";
 import { HbposPosIpadOtaUpdateApi } from "../../features/app-updates/hbpos-pos-ipad-ota-update-api";
-import { OtaUpdateCoordinator } from "../../features/app-updates/ota-update-coordinator";
+import {
+  OtaUpdateCoordinator,
+  shouldCheckOtaPolicy,
+} from "../../features/app-updates/ota-update-coordinator";
 import {
   createStartupOtaRecoveryPolicyStore,
   StartupOtaRecovery,
 } from "../../features/app-updates/startup-ota-recovery";
 import { createAxiosHbposTransport } from "../api/axios-transport";
+import { HBPOS_DEVICE_SYSTEM } from "../api/hbpos-api";
 import { ExpoSecureStoreAdapter } from "../security/expo-secure-store";
 import {
   DeviceCredentialStore,
@@ -79,8 +83,12 @@ export async function loadExpoStartupOtaRecovery(
     Updates.runtimeVersion,
     appVersion,
   );
-  // 与完整 runtime 的 automaticChecksConfigured 完全一致。
-  const enabled = extra?.hbpos?.automaticOtaChecks === true;
+  // 与完整 runtime 的判定完全一致（含安卓平板不查 iPad OTA 策略）。
+  const enabled = shouldCheckOtaPolicy({
+    automaticChecksConfigured: extra?.hbpos?.automaticOtaChecks === true,
+    updatesEnabled: Updates.isEnabled,
+    deviceSystem: HBPOS_DEVICE_SYSTEM,
+  });
   const coordinator = new OtaUpdateCoordinator({
     automaticChecksEnabled: enabled,
     metadata: {

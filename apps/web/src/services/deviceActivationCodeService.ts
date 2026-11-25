@@ -45,7 +45,11 @@ function asNumber(value: unknown, fallback: number) {
 
 function normalizeSystem(value: unknown): DeviceActivationSystem | null {
   const system = asString(value)
-  return system === 'Windows' || system === 'iPadOS' || system === 'Android' || system === 'iOS'
+  return system === 'Windows' ||
+    system === 'iPadOS' ||
+    system === 'AndroidTablet' ||
+    system === 'Android' ||
+    system === 'iOS'
     ? system
     : null
 }

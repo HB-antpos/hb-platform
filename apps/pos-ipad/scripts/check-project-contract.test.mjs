@@ -17,6 +17,10 @@ const appProvidersSource = readFileSync(
   "utf8",
 );
 const appEntrySource = readFileSync(new URL("index.js", appRoot), "utf8");
+function introspectablePlatforms(source) {
+  const match = /platforms:\s*\[([^\]]*)\]/u.exec(source);
+  return match ? [...match[1].matchAll(/"([^"]+)"/gu)].map((item) => item[1]) : [];
+}
 const routeFiles = readdirSync(new URL("app/", appRoot), {
   recursive: true,
   withFileTypes: true,
@@ -41,7 +45,10 @@ assert.equal(
   "自定义入口必须先捕获无依赖性能原点，再注册计时器、客显与 Sentry，最后交给 Expo Router。",
 );
 assert.equal(packageJson.private, true);
-assert.equal(packageJson.scripts.android, undefined);
+// 安卓平板版与 iPad 共用工程：必须有安卓启动与 prebuild 入口。
+assert.match(packageJson.scripts.android ?? "", /expo run:android/);
+assert.match(packageJson.scripts["prebuild:android"] ?? "", /expo prebuild --platform android/);
+assert.deepEqual(introspectablePlatforms(appConfigSource), ["ios", "android"]);
 assert.match(
   packageJson.scripts["test:sync-history"],
   /src\/features\/sync-history\/\*\.rntl\.test\.tsx/,
@@ -77,6 +84,13 @@ assert.equal(
 assert.equal(easConfig.build.development.developmentClient, true);
 assert.equal(easConfig.build.preview.distribution, "internal");
 assert.equal(easConfig.build.production.distribution, "store");
+for (const profile of ["preview", "production", "production-zeller"]) {
+  assert.equal(
+    easConfig.build[profile].android?.buildType,
+    "apk",
+    `${profile} 安卓构建必须产出签名 APK（受控安装，不上 Google Play）。`,
+  );
+}
 assert.equal(
   easConfig.cli.appVersionSource,
   "remote",

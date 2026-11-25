@@ -14,7 +14,7 @@ public sealed record PosSettingEffective(bool? Value, string Source);
 /// </summary>
 public static class PosSettingMerger
 {
-    /// <summary>设备系统（Windows / iPadOS / iOS / Android）→ 端类型；POS 设备表只有设备系统，没有回执过的设备靠它推导。</summary>
+    /// <summary>设备系统（Windows / iPadOS / AndroidTablet / iOS / Android）→ 端类型；POS 设备表只有设备系统，没有回执过的设备靠它推导。</summary>
     public static string ClientKindFromDeviceSystem(string? deviceSystem)
     {
         var value = deviceSystem?.Trim();
@@ -23,8 +23,10 @@ public static class PosSettingMerger
             return PosSettingClientKinds.Wpf;
         }
 
+        // AndroidTablet 是同一个大屏收银 App 的安卓构建，按 iPad 端下发设置，不能落到手持端。
         if (string.Equals(value, "iPadOS", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(value, "iOS", StringComparison.OrdinalIgnoreCase))
+            || string.Equals(value, "iOS", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "AndroidTablet", StringComparison.OrdinalIgnoreCase))
         {
             return PosSettingClientKinds.Ipad;
         }

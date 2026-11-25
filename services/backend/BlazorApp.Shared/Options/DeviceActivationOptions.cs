@@ -14,13 +14,15 @@ public sealed class DeviceActivationOptions
             "iPadOS" => LegacyRegistrationEnabled.IpadOS,
             "Android" => LegacyRegistrationEnabled.Android,
             "iOS" => LegacyRegistrationEnabled.IOS,
+            "AndroidTablet" => LegacyRegistrationEnabled.AndroidTablet,
             _ => true,
         };
 
     public static bool TryNormalizeDeviceSystem(string? deviceSystem, out string normalized)
     {
         var candidate = deviceSystem?.Trim();
-        foreach (var supported in new[] { "Windows", "iPadOS", "Android", "iOS" })
+        // AndroidTablet = 安卓平板上的大屏收银 App，与手持 Android 是两个独立开关。
+        foreach (var supported in new[] { "Windows", "iPadOS", "Android", "iOS", "AndroidTablet" })
         {
             if (string.Equals(candidate, supported, StringComparison.OrdinalIgnoreCase))
             {
@@ -40,4 +42,6 @@ public sealed class LegacyRegistrationOptions
     public bool IpadOS { get; set; } = true;
     public bool Android { get; set; } = true;
     public bool IOS { get; set; } = true;
+    // 安卓平板是新平台、没有存量旧客户端：默认只允许激活码注册（11-25 用户拍板），需要时再用配置显式打开。
+    public bool AndroidTablet { get; set; } = false;
 }

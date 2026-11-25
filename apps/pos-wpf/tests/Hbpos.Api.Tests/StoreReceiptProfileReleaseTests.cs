@@ -257,6 +257,7 @@ public sealed class StoreReceiptProfileReleaseTests
     [InlineData(" Windows ", "wpf")]
     [InlineData("iPadOS", "ipad")]
     [InlineData("iOS", "ipad")]
+    [InlineData("AndroidTablet", "ipad")]
     [InlineData("Android", "handheld")]
     [InlineData("android", "handheld")]
     [InlineData("Linux", "other")]

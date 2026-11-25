@@ -332,6 +332,35 @@ public sealed class DeviceActivationCodeManagementTests
     }
 
     [Fact]
+    public async Task CreateAndList_SupportAndroidTabletAsSeparatePosPlatform()
+    {
+        using var fixture = new ManagementFixture();
+        fixture.SeedStore("S001", "Store 1");
+
+        var tablet = await fixture.Service.CreateAsync(
+            new DeviceActivationCodeCreateRequestDto("S001", "AndroidTablet", 1440, "Android tablet counter"),
+            "ADMIN");
+        var ipad = await fixture.Service.CreateAsync(
+            new DeviceActivationCodeCreateRequestDto("S001", "iPadOS", 1440, "iPad counter"),
+            "ADMIN");
+        // 设备系统精确大小写，变体不能创建。
+        var lowerCase = await fixture.Service.CreateAsync(
+            new DeviceActivationCodeCreateRequestDto("S001", "androidtablet", 1440, "Bad case"),
+            "ADMIN");
+
+        Assert.True(tablet.Success, tablet.Message);
+        Assert.Equal("AndroidTablet", tablet.Data!.Grant.DeviceSystem);
+        Assert.True(ipad.Success, ipad.Message);
+        Assert.False(lowerCase.Success);
+
+        var listed = await fixture.Service.ListAsync(1, 30, "S001", "AndroidTablet", "Available");
+        var page = Assert.IsType<PagedResult<DeviceActivationCodeGrantDto>>(listed.Data);
+        var item = Assert.Single(Assert.IsType<List<DeviceActivationCodeGrantDto>>(page.Items));
+        Assert.Equal(tablet.Data.Grant.GrantId, item.GrantId);
+        Assert.Equal("AndroidTablet", item.DeviceSystem);
+    }
+
+    [Fact]
     public async Task ListAndManageableStores_EnforceServerSideStoreScope()
     {
         using var fixture = new ManagementFixture();

@@ -37,7 +37,7 @@ import AppUsagePanel from './AppUsagePanel'
 import DeviceActivationCodePanel from './DeviceActivationCodePanel'
 import EmergencyLoginModal from './EmergencyLoginModal'
 import PosApiEntryPanel from './PosApiEntryPanel'
-import { supportsTransactionGate } from './deviceSystemOptions'
+import { formatDeviceSystemLabel, supportsTransactionGate } from './deviceSystemOptions'
 import {
   DeviceStatusPill,
   DeviceTypeTag,
@@ -591,7 +591,7 @@ export default function DeviceRegistrationPage() {
           <div className="dev-mgmt-two">
             <span className="dev-mgmt-inline">
               <DeviceTypeTag value={record.deviceType} />
-              <span className="dev-mgmt-sub">{record.deviceSystem || EMPTY_VALUE}</span>
+              <span className="dev-mgmt-sub">{formatDeviceSystemLabel(record.deviceSystem, t) || EMPTY_VALUE}</span>
             </span>
             {/* 客户端版本随心跳上报；没上报的设备不占第二行，避免全表出现一排空占位。 */}
             {record.appVersion ? (

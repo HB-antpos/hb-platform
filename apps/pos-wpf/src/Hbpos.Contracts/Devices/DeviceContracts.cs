@@ -36,6 +36,11 @@ public static class DeviceSystems
 
     public const string Android = "Android";
 
+    /// <summary>
+    /// 安卓平板上运行的大屏收银 App（与 iPadOS 同一个 App 的安卓构建），业务类别等同 iPadOS，不是手持端。
+    /// </summary>
+    public const string AndroidTablet = "AndroidTablet";
+
     public static bool TryNormalize(string? value, out string normalized)
     {
         var candidate = (value ?? string.Empty).Trim();
@@ -61,6 +66,13 @@ public static class DeviceSystems
         if (string.Equals(value, Android, StringComparison.Ordinal))
         {
             normalized = Android;
+            return true;
+        }
+
+        // 安卓平板大屏收银同样属于跨端安全合同，只接受精确大小写，避免与手持 Android 混淆。
+        if (string.Equals(value, AndroidTablet, StringComparison.Ordinal))
+        {
+            normalized = AndroidTablet;
             return true;
         }
 

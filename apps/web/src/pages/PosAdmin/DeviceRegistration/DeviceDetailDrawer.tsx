@@ -32,6 +32,7 @@ import {
 } from './deviceManagementLogic'
 import {
   canEditRegisteredDeviceSystem,
+  formatDeviceSystemLabel,
   getRegisteredDeviceSystemEditOptions,
   isEnabledLegacyIosPos,
   supportsTransactionGate,
@@ -215,7 +216,7 @@ export default function DeviceDetailDrawer({
               <dt>{t('posAdmin.devices.deviceType')}</dt>
               <dd><DeviceTypeTag value={view.deviceType} /></dd>
               <dt>{t('posAdmin.devices.deviceSystem')}</dt>
-              <dd>{view.deviceSystem || EMPTY_VALUE}</dd>
+              <dd>{formatDeviceSystemLabel(view.deviceSystem, t) || EMPTY_VALUE}</dd>
               <dt>{t('posAdmin.devices.allowTransactions')}</dt>
               <dd>
                 {supportsTransactionGate(view.deviceSystem, view.deviceType)
@@ -336,7 +337,7 @@ export default function DeviceDetailDrawer({
                         options={(detail
                           ? getRegisteredDeviceSystemEditOptions(detail.status, detail.deviceSystem, detail.deviceType)
                           : []
-                        ).map((deviceSystem) => ({ label: deviceSystem, value: deviceSystem }))}
+                        ).map((deviceSystem) => ({ label: formatDeviceSystemLabel(deviceSystem, t), value: deviceSystem }))}
                       />
                     </Form.Item>
                   </div>

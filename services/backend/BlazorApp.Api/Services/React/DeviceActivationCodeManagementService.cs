@@ -13,7 +13,8 @@ public sealed class DeviceActivationCodeManagementService
 {
     private static readonly HashSet<int> AllowedValidForMinutes = [30, 120, 1440];
     private static readonly HashSet<string> AllowedDeviceSystems =
-        new(StringComparer.Ordinal) { "Windows", "iPadOS", "Android", "iOS" };
+        // AndroidTablet：安卓平板大屏收银，开通码与 iPadOS 分开签发，消费时由 POS API 精确匹配平台。
+        new(StringComparer.Ordinal) { "Windows", "iPadOS", "Android", "iOS", "AndroidTablet" };
     private static readonly Expression<Func<DeviceActivationCodeGrant, DeviceActivationCodeGrant>>
         ManagementProjection = grant => new DeviceActivationCodeGrant
         {

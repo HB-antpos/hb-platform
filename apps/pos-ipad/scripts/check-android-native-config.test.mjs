@@ -1,0 +1,413 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const expoCli = createRequire(import.meta.url).resolve("expo/bin/cli");
+const execFileAsync = promisify(execFile);
+
+async function read(relativePath) {
+  return readFile(path.join(appRoot, relativePath), "utf8");
+}
+
+async function readJson(relativePath) {
+  return JSON.parse(await read(relativePath));
+}
+
+function createCleanExpoEnvironment() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => !/^(?:EAS_|EXPO_PUBLIC_HBPOS_)/u.test(name),
+    ),
+  );
+}
+
+let androidModResultsPromise;
+
+async function resolveAndroidModResults() {
+  // 在内存中执行 config plugin，避免依赖或写入被忽略的原生工程目录。
+  androidModResultsPromise ??= execFileAsync(
+    expoCli,
+    ["config", "--type", "introspect", "--json"],
+    {
+      cwd: appRoot,
+      env: createCleanExpoEnvironment(),
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  ).then(({ stdout }) => JSON.parse(stdout)?._internal?.modResults?.android);
+
+  const modResults = await androidModResultsPromise;
+  assert.ok(modResults, "Expo introspection 未返回 Android modResults");
+  return modResults;
+}
+
+async function resolveAndroidManifest() {
+  const manifest = (await resolveAndroidModResults())?.manifest?.manifest;
+
+  assert.ok(manifest, "Expo introspection 未返回 Android manifest");
+  return manifest;
+}
+
+async function resolveAndroidStyles() {
+  const styles = (await resolveAndroidModResults())?.styles;
+
+  assert.ok(styles, "Expo introspection 未返回 Android styles");
+  return styles;
+}
+
+test("Expo introspection 生成的 AndroidManifest 全局禁用系统与云备份", async () => {
+  const [manifest, appConfig] = await Promise.all([
+    resolveAndroidManifest(),
+    read("app.config.ts"),
+  ]);
+  const [application] = manifest.application ?? [];
+
+  assert.ok(application, "Expo introspection 未返回 application 节点");
+  assert.equal(application.$?.["android:allowBackup"], "false");
+  // expo-secure-store 只关掉它自带的备份规则改写，全局 allowBackup=false 才是真正的关闭开关。
+  assert.match(appConfig, /allowBackup:\s*false/);
+});
+
+test("Android 30 生成配置满足通知、相机与启动样式 lint 契约", async () => {
+  const [manifest, styles] = await Promise.all([
+    resolveAndroidManifest(),
+    resolveAndroidStyles(),
+  ]);
+  const permissions = manifest["uses-permission"] ?? [];
+  const cameraFeatures = (manifest["uses-feature"] ?? []).filter(
+    (entry) => entry?.$?.["android:name"] === "android.hardware.camera",
+  );
+  const splashStyle = (styles.resources?.style ?? []).find(
+    (entry) => entry?.$?.name === "Theme.App.SplashScreen",
+  );
+  const splashBehavior = (splashStyle?.item ?? []).find(
+    (entry) =>
+      entry?.$?.name === "android:windowSplashScreenBehavior",
+  );
+
+  assert.deepEqual(
+    {
+      postNotificationsPermissionCount: permissions.filter(
+        (entry) =>
+          entry?.$?.["android:name"] ===
+          "android.permission.POST_NOTIFICATIONS",
+      ).length,
+      cameraFeatureCount: cameraFeatures.length,
+      cameraRequired: cameraFeatures[0]?.$?.["android:required"],
+      splashTargetApi: splashBehavior?.$?.["tools:targetApi"],
+    },
+    {
+      postNotificationsPermissionCount: 1,
+      cameraFeatureCount: 1,
+      cameraRequired: "false",
+      splashTargetApi: "33",
+    },
+  );
+});
+
+test("printer and attendance Expo modules autolink Apple and Android without ReactPackage", async () => {
+  const [printerConfig, attendanceConfig, printerSource, attendanceSource] =
+    await Promise.all([
+      readJson("modules/hb-printer/expo-module.config.json"),
+      readJson("modules/hb-attendance-security/expo-module.config.json"),
+      read(
+        "modules/hb-printer/android/src/main/java/expo/modules/hbprinter/HbPrinterModule.kt",
+      ),
+      read(
+        "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceSecurityModule.kt",
+      ),
+    ]);
+
+  assert.deepEqual(new Set(printerConfig.platforms), new Set(["apple", "android"]));
+  assert.deepEqual(printerConfig.apple?.modules, ["HbPrinterModule"]);
+  assert.deepEqual(printerConfig.android?.modules, [
+    "expo.modules.hbprinter.HbPrinterModule",
+  ]);
+  assert.deepEqual(
+    new Set(attendanceConfig.platforms),
+    new Set(["apple", "android"]),
+  );
+  assert.deepEqual(attendanceConfig.apple?.modules, [
+    "HBAttendanceSecurityModule",
+  ]);
+  assert.deepEqual(attendanceConfig.android?.modules, [
+    "expo.modules.hbattendancesecurity.HBAttendanceSecurityModule",
+  ]);
+
+  const nativeSources = `${printerSource}\n${attendanceSource}`;
+  assert.doesNotMatch(nativeSources, /ReactPackage|ReactContextBaseJavaModule/);
+  assert.match(printerSource, /Name\("HbPrinter"\)/);
+  assert.match(attendanceSource, /Name\("HBAttendanceSecurity"\)/);
+});
+
+test("Android printer keeps BLE and paired SPP as explicit opaque transports", async () => {
+  const source = await read(
+    "modules/hb-printer/android/src/main/java/expo/modules/hbprinter/HbPrinterModule.kt",
+  );
+
+  for (const functionName of [
+    "getStatus",
+    "scan",
+    "connect",
+    "disconnect",
+    "write",
+    "printText",
+    "openCashDrawer",
+  ]) {
+    assert.match(source, new RegExp(`AsyncFunction\\(\"${functionName}\"\\)`));
+  }
+  assert.match(source, /"ble:"/);
+  assert.match(source, /"spp:"/);
+  assert.match(source, /BluetoothLeScanner|bluetoothLeScanner/);
+  assert.match(source, /startDiscovery\(\)/);
+  assert.match(source, /bondedDevices/);
+  assert.match(source, /BluetoothDevice\.BOND_BONDED/);
+  assert.match(source, /PRINTER_SPP_PAIRING_REQUIRED/);
+  // 扫描结果带经典蓝牙系统配对状态，设置页据此提示「已配对 / 未配对」；BLE 恒为 null。
+  assert.match(source, /"bonded" to bonded/);
+  assert.match(
+    source,
+    /bonded = if \(transport == TransportKind\.SPP\)[\s\S]*?BOND_BONDED[\s\S]*?else \{\s*null/,
+  );
+  assert.match(source, /createRfcommSocketToServiceRecord/);
+  assert.match(source, /BluetoothDevice\.TRANSPORT_LE/);
+  // API 30 及以下扫描前必须检查定位总开关，否则 BLE 扫描静默返回空列表。
+  assert.match(
+    source,
+    /private fun startScan[\s\S]*?requireBluetoothReady[\s\S]*?isScanLocationServiceReady\(\)[\s\S]*?PRINTER_BLUETOOTH_LOCATION_OFF[\s\S]*?scanPromise = promise/,
+  );
+  assert.match(
+    source,
+    /fun isScanLocationServiceReady\(\)[\s\S]*?VERSION_CODES\.S\) return true[\s\S]*?isLocationEnabled/,
+  );
+  assert.doesNotMatch(source, /createBond\s*\(/);
+  assert.doesNotMatch(source, /createInsecureRfcommSocket/);
+  assert.doesNotMatch(source, /ReactPackage|WritableMap|ReadableMap/);
+  assert.doesNotMatch(source, /buildProductLabel|Bitmap|Canvas|ZXing/);
+});
+
+test("Android printer drops a ready SPP session when its ACL link or the adapter goes away", async () => {
+  const source = await read(
+    "modules/hb-printer/android/src/main/java/expo/modules/hbprinter/HbPrinterModule.kt",
+  );
+
+  // SPP socket.isConnected 只看本地状态；不听 ACL 断开，打印机重启后第一张小票会写进死连接。
+  assert.match(source, /BluetoothDevice\.ACTION_ACL_DISCONNECTED/);
+  assert.match(source, /BluetoothAdapter\.ACTION_STATE_CHANGED/);
+  assert.match(
+    source,
+    /private fun startConnect[\s\S]*?ensureLinkStateReceiverRegistered\(\)[\s\S]*?connectPromise = promise/,
+  );
+  // 与移动端一致：断开先等 250ms，同设备 ACL_CONNECTED 取消，到期再核对 socket 身份。
+  assert.match(source, /BluetoothDevice\.ACTION_ACL_CONNECTED/);
+  assert.match(source, /ACL_DISCONNECT_SETTLE_MS = 250L/);
+  assert.match(
+    source,
+    /ACTION_ACL_DISCONNECTED ->[\s\S]*?scheduleSppLinkLoss\(address\)[\s\S]*?ACTION_ACL_CONNECTED ->[\s\S]*?cancelPendingSppLinkLoss\(address\)/,
+  );
+  assert.match(
+    source,
+    /private fun scheduleSppLinkLoss[\s\S]*?isReadySppConnection\(address\)[\s\S]*?scheduler\.schedule\([\s\S]*?handleSppLinkLost\(address, socket\)[\s\S]*?ACL_DISCONNECT_SETTLE_MS/,
+  );
+  assert.match(
+    source,
+    /private fun isReadySppConnection[\s\S]*?connectedTransport == TransportKind\.SPP[\s\S]*?connectedToken\?\.address == address/,
+  );
+  assert.match(
+    source,
+    /private fun handleSppLinkLost\(address: String, socket: BluetoothSocket\)[\s\S]*?pendingSppLinkLossSocket !== socket[\s\S]*?sppSocket !== socket[\s\S]*?finishPendingOperation\([\s\S]*?"unknown"[\s\S]*?clearConnectedTransport\(\)[\s\S]*?connectionState = "disconnected"/,
+  );
+  assert.match(
+    source,
+    /private fun handleBluetoothTurnedOff[\s\S]*?failConnect\([\s\S]*?clearConnectedTransport\(\)[\s\S]*?connectionState = "disconnected"/,
+  );
+  assert.match(source, /OnDestroy[\s\S]*?unregisterLinkStateReceiver\(\)/);
+  assert.match(source, /registerReceiver\(linkStateReceiver, filter, Context\.RECEIVER_NOT_EXPORTED\)/);
+});
+
+test("printer operation ids are exclusive and uncertain writes never switch or replay transports", async () => {
+  const source = await read(
+    "modules/hb-printer/android/src/main/java/expo/modules/hbprinter/HbPrinterModule.kt",
+  );
+
+  assert.match(source, /PRINTER_OPERATION_ID_REQUIRED/);
+  assert.match(source, /PRINTER_OPERATION_IN_PROGRESS/);
+  assert.match(source, /PRINTER_OPERATION_ALREADY_USED/);
+  assert.match(source, /operationTransportById/);
+  assert.match(source, /connectedTransport/);
+  assert.match(source, /state\s*=\s*"unknown"|resultPayload\([^)]*"unknown"/s);
+  assert.match(source, /无法确认|unknown/);
+  assert.doesNotMatch(source, /fallback|retryWrite|resend/i);
+});
+
+test("Android attendance wraps an export-once A256 key and emits only interoperable HBATE1 QR data", async () => {
+  const [
+    moduleSource,
+    keystoreSource,
+    tokenSource,
+    verifierSource,
+    exceptionSource,
+  ] =
+    await Promise.all([
+      read(
+        "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceSecurityModule.kt",
+      ),
+      read(
+        "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceKeystore.kt",
+      ),
+      read(
+        "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceTokenCodec.kt",
+      ),
+      read(
+        "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBEmergencyLoginVerifier.kt",
+      ),
+      read(
+        "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceSecurityException.kt",
+      ),
+    ]);
+  const source = `${moduleSource}\n${keystoreSource}\n${tokenSource}\n${verifierSource}\n${exceptionSource}`;
+
+  assert.match(keystoreSource, /AndroidKeyStore/);
+  assert.match(keystoreSource, /KeyGenParameterSpec/);
+  assert.match(keystoreSource, /KeyProperties\.PURPOSE_ENCRYPT/);
+  assert.match(keystoreSource, /KeyProperties\.PURPOSE_DECRYPT/);
+  assert.match(keystoreSource, /AES\/GCM\/NoPadding/);
+  assert.match(keystoreSource, /SecureRandom/);
+  assert.match(keystoreSource, /ATTENDANCE_KEY_SIZE\s*=\s*32/);
+  assert.match(keystoreSource, /ByteArray\(ATTENDANCE_KEY_SIZE\)/);
+  assert.match(keystoreSource, /encrypted|ciphertext/i);
+  assert.match(keystoreSource, /nonce|iv/i);
+  assert.match(keystoreSource, /SharedPreferences/);
+  assert.match(keystoreSource, /consumed/i);
+  assert.match(keystoreSource, /fill\(0\)/);
+  assert.doesNotMatch(source, /wrappingKey\.encoded|PRIVATE KEY-----/);
+
+  assert.match(moduleSource, /Function\("getSystemUptimeMilliseconds"\)/);
+  assert.match(moduleSource, /SystemClock\.elapsedRealtime\(\)/);
+  for (const functionName of [
+    "createA256Identity",
+    "hasA256Key",
+    "readRegistrationKeyMaterial",
+    "issueAttendanceQr",
+    "destroyA256Key",
+    "validateEs256P256PublicKey",
+    "verifyEs256P256Token",
+  ]) {
+    assert.match(
+      moduleSource,
+      new RegExp(`AsyncFunction\\("${functionName}"\\)`),
+    );
+  }
+  assert.doesNotMatch(
+    moduleSource,
+    /createEs256Identity|hasEs256Key|readRegistrationPublicKey|destroyEs256Key/,
+  );
+
+  assert.match(tokenSource, /HBATE1/);
+  assert.doesNotMatch(tokenSource, /HBATE2/);
+  assert.match(tokenSource, /AES\/GCM\/NoPadding/);
+  assert.match(tokenSource, /NONCE_SIZE\s*=\s*12/);
+  assert.match(tokenSource, /ByteArray\(NONCE_SIZE\)/);
+  assert.match(tokenSource, /HBATE1\.\$\{input\.kid\}|TOKEN_PREFIX.*input\.kid/s);
+  assert.match(tokenSource, /ByteOrder\.LITTLE_ENDIAN/);
+  assert.match(tokenSource, /swapAt|toDotNetGuidBytes/);
+  assert.match(tokenSource, /storeBytes\.size\.toByte\(\)/);
+  assert.match(tokenSource, /deviceBytes\.size\.toByte\(\)/);
+  assert.match(tokenSource, /MAX_TOKEN_LENGTH\s*=\s*600/);
+  assert.match(tokenSource, /tokenId/);
+
+  assert.match(verifierSource, /HBPOSE1-/);
+  assert.match(verifierSource, /HBPOSE2-/);
+  assert.match(verifierSource, /EMERGENCY_TOKEN_WRONG_STORE/);
+  assert.match(verifierSource, /EMERGENCY_TOKEN_NOT_ACTIVE/);
+  assert.match(verifierSource, /EMERGENCY_TOKEN_EXPIRED/);
+
+  for (const code of [
+    "ATTENDANCE_SECURITY_INVALID_ARGUMENT",
+    "ATTENDANCE_KEY_NOT_FOUND",
+    "ATTENDANCE_KEYCHAIN_FAILURE",
+    "ATTENDANCE_KEY_GENERATION_FAILED",
+    "ATTENDANCE_TOKEN_GENERATION_FAILED",
+    "ATTENDANCE_QR_RENDER_FAILED",
+  ]) {
+    assert.match(exceptionSource, new RegExp(`"${code}"`));
+  }
+  assert.doesNotMatch(
+    exceptionSource,
+    /ATTENDANCE_KEYSTORE_FAILURE|ATTENDANCE_REGISTRATION_EXPORT_CONSUMED/,
+  );
+});
+
+test("安卓蓝牙权限只声明前台 Android 11 / 12+ 矩阵，不含后台、广播或安装包权限", async () => {
+  const manifest = await resolveAndroidManifest();
+  const permissions = new Map(
+    (manifest["uses-permission"] ?? []).map((entry) => [
+      entry?.$?.["android:name"],
+      entry?.$ ?? {},
+    ]),
+  );
+
+  for (const name of [
+    "android.permission.BLUETOOTH",
+    "android.permission.BLUETOOTH_ADMIN",
+    "android.permission.ACCESS_FINE_LOCATION",
+  ]) {
+    assert.equal(permissions.get(name)?.["android:maxSdkVersion"], "30", name);
+  }
+  assert.equal(
+    permissions.get("android.permission.BLUETOOTH_SCAN")?.[
+      "android:usesPermissionFlags"
+    ],
+    "neverForLocation",
+  );
+  assert.ok(permissions.has("android.permission.BLUETOOTH_CONNECT"));
+  for (const name of [
+    "android.permission.BLUETOOTH_ADVERTISE",
+    "android.permission.FOREGROUND_SERVICE",
+    "android.permission.REQUEST_INSTALL_PACKAGES",
+  ]) {
+    assert.equal(permissions.has(name), false, name);
+  }
+  for (const name of [
+    "android.permission.RECORD_AUDIO",
+    "android.permission.ACCESS_BACKGROUND_LOCATION",
+  ]) {
+    assert.equal(permissions.get(name)?.["tools:node"], "remove", name);
+  }
+});
+
+test("安卓平板与手持端是两个独立 App：包名、考勤密钥别名不能沿用手持端", async () => {
+  const [appConfig, keystoreSource, tokenSource] = await Promise.all([
+    read("app.config.ts"),
+    read(
+      "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceKeystore.kt",
+    ),
+    read(
+      "modules/hb-attendance-security/android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceTokenCodec.kt",
+    ),
+  ]);
+  const manifest = await resolveAndroidManifest();
+  const [activity] = manifest.application?.[0]?.activity ?? [];
+
+  assert.match(appConfig, /package:\s*"com\.hbweb\.posipad"/);
+  assert.equal(activity?.$?.["android:screenOrientation"], "landscape");
+  assert.match(keystoreSource, /com\.hbweb\.posipad\.attendance\.a256\.wrap\./);
+  assert.doesNotMatch(`${keystoreSource}\n${tokenSource}`, /poshandheld/i);
+  // 与 iPad 端同为 Q 级纠错：收银页考勤码正中压了倒计时圆标。
+  assert.match(tokenSource, /ErrorCorrectionLevel\.Q/);
+});
+
+test("客显原生模块第一阶段只有 iOS，安卓端由 JS 按无外屏处理", async () => {
+  const [config, bridge] = await Promise.all([
+    readJson("modules/hb-external-display/expo-module.config.json"),
+    read("src/core/peripherals/customer-display/native/external-display-native-module.ts"),
+  ]);
+
+  assert.deepEqual(config.platforms, ["apple"]);
+  assert.match(bridge, /requireOptionalNativeModule/);
+});

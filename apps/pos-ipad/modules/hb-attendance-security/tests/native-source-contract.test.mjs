@@ -13,14 +13,18 @@ async function read(relativePath) {
   return readFile(path.join(moduleRoot, relativePath), "utf8");
 }
 
-test("Expo module is iOS-only and exports the narrow attendance security bridge", async () => {
+test("Expo module keeps the Apple bridge while adding the Android bridge", async () => {
   const [moduleConfig, swiftModule] = await Promise.all([
     read("expo-module.config.json"),
     read("ios/HBAttendanceSecurityModule.swift"),
   ]);
 
-  assert.match(moduleConfig, /"platforms":\s*\["apple"\]/);
+  assert.match(moduleConfig, /"platforms":\s*\["apple",\s*"android"\]/);
   assert.match(moduleConfig, /"HBAttendanceSecurityModule"/);
+  assert.match(
+    moduleConfig,
+    /"expo\.modules\.hbattendancesecurity\.HBAttendanceSecurityModule"/,
+  );
   assert.match(swiftModule, /Name\("HBAttendanceSecurity"\)/);
   for (const functionName of [
     "createA256Identity",
@@ -130,5 +134,77 @@ test("native module declares stable non-secret error codes", async () => {
   assert.doesNotMatch(
     source,
     /keyMaterial|publicKeyPem|rawValue:\s*token/,
+  );
+});
+
+test("Android keeps the same A256 bridge and wraps export-once HBATE1 key material", async () => {
+  const [moduleSource, storageSource, tokenSource, errorSource] =
+    await Promise.all([
+      read(
+        "android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceSecurityModule.kt",
+      ),
+      read(
+        "android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceKeystore.kt",
+      ),
+      read(
+        "android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceTokenCodec.kt",
+      ),
+      read(
+        "android/src/main/java/expo/modules/hbattendancesecurity/HBAttendanceSecurityException.kt",
+      ),
+    ]);
+
+  for (const functionName of [
+    "createA256Identity",
+    "hasA256Key",
+    "readRegistrationKeyMaterial",
+    "issueAttendanceQr",
+    "destroyA256Key",
+    "validateEs256P256PublicKey",
+    "verifyEs256P256Token",
+  ]) {
+    assert.match(
+      moduleSource,
+      new RegExp(`AsyncFunction\\("${functionName}"\\)`),
+    );
+  }
+  assert.match(moduleSource, /Function\("getSystemUptimeMilliseconds"\)/);
+  assert.doesNotMatch(moduleSource, /createEs256Identity|HBATE2/);
+
+  assert.match(storageSource, /AndroidKeyStore/);
+  assert.match(storageSource, /AES\/GCM\/NoPadding/);
+  assert.match(storageSource, /KeyProperties\.PURPOSE_ENCRYPT/);
+  assert.match(storageSource, /KeyProperties\.PURPOSE_DECRYPT/);
+  assert.match(storageSource, /ATTENDANCE_KEY_SIZE\s*=\s*32/);
+  assert.match(storageSource, /ByteArray\(ATTENDANCE_KEY_SIZE\)/);
+  assert.match(storageSource, /SharedPreferences/);
+  assert.match(storageSource, /consumed/i);
+  assert.match(storageSource, /fill\(0\)/);
+  assert.doesNotMatch(storageSource, /wrappingKey\.encoded/);
+
+  assert.match(tokenSource, /TOKEN_PREFIX\s*=\s*"HBATE1"/);
+  assert.doesNotMatch(tokenSource, /HBATE2/);
+  assert.match(tokenSource, /AES\/GCM\/NoPadding/);
+  assert.match(tokenSource, /NONCE_SIZE\s*=\s*12/);
+  assert.match(tokenSource, /ByteArray\(NONCE_SIZE\)/);
+  assert.match(tokenSource, /ByteOrder\.LITTLE_ENDIAN/);
+  assert.match(tokenSource, /toDotNetGuidBytes/);
+  assert.match(tokenSource, /MAX_TOKEN_LENGTH\s*=\s*600/);
+  assert.match(tokenSource, /ErrorCorrectionLevel\.Q/);
+  assert.match(storageSource, /com\.hbweb\.posipad\.attendance\.a256\.wrap\./);
+
+  for (const code of [
+    "ATTENDANCE_SECURITY_INVALID_ARGUMENT",
+    "ATTENDANCE_KEY_NOT_FOUND",
+    "ATTENDANCE_KEYCHAIN_FAILURE",
+    "ATTENDANCE_KEY_GENERATION_FAILED",
+    "ATTENDANCE_TOKEN_GENERATION_FAILED",
+    "ATTENDANCE_QR_RENDER_FAILED",
+  ]) {
+    assert.match(errorSource, new RegExp(`"${code}"`));
+  }
+  assert.doesNotMatch(
+    errorSource,
+    /ATTENDANCE_KEYSTORE_FAILURE|ATTENDANCE_REGISTRATION_EXPORT_CONSUMED/,
   );
 });

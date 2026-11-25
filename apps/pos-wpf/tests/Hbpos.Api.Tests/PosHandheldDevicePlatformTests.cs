@@ -13,6 +13,7 @@ public sealed class PosHandheldDevicePlatformTests
     [Theory]
     [InlineData("iOS", "iOS")]
     [InlineData("Android", "Android")]
+    [InlineData("AndroidTablet", "AndroidTablet")]
     [InlineData(" iPadOS ", "iPadOS")]
     [InlineData("IPADOS", "iPadOS")]
     [InlineData(" windows ", "Windows")]
@@ -34,6 +35,10 @@ public sealed class PosHandheldDevicePlatformTests
     [InlineData(" android ")]
     [InlineData("android")]
     [InlineData("ANDROID")]
+    [InlineData(" AndroidTablet ")]
+    [InlineData("androidtablet")]
+    [InlineData("ANDROIDTABLET")]
+    [InlineData("Androidtablet")]
     public void DeviceSystems_rejects_noncanonical_handheld_platform_values(string input)
     {
         var accepted = DeviceSystems.TryNormalize(input, out var normalized);
@@ -46,6 +51,7 @@ public sealed class PosHandheldDevicePlatformTests
     [InlineData("iOS")]
     [InlineData("Android")]
     [InlineData("iPadOS")]
+    [InlineData("AndroidTablet")]
     public void Device_authorization_requires_exact_hardware_for_every_mobile_platform(
         string deviceSystem)
     {

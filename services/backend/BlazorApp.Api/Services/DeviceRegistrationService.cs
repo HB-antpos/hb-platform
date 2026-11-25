@@ -752,6 +752,9 @@ namespace BlazorApp.Api.Services
                                 != DeviceRegistrationDeviceSystems.Windows
                             && d.设备系统.Trim()
                                 != DeviceRegistrationDeviceSystems.IpadOs
+                            // 安卓平板有独立筛选项，不再归入「其他」。
+                            && d.设备系统.Trim()
+                                != DeviceRegistrationDeviceSystems.AndroidTablet
                         );
                     }
                     else

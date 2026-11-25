@@ -43,6 +43,7 @@ public sealed class OperationAuditQueryService
     {
         Windows,
         IpadOs,
+        AndroidTablet,
         Unknown,
         Invalid,
     }
@@ -846,6 +847,7 @@ public sealed class OperationAuditQueryService
         {
             DeviceSystemFilter.Windows => query.Where(item => item.DeviceSystem == "Windows"),
             DeviceSystemFilter.IpadOs => query.Where(item => item.DeviceSystem == "iPadOS"),
+            DeviceSystemFilter.AndroidTablet => query.Where(item => item.DeviceSystem == "AndroidTablet"),
             DeviceSystemFilter.Unknown => query.Where(item => item.DeviceSystem == null || item.DeviceSystem == ""),
             _ => query,
         };
@@ -1138,6 +1140,11 @@ public sealed class OperationAuditQueryService
             return DeviceSystemFilter.IpadOs;
         }
 
+        if (string.Equals(normalized, "AndroidTablet", StringComparison.OrdinalIgnoreCase))
+        {
+            return DeviceSystemFilter.AndroidTablet;
+        }
+
         return string.Equals(normalized, "Unknown", StringComparison.OrdinalIgnoreCase)
             ? DeviceSystemFilter.Unknown
             : DeviceSystemFilter.Invalid;
@@ -1154,6 +1161,11 @@ public sealed class OperationAuditQueryService
         if (string.Equals(normalized, "Windows", StringComparison.OrdinalIgnoreCase))
         {
             return "Windows";
+        }
+
+        if (string.Equals(normalized, "AndroidTablet", StringComparison.OrdinalIgnoreCase))
+        {
+            return "AndroidTablet";
         }
 
         return string.Equals(normalized, "iPadOS", StringComparison.OrdinalIgnoreCase)
