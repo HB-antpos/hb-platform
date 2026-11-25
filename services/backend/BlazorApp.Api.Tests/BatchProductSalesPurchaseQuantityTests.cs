@@ -28,11 +28,63 @@ public sealed class BatchProductSalesPurchaseQuantityTests
     }
 
     [Fact]
-    public async Task 进货日期超过366天时拒绝()
+    public async Task 进货日期超过426天时拒绝()
     {
+        // 进货区间 = 销售区间（最多 366 天）向前多 60 天，上限 426 天。
         var end = DateTime.Today.AddDays(-1);
         await Assert.ThrowsAsync<BatchProductSalesAnalysisValidationException>(() => CreateService().GetPurchaseQuantitiesAsync(
-            new BatchProductSalesPurchaseRequestDto { StartDate = end.AddDays(-366), EndDate = end, ProductCodes = ["P1"] }, null));
+            new BatchProductSalesPurchaseRequestDto { StartDate = end.AddDays(-BatchProductSalesAnalysisService.MaxPurchaseDays), EndDate = end, ProductCodes = ["P1"] }, null));
+        await Assert.ThrowsAsync<BatchProductSalesAnalysisValidationException>(() => CreateService().GetPurchaseDetailsAsync(
+            new BatchProductSalesPurchaseDetailRequestDto { StartDate = end.AddDays(-BatchProductSalesAnalysisService.MaxPurchaseDays), EndDate = end, ProductCodes = ["P1"] }, null));
+    }
+
+    [Fact]
+    public void 进货区间上限比销量多60天_销量仍是366天()
+    {
+        Assert.Equal(426, BatchProductSalesAnalysisService.MaxPurchaseDays);
+        var end = DateTime.Today.AddDays(-2);
+        var purchaseMax = new BatchProductSalesScopeDto { StartDate = end.AddDays(-(BatchProductSalesAnalysisService.MaxPurchaseDays - 1)), EndDate = end };
+        Assert.Equal(purchaseMax.StartDate.Date, BatchProductSalesAnalysisService.ValidateRange(purchaseMax, BatchProductSalesAnalysisService.MaxPurchaseDays).StartDate);
+        // 同样的 426 天给销量（默认上限）仍要拒绝。
+        Assert.Throws<BatchProductSalesAnalysisValidationException>(() => BatchProductSalesAnalysisService.ValidateRange(purchaseMax));
+    }
+
+    [Fact]
+    public async Task 进货明细_未来日期与商品数量越界时拒绝且不访问数据库()
+    {
+        var future = DateTime.Today.AddDays(30);
+        await Assert.ThrowsAsync<BatchProductSalesAnalysisValidationException>(() => CreateService().GetPurchaseDetailsAsync(
+            new BatchProductSalesPurchaseDetailRequestDto { StartDate = future, EndDate = future, ProductCodes = ["P1"] }, null));
+        var day = DateTime.Today.AddDays(-1);
+        await Assert.ThrowsAsync<BatchProductSalesAnalysisValidationException>(() => CreateService().GetPurchaseDetailsAsync(
+            new BatchProductSalesPurchaseDetailRequestDto { StartDate = day, EndDate = day, ProductCodes = [] }, null));
+    }
+
+    [Fact]
+    public void Sql_进货明细与汇总共用同一筛选口径()
+    {
+        var detail = BatchProductSalesAnalysisService.PurchaseDetailSql;
+        // 这些条件决定「算不算进货、算在哪天」，明细与汇总必须逐字一致，逐笔合计才会等于进货量。
+        foreach (var fragment in new[]
+        {
+            "COALESCE(h.[IsDeleted], 0) = 0",
+            "COALESCE(h.[FlowStatus], -1) <> 0",
+            "COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) >= @StartDate",
+            "COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) < @EndDateExclusive",
+            "COALESCE(d.[IsDeleted], 0) = 0",
+            "i.[EffectivePurchaseDate] >= CAST(@StartDate AS date)",
+            "i.[EffectivePurchaseDate] < CAST(@EndDateExclusive AS date)",
+            "COALESCE(NULLIF(d.[ProductCode], N''), NULLIF(srp.[ProductCode], N''))",
+            "OPENJSON(@ProductCodes)",
+            "OPENJSON(@StoreCodes)",
+        })
+        {
+            Assert.Contains(fragment, BatchProductSalesAnalysisService.PurchaseQuantitySql, StringComparison.Ordinal);
+            Assert.Contains(fragment, detail, StringComparison.Ordinal);
+        }
+        Assert.Contains("SUM(COALESCE(d.[AllocQuantity], 0)) AS [Quantity]", detail, StringComparison.Ordinal);
+        Assert.Contains("SELECT TOP (@Limit)", detail, StringComparison.Ordinal);
+        Assert.Contains("ORDER BY r.[PurchaseDate] DESC", detail, StringComparison.Ordinal);
     }
 
     [Theory]

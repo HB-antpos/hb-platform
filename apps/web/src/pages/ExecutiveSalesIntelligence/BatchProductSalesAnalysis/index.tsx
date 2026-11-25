@@ -1,21 +1,22 @@
 import { DownloadOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { Alert, Button, DatePicker, Dropdown, Empty, Input, Pagination, Select, Skeleton, Tag, Tooltip } from 'antd'
+import { Alert, Button, DatePicker, Dropdown, Empty, Input, Pagination, Select, Skeleton, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs, { type Dayjs } from 'dayjs'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PropsWithChildren } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PropsWithChildren, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageContainer from '../../../components/PageContainer'
 import { MeasuredTable } from '../../../components/MeasuredTable'
 import { batchProductSalesApi } from '../../../services/batchProductSalesAnalysisService'
 import { useAuthStore } from '../../../store/auth'
 import { RequestError } from '../../../utils/request'
-import type { BatchProductSalesApi, BatchSalesBranch, BatchSalesBranchOverview, BatchSalesCoverage, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesMetrics, BatchSalesPurchaseResult, BatchSalesQueryResult, BatchSalesScope } from '../../../types/batchProductSalesAnalysis'
+import type { BatchProductSalesApi, BatchSalesBranch, BatchSalesBranchOverview, BatchSalesCoverage, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesMetrics, BatchSalesPurchaseDetailResult, BatchSalesPurchaseResult, BatchSalesQueryResult, BatchSalesScope } from '../../../types/batchProductSalesAnalysis'
 import ProductImage from '../ProductFlowShared/ProductImage'
 import { MAX_ITEM_NUMBERS, parsePastedItemNumbers, type ImportResult } from './import'
-import { appendBatchProductSalesPurchaseOnlyBranches, buildBatchProductSalesAnalysis, buildBatchProductSalesDetailExportScope, buildBatchProductSalesPurchaseIndex, formatCsvRow, getBatchProductSalesPurchase, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, getBatchProductSalesDiscountStateKey, hasBatchProductSalesDiscountStatisticsNotice, mergeBatchProductSalesDetailClassifications } from './logic'
+import { appendBatchProductSalesPurchaseOnlyBranches, BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS, buildBatchProductSalesAnalysis, deriveBatchProductSalesPurchaseRange, isBatchProductSalesDefaultPurchaseRange, buildBatchProductSalesDetailExportScope, buildBatchProductSalesPurchaseIndex, formatCsvRow, getBatchProductSalesPurchase, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, getBatchProductSalesDiscountStateKey, hasBatchProductSalesDiscountStatisticsNotice, mergeBatchProductSalesDetailClassifications } from './logic'
 import DiscountDailyChart from './DiscountDailyChart'
 import type { DiscountChartDaily } from './chartModel'
 import ProductScopeModal from './ProductScopeModal'
+import PurchaseDetailPopover from './PurchaseDetailPopover'
 import styles from './index.module.css'
 import { registerPageMessages } from '../../../i18n/registerPageMessages'
 import messagesEn from './messages.en.json'
@@ -68,8 +69,13 @@ function defaultRange(today: string): [Dayjs, Dayjs] {
 function number(value: number | null | undefined) {
   return quantityFormatter.format(value ?? 0)
 }
-function sameDayRange(left: [Dayjs, Dayjs], right: [Dayjs, Dayjs]) {
-  return left[0].isSame(right[0], 'day') && left[1].isSame(right[1], 'day')
+function toDateScope(range: [Dayjs, Dayjs]) {
+  return { startDate: range[0].format('YYYY-MM-DD'), endDate: range[1].format('YYYY-MM-DD') }
+}
+/** 进货日期默认 = 销售开始日前 60 天 ～ 销售结束日（推导规则见 logic.ts）。 */
+function purchaseRangeFor(salesRange: [Dayjs, Dayjs]): [Dayjs, Dayjs] {
+  const scope = deriveBatchProductSalesPurchaseRange(toDateScope(salesRange).startDate, toDateScope(salesRange).endDate)
+  return [dayjs(scope.startDate), dayjs(scope.endDate)]
 }
 function money(value: number | null | undefined) {
   return value === null || value === undefined || !Number.isFinite(value) ? '—' : audFormatter.format(value)
@@ -233,8 +239,9 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
   ].join('|') : 'anonymous', [currentUser])
   const today = useMemo(businessToday, [])
   const [draftRange, setDraftRange] = useState<[Dayjs, Dayjs]>(() => defaultRange(today))
-  // 进货日期默认跟随销售日期；用户把它改成与销售日期不同的区间后不再跟随，改回相同则恢复跟随。
-  const [draftPurchaseRange, setDraftPurchaseRange] = useState<[Dayjs, Dayjs]>(() => defaultRange(today))
+  // 进货日期默认 = 销售开始日前 60 天 ～ 销售结束日，并随销售日期联动；
+  // 用户手动改成别的区间后不再联动，改回推导出的默认区间则恢复联动。
+  const [draftPurchaseRange, setDraftPurchaseRange] = useState<[Dayjs, Dayjs]>(() => purchaseRangeFor(defaultRange(today)))
   const [purchaseRangeFollowsSales, setPurchaseRangeFollowsSales] = useState(true)
   const [draftStores, setDraftStores] = useState<string[]>([])
   const [pastedText, setPastedText] = useState('')
@@ -450,10 +457,38 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
   const selectedBranch = rankedBranches.find((branch) => branch.branchCode === activeBranchCode)
   // 进货量未就绪时不能显示 0：加载中显示省略号，失败或未查询显示破折号。
   const purchaseValue = (filters: { productCode?: string; branchCode?: string }) => purchaseIndex ? number(getBatchProductSalesPurchase(purchaseIndex, filters).total) : purchaseLoading ? '…' : '—'
-  const purchaseBreakdown = (filters: { productCode?: string; branchCode?: string }) => {
-    if (!purchaseIndex) return undefined
+  // 逐笔明细缓存随进货结果整体失效：重新查询或改进货日期后旧明细不能再用。
+  // purchaseResult 只作为「换一份新缓存」的触发条件，回调里不读取它。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const purchaseDetailCache = useMemo(() => new Map<string, BatchSalesPurchaseDetailResult>(), [purchaseResult])
+  const productItemNumbers = useMemo(() => new Map((queryResult?.products ?? []).map((product) => [product.productCode, product.itemNumber])), [queryResult?.products])
+  /**
+   * 把进货数字包成可点击的明细入口。明细请求严格沿用这次进货结果的日期、分店与商品范围，逐笔合计与数字一致；
+   * 进货量未就绪或为 0 时不可点，只按原样显示。
+   */
+  const purchaseDetail = (filters: { productCode?: string; branchCode?: string }, children: ReactNode, className?: string) => {
+    const plain = className ? <span className={className}>{children}</span> : <>{children}</>
+    if (!purchaseIndex || !purchaseResult) return plain
     const quantity = getBatchProductSalesPurchase(purchaseIndex, filters)
-    return t('batchProductSalesAnalysis.purchaseBreakdown', { warehouse: number(quantity.warehouse), supplier: number(quantity.supplier) })
+    if (!quantity.warehouse && !quantity.supplier) return plain
+    const scope = purchaseResult
+    const productCodes = filters.productCode ? [filters.productCode] : scope.productCodes
+    return (
+      <PurchaseDetailPopover
+        cacheKey={`${filters.productCode ?? '*'}|${filters.branchCode ?? '*'}`}
+        cache={purchaseDetailCache}
+        load={(signal) => api.getPurchaseDetails({ startDate: scope.startDate, endDate: scope.endDate, storeCodes: scope.storeCodes, productCodes, ...(filters.branchCode ? { branchCode: filters.branchCode } : {}) }, signal)}
+        summary={quantity}
+        range={{ startDate: scope.startDate, endDate: scope.endDate }}
+        showBranch={!filters.branchCode}
+        showProduct={!filters.productCode}
+        branchLabel={(code) => branchNames.get(code) ?? code}
+        productLabel={(code) => productItemNumbers.get(code) ?? code}
+        className={className}
+      >
+        {children}
+      </PurchaseDetailPopover>
+    )
   }
   const discountNotice = useMemo(() => {
     const priority = ['Failed', 'OutOfSync', 'Superseded', 'Unavailable', 'Partial', 'Refreshing', 'Backfilling', 'Running', 'Queued', 'Pending'] as const
@@ -587,7 +622,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
       setQueryError('date')
       return
     }
-    if (getBatchProductSalesDateRangeError(input.purchaseRange.startDate, input.purchaseRange.endDate, today)) {
+    if (getBatchProductSalesDateRangeError(input.purchaseRange.startDate, input.purchaseRange.endDate, today, BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS)) {
       setQueryError('purchaseDate')
       return
     }
@@ -948,7 +983,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
       width: 76,
       align: 'right',
       className: styles.purchaseCell,
-      render: (_, row) => purchaseValue({ productCode: productFilter, branchCode: row.branchCode }),
+      render: (_, row) => purchaseDetail({ productCode: productFilter, branchCode: row.branchCode }, purchaseValue({ productCode: productFilter, branchCode: row.branchCode })),
     },
     {
       title: t('batchProductSalesAnalysis.columns.amount'),
@@ -1003,7 +1038,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
       width: 76,
       align: 'right',
       className: styles.purchaseCell,
-      render: (_, row) => purchaseValue({ productCode: row.product.productCode, branchCode: activeBranchCode }),
+      render: (_, row) => purchaseDetail({ productCode: row.product.productCode, branchCode: activeBranchCode }, purchaseValue({ productCode: row.product.productCode, branchCode: activeBranchCode })),
     },
     {
       title: t('batchProductSalesAnalysis.columns.amount'),
@@ -1082,7 +1117,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                   if (!value?.[0] || !value?.[1]) return
                   const next: [Dayjs, Dayjs] = [value[0], value[1]]
                   setDraftRange(next)
-                  if (purchaseRangeFollowsSales) setDraftPurchaseRange(next)
+                  if (purchaseRangeFollowsSales) setDraftPurchaseRange(purchaseRangeFor(next))
                 }}
               />
             </label>
@@ -1097,7 +1132,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                   if (!value?.[0] || !value?.[1]) return
                   const next: [Dayjs, Dayjs] = [value[0], value[1]]
                   setDraftPurchaseRange(next)
-                  setPurchaseRangeFollowsSales(sameDayRange(next, draftRange))
+                  setPurchaseRangeFollowsSales(isBatchProductSalesDefaultPurchaseRange(toDateScope(next), toDateScope(draftRange)))
                 }}
               />
             </label>
@@ -1241,31 +1276,36 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                         })}
                         tabIndex={0}
                       >
-                        <button className={`${styles.productRow} ${selectedProductCode === ALL_PRODUCTS ? styles.productCurrent : ''}`} aria-pressed={selectedProductCode === ALL_PRODUCTS} onClick={() => chooseProduct(ALL_PRODUCTS)}>
-                          <span className={styles.allProductsIcon}>Σ</span>
-                          <span className={styles.productInfo}>
-                            <strong>{t('batchProductSalesAnalysis.allProducts')}</strong>
-                            <span>{t('batchProductSalesAnalysis.allProductsHint')}</span>
-                          </span>
+                        {/* 行本身负责选中（点击空白处也算）；进货数字是独立的按钮，避免按钮嵌套按钮。 */}
+                        <div className={`${styles.productRow} ${selectedProductCode === ALL_PRODUCTS ? styles.productCurrent : ''}`} onClick={() => chooseProduct(ALL_PRODUCTS)}>
+                          <button type="button" className={styles.productSelect} aria-pressed={selectedProductCode === ALL_PRODUCTS}>
+                            <span className={styles.allProductsIcon}>Σ</span>
+                            <span className={styles.productInfo}>
+                              <strong>{t('batchProductSalesAnalysis.allProducts')}</strong>
+                              <span>{t('batchProductSalesAnalysis.allProductsHint')}</span>
+                            </span>
+                          </button>
                           <span className={styles.productQuantities}>
                             <b>{queryResult.coverage.status === 'pending' ? '—' : number(queryResult.products.reduce((sum, product) => sum + (product.quantity ?? 0), 0))}</b>
-                            <small className={styles.purchaseText}>{t('batchProductSalesAnalysis.purchaseShort', { value: purchaseValue({}) })}</small>
+                            {purchaseDetail({}, t('batchProductSalesAnalysis.purchaseShort', { value: purchaseValue({}) }), styles.purchaseText)}
                           </span>
-                        </button>
+                        </div>
                         {filteredProducts
                           .slice((productPage - 1) * PRODUCT_PAGE_SIZE, productPage * PRODUCT_PAGE_SIZE)
                           .map((product) => (
-                            <button key={product.productCode} className={`${styles.productRow} ${selectedProductCode === product.productCode ? styles.productCurrent : ''}`} aria-pressed={selectedProductCode === product.productCode} onClick={() => chooseProduct(product.productCode)}>
-                              <ProductImage src={product.imageUrl} alt={product.productName || product.itemNumber} />
-                              <span className={styles.productInfo}>
-                                <strong>{product.itemNumber}</strong>
-                                <span>{product.productName || product.englishName || product.productCode}</span>
-                              </span>
+                            <div key={product.productCode} className={`${styles.productRow} ${selectedProductCode === product.productCode ? styles.productCurrent : ''}`} onClick={() => chooseProduct(product.productCode)}>
+                              <button type="button" className={styles.productSelect} aria-pressed={selectedProductCode === product.productCode}>
+                                <ProductImage src={product.imageUrl} alt={product.productName || product.itemNumber} />
+                                <span className={styles.productInfo}>
+                                  <strong>{product.itemNumber}</strong>
+                                  <span>{product.productName || product.englishName || product.productCode}</span>
+                                </span>
+                              </button>
                               <span className={styles.productQuantities}>
                                 <b>{product.quantity === null ? '—' : number(product.quantity)}</b>
-                                <small className={styles.purchaseText}>{t('batchProductSalesAnalysis.purchaseShort', { value: purchaseValue({ productCode: product.productCode }) })}</small>
+                                {purchaseDetail({ productCode: product.productCode }, t('batchProductSalesAnalysis.purchaseShort', { value: purchaseValue({ productCode: product.productCode }) }), styles.purchaseText)}
                               </span>
-                            </button>
+                            </div>
                           ))}
                       </div>
                     ) : (
@@ -1319,11 +1359,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                       <span>
                         {t('batchProductSalesAnalysis.discountRate')} <b>{discountRate(rankAnalysis.metrics)}</b>
                       </span>
-                      <Tooltip title={purchaseBreakdown({ productCode: productFilter })} trigger={['hover', 'focus']}>
-                        <span className={styles.purchase} tabIndex={purchaseIndex ? 0 : undefined}>
-                          {t('batchProductSalesAnalysis.metrics.purchase')} <b>{purchaseValue({ productCode: productFilter })}</b>
-                        </span>
-                      </Tooltip>
+                      {purchaseDetail({ productCode: productFilter }, <>{t('batchProductSalesAnalysis.metrics.purchase')} <b>{purchaseValue({ productCode: productFilter })}</b></>, styles.purchase)}
                     </div>
                     <p className={styles.priceHint}>
                       {t('batchProductSalesAnalysis.priceRange', {
@@ -1367,11 +1403,7 @@ export default function BatchProductSalesAnalysisPage({ api = batchProductSalesA
                         <span className={styles.discount}>
                           {t('batchProductSalesAnalysis.metrics.discount')} <b>{classified(analysis.metrics, 'discountQuantity', classificationUnavailable)}</b>
                         </span>
-                        <Tooltip title={purchaseBreakdown({ productCode: productFilter, branchCode: activeBranchCode })} trigger={['hover', 'focus']}>
-                          <span className={styles.purchase} tabIndex={purchaseIndex ? 0 : undefined}>
-                            {t('batchProductSalesAnalysis.metrics.purchase')} <b>{purchaseValue({ productCode: productFilter, branchCode: activeBranchCode })}</b>
-                          </span>
-                        </Tooltip>
+                        {purchaseDetail({ productCode: productFilter, branchCode: activeBranchCode }, <>{t('batchProductSalesAnalysis.metrics.purchase')} <b>{purchaseValue({ productCode: productFilter, branchCode: activeBranchCode })}</b></>, styles.purchase)}
                       </div>
                     </>
                   ) : null}

@@ -89,6 +89,13 @@ const branchRows = (scope: BatchSalesScope, rows: typeof facts, withCount: boole
 const coverage = (scope: BatchSalesScope) => ({ status: 'complete', readyDates: dates(scope), pendingDates: [], version: 'preview-v1' })
 const productRows = (rows: typeof facts, codes: string[]) => products.filter(product => codes.includes(product.productCode)).map(product => ({ ...product, metrics: add(rows.filter(row => row.productCode === product.productCode).map(row => row.metrics)) }))
 
+// 进货演示数据：06-20 首批铺货（销售 09-01 起时落在默认 60 天窗口外）、08-15 仓库发货、08-28 仓库单（第二家店未出库）、09-10 供应商进货。
+const purchaseFacts = products.slice(0, 6).flatMap((product, productIndex) => stores.flatMap((store, storeIndex) => [
+  { source: 'Warehouse', documentNo: `2026-12${productIndex}${storeIndex}`, purchaseDate: '2026-06-20', isShipped: true, productCode: product.productCode, branchCode: store.code, quantity: 144 },
+  { source: 'Warehouse', documentNo: `2026-15${productIndex}${storeIndex}`, purchaseDate: '2026-08-15', isShipped: true, productCode: product.productCode, branchCode: store.code, quantity: 72 },
+  { source: 'Warehouse', documentNo: `2026-18${productIndex}${storeIndex}`, purchaseDate: '2026-08-28', isShipped: storeIndex !== 1, productCode: product.productCode, branchCode: store.code, quantity: 24 + storeIndex * 12 },
+  ...(storeIndex % 2 === 0 ? [{ source: 'Supplier', documentNo: `INV-${3180 + productIndex * 10 + storeIndex}`, purchaseDate: '2026-09-10', isShipped: true, productCode: product.productCode, branchCode: store.code, quantity: 6 }] : []),
+]))
 const originalFetch = window.fetch.bind(window)
 window.fetch = async (input, init) => {
   const url = String(input)
@@ -124,6 +131,23 @@ window.fetch = async (input, init) => {
       branches: branchRows(scope, rows, false), warnings: [], statisticStatus: 'Fresh', discountStatisticStatus: 'Fresh', coverage: coverage(scope) })
   }
   const codes: string[] = body.productCodes ?? products.map(product => product.productCode)
+  if (endpoint === 'purchases' || endpoint === 'purchase-details') {
+    const matched = purchaseFacts.filter(row => codes.includes(row.productCode) && scope.storeCodes.includes(row.branchCode)
+      && (!body.branchCode || row.branchCode === body.branchCode) && row.purchaseDate >= scope.startDate && row.purchaseDate <= scope.endDate)
+    if (endpoint === 'purchase-details') {
+      return json({ ...scope, productCodes: codes, branchCode: body.branchCode, limit: 500, truncated: false,
+        rows: [...matched].sort((left, right) => right.purchaseDate.localeCompare(left.purchaseDate) || left.source.localeCompare(right.source) || left.documentNo.localeCompare(right.documentNo)) })
+    }
+    const totals = new Map<string, { productCode: string; branchCode: string; warehouseQuantity: number; supplierQuantity: number }>()
+    matched.forEach(row => {
+      const key = `${row.productCode}|${row.branchCode}`
+      const total = totals.get(key) ?? { productCode: row.productCode, branchCode: row.branchCode, warehouseQuantity: 0, supplierQuantity: 0 }
+      if (row.source === 'Warehouse') total.warehouseQuantity += row.quantity
+      else total.supplierQuantity += row.quantity
+      totals.set(key, total)
+    })
+    return json({ ...scope, productCodes: codes, rows: [...totals.values()] })
+  }
   const rows = inScope(scope, codes)
   if (endpoint === 'overview/branch') {
     const branchFacts = rows.filter(row => row.branchCode === body.branchCode)

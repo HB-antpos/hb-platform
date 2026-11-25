@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import type { BatchSalesBranch, BatchSalesDaily, BatchSalesDetail, BatchSalesDiscountOverview, BatchSalesMetrics } from '../../../types/batchProductSalesAnalysis'
-import { appendBatchProductSalesPurchaseOnlyBranches, buildBatchProductSalesAnalysis, buildBatchProductSalesDetailExportScope, buildBatchProductSalesPurchaseIndex, getBatchProductSalesPurchase, escapeCsvCell, formatCsvRow, getBatchProductSalesDiscountStateKey, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, hasBatchProductSalesDiscountStatisticsNotice, hasBatchProductSalesDailyActivity, mergeBatchProductSalesDetailClassifications, runBatchProductSalesPool, shouldRefreshBatchProductSalesDiscountStatistics, sortBatchProductSalesBranchesByQuantity } from './logic'
+import { appendBatchProductSalesPurchaseOnlyBranches, buildBatchProductSalesAnalysis, buildBatchProductSalesDetailExportScope, buildBatchProductSalesPurchaseIndex, getBatchProductSalesPurchase, escapeCsvCell, formatCsvRow, getBatchProductSalesDiscountStateKey, getBatchProductSalesClassifiedQuantity, getBatchProductSalesDateRangeError, deriveBatchProductSalesPurchaseRange, isBatchProductSalesDefaultPurchaseRange, BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS, hasBatchProductSalesDiscountStatisticsNotice, hasBatchProductSalesDailyActivity, mergeBatchProductSalesDetailClassifications, runBatchProductSalesPool, shouldRefreshBatchProductSalesDiscountStatistics, sortBatchProductSalesBranchesByQuantity } from './logic'
 
 function metrics(overrides: Partial<BatchSalesMetrics> = {}): BatchSalesMetrics {
   return {
@@ -62,6 +62,18 @@ assert.equal(getBatchProductSalesDateRangeError('2025-08-17', '2026-08-18', '202
 assert.equal(getBatchProductSalesDateRangeError('2026-08-19', '2026-08-18', '2026-08-18'), '开始日期不能晚于结束日期', '开始日期晚于结束日期必须拒绝')
 assert.equal(getBatchProductSalesDateRangeError('2026-02-31', '2026-08-18', '2026-08-18'), '日期格式无效', '不存在的日期必须拒绝')
 assert.equal(getBatchProductSalesDateRangeError('2026-08-18', '2026-08-19', '2026-08-18'), '结束日期不能晚于今天', '结束日期晚于传入业务日期必须拒绝')
+// 进货日期：上限 366 + 60 天，销量仍是 366 天。
+assert.equal(BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS, 426)
+assert.equal(getBatchProductSalesDateRangeError('2025-06-19', '2026-08-18', '2026-08-18', BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS), undefined, '含首尾共 426 天的进货区间必须允许')
+assert.equal(getBatchProductSalesDateRangeError('2025-06-18', '2026-08-18', '2026-08-18', BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS), '日期范围不能超过 426 天', '超过 426 天的进货区间必须拒绝')
+assert.equal(getBatchProductSalesDateRangeError('2025-06-19', '2026-08-18', '2026-08-18'), '日期范围不能超过 366 天', '销量区间仍按 366 天校验')
+// 进货默认区间 = 销售开始日前 60 天 ～ 销售结束日（跨月、跨年、闰年都按纯日期计算）。
+assert.deepEqual(deriveBatchProductSalesPurchaseRange('2026-10-26', '2026-11-24'), { startDate: '2026-08-27', endDate: '2026-11-24' }, '截图场景：10-26 往前 60 天是 08-27')
+assert.deepEqual(deriveBatchProductSalesPurchaseRange('2026-01-15', '2026-02-10'), { startDate: '2025-11-16', endDate: '2026-02-10' }, '跨年')
+assert.deepEqual(deriveBatchProductSalesPurchaseRange('2024-04-30', '2024-05-10'), { startDate: '2024-03-01', endDate: '2024-05-10' }, '闰年 2 月 29 天')
+assert.equal(getBatchProductSalesDateRangeError(deriveBatchProductSalesPurchaseRange('2025-08-18', '2026-08-18').startDate, '2026-08-18', '2026-08-18', BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS), undefined, '销量选满 366 天时，默认进货区间仍在上限内')
+assert.equal(isBatchProductSalesDefaultPurchaseRange({ startDate: '2026-08-27', endDate: '2026-11-24' }, { startDate: '2026-10-26', endDate: '2026-11-24' }), true, '等于推导区间时继续联动')
+assert.equal(isBatchProductSalesDefaultPurchaseRange({ startDate: '2026-10-26', endDate: '2026-11-24' }, { startDate: '2026-10-26', endDate: '2026-11-24' }), false, '与销售日期相同（旧默认）不再视为默认')
 
 assert.equal(escapeCsvCell('plain'), 'plain', '普通单元格不应额外转义')
 assert.equal(escapeCsvCell('a,"b"'), '"a,""b"""', 'CSV 引号和逗号必须按 RFC 4180 转义')

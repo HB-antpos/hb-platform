@@ -131,6 +131,19 @@ try {
         },
       })
     }
+    if (pathname.endsWith('/purchase-details')) {
+      return jsonResponse({
+        Success: true,
+        Data: {
+          StartDate: '2026-05-02T00:00:00', EndDate: '2026-07-31T00:00:00', StoreCodes: ['S1', 'S2'], ProductCodes: ['P-1'], BranchCode: 'S1',
+          Rows: [
+            { Source: 'Warehouse', DocumentNo: '2026-1820', PurchaseDate: '2026-07-07T00:00:00', IsShipped: false, ProductCode: 'P-1', BranchCode: 'S1', Quantity: 96 },
+            { Source: 'Supplier', DocumentNo: 'INV-9', PurchaseDate: '2026-06-01T00:00:00', IsShipped: true, ProductCode: 'P-1', BranchCode: 'S1', Quantity: 6 },
+          ],
+          Limit: 500, Truncated: true,
+        },
+      })
+    }
     if (pathname.endsWith('/purchases')) {
       return jsonResponse({
         Success: true,
@@ -272,6 +285,24 @@ try {
     () => batchProductSalesApi.getPurchases({ startDate: '2026-07-01', endDate: '2026-07-31', storeCodes: [], productCodes: [] }),
     '缺少商品编码',
     '没有商品编码时不得请求进货量',
+  )
+
+  const details = await batchProductSalesApi.getPurchaseDetails({ startDate: '2026-05-02', endDate: '2026-07-31', storeCodes: ['S1', 'S2'], productCodes: ['P-1'], branchCode: 'S1' })
+  const detailCall = captured[captured.length - 1]
+  assert.equal(detailCall?.url, '/api/react/v1/dashboard/batch-product-sales-analysis/purchase-details', '进货明细必须请求独立 POST 路径')
+  assert.equal(detailCall?.init?.method, 'POST', '进货明细必须使用 POST')
+  assert.deepEqual(JSON.parse(String(detailCall?.init?.body)), { startDate: '2026-05-02', endDate: '2026-07-31', storeCodes: ['S1', 'S2'], productCodes: ['P-1'], branchCode: 'S1' }, '进货明细的区间、商品与分店必须原样提交')
+  assert.deepEqual(details.rows, [
+    { source: 'Warehouse', documentNo: '2026-1820', purchaseDate: '2026-07-07', isShipped: false, productCode: 'P-1', branchCode: 'S1', quantity: 96 },
+    { source: 'Supplier', documentNo: 'INV-9', purchaseDate: '2026-06-01', isShipped: true, productCode: 'P-1', branchCode: 'S1', quantity: 6 },
+  ], 'PascalCase 进货明细必须归一化，日期只保留 yyyy-MM-dd')
+  assert.equal(details.branchCode, 'S1')
+  assert.equal(details.limit, 500)
+  assert.equal(details.truncated, true, '超出上限的标记必须保留')
+  await assertRejects(
+    () => batchProductSalesApi.getPurchaseDetails({ startDate: '2026-07-01', endDate: '2026-07-31', storeCodes: [], productCodes: [] }),
+    '缺少商品编码',
+    '没有商品编码时不得请求进货明细',
   )
 
   responseMode = 'coverageConflict'

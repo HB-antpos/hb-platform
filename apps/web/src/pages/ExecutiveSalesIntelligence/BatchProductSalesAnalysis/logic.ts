@@ -340,6 +340,13 @@ function normalizeDiscountState(status?: string): string {
   return status?.trim().replace(/[ _-]/g, '').toLowerCase() ?? ''
 }
 
+/** 销量日期最多 366 天（与后端 MaxDays 一致）。 */
+export const BATCH_PRODUCT_SALES_MAX_DAYS = 366
+/** 进货日期默认向销售开始日之前多看的天数。 */
+export const BATCH_PRODUCT_SALES_PURCHASE_LOOKBACK_DAYS = 60
+/** 进货日期上限 = 366 + 60 天（与后端 MaxPurchaseDays 一致）。 */
+export const BATCH_PRODUCT_SALES_MAX_PURCHASE_DAYS = BATCH_PRODUCT_SALES_MAX_DAYS + BATCH_PRODUCT_SALES_PURCHASE_LOOKBACK_DAYS
+
 function parseDateOnly(value: string): Date | null {
   const match = DATE_ONLY_PATTERN.exec(value.trim())
   if (!match) {
@@ -355,7 +362,7 @@ function parseDateOnly(value: string): Date | null {
 /**
  * 使用页面传入的业务日期字符串校验，避免浏览器本地时区在 UTC 零点附近改变结果。
  */
-export function getBatchProductSalesDateRangeError(startDate: string, endDate: string, todayDate: string): string | undefined {
+export function getBatchProductSalesDateRangeError(startDate: string, endDate: string, todayDate: string, maxDays = BATCH_PRODUCT_SALES_MAX_DAYS): string | undefined {
   const start = parseDateOnly(startDate)
   const end = parseDateOnly(endDate)
   const today = parseDateOnly(todayDate)
@@ -368,10 +375,31 @@ export function getBatchProductSalesDateRangeError(startDate: string, endDate: s
   if (end.getTime() > today.getTime()) {
     return '结束日期不能晚于今天'
   }
-  if ((end.getTime() - start.getTime()) / 86_400_000 > 365) {
-    return '日期范围不能超过 366 天'
+  if ((end.getTime() - start.getTime()) / 86_400_000 > maxDays - 1) {
+    return `日期范围不能超过 ${maxDays} 天`
   }
   return undefined
+}
+
+function formatDateOnly(value: Date) {
+  return value.toISOString().slice(0, 10)
+}
+
+/**
+ * 进货日期默认 = 销售开始日前 60 天 ～ 销售结束日：仓库商品多在上市前铺货，
+ * 与销量同一窗口会把这部分进货漏掉（进货显示 0）。日期按 UTC 纯日期计算，不受浏览器时区影响。
+ */
+export function deriveBatchProductSalesPurchaseRange(salesStartDate: string, salesEndDate: string): { startDate: string; endDate: string } {
+  const start = parseDateOnly(salesStartDate)
+  if (!start) return { startDate: salesStartDate, endDate: salesEndDate }
+  start.setUTCDate(start.getUTCDate() - BATCH_PRODUCT_SALES_PURCHASE_LOOKBACK_DAYS)
+  return { startDate: formatDateOnly(start), endDate: salesEndDate }
+}
+
+/** 进货日期是否仍等于由销售日期推导出的默认区间；用于判断修改销售日期时是否继续联动。 */
+export function isBatchProductSalesDefaultPurchaseRange(purchase: { startDate: string; endDate: string }, sales: { startDate: string; endDate: string }): boolean {
+  const expected = deriveBatchProductSalesPurchaseRange(sales.startDate, sales.endDate)
+  return purchase.startDate === expected.startDate && purchase.endDate === expected.endDate
 }
 
 /** CSV 单元格统一转义，并把可能被表格程序视为公式的前缀改为纯文本。 */

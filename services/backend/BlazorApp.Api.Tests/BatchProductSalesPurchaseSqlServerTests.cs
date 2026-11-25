@@ -1,3 +1,4 @@
+using BlazorApp.Api.Services.React;
 using BlazorApp.Shared.Models;
 using Xunit;
 
@@ -11,6 +12,86 @@ public sealed partial class BatchProductSalesAnalysisSqlServerIntegrationTests
 {
     [BatchSalesSqlServerFact]
     public async Task Purchases_SQLServer_总仓配货与供应商进货按口径合计()
+    {
+        await SeedPurchaseFixtureAsync();
+
+        var response = await CreateAnalysisService().GetPurchaseQuantitiesAsync(new()
+        {
+            StartDate = new DateTime(2026, 9, 1), EndDate = new DateTime(2026, 9, 30),
+            StoreCodes = ["S1", "S2"], ProductCodes = ["P1", "P2", "P3"],
+        }, null);
+
+        var rows = response.Data!.Rows
+            .OrderBy(row => row.ProductCode, StringComparer.Ordinal).ThenBy(row => row.BranchCode, StringComparer.Ordinal)
+            .Select(row => (row.ProductCode, row.BranchCode, row.WarehouseQuantity, row.SupplierQuantity)).ToList();
+        // 明细有商品编码时不看零售价（SRP-P1 指向别的商品也不影响）；P3 配货数量为空、全为 0 的组合不返回。
+        Assert.Equal(
+            [("P1", "S1", 24m, 12m), ("P1", "S2", 6m, 0m), ("P2", "S1", 0m, 5m)],
+            rows);
+        Assert.Equal(["S1", "S2"], response.Data.StoreCodes);
+        Assert.Equal(["P1", "P2", "P3"], response.Data.ProductCodes);
+    }
+
+    [BatchSalesSqlServerFact]
+    public async Task PurchaseDetails_SQLServer_逐笔明细按日期倒序且合计等于进货量()
+    {
+        await SeedPurchaseFixtureAsync();
+        var service = CreateAnalysisService();
+        var scope = new { Start = new DateTime(2026, 9, 1), End = new DateTime(2026, 9, 30) };
+
+        var response = await service.GetPurchaseDetailsAsync(new()
+        {
+            StartDate = scope.Start, EndDate = scope.End, StoreCodes = ["S1", "S2"], ProductCodes = ["P1", "P2", "P3"],
+        }, null);
+
+        var rows = response.Data!.Rows
+            .Select(row => (row.Source, row.DocumentNo, row.PurchaseDate, row.IsShipped, row.ProductCode, row.BranchCode, row.Quantity)).ToList();
+        // 未出库的 W3 按订单日期 09-30 计入并标记未发货；供应商单无单号时退回 InvoiceGUID；配货为 0 / NULL 的明细不出现。
+        Assert.Equal(
+        [
+            ("Warehouse", "W3", new DateTime(2026, 9, 30), false, "P1", "S2", 6m),
+            ("Supplier", "INV-1", new DateTime(2026, 9, 10), true, "P1", "S1", 12m),
+            ("Supplier", "INV-1", new DateTime(2026, 9, 10), true, "P2", "S1", 5m),
+            ("Warehouse", "SO-1", new DateTime(2026, 9, 2), true, "P1", "S1", 24m),
+        ], rows);
+        Assert.False(response.Data.Truncated);
+        Assert.Equal(BatchProductSalesAnalysisService.MaxPurchaseDetailRows, response.Data.Limit);
+
+        // 与进货量汇总逐项对账：同一请求下逐笔合计必须等于商品×分店×来源的进货量。
+        var totals = (await service.GetPurchaseQuantitiesAsync(new()
+        {
+            StartDate = scope.Start, EndDate = scope.End, StoreCodes = ["S1", "S2"], ProductCodes = ["P1", "P2", "P3"],
+        }, null)).Data!.Rows;
+        foreach (var total in totals)
+        {
+            Assert.Equal(total.WarehouseQuantity, rows.Where(row => row.Source == "Warehouse" && row.ProductCode == total.ProductCode && row.BranchCode == total.BranchCode).Sum(row => row.Quantity));
+            Assert.Equal(total.SupplierQuantity, rows.Where(row => row.Source == "Supplier" && row.ProductCode == total.ProductCode && row.BranchCode == total.BranchCode).Sum(row => row.Quantity));
+        }
+    }
+
+    [BatchSalesSqlServerFact]
+    public async Task PurchaseDetails_SQLServer_指定分店只返回该店_越权分店返回空()
+    {
+        await SeedPurchaseFixtureAsync();
+        var service = CreateAnalysisService();
+
+        var single = await service.GetPurchaseDetailsAsync(new()
+        {
+            StartDate = new DateTime(2026, 9, 1), EndDate = new DateTime(2026, 9, 30), ProductCodes = ["P1"], BranchCode = "s2",
+        }, ["S1", "S2"]);
+        var row = Assert.Single(single.Data!.Rows);
+        Assert.Equal(("W3", "S2", 6m), (row.DocumentNo, row.BranchCode, row.Quantity));
+        // 分店编码大小写不敏感，返回规范值。
+        Assert.Equal("S2", single.Data.BranchCode);
+
+        var outOfScope = await service.GetPurchaseDetailsAsync(new()
+        {
+            StartDate = new DateTime(2026, 9, 1), EndDate = new DateTime(2026, 9, 30), ProductCodes = ["P1"], BranchCode = "S3",
+        }, ["S1", "S2"]);
+        Assert.Empty(outOfScope.Data!.Rows);
+    }
+
+    private async Task SeedPurchaseFixtureAsync()
     {
         await PreparePurchaseSchemaAsync();
         await _catalog!.Ado.ExecuteCommandAsync("""
@@ -57,6 +138,9 @@ INSERT INTO [StoreLocalSupplierInvoiceDetails] ([DetailGUID], [InvoiceGUID], [Pr
 INSERT INTO [StoreRetailPrice] ([UUID], [ProductCode], [IsDeleted]) VALUES
     (N'SRP-P1', N'P-OTHER', 0),
     (N'SRP-P2', N'P2', 0);
+-- 逐笔明细的单号：W1、I1 有单号；W3 无单号，明细退回 OrderGUID。
+UPDATE [WareHouseOrder] SET [OrderNo] = N'SO-1' WHERE [OrderGUID] = N'W1';
+UPDATE [StoreLocalSupplierInvoice] SET [InvoiceNo] = N'INV-1' WHERE [InvoiceGUID] = N'I1';
 """);
         await _catalog.Insertable(new Store[]
         {
@@ -64,22 +148,6 @@ INSERT INTO [StoreRetailPrice] ([UUID], [ProductCode], [IsDeleted]) VALUES
             new() { StoreCode = "S2", StoreName = "二店", IsDeleted = false },
             new() { StoreCode = "S3", StoreName = "三店", IsDeleted = false },
         }).ExecuteCommandAsync();
-
-        var response = await CreateAnalysisService().GetPurchaseQuantitiesAsync(new()
-        {
-            StartDate = new DateTime(2026, 9, 1), EndDate = new DateTime(2026, 9, 30),
-            StoreCodes = ["S1", "S2"], ProductCodes = ["P1", "P2", "P3"],
-        }, null);
-
-        var rows = response.Data!.Rows
-            .OrderBy(row => row.ProductCode, StringComparer.Ordinal).ThenBy(row => row.BranchCode, StringComparer.Ordinal)
-            .Select(row => (row.ProductCode, row.BranchCode, row.WarehouseQuantity, row.SupplierQuantity)).ToList();
-        // 明细有商品编码时不看零售价（SRP-P1 指向别的商品也不影响）；P3 配货数量为空、全为 0 的组合不返回。
-        Assert.Equal(
-            [("P1", "S1", 24m, 12m), ("P1", "S2", 6m, 0m), ("P2", "S1", 0m, 5m)],
-            rows);
-        Assert.Equal(["S1", "S2"], response.Data.StoreCodes);
-        Assert.Equal(["P1", "P2", "P3"], response.Data.ProductCodes);
     }
 
     [BatchSalesSqlServerFact]
@@ -114,13 +182,13 @@ INSERT INTO [WareHouseOrderDetails] ([DetailGUID], [OrderGUID], [ProductCode], [
         await PrepareAnalysisSchemaAsync();
         await _catalog!.Ado.ExecuteCommandAsync("""
 CREATE TABLE [WareHouseOrder] (
-    [OrderGUID] nvarchar(255) NOT NULL PRIMARY KEY, [StoreCode] nvarchar(50) NULL, [OrderDate] datetime NULL,
+    [OrderGUID] nvarchar(255) NOT NULL PRIMARY KEY, [OrderNo] nvarchar(50) NULL, [StoreCode] nvarchar(50) NULL, [OrderDate] datetime NULL,
     [OutboundDate] datetime NULL, [FlowStatus] int NULL, [IsDeleted] bit NULL, [CreatedAt] datetime NULL);
 CREATE TABLE [WareHouseOrderDetails] (
     [DetailGUID] nvarchar(50) NOT NULL PRIMARY KEY, [OrderGUID] nvarchar(50) NULL, [ProductCode] nvarchar(50) NULL,
     [Quantity] decimal(18, 2) NULL, [AllocQuantity] decimal(18, 2) NULL, [IsDeleted] bit NULL);
 CREATE TABLE [StoreLocalSupplierInvoice] (
-    [InvoiceGUID] nvarchar(255) NOT NULL PRIMARY KEY, [StoreCode] nvarchar(50) NULL, [OrderDate] datetime NULL,
+    [InvoiceGUID] nvarchar(255) NOT NULL PRIMARY KEY, [InvoiceNo] nvarchar(50) NULL, [StoreCode] nvarchar(50) NULL, [OrderDate] datetime NULL,
     [InboundDate] datetime NULL, [CreatedAt] datetime NOT NULL, [IsDeleted] bit NOT NULL,
     [EffectivePurchaseDate] AS CONVERT(date, COALESCE([InboundDate], [OrderDate], [CreatedAt])) PERSISTED);
 CREATE TABLE [StoreLocalSupplierInvoiceDetails] (
