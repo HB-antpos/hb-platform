@@ -1155,3 +1155,143 @@
 .atp-ml-day.is-zero {
   color: #c0c5cf;
 }
+
+/* ===== 工时统计单元格气泡 / 工资表逐日明细气泡 ===== */
+.atp-cell-pop .ant-popover-inner {
+  padding: 0;
+  border-radius: 10px;
+}
+.atp-cd {
+  width: 320px;
+  max-width: 86vw;
+  font-size: 13px;
+  padding: 10px 14px 12px;
+}
+.atp-cd-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.atp-cd-head b {
+  font-size: 14px;
+}
+.atp-cd-sub {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+.atp-cd-tier {
+  margin-left: auto;
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+.atp-cd-tier-weekday { background: #eef2ff; color: #3b5bdb; }
+.atp-cd-tier-saturday { background: #fff4e6; color: #d9480f; }
+.atp-cd-tier-sunday { background: #fff0f0; color: #c92a2a; }
+.atp-cd-tier-publicHoliday { background: #f3f0ff; color: #7048e8; }
+.atp-cd-tier-leave { background: #e6fffb; color: #08979c; }
+.atp-cd-shift + .atp-cd-shift {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #eee;
+}
+.atp-cd-sec {
+  margin: 8px 0 3px;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+.atp-cd-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+}
+.atp-cd-k {
+  flex: none;
+  width: 58px;
+  color: rgba(0, 0, 0, 0.45);
+}
+.atp-cd-seg {
+  margin: 4px 0;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: #f7f9fc;
+  font-variant-numeric: tabular-nums;
+}
+.atp-cd-seg-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.atp-cd-in { color: #389e0d; font-weight: 600; }
+.atp-cd-out { color: #cf1322; font-weight: 600; }
+.atp-cd-open { color: #ad6800; font-weight: 600; }
+.atp-cd-dur { margin-left: auto; color: rgba(0, 0, 0, 0.55); }
+.atp-cd-seg-sub {
+  margin-top: 2px;
+  color: rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+}
+.atp-cd-paid {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #f0f0f0;
+}
+.atp-cd-note {
+  margin-top: 7px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #fafafa;
+}
+.atp-cd-note-warn { background: #fff7e6; color: #ad4e00; }
+.atp-cd-note-ok { background: #f6ffed; color: #237804; }
+.atp-cd-note-info { background: #f0f5ff; color: #1d39c4; }
+.atp-cd-actions { margin-top: 8px; }
+.atp-cd-revoke { padding-inline: 0; }
+.atp-bd-table {
+  width: 100%;
+  margin-top: 4px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.atp-bd-table td {
+  padding: 5px 4px;
+  border-bottom: 1px dashed #eee;
+}
+.atp-bd-table tr:last-child td { border-bottom: 0; }
+.atp-bd-table tr.is-link { cursor: pointer; }
+.atp-bd-table tr.is-link:hover td { background: #f0f7ff; }
+.atp-bd-ranges { color: rgba(0, 0, 0, 0.45); font-size: 12px; }
+.atp-bd-hours { text-align: right; }
+.atp-bd-sum {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  padding-top: 7px;
+  border-top: 1px solid #eee;
+}
+/* 从工资表点某一天跳过来时，目标格闪一下 */
+.atp-cell-flash {
+  animation: atp-cell-flash 1.8s ease-out 1;
+}
+@keyframes atp-cell-flash {
+  0%, 60% { outline: 3px solid #1677ff; outline-offset: 1px; background: #e6f4ff; }
+  100% { outline: 3px solid transparent; outline-offset: 1px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .atp-cell-flash { animation: none; outline: 3px solid #1677ff; outline-offset: 1px; }
+}
+/* 有逐日明细气泡的数字：悬停时有点下划线提示可看 */
+.atp-bd-trigger {
+  cursor: default;
+}
+.atp-bd-trigger:hover {
+  text-decoration: underline dotted rgba(0, 0, 0, 0.35);
+  text-underline-offset: 3px;
+}

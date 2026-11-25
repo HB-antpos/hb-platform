@@ -459,6 +459,84 @@
       "traceNoCertificate": "No medical certificate (not uploaded when added)",
       "rangeStart": "Start date",
       "rangeEnd": "End date"
+    },
+    "cellDetail": {
+      "title": "{{name}}",
+      "subtitle": "{{date}}",
+      "punches": "Punches ({{count}} segment(s))",
+      "noPunches": "No punches",
+      "schedule": "Rostered",
+      "clockIn": "In",
+      "clockOut": "Out",
+      "openEnd": "Not clocked out",
+      "autoOut": "Auto clock-out (24:00 not paid)",
+      "paid": "Paid hours",
+      "deviation": "Deviation",
+      "meal": "Meal deduction",
+      "mealAddBack": "Approved add-back {{text}}",
+      "overtime": "Approved overtime {{text}}",
+      "source": "Source",
+      "deviceCode": "Device {{code}}",
+      "late": "Late {{text}}",
+      "early": "Early {{text}}",
+      "earlyLeave": "Left early {{text}}",
+      "lateLeave": "Left late {{text}}",
+      "onTime": "On time",
+      "units": {
+        "hour": "h",
+        "minute": "min"
+      },
+      "tier": {
+        "weekday": "Weekday rate",
+        "saturday": "Saturday rate",
+        "sunday": "Sunday rate",
+        "publicHoliday": "Public holiday rate"
+      },
+      "sources": {
+        "pos": "POS QR scan",
+        "adjusted": "Manager edit",
+        "manual": "Manual entry",
+        "autoOut": "System auto clock-out",
+        "app": "Mobile app",
+        "other": "Other"
+      },
+      "missingText": "The rostered shift has passed with no punches; currently counted as 0 h.",
+      "missingAction": "Add hours",
+      "otherStore": "Other store",
+      "otherStoreValue": "{{name}} {{hours}} h (not counted here)",
+      "leaveSick": "Paid sick leave {{hours}} h",
+      "leaveAnnual": "Annual leave {{hours}} h",
+      "leaveCashOut": "Annual leave payout {{hours}} h",
+      "leaveUnpaid": "Leave (unpaid)",
+      "holidayPay": "Paid public holiday {{hours}} h",
+      "holidayPending": "Paid public holiday pending",
+      "approved": "Reviewed · nothing pending",
+      "pending": "Pending items on this cell",
+      "birthday": "Birthday"
+    },
+    "breakdown": {
+      "title": "{{name}} · {{label}}",
+      "tierDays": "{{count}} day(s)",
+      "leave": "Paid leave",
+      "total": "Total",
+      "sum": "Total",
+      "mismatch": "This total differs from the table (annual leave follows the finance approval). The table figure prevails.",
+      "jump": "Click a day to jump to Hours and highlight that cell",
+      "empty": "No matching days this period",
+      "tierName": {
+        "weekday": "Weekday",
+        "saturday": "Saturday",
+        "sunday": "Sunday",
+        "publicHoliday": "Public holiday"
+      },
+      "leaveType": {
+        "PaidSick": "Sick",
+        "PaidAnnual": "Annual",
+        "AnnualCashOut": "Payout",
+        "PublicHolidayPay": "Paid PH",
+        "AnnualLeave": "Unpaid annual",
+        "SickLeave": "Unpaid sick"
+      }
     }
   }
 }

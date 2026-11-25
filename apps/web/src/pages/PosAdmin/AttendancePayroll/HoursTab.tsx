@@ -1,7 +1,7 @@
 import { CheckOutlined, PaperClipOutlined } from '@ant-design/icons'
-import { Avatar, Button, Empty, Popconfirm, Popover, Space, Spin, Tag, message } from 'antd'
+import { Avatar, Button, Empty, Popover, Space, Spin, Tag, message } from 'antd'
 import dayjs from 'dayjs'
-import { useMemo, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { reviewAttendanceApproval } from '../../../services/attendancePayrollService'
@@ -14,6 +14,8 @@ import type {
 } from '../../../types/attendancePayroll'
 import { avatarColorOf, initialsOf } from '../AttendanceReview/reviewLogic'
 import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
+import { CellDetailContent } from './HoursCellPopover'
+import { buildCellDetail } from './hoursCellDetailLogic'
 import type { ManualEntryPreset } from './ManualEntryDrawer'
 import { collectMissingPunches, manualEntryCellKind } from './manualEntryLogic'
 import { EMPLOYMENT_TYPE_TAG_COLORS, MANAGER_TAG_COLOR, cellHoursText, formatHours, isoWeekNumber, round2, showsAgeBadge, summarizeEmployeeHours, type BirthdayRateReview } from './payrollLogic'
@@ -37,6 +39,8 @@ interface HoursTabProps {
     /** 撤销补录建的假（带薪病假 / 年假）；传的是请假记录的 leaveGuid。 */
     onRevokeLeave: (leaveGuid: string) => Promise<void>
   }
+  /** 从工资表点某一天跳过来：滚动到该员工该日的格子并闪一下；nonce 变化才重新触发。 */
+  flashCell?: { userGuid: string; date: string; nonce: number } | null
 }
 
 const TOTAL_KEYS = ['weekday', 'saturday', 'sunday', 'publicHoliday', 'leave', 'total'] as const
@@ -57,6 +61,24 @@ export default function HoursTab(props: HoursTabProps) {
   const [acting, setActing] = useState<string>()
   const manualEntry = props.manualEntry
   const today = dayjs().format('YYYY-MM-DD')
+  const flashCell = props.flashCell
+  const [flashing, setFlashing] = useState<string | null>(null)
+  // 从工资表跳来：等表格渲染出来后滚到那一格并闪 2 秒
+  useEffect(() => {
+    if (!flashCell || !data) return undefined
+    const key = `${flashCell.userGuid}|${flashCell.date}`
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector(`[data-cell="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
+      setFlashing(key)
+    })
+    const timer = window.setTimeout(() => setFlashing(null), 2200)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(timer)
+    }
+    // data 变化（重载）不应再次闪烁：只跟 nonce
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flashCell?.nonce, Boolean(data)])
 
   const employees = data?.employees ?? []
   const days = data?.days ?? []
@@ -252,65 +274,67 @@ export default function HoursTab(props: HoursTabProps) {
     if (day.isBirthday) badges.push(<span key="bday" className="atp-badge atp-badge-birthday" role="img" aria-label={t('attendancePayroll.legend.birthday')}>🎂</span>)
     if (pending) badges.push(<span key="pend" className="atp-badge atp-badge-pending">{t('attendancePayroll.badges.pending')}</span>)
     if (!pending && day.approvedMarks.length) badges.push(<span key="ok" className="atp-badge atp-badge-ok"><CheckOutlined /></span>)
-    // 「补」角标：补录的打卡（撤销 = 按员工 + 日期）或补录的假（撤销 = 按请假记录）
+    // 「补」角标：补录的打卡（撤销 = 按员工 + 日期）或补录的假（撤销 = 按请假记录）；
+    // 原因 / 补录人 / 时间与撤销按钮都在单元格气泡里（鼠标放在格子上就能看到）
     const manualLeaveGuid = day.leave?.manualEntry ? day.leave.leaveGuid : undefined
     const manualTrace = day.manualEntry ?? day.leave?.manualEntry
     if (manualTrace) {
-      const trace = manualTrace
-      badges.push(
-        <Popover
-          key="manual"
-          trigger="hover"
-          title={t('attendancePayroll.manualEntry.traceTitle')}
-          content={(
-            <div className="atp-me-trace">
-              <div>{t('attendancePayroll.manualEntry.traceReason', { reason: trace.reason ?? '—' })}</div>
-              <div>{t('attendancePayroll.manualEntry.traceBy', { by: trace.createdBy ?? '—', at: trace.createdAt ? dayjs(trace.createdAt).format('MM-DD HH:mm') : '—' })}</div>
-              {trace.createdSchedule ? <div className="atp-me-trace-sub">{t('attendancePayroll.manualEntry.traceSchedule')}</div> : null}
-              {manualLeaveGuid && day.leave?.type === 'PaidSick' && !day.leave.hasCertificate
-                ? <div className="atp-me-trace-sub">{t('attendancePayroll.manualLeave.traceNoCertificate')}</div>
-                : null}
-              {manualEntry ? (
-                <Popconfirm
-                  title={manualLeaveGuid ? t('attendancePayroll.manualLeave.revokeConfirm') : t('attendancePayroll.manualEntry.revokeConfirm')}
-                  okText={t('attendancePayroll.manualEntry.revoke')}
-                  cancelText={t('attendancePayroll.manualEntry.cancel')}
-                  onConfirm={() => (manualLeaveGuid ? manualEntry.onRevokeLeave(manualLeaveGuid) : manualEntry.onRevoke(employee.userGuid, day.date))}
-                >
-                  <Button type="link" size="small" danger>{t('attendancePayroll.manualEntry.revoke')}</Button>
-                </Popconfirm>
-              ) : null}
-            </div>
-          )}
-        >
-          <span className="atp-badge atp-badge-manual">{t('attendancePayroll.manualEntry.badge')}</span>
-        </Popover>,
-      )
+      badges.push(<span key="manual" className="atp-badge atp-badge-manual">{t('attendancePayroll.manualEntry.badge')}</span>)
     }
 
     const restText = day.isUnavailable ? t('attendancePayroll.hours.unavailable') : t('attendancePayroll.hours.rest')
+    const flashKey = `${employee.userGuid}|${day.date}`
+    const cellNode = (
+      <div
+        data-cell={flashKey}
+        className={[...classes, flashing === flashKey ? 'atp-cell-flash' : ''].filter(Boolean).join(' ')}
+        {...(entryKind !== 'none'
+          ? {
+            role: 'button',
+            tabIndex: 0,
+            onClick: openEntry,
+            onKeyDown: (event: KeyboardEvent) => { if (event.key === 'Enter') openEntry() },
+          }
+          : {})}
+      >
+        {entryKind === 'missing' ? (
+          <span className="atp-cell-missing-text">
+            {t('attendancePayroll.manualEntry.cellMissing')}
+            {day.scheduleStart && day.scheduleEnd ? <small>{t('attendancePayroll.manualEntry.cellScheduled', { start: day.scheduleStart, end: day.scheduleEnd })}</small> : null}
+          </span>
+        ) : value !== null ? <span className="atp-cell-value">{value}</span> : <span className="atp-cell-rest-text">{restText}</span>}
+        {entryKind === 'addable' ? <span className="atp-cell-add-text">{t('attendancePayroll.manualEntry.cellAdd')}</span> : null}
+        {badges.length ? <span className="atp-cell-badges">{badges}</span> : null}
+      </div>
+    )
+    // 悬停气泡：该格对应的打卡记录（排班 / 班段 / 来源 / 偏差 / 用餐扣除）与补录留痕；休息格没有内容就不弹
+    const showPopover = buildCellDetail(day).hasContent
     return (
       <td key={day.date} className={[weekStart ? 'atp-week-divider' : '', header.isPublicHoliday ? 'atp-col-holiday' : ''].join(' ')}>
-        <div
-          className={classes.join(' ')}
-          {...(entryKind !== 'none'
-            ? {
-              role: 'button',
-              tabIndex: 0,
-              onClick: openEntry,
-              onKeyDown: (event: KeyboardEvent) => { if (event.key === 'Enter') openEntry() },
-            }
-            : {})}
-        >
-          {entryKind === 'missing' ? (
-            <span className="atp-cell-missing-text">
-              {t('attendancePayroll.manualEntry.cellMissing')}
-              {day.scheduleStart && day.scheduleEnd ? <small>{t('attendancePayroll.manualEntry.cellScheduled', { start: day.scheduleStart, end: day.scheduleEnd })}</small> : null}
-            </span>
-          ) : value !== null ? <span className="atp-cell-value">{value}</span> : <span className="atp-cell-rest-text">{restText}</span>}
-          {entryKind === 'addable' ? <span className="atp-cell-add-text">{t('attendancePayroll.manualEntry.cellAdd')}</span> : null}
-          {badges.length ? <span className="atp-cell-badges">{badges}</span> : null}
-        </div>
+        {showPopover ? (
+          <Popover
+            trigger="hover"
+            placement="bottom"
+            mouseEnterDelay={0.35}
+            destroyOnHidden
+            classNames={{ root: 'atp-cell-pop' }}
+            content={(
+              <CellDetailContent
+                employeeName={employee.userName}
+                day={day}
+                trace={manualTrace}
+                noCertificate={Boolean(manualLeaveGuid && day.leave?.type === 'PaidSick' && !day.leave.hasCertificate)}
+                onAddHours={entryKind === 'missing' ? openEntry : undefined}
+                onRevoke={manualEntry && manualTrace
+                  ? () => (manualLeaveGuid ? manualEntry.onRevokeLeave(manualLeaveGuid) : manualEntry.onRevoke(employee.userGuid, day.date))
+                  : undefined}
+                revokeConfirmTitle={manualLeaveGuid ? t('attendancePayroll.manualLeave.revokeConfirm') : t('attendancePayroll.manualEntry.revokeConfirm')}
+              />
+            )}
+          >
+            {cellNode}
+          </Popover>
+        ) : cellNode}
       </td>
     )
   }

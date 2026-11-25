@@ -46,6 +46,34 @@ export interface AttendanceHoursDayHeaderDto {
   holidayName?: string
 }
 
+/** 工时统计一个打卡班段：上班 / 下班时间与来源。 */
+export interface AttendanceHoursSegmentDto {
+  start: string
+  end?: string | null
+  isAutoClockOut?: boolean
+  /** 上班打卡来源：PosQr 收银机扫码 / ManualAdjustment 店长修改 / ManualEntry 补录 / App …；旧版接口没有。 */
+  inSource?: string | null
+  /** 下班打卡来源。 */
+  outSource?: string | null
+  /** 上班打卡的收银机设备码（如 POS_1003_1308）；非收银机打卡为空。 */
+  deviceCode?: string | null
+}
+
+/** 一个排班在格子上的明细：分钟数与工资计算用的是同一份结果。 */
+export interface AttendanceHoursShiftDto {
+  /** 排班窗口 HH:mm；跨午夜的班结束时刻小于开始时刻。 */
+  scheduleStart: string
+  scheduleEnd: string
+  workedMinutes: number
+  inScheduleMinutes: number
+  mealDeductionMinutes: number
+  mealAddBackMinutes: number
+  overtimeMinutes: number
+  paidMinutes: number
+  /** 打卡班段；未打卡的班为空数组。 */
+  segments: AttendanceHoursSegmentDto[]
+}
+
 export interface AttendanceHoursDayDto {
   date: string
   /** 当天计薪工时（十进制小时，2 位小数）；没上班为 null。 */
@@ -79,7 +107,9 @@ export interface AttendanceHoursDayDto {
   otherStores: { storeCode: string; storeName?: string; hours: number }[]
   isBirthday?: boolean
   /** 当天班段（HH:mm；系统午夜自动下班 end = 24:00）。 */
-  segments?: { start: string; end?: string | null; isAutoClockOut?: boolean }[]
+  segments?: AttendanceHoursSegmentDto[]
+  /** 当天每个排班的明细（排班窗口 / 打卡段与来源 / 用餐扣除 / 加班），气泡展示用；旧版接口没有这个字段。 */
+  shifts?: AttendanceHoursShiftDto[]
   /** 有排班、排班窗口已过去、却一次打卡都没有（目前按 0 工时计）：可补录。 */
   missingPunch?: boolean
   /** 未打卡班的排班窗口（HH:mm），补录表单预填用；只在 missingPunch 时有值。 */
