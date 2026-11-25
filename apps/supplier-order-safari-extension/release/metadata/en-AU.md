@@ -17,10 +17,10 @@ The Safari extension is designed for iPhone and iPad and is available only to au
 
 Keywords: supplier,ordering,purchase,sales,inventory,business
 
-## What's New in Version 1.7.0
+## What's New in Version 1.7.1
 
-- Scan a product barcode on a supported supplier website: the assistant finds the matching supplier item number in Hot Bargain and searches the supplier site for it. Requires a scanner or keyboard that types the barcode.
-- If the product is already on the current page, it is highlighted without leaving the page. The assistant only searches; it never adds items to a cart or places an order.
+- More reliable barcode scanning with Bluetooth scanners in keyboard mode: a brief connection stall in the middle of a scan no longer cuts the barcode short, so the assistant no longer looks up the wrong item number from a partial barcode.
+- Scanners set to end each barcode with a carriage return and line feed no longer trigger an extra page action or browser shortcut after the scan.
 
 Privacy URL: https://hotbargain.vip/privacy/browser-extension
 
