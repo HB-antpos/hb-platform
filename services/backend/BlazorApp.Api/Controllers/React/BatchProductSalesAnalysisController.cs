@@ -94,6 +94,17 @@ public sealed class BatchProductSalesAnalysisController : ControllerBase
         catch (Exception ex) { return InternalError<BatchProductSalesPurchaseResultDto>(ex, "批量货号进货量查询失败"); }
     }
 
+    /// <summary>进货逐笔明细：与进货量同一权限、门店范围与日期口径，点开进货量时按需加载。</summary>
+    [HttpPost("purchase-details")]
+    public async Task<IActionResult> PurchaseDetails([FromBody] BatchProductSalesPurchaseDetailRequestDto request)
+    {
+        try { return Ok(await _service.GetPurchaseDetailsAsync(request, await ResolveStoreScopeAsync(), HttpContext.RequestAborted)); }
+        catch (BatchProductSalesAnalysisForbiddenException) { return Forbid(); }
+        catch (BatchProductSalesAnalysisValidationException ex) { return BadRequest(ApiResponse<BatchProductSalesPurchaseDetailResultDto>.Error(ex.Message)); }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested) { return new EmptyResult(); }
+        catch (Exception ex) { return InternalError<BatchProductSalesPurchaseDetailResultDto>(ex, "批量货号进货明细查询失败"); }
+    }
+
     [HttpPost("export/detail")]
     public async Task<IActionResult> ExportDetail([FromBody] BatchProductSalesFollowupRequestDto request)
     {

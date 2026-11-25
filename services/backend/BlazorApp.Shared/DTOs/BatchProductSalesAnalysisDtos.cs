@@ -200,6 +200,41 @@ public sealed class BatchProductSalesPurchaseResultDto : BatchProductSalesScopeD
     public List<BatchProductSalesPurchaseRowDto> Rows { get; set; } = [];
 }
 
+/// <summary>
+/// 进货逐笔明细查询：点开某个进货量时按需加载，口径与 <see cref="BatchProductSalesPurchaseRequestDto"/> 完全一致；
+/// BranchCode 为空表示当前门店范围内全部分店。
+/// </summary>
+public sealed class BatchProductSalesPurchaseDetailRequestDto : BatchProductSalesScopeDto
+{
+    public List<string>? ProductCodes { get; set; }
+    public string? BranchCode { get; set; }
+}
+
+/// <summary>每张单据×商品一行；仓库发货取配货（发货）数量，供应商进货取进货单数量。</summary>
+public sealed class BatchProductSalesPurchaseDetailRowDto
+{
+    /// <summary>Warehouse = 仓库分店订单发货；Supplier = 分店供应商进货单。</summary>
+    public string Source { get; set; } = string.Empty;
+    public string DocumentNo { get; set; } = string.Empty;
+    /// <summary>计入进货量所用的日期：仓库单为出库日期（未出库为订单日期），供应商单为有效进货日期。</summary>
+    public DateTime PurchaseDate { get; set; }
+    /// <summary>仓库单尚无出库日期、按订单日期计入时为 false；供应商单恒为 true。</summary>
+    public bool IsShipped { get; set; }
+    public string ProductCode { get; set; } = string.Empty;
+    public string BranchCode { get; set; } = string.Empty;
+    public decimal Quantity { get; set; }
+}
+
+public sealed class BatchProductSalesPurchaseDetailResultDto : BatchProductSalesScopeDto
+{
+    public List<string> ProductCodes { get; set; } = [];
+    public string? BranchCode { get; set; }
+    /// <summary>按日期倒序，最多 <c>Limit</c> 行；超出时 Truncated = true。</summary>
+    public List<BatchProductSalesPurchaseDetailRowDto> Rows { get; set; } = [];
+    public int Limit { get; set; }
+    public bool Truncated { get; set; }
+}
+
 public sealed class BatchProductSalesDiscountOverviewDto : BatchProductSalesScopeDto
 {
     public List<string> ProductCodes { get; set; } = [];

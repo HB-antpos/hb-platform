@@ -37,7 +37,31 @@
     "purchaseShort": "进货 {{value}}",
     "purchaseBreakdown": "总仓配货 {{warehouse}} · 供应商进货单 {{supplier}}",
     "purchaseLoadFailed": "进货量加载失败，销量不受影响。",
-    "purchaseNote": "进货量 = 总仓配货（仓库订货单的配货数量，不含草稿；按出库日期，未出库按订单日期）+ 分店供应商进货单数量（按入库日期，无则按订单日期）。进货日期默认与销售日期相同，可单独调整；只改进货日期时不会重新查询销量。",
+    "purchaseNote": "进货量 = 总仓配货（仓库分店订单的发货数量，不含草稿；按出库日期，未出库按订单日期）+ 分店供应商进货单数量（按入库日期，无则按订单日期）。进货日期默认为销售开始日前 60 天至销售结束日（仓库商品多在上市前铺货），可单独调整；点进货数字可查看每次进货的日期与数量。只改进货日期时不会重新查询销量。",
+    "purchaseDetail": {
+      "title": "进货明细",
+      "open": "查看进货明细",
+      "range": "{{startDate}} 至 {{endDate}}",
+      "summary": "合计 {{total}} · 仓库发货 {{warehouse}} · 供应商进货 {{supplier}}",
+      "columns": {
+        "date": "进货日期",
+        "source": "来源",
+        "documentNo": "单号",
+        "branch": "分店",
+        "itemNumber": "货号",
+        "quantity": "数量"
+      },
+      "source": {
+        "Warehouse": "仓库发货",
+        "Supplier": "供应商进货"
+      },
+      "notShipped": "未出库",
+      "notShippedHint": "仓库单尚未出库，按订单日期计入",
+      "empty": "该进货日期内没有进货记录",
+      "count": "共 {{count}} 笔",
+      "truncated": "仅显示最近 {{limit}} 笔，更早的记录请缩小进货日期或分店范围。",
+      "loadFailed": "进货明细加载失败"
+    },
     "total": "合计",
     "noImportedItems": "先粘贴或导入至少一个有效货号，再查询销量。",
     "noQueryResult": "尚未查询销量",
@@ -95,7 +119,7 @@
       "timeout": "请求超时，请重试。",
       "forbidden": "您没有查询这些分店销量的权限。",
       "date": "日期范围无效。",
-      "purchaseDate": "进货日期范围无效（最多 366 天，且不能晚于今天）。",
+      "purchaseDate": "进货日期范围无效（最多 426 天，且不能晚于今天）。",
       "statistics": "统计版本已变化，已保留当前结果，请刷新结果。"
     },
     "metrics": {

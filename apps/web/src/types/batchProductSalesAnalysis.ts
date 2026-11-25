@@ -159,6 +159,35 @@ export interface BatchSalesPurchaseResult extends BatchSalesScope {
   rows: BatchSalesPurchaseRow[]
 }
 
+/** 进货逐笔明细：点开某个进货量时按需请求，日期与门店口径与进货量完全一致。branchCode 为空表示全部分店。 */
+export interface BatchSalesPurchaseDetailRequest extends BatchSalesScope {
+  productCodes: string[]
+  branchCode?: string
+}
+
+/** Warehouse = 仓库分店订单发货（配货数量）；Supplier = 分店供应商进货单。 */
+export type BatchSalesPurchaseSource = 'Warehouse' | 'Supplier'
+
+/** 每张单据×商品一行。purchaseDate 为计入进货量的日期：仓库单按出库日期，未出库（isShipped = false）按订单日期。 */
+export interface BatchSalesPurchaseDetailRow {
+  source: BatchSalesPurchaseSource
+  documentNo: string
+  purchaseDate: string
+  isShipped: boolean
+  productCode: string
+  branchCode: string
+  quantity: number
+}
+
+export interface BatchSalesPurchaseDetailResult extends BatchSalesScope {
+  productCodes: string[]
+  branchCode?: string
+  /** 按日期倒序，最多 limit 行；truncated 表示还有更早的记录未返回。 */
+  rows: BatchSalesPurchaseDetailRow[]
+  limit: number
+  truncated: boolean
+}
+
 export interface BatchSalesOptions {
   stores: { code: string; name: string }[]
   maxItemNumbers: number
@@ -173,4 +202,5 @@ export interface BatchProductSalesApi {
   getDiscounts(input: BatchSalesLockedScope & { branchCode?: string }, signal?: AbortSignal): Promise<BatchSalesDiscountOverview>
   exportDetail(input: BatchSalesLockedScope, signal?: AbortSignal): Promise<string>
   getPurchases(input: BatchSalesPurchaseRequest, signal?: AbortSignal): Promise<BatchSalesPurchaseResult>
+  getPurchaseDetails(input: BatchSalesPurchaseDetailRequest, signal?: AbortSignal): Promise<BatchSalesPurchaseDetailResult>
 }

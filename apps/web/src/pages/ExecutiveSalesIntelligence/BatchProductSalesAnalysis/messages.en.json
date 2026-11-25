@@ -37,7 +37,31 @@
     "purchaseShort": "Purch. {{value}}",
     "purchaseBreakdown": "Warehouse allocation {{warehouse}} · Supplier invoices {{supplier}}",
     "purchaseLoadFailed": "Purchase quantities could not be loaded. Sales figures are unaffected.",
-    "purchaseNote": "Purchased = warehouse allocation (allocated quantity on store warehouse orders, drafts excluded; by dispatch date, or order date if not yet dispatched) + store supplier invoice quantity (by received date, or order date if not received). Purchase dates default to the sales dates and can be changed separately; changing only the purchase dates does not re-run the sales query.",
+    "purchaseNote": "Purchased = warehouse dispatch (dispatched quantity on store warehouse orders, drafts excluded; by dispatch date, or order date if not yet dispatched) + store supplier invoice quantity (by received date, or order date if not received). Purchase dates default to 60 days before the sales start date through the sales end date (warehouse items are usually stocked before launch) and can be changed separately; click a purchased figure to see each purchase date and quantity. Changing only the purchase dates does not re-run the sales query.",
+    "purchaseDetail": {
+      "title": "Purchase details",
+      "open": "View purchase details",
+      "range": "{{startDate}} to {{endDate}}",
+      "summary": "Total {{total}} · Warehouse dispatch {{warehouse}} · Supplier invoices {{supplier}}",
+      "columns": {
+        "date": "Date",
+        "source": "Source",
+        "documentNo": "Document",
+        "branch": "Store",
+        "itemNumber": "Item No.",
+        "quantity": "Qty"
+      },
+      "source": {
+        "Warehouse": "Warehouse",
+        "Supplier": "Supplier"
+      },
+      "notShipped": "Not dispatched",
+      "notShippedHint": "Warehouse order not dispatched yet; counted by order date",
+      "empty": "No purchases in these dates",
+      "count": "{{count}} records",
+      "truncated": "Showing the latest {{limit}} records only. Narrow the purchase dates or stores to see earlier ones.",
+      "loadFailed": "Purchase details could not be loaded"
+    },
     "total": "Total",
     "noImportedItems": "Paste or import at least one valid item number before querying sales.",
     "noQueryResult": "Sales have not been queried yet",
@@ -95,7 +119,7 @@
       "timeout": "The request timed out. Please retry.",
       "forbidden": "You are not permitted to query sales for these stores.",
       "date": "The date range is invalid.",
-      "purchaseDate": "The purchase date range is invalid (up to 366 days, ending no later than today).",
+      "purchaseDate": "The purchase date range is invalid (up to 426 days, ending no later than today).",
       "statistics": "Statistics changed. Current results are retained; refresh results."
     },
     "metrics": {

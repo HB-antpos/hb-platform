@@ -22,6 +22,12 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
     // SQL Server 的参数上限为 2100；给日期、门店等过滤条件留出空间。
     private const int ProductCodeQueryBatchSize = 500;
     internal const int MaxDays = 366;
+    // 进货日期默认取「销售开始日前 60 天 ～ 销售结束日」：仓库商品多在上市前铺货，与销量同窗口会把进货算成 0。
+    // 销售日期最多 366 天，进货区间因此放宽到 366 + 60 天。
+    internal const int PurchaseLookbackDays = 60;
+    internal const int MaxPurchaseDays = MaxDays + PurchaseLookbackDays;
+    // 进货逐笔明细单次最多返回的行数（单据×商品），超出时提示只显示最近的部分。
+    internal const int MaxPurchaseDetailRows = 500;
     private readonly ISqlSugarClient _db;
     private readonly BatchProductSalesStatisticReader _statisticReader;
     private readonly BatchProductSalesDiscountSnapshotReader _discountSnapshotReader;
@@ -413,7 +419,7 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         IReadOnlyList<string>? scopedStoreCodes,
         CancellationToken cancellationToken = default)
     {
-        var range = ValidateRange(request);
+        var range = ValidateRange(request, MaxPurchaseDays);
         var productCodes = NormalizeProductCodes(request.ProductCodes);
         var storeScope = await ResolveEffectiveStoreScopeAsync(request.StoreCodes, scopedStoreCodes, cancellationToken);
         var result = new BatchProductSalesPurchaseResultDto
@@ -426,23 +432,80 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
         if (storeScope.Codes.Count == 0) return ApiResponse<BatchProductSalesPurchaseResultDto>.OK(result);
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var parameters = new[]
+        result.Rows = await QueryPurchaseSqlAsync<BatchProductSalesPurchaseRowDto>(
+            PurchaseQuantitySql, BuildPurchaseParameters(productCodes, storeScope.Codes, range), "进货量查询已取消。", cancellationToken);
+        _logger.LogInformation(
+            "批量货号进货量查询耗时 {ElapsedMs}ms，商品 {ProductCount} 个，分店 {StoreCount} 家，结果 {RowCount} 行",
+            stopwatch.ElapsedMilliseconds, productCodes.Count, storeScope.Codes.Count, result.Rows.Count);
+        return ApiResponse<BatchProductSalesPurchaseResultDto>.OK(result);
+    }
+
+    /// <summary>
+    /// 进货逐笔明细（每张单据×商品一行，按日期倒序，最多 <see cref="MaxPurchaseDetailRows"/> 行）。
+    /// 日期、草稿/删除过滤、零售价回查编码与 <see cref="PurchaseQuantitySql"/> 完全相同，逐笔合计必然等于进货量。
+    /// 指定 BranchCode 时只在有效门店范围内取该分店；不在范围内（无权或已停用）返回空结果而不是越权读取。
+    /// </summary>
+    public async Task<ApiResponse<BatchProductSalesPurchaseDetailResultDto>> GetPurchaseDetailsAsync(
+        BatchProductSalesPurchaseDetailRequestDto request,
+        IReadOnlyList<string>? scopedStoreCodes,
+        CancellationToken cancellationToken = default)
+    {
+        var range = ValidateRange(request, MaxPurchaseDays);
+        var productCodes = NormalizeProductCodes(request.ProductCodes);
+        var storeScope = await ResolveEffectiveStoreScopeAsync(request.StoreCodes, scopedStoreCodes, cancellationToken);
+        var branchCode = string.IsNullOrWhiteSpace(request.BranchCode) ? null : request.BranchCode.Trim();
+        var storeCodes = branchCode == null
+            ? storeScope.Codes
+            : storeScope.Codes.Where(code => string.Equals(code, branchCode, StringComparison.OrdinalIgnoreCase)).ToList();
+        var result = new BatchProductSalesPurchaseDetailResultDto
         {
-            new SugarParameter("@ProductCodes", System.Text.Json.JsonSerializer.Serialize(productCodes)),
-            new SugarParameter("@StoreCodes", System.Text.Json.JsonSerializer.Serialize(storeScope.Codes)),
-            new SugarParameter("@StartDate", range.StartDate),
-            new SugarParameter("@EndDateExclusive", range.EndDate.AddDays(1)),
+            StartDate = range.StartDate,
+            EndDate = range.EndDate,
+            StoreCodes = storeScope.Codes,
+            ProductCodes = productCodes,
+            BranchCode = branchCode == null ? null : storeCodes.FirstOrDefault() ?? branchCode,
+            Limit = MaxPurchaseDetailRows,
         };
+        if (storeCodes.Count == 0) return ApiResponse<BatchProductSalesPurchaseDetailResultDto>.OK(result);
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var parameters = BuildPurchaseParameters(productCodes, storeCodes, range)
+            // 多取一行用来判断是否超出上限。
+            .Append(new SugarParameter("@Limit", MaxPurchaseDetailRows + 1))
+            .ToArray();
+        var rows = await QueryPurchaseSqlAsync<BatchProductSalesPurchaseDetailRowDto>(
+            PurchaseDetailSql, parameters, "进货明细查询已取消。", cancellationToken);
+        result.Truncated = rows.Count > MaxPurchaseDetailRows;
+        result.Rows = result.Truncated ? rows.Take(MaxPurchaseDetailRows).ToList() : rows;
+        _logger.LogInformation(
+            "批量货号进货明细查询耗时 {ElapsedMs}ms，商品 {ProductCount} 个，分店 {StoreCount} 家，结果 {RowCount} 行，截断 {Truncated}",
+            stopwatch.ElapsedMilliseconds, productCodes.Count, storeCodes.Count, result.Rows.Count, result.Truncated);
+        return ApiResponse<BatchProductSalesPurchaseDetailResultDto>.OK(result);
+    }
+
+    private static SugarParameter[] BuildPurchaseParameters(
+        IReadOnlyList<string> productCodes, IReadOnlyList<string> storeCodes, (DateTime StartDate, DateTime EndDate) range) =>
+    [
+        new SugarParameter("@ProductCodes", System.Text.Json.JsonSerializer.Serialize(productCodes)),
+        new SugarParameter("@StoreCodes", System.Text.Json.JsonSerializer.Serialize(storeCodes)),
+        new SugarParameter("@StartDate", range.StartDate),
+        new SugarParameter("@EndDateExclusive", range.EndDate.AddDays(1)),
+    ];
+
+    private async Task<List<T>> QueryPurchaseSqlAsync<T>(
+        string sql, SugarParameter[] parameters, string cancelledMessage, CancellationToken cancellationToken)
+    {
         var previousToken = _db.Ado.CancellationToken;
         _db.Ado.CancellationToken = cancellationToken;
         try
         {
-            result.Rows = await _db.Ado.SqlQueryAsync<BatchProductSalesPurchaseRowDto>(PurchaseQuantitySql, parameters);
+            var rows = await _db.Ado.SqlQueryAsync<T>(sql, parameters);
             cancellationToken.ThrowIfCancellationRequested();
+            return rows;
         }
         catch (Exception exception) when (cancellationToken.IsCancellationRequested && exception is not OperationCanceledException)
         {
-            throw new OperationCanceledException("进货量查询已取消。", exception, cancellationToken);
+            throw new OperationCanceledException(cancelledMessage, exception, cancellationToken);
         }
         finally
         {
@@ -450,10 +513,6 @@ public sealed class BatchProductSalesAnalysisService : IBatchProductSalesAnalysi
             if (previousToken.HasValue) _db.Ado.CancellationToken = previousToken.Value;
             else _db.Ado.RemoveCancellationToken();
         }
-        _logger.LogInformation(
-            "批量货号进货量查询耗时 {ElapsedMs}ms，商品 {ProductCount} 个，分店 {StoreCount} 家，结果 {RowCount} 行",
-            stopwatch.ElapsedMilliseconds, productCodes.Count, storeScope.Codes.Count, result.Rows.Count);
-        return ApiResponse<BatchProductSalesPurchaseResultDto>.OK(result);
     }
 
     /// <summary>
@@ -526,6 +585,89 @@ FROM (
 ) r
 GROUP BY r.[ProductCode], r.[BranchCode]
 HAVING SUM(r.[WarehouseQuantity]) <> 0 OR SUM(r.[SupplierQuantity]) <> 0
+OPTION (RECOMPILE);
+
+DROP TABLE #BatchPurchaseWarehouseOrders;
+DROP TABLE #BatchPurchaseStores;
+DROP TABLE #BatchPurchaseProducts;
+""";
+
+    /// <summary>
+    /// 进货逐笔明细：筛选条件、日期口径与 <see cref="PurchaseQuantitySql"/> 逐字一致，只是把分组粒度从商品×分店细化到单据×商品。
+    /// 仓库单的进货日期 = 出库日期，未出库按订单日期（IsShipped = 0）；供应商单 = EffectivePurchaseDate。
+    /// 单号为空时退回单据 GUID，保证每行都能定位到原单。
+    /// </summary>
+    internal const string PurchaseDetailSql = """
+SET NOCOUNT ON;
+CREATE TABLE #BatchPurchaseProducts ([ProductCode] nvarchar(50) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+INSERT INTO #BatchPurchaseProducts ([ProductCode])
+SELECT DISTINCT CONVERT(nvarchar(50), [value]) FROM OPENJSON(@ProductCodes) WHERE NULLIF(CONVERT(nvarchar(50), [value]), N'') IS NOT NULL;
+
+CREATE TABLE #BatchPurchaseStores ([StoreCode] nvarchar(50) COLLATE DATABASE_DEFAULT NOT NULL PRIMARY KEY);
+INSERT INTO #BatchPurchaseStores ([StoreCode])
+SELECT DISTINCT CONVERT(nvarchar(50), [value]) FROM OPENJSON(@StoreCodes) WHERE NULLIF(CONVERT(nvarchar(50), [value]), N'') IS NOT NULL;
+
+SELECT
+    h.[OrderGUID],
+    h.[OrderNo],
+    s.[StoreCode],
+    h.[OutboundDate],
+    COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) AS [PurchaseAt]
+INTO #BatchPurchaseWarehouseOrders
+FROM [WareHouseOrder] h
+INNER JOIN #BatchPurchaseStores s ON s.[StoreCode] = h.[StoreCode]
+WHERE COALESCE(h.[IsDeleted], 0) = 0
+    -- 草稿（FlowStatus = 0）不算进货；已提交、配货中、已完成都按配货数量计。
+    AND COALESCE(h.[FlowStatus], -1) <> 0
+    AND COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) >= @StartDate
+    AND COALESCE(h.[OutboundDate], h.[OrderDate], h.[CreatedAt]) < @EndDateExclusive;
+
+SELECT TOP (@Limit)
+    r.[Source], r.[DocumentNo], r.[PurchaseDate], r.[IsShipped], r.[ProductCode], r.[BranchCode], r.[Quantity]
+FROM (
+    SELECT
+        N'Warehouse' AS [Source],
+        COALESCE(NULLIF(o.[OrderNo], N''), o.[OrderGUID]) AS [DocumentNo],
+        CAST(o.[PurchaseAt] AS date) AS [PurchaseDate],
+        CAST(CASE WHEN o.[OutboundDate] IS NULL THEN 0 ELSE 1 END AS bit) AS [IsShipped],
+        p.[ProductCode],
+        o.[StoreCode] AS [BranchCode],
+        SUM(COALESCE(d.[AllocQuantity], 0)) AS [Quantity]
+    FROM #BatchPurchaseWarehouseOrders o
+    INNER JOIN [WareHouseOrderDetails] d
+        ON d.[OrderGUID] = o.[OrderGUID]
+        AND COALESCE(d.[IsDeleted], 0) = 0
+    INNER JOIN #BatchPurchaseProducts p ON p.[ProductCode] = d.[ProductCode]
+    GROUP BY o.[OrderGUID], o.[OrderNo], o.[PurchaseAt], o.[OutboundDate], p.[ProductCode], o.[StoreCode]
+    HAVING SUM(COALESCE(d.[AllocQuantity], 0)) <> 0
+    UNION ALL
+    SELECT
+        N'Supplier' AS [Source],
+        COALESCE(NULLIF(i.[InvoiceNo], N''), i.[InvoiceGUID]) AS [DocumentNo],
+        i.[EffectivePurchaseDate] AS [PurchaseDate],
+        CAST(1 AS bit) AS [IsShipped],
+        p.[ProductCode],
+        s.[StoreCode] AS [BranchCode],
+        SUM(COALESCE(d.[Quantity], 0)) AS [Quantity]
+    FROM [StoreLocalSupplierInvoice] i
+    INNER JOIN #BatchPurchaseStores s ON s.[StoreCode] = i.[StoreCode]
+    INNER JOIN [StoreLocalSupplierInvoiceDetails] d
+        ON d.[InvoiceGUID] = i.[InvoiceGUID]
+        AND d.[IsDeleted] = 0
+    -- 只有明细缺商品编码时才回查零售价补编码，按主键逐行查找。
+    LEFT JOIN [StoreRetailPrice] srp
+        ON NULLIF(d.[ProductCode], N'') IS NULL
+        AND srp.[UUID] = d.[StoreProductCode]
+        AND srp.[IsDeleted] = 0
+    INNER JOIN #BatchPurchaseProducts p
+        ON p.[ProductCode] = COALESCE(NULLIF(d.[ProductCode], N''), NULLIF(srp.[ProductCode], N''))
+    WHERE i.[IsDeleted] = 0
+        AND i.[EffectivePurchaseDate] >= CAST(@StartDate AS date)
+        AND i.[EffectivePurchaseDate] < CAST(@EndDateExclusive AS date)
+    GROUP BY i.[InvoiceGUID], i.[InvoiceNo], i.[EffectivePurchaseDate], p.[ProductCode], s.[StoreCode]
+    HAVING SUM(COALESCE(d.[Quantity], 0)) <> 0
+) r
+ORDER BY r.[PurchaseDate] DESC, r.[Source], r.[DocumentNo], r.[BranchCode], r.[ProductCode]
 OPTION (RECOMPILE);
 
 DROP TABLE #BatchPurchaseWarehouseOrders;
@@ -921,11 +1063,11 @@ DROP TABLE #BatchPurchaseProducts;
         return segments;
     }
 
-    internal static (DateTime StartDate, DateTime EndDate) ValidateRange(BatchProductSalesScopeDto request)
+    internal static (DateTime StartDate, DateTime EndDate) ValidateRange(BatchProductSalesScopeDto request, int maxDays = MaxDays)
     {
         var start = request.StartDate.Date; var end = request.EndDate.Date;
-        if (start == DateTime.MinValue || end == DateTime.MinValue || start > end || end > GetBrisbaneToday() || (end - start).TotalDays + 1 > MaxDays)
-            throw new BatchProductSalesAnalysisValidationException("日期范围无效，最多 366 天。");
+        if (start == DateTime.MinValue || end == DateTime.MinValue || start > end || end > GetBrisbaneToday() || (end - start).TotalDays + 1 > maxDays)
+            throw new BatchProductSalesAnalysisValidationException($"日期范围无效，最多 {maxDays} 天。");
         return (start, end);
     }
     internal static List<string> NormalizeItemNumbers(IEnumerable<string>? values)

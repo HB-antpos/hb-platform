@@ -17,6 +17,8 @@ import type {
   BatchSalesLockedScope,
   BatchSalesProduct,
   BatchSalesProductSummary,
+  BatchSalesPurchaseDetailRequest,
+  BatchSalesPurchaseDetailResult,
   BatchSalesPurchaseRequest,
   BatchSalesPurchaseResult,
   BatchSalesQuery,
@@ -425,4 +427,37 @@ async function getPurchases(input: BatchSalesPurchaseRequest, signal?: AbortSign
   return normalizePurchaseResult(unwrapPayload(response))
 }
 
-export const batchProductSalesApi: BatchProductSalesApi = { getOptions, query, getDetail, getBranchOverview, getDiscounts, exportDetail, getPurchases }
+function normalizePurchaseDetailResult(raw: unknown): BatchSalesPurchaseDetailResult {
+  const record = asRecord(raw, '进货明细响应')
+  const branchCode = optionalString(pick(record, 'branchCode', 'BranchCode'))
+  return {
+    ...normalizeResponseScope(record),
+    productCodes: requiredStringArray(pick(record, 'productCodes', 'ProductCodes'), '商品编码'),
+    ...(branchCode ? { branchCode } : {}),
+    rows: requiredArray(pick(record, 'rows', 'Rows'), '进货明细').map((entry, index) => {
+      const row = asRecord(entry, `进货明细[${index}]`)
+      const isShipped = pick(row, 'isShipped', 'IsShipped')
+      if (typeof isShipped !== 'boolean') throw new Error(`缺少或非法进货明细[${index}].是否已出库`)
+      return {
+        source: normalizeEnum(pick(row, 'source', 'Source'), `进货明细[${index}].来源`, ['Warehouse', 'Supplier'] as const),
+        documentNo: requiredString(pick(row, 'documentNo', 'DocumentNo'), `进货明细[${index}].单号`),
+        purchaseDate: normalizeDate(pick(row, 'purchaseDate', 'PurchaseDate'), `进货明细[${index}].进货日期`),
+        isShipped,
+        productCode: requiredString(pick(row, 'productCode', 'ProductCode'), `进货明细[${index}].商品编码`),
+        branchCode: requiredString(pick(row, 'branchCode', 'BranchCode'), `进货明细[${index}].分店编码`),
+        quantity: requiredNumber(pick(row, 'quantity', 'Quantity'), `进货明细[${index}].数量`),
+      }
+    }),
+    limit: requiredNumber(pick(record, 'limit', 'Limit'), '明细上限'),
+    truncated: pick(record, 'truncated', 'Truncated') === true,
+  }
+}
+
+async function getPurchaseDetails(input: BatchSalesPurchaseDetailRequest, signal?: AbortSignal): Promise<BatchSalesPurchaseDetailResult> {
+  validateScope(input)
+  if (!requiredStringArray(input.productCodes, '商品编码').length) throw new Error('缺少商品编码')
+  const response = await request.post<ApiResponse<unknown> | unknown>(`${API_BASE}/purchase-details`, input, { signal })
+  return normalizePurchaseDetailResult(unwrapPayload(response))
+}
+
+export const batchProductSalesApi: BatchProductSalesApi = { getOptions, query, getDetail, getBranchOverview, getDiscounts, exportDetail, getPurchases, getPurchaseDetails }

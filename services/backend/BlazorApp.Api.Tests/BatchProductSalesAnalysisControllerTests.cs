@@ -197,6 +197,42 @@ public sealed class BatchProductSalesAnalysisControllerTests
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    [Fact]
+    public async Task PurchaseDetails_撤销权限时不调用服务()
+    {
+        var service = new Mock<IBatchProductSalesAnalysisService>(MockBehavior.Strict);
+        var result = await CreateController(service.Object, "User", ["S1"], hasPermission: false).PurchaseDetails(new());
+        Assert.IsType<ForbidResult>(result);
+        service.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task PurchaseDetails_受限用户按名下门店范围读取明细()
+    {
+        IReadOnlyList<string>? captured = null;
+        var service = new Mock<IBatchProductSalesAnalysisService>();
+        service.Setup(x => x.GetPurchaseDetailsAsync(It.IsAny<BatchProductSalesPurchaseDetailRequestDto>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .Callback<BatchProductSalesPurchaseDetailRequestDto, IReadOnlyList<string>?, CancellationToken>((_, scope, _) => captured = scope)
+            .ReturnsAsync(ApiResponse<BatchProductSalesPurchaseDetailResultDto>.OK(new()));
+
+        var result = await CreateController(service.Object, "User", ["S1", "S2"]).PurchaseDetails(new() { ProductCodes = ["P1"], BranchCode = "S2" });
+
+        Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(new[] { "S1", "S2" }, captured);
+    }
+
+    [Fact]
+    public async Task PurchaseDetails_参数校验失败返回400()
+    {
+        var service = new Mock<IBatchProductSalesAnalysisService>();
+        service.Setup(x => x.GetPurchaseDetailsAsync(It.IsAny<BatchProductSalesPurchaseDetailRequestDto>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new BatchProductSalesAnalysisValidationException("日期范围无效，最多 426 天。"));
+
+        var result = await CreateController(service.Object, "User", ["S1"]).PurchaseDetails(new());
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
     private static BatchProductSalesAnalysisController CreateController(IBatchProductSalesAnalysisService service, string role, List<string> stores, bool hasPermission = true, bool snapshotSuccess = true, List<string>? permissionCodes = null)
     {
         // 默认模拟后台销售看板权限；permissionCodes 可改为前台权限或其他组合。
