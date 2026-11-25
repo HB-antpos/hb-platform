@@ -253,6 +253,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       },
     ],
     "./plugins/with-rn-fmt-xcode26",
+    // Xcode 27 不再接受部署版本低于 iOS 15 的 Pod 目标，统一抬到 app 的 17.0。
+    "./plugins/with-pods-deployment-target-floor",
     [
       "./plugins/with-hb-printer",
       {

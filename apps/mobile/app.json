@@ -188,6 +188,7 @@
     "plugins": [
       "expo-router",
       "./plugins/with-ios-printer-module",
+      "./plugins/with-pods-deployment-target-floor",
       [
         "react-native-ble-plx",
         {
