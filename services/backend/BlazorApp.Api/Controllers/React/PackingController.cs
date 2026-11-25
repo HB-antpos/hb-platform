@@ -19,15 +19,23 @@ public sealed class PackingController(
     ILogger<PackingController> logger
 ) : ControllerBase
 {
-    /// <summary>当前账号能操作的地点（分店 / 总仓），界面据此显示分店切换。</summary>
+    /// <summary>
+    /// 当前账号能操作的地点（分店 / 总仓），界面据此显示分店切换。
+    /// side：store = 只要分店（「分店打包」入口）、warehouse = 只要总仓（「仓库打包」入口）；
+    /// 不传时返回全部地点（兼容还没拆入口的旧版手机）。IsManager 按返回的这些地点计算。
+    /// </summary>
     [HttpGet("scope")]
-    public Task<IActionResult> GetScope() =>
-        RunAsync(nameof(GetScope), op => Task.FromResult(PackingResult<PackingScopeDto>.Ok(new PackingScopeDto
+    public Task<IActionResult> GetScope([FromQuery] string? side = null) =>
+        RunAsync(nameof(GetScope), op =>
         {
-            IsManager = op.IsManager,
-            IsAdmin = op.IsAdmin,
-            Owners = op.Owners.Select(owner => new PackingOwnerDto { Code = owner.Code, Name = owner.Name, IsWarehouse = owner.IsWarehouse }).ToList(),
-        })));
+            var owners = PackingScopeSides.Filter(op.Owners, side);
+            return Task.FromResult(PackingResult<PackingScopeDto>.Ok(new PackingScopeDto
+            {
+                IsManager = owners.Any(owner => op.IsManagerOf(owner.Code)),
+                IsAdmin = op.IsAdmin,
+                Owners = owners.Select(owner => new PackingOwnerDto { Code = owner.Code, Name = owner.Name, IsWarehouse = owner.IsWarehouse }).ToList(),
+            }));
+        });
 
     // ---- 箱 ----
 

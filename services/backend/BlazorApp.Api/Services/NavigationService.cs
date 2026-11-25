@@ -54,10 +54,12 @@ namespace BlazorApp.Api.Services
             Permissions.Attendance.Admin.View,
         };
 
-        /// <summary>扫码打包入口的可见权限：分店 StorePacking.Use，总仓 Warehouse.Packing（含管理仓库 / 管理仓库订货别名），任一即可。</summary>
-        private static readonly List<string> PackingMenuPermissions = new()
+        /// <summary>
+        /// 「仓库打包」入口的可见权限：Warehouse.Packing，管理仓库 / 管理仓库订货按后端别名自动具备；
+        /// 菜单显式列出别名，避免依赖客户端展开。「分店打包」入口只认 StorePacking.Use，两个入口互不放行。
+        /// </summary>
+        private static readonly List<string> WarehousePackingMenuPermissions = new()
         {
-            Permissions.StorePacking.Use,
             Permissions.Warehouse.Packing,
             Permissions.Warehouse.Manage,
             Permissions.Warehouse.ManageOrders,
@@ -113,6 +115,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/warehouse/store-orders", TitleKey = "menu.storeOrders", Icon = "ReconciliationOutlined", Permission = Permissions.Warehouse.ManageOrders },
                     new() { Path = "/warehouse/preorders", TitleKey = "menu.preorders", Icon = "ScheduleOutlined", Permission = Permissions.Warehouse.ManageOrders },
                     new() { Path = "/warehouse/store-order-import-price-variance", TitleKey = "menu.storeOrderImportPriceVariance", Icon = "BarChartOutlined", Permission = Permissions.Warehouse.ManageOrders },
+                    // 仓库打包：总仓扫码装箱 / 组托盘 / 发往分店，只显示总仓这一个地点；与「收银管理 → 分店打包」分开授权。
+                    new() { Path = "/warehouse/packing", TitleKey = "menu.warehousePacking", Icon = "InboxOutlined", AnyPermissions = WarehousePackingMenuPermissions },
                     new() { Path = "/warehouse/containers",   TitleKey = "menu.containers", Icon = "InboxOutlined",          Permission = Permissions.Container.View },
                     new() { Path = "/warehouse/products",     TitleKey = "menu.warehouseProducts", Icon = "AppstoreOutlined",   Permission = Permissions.Warehouse.ManageProducts },
                     new() { Path = "/warehouse/categories",   TitleKey = "menu.categories",        Icon = "TagsOutlined",       Permission = Permissions.Warehouse.ManageCategories },
@@ -195,8 +199,8 @@ namespace BlazorApp.Api.Services
                     new() { Path = "/pos-admin/payroll",               TitleKey = "menu.attendancePayroll",      Icon = "AccountBookOutlined",        AnyPermissions = new List<string> { Permissions.Attendance.Punch.ViewManagedStore, Permissions.Attendance.Payroll.View, Permissions.Myob.Connection.Manage, Permissions.Myob.Employee.Bind, Permissions.Myob.Payslip.ViewManagedStore, Permissions.Myob.Payslip.ViewAllStores } },
                     new() { Path = "/pos-admin/sales-orders",          TitleKey = "menu.salesOrders",            Icon = "FileDoneOutlined",           Permission = Permissions.Orders.View },
                     new() { Path = "/pos-admin/local-supplier-invoices", TitleKey = "menu.localSupplierInvoices", Icon = "ReconciliationOutlined",     Permission = Permissions.LocalPurchase.View },
-                    // 扫码打包（分店 + 总仓共用）：分店用 StorePacking.Use，总仓用 Warehouse.Packing（管理仓库 / 管理仓库订货按别名自动具备），任一即可见。
-                    new() { Path = "/packing", TitleKey = "menu.packing", Icon = "InboxOutlined", AnyPermissions = PackingMenuPermissions },
+                    // 分店打包：只认 StorePacking.Use，只显示账号所属的分店；总仓打包在「仓库管理 → 仓库打包」。
+                    new() { Path = "/packing", TitleKey = "menu.storePacking", Icon = "InboxOutlined", Permission = Permissions.StorePacking.Use },
                 },
             },
         };
@@ -286,19 +290,24 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 仓库打包：总仓扫码装箱 / 组托盘 / 发往分店，页面只显示总仓（/packing/scope?side=warehouse）。
+                // Warehouse.Packing，管理仓库 / 管理仓库订货按别名自动具备；菜单显式列出别名，避免依赖客户端展开。
+                // 打包接口只接受登录账号（要记操作人），所以不进仓库设备菜单。
+                RouteName = "warehouse-packing",
+                TitleKey = "tabs.warehousePacking",
+                Icon = "package-variant",
+                Permission = Permissions.Warehouse.Packing,
+                AnyPermissions = WarehousePackingMenuPermissions.ToArray(),
+                Order = 42,
+            },
+            new()
+            {
+                // 分店打包：只认 StorePacking.Use，页面只显示账号所属的分店（/packing/scope?side=store）。
+                // 打包接口只接受登录账号（要记操作人），所以不进仓库设备菜单。
                 RouteName = "packing",
                 TitleKey = "tabs.packing",
                 Icon = "package-variant",
-                // 分店与总仓共用：分店打包专用权限，或总仓打包权限（管理仓库 / 管理仓库订货按别名自动具备）任一即可见；
-                // 具体能操作哪些分店 / 总仓由 /packing/scope 按账号算出。打包接口只接受登录账号（要记操作人），所以不进仓库设备菜单。
                 Permission = Permissions.StorePacking.Use,
-                AnyPermissions = new[]
-                {
-                    Permissions.StorePacking.Use,
-                    Permissions.Warehouse.Packing,
-                    Permissions.Warehouse.Manage,
-                    Permissions.Warehouse.ManageOrders,
-                },
                 Order = 43,
             },
             new()
@@ -770,35 +779,53 @@ namespace BlazorApp.Api.Services
         )
         {
             var result = new List<NavigationMenuDto>();
+            // 仓库员工桌面端的仓库功能只暴露分店订货列表，加上「仓库打包」（总仓装箱要用）。
+            var warehouseChildren = new List<NavigationMenuDto>();
             if (HasAnyPermission(
                     context,
                     Permissions.Warehouse.ManageOrders,
                     Permissions.Warehouse.Manage
                 ))
             {
-                // 仓库员工桌面端的仓库功能仍只暴露分店订货列表。
+                warehouseChildren.Add(
+                    new()
+                    {
+                        Path = "/warehouse/store-orders",
+                        TitleKey = "menu.storeOrders",
+                        Icon = "ReconciliationOutlined",
+                        Permission = Permissions.Warehouse.ManageOrders,
+                    }
+                );
+            }
+
+            if (HasAnyPermission(context, WarehousePackingMenuPermissions.ToArray()))
+            {
+                warehouseChildren.Add(
+                    new()
+                    {
+                        Path = "/warehouse/packing",
+                        TitleKey = "menu.warehousePacking",
+                        Icon = "InboxOutlined",
+                        AnyPermissions = WarehousePackingMenuPermissions,
+                    }
+                );
+            }
+
+            if (warehouseChildren.Count > 0)
+            {
                 result.Add(
                     new NavigationMenuDto
                     {
                         Path = "/warehouse",
                         TitleKey = "menu.warehouse",
                         Icon = "DatabaseOutlined",
-                        Children = new List<NavigationMenuDto>
-                        {
-                            new()
-                            {
-                                Path = "/warehouse/store-orders",
-                                TitleKey = "menu.storeOrders",
-                                Icon = "ReconciliationOutlined",
-                                Permission = Permissions.Warehouse.ManageOrders,
-                            },
-                        },
+                        Children = warehouseChildren,
                     }
                 );
             }
 
-            // 扫码打包：仓库员工在总仓装箱要用；入口在「收银管理」组下，组里其他页面仍不对仓库员工开放。
-            if (HasAnyPermission(context, PackingMenuPermissions.ToArray()))
+            // 分店打包：仓库员工一般没有；若单独授了 StorePacking.Use，仍放在「收银管理」组下，组里其他页面不对仓库员工开放。
+            if (HasAnyPermission(context, Permissions.StorePacking.Use))
             {
                 result.Add(
                     new NavigationMenuDto
@@ -811,9 +838,9 @@ namespace BlazorApp.Api.Services
                             new()
                             {
                                 Path = "/packing",
-                                TitleKey = "menu.packing",
+                                TitleKey = "menu.storePacking",
                                 Icon = "InboxOutlined",
-                                AnyPermissions = PackingMenuPermissions,
+                                Permission = Permissions.StorePacking.Use,
                             },
                         },
                     }

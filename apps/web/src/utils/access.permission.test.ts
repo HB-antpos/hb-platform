@@ -1374,11 +1374,16 @@ assertEqual(
   'Warehouse.Manage role preview should show the warehouse products Web menu with both accepted permissions',
 )
 
-// 扫码打包（分店 + 总仓共用）放在「收银管理」组下，Warehouse.Manage 按别名具备打包权限：该组里只会出现扫码打包，没有别的收银页面。
+// 打包拆成两个入口：Warehouse.Manage 按别名具备「仓库打包」（仓库组），不具备「分店打包」，所以没有收银管理组。
 assertEqual(
-  warehouseLegacyPosAdminMenu?.children?.map((node) => node.path).join(','),
-  '/packing',
-  'Warehouse.Manage role preview should only show scan packing under the POS admin parent menu',
+  Boolean(warehouseLegacyPosAdminMenu),
+  false,
+  'Warehouse.Manage role preview should not show the POS admin group (store packing needs StorePacking.Use)',
+)
+assertEqual(
+  findWebMenuNode(warehouseLegacyWebPreview, '/warehouse/packing')?.visible,
+  true,
+  'Warehouse.Manage role preview should show warehouse packing under the warehouse group',
 )
 
 assertEqual(
@@ -1402,21 +1407,15 @@ const warehouseStaffMenu = warehouseStaffWebPreview.find((node) => node.path ===
 
 assertEqual(
   warehouseStaffWebPreview.map((node) => node.path).join(','),
-  '/warehouse,/pos-admin',
-  'WarehouseStaff desktop preview should only show the warehouse parent menu plus the POS admin group that holds scan packing',
+  '/warehouse',
+  'WarehouseStaff desktop preview should only show the warehouse parent menu',
 )
 
-// 扫码打包（总仓装箱）对仓库员工单独放出：收银管理组里只有这一项（持有 Warehouse.Manage 即按别名具备打包权限）。
-assertEqual(
-  warehouseStaffWebPreview.find((node) => node.path === '/pos-admin')?.children?.map((node) => node.path).join(','),
-  '/packing',
-  'WarehouseStaff desktop preview should only show scan packing under the POS admin parent menu',
-)
-
+// 仓库打包（总仓装箱）对仓库员工单独放出，放在仓库组里（持有 Warehouse.Manage 即按别名具备仓库打包权限）。
 assertEqual(
   warehouseStaffMenu?.children?.map((node) => node.path).join(','),
-  '/warehouse/store-orders',
-  'WarehouseStaff desktop preview should only show the store order list under warehouse',
+  '/warehouse/store-orders,/warehouse/packing',
+  'WarehouseStaff desktop preview should only show the store order list and warehouse packing under warehouse',
 )
 
 assertEqual(

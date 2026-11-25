@@ -55,6 +55,9 @@ export interface PackOwner {
   isWarehouse: boolean
 }
 
+/** 打包入口的「边」：仓库打包只显示总仓，分店打包只显示账号所属的分店（后端 /packing/scope?side=）。 */
+export type PackSide = 'store' | 'warehouse'
+
 export interface PackScope {
   owners: PackOwner[]
   isManager: boolean

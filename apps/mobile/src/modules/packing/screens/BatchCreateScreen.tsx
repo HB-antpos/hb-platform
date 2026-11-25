@@ -25,7 +25,7 @@ import {
 import { packingErrorMessage } from "../packing-errors";
 import { blankCartonLabelPreview, buildBlankCartonLabelPayload, destinationFormOf, emptyDestinationForm, toDestinationRequest } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { PACKING_HOME, batchRoute } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import { usePackScope } from "../use-pack-scope";
 import { DESTINATION_TYPE, type DestinationFormValue, type PackDestination } from "../types";
 import { DestinationSheet } from "../components/DestinationSheet";
@@ -49,6 +49,8 @@ function sampleCartonNo(now: Date) {
 export function BatchCreateScreen() {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
   const printerConnected = usePrinterStore((state) => state.status) === "connected";
@@ -104,7 +106,7 @@ export function BatchCreateScreen() {
     );
   }, [count, destination, operatorName, owner?.name]);
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
 
   const submit = async (print: boolean) => {
     if (!owner || submitting) return;
@@ -127,7 +129,7 @@ export function BatchCreateScreen() {
       requestIds.reset();
       void queryClient.invalidateQueries({ queryKey: ["packing", "cartons"] });
       void queryClient.invalidateQueries({ queryKey: ["packing", "batches"] });
-      router.replace(batchRoute(result.batchGuid, { autoPrint: print, copies, duplicate: result.duplicate }));
+      router.replace(routes.batch(result.batchGuid, { autoPrint: print, copies, duplicate: result.duplicate }));
     } catch (error) {
       setSnackbar(t("batch.createFailed", { detail: packingErrorMessage(error, t, language) }));
     } finally {

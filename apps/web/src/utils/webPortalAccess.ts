@@ -211,12 +211,17 @@ const ADMIN_ENTRY_RULES: readonly AdminEntryRule[] = [
       access.hasPermission(P.FaceMatch.Unwelcome.Review),
   },
   {
-    // 扫码打包：只有 StorePacking.Use（分店）或 Warehouse.Packing（总仓）的账号也要能进入后台；放在既有入口之后，组合权限用户沿用原默认入口。
-    // 管理仓库 / 管理仓库订货按后端别名自动具备打包权限，这里一并放行。
+    // 仓库打包：只有 Warehouse.Packing 的账号也要能进入后台；管理仓库 / 管理仓库订货按后端别名自动具备。
+    // 放在既有入口之后，组合权限用户沿用原默认入口（例如管理订货仍落到分店订货）。
+    defaultPath: '/warehouse/packing',
+    targetPrefixes: ['/warehouse/packing'],
+    canAccess: (access) => access.hasPermission(P.Warehouse.Packing) || access.canManageWarehouseOrders,
+  },
+  {
+    // 分店打包：只有 StorePacking.Use 的店员也要能进入后台。
     defaultPath: '/packing',
     targetPrefixes: ['/packing'],
-    canAccess: (access) =>
-      access.hasPermission(P.StorePacking.Use) || access.hasPermission(P.Warehouse.Packing) || access.canManageWarehouseOrders,
+    canAccess: (access) => access.hasPermission(P.StorePacking.Use),
   },
   {
     // 放在既有入口之后，组合权限用户继续沿用原默认入口。

@@ -75,7 +75,8 @@
     "title": "Carton"
   },
   "home": {
-    "title": "Packing",
+    "title": "Store packing",
+    "titleWarehouse": "Warehouse packing",
     "scanPlaceholder": "Scan a carton or pallet label to open it",
     "cameraTitle": "Scan a carton or pallet label",
     "unknownCode": "{{code}} is not a carton or pallet number",

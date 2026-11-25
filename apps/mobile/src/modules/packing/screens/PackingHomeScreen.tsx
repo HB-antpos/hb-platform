@@ -52,7 +52,8 @@ import {
   type PalletDisplayState,
 } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { PACKING_BATCH_LIST, PACKING_LOCATE, cartonRoute, palletRoute, printCartonLabel, receiveRoute } from "../pack-print";
+import { printCartonLabel } from "../pack-print";
+import { usePackRoutes, usePackSide } from "../use-pack-side";
 import { usePackScope } from "../use-pack-scope";
 import {
   WAREHOUSE_OWNER_CODE,
@@ -77,6 +78,10 @@ type HomeTab = "cartons" | "pallets" | "incoming";
 export function PackingHomeScreen() {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
+  // 两个入口共用这个首页：标题跟着入口走（仓库打包 / 分店打包）。
+  const homeTitle = t(usePackSide() === "warehouse" ? "home.titleWarehouse" : "home.title");
   const queryClient = useQueryClient();
   const focused = useIsFocused();
   const user = useAuthStore((state) => state.user);
@@ -156,7 +161,7 @@ export function PackingHomeScreen() {
         setKeyword("");
         if (lookup?.canReceive) {
           playScanFeedbackSound("found");
-          router.push(receiveRoute(code));
+          router.push(routes.receive(code));
           return;
         }
         if (resolved.kind === "carton") {
@@ -170,7 +175,7 @@ export function PackingHomeScreen() {
               await activateCarton(resolved.guid);
               playScanFeedbackSound("found");
               void queryClient.invalidateQueries({ queryKey: ["packing", "cartons"] });
-              router.push(cartonRoute(resolved.guid, { activated: true }));
+              router.push(routes.carton(resolved.guid, { activated: true }));
               return;
             } catch (error) {
               // 已经被别人封箱 / 启用不了：照常打开这只箱，由箱页给出状态；其他错误提示后留在首页。
@@ -183,7 +188,7 @@ export function PackingHomeScreen() {
           }
         }
         playScanFeedbackSound("found");
-        router.push(resolved.kind === "carton" ? cartonRoute(resolved.guid) : palletRoute(resolved.guid));
+        router.push(resolved.kind === "carton" ? routes.carton(resolved.guid) : routes.pallet(resolved.guid));
       } catch (error) {
         playScanFeedbackSound("not_found");
         // 404：不是箱号也不是托盘号（多半是扫到了商品码）。
@@ -197,7 +202,7 @@ export function PackingHomeScreen() {
         setResolving(false);
       }
     },
-    [language, queryClient, router, t],
+    [language, queryClient, router, routes, t],
   );
 
   const hid = useHidBarcodeScanner({
@@ -213,11 +218,11 @@ export function PackingHomeScreen() {
       if (creating === "carton") {
         const carton = await createCarton({ ownerCode: owner.code, ...toDestinationRequest(value) });
         setCreating(null);
-        router.push(cartonRoute(carton.cartonGuid));
+        router.push(routes.carton(carton.cartonGuid));
       } else {
         const pallet = await createPallet({ ownerCode: owner.code, ...toDestinationRequest(value) });
         setCreating(null);
-        router.push(palletRoute(pallet.palletGuid));
+        router.push(routes.pallet(pallet.palletGuid));
         const consignmentNo = value.consignmentNo.trim();
         const remark = value.remark.trim();
         if (consignmentNo || remark) {
@@ -346,7 +351,7 @@ export function PackingHomeScreen() {
   if (!owner) {
     return (
       <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
-        <PickHeader showBleScanner title={t("home.title")} onBack={goBack} backLabel={t("actions.back")} />
+        <PickHeader showBleScanner title={homeTitle} onBack={goBack} backLabel={t("actions.back")} />
         <ActivityIndicator style={packStyles.loading} />
       </SafeAreaView>
     );
@@ -385,7 +390,7 @@ export function PackingHomeScreen() {
       <View style={styles.stats}>
         <Stat label={t("home.statPacking")} value={cartonCounts?.packingCount} />
         <Stat label={isWarehouse ? t("home.statStoredWarehouse") : t("home.statStored")} value={cartonCounts?.storedCount} unit={t("home.unitCarton")} />
-        <Stat label={t("home.statIncoming")} value={incomingCount} highlight onPress={() => router.push(receiveRoute())} />
+        <Stat label={t("home.statIncoming")} value={incomingCount} highlight onPress={() => router.push(routes.receive())} />
       </View>
       <View style={packStyles.buttons}>
         <Button
@@ -415,7 +420,7 @@ export function PackingHomeScreen() {
         <Button
           mode="outlined"
           icon="map-marker-question-outline"
-          onPress={() => router.push(PACKING_LOCATE)}
+          onPress={() => router.push(routes.locate)}
           style={[packStyles.button, packStyles.flex]}
           contentStyle={packStyles.buttonContent}
         >
@@ -426,7 +431,7 @@ export function PackingHomeScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={t("home.receive")}
-          onPress={() => router.push(receiveRoute())}
+          onPress={() => router.push(routes.receive())}
           style={styles.receiveRow}
         >
           <MaterialCommunityIcons name="package-down" size={20} color={PACK_COLORS.action} />
@@ -447,7 +452,7 @@ export function PackingHomeScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={t("home.batch")}
-            onPress={() => router.push(PACKING_BATCH_LIST)}
+            onPress={() => router.push(routes.batchList)}
             style={[styles.receiveRow, styles.batchRow]}
           >
             <MaterialCommunityIcons name="tag-multiple-outline" size={20} color={PACK_COLORS.action} />
@@ -543,7 +548,7 @@ export function PackingHomeScreen() {
   return (
     <SafeAreaView edges={["top", "bottom", "left", "right"]} style={packStyles.screen}>
       <PickHeader showBleScanner
-        title={selectMode ? t("select.title", { count: chosen.length }) : t("home.title")}
+        title={selectMode ? t("select.title", { count: chosen.length }) : homeTitle}
         onBack={selectMode ? exitSelect : goBack}
         backLabel={selectMode ? t("select.exit") : t("actions.back")}
         right={
@@ -596,7 +601,7 @@ export function PackingHomeScreen() {
               selecting={selectMode}
               selected={selected.has(item.cartonGuid)}
               onPress={() =>
-                selectMode ? setSelected((current) => toggleSelected(current, item.cartonGuid)) : router.push(cartonRoute(item.cartonGuid))
+                selectMode ? setSelected((current) => toggleSelected(current, item.cartonGuid)) : router.push(routes.carton(item.cartonGuid))
               }
               onLongPress={() => startSelect(item)}
             />
@@ -608,7 +613,7 @@ export function PackingHomeScreen() {
           data={palletsQuery.data?.items ?? []}
           keyExtractor={(item) => item.palletGuid}
           renderItem={({ item }) => (
-            <PalletCard pallet={item} ownerCode={owner.code} isWarehouse={isWarehouse} onPress={() => router.push(palletRoute(item.palletGuid))} />
+            <PalletCard pallet={item} ownerCode={owner.code} isWarehouse={isWarehouse} onPress={() => router.push(routes.pallet(item.palletGuid))} />
           )}
         />
       ) : (
@@ -616,7 +621,7 @@ export function PackingHomeScreen() {
           {...listProps}
           data={incoming}
           keyExtractor={(item) => `${item.kind}:${item.guid}`}
-          renderItem={({ item }) => <IncomingCard item={item} onPress={() => router.push(receiveRoute(item.no))} />}
+          renderItem={({ item }) => <IncomingCard item={item} onPress={() => router.push(routes.receive(item.no))} />}
         />
       )}
 

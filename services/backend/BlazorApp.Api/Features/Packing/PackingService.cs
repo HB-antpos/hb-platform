@@ -633,7 +633,13 @@ internal sealed partial class PackingService(
                 return denied;
             }
 
-            if (carton!.Status != PackCartonStatuses.Sealed)
+            // 主管身份按箱所属地点判断：店长在总仓的箱上不算主管。
+            if (!op.IsManagerOf(carton!.OwnerCode))
+            {
+                return CartonFail(403, PackingErrorCodes.NotAllowed, "只有店长或仓库经理可以重新开箱");
+            }
+
+            if (carton.Status != PackCartonStatuses.Sealed)
             {
                 return CartonFail(409, PackingErrorCodes.CartonNotSealed, "只有已封箱的箱可以重新开箱");
             }

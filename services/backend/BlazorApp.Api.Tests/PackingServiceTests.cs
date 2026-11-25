@@ -283,6 +283,29 @@ public sealed class PackingServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task 重新开箱_主管身份按箱所属地点判断_店长兼有总仓时不能重开总仓的箱()
+    {
+        var service = CreateService();
+        // 店长角色兼有仓库打包权限：分店是主管，总仓只是普通打包员（PackingAccessService 按地点给出 CanManage）。
+        var storeManagerWithWarehouse = new PackingOperator(
+            "u-mixed",
+            "Mixed",
+            true,
+            false,
+            new[] { Sunnybank with { CanManage = true }, Warehouse with { CanManage = false } }
+        );
+        var warehouseCarton = await SealedCartonAsync(service, Wendy, Dest(PackDestinationTypes.Store, "1013"), ("HB24102", 6));
+        var storeCarton = await SealedCartonAsync(service, Lily, ("HB23817", 2));
+
+        var onWarehouse = await service.ReopenCartonAsync(storeManagerWithWarehouse, warehouseCarton.CartonGuid);
+        var onStore = await service.ReopenCartonAsync(storeManagerWithWarehouse, storeCarton.CartonGuid);
+
+        Assert.Equal(403, onWarehouse.StatusCode);
+        Assert.Equal(PackingErrorCodes.NotAllowed, onWarehouse.ErrorCode);
+        Assert.True(onStore.Success, onStore.Message);
+    }
+
+    [Fact]
     public async Task 重新开箱_只有店长可以_箱号不变可继续装_并留下操作记录()
     {
         var service = CreateService();

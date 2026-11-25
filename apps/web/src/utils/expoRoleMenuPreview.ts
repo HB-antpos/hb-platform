@@ -161,6 +161,7 @@ const TAB_PATHS: Record<string, string> = {
   containers: '/(shell)/containers',
   'container-new-products': '/(shell)/container-new-products',
   'warehouse-picking': '/(shell)/warehouse-picking',
+  'warehouse-packing': '/(shell)/warehouse-packing',
   packing: '/(shell)/packing',
   'domestic-purchase': '/(shell)/domestic-purchase',
   'local-supplier-invoices': '/(shell)/local-supplier-invoices',
@@ -214,7 +215,8 @@ const ROUTE_LABELS: Record<string, Pick<ExpoAppMenuDefinition, 'zhTitle' | 'enTi
   containers: { zhTitle: '货柜管理', enTitle: 'Containers' },
   'container-new-products': { zhTitle: 'HB新品', enTitle: 'HB new arrivals' },
   'warehouse-picking': { zhTitle: '订单拣货', enTitle: 'Order picking' },
-  packing: { zhTitle: '扫码打包', enTitle: 'Packing' },
+  'warehouse-packing': { zhTitle: '仓库打包', enTitle: 'Warehouse packing' },
+  packing: { zhTitle: '分店打包', enTitle: 'Store packing' },
   'domestic-purchase': { zhTitle: '中国采购', enTitle: 'China Purchase' },
   'local-supplier-invoices': { zhTitle: '澳洲进货', enTitle: 'AU Invoices' },
   advertisements: { zhTitle: '广告', enTitle: 'Advertisements' },
@@ -334,12 +336,21 @@ const EXPO_APP_MENU_DEFINITIONS: ExpoAppMenuDefinition[] = [
     ...ROUTE_LABELS['warehouse-picking'],
   },
   {
+    routeName: 'warehouse-packing',
+    titleKey: 'tabs.warehousePacking',
+    icon: 'package-variant',
+    // 与后端 FullAppMenu 的 AnyPermissions 一致：仓库打包权限，或管理仓库 / 管理仓库订货任一即可见。
+    // 同样不加入 PERMISSION_ALIAS_GROUPS（双向等价会让只有打包权限的人误显示订单等入口）。
+    permissionCodes: [P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+    order: 42,
+    ...ROUTE_LABELS['warehouse-packing'],
+  },
+  {
     routeName: 'packing',
     titleKey: 'tabs.packing',
     icon: 'package-variant',
-    // 与后端 FullAppMenu 的 AnyPermissions 一致：分店打包权限、总仓打包权限，或管理仓库 / 管理仓库订货任一即可见。
-    // 同样不加入 PERMISSION_ALIAS_GROUPS（双向等价会让只有打包权限的人误显示订单等入口）。
-    permissionCodes: [P.StorePacking.Use, P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+    // 与后端 FullAppMenu 一致：分店打包只认 StorePacking.Use。
+    permissionCodes: [P.StorePacking.Use],
     order: 43,
     ...ROUTE_LABELS.packing,
   },

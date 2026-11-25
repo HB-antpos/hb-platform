@@ -1142,8 +1142,9 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(50, menu.Count);
+        Assert.Equal(51, menu.Count);
         Assert.Contains(menu, item => item.RouteName == "packing");
+        Assert.Contains(menu, item => item.RouteName == "warehouse-packing");
         Assert.Contains(menu, item => item.RouteName == "pos-settings");
         Assert.Contains(menu, item => item.RouteName == "daily-closes");
         Assert.Contains(menu, item => item.RouteName == "payslips");
@@ -1215,40 +1216,58 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildMenu_ShowsPackingForStorePackingOrWarehousePackingPermissions()
+    public void BuildMenu_SplitsWarehousePackingAndStorePackingEntries()
     {
-        static bool HasPacking(List<NavigationMenuDto> menu) =>
+        static bool HasStorePacking(List<NavigationMenuDto> menu) =>
             menu.Any(node => node.Path == "/pos-admin"
                 && node.Children != null
                 && node.Children.Any(child => child.Path == "/packing"));
+        static bool HasWarehousePacking(List<NavigationMenuDto> menu) =>
+            menu.Any(node => node.Path == "/warehouse"
+                && node.Children != null
+                && node.Children.Any(child => child.Path == "/warehouse/packing"));
 
         var storePackingUser = CreateUser(new Claim("permission", Permissions.StorePacking.Use));
         var warehousePackingUser = CreateUser(new Claim("permission", Permissions.Warehouse.Packing));
         var manageUser = CreateUser(new Claim("permission", Permissions.Warehouse.Manage));
         var ordersUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageOrders));
+        var bothUser = CreateUser(
+            new Claim("permission", Permissions.StorePacking.Use),
+            new Claim("permission", Permissions.Warehouse.Packing)
+        );
         var productsOnlyUser = CreateUser(
             new Claim("permission", Permissions.Dashboard.View),
             new Claim("permission", Permissions.Warehouse.ManageProducts)
         );
 
-        // 扫码打包入口（分店 + 总仓共用，放在「收银管理」组）：StorePacking.Use / Warehouse.Packing 任一即可，
-        // 管理仓库、管理仓库订货按别名具备；只有打包权限的账号也要拿得到后台菜单。
+        // 分店打包（收银管理组）只认 StorePacking.Use；只有分店打包权限的账号也要拿得到后台菜单，且看不到仓库组。
         var storeMenu = _service.BuildMenu(storePackingUser);
-        Assert.True(HasPacking(storeMenu));
+        Assert.True(HasStorePacking(storeMenu));
         Assert.Equal(
             new[] { "/packing" },
             storeMenu.Single(node => node.Path == "/pos-admin").Children!.Select(child => child.Path).ToArray()
         );
         Assert.DoesNotContain(storeMenu, node => node.Path == "/warehouse");
-        Assert.True(HasPacking(_service.BuildMenu(warehousePackingUser)));
-        Assert.True(HasPacking(_service.BuildMenu(manageUser)));
-        Assert.True(HasPacking(_service.BuildMenu(ordersUser)));
-        Assert.False(HasPacking(_service.BuildMenu(productsOnlyUser)));
-        // 旧的仓库组入口已经挪走。
-        Assert.DoesNotContain(
-            _service.BuildMenu(manageUser).SelectMany(node => node.Children ?? new List<NavigationMenuDto>()),
-            child => child.Path == "/warehouse/packing"
+
+        // 仓库打包（仓库管理组）认 Warehouse.Packing，管理仓库、管理仓库订货按别名具备；这些账号都看不到分店打包。
+        foreach (var user in new[] { warehousePackingUser, manageUser, ordersUser })
+        {
+            var menu = _service.BuildMenu(user);
+            Assert.True(HasWarehousePacking(menu));
+            Assert.False(HasStorePacking(menu));
+        }
+
+        var warehouseOnlyMenu = _service.BuildMenu(warehousePackingUser);
+        Assert.Equal(
+            new[] { "/warehouse/packing" },
+            warehouseOnlyMenu.Single(node => node.Path == "/warehouse").Children!.Select(child => child.Path).ToArray()
         );
+
+        // 两个权限都有时两个入口都在；都没有时都不显示。
+        Assert.True(HasStorePacking(_service.BuildMenu(bothUser)));
+        Assert.True(HasWarehousePacking(_service.BuildMenu(bothUser)));
+        Assert.False(HasStorePacking(_service.BuildMenu(productsOnlyUser)));
+        Assert.False(HasWarehousePacking(_service.BuildMenu(productsOnlyUser)));
     }
 
     [Theory]
@@ -1257,7 +1276,7 @@ public class NavigationServiceTests
     [InlineData("店长")]
     public void BuildMenu_ShowsPackingForStoreRolesWithStorePackingPermission(string roleName)
     {
-        // 分店店员 / 店长角色持有 StorePacking.Use 时，侧边栏要能看到「扫码打包」。
+        // 分店店员 / 店长角色持有 StorePacking.Use 时，侧边栏要能看到「分店打包」。
         var user = CreateUser(
             new Claim(ClaimTypes.Role, roleName),
             new Claim("permission", Permissions.StorePacking.Use)
@@ -1270,9 +1289,9 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildMenu_ShowsPackingForWarehouseStaffWithPackingPermissionOnly()
+    public void BuildMenu_ShowsWarehousePackingForWarehouseStaffWithPackingPermissionOnly()
     {
-        // 仓库员工桌面端只暴露分店订货和被显式授权的页面；扫码打包是总仓装箱用的，要单独放出来。
+        // 仓库员工桌面端只暴露分店订货和被显式授权的页面；仓库打包是总仓装箱用的，放在仓库组里，不再挂到收银管理组。
         var user = CreateUser(
             new Claim(ClaimTypes.Role, "WarehouseStaff"),
             new Claim("permission", Permissions.Warehouse.Packing)
@@ -1280,9 +1299,9 @@ public class NavigationServiceTests
 
         var menu = _service.BuildMenu(user);
 
-        var posAdmin = Assert.Single(menu);
-        Assert.Equal("/pos-admin", posAdmin.Path);
-        Assert.Equal(new[] { "/packing" }, posAdmin.Children!.Select(child => child.Path).ToArray());
+        var warehouse = Assert.Single(menu);
+        Assert.Equal("/warehouse", warehouse.Path);
+        Assert.Equal(new[] { "/warehouse/packing" }, warehouse.Children!.Select(child => child.Path).ToArray());
     }
 
     [Fact]
@@ -1294,7 +1313,7 @@ public class NavigationServiceTests
     }
 
     [Fact]
-    public void BuildAppMenu_ShowsPackingForStorePackingWarehousePackingOrWarehouseManagePermissions()
+    public void BuildAppMenu_SplitsWarehousePackingAndStorePackingEntries()
     {
         var storeUser = CreateUser(new Claim("permission", Permissions.StorePacking.Use));
         var packingUser = CreateUser(new Claim("permission", Permissions.Warehouse.Packing));
@@ -1302,12 +1321,20 @@ public class NavigationServiceTests
         var ordersUser = CreateUser(new Claim("permission", Permissions.Warehouse.ManageOrders));
         var pickingOnlyUser = CreateUser(new Claim("permission", Permissions.Warehouse.Picking));
 
-        // 打包入口分店、总仓共用：分店打包权限、总仓打包权限或其别名（管理仓库、管理仓库订货）任一即可见；只有拣货权限的账号看不到。
-        Assert.Single(_service.BuildAppMenu(storeUser), item => item.RouteName == "packing");
-        Assert.Single(_service.BuildAppMenu(packingUser), item => item.RouteName == "packing");
-        Assert.Single(_service.BuildAppMenu(manageUser), item => item.RouteName == "packing");
-        Assert.Single(_service.BuildAppMenu(ordersUser), item => item.RouteName == "packing");
+        // 分店打包只认 StorePacking.Use；仓库打包认 Warehouse.Packing 及其别名（管理仓库、管理仓库订货）；两个入口互不放行。
+        var storeMenu = _service.BuildAppMenu(storeUser);
+        Assert.Single(storeMenu, item => item.RouteName == "packing");
+        Assert.DoesNotContain(storeMenu, item => item.RouteName == "warehouse-packing");
+        foreach (var user in new[] { packingUser, manageUser, ordersUser })
+        {
+            var menu = _service.BuildAppMenu(user);
+            Assert.Single(menu, item => item.RouteName == "warehouse-packing");
+            Assert.DoesNotContain(menu, item => item.RouteName == "packing");
+        }
+
+        // 只有拣货权限的账号两个打包入口都看不到。
         Assert.DoesNotContain(_service.BuildAppMenu(pickingOnlyUser), item => item.RouteName == "packing");
+        Assert.DoesNotContain(_service.BuildAppMenu(pickingOnlyUser), item => item.RouteName == "warehouse-packing");
         // 反过来，只有打包权限也不会连带看到拣货入口。
         Assert.DoesNotContain(_service.BuildAppMenu(storeUser), item => item.RouteName == "warehouse-picking");
         Assert.DoesNotContain(_service.BuildAppMenu(packingUser), item => item.RouteName == "warehouse-picking");
@@ -1319,6 +1346,8 @@ public class NavigationServiceTests
         // 打包接口只接受登录账号（要记操作人），纯设备会话没有个人账号，仓库设备也不放出入口。
         Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "packing");
         Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "packing");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "warehouse-packing");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "warehouse-packing");
     }
 
     [Fact]
@@ -2639,10 +2668,8 @@ public class NavigationServiceTests
 
     private static void AssertWarehouseStaffStoreOrderAndPackingMenuOnly(List<NavigationMenuDto> menu)
     {
-        // 仓库员工：仓库组只有分店订货；另有「收银管理」组下的扫码打包（持有 Warehouse.Manage 即按别名具备打包权限），组里没有别的页面。
-        Assert.Equal(new[] { "/warehouse", "/pos-admin" }, menu.Select(node => node.Path).ToArray());
-        var posAdminMenu = menu.Single(node => node.Path == "/pos-admin");
-        Assert.Equal(new[] { "/packing" }, posAdminMenu.Children!.Select(child => child.Path).ToArray());
+        // 仓库员工：仓库组只有分店订货和仓库打包（持有 Warehouse.Manage 即按别名具备仓库打包权限）；不再有收银管理组。
+        Assert.Equal(new[] { "/warehouse" }, menu.Select(node => node.Path).ToArray());
         var warehouseMenu = menu.Single(node => node.Path == "/warehouse");
 
         var children = warehouseMenu.Children!;
@@ -2650,6 +2677,7 @@ public class NavigationServiceTests
             new[]
             {
                 "/warehouse/store-orders",
+                "/warehouse/packing",
             },
             children.Select(item => item.Path).ToArray()
         );

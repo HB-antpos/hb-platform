@@ -74,6 +74,10 @@ try {
   respondWith(200, { success: true, data: { owners: [{ code: '1008', name: 'Sunnybank', isWarehouse: false }], isManager: true, isAdmin: false } })
   let request = await capture(() => getPackScope())
   assertEqual(request.url.endsWith(`${BASE}/scope`), true, '地点接口地址')
+  request = await capture(() => getPackScope('warehouse'))
+  assertEqual(request.url.endsWith(`${BASE}/scope?side=warehouse`), true, '仓库打包入口只要总仓')
+  request = await capture(() => getPackScope('store'))
+  assertEqual(request.url.endsWith(`${BASE}/scope?side=store`), true, '分店打包入口只要分店')
   assertEqual((await getPackScope()).isManager, true, '读到 isManager')
 
   // 箱列表：地点、筛选、关键字、只看我的；mine=false 时不带参数

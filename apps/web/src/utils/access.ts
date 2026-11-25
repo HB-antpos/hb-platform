@@ -89,7 +89,8 @@ function createEmptyAccess(): AccessControl {
     canOrderSupplierPreorders: false,
     canManageWarehouseCategories: false,
     canManageWarehouseLocations: false,
-    canUsePacking: false,
+    canUseWarehousePacking: false,
+    canUseStorePacking: false,
     canViewContainers: false,
     canCreateContainer: false,
     canEditContainer: false,
@@ -345,9 +346,11 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     isAdmin || hasPermission(P.Warehouse.ManageCategories) || hasPermission(P.Warehouse.Manage)
   const canManageWarehouseLocations =
     isAdmin || hasPermission(P.Warehouse.ManageLocations) || hasPermission(P.Warehouse.Manage)
-  // 扫码打包：分店用 StorePacking.Use；总仓用 Warehouse.Packing，管理仓库 / 管理仓库订货与后端别名同一口径，无需重新授权。
-  // canManageWarehouseOrders 已含管理员 / ManageOrders / Manage，这里直接复用，避免重复写权限码（首屏包体预算很紧）。
-  const canUsePacking = canManageWarehouseOrders || hasPermission(P.StorePacking.Use) || hasPermission(P.Warehouse.Packing)
+  // 扫码打包拆成两个入口、各自授权：
+  // 仓库打包 = Warehouse.Packing，管理仓库 / 管理仓库订货与后端别名同一口径（canManageWarehouseOrders 已含管理员 / ManageOrders / Manage，直接复用，首屏包体预算很紧）；
+  // 分店打包 = StorePacking.Use（管理员由 hasPermission 统一放行）。
+  const canUseWarehousePacking = canManageWarehouseOrders || hasPermission(P.Warehouse.Packing)
+  const canUseStorePacking = hasPermission(P.StorePacking.Use)
   const canViewContainers = isAdmin || hasPermission(P.Container.View)
   const canCreateContainer = isAdmin || hasPermission(P.Container.Create)
   const canEditContainer = isAdmin || hasPermission(P.Container.Edit)
@@ -584,7 +587,8 @@ export function buildAccess(currentUser?: CurrentUser | null): AccessControl {
     canOrderSupplierPreorders,
     canManageWarehouseCategories,
     canManageWarehouseLocations,
-    canUsePacking,
+    canUseWarehousePacking,
+    canUseStorePacking,
     canViewContainers,
     canCreateContainer,
     canEditContainer,

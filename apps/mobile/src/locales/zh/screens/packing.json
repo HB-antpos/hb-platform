@@ -75,7 +75,8 @@
     "title": "箱"
   },
   "home": {
-    "title": "扫码打包",
+    "title": "分店打包",
+    "titleWarehouse": "仓库打包",
     "scanPlaceholder": "扫箱标签 / 托盘标签直接打开",
     "cameraTitle": "扫箱标签或托盘标签",
     "unknownCode": "{{code}} 不是箱号或托盘号",

@@ -69,7 +69,8 @@ const accessKeyPermissionMap: Partial<Record<keyof AccessControl, string[]>> = {
   canManageWarehouseProducts: [P.Warehouse.ManageProducts, P.Warehouse.Manage],
   canManageWarehouseCategories: [P.Warehouse.ManageCategories, P.Warehouse.Manage],
   canManageWarehouseLocations: [P.Warehouse.ManageLocations, P.Warehouse.Manage],
-  canUsePacking: [P.StorePacking.Use, P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+  canUseWarehousePacking: [P.Warehouse.Packing, P.Warehouse.Manage, P.Warehouse.ManageOrders],
+  canUseStorePacking: [P.StorePacking.Use],
   canViewReports: [P.Reports.View],
   canViewSalesIntelligence: [],
   canViewSalesData: [P.SalesDashboard.SalesDataView],
@@ -205,6 +206,7 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
     children: [
       { path: '/warehouse/store-orders', title: 'menu.storeOrders', accessKey: 'canManageWarehouseOrders' },
       { path: '/warehouse/store-order-import-price-variance', title: 'menu.storeOrderImportPriceVariance', accessKey: 'canManageStoreOrderImportPriceVariance' },
+      { path: '/warehouse/packing', title: 'menu.warehousePacking', accessKey: 'canUseWarehousePacking' },
       { path: '/warehouse/containers', title: 'menu.containers', accessKey: 'canViewContainers' },
       { path: '/warehouse/products', title: 'menu.warehouseProducts', accessKey: 'canManageWarehouseProducts' },
       { path: '/warehouse/categories', title: 'menu.categories', accessKey: 'canManageWarehouseCategories' },
@@ -285,18 +287,20 @@ const webMenuPreviewRoutes: WebMenuPreviewRoute[] = [
       { path: '/pos-admin/seasonal-card-stats', title: 'menu.seasonalCardStats', accessKey: 'canViewSeasonalCardStats' },
       { path: '/pos-admin/sales-orders', title: 'menu.salesOrders', accessKey: 'canReadOrder' },
       { path: '/pos-admin/local-supplier-invoices', title: 'menu.localSupplierInvoices', accessKey: 'canManageLocalPurchase' },
-      { path: '/packing', title: 'menu.packing', accessKey: 'canUsePacking' },
+      { path: '/packing', title: 'menu.storePacking', accessKey: 'canUseStorePacking' },
     ],
   },
 ]
 
 /** 自带后台入口规则（见 webPortalAccess 的 ADMIN_ENTRY_RULES）的独立页面：从菜单授予时不连带授予工作台。 */
-const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms', '/packing', '/system/pos-settings'])
+const SELF_ENTRY_MENU_PATHS = new Set(['/pos-admin/store-cash', '/pos-admin/planograms', '/packing', '/warehouse/packing', '/system/pos-settings'])
 
 const warehouseStaffVisibleMenuPaths = new Set([
   '/warehouse',
   '/warehouse/store-orders',
-  // 扫码打包：仓库员工在总仓装箱用，入口在「收银管理」组下；组里其他页面仍不对仓库员工开放。
+  // 仓库打包：仓库员工在总仓装箱用，放在仓库组里。
+  '/warehouse/packing',
+  // 分店打包：仓库员工一般没有；单独授了 StorePacking.Use 时仍在「收银管理」组下，组里其他页面不对仓库员工开放。
   '/pos-admin',
   '/packing',
 ])

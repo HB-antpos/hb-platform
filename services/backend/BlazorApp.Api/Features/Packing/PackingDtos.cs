@@ -22,12 +22,17 @@ public sealed class PackingResult<T>
         };
 }
 
-/// <summary>账号能操作的一个所属地点：一家分店，或总仓。</summary>
-public sealed record PackingOwner(string Code, string Name, bool IsWarehouse);
+/// <summary>
+/// 账号能操作的一个所属地点：一家分店，或总仓。
+/// CanManage：在这个地点是不是主管（分店看店长角色，总仓看仓库经理角色 / 管理仓库 / 管理仓库订货）；
+/// 为 null 时沿用操作人整体的 IsManager（测试与拣货端构造的操作人只有一类地点，不需要逐个区分）。
+/// </summary>
+public sealed record PackingOwner(string Code, string Name, bool IsWarehouse, bool? CanManage = null);
 
 /// <summary>
 /// 当前操作人。Owners 是账号能操作的全部地点（店员只有本店，店长是所管分店，管理员是全部分店加总仓）；
-/// IsManager 为店长 / 仓库经理 / 管理员，才能重新开箱、重新开托、改存放位置名称；IsAdmin 才能改运输公司。
+/// IsManager 表示「至少在一个地点是主管」，具体某个地点能不能重新开箱、重新开托、改存放位置要用 IsManagerOf 判断，
+/// 避免店长角色兼有仓库打包权限时在总仓也被当成主管；IsAdmin 才能改运输公司。
 /// </summary>
 public sealed record PackingOperator(
     string UserGuid,
@@ -37,9 +42,38 @@ public sealed record PackingOperator(
     IReadOnlyList<PackingOwner> Owners
 )
 {
-    public bool Has(string? ownerCode) =>
-        !string.IsNullOrWhiteSpace(ownerCode)
-        && Owners.Any(owner => string.Equals(owner.Code, ownerCode.Trim(), StringComparison.OrdinalIgnoreCase));
+    public bool Has(string? ownerCode) => Find(ownerCode) != null;
+
+    /// <summary>在指定地点是不是主管：管理员处处是；否则看该地点自己的 CanManage（未设置时回落到整体 IsManager）。</summary>
+    public bool IsManagerOf(string? ownerCode)
+    {
+        var owner = Find(ownerCode);
+        return owner != null && (IsAdmin || (owner.CanManage ?? IsManager));
+    }
+
+    private PackingOwner? Find(string? ownerCode) =>
+        string.IsNullOrWhiteSpace(ownerCode)
+            ? null
+            : Owners.FirstOrDefault(owner => string.Equals(owner.Code, ownerCode.Trim(), StringComparison.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// 打包入口的「边」：Web / 手机把「仓库打包」和「分店打包」拆成两个入口，各自只显示自己这一边的地点。
+/// 只影响地点列表的展示；读写接口仍按 ownerCode 校验，不依赖这个参数。
+/// </summary>
+public static class PackingScopeSides
+{
+    public const string Store = "store";
+    public const string Warehouse = "warehouse";
+
+    /// <summary>按边过滤地点；side 为空或不认识时原样返回（旧版客户端不传）。</summary>
+    public static IReadOnlyList<PackingOwner> Filter(IReadOnlyList<PackingOwner> owners, string? side) =>
+        side?.Trim().ToLowerInvariant() switch
+        {
+            Store => owners.Where(owner => !owner.IsWarehouse).ToList(),
+            Warehouse => owners.Where(owner => owner.IsWarehouse).ToList(),
+            _ => owners,
+        };
 }
 
 public static class PackingErrorCodes

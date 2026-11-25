@@ -33,7 +33,7 @@ import {
   toggleSelected,
 } from "./batch-logic";
 import { packingErrorMessage } from "./packing-errors";
-import { batchRoute, cartonRoute } from "./pack-routes";
+import { batchRoute, cartonRoute, packRoutes, packSideOfPath } from "./pack-routes";
 import {
   buildBlankCartonLabelPayload,
   buildCartonLabelPayload,
@@ -387,4 +387,30 @@ test("路由：创建并打印带 autoprint 与份数；扫码启用后带 activ
   assert.equal(batchRoute("b1", { autoPrint: true, copies: 1, duplicate: true }), "/packing/batch/b1?autoprint=1&duplicate=1");
   assert.equal(cartonRoute("c1"), "/packing/carton/c1");
   assert.equal(cartonRoute("c1", { activated: true }), "/packing/carton/c1?activated=1");
+});
+
+test("路由：仓库打包与分店打包各走各的路由栈，页面按路径判断入口", () => {
+  const warehouse = packRoutes("warehouse");
+  assert.equal(warehouse.home, "/(shell)/warehouse-packing");
+  assert.equal(warehouse.locate, "/(shell)/warehouse-packing/locate");
+  assert.equal(warehouse.batchList, "/(shell)/warehouse-packing/batch");
+  assert.equal(warehouse.carton("c 1", { activated: true }), "/warehouse-packing/carton/c%201?activated=1");
+  assert.equal(warehouse.pallet("p1"), "/warehouse-packing/pallet/p1");
+  assert.equal(warehouse.batch("b1", { autoPrint: true, copies: 3 }), "/warehouse-packing/batch/b1?autoprint=1&copies=3");
+  assert.equal(warehouse.receiveOrder("a b"), "/warehouse-packing/receive-order?orderGuid=a%20b");
+  assert.deepEqual(warehouse.receive("BOX1"), { pathname: "/(shell)/warehouse-packing/receive", params: { code: "BOX1" } });
+  assert.equal(warehouse.receive(), "/(shell)/warehouse-packing/receive");
+
+  // 分店打包保持原来的 /packing 路径，旧深链与通知照常可用。
+  const store = packRoutes("store");
+  assert.equal(store.home, "/(shell)/packing");
+  assert.equal(store.carton("c1"), cartonRoute("c1"));
+  assert.equal(store.receiveOrder("abc"), "/packing/receive-order?orderGuid=abc");
+
+  // usePathname 不带 (shell) 分组。
+  assert.equal(packSideOfPath("/warehouse-packing"), "warehouse");
+  assert.equal(packSideOfPath("/warehouse-packing/carton/c1"), "warehouse");
+  assert.equal(packSideOfPath("/packing/carton/c1"), "store");
+  assert.equal(packSideOfPath("/warehouse-picking"), "store");
+  assert.equal(packSideOfPath(null), "store");
 });
