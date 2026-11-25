@@ -12,6 +12,10 @@ public sealed class ProductInsightBranchSalesDto
     public int IncludedStoreCount { get; set; }
     public int Quantity { get; set; }
     public decimal Amount { get; set; }
+    /// <summary>进货口径：local = 本地进货单数量；warehouse = 仓库已出库配货数量。与单店进销页一致。</summary>
+    public string PurchaseSource { get; set; } = "local";
+    /// <summary>纳入分店在本区间的进货（或配货）合计。</summary>
+    public decimal PurchaseQuantity { get; set; }
     public List<ProductInsightBranchSalesRowDto> Rows { get; set; } = new();
 }
 
@@ -27,4 +31,6 @@ public sealed class ProductInsightBranchSalesRowDto
     public string StoreName { get; set; } = string.Empty;
     public int Quantity { get; set; }
     public decimal Amount { get; set; }
+    /// <summary>本区间进货（或配货）数量，口径见 <see cref="ProductInsightBranchSalesDto.PurchaseSource"/>。</summary>
+    public decimal PurchaseQuantity { get; set; }
 }

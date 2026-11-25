@@ -78,9 +78,7 @@ public sealed class StoreProductInsightQueryService(
             GeneratedAt = DateTime.UtcNow,
             Store = store,
             Product = product,
-            SourceType = string.Equals(product.LocalSupplierCode?.Trim(), "200", StringComparison.Ordinal)
-                ? "warehouse"
-                : "local",
+            SourceType = ResolveSourceType(product.LocalSupplierCode),
         };
 
         var sales = await GetSalesAsync(storeCode, productCode, startDate, endDate, cancellationToken);
@@ -96,6 +94,65 @@ public sealed class StoreProductInsightQueryService(
         }
         return result;
     }
+
+    /// <summary>
+    /// 跨分店汇总本区间进货量，口径与单店 <see cref="GetAsync"/> 完全一致：
+    /// 本地供应商商品按进货单明细数量（入库日优先、否则订单日），仓库商品（供应商 200）按已出库订单的配货数量（出库日）。
+    /// 先按单据取回再在内存按分店求和，复用同一组查询构造器，避免两处口径漂移。
+    /// </summary>
+    public async Task<ProductBranchPurchaseSummary> GetBranchPurchasesAsync(
+        string productCode,
+        IReadOnlyCollection<string> storeCodes,
+        DateTime startDate,
+        DateTime endDate,
+        CancellationToken cancellationToken = default
+    )
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var localSupplierCode = await _db.Queryable<Product>()
+            .Where(item => item.ProductCode == productCode && !item.IsDeleted)
+            .Select(item => item.LocalSupplierCode)
+            .FirstAsync();
+        var sourceType = ResolveSourceType(localSupplierCode);
+        var summary = new ProductBranchPurchaseSummary { SourceType = sourceType };
+        var codes = storeCodes.Where(code => !string.IsNullOrWhiteSpace(code)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (codes.Count == 0)
+        {
+            return summary;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        IEnumerable<(string? StoreCode, decimal Quantity)> movements;
+        if (sourceType == "warehouse")
+        {
+            var rows = await BuildWarehouseDeliveryQuery(codes, productCode, startDate.Date, endDate.Date.AddDays(1)).ToListAsync();
+            // 与单店相同，再用规则函数复核出库状态与日期，防止 SQLite / MergeTable 的可空日期比较差异。
+            movements = rows
+                .Where(item => StoreProductInsightRules.IsWarehouseDelivery(item.FlowStatus, item.OutboundDate, item.AllocQuantity, startDate, endDate))
+                .Select(item => (item.StoreCode, item.AllocQuantity));
+        }
+        else
+        {
+            var rows = await BuildValidPurchaseQuery(codes, productCode)
+                .Where(item => item.InboundDate >= startDate.Date && item.InboundDate < endDate.Date.AddDays(1))
+                .ToListAsync();
+            movements = rows.Select(item => (item.StoreCode, item.Quantity));
+        }
+
+        foreach (var (storeCode, quantity) in movements)
+        {
+            var key = storeCode?.Trim();
+            if (string.IsNullOrEmpty(key))
+            {
+                continue;
+            }
+            summary.QuantityByStore[key] = summary.QuantityByStore.GetValueOrDefault(key) + quantity;
+        }
+        return summary;
+    }
+
+    internal static string ResolveSourceType(string? localSupplierCode) =>
+        string.Equals(localSupplierCode?.Trim(), "200", StringComparison.Ordinal) ? "warehouse" : "local";
 
     private async Task<(ProductInsightSalesDto Sales, DateTime? LastUpdatedAt)> GetSalesAsync(string storeCode, string productCode, DateTime startDate, DateTime endDate, CancellationToken cancellationToken)
     {
@@ -124,13 +181,13 @@ public sealed class StoreProductInsightQueryService(
 
     private async Task<ProductInsightPurchasesDto> GetPurchasesAsync(string storeCode, string productCode, DateTime startDate, DateTime endDate, CancellationToken cancellationToken)
     {
-        var currentRows = await BuildValidPurchaseQuery(storeCode, productCode)
+        var currentRows = await BuildValidPurchaseQuery(new List<string> { storeCode }, productCode)
             .Where(item => item.InboundDate >= startDate.Date && item.InboundDate < endDate.Date.AddDays(1))
             .OrderBy(item => item.InboundDate, OrderByType.Desc)
             .OrderBy(item => item.Id, OrderByType.Desc)
             .ToListAsync();
         cancellationToken.ThrowIfCancellationRequested();
-        var lastRow = await BuildValidPurchaseQuery(storeCode, productCode)
+        var lastRow = await BuildValidPurchaseQuery(new List<string> { storeCode }, productCode)
             .Where(item => item.InboundDate < endDate.Date.AddDays(1))
             .OrderBy(item => item.InboundDate, OrderByType.Desc)
             .OrderBy(item => item.Id, OrderByType.Desc)
@@ -147,7 +204,7 @@ public sealed class StoreProductInsightQueryService(
         };
     }
 
-    private ISugarQueryable<PurchaseRow> BuildValidPurchaseQuery(string storeCode, string productCode)
+    private ISugarQueryable<PurchaseRow> BuildValidPurchaseQuery(List<string> storeCodes, string productCode)
     {
         // 本地进货按进货单明细数量统计，不以入库状态筛掉单据；该数量不代表实收数量。
         // 与既有商品动销报表一致，业务日期优先入库日，未填时使用订单日，不以创建日期冒充进货日期。
@@ -157,14 +214,15 @@ public sealed class StoreProductInsightQueryService(
             .LeftJoin<StoreRetailPrice>((detail, invoice, price) => detail.StoreProductCode == price.UUID && price.StoreCode == invoice.StoreCode && !price.IsDeleted)
             .LeftJoin<HBLocalSupplier>((detail, invoice, price, supplier) => invoice.SupplierCode == supplier.LocalSupplierCode && !supplier.IsDeleted)
             .Where((detail, invoice, price, supplier) =>
-                invoice.StoreCode == storeCode
+                storeCodes.Contains(invoice.StoreCode)
                 && SqlFunc.IIF(SqlFunc.IsNullOrEmpty(detail.ProductCode), price.ProductCode, detail.ProductCode) == productCode
                 && !invoice.IsDeleted && !detail.IsDeleted
                 && (invoice.InboundDate != null || invoice.OrderDate != null))
-            .GroupBy((detail, invoice, price, supplier) => new { invoice.InvoiceGUID, invoice.InvoiceNo, invoice.InboundDate, invoice.OrderDate, invoice.SupplierCode, supplier.Name })
+            .GroupBy((detail, invoice, price, supplier) => new { invoice.InvoiceGUID, invoice.StoreCode, invoice.InvoiceNo, invoice.InboundDate, invoice.OrderDate, invoice.SupplierCode, supplier.Name })
             .Select((detail, invoice, price, supplier) => new PurchaseRow
             {
                 Id = invoice.InvoiceGUID,
+                StoreCode = invoice.StoreCode,
                 DocumentNo = invoice.InvoiceNo,
                 InboundDate = SqlFunc.IIF(invoice.InboundDate != null, invoice.InboundDate!.Value, invoice.OrderDate!.Value),
                 SupplierCode = invoice.SupplierCode,
@@ -176,12 +234,12 @@ public sealed class StoreProductInsightQueryService(
 
     private async Task<ProductInsightWarehouseDto> GetWarehouseAsync(string storeCode, string productCode, DateTime startDate, DateTime endDate, CancellationToken cancellationToken)
     {
-        var rows = await BuildWarehouseOrderQuery(storeCode, productCode)
+        var rows = await BuildWarehouseOrderQuery(new List<string> { storeCode }, productCode)
             .Where(item => item.OrderDate >= startDate.Date && item.OrderDate < endDate.Date.AddDays(1))
             .OrderBy(item => item.OrderDate, OrderByType.Desc)
             .ToListAsync();
         // 送货按实际出库日，而非订货日统计；日期条件在分组前下推，避免 SQLite 对 MergeTable 的 nullable 日期比较漏行。
-        var deliveryRows = await BuildWarehouseDeliveryQuery(storeCode, productCode, startDate.Date, endDate.Date.AddDays(1))
+        var deliveryRows = await BuildWarehouseDeliveryQuery(new List<string> { storeCode }, productCode, startDate.Date, endDate.Date.AddDays(1))
             .OrderBy(item => item.OutboundDate, OrderByType.Desc)
             .ToListAsync();
         var deliveries = deliveryRows
@@ -189,7 +247,7 @@ public sealed class StoreProductInsightQueryService(
             .Select(ToDeliveryMovement)
             .ToList();
         cancellationToken.ThrowIfCancellationRequested();
-        var lastDeliveryRow = await BuildWarehouseDeliveryQuery(storeCode, productCode, null, endDate.Date.AddDays(1))
+        var lastDeliveryRow = await BuildWarehouseDeliveryQuery(new List<string> { storeCode }, productCode, null, endDate.Date.AddDays(1))
             .OrderBy(item => item.OutboundDate, OrderByType.Desc)
             .FirstAsync();
         return new ProductInsightWarehouseDto
@@ -213,13 +271,14 @@ public sealed class StoreProductInsightQueryService(
         };
     }
 
-    private ISugarQueryable<WarehouseOrderRow> BuildWarehouseOrderQuery(string storeCode, string productCode)
+    private ISugarQueryable<WarehouseOrderRow> BuildWarehouseOrderQuery(List<string> storeCodes, string productCode)
     {
-        return BuildWarehouseOrderBaseQuery(storeCode, productCode)
-            .GroupBy((detail, order) => new { order.OrderGUID, order.OrderNo, order.OrderDate, order.OutboundDate, order.FlowStatus })
+        return BuildWarehouseOrderBaseQuery(storeCodes, productCode)
+            .GroupBy((detail, order) => new { order.OrderGUID, order.StoreCode, order.OrderNo, order.OrderDate, order.OutboundDate, order.FlowStatus })
             .Select((detail, order) => new WarehouseOrderRow
             {
                 Id = order.OrderGUID,
+                StoreCode = order.StoreCode,
                 DocumentNo = order.OrderNo,
                 OrderDate = order.OrderDate!.Value,
                 OutboundDate = order.OutboundDate,
@@ -230,9 +289,9 @@ public sealed class StoreProductInsightQueryService(
             .MergeTable();
     }
 
-    private ISugarQueryable<WarehouseOrderRow> BuildWarehouseDeliveryQuery(string storeCode, string productCode, DateTime? startDate, DateTime endExclusive)
+    private ISugarQueryable<WarehouseOrderRow> BuildWarehouseDeliveryQuery(List<string> storeCodes, string productCode, DateTime? startDate, DateTime endExclusive)
     {
-        var query = BuildWarehouseOrderBaseQuery(storeCode, productCode)
+        var query = BuildWarehouseOrderBaseQuery(storeCodes, productCode)
             .Where((detail, order) => order.FlowStatus == 2 && order.OutboundDate != null && detail.AllocQuantity > 0);
         if (startDate.HasValue)
         {
@@ -240,10 +299,11 @@ public sealed class StoreProductInsightQueryService(
         }
         return query
             .Where((detail, order) => order.OutboundDate < endExclusive)
-            .GroupBy((detail, order) => new { order.OrderGUID, order.OrderNo, order.OrderDate, order.OutboundDate, order.FlowStatus })
+            .GroupBy((detail, order) => new { order.OrderGUID, order.StoreCode, order.OrderNo, order.OrderDate, order.OutboundDate, order.FlowStatus })
             .Select((detail, order) => new WarehouseOrderRow
             {
                 Id = order.OrderGUID,
+                StoreCode = order.StoreCode,
                 DocumentNo = order.OrderNo,
                 OrderDate = order.OrderDate!.Value,
                 OutboundDate = order.OutboundDate,
@@ -254,11 +314,11 @@ public sealed class StoreProductInsightQueryService(
             .MergeTable();
     }
 
-    private ISugarQueryable<WareHouseOrderDetails, WareHouseOrder> BuildWarehouseOrderBaseQuery(string storeCode, string productCode)
+    private ISugarQueryable<WareHouseOrderDetails, WareHouseOrder> BuildWarehouseOrderBaseQuery(List<string> storeCodes, string productCode)
     {
         return _db.Queryable<WareHouseOrderDetails>()
             .InnerJoin<WareHouseOrder>((detail, order) => detail.OrderGUID == order.OrderGUID)
-            .Where((detail, order) => order.StoreCode == storeCode && detail.ProductCode == productCode && order.FlowStatus > 0 && !order.IsDeleted && !detail.IsDeleted && order.OrderDate != null);
+            .Where((detail, order) => storeCodes.Contains(order.StoreCode) && detail.ProductCode == productCode && order.FlowStatus > 0 && !order.IsDeleted && !detail.IsDeleted && order.OrderDate != null);
     }
 
     private static ProductInsightMovementDto ToMovement(PurchaseRow row) => new()
@@ -287,6 +347,13 @@ public sealed class StoreProductInsightQueryService(
         _ => "unknown",
     };
 
-    private sealed class PurchaseRow { public string Id { get; set; } = string.Empty; public string? DocumentNo { get; set; } public DateTime InboundDate { get; set; } public string? SupplierCode { get; set; } public string? SupplierName { get; set; } public decimal Quantity { get; set; } }
-    private sealed class WarehouseOrderRow { public string Id { get; set; } = string.Empty; public string? DocumentNo { get; set; } public DateTime OrderDate { get; set; } public DateTime? OutboundDate { get; set; } public int? FlowStatus { get; set; } public decimal Quantity { get; set; } public decimal AllocQuantity { get; set; } }
+    private sealed class PurchaseRow { public string Id { get; set; } = string.Empty; public string? StoreCode { get; set; } public string? DocumentNo { get; set; } public DateTime InboundDate { get; set; } public string? SupplierCode { get; set; } public string? SupplierName { get; set; } public decimal Quantity { get; set; } }
+    private sealed class WarehouseOrderRow { public string Id { get; set; } = string.Empty; public string? StoreCode { get; set; } public string? DocumentNo { get; set; } public DateTime OrderDate { get; set; } public DateTime? OutboundDate { get; set; } public int? FlowStatus { get; set; } public decimal Quantity { get; set; } public decimal AllocQuantity { get; set; } }
+}
+
+/// <summary>跨分店进货汇总：SourceType 为 local（本地进货单）或 warehouse（仓库配货出库）。</summary>
+public sealed class ProductBranchPurchaseSummary
+{
+    public string SourceType { get; init; } = "local";
+    public Dictionary<string, decimal> QuantityByStore { get; } = new(StringComparer.OrdinalIgnoreCase);
 }

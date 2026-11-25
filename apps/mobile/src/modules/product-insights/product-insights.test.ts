@@ -6,8 +6,11 @@ import {
 } from "./api-normalization";
 import {
   canViewProductInsightBranches,
+  describeBranchPurchase,
   findProductInsightStore,
   isValidProductInsightRange,
+  sortBranchRows,
+  summarizeBranchPurchases,
 } from "./logic";
 import { createProductInsightRequestGate } from "./request-gate";
 import type { ProductBranchSales, StoreProductInsight } from "./types";
@@ -58,9 +61,23 @@ const branches: ProductBranchSales = {
   includedStoreCount: 2,
   quantity: 5,
   amount: 12.5,
+  purchaseSource: "local",
+  purchaseQuantity: 10,
   rows: [
-    { storeCode: "S1", storeName: "一店", quantity: 5, amount: 12.5 },
-    { storeCode: "S2", storeName: "二店", quantity: 0, amount: 0 },
+    {
+      storeCode: "S1",
+      storeName: "一店",
+      quantity: 5,
+      amount: 12.5,
+      purchaseQuantity: 6,
+    },
+    {
+      storeCode: "S2",
+      storeName: "二店",
+      quantity: 0,
+      amount: 0,
+      purchaseQuantity: 4,
+    },
   ],
 };
 
@@ -225,4 +242,130 @@ test("切店或销毁会话同步取消当前请求，新的会话仍可继续�
   assert.equal(previous.isCurrent(), false);
   assert.equal(previous.signal.aborted, true);
   assert.equal(gate.begin().isCurrent(), true);
+});
+
+test("旧版服务器未返回进货字段时整份进货视为未知，不能当成 0 件", () => {
+  const legacy = {
+    ...branches,
+    purchaseSource: undefined,
+    purchaseQuantity: undefined,
+    rows: branches.rows.map(({ purchaseQuantity: _omit, ...row }) => row),
+  };
+  const result = normalizeProductBranchSales(legacy);
+  assert.equal(result.purchaseSource, null);
+  assert.equal(result.purchaseQuantity, null);
+  assert.ok(result.rows.every((row) => row.purchaseQuantity === null));
+  assert.equal(summarizeBranchPurchases(result), null);
+
+  // 只缺一行的半份数据同样整份作废。
+  const partial = normalizeProductBranchSales({
+    ...branches,
+    rows: [
+      branches.rows[0],
+      { ...branches.rows[1], purchaseQuantity: undefined },
+    ],
+  });
+  assert.equal(partial.purchaseQuantity, null);
+  assert.equal(partial.rows[0].purchaseQuantity, null);
+  assert.equal(normalizeProductBranchSales(branches).purchaseQuantity, 10);
+  assert.throws(
+    () => normalizeProductBranchSales({ ...branches, purchaseSource: "other" }),
+    /Invalid/,
+  );
+});
+
+test("分店进货提示：无进货、无销售、超卖、积压与售罄率", () => {
+  assert.deepEqual(
+    describeBranchPurchase({ quantity: 3, purchaseQuantity: null }),
+    {
+      state: "unknown",
+      sellThroughRate: null,
+      overstock: false,
+    },
+  );
+  assert.equal(
+    describeBranchPurchase({ quantity: 8, purchaseQuantity: 0 }).state,
+    "noPurchase",
+  );
+  const noSales = describeBranchPurchase({
+    quantity: 0,
+    purchaseQuantity: 120,
+  });
+  assert.equal(noSales.state, "noSales");
+  assert.equal(noSales.overstock, true);
+  const oversold = describeBranchPurchase({
+    quantity: 131,
+    purchaseQuantity: 96,
+  });
+  assert.equal(oversold.state, "oversold");
+  assert.equal(oversold.overstock, false);
+  const slow = describeBranchPurchase({ quantity: 66, purchaseQuantity: 288 });
+  assert.equal(slow.state, "normal");
+  assert.equal(slow.overstock, true);
+  // 进货不足 24 件时，售罄率再低也不挂积压，避免小样本误报。
+  assert.equal(
+    describeBranchPurchase({ quantity: 1, purchaseQuantity: 12 }).overstock,
+    false,
+  );
+  assert.ok(
+    Math.abs(
+      (describeBranchPurchase({ quantity: 196, purchaseQuantity: 240 })
+        .sellThroughRate ?? 0) - 0.8167,
+    ) < 0.001,
+  );
+});
+
+test("分店表按进货或销量降序，未知进货排最后且并列稳定", () => {
+  const rows = [
+    {
+      storeCode: "A",
+      storeName: "A",
+      quantity: 10,
+      amount: 50,
+      purchaseQuantity: 5,
+    },
+    {
+      storeCode: "B",
+      storeName: "B",
+      quantity: 20,
+      amount: 90,
+      purchaseQuantity: 40,
+    },
+    {
+      storeCode: "C",
+      storeName: "C",
+      quantity: 30,
+      amount: 99,
+      purchaseQuantity: null,
+    },
+    {
+      storeCode: "D",
+      storeName: "D",
+      quantity: 20,
+      amount: 80,
+      purchaseQuantity: 40,
+    },
+  ];
+  assert.deepEqual(
+    sortBranchRows(rows, "purchase").map((row) => row.storeCode),
+    ["B", "D", "A", "C"],
+  );
+  assert.deepEqual(
+    sortBranchRows(rows, "quantity").map((row) => row.storeCode),
+    ["C", "B", "D", "A"],
+  );
+  assert.equal(rows[0].storeCode, "A");
+});
+
+test("整体售罄率与进货店数、有销售店数", () => {
+  const totals = summarizeBranchPurchases(branches);
+  assert.ok(totals);
+  assert.equal(totals.sellThroughRate, 0.5);
+  assert.equal(totals.purchaseStoreCount, 2);
+  assert.equal(totals.salesStoreCount, 1);
+  assert.equal(
+    summarizeBranchPurchases({ quantity: 3, purchaseQuantity: 0, rows: [] })
+      ?.sellThroughRate,
+    null,
+  );
 });
