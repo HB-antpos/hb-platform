@@ -40,7 +40,8 @@ import {
   type PalletBlockReason,
 } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { PACKING_HOME, cartonRoute, printPalletLabel, receiveRoute } from "../pack-print";
+import { printPalletLabel } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import { usePackScope } from "../use-pack-scope";
 import {
   DESTINATION_TYPE,
@@ -81,6 +82,8 @@ interface BlockedScan {
 export function PalletScreen({ palletGuid }: { palletGuid: string }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const scope = usePackScope();
@@ -123,7 +126,7 @@ export function PalletScreen({ palletGuid }: { palletGuid: string }) {
     [palletGuid, queryClient],
   );
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
 
   // 扫码串行执行：连扫多只箱时不丢码。
   const enqueue = useCallback((task: () => Promise<void>) => {
@@ -404,8 +407,8 @@ export function PalletScreen({ palletGuid }: { palletGuid: string }) {
           mode={mode === "editable" ? "readonly" : mode}
           saving={saving}
           onReprint={() => void reprint()}
-          onOpenCarton={(cartonGuid) => router.push(cartonRoute(cartonGuid))}
-          onReceive={() => router.push(receiveRoute(pallet.palletNo))}
+          onOpenCarton={(cartonGuid) => router.push(routes.carton(cartonGuid))}
+          onReceive={() => router.push(routes.receive(pallet.palletNo))}
         />
       ) : (
         <>
@@ -503,7 +506,7 @@ export function PalletScreen({ palletGuid }: { palletGuid: string }) {
                   const code = blocked.code;
                   enqueue(() => addCarton(code, true));
                 }}
-                onOpenCarton={(cartonGuid) => router.push(cartonRoute(cartonGuid))}
+                onOpenCarton={(cartonGuid) => router.push(routes.carton(cartonGuid))}
               />
             ) : null}
 
@@ -526,7 +529,7 @@ export function PalletScreen({ palletGuid }: { palletGuid: string }) {
                     ]
                       .filter(Boolean)
                       .join(" · ")}
-                    onPress={() => router.push(cartonRoute(carton.cartonGuid))}
+                    onPress={() => router.push(routes.carton(carton.cartonGuid))}
                     right={
                       <>
                         {carton.cartonGuid === lastAdded ? <Tag tone="green" icon="check" label={t("pallet.justAdded")} /> : null}

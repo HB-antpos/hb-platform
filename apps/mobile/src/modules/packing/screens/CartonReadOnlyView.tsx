@@ -8,7 +8,8 @@ import { useAppTranslation } from "@/shared/i18n/use-app-translation";
 import { printErrorDetail } from "../packing-errors";
 import { formatLocalTime, type ViewMode } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { palletRoute, printCartonLabel, receiveRoute } from "../pack-print";
+import { printCartonLabel } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import type { PackCartonDetail } from "../types";
 import { destinationText } from "../components/destination-text";
 import { KeyValueRow, PACK_COLORS, SectionTitle, packStyles } from "../components/pack-ui";
@@ -28,6 +29,8 @@ export function CartonReadOnlyView({
 }) {
   const { t } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const smallLabel = usePackPreferences((state) => state.smallLabel);
   const [printing, setPrinting] = useState(false);
   const target = destinationText(carton.destination, t, carton.ownerCode);
@@ -72,7 +75,7 @@ export function CartonReadOnlyView({
           <KeyValueRow
             label={t("fields.pallet")}
             value={carton.palletNo}
-            onPress={() => router.push(palletRoute(carton.palletGuid as string))}
+            onPress={() => router.push(routes.pallet(carton.palletGuid as string))}
           />
         ) : null}
         {carton.dispatchedAtUtc ? (
@@ -114,7 +117,7 @@ export function CartonReadOnlyView({
         <Button
           mode="contained"
           icon="package-down"
-          onPress={() => router.push(receiveRoute(carton.cartonNo))}
+          onPress={() => router.push(routes.receive(carton.cartonNo))}
           style={packStyles.button}
           contentStyle={packStyles.buttonContent}
         >

@@ -90,8 +90,8 @@ assert.equal(implicitPreview[2].visible, false);
 
 const fullMenus = getRoleMenuDefinitions("en");
 // Web 菜单目录按页签登记：52 = 原 50 项 + 节日销售报告（#1155）+ 商品陈列图（/pos-admin/planograms，Planogram.View，商品与价格合并页的第 5 个页签）。
-assert.equal(fullMenus.filter((item) => item.platform === "web").length, 53); // +1 扫码打包（Web，/packing） +1 收银端设置下发（Web）
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 47); // +1 扫码打包（移动端） +1 收银端设置下发（移动端）
+assert.equal(fullMenus.filter((item) => item.platform === "web").length, 54); // +1 分店打包（Web，/packing） +1 收银端设置下发（Web） +1 仓库打包（Web，/warehouse/packing）
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 48); // +1 分店打包（移动端） +1 收银端设置下发（移动端） +1 仓库打包（移动端）
 // 「人脸比对」合并入口：与后端 FullAppMenu 的 any-of 一致，六个码任一即可见；旧三项目录项保留（旧版 App 兼容）
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "face-hub")?.permissionCodes,
@@ -113,10 +113,23 @@ assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "warehouse-picking")?.permissionCodes,
   ["Warehouse.Picking", "Warehouse.Manage", "Warehouse.ManageOrders"]
 );
-// 扫码打包分店、总仓共用：分店打包权限、总仓打包权限或两个仓库管理权限任一即可见。
+// 打包拆成两个入口：仓库打包认仓库打包权限或两个仓库管理权限；分店打包只认分店打包权限。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "mobile" && item.key === "warehouse-packing")?.permissionCodes,
+  ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]
+);
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "packing")?.permissionCodes,
-  ["StorePacking.Use", "Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]
+  ["StorePacking.Use"]
+);
+// Web 侧两个入口同口径：仓库打包在仓库组，分店打包在收银管理组。
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "web" && item.key === "/warehouse/packing")?.permissionCodes,
+  ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]
+);
+assert.deepEqual(
+  fullMenus.find((item) => item.platform === "web" && item.key === "/packing")?.permissionCodes,
+  ["StorePacking.Use"]
 );
 // 季节商品查询会展示其他分店库存，只认独立权限，不复用商品查询的 StoreProducts.View。
 assert.deepEqual(

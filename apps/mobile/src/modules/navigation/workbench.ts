@@ -30,7 +30,7 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "home", labelKey: "routes.storeOrdering", icon: "storefront-outline" },
       { routeName: "cart", labelKey: "routes.cart", icon: "cart-outline" },
       { routeName: "orders", labelKey: "routes.orders", icon: "clipboard-list-outline" },
-      // 扫码打包 / 签收到货：分店装箱、发出、签收，入口放在分店区；总仓账号同样从这里进。
+      // 分店打包 / 签收到货：分店装箱、发出、签收，入口放在分店区；总仓打包在「仓库与采购」组。
       { routeName: "packing", labelKey: "routes.packing", icon: "package-variant" },
       { routeName: "local-supplier-invoices", labelKey: "routes.localSupplierInvoices", icon: "receipt-text-outline" },
     ],
@@ -59,6 +59,8 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "warehouse", labelKey: "routes.warehouse", icon: "warehouse" },
       { routeName: "containers", labelKey: "routes.containers", icon: "archive-outline" },
       { routeName: "warehouse-picking", labelKey: "routes.warehousePicking", icon: "clipboard-check-outline" },
+      // 仓库打包：总仓装箱、组托盘、发往分店，只显示总仓。
+      { routeName: "warehouse-packing", labelKey: "routes.warehousePacking", icon: "package-variant" },
       { routeName: "warehouse-product-insights", labelKey: "routes.warehouseProductInsights", icon: "warehouse" },
       { routeName: "domestic-purchase", labelKey: "routes.domesticPurchase", icon: "shopping-outline" },
     ],

@@ -27,7 +27,8 @@ import {
   looksLikePackCode,
 } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { cartonRoute, palletRoute, printCartonLabel } from "../pack-print";
+import { printCartonLabel } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import { DESTINATION_TYPE, type PackCartonDetail } from "../types";
 import { CodeEntrySheet } from "../components/EntrySheets";
 import { LocationPickerSheet } from "../components/LocationPickerSheet";
@@ -60,6 +61,8 @@ export function CartonSealedView({
 }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const smallLabel = usePackPreferences((state) => state.smallLabel);
   const [sheet, setSheet] = useState<"pallet" | "location" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -139,7 +142,7 @@ export function CartonSealedView({
         await addCartonToPallet(pallet.palletGuid, carton.cartonNo);
         setSheet(null);
         onReload();
-        router.push(palletRoute(pallet.palletGuid));
+        router.push(routes.pallet(pallet.palletGuid));
       } catch (error) {
         setSheetError(packingErrorMessage(error, t, language));
       }
@@ -166,7 +169,7 @@ export function CartonSealedView({
           ...destinationRequestOf(carton.destination),
           orderGuid: carton.orderGuid,
         });
-        router.replace(cartonRoute(next.cartonGuid));
+        router.replace(routes.carton(next.cartonGuid));
       } catch (error) {
         onMessage(packingErrorMessage(error, t, language));
       }
@@ -242,7 +245,7 @@ export function CartonSealedView({
         const resolved = await resolvePackCode(code);
         if (resolved.kind === "carton") {
           playScanFeedbackSound("found");
-          if (resolved.guid !== carton.cartonGuid) router.push(cartonRoute(resolved.guid));
+          if (resolved.guid !== carton.cartonGuid) router.push(routes.carton(resolved.guid));
           return;
         }
         if (onPallet) {
@@ -256,7 +259,7 @@ export function CartonSealedView({
         onMessage(packingErrorMessage(error, t, language));
       }
     },
-    [carton.cartonGuid, language, onMessage, onPallet, putOnPallet, router, t],
+    [carton.cartonGuid, language, onMessage, onPallet, putOnPallet, router, routes, t],
   );
   const hid = useHidBarcodeScanner({ enabled: focused && sheet === null && !busy, onScan: handleScan });
 
@@ -287,7 +290,7 @@ export function CartonSealedView({
             value={where}
             onPress={
               onPallet && carton.palletGuid
-                ? () => router.push(palletRoute(carton.palletGuid as string))
+                ? () => router.push(routes.pallet(carton.palletGuid as string))
                 : () => {
                     setSheetError("");
                     setSheet("location");
@@ -320,7 +323,7 @@ export function CartonSealedView({
               title={t("sealed.openPallet")}
               subtitle={t("sealed.openPalletHint", { palletNo: carton.palletNo ?? "" })}
               right={<Chevron />}
-              onPress={() => router.push(palletRoute(carton.palletGuid as string))}
+              onPress={() => router.push(routes.pallet(carton.palletGuid as string))}
             />
           ) : (
             <>
