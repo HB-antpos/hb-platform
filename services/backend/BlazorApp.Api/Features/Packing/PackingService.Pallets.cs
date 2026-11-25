@@ -197,7 +197,7 @@ internal sealed partial class PackingService
             var mismatch = PackDestinationTypes.IsShippable(carton.DestinationType)
                 && PackDestinationTypes.IsShippable(pallet.DestinationType)
                 && !SameCode(carton.DestinationCode, pallet.DestinationCode);
-            if (mismatch && !(request.AllowDestinationMismatch && op.IsManager))
+            if (mismatch && !(request.AllowDestinationMismatch && op.IsManagerOf(pallet.OwnerCode)))
             {
                 return await PalletBlockedAsync(
                     pallet,
@@ -381,7 +381,13 @@ internal sealed partial class PackingService
                 return denied;
             }
 
-            if (pallet!.Status != PackPalletStatuses.Sealed)
+            // 主管身份按托盘所属地点判断：店长在总仓的托盘上不算主管。
+            if (!op.IsManagerOf(pallet!.OwnerCode))
+            {
+                return PalletFail(403, PackingErrorCodes.NotAllowed, "只有店长或仓库经理可以重新开托");
+            }
+
+            if (pallet.Status != PackPalletStatuses.Sealed)
             {
                 return PalletFail(409, PackingErrorCodes.PalletNotSealed, "只有已封托的托盘可以重新开托");
             }

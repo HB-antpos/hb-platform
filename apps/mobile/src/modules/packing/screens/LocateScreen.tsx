@@ -17,7 +17,7 @@ import { locateProduct } from "../api";
 import { readPackingError } from "../api-normalization";
 import { packingErrorMessage } from "../packing-errors";
 import { groupLocateRows, groupLocateSections, type LocateSection } from "../packing-logic";
-import { PACKING_HOME, cartonRoute, palletRoute } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import { usePackScope } from "../use-pack-scope";
 import { CARTON_STATUS, type LocateGroupKey, type PackLocateRow } from "../types";
 import { OwnerBar } from "../components/OwnerBar";
@@ -38,6 +38,8 @@ const GROUP_ICON: Record<LocateGroupKey, "archive-outline" | "truck-delivery-out
 export function LocateScreen() {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const scope = usePackScope();
   const owner = scope.owner;
@@ -79,7 +81,7 @@ export function LocateScreen() {
   }, []);
   const hid = useHidBarcodeScanner({ enabled: focused && !inputFocused && !cameraVisible, onScan: search });
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
   const result = query.data;
   const sections = useMemo(() => groupLocateSections(result?.rows ?? []), [result?.rows]);
   const notFound = query.isError && readPackingError(query.error).code === "CODE_NOT_FOUND";
@@ -172,8 +174,8 @@ export function LocateScreen() {
                 <SectionBlock
                   key={section.group}
                   section={section}
-                  onOpenCarton={(guid) => router.push(cartonRoute(guid))}
-                  onOpenPallet={(guid) => router.push(palletRoute(guid))}
+                  onOpenCarton={(guid) => router.push(routes.carton(guid))}
+                  onOpenPallet={(guid) => router.push(routes.pallet(guid))}
                 />
               ))
             )}

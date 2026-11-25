@@ -63,15 +63,26 @@ internal sealed class PackingAccessService(
             || isWarehouseManagerRole
             || await HasPermissionAsync(user, Permissions.Warehouse.Packing);
 
+        // 主管按地点分开算：分店看店长角色，总仓看仓库经理角色或管理仓库 / 管理仓库订货权限。
+        // 这样店长角色兼有仓库打包权限时，在总仓仍只是普通打包员（不能重新开箱 / 开托）。
+        var storeManager = isAdmin || isStoreManagerRole;
+        var warehouseManager = isAdmin
+            || isWarehouseManagerRole
+            || (hasWarehouse
+                && (await HasPermissionAsync(user, Permissions.Warehouse.Manage)
+                    || await HasPermissionAsync(user, Permissions.Warehouse.ManageOrders)));
+
         var owners = new List<PackingOwner>();
         if (hasStore)
         {
-            owners.AddRange(await LoadStoreOwnersAsync(userGuid, allStores: isAdmin));
+            owners.AddRange(
+                (await LoadStoreOwnersAsync(userGuid, allStores: isAdmin)).Select(owner => owner with { CanManage = storeManager })
+            );
         }
 
         if (hasWarehouse)
         {
-            owners.Add(new PackingOwner(PackOwners.Warehouse, PackingConfig.WarehouseName(configuration), true));
+            owners.Add(new PackingOwner(PackOwners.Warehouse, PackingConfig.WarehouseName(configuration), true, warehouseManager));
         }
 
         if (owners.Count == 0)
@@ -79,12 +90,7 @@ internal sealed class PackingAccessService(
             return PackingAccessResult.Denied(403, PackingErrorCodes.NotAllowed, "当前账号没有可以打包的分店或仓库");
         }
 
-        var isManager = isAdmin
-            || isStoreManagerRole
-            || isWarehouseManagerRole
-            || (hasWarehouse
-                && (await HasPermissionAsync(user, Permissions.Warehouse.Manage)
-                    || await HasPermissionAsync(user, Permissions.Warehouse.ManageOrders)));
+        var isManager = owners.Any(owner => owner.CanManage == true);
 
         var name = user.FindFirst("fullName")?.Value;
         if (string.IsNullOrWhiteSpace(name))
@@ -101,7 +107,7 @@ internal sealed class PackingAccessService(
             string.IsNullOrWhiteSpace(name) ? userGuid : name.Trim(),
             IsManager: false,
             IsAdmin: false,
-            new[] { new PackingOwner(PackOwners.Warehouse, PackingConfig.WarehouseName(configuration), true) }
+            new[] { new PackingOwner(PackOwners.Warehouse, PackingConfig.WarehouseName(configuration), true, CanManage: false) }
         );
 
     private async Task<List<PackingOwner>> LoadStoreOwnersAsync(string userGuid, bool allStores)

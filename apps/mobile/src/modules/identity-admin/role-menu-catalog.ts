@@ -22,6 +22,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/warehouse/store-orders", "Store orders", "分店订货", ["Warehouse.ManageOrders"]],
   ["/warehouse/preorders", "Preorders", "预订单", ["Warehouse.ManageOrders"]],
   ["/warehouse/store-order-import-price-variance", "Import price variance", "导入价格差异", ["Warehouse.ManageOrders"]],
+  // 仓库打包（Web「仓库管理」组）：Warehouse.Packing；管理仓库 / 管理仓库订货按后端别名自动具备。
+  ["/warehouse/packing", "Warehouse packing", "仓库打包", ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
   ["/warehouse/containers", "Containers", "货柜管理", ["Container.View"]],
   ["/warehouse/products", "Warehouse products", "仓库商品", ["Warehouse.ManageProducts"]],
   ["/warehouse/categories", "Categories", "分类管理", ["Warehouse.ManageCategories"]],
@@ -65,8 +67,8 @@ const WEB_MENU: MenuSource[] = ([
   ["/pos-admin/myob", "MYOB integration", "MYOB 对接", ["Myob.Connection.Manage", "Myob.Employee.Bind", "Myob.Payslip.ViewManagedStore", "Myob.Payslip.ViewAllStores", "Attendance.Payroll.Edit"]],
   ["/pos-admin/sales-orders", "Sales orders", "销售订单", ["Orders.View"]],
   ["/pos-admin/local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.View"]],
-  // 扫码打包（分店 + 总仓共用，在 Web「收银管理」组下）：分店 StorePacking.Use，总仓 Warehouse.Packing；管理仓库 / 管理仓库订货按后端别名自动具备。
-  ["/packing", "Scan packing", "扫码打包", ["StorePacking.Use", "Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
+  // 分店打包（Web「收银管理」组）：只认 StorePacking.Use；总仓打包在「仓库管理 → 仓库打包」。
+  ["/packing", "Store packing", "分店打包", ["StorePacking.Use"]],
 ] as MenuRow[]).map(toSource("web"));
 
 const MOBILE_MENU: MenuSource[] = ([
@@ -78,8 +80,9 @@ const MOBILE_MENU: MenuSource[] = ([
   ["containers", "Containers", "货柜管理", ["Container.View"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：拣货专用权限，或管理仓库 / 管理仓库订货任一即可见。
   ["warehouse-picking", "Order picking", "订单拣货", ["Warehouse.Picking", "Warehouse.Manage", "Warehouse.ManageOrders"]],
-  // 与后端 FullAppMenu 的 AnyPermissions 一致：分店打包权限、总仓打包权限，或管理仓库 / 管理仓库订货任一即可见（分店、总仓共用）。
-  ["packing", "Packing", "扫码打包", ["StorePacking.Use", "Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
+  // 与后端 FullAppMenu 一致：仓库打包认 Warehouse.Packing 或管理仓库 / 管理仓库订货；分店打包只认 StorePacking.Use。
+  ["warehouse-packing", "Warehouse packing", "仓库打包", ["Warehouse.Packing", "Warehouse.Manage", "Warehouse.ManageOrders"]],
+  ["packing", "Store packing", "分店打包", ["StorePacking.Use"]],
   ["domestic-purchase", "China purchasing", "国内采购", ["DomesticPurchase.ManageProducts"]],
   ["local-supplier-invoices", "Local supplier invoices", "本地供应商发票", ["LocalPurchase.MobileView", "LocalPurchase.View"]],
   ["advertisements", "Advertisements", "广告", ["Advertisements.View"]],

@@ -41,7 +41,8 @@ import {
   toDestinationRequest,
 } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { PACKING_HOME, printCartonLabel } from "../pack-print";
+import { printCartonLabel } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import {
   CARTON_STATUS,
   type DestinationFormValue,
@@ -68,6 +69,8 @@ const cartonKey = (cartonGuid: string) => ["packing", "carton", cartonGuid] as c
 export function CartonScreen({ cartonGuid, justActivated = false }: { cartonGuid: string; justActivated?: boolean }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const scope = usePackScope();
@@ -97,7 +100,7 @@ export function CartonScreen({ cartonGuid, justActivated = false }: { cartonGuid
     [cartonGuid, queryClient],
   );
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
 
   const closeDestination = () => {
     setDestinationVisible(false);

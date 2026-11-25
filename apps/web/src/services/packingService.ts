@@ -27,6 +27,7 @@ import type {
   PackReceivePalletRequest,
   PackResolveResult,
   PackScope,
+  PackSide,
   PackVoidBlankResult,
 } from '../types/packing'
 import request, { RequestError, unwrapApiData } from '../utils/request'
@@ -62,9 +63,9 @@ export function readPackingError<TData = unknown>(error: unknown): PackingErrorI
 
 // ---- 所属地点 ----
 
-/** 当前账号能操作的地点（分店 / 总仓）以及是不是店长 / 管理员。 */
-export async function getPackScope() {
-  return unwrapApiData(await request.get<ApiResponse<PackScope>>(`${API_BASE}/scope`))
+/** 当前账号能操作的地点（分店 / 总仓）以及是不是店长 / 管理员；side 只要这一边的地点（仓库打包 / 分店打包两个入口）。 */
+export async function getPackScope(side?: PackSide) {
+  return unwrapApiData(await request.get<ApiResponse<PackScope>>(`${API_BASE}/scope`, side ? { params: { side } } : undefined))
 }
 
 /**

@@ -219,7 +219,7 @@ namespace BlazorApp.Shared.Constants
             "Warehouse.ManageProducts",
             // 撤销价格变更任务：Web「价格变更任务」页与移动端「价格和标签」共用。
             "Warehouse.CancelPriceUpdateTasks",
-            // 扫码打包：移动端「扫码打包」与 Web「扫码打包」共用（分店用 StorePacking.Use，总仓用 Warehouse.Packing）。
+            // 扫码打包拆成两个入口：「仓库打包」（Warehouse.Packing）与「分店打包」（StorePacking.Use），移动端与 Web 都有。
             "Warehouse.Packing",
             "StorePacking.Use",
         };

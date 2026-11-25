@@ -115,6 +115,74 @@ public sealed class PackingAccessServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task 店长兼有仓库打包权限_主管身份按地点区分_分店是主管_总仓不是()
+    {
+        var result = await ResolveAsync(
+            User("u-mgr", role: "StoreManager"),
+            PackingPermissions(Permissions.StorePacking.Use, Permissions.Warehouse.Packing)
+        );
+
+        var op = result.Operator!;
+        Assert.True(op.IsManager);
+        Assert.True(op.IsManagerOf("1013"));
+        Assert.True(op.IsManagerOf("1020"));
+        Assert.False(op.IsManagerOf(PackOwners.Warehouse));
+        Assert.False(op.IsManagerOf("1030"));
+    }
+
+    [Fact]
+    public async Task 仓库经理兼有分店打包权限_总仓是主管_分店不是()
+    {
+        var result = await ResolveAsync(
+            User("u-staff"),
+            PackingPermissions(Permissions.StorePacking.Use, Permissions.Warehouse.Packing, Permissions.Warehouse.ManageOrders)
+        );
+
+        var op = result.Operator!;
+        Assert.True(op.IsManagerOf(PackOwners.Warehouse));
+        Assert.False(op.IsManagerOf("1013"));
+    }
+
+    [Fact]
+    public async Task 管理员_每个地点都是主管()
+    {
+        var result = await ResolveAsync(User("u-admin", role: Permissions.SuperAdminRoleNames[0]), PackingPermissions());
+
+        var op = result.Operator!;
+        Assert.All(op.Owners, owner => Assert.True(op.IsManagerOf(owner.Code)));
+    }
+
+    [Fact]
+    public async Task 只有分店打包权限的店长_不会因为店长角色在总仓成为主管()
+    {
+        // 以前店长角色不管有没有总仓地点都算 IsManager；现在 IsManager 只表示「在自己能操作的某个地点是主管」。
+        var result = await ResolveAsync(User("u-mgr", role: "StoreManager"), PackingPermissions(Permissions.Warehouse.Packing));
+
+        var op = result.Operator!;
+        Assert.Equal(new[] { PackOwners.Warehouse }, op.Owners.Select(owner => owner.Code));
+        Assert.False(op.IsManager);
+        Assert.False(op.IsManagerOf(PackOwners.Warehouse));
+    }
+
+    [Theory]
+    [InlineData("store", new[] { "1013", "1020" })]
+    [InlineData("STORE", new[] { "1013", "1020" })]
+    [InlineData("warehouse", new[] { PackOwners.Warehouse })]
+    [InlineData(null, new[] { "1013", "1020", PackOwners.Warehouse })]
+    [InlineData("unknown", new[] { "1013", "1020", PackOwners.Warehouse })]
+    public void 打包入口按边过滤地点_不传或不认识时返回全部(string? side, string[] expected)
+    {
+        var owners = new[]
+        {
+            new PackingOwner("1013", "Sunnybank", false),
+            new PackingOwner("1020", "Inala", false),
+            new PackingOwner(PackOwners.Warehouse, "HB TEST WAREHOUSE", true),
+        };
+
+        Assert.Equal(expected, PackingScopeSides.Filter(owners, side).Select(owner => owner.Code));
+    }
+
+    [Fact]
     public async Task 没有打包权限_或没有关联任何分店_或是订货助手令牌_一律拒绝()
     {
         var noPermission = await ResolveAsync(User("u-staff"), PackingPermissions());

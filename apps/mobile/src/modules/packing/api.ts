@@ -21,6 +21,7 @@ import {
   normalizeScope,
   normalizeVoidBlank,
 } from "./api-normalization";
+import type { PackSide } from "./pack-routes";
 import type { CartonFilter, PackBatchCreateRequest, PackDestinationRequest, PalletFilter } from "./types";
 
 const BASE = "/react/v1/packing";
@@ -30,8 +31,12 @@ const pallet = (palletGuid: string, suffix = "") => `${BASE}/pallets/${encodeURI
 // ---- 所属地点 ----
 
 /** 账号能操作的分店 / 总仓，以及是不是店长 / 管理员。 */
-export async function fetchPackScope(signal?: AbortSignal) {
-  const response = await apiClient.get(`${BASE}/scope`, { signal });
+/**
+ * 当前账号能打包的地点。side：仓库打包只要总仓、分店打包只要所属分店（服务端过滤）；
+ * 老后端不认 side 时会返回全部地点，入口照常可用。
+ */
+export async function fetchPackScope(signal?: AbortSignal, side?: PackSide) {
+  const response = await apiClient.get(`${BASE}/scope`, { signal, params: side ? { side } : undefined });
   return normalizeScope(response.data);
 }
 

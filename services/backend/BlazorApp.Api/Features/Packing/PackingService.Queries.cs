@@ -54,7 +54,7 @@ internal sealed partial class PackingService
         }
 
         // 跨店查询只给店长 / 管理员：店员只看本店。
-        if (allStores && !op.IsManager)
+        if (allStores && !op.IsManagerOf(owner.Code))
         {
             return PackingResult<PackingLocateDto>.Fail(403, PackingErrorCodes.NotAllowed, "只有店长可以查看其他分店");
         }
@@ -328,6 +328,12 @@ internal sealed partial class PackingService
             }
 
             ownerCode = existing.OwnerCode;
+        }
+
+        // 主管身份按位置所属地点判断（入口处的 IsManager 只是「至少在一个地点是主管」的快速拦截）。
+        if (!op.IsManagerOf(ownerCode))
+        {
+            return PackingResult<PackingLocationDto>.Fail(403, PackingErrorCodes.NotAllowed, "只有店长可以维护存放位置");
         }
 
         var nameTaken = await _db.Queryable<PackLocation>()

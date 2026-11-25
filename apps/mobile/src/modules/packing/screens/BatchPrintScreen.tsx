@@ -23,7 +23,8 @@ import {
 import { packingErrorMessage, printErrorDetail } from "../packing-errors";
 import { formatLocalTime } from "../packing-logic";
 import { usePackPreferences } from "../pack-preferences";
-import { PACKING_BATCH_LIST, printCartonLabel } from "../pack-print";
+import { printCartonLabel } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import type { PackCartonSummary } from "../types";
 import { PrinterStatusTag } from "../components/PrinterStatusTag";
 import { MONO_FONT, PACK_COLORS, SectionTitle, Tag, WarningCard, packStyles } from "../components/pack-ui";
@@ -47,6 +48,8 @@ export function BatchPrintScreen({
 }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
@@ -183,7 +186,7 @@ export function BatchPrintScreen({
     ]);
   };
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_BATCH_LIST));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.batchList));
 
   const info = query.isError ? readPackingError(query.error) : null;
   const batch = query.data?.batch ?? null;

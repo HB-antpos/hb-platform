@@ -12,7 +12,7 @@ import { readPackingError } from "../api-normalization";
 import { isBatchApiMissing } from "../batch-logic";
 import { packingErrorMessage } from "../packing-errors";
 import { formatLocalTime } from "../packing-logic";
-import { PACKING_BATCH_NEW, PACKING_HOME, batchRoute } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import { usePackScope } from "../use-pack-scope";
 import { OwnerBar } from "../components/OwnerBar";
 import { PrinterStatusTag } from "../components/PrinterStatusTag";
@@ -22,6 +22,8 @@ import { Tag, UnitRow, packStyles } from "../components/pack-ui";
 export function BatchListScreen() {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const scope = usePackScope();
   const owner = scope.owner;
@@ -32,7 +34,7 @@ export function BatchListScreen() {
     enabled: focused && Boolean(ownerCode),
     staleTime: 5_000,
   });
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
   const info = query.isError ? readPackingError(query.error) : null;
   const unavailable = info ? isBatchApiMissing(info.status, info.code) : false;
 
@@ -62,7 +64,7 @@ export function BatchListScreen() {
             <Button
               mode="contained"
               icon="plus"
-              onPress={() => router.push(PACKING_BATCH_NEW)}
+              onPress={() => router.push(routes.batchNew)}
               style={packStyles.button}
               contentStyle={packStyles.buttonContent}
             >
@@ -83,7 +85,7 @@ export function BatchListScreen() {
                 monoTitle
                 subtitle={`${t("batch.itemStats", { count: item.count, printed: item.printedCount, unactivated: item.unactivatedCount })}\n${t("batch.itemSubtitle", { time: formatLocalTime(item.createdAtUtc), creator: item.createdByName || "—" })}`}
                 right={item.voidedCount > 0 ? <Tag tone="gray" label={t("batch.itemVoided", { count: item.voidedCount })} /> : undefined}
-                onPress={() => router.push(batchRoute(item.batchGuid))}
+                onPress={() => router.push(routes.batch(item.batchGuid))}
                 accessibilityLabel={t("batch.itemTitle", { first: item.firstCartonNo, last: item.lastCartonNo })}
               />
             </View>

@@ -553,6 +553,17 @@ export const appRoutes: AppRouteItem[] = [
         element: <StoreOrderImportPriceVariancePage />,
       },
       {
+        // 仓库打包：总仓扫码装箱 / 组托盘 / 发往分店，页面只显示总仓；与「收银管理 → 分店打包」共用同一个页面组件、分开授权。
+        path: '/warehouse/packing',
+        meta: {
+          title: 'menu.warehousePacking',
+          icon: 'InboxOutlined',
+          keepAlive: true,
+          accessKey: 'canUseWarehousePacking',
+        },
+        element: <PackingPage side="warehouse" />,
+      },
+      {
         path: '/warehouse/store-order/detail/:id',
         meta: {
           title: 'menu.storeOrderDetail',
@@ -1024,16 +1035,16 @@ export const appRoutes: AppRouteItem[] = [
         element: <LocalSupplierInvoicesPage />,
       },
       {
-        // 扫码打包（分店 + 总仓共用）：打包台 / 箱 / 托盘 / 到货签收 / 商品位置 / 存放位置 / 运输公司，一个页面七个标签。
-        // 放在分店侧的「收银管理」组里；分店用 StorePacking.Use，总仓用 Warehouse.Packing（管理仓库 / 管理仓库订货按别名具备）。
+        // 分店打包：打包台 / 箱 / 托盘 / 到货签收 / 商品位置 / 存放位置 / 运输公司，一个页面七个标签，只显示账号所属的分店。
+        // 放在「收银管理」组里，只认 StorePacking.Use；总仓打包在「仓库管理 → 仓库打包」（/warehouse/packing）。
         path: '/packing',
         meta: {
-          title: 'menu.packing',
+          title: 'menu.storePacking',
           icon: 'InboxOutlined',
           keepAlive: true,
-          accessKey: 'canUsePacking',
+          accessKey: 'canUseStorePacking',
         },
-        element: <PackingPage />,
+        element: <PackingPage side="store" />,
       },
       {
         // 旧地址兼容：页面已挪到销售看板，书签与历史链接重定向到新路径。
@@ -1207,28 +1218,33 @@ function isWarehouseStaffNavigationLimited(access: AccessControl) {
 
 function buildWarehouseStaffMenus(access: AccessControl): MenuProps['items'] {
   const menus: NonNullable<MenuProps['items']> = []
+  // 仓库员工侧边栏的仓库组只保留分店订货列表和仓库打包；首柜价差异属于仓库管理员报表，不跟随只读订货入口开放。
+  const warehouseChildren: NonNullable<MenuProps['items']> = []
   if (access.canManageWarehouseOrders) {
-    // 仓库员工侧边栏只保留分店订货列表；首柜价差异属于仓库管理员报表，不跟随只读订货入口开放。
+    warehouseChildren.push({
+      key: '/warehouse/store-orders',
+      icon: iconMap.ReconciliationOutlined,
+      label: i18n.t('menu.storeOrders'),
+    })
+  }
+  if (access.canUseWarehousePacking) {
+    warehouseChildren.push({ key: '/warehouse/packing', icon: iconMap.InboxOutlined, label: i18n.t('menu.warehousePacking') })
+  }
+  if (warehouseChildren.length > 0) {
     menus.push({
       key: '/warehouse',
       icon: iconMap.DatabaseOutlined,
       label: i18n.t('menu.warehouse'),
-      children: [
-        {
-          key: '/warehouse/store-orders',
-          icon: iconMap.ReconciliationOutlined,
-          label: i18n.t('menu.storeOrders'),
-        },
-      ],
+      children: warehouseChildren,
     })
   }
-  if (access.canUsePacking) {
-    // 扫码打包：仓库员工在总仓装箱要用；入口在「收银管理」组下，组里其他页面仍不对仓库员工开放。
+  if (access.canUseStorePacking) {
+    // 分店打包：仓库员工一般没有；单独授了 StorePacking.Use 时仍在「收银管理」组下，组里其他页面不对仓库员工开放。
     menus.push({
       key: '/pos-admin',
       icon: iconMap.WalletOutlined,
       label: i18n.t('menu.posAdmin'),
-      children: [{ key: '/packing', icon: iconMap.InboxOutlined, label: i18n.t('menu.packing') }],
+      children: [{ key: '/packing', icon: iconMap.InboxOutlined, label: i18n.t('menu.storePacking') }],
     })
   }
   return menus

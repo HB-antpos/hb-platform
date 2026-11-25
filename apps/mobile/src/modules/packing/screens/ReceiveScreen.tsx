@@ -25,13 +25,12 @@ import {
   receiveOwnerCode,
   validCheckedGuids,
 } from "../packing-logic";
-import { PACKING_HOME, cartonRoute, palletRoute } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import {
   incomingOrderEntries,
   orderEntriesOf,
   orderReceiveKey,
   parseOrderBarcode,
-  receiveOrderRoute,
   type OrderReceiveEntry,
 } from "../order-receive-logic";
 import { usePackScope } from "../use-pack-scope";
@@ -58,6 +57,8 @@ interface ReceiveDone {
 export function ReceiveScreen({ initialCode }: { initialCode: string }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
@@ -98,7 +99,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
     refetchInterval: focused && allowed && Boolean(owner) ? 30_000 : false,
   });
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
 
   const refreshLists = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ["packing", "incoming"] });
@@ -155,7 +156,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
         playScanFeedbackSound("found");
         // 预热缓存：进入页面直接用这份数据，不闪一下加载。
         queryClient.setQueryData(orderReceiveKey(detail.orderGuid), detail);
-        router.push(receiveOrderRoute(detail.orderGuid));
+        router.push(routes.receiveOrder(detail.orderGuid));
       } catch (error) {
         playScanFeedbackSound("not_found");
         setCurrent(null);
@@ -164,7 +165,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
         setLoading(false);
       }
     },
-    [language, queryClient, router, t],
+    [language, queryClient, router, routes, t],
   );
 
   /** 扫码 / 点列表进来的码：订单条码走按订单签收，其余按托盘 / 箱标签查找。 */
@@ -434,7 +435,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
                   pieces: pallet.pieceCount,
                 })}
                 right={<Tag tone={blockKind ? "gray" : "orange"} label={blockKind ? t(`receive.blockedTag.${blockKind}`) : t("incoming.inTransit")} />}
-                onPress={() => router.push(palletRoute(pallet.palletGuid))}
+                onPress={() => router.push(routes.pallet(pallet.palletGuid))}
               />
               <View style={styles.palletMeta}>
                 <Text style={packStyles.muted}>{palletSummary}</Text>
@@ -455,7 +456,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
                 kind={blockKind}
                 target={pallet.destination.name || pallet.destination.code || "—"}
                 owner={owner?.name ?? ""}
-                onOpen={() => router.push(palletRoute(pallet.palletGuid))}
+                onOpen={() => router.push(routes.pallet(pallet.palletGuid))}
               />
             ) : null}
 
@@ -509,7 +510,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
                   pieces: looseCarton.pieceCount,
                 })}
                 right={<Tag tone={blockKind ? "gray" : "orange"} label={blockKind ? t(`receive.blockedTag.${blockKind}`) : t("incoming.inTransit")} />}
-                onPress={() => router.push(cartonRoute(looseCarton.cartonGuid))}
+                onPress={() => router.push(routes.carton(looseCarton.cartonGuid))}
               />
               <View style={styles.palletMeta}>
                 <Text numberOfLines={1} style={packStyles.muted}>
@@ -527,7 +528,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
                 kind={blockKind}
                 target={looseCarton.destination.name || looseCarton.destination.code || "—"}
                 owner={owner?.name ?? ""}
-                onOpen={() => router.push(cartonRoute(looseCarton.cartonGuid))}
+                onOpen={() => router.push(routes.carton(looseCarton.cartonGuid))}
               />
             ) : (
               <View style={packStyles.cardList}>
@@ -538,7 +539,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
         ) : null}
 
         {/* 这批货属于订货单：可以改成按订单一次签收发给本店的全部在途箱。 */}
-        {current ? <OrderReceiveEntries entries={orderEntriesOf(current)} onOpen={(orderGuid) => router.push(receiveOrderRoute(orderGuid))} /> : null}
+        {current ? <OrderReceiveEntries entries={orderEntriesOf(current)} onOpen={(orderGuid) => router.push(routes.receiveOrder(orderGuid))} /> : null}
 
         {!current && !loading ? (
           <>
@@ -563,7 +564,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
                     onPress={() => void lookup(item.no)}
                     onOpenOrder={(entries) => {
                       // 只有一张订单直接进入；多张先选订单。
-                      if (entries.length === 1) router.push(receiveOrderRoute(entries[0].orderGuid));
+                      if (entries.length === 1) router.push(routes.receiveOrder(entries[0].orderGuid));
                       else setOrderChooser(entries);
                     }}
                   />
@@ -666,7 +667,7 @@ export function ReceiveScreen({ initialCode }: { initialCode: string }) {
         onDismiss={() => setOrderChooser(null)}
         onSelect={(orderGuid) => {
           setOrderChooser(null);
-          router.push(receiveOrderRoute(orderGuid));
+          router.push(routes.receiveOrder(orderGuid));
         }}
       />
       <PickCameraSheet

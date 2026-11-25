@@ -14,7 +14,7 @@ import {
   listPackLocations,
   readPackingError,
 } from '../../services/packingService'
-import type { PackCarrier, PackIncoming, PackLocation, PackOwner, PackScope } from '../../types/packing'
+import type { PackCarrier, PackIncoming, PackLocation, PackOwner, PackScope, PackSide } from '../../types/packing'
 
 import CarriersTab from './CarriersTab'
 import CartonDrawer from './CartonDrawer'
@@ -39,17 +39,22 @@ type PackingTabKey = 'station' | 'cartons' | 'pallets' | 'receive' | 'locate' | 
 
 const EMPTY_INCOMING: PackIncoming = { pending: [], recent: [] }
 
-function readSavedOwner(): string | null {
+/** 两个入口各记各的上次地点；分店打包沿用原来的键，升级后不丢已记住的分店。 */
+function ownerStorageKey(side: PackSide) {
+  return side === 'warehouse' ? `${PACK_OWNER_STORAGE_KEY}.warehouse` : PACK_OWNER_STORAGE_KEY
+}
+
+function readSavedOwner(side: PackSide): string | null {
   try {
-    return window.localStorage.getItem(PACK_OWNER_STORAGE_KEY)
+    return window.localStorage.getItem(ownerStorageKey(side))
   } catch {
     return null
   }
 }
 
-function saveOwner(code: string) {
+function saveOwner(side: PackSide, code: string) {
   try {
-    window.localStorage.setItem(PACK_OWNER_STORAGE_KEY, code)
+    window.localStorage.setItem(ownerStorageKey(side), code)
   } catch {
     // 本机存储不可用时只是不记忆选择。
   }
@@ -201,8 +206,11 @@ function PackingWorkspace({ scope, ownerCode }: WorkspaceProps) {
   )
 }
 
-/** 扫码打包：打包台 / 箱 / 托盘 / 到货签收 / 商品位置 / 存放位置 / 运输公司；分店和总仓共用，右上角选地点。 */
-export default function PackingPage() {
+/**
+ * 扫码打包：打包台 / 箱 / 托盘 / 到货签收 / 商品位置 / 存放位置 / 运输公司。
+ * 仓库打包（side=warehouse）只显示总仓，分店打包（side=store）只显示账号所属的分店；同一边有多个地点时右上角可切换。
+ */
+export default function PackingPage({ side }: { side: PackSide }) {
   const { t } = useTranslation()
   const [scope, setScope] = useState<PackScope | null>(null)
   const [scopeError, setScopeError] = useState<{ status: number; message: string } | null>(null)
@@ -210,13 +218,13 @@ export default function PackingPage() {
 
   useEffect(() => {
     let cancelled = false
-    getPackScope()
+    getPackScope(side)
       .then((result) => {
         if (cancelled) {
           return
         }
         setScope(result)
-        setOwnerCode(resolveInitialOwnerCode(result.owners, readSavedOwner()))
+        setOwnerCode(resolveInitialOwnerCode(result.owners, readSavedOwner(side)))
       })
       .catch((error) => {
         if (!cancelled) {
@@ -227,11 +235,11 @@ export default function PackingPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [side])
 
   const changeOwner = (code: string) => {
     setOwnerCode(code)
-    saveOwner(code)
+    saveOwner(side, code)
   }
 
   // 右上角：只有一个地点时显示成只读文字，多个时可切换（店长管多家店、管理员有全部分店和总仓）。
@@ -256,15 +264,21 @@ export default function PackingPage() {
     ) : null
 
   return (
-    <PageContainer title={t('menu.packing')} subtitle={t('packingUi.subtitle')} compact extra={ownerPicker}>
+    <PageContainer
+      title={t(side === 'warehouse' ? 'menu.warehousePacking' : 'menu.storePacking')}
+      subtitle={t('packingUi.subtitle')}
+      compact
+      extra={ownerPicker}
+    >
       {scopeError ? (
         <Result status={scopeError.status === 403 ? '403' : 'error'} title={scopeError.message} />
+      ) : scope && scope.owners.length === 0 ? (
+        // 这一边没有可操作的地点（例如只有仓库权限的账号打开分店打包）：先于加载态判断，否则 ownerCode 为空会一直转圈。
+        <Alert type="warning" showIcon message={t('packingUi.owner.none')} />
       ) : !scope || !ownerCode ? (
         <div className="wh-packing-loading">
           <Spin />
         </div>
-      ) : scope.owners.length === 0 ? (
-        <Alert type="warning" showIcon message={t('packingUi.owner.none')} />
       ) : (
         <PackingWorkspace key={ownerCode} scope={scope} ownerCode={ownerCode} />
       )}

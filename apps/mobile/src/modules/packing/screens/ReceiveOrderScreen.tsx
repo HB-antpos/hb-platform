@@ -23,7 +23,7 @@ import {
   splitOrderCartons,
 } from "../order-receive-logic";
 import { packingErrorMessage } from "../packing-errors";
-import { PACKING_HOME } from "../pack-print";
+import { usePackRoutes } from "../use-pack-side";
 import { OrderReceiveSheet } from "../components/OrderReceiveSheet";
 import { PACK_COLORS, SectionTitle, Tag, UnitRow, packStyles } from "../components/pack-ui";
 
@@ -35,6 +35,8 @@ import { PACK_COLORS, SectionTitle, Tag, UnitRow, packStyles } from "../componen
 export function ReceiveOrderScreen({ orderGuid }: { orderGuid: string }) {
   const { t, language } = useAppTranslation("packing");
   const router = useRouter();
+  // 跳转留在当前入口（仓库打包 / 分店打包）的路由栈里。
+  const routes = usePackRoutes();
   const focused = useIsFocused();
   const queryClient = useQueryClient();
   const user = useAuthStore((state) => state.user);
@@ -55,7 +57,7 @@ export function ReceiveOrderScreen({ orderGuid }: { orderGuid: string }) {
   });
   const detail = query.data ?? null;
 
-  const goBack = () => (router.canGoBack() ? router.back() : router.replace(PACKING_HOME));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace(routes.home));
 
   const refreshLists = () => {
     void queryClient.invalidateQueries({ queryKey: ["packing", "incoming"] });
