@@ -3168,13 +3168,24 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   function createScanDetector({
     minLength = SCAN_MIN_LENGTH,
     maxKeyGapMs = SCAN_MAX_KEY_GAP_MS,
-    terminatorGapMs = SCAN_TERMINATOR_GAP_MS
+    terminatorGapMs = SCAN_TERMINATOR_GAP_MS,
+    stallGapMs = SCAN_STALL_GAP_MS
   } = {}) {
     let buffer = "";
     let lastAt = 0;
+    let stalls = 0;
+    let broken = false;
     function reset() {
       buffer = "";
       lastAt = 0;
+      stalls = 0;
+      broken = false;
+    }
+    function interrupt(timeStamp) {
+      broken = broken || buffer.length >= SCAN_MIN_BURST_LENGTH;
+      buffer = "";
+      stalls = 0;
+      lastAt = timeStamp;
     }
     function handle(event) {
       if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.repeat) {
@@ -3184,17 +3195,28 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
       if (event.key === "Shift") return null;
       if (TERMINATOR_KEYS.has(event.key)) {
         const code = buffer;
-        const gap = event.timeStamp - lastAt;
+        const gap2 = event.timeStamp - lastAt;
+        const incomplete = broken;
         reset();
+        if (incomplete) return null;
         if (code.length < minLength || code.length > SCAN_MAX_LENGTH) return null;
-        if (gap > terminatorGapMs || !SCAN_CODE_PATTERN.test(code)) return null;
+        if (gap2 > terminatorGapMs || !SCAN_CODE_PATTERN.test(code)) return null;
         return code;
       }
       if (typeof event.key !== "string" || event.key.length !== 1) {
-        reset();
+        interrupt(event.timeStamp);
         return null;
       }
-      if (buffer && event.timeStamp - lastAt > maxKeyGapMs) buffer = "";
+      const gap = event.timeStamp - lastAt;
+      if (gap > SCAN_IDLE_RESET_MS) {
+        reset();
+      } else if (buffer && gap > maxKeyGapMs) {
+        if (gap <= stallGapMs && stalls < SCAN_MAX_STALLS) {
+          stalls += 1;
+        } else {
+          interrupt(event.timeStamp);
+        }
+      }
       buffer += event.key;
       lastAt = event.timeStamp;
       return null;
@@ -3276,13 +3298,17 @@ ${items.length}:${hashItemNumbers(items)}`, { href, items });
   function normalizeScanItemNumber(value) {
     return String(value ?? "").trim().toUpperCase();
   }
-  var SCAN_MAX_KEY_GAP_MS, SCAN_MIN_LENGTH, SCAN_MAX_LENGTH, SCAN_TERMINATOR_GAP_MS, SCAN_CODE_PATTERN, TERMINATOR_KEYS, SCAN_REPEAT_WINDOW_MS;
+  var SCAN_MAX_KEY_GAP_MS, SCAN_MIN_LENGTH, SCAN_MAX_LENGTH, SCAN_TERMINATOR_GAP_MS, SCAN_STALL_GAP_MS, SCAN_MIN_BURST_LENGTH, SCAN_MAX_STALLS, SCAN_IDLE_RESET_MS, SCAN_CODE_PATTERN, TERMINATOR_KEYS, SCAN_REPEAT_WINDOW_MS;
   var init_barcode_scan = __esm({
     "src/lib/barcode-scan.js"() {
       SCAN_MAX_KEY_GAP_MS = 80;
       SCAN_MIN_LENGTH = 8;
       SCAN_MAX_LENGTH = 50;
       SCAN_TERMINATOR_GAP_MS = 200;
+      SCAN_STALL_GAP_MS = 300;
+      SCAN_MIN_BURST_LENGTH = 4;
+      SCAN_MAX_STALLS = 2;
+      SCAN_IDLE_RESET_MS = 1e3;
       SCAN_CODE_PATTERN = /^[0-9A-Za-z._-]+$/;
       TERMINATOR_KEYS = /* @__PURE__ */ new Set(["Enter", "Tab"]);
       SCAN_REPEAT_WINDOW_MS = 1500;

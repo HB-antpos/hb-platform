@@ -46,6 +46,55 @@ test('中途长停顿会重新开始计数', () => {
   assert.equal(feed(detector, '93111925', { start: 5000 }), '93111925');
 });
 
+// 模拟蓝牙传输卡顿：在第 index 个字符前额外停顿 stall 毫秒。
+function feedWithStalls(detector, text, stalls, { gap = 15, start = 1000 } = {}) {
+  let at = start;
+  [...text].forEach((key, index) => {
+    at += stalls[index] ?? 0;
+    assert.equal(detector.handle({ key, timeStamp: at }), null);
+    at += gap;
+  });
+  return detector.handle({ key: 'Enter', timeStamp: at });
+}
+
+test('扫码中途传输卡顿 300ms 以内时拼回完整条码，不只取后半截', () => {
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 4: 120 }), '9311192573830');
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 4: 250, 9: 180 }), '9311192573830');
+  // 卡顿发生在开头一两个字符之后也要拼回。
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 1: 150 }), '9311192573830');
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 3: 90 }), '9311192573830');
+});
+
+test('扫码中途卡顿过久时整次作废，不把后半截当成条码', () => {
+  assert.equal(feedWithStalls(createScanDetector(), '9311192573830', { 4: 500 }), null);
+  // 卡顿次数超过上限同样作废。
+  assert.equal(feedWithStalls(createScanDetector(), '93111925738301234', { 4: 120, 8: 120, 12: 120 }), null);
+});
+
+test('扫码中途夹进非字符键时整次作废', () => {
+  const detector = createScanDetector();
+  let at = 1000;
+  for (const key of '9311') detector.handle({ key, timeStamp: (at += 15) });
+  detector.handle({ key: 'Unidentified', timeStamp: (at += 15) });
+  for (const key of '192573830') detector.handle({ key, timeStamp: (at += 15) });
+  assert.equal(detector.handle({ key: 'Enter', timeStamp: (at += 15) }), null);
+});
+
+test('作废的扫码收尾后，紧接着重扫可以正常识别', () => {
+  const detector = createScanDetector();
+  assert.equal(feedWithStalls(detector, '9311192573830', { 4: 500 }), null);
+  assert.equal(feedWithStalls(detector, '9311192573830', {}, { start: 2000 }), '9311192573830');
+});
+
+test('人手敲了几个键、停一会儿再扫码：不拼进条码，扫码也不被作废', () => {
+  assert.equal(feedWithStalls(createScanDetector(), 'ab93111925', { 2: 400 }), '93111925');
+});
+
+test('人工打字中偶有快速连击也不会被拼成扫码', () => {
+  assert.equal(feedWithStalls(createScanDetector(), 'abcdefgh', { 2: 150, 4: 150, 6: 150 }), null);
+  assert.equal(feedWithStalls(createScanDetector(), 'abcdefgh', { 1: 200, 2: 200, 3: 200, 4: 200, 5: 200, 6: 200, 7: 200 }), null);
+});
+
 test('带组合键或收尾键过晚都不算扫码', () => {
   const detector = createScanDetector();
   detector.handle({ key: '9', timeStamp: 0 });
