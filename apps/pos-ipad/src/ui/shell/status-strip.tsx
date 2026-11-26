@@ -37,6 +37,8 @@ type ReconnectableIndicatorProps = StatusIndicatorProps &
     accessibilityLabel: string;
     onPress: () => void;
     testID: string;
+    /** 末尾提示图标：重连用「↻」，打开配对面板用「›」。 */
+    trailingIcon?: StatusIconName;
   }>;
 
 type StaticIdentityProps = Readonly<{
@@ -81,6 +83,7 @@ function ReconnectableIndicator({
   onPress,
   testID,
   tone,
+  trailingIcon = "refresh",
   value,
 }: ReconnectableIndicatorProps) {
   return (
@@ -110,7 +113,7 @@ function ReconnectableIndicator({
       <MaterialCommunityIcons
         accessible={false}
         color={posColors.chromeInk}
-        name="refresh"
+        name={trailingIcon}
         size={15}
       />
     </PosPressable>
@@ -174,6 +177,7 @@ export function PosStatusStrip({
   const {
     connectivity,
     bleScanner,
+    bleScannerOpenPairing,
     bleScannerReconnect,
     deviceGate,
     display,
@@ -193,6 +197,11 @@ export function PosStatusStrip({
   const bleReconnect =
     bleScanner && bleScannerReconnect && isBleScannerReconnectable(bleScanner)
       ? bleScannerReconnect
+      : null;
+  // 未配对且当前页面登记了配对面板（设备注册页）时，「未配对」可点：点一下打开配对面板。
+  const blePairing =
+    bleScanner && bleScannerOpenPairing && bleScanner.state === "not-paired"
+      ? bleScannerOpenPairing
       : null;
   const currentLanguage =
     language ?? i18n.resolvedLanguage ?? i18n.language;
@@ -286,6 +295,18 @@ export function PosStatusStrip({
           onPress={bleReconnect}
           testID="status-strip-ble-reconnect"
           tone={bleIndicator.tone}
+          value={bleValue}
+        />
+      ) : bleIndicator && blePairing ? (
+        <ReconnectableIndicator
+          accessibilityHint={t("status.bleScanner.pairHint")}
+          accessibilityLabel={t("status.bleScanner.pairLabel", { state: bleValue })}
+          icon={bleIndicator.icon}
+          label={t("status.bleScanner")}
+          onPress={blePairing}
+          testID="status-strip-ble-pair"
+          tone={bleIndicator.tone}
+          trailingIcon="chevron-right"
           value={bleValue}
         />
       ) : bleIndicator ? (

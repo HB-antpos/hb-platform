@@ -152,7 +152,14 @@ export function CameraScannerModal({
                 }}
                 style={styles.preview}
               />
-              <View pointerEvents="none" style={styles.target} />
+              {cameraScannerTargetShape(context) === "square" ? (
+                // 二维码（设备注册码）用居中的正方形取景框，引导店员把整个码放进框里。
+                <View pointerEvents="none" style={styles.squareTargetLayer}>
+                  <View style={styles.squareTarget} testID="camera-scanner-target-square" />
+                </View>
+              ) : (
+                <View pointerEvents="none" style={styles.target} testID="camera-scanner-target" />
+              )}
             </View>
           ) : (
             <CameraScannerState
@@ -177,6 +184,18 @@ export function CameraScannerModal({
       </View>
     </Modal>
   );
+}
+
+/**
+ * 取景框形状：二维码场景用正方形，商品等一维条码场景沿用横向长条。
+ * 只是视觉引导；原生相机仍在整个预览画面里识别，不会因框的形状漏扫。
+ */
+export function cameraScannerTargetShape(
+  context: ScannerCaptureContext,
+): "square" | "strip" {
+  return context === "device-activation" || context === "emergency-qr"
+    ? "square"
+    : "strip";
 }
 
 function contextLabel(
@@ -225,6 +244,19 @@ const styles = createPosStyles((colors) => ({
     marginVertical: 18,
     overflow: "hidden",
     position: "relative",
+  },
+  // 预览高 340：正方形边长 240，上下各留 50，横向居中。
+  squareTarget: {
+    borderColor: CAMERA_SCANNER_TARGET_BORDER,
+    borderRadius: 10,
+    borderWidth: 2,
+    height: 240,
+    width: 240,
+  },
+  squareTargetLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: "center",
+    justifyContent: "center",
   },
   stateSpacing: { marginVertical: 18 },
   target: {

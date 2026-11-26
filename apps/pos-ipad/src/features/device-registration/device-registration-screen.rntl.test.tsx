@@ -16,6 +16,7 @@ import type {
 } from "@/core/api/hbpos-api";
 import type { DeviceSessionState } from "@/core/security/device-session";
 import i18n from "@/i18n";
+import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { posColors } from "@/ui/theme";
 
 jest.mock("expo-sqlite/kv-store", () => ({
@@ -103,6 +104,24 @@ jest.mock("@/features/scanner-camera/camera-scanner-modal", () => ({
   },
 }));
 
+let mockBlePanelProps: Readonly<{ onClose(): void }> | null = null;
+jest.mock("@/features/settings/ble-scanner-settings", () => ({
+  BleScannerLoginPanel: (props: Readonly<{ onClose(): void }>) => {
+    mockBlePanelProps = props;
+    return null;
+  },
+}));
+
+// 注册页的 BLE 注册码接收器：记下回调与释放次数，测试里直接模拟扫码枪交码。
+let mockActivationSink: ((raw: string) => void) | null = null;
+const mockReleaseActivationCapture = jest.fn(() => {
+  mockActivationSink = null;
+});
+const mockCaptureDeviceActivation = jest.fn((sink: (raw: string) => void) => {
+  mockActivationSink = sink;
+  return mockReleaseActivationCapture;
+});
+
 jest.mock("@/core/runtime/pos-runtime-context", () => ({
   usePosRuntime: () => mockRuntimeValue,
 }));
@@ -159,6 +178,7 @@ beforeEach(async () => {
         router: {
           acceptCameraText: jest.fn(() => true),
           acquireContext: jest.fn(() => jest.fn()),
+          captureDeviceActivation: mockCaptureDeviceActivation,
           startCamera: jest.fn(async () => undefined),
           stopCamera: jest.fn(async () => undefined),
         },
@@ -584,5 +604,82 @@ test("需要恢复时网络检测入口单独保留，重试按钮与其他状�
       screen.getByTestId("registration-recovery-retry").props.style,
     ),
   ).toMatchObject({ minHeight: 88 });
+  await screen.unmount();
+});
+
+function withBleScanner() {
+  const base = mockRuntimeValue as {
+    services: { scanner: Record<string, unknown> } & Record<string, unknown>;
+  };
+  mockRuntimeValue = {
+    ...base,
+    services: {
+      ...base.services,
+      scanner: { ...base.services.scanner, ble: { getStatus: jest.fn() } },
+    },
+  };
+}
+
+test("新设备在注册页就能配蓝牙扫码枪：卡片与顶栏「未配对」都打开同一个配对面板", async () => {
+  withBleScanner();
+  mockBlePanelProps = null;
+  usePosShellStore
+    .getState()
+    .setBleScanner({ state: "not-paired", batteryLevel: null, attention: false });
+  const screen = await render(<DeviceRegistrationScreen />);
+
+  expect(screen.getByText("用相机扫描注册码")).toBeTruthy();
+  expect(screen.getByTestId("registration-ble-scanner-state").props.children).toBe("未配对");
+  expect(screen.getByText("点此连接扫码枪，连上后直接扫注册码。")).toBeTruthy();
+
+  await fireEvent.press(screen.getByTestId("registration-ble-scanner"));
+  expect(mockBlePanelProps).not.toBeNull();
+  // 面板打开期间让出注册码租约，扫码交给面板自己的配对 / 测试流程。
+  expect(mockReleaseActivationCapture).toHaveBeenCalled();
+  await act(async () => mockBlePanelProps?.onClose());
+  expect(mockActivationSink).not.toBeNull();
+
+  // 顶栏入口由本页登记，离开本页即撤销。
+  mockBlePanelProps = null;
+  const openPairing = usePosShellStore.getState().bleScannerOpenPairing;
+  expect(openPairing).not.toBeNull();
+  await act(async () => openPairing?.());
+  expect(mockBlePanelProps).not.toBeNull();
+  await screen.unmount();
+  expect(usePosShellStore.getState().bleScannerOpenPairing).toBeNull();
+  usePosShellStore.getState().reset();
+});
+
+test("蓝牙扫码枪扫到注册码：不用先点输入框，直接走与相机相同的识别", async () => {
+  withBleScanner();
+  usePosShellStore
+    .getState()
+    .setBleScanner({ state: "ready", batteryLevel: 90, attention: false });
+  const screen = await render(<DeviceRegistrationScreen />);
+
+  expect(screen.getByText("直接扫注册码即可。")).toBeTruthy();
+  expect(mockCaptureDeviceActivation).toHaveBeenCalledTimes(1);
+  await act(async () => mockActivationSink?.(`${activationCode}\t`));
+
+  await waitFor(() =>
+    expect(mockPreviewActivationCode).toHaveBeenCalledWith(activationCode),
+  );
+  expect(await screen.findByTestId("registration-redeem")).toBeTruthy();
+
+  // 相机弹窗打开时让出租约，避免同一个码从两条路各进一次。
+  const released = mockReleaseActivationCapture.mock.calls.length;
+  await fireEvent.press(screen.getByTestId("registration-scan"));
+  expect(mockReleaseActivationCapture.mock.calls.length).toBeGreaterThan(released);
+  expect(mockActivationSink).toBeNull();
+  await screen.unmount();
+  usePosShellStore.getState().reset();
+});
+
+test("没有 BLE 服务（旧原生包）时不显示扫码枪卡片，也不申请注册码租约", async () => {
+  const screen = await render(<DeviceRegistrationScreen />);
+
+  expect(screen.queryByTestId("registration-ble-scanner")).toBeNull();
+  expect(mockCaptureDeviceActivation).not.toHaveBeenCalled();
+  expect(usePosShellStore.getState().bleScannerOpenPairing).toBeNull();
   await screen.unmount();
 });

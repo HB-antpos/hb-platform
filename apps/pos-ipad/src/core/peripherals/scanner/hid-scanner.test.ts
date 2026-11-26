@@ -239,6 +239,30 @@ assert.equal(events.at(-1)?.value, "GOOD", "超长缓冲必须丢弃，不能污
   releaseActivation();
   assert.equal(bleEvents.length, beforeSensitive, "开通码不得进入 routed 总线");
 
+  // 注册页直接收注册码：只交给持有租约的私有接收器，原文不做 Unicode trim，也不进任何订阅。
+  const sinkValues: string[] = [];
+  const portBeforeSink = portEvents.length;
+  const releaseCapture = bleRouter.captureDeviceActivation((raw) => sinkValues.push(raw));
+  assert.equal(bleRouter.acceptBleText(" HBDEV1-SINK-1\r\n"), true);
+  assert.deepEqual(sinkValues, [" HBDEV1-SINK-1"], "交出 BLE 原文，只去回车换行");
+  assert.equal(bleRouter.acceptBleText("\r\n"), false, "空码不交给接收器");
+  // 相机弹窗后申请的 device-activation 租约压在上面：BLE 码让给相机场景（静默吞掉），注册页收不到。
+  const releaseCameraLease = bleRouter.acquireContext("device-activation");
+  assert.equal(bleRouter.acceptBleText("HBDEV1-SINK-2"), true);
+  assert.deepEqual(sinkValues, [" HBDEV1-SINK-1"]);
+  releaseCameraLease();
+  assert.equal(bleRouter.acceptBleText("HBDEV1-SINK-3"), true);
+  assert.equal(sinkValues.at(-1), "HBDEV1-SINK-3");
+  releaseCapture();
+  assert.equal(
+    bleRouter.acceptBleText("HBDEV1-SINK-4"),
+    false,
+    "释放后栈顶回到无人占用的默认场景，注册码不再投递",
+  );
+  assert.equal(sinkValues.length, 2);
+  assert.equal(bleEvents.length, beforeSensitive, "注册页接收器不得把注册码放进 routed 总线");
+  assert.equal(portEvents.length, portBeforeSink, "注册页接收器不得把注册码放进 ScannerPort 订阅");
+
   // 测试独占：scanner-test 租约下所有来源的码只以 scanner-test 场景投递，且不去重。
   const releaseTest = bleRouter.acquireContext("scanner-test");
   bleNow += 1_000;
