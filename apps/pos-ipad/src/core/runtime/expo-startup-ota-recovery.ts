@@ -1,5 +1,7 @@
 import Constants from "expo-constants";
+import Storage from "expo-sqlite/kv-store";
 
+import { createExpoOtaChannelBindingStore } from "../../features/app-updates/expo-ota-channel-binding";
 import { ExpoOtaUpdatePort } from "../../features/app-updates/expo-ota-update-port";
 import { HbposPosIpadOtaUpdateApi } from "../../features/app-updates/hbpos-pos-ipad-ota-update-api";
 import {
@@ -101,6 +103,9 @@ export async function loadExpoStartupOtaRecovery(
     installer: new ExpoOtaUpdatePort({
       enabled: Updates.isEnabled,
       runtimeVersion: Updates.runtimeVersion,
+      launchChannel: Updates.channel ?? null,
+      nativeBuild: Constants.nativeBuildVersion ?? "0",
+      channelBinding: createExpoOtaChannelBindingStore(Storage),
       updates: {
         setUpdateRequestHeadersOverride: (headers) =>
           Updates.setUpdateRequestHeadersOverride(headers),

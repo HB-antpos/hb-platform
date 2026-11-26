@@ -84,6 +84,9 @@ function createHarness(
     enabled: true,
     runtimeVersion: options.installedRuntimeVersion ?? "1.0.7",
     updates: nativeUpdates,
+    launchChannel: "pos-ipad-production",
+    nativeBuild: "21",
+    channelBinding: { read: () => null, write: () => undefined },
   });
   const enabled = options.enabled ?? true;
   const coordinator = new OtaUpdateCoordinator({
@@ -177,11 +180,11 @@ test("卡死设备可检查并套用受控 OTA：安装前复核策略，channel
     "native:check",
     "native:fetch",
   ]);
-  // 构造时清除遗留覆盖 → 核验时定向 channel → 核验后清除；只下载，不在进程内 reload。
+  // 构造时清除遗留覆盖 → 核验时定向 channel → 下载成功后保留该 channel（冷启动靠它选中更新）；
+  // 只下载，不在进程内 reload。
   assert.deepEqual(harness.overrides, [
     null,
     { "expo-channel-name": RELEASE_CHANNEL },
-    null,
   ]);
   assert.deepEqual(observed, [
     "checking",
