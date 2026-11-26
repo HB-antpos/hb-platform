@@ -148,6 +148,7 @@
       "autoClosed": "Closed automatically",
       "hoursNow": "Hours that day",
       "paidNow": "Paid hours (now)",
+      "paidAfterOvertime": "Paid hours (after approval)",
       "tierLabel": "Rate tier",
       "paidAfterHint": "Paid hours are recalculated after approval (meal breaks and overtime per the rules)",
       "hasPunch": "Punched that day",

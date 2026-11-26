@@ -62,6 +62,7 @@ import {
   REVIEW_CATEGORIES,
   avatarColorOf,
   buildDayPreviewFromRecord,
+  paidHoursAfterOvertime,
   buildTimelineModel,
   canRejectCategory,
   canReviewItem,
@@ -807,6 +808,10 @@ export default function AttendanceReviewPage({ embedded = false, shared }: Atten
     if (!preview || preview.workedHours === undefined) return null
     const tier = tierOfWorkDate(item.workDate, preview.tier)
     const hasAfter = preview.workedHoursAfter !== undefined && item.reviewStatus === 'Pending'
+    // 待审加班：计薪工时按输入框里的批准分钟实时推算（0 分钟＝只计排班内），下方小字保留当前值
+    const paidAfter = getReviewCategory(item) === 'Overtime' && item.reviewStatus === 'Pending'
+      ? paidHoursAfterOvertime(preview, overtimeMinutes)
+      : undefined
     return (
       <section className="atr-section">
         <div className="atr-section-head">
@@ -822,8 +827,18 @@ export default function AttendanceReviewPage({ embedded = false, shared }: Atten
             {hasAfter ? <span className="atr-stat-sub">{t('attendanceReview.detail.workedNow', { value: formatHours(preview.workedHours, '0') })}</span> : null}
           </div>
           <div className="atr-stat">
-            <span>{t('attendanceReview.detail.paidNow')}</span>
-            <strong>{preview.paidHours === undefined ? '--' : t('attendanceReview.hoursValue', { value: formatHours(preview.paidHours, '0') })}</strong>
+            {paidAfter !== undefined ? (
+              <>
+                <span>{t('attendanceReview.detail.paidAfterOvertime')}</span>
+                <strong>{t('attendanceReview.hoursValue', { value: formatHours(paidAfter, '0') })}</strong>
+                <span className="atr-stat-sub">{t('attendanceReview.detail.workedNow', { value: formatHours(preview.paidHours, '0') })}</span>
+              </>
+            ) : (
+              <>
+                <span>{t('attendanceReview.detail.paidNow')}</span>
+                <strong>{preview.paidHours === undefined ? '--' : t('attendanceReview.hoursValue', { value: formatHours(preview.paidHours, '0') })}</strong>
+              </>
+            )}
           </div>
           {tier ? (
             <div className="atr-stat">

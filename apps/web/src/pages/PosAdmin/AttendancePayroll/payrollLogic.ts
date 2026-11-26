@@ -329,6 +329,20 @@ export const CASH_OVERRIDE_BUCKETS = [
 export type CashOverrideBucketKey = (typeof CASH_OVERRIDE_BUCKETS)[number]['key']
 
 /**
+ * 工资表现金区要显示的手填档（「公假 $」「假 $」列）：本期至少有一人这一档可手填（有现金工时），
+ * 或存着手填值（含因改成全转账而没生效的，要让店长看到告警）时才显示；全员都在转账里时整列隐藏。
+ * 导出不受影响，仍固定带这两列。
+ */
+export function visibleCashOverrideBuckets(
+  rows: readonly Pick<AttendancePayRowDto, 'cash'>[],
+): (typeof CASH_OVERRIDE_BUCKETS)[number][] {
+  return CASH_OVERRIDE_BUCKETS.filter(({ key }) => rows.some((row) => {
+    const bucket = row.cash[key]
+    return bucket.editable || bucket.isManual || (bucket.manualAmount !== null && bucket.manualAmount !== undefined)
+  }))
+}
+
+/**
  * 本页手填汇总：手填了几项，手填合计比系统值多（正）或少（负）多少。
  * 只数「已生效」的手填（isManual）；有手填但这一档已没有现金工时而没生效的不数，那种情况行上另有告警。
  */

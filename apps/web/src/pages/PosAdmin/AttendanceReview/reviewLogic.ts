@@ -236,6 +236,26 @@ const clockMinutes = (clock: string) => {
   return hour * 60 + (minute || 0)
 }
 
+const minutesToHours2 = (minutes: number | undefined) =>
+  minutes === undefined ? undefined : Math.round((minutes / 60) * 100) / 100
+
+/**
+ * 加班审核时「批准后计薪工时」的本地推算（店长改批准分钟时实时变化）：
+ * 工资口径计薪分钟里已含当前已批加班，换成「已批 + 本次输入」并按候选分钟封顶（与后端 Math.Min 同口径）。
+ * 缺工资口径字段（旧后端）时返回 undefined，页面不显示推算值。
+ */
+export function paidHoursAfterOvertime(
+  preview: Pick<AttendanceApprovalDayPreviewDto, 'payrollPaidMinutes' | 'approvedOvertimeMinutes' | 'candidateOvertimeMinutes'> | undefined,
+  inputMinutes: number | null | undefined,
+): number | undefined {
+  if (!preview || preview.payrollPaidMinutes === undefined) return undefined
+  const candidate = Math.max(0, preview.candidateOvertimeMinutes ?? 0)
+  const approved = Math.min(candidate, Math.max(0, preview.approvedOvertimeMinutes ?? 0))
+  const input = Math.max(0, inputMinutes ?? 0)
+  const after = preview.payrollPaidMinutes - approved + Math.min(candidate, approved + input)
+  return minutesToHours2(Math.max(0, after))
+}
+
 /**
  * 审核详情的当天时间线与工时：排班、现有班段、补卡批准后的班段与实际工时。
  * 后端没有「批准后」预览接口，补卡按「去掉被改的段原工时 + 新段工时」推算实际工时；计薪工时显示当前值，批准后以后端为准。
@@ -290,7 +310,11 @@ export function buildDayPreviewFromRecord(
     proposedSegments: proposed ? [proposed] : undefined,
     segmentLimit: record.segmentLimit,
     workedHours: Math.round((workedMinutes / 60) * 100) / 100,
-    paidHours: record.paidMinutes === undefined ? undefined : Math.round((record.paidMinutes / 60) * 100) / 100,
+    // 计薪工时用工资口径（只计已批加班，与工资表一致）；旧后端没有该字段时退回旧口径
+    paidHours: minutesToHours2(record.payrollPaidMinutes ?? record.paidMinutes),
+    payrollPaidMinutes: record.payrollPaidMinutes,
+    approvedOvertimeMinutes: record.approvedOvertimeMinutes,
+    candidateOvertimeMinutes: record.candidateOvertimeMinutes,
     workedHoursAfter: workedAfter === undefined ? undefined : Math.round((workedAfter / 60) * 100) / 100,
     tier: tierOfWorkDate(approval.workDate ?? record.workDate),
     replaced: replaced && proposed

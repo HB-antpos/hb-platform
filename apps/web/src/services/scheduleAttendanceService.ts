@@ -116,6 +116,7 @@ export function normalizeAttendanceSchedule(value: unknown): AttendanceScheduleD
     approvedMealAddBackMinutes: readCompat<number>(source, 'approvedMealAddBackMinutes', 'ApprovedMealAddBackMinutes'),
     pendingMealAddBackMinutes: readCompat<number>(source, 'pendingMealAddBackMinutes', 'PendingMealAddBackMinutes'),
     paidMinutes: readCompat<number>(source, 'paidMinutes', 'PaidMinutes'),
+    payrollPaidMinutes: readCompat<number>(source, 'payrollPaidMinutes', 'PayrollPaidMinutes'),
   }
 }
 

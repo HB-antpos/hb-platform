@@ -20,13 +20,13 @@ import BirthdayRateReviewBanner from './BirthdayRateReviewBanner'
 import { BreakdownContent } from './HoursCellPopover'
 import { breakdownMismatch, buildBreakdown, type BreakdownKey } from './hoursCellDetailLogic'
 import {
-  CASH_OVERRIDE_BUCKETS,
   TRANSFER_FILL_ORDER,
   employeeDisplayName,
   formatHours,
   formatMoney,
   formatSignedMoney,
   resolveCashOverrideCommit,
+  visibleCashOverrideBuckets,
   round2,
   showsAgeBadge,
   summarizeCashOverrides,
@@ -300,6 +300,8 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
   }, [rows])
   // 本页手填了几项、比系统值多（少）多少：显示在「现金合计」卡上，方便财务核对差额。
   const overrides = useMemo(() => summarizeCashOverrides(rows), [rows])
+  // 「公假 $ / 假 $」列：本期没人能手填（全在转账里）时隐藏，减少一屏的空列
+  const cashOverrideColumns = useMemo(() => visibleCashOverrideBuckets(rows), [rows])
 
   const periodKey = data ? { storeCode: data.storeCode, periodStart: data.periodStart, weeks: data.weeks } : null
 
@@ -445,20 +447,23 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <th rowSpan={2} className="atp-sticky atp-employee-col">{t('attendancePayroll.pay.employeeMode')}</th>
                   <th colSpan={6}>{t('attendancePayroll.pay.payableHours')}</th>
                   <th colSpan={2} className="atp-week-divider atp-head-transfer">{t('attendancePayroll.pay.transfer')}</th>
-                  <th colSpan={5} className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.cash')}</th>
+                  <th colSpan={3 + cashOverrideColumns.length} className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.cash')}</th>
                   <th rowSpan={2} className="atp-week-divider">{t('attendancePayroll.pay.gross')}</th>
                   {myobPush ? <th rowSpan={2}>{t('attendancePayroll.pay.myobPush')}</th> : null}
                   <th rowSpan={2}>{t('attendancePayroll.pay.note')}</th>
                 </tr>
                 <tr>
                   {HOUR_KEYS.map((key) => <th key={key}>{t(`attendancePayroll.tierLong.${key}`)}</th>)}
-                  <th>{t('attendancePayroll.tierLong.leave')}</th>
+                  <th className="atp-leave-col">{t('attendancePayroll.tierLong.leave')}</th>
                   <th>{t('attendancePayroll.tierLong.total')}</th>
                   <th className="atp-week-divider atp-head-transfer">{t('attendancePayroll.pay.hoursByTier')}</th>
                   <th className="atp-head-transfer">{t('attendancePayroll.pay.amount')}</th>
                   <th className="atp-week-divider atp-head-cash">{t('attendancePayroll.pay.hoursByTier')}</th>
-                  <th className="atp-head-cash">{t('attendancePayroll.pay.cashPublicHoliday')}</th>
-                  <th className="atp-head-cash">{t('attendancePayroll.pay.cashLeave')}</th>
+                  {cashOverrideColumns.map(({ key }) => (
+                    <th key={key} className="atp-head-cash">
+                      {t(key === 'publicHoliday' ? 'attendancePayroll.pay.cashPublicHoliday' : 'attendancePayroll.pay.cashLeave')}
+                    </th>
+                  ))}
                   <th className="atp-head-cash">{t('attendancePayroll.pay.allowance')}</th>
                   <th className="atp-head-cash">{t('attendancePayroll.pay.amount')}</th>
                 </tr>
@@ -503,7 +508,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                       </div>
                     </td>
                     {HOUR_KEYS.map((key) => <td key={key} className="atp-num">{withBreakdown(row, key, <span className="atp-bd-trigger">{formatHours(row.hours[key])}</span>)}</td>)}
-                    <td className="atp-num">{renderLeave(row)}</td>
+                    <td className="atp-num atp-leave-col">{renderLeave(row)}</td>
                     <td className="atp-num atp-num-strong">{withBreakdown(row, 'total', <span className="atp-bd-trigger">{formatHours(row.hours.total)}</span>)}</td>
                     <td className="atp-num atp-week-divider atp-col-transfer">
                       <div className="atp-pay-cell">
@@ -518,7 +523,7 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                         {row.cash.hours > 0 ? <span className="atp-pay-sub">{bucketText(row.cash.buckets)}</span> : null}
                       </div>
                     </td>
-                    {CASH_OVERRIDE_BUCKETS.map(({ key, apiBucket }) => (
+                    {cashOverrideColumns.map(({ key, apiBucket }) => (
                       <td key={key} className="atp-num atp-col-cash atp-cash-bucket-col">
                         <CashBucketInput
                           bucket={row.cash[key]}
@@ -567,8 +572,9 @@ export default function PayTab({ data, loading, weeks, canEdit, onReload, rateRe
                   <td className="atp-num atp-week-divider">{formatHours(totals.transferHours)}</td>
                   <td className="atp-num">{formatMoney(totals.transferAmount)}</td>
                   <td className="atp-num atp-week-divider">{formatHours(totals.cashHours)}</td>
-                  <td className="atp-num">{formatMoney(totals.publicHolidayCash)}</td>
-                  <td className="atp-num">{formatMoney(totals.leaveCash)}</td>
+                  {cashOverrideColumns.map(({ key }) => (
+                    <td key={key} className="atp-num">{formatMoney(key === 'publicHoliday' ? totals.publicHolidayCash : totals.leaveCash)}</td>
+                  ))}
                   <td className="atp-num">{formatMoney(totals.allowance)}</td>
                   <td className="atp-num">{formatMoney(totals.cashAmount)}</td>
                   <td className="atp-num atp-num-strong atp-week-divider">{formatMoney(totals.gross)}</td>

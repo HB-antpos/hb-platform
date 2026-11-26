@@ -411,7 +411,12 @@ export interface AttendanceApprovalDayPreviewDto {
   segmentLimit?: number
   /** 当前实际 / 计薪工时。 */
   workedHours?: number
+  /** 当前计薪工时：工资口径（只计已批加班）；旧后端没有工资口径字段时退回旧 paidMinutes。 */
   paidHours?: number
+  /** 推算「批准加班后计薪工时」用：工资口径计薪分钟、当前已批加班分钟、候选加班分钟。 */
+  payrollPaidMinutes?: number
+  approvedOvertimeMinutes?: number
+  candidateOvertimeMinutes?: number
   /** 批准后实际工时（补卡按本地推算、漏下班按后端补卡预览）。 */
   workedHoursAfter?: number
   /** 工作日所在时薪档。 */

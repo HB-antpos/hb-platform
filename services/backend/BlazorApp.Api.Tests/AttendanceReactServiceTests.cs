@@ -3637,6 +3637,27 @@ namespace BlazorApp.Api.Tests
         }
 
         [Fact]
+        public async Task GetMyTodayAsync_PayrollPaidMinutes_CountsOnlyApprovedOvertime()
+        {
+            // 排班 09:00–17:00、打卡 09:00–17:23：未批加班时工资口径只计排班内 480 − 用餐 30 = 450，
+            // 旧 PaidMinutes（实际工时 − 用餐）会把未批的 23 分钟也算进去；批准 15 分钟后变 465。
+            var approval = await SeedCompletedOvertimeAndGetPendingAsync("payroll-paid");
+            var before = await CreateService("staff-user", "staff", "StoreStaff")
+                .GetMyTodayAsync(new DateTime(2026, 5, 18), "BRI");
+            var pendingDay = Assert.Single(before.Data!.Schedules);
+            Assert.Equal(450, pendingDay.PayrollPaidMinutes);
+            Assert.True(pendingDay.PaidMinutes > pendingDay.PayrollPaidMinutes);
+
+            var reviewed = await CreateService("admin-user", "admin", "Admin")
+                .ApproveAsync(approval.ApprovalGuid, new ReviewAttendanceApprovalDto { ApprovedOvertimeMinutes = 15, ReviewRemark = "只批十五分钟" });
+            var after = await CreateService("staff-user", "staff", "StoreStaff")
+                .GetMyTodayAsync(new DateTime(2026, 5, 18), "BRI");
+
+            Assert.True(reviewed.Success, reviewed.Message);
+            Assert.Equal(465, Assert.Single(after.Data!.Schedules).PayrollPaidMinutes);
+        }
+
+        [Fact]
         public async Task RejectAsync_Overtime_DoesNotRegenerateProcessedMinutes()
         {
             var approval = await SeedCompletedOvertimeAndGetPendingAsync("rejected-terminal");

@@ -10,6 +10,7 @@ import {
   countByCategory,
   describeSubmittedTime,
   findAutoClockOutPunchGuid,
+  paidHoursAfterOvertime,
   getReviewCategory,
   initialsOf,
   isBatchableCategory,
@@ -176,4 +177,31 @@ console.log('reviewLogic.test.ts: ok')
   assert.equal(one.outside, 1, '范围外只数当前选的店')
   assert.equal(one.outsideFrom, '2026-11-10')
   assert.deepEqual(summarizePending([], '2026-11-16', '2026-11-22'), { byStore: {}, outside: 0, outsideFrom: undefined, outsideTo: undefined })
+}
+
+// 加班审核的计薪工时（工资口径）：Breanna 11-24 排班 09:00–17:30、打卡约 07:45–17:5x，候选加班 75 分钟。
+// 「现在」只计排班内 510 − 用餐 30 = 480（8.00 h），不再把未批的早到 / 晚走算进去；
+// 批准后按输入实时推算，超过候选分钟按候选封顶。
+{
+  const record: AttendanceScheduleDto = {
+    ...jackRecord,
+    workedMinutes: 583,
+    paidMinutes: 553,
+    payrollPaidMinutes: 480,
+    candidateOvertimeMinutes: 75,
+    approvedOvertimeMinutes: 0,
+  }
+  const preview = buildDayPreviewFromRecord(record, item({ sourceType: 'Overtime', workDate: '2026-11-24' }))
+  assert.equal(preview.paidHours, 8, '计薪工时（现在）用工资口径，不含未批加班')
+  assert.equal(paidHoursAfterOvertime(preview, 0), 8, '批 0 分钟＝只计排班内')
+  assert.equal(paidHoursAfterOvertime(preview, 75), 9.25)
+  assert.equal(paidHoursAfterOvertime(preview, 30), 8.5)
+  assert.equal(paidHoursAfterOvertime(preview, 200), 9.25, '超过候选按候选封顶')
+  assert.equal(paidHoursAfterOvertime(preview, null), 8)
+  // 已有另一条已批 30 分钟：工资口径已含这 30，本次再批 30 → 共 60
+  assert.equal(paidHoursAfterOvertime({ payrollPaidMinutes: 510, approvedOvertimeMinutes: 30, candidateOvertimeMinutes: 75 }, 30), 9)
+  // 旧后端没有工资口径字段：退回旧 paidMinutes，且不做批准后推算
+  const legacy = buildDayPreviewFromRecord({ ...record, payrollPaidMinutes: undefined }, item({ sourceType: 'Overtime', workDate: '2026-11-24' }))
+  assert.equal(legacy.paidHours, 9.22)
+  assert.equal(paidHoursAfterOvertime(legacy, 75), undefined)
 }

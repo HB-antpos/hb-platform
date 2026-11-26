@@ -148,6 +148,7 @@
       "autoClosed": "自动结案",
       "hoursNow": "当天工时",
       "paidNow": "计薪工时（现在）",
+      "paidAfterOvertime": "计薪工时（批准后）",
       "tierLabel": "时薪档",
       "paidAfterHint": "计薪工时批准后由系统重算（扣餐、加班按口径）",
       "hasPunch": "当天已打卡",

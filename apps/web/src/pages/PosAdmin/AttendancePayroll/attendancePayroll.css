@@ -460,6 +460,23 @@
   gap: 2px;
 }
 
+/* 带薪假列：「年 申请 24 → 核定 [输入框]」要排在一行内，列太窄时输入框会被挤成一条竖线 */
+.atp-pay-grid .atp-leave-col {
+  min-width: 168px;
+}
+
+.atp-pay-grid .atp-leave-col .atp-pay-sub {
+  max-width: none;
+}
+
+.atp-pay-grid .atp-leave-col .atp-approval {
+  white-space: nowrap;
+}
+
+.atp-pay-grid .atp-leave-col .atp-approval .ant-input-number {
+  flex-shrink: 0;
+}
+
 .atp-dashed-box {
   display: inline-block;
   padding: 0 4px;
