@@ -41,6 +41,18 @@ public sealed class BrowserExtensionAccessService : IBrowserExtensionAccessServi
             return false;
         }
 
+        // 大屏收银设备：只认令牌里服务端写入的分店；不传分店的公司级接口（排行、条码查货号、分类采集）放行。
+        if (BrowserExtensionPosDevicePrincipal.IsPosDevice(user))
+        {
+            if (!BrowserExtensionPosDevicePrincipal.TryGetIdentity(user, out var device))
+            {
+                return false;
+            }
+
+            return string.IsNullOrWhiteSpace(storeCode)
+                || device.StoreCode.Equals(storeCode.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
         if (IsWarehouseStaffOnly(user))
         {
             // 与现有订货前台一致：纯仓库员工只能凭显式 Orders.Create 代建任意分店订单。
@@ -83,6 +95,14 @@ public sealed class BrowserExtensionAccessService : IBrowserExtensionAccessServi
         if (user.Identity?.IsAuthenticated != true)
         {
             return Array.Empty<string>();
+        }
+
+        // 设备只有绑定的那一家分店，App 里不再显示选分店。
+        if (BrowserExtensionPosDevicePrincipal.IsPosDevice(user))
+        {
+            return BrowserExtensionPosDevicePrincipal.TryGetIdentity(user, out var device)
+                ? new[] { device.StoreCode }
+                : Array.Empty<string>();
         }
 
         var userGuid = user.FindFirst("userId")?.Value

@@ -1,0 +1,14 @@
+{
+  "system": {
+    "appDownloads": {
+      "serviceTokens": {
+        "purposes": {
+          "pos-supplier-assistant-token-issuer": {
+            "label": "订货助手设备令牌签发器（POS API）",
+            "description": "仅用于 POS API 为已登记的大屏收银设备（iPad / 安卓平板）换取订货助手令牌，不能读写业务数据；环境变量为 HBPOS_SUPPLIER_ASSISTANT_TOKEN。"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "system": {
+    "appDownloads": {
+      "serviceTokens": {
+        "purposes": {
+          "pos-supplier-assistant-token-issuer": {
+            "label": "Supplier assistant device token issuer (POS API)",
+            "description": "Only lets the POS API exchange supplier assistant tokens for registered HB POS tablets (iPad / Android tablet); it cannot read or write business data. Environment variable: HBPOS_SUPPLIER_ASSISTANT_TOKEN."
+          }
+        }
+      }
+    }
+  }
+}

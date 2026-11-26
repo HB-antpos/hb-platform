@@ -28,6 +28,7 @@ const registeredPageCopySurfaces = {
   "app/sales.tsx": "src/features/sales/ui/sales-copy.ts",
   "app/settings.tsx": "src/features/settings/settings-copy.ts",
   "app/special-products.tsx": "src/features/special-products/special-products-copy.ts",
+  "app/supplier-assistant.tsx": "src/features/supplier-assistant/supplier-assistant-copy.ts",
   "app/sync-history.tsx": "src/features/sync-history/sync-history-copy.ts",
   "app/update-recovery.tsx": "src/features/app-updates/app-update-recovery-screen.tsx",
   "app/zeller-probe.tsx": "src/features/zeller-probe/zeller-probe-copy.ts",

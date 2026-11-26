@@ -66,6 +66,12 @@ public static class BrowserExtensionCaptureRateLimits
 
     internal static string ResolvePartitionKey(HttpContext context)
     {
+        // 大屏收银设备没有员工身份；按设备单独计数，免得同店多台设备共用一个出口 IP 互相挤占额度。
+        if (React.BrowserExtensionPosDevicePrincipal.TryGetIdentity(context.User, out var device))
+        {
+            return $"pos-device:{device.StoreCode}:{device.DeviceCode}";
+        }
+
         var userKey = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? context.User.Identity?.Name;
         if (!string.IsNullOrWhiteSpace(userKey))

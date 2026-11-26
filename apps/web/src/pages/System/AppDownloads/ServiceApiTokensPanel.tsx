@@ -36,6 +36,9 @@ import type {
   ServiceApiTokenPurpose,
 } from '../../../types/serviceApiToken'
 import { formatAppDownloadLocalDateTime } from './time'
+import { registerPageMessages } from '../../../i18n/registerPageMessages'
+import serviceApiTokenMessagesEn from './serviceApiTokenMessages.en.json'
+import serviceApiTokenMessagesZh from './serviceApiTokenMessages.zh.json'
 import {
   buildServiceApiTokenEnvSnippet,
   canRevokeServiceApiToken,
@@ -46,6 +49,9 @@ import {
   resolveServiceApiTokenStatusColor,
 } from './serviceApiTokenPanelLogic'
 import { MeasuredTable } from '../../../components/MeasuredTable'
+
+// 新增用途的文案放页面级，避免撑大首屏语言包（首屏 gzip 预算只剩几百字节）。
+registerPageMessages({ zh: serviceApiTokenMessagesZh, en: serviceApiTokenMessagesEn })
 
 const DEFAULT_TOKEN_PURPOSE: ServiceApiTokenPurpose = 'mobile-ota-publisher'
 const KNOWN_TOKEN_STATUSES = ['active', 'revoked', 'expired'] as const
@@ -530,6 +536,12 @@ export default function ServiceApiTokensPanel() {
                   value: 'deployment-acceptance-reporter',
                   label: t(
                     'system.appDownloads.serviceTokens.purposes.deployment-acceptance-reporter.label',
+                  ),
+                },
+                {
+                  value: 'pos-supplier-assistant-token-issuer',
+                  label: t(
+                    'system.appDownloads.serviceTokens.purposes.pos-supplier-assistant-token-issuer.label',
                   ),
                 },
               ]}

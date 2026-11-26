@@ -4,6 +4,7 @@ export type ServiceApiTokenPurpose =
   | 'pos-ipad-update-decision-reader'
   | 'quality-ci-reporter'
   | 'deployment-acceptance-reporter'
+  | 'pos-supplier-assistant-token-issuer'
 
 export interface ServiceApiTokenCreateRequest {
   name: string

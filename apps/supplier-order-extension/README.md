@@ -6,6 +6,8 @@ Chrome / Edge / macOS Safari Manifest V3 扩展，在已配置的供应商列表
 
 1.7.0 起支持键盘模式扫码枪：在已配置 `search`（`urlTemplate` 网址模板，或网址拼不出来时的 `inputSelector` 搜索框）的供应商页面或侧栏扫条码，后端按“条码 + 当前供应商”查出货号（`barcode-lookup`）；商品已在当前页就高亮，否则跳到供应商网站的按货号搜索页。扫码枪需以回车或 Tab 结尾；只搜索，不加购、不下单。1.7.1 起容忍扫码途中 300ms 以内的蓝牙传输卡顿（拼回完整条码，卡太久整次作废，不再只取后半截），并拦下「回车换行」结尾多出来的回车 / Ctrl+J。
 
+HB POS 大屏收银 App（iPad / 安卓平板）的「订货助手」页复用本扩展的供应商页脚本：`content/list.js` 与 `lib/*` 被打包进 `apps/pos-ipad/src/features/supplier-assistant/generated/`，在 App 内网页窗口注入，令牌按设备绑定的分店签发，不需要登录网站。**改了 `content/list.js` 或 `lib/*.js` 后要运行 `node apps/pos-ipad/scripts/build-supplier-assistant-content.mjs` 重新生成**，否则 iPad 车道的源码哈希测试会失败。
+
 ## 目录
 
 - `src/`：扩展源码（不含构建产物与凭据）
