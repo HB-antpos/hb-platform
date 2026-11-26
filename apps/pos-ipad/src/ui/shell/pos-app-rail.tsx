@@ -1,13 +1,20 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal, ScrollView, Text, View } from "react-native";
+import {
+  Modal,
+  ScrollView,
+  Text,
+  useWindowDimensions,
+  View,
+} from "react-native";
 import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 import {
-  MAX_PINNED_DESTINATIONS,
   POS_DESTINATION_META,
   POS_NAV_GROUP_ORDER,
+  POS_RAIL_METRICS,
+  resolvePinnedCapacity,
   togglePinnedDestination,
   type PosActiveDestination,
   type PosDestinationId,
@@ -67,8 +74,23 @@ export type PosAppRailProps = Readonly<{
   locked?: boolean;
   /** 界面语言；不传时取全局 i18n 的当前语言。 */
   language?: string | undefined;
+  /** 侧栏能固定几个；不传时按屏幕高度算（13 寸 6 个、11 寸 5 个），测试里用来固定数量。 */
+  pinnedCapacity?: number;
   testID?: string;
 }>;
+
+/**
+ * 按本机屏幕估算侧栏能固定几个入口。
+ * 侧栏高度 = 窗口高度 − 上下安全区 − 顶栏；用窗口尺寸而不是 onLayout，
+ * 是因为每个页面各自渲染侧栏，onLayout 会让每次换页先显示 5 个再跳成 6 个。
+ */
+function usePinnedCapacity(): number {
+  const { height } = useWindowDimensions();
+  const insets = useContext(SafeAreaInsetsContext);
+  const railHeight =
+    height - (insets?.top ?? 0) - (insets?.bottom ?? 0) - POS_TOP_BAR_HEIGHT;
+  return resolvePinnedCapacity(railHeight);
+}
 
 /** 左侧功能栏：收银、固定的常用入口、更多、锁屏。 */
 export function PosAppRail({
@@ -76,24 +98,31 @@ export function PosAppRail({
   language,
   locked = false,
   model,
+  pinnedCapacity,
   testID = "pos-rail",
 }: PosAppRailProps) {
   usePosThemeVersion();
   const { i18n, t } = useTranslation();
   const [moreVisible, setMoreVisible] = useState(false);
   const closeMore = useCallback(() => setMoreVisible(false), []);
+  const screenCapacity = usePinnedCapacity();
+  const capacity = pinnedCapacity ?? screenCapacity;
 
   const entryById = new Map(model.entries.map((entry) => [entry.id, entry]));
-  const pinnedEntries = model.pinned.flatMap((id) => {
-    const entry = entryById.get(id);
-    return entry ? [entry] : [];
-  });
+  // 先去掉当前收银员没权限的入口再截到 capacity，没权限的固定项不占侧栏位置。
+  const pinnedEntries = model.pinned
+    .flatMap((id) => {
+      const entry = entryById.get(id);
+      return entry ? [entry] : [];
+    })
+    .slice(0, capacity);
+  const visiblePinnedIds = new Set(pinnedEntries.map((entry) => entry.id));
   // 当前页不在侧栏里时，高亮「更多」，让收银员知道自己是从哪里进来的。
   const activeIsPinned = pinnedEntries.some((entry) => entry.id === active);
   const moreActive =
     moreVisible || (active !== "sales" && active !== "none" && !activeIsPinned);
   const needsAttention = model.entries.some(
-    (entry) => entry.attention && !model.pinned.includes(entry.id),
+    (entry) => entry.attention && !visiblePinnedIds.has(entry.id),
   );
 
   return (
@@ -152,6 +181,7 @@ export function PosAppRail({
       ) : null}
       <PosMorePanel
         active={active}
+        capacity={capacity}
         // i18n 尚未初始化（独立渲染）时没有语言，退回英文名称而不是抛错。
         language={language ?? i18n.resolvedLanguage ?? i18n.language ?? "en"}
         model={model}
@@ -231,6 +261,8 @@ function RailTile({
 
 type PosMorePanelProps = Readonly<{
   active: PosActiveDestination;
+  /** 侧栏能固定几个，固定到上限时提示先取消一个。 */
+  capacity: number;
   language: string;
   model: PosNavModel;
   onClose(): void;
@@ -240,6 +272,7 @@ type PosMorePanelProps = Readonly<{
 /** 「全部功能」面板：所有入口按用途分组一屏展开，并在这里固定常用项、换语言和主题。 */
 function PosMorePanel({
   active,
+  capacity,
   language,
   model,
   onClose,
@@ -257,7 +290,11 @@ function PosMorePanel({
   }, [onClose]);
 
   const togglePin = (destinationId: PosDestinationId) => {
-    const result = togglePinnedDestination(model.pinned, destinationId);
+    const result = togglePinnedDestination(
+      model.pinned,
+      destinationId,
+      capacity,
+    );
     setPinLimitReached(result.outcome === "limit");
     if (result.outcome !== "limit") model.onPinnedChange?.(result.pinned);
   };
@@ -315,8 +352,8 @@ function PosMorePanel({
               testID="pos-more-pin-hint"
             >
               {pinLimitReached
-                ? t("nav.pinLimit", { max: MAX_PINNED_DESTINATIONS })
-                : t("nav.pinHint", { max: MAX_PINNED_DESTINATIONS })}
+                ? t("nav.pinLimit", { max: capacity })
+                : t("nav.pinHint", { max: capacity })}
             </Text>
           ) : null}
           <ScrollView
@@ -648,21 +685,21 @@ const styles = createPosStyles((colors) => ({
     backgroundColor: colors.surface,
     borderRightColor: colors.border,
     borderRightWidth: 1,
-    gap: 8,
+    gap: POS_RAIL_METRICS.gap,
     paddingHorizontal: 8,
-    paddingVertical: 10,
+    paddingVertical: POS_RAIL_METRICS.paddingVertical,
     width: POS_RAIL_WIDTH,
   },
   railDivider: {
     backgroundColor: colors.border,
-    height: 1,
+    height: POS_RAIL_METRICS.dividerHeight,
     marginHorizontal: 6,
   },
   railScroll: {
     flex: 1,
   },
   railScrollContent: {
-    gap: 8,
+    gap: POS_RAIL_METRICS.gap,
   },
   sheet: {
     backgroundColor: colors.canvas,
@@ -711,7 +748,7 @@ const styles = createPosStyles((colors) => ({
     borderRadius: posRadius.medium,
     gap: 4,
     justifyContent: "center",
-    minHeight: 76,
+    minHeight: POS_RAIL_METRICS.tileHeight,
     paddingHorizontal: 2,
   },
   tileActive: {
