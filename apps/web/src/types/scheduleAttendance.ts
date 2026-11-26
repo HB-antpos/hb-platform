@@ -98,6 +98,8 @@ export interface AttendanceScheduleDto {
   pendingMealAddBackMinutes?: number
   /** 计薪工时 = 已闭合班段工时 − 用餐扣除 + 已批准加回；workedMinutes 含义不变。 */
   paidMinutes?: number
+  /** 工资口径计薪分钟（与工时统计 / 工资表同算法）：排班内工时 + 已批加班 − 用餐扣除 + 已批加回；旧后端不返回。 */
+  payrollPaidMinutes?: number
 }
 
 /** 下班时的用餐声明：员工声明没休息时生成 MealBreak 审批。 */

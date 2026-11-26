@@ -4937,6 +4937,38 @@ namespace BlazorApp.Api.Services.React
             }
         }
 
+        /// <summary>
+        /// 按工资口径（PayrollCalculator.CalculateDay）算单个排班当天的计薪分钟；只取已闭合班段，
+        /// 跨午夜排班的结束时间顺延一天，与工资快照的窗口算法一致。
+        /// </summary>
+        private static int CalculatePayrollPaidMinutes(
+            AttendanceSchedule schedule,
+            AttendanceWorkSessionDto session,
+            int approvedOvertimeMinutes,
+            int approvedMealAddBackMinutes)
+        {
+            var segments = session.Segments
+                .Where(item => item.ClockIn != null && item.ClockOut != null)
+                .Select(item => new PayrollSegment(
+                    item.ClockIn!.PunchTimeLocal,
+                    item.ClockOut!.PunchTimeLocal,
+                    item.ClockOut.IsSystemAutoClockOut))
+                .ToList();
+            var windowStart = schedule.WorkDate.Date.Add(schedule.StartTime);
+            var windowEnd = schedule.WorkDate.Date.Add(schedule.EndTime);
+            if (windowEnd <= windowStart)
+            {
+                windowEnd = windowEnd.AddDays(1);
+            }
+            return PayrollCalculator.CalculateDay(new PayrollDayInput(
+                windowStart,
+                windowEnd,
+                segments,
+                AttendanceMealBreakRules.EffectiveCount(schedule.MealBreakCount, schedule.StartTime, schedule.EndTime),
+                approvedOvertimeMinutes,
+                approvedMealAddBackMinutes)).PaidMinutes;
+        }
+
         private async Task PopulateWorkSessionFieldsAsync(
             List<AttendanceScheduleDto> scheduleDtos,
             List<AttendanceSchedule> schedules,
@@ -5053,6 +5085,13 @@ namespace BlazorApp.Api.Services.React
                 dto.ApprovedOvertimeMinutes = Math.Min(
                     session.CandidateOvertimeMinutes,
                     approvedTotal);
+                // 工资口径的计薪分钟：与工资快照（BuildPayrollSnapshotAsync）同样只计已批加班、已批用餐加回，
+                // 避免审核台把未批的早到 / 晚走算进「计薪工时」，与工资表对不上。
+                dto.PayrollPaidMinutes = CalculatePayrollPaidMinutes(
+                    schedule,
+                    session,
+                    dto.ApprovedOvertimeMinutes,
+                    dto.ApprovedMealAddBackMinutes);
                 if (overtimeApprovals.Any(item => item.ReviewStatus == "Pending"))
                 {
                     dto.OvertimeApprovalStatus = "Pending";

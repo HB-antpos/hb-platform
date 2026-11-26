@@ -96,6 +96,11 @@ namespace BlazorApp.Shared.DTOs
         public int PendingMealAddBackMinutes { get; set; }
         /// <summary>计薪工时 = 已闭合班段工时 − 用餐扣除 + 已批准加回；WorkedMinutes 含义不变（仍是原始班段时长）。</summary>
         public int PaidMinutes { get; set; }
+        /// <summary>
+        /// 工资口径的计薪分钟（与工时统计 / 工资表同一算法）：排班时段内工时 + 已批准加班 − 用餐扣除 + 已批准加回。
+        /// 未批准的加班、排班外的早到晚走都不计；审核台用它显示「计薪工时（现在）」，并据此推算批准加班后的值。
+        /// </summary>
+        public int PayrollPaidMinutes { get; set; }
         /// <summary>用餐状态（休息横幅、计时、下班前确认）；仅「我的今日」接口且排班有用餐时返回。</summary>
         public AttendanceMealStateDto? Meal { get; set; }
         /// <summary>只读合规提醒；存在提醒时排班仍可保存和发布。</summary>

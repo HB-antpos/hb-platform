@@ -24,6 +24,7 @@ import {
   resolvePeriodStart,
   shiftPeriod,
   summarizeCashOverrides,
+  visibleCashOverrideBuckets,
   summarizeEmployeeHours,
   resolvePublicHolidayRate,
 } from './payrollLogic'
@@ -323,3 +324,17 @@ assert.deepEqual(Object.keys(EMPLOYMENT_TYPE_TAG_COLORS).sort(), ['Casual', 'Ful
 }
 
 console.log('payrollLogic.test.ts: ok')
+
+// 现金区「公假 $ / 假 $」列：全员都在转账里（不可填、也没存手填值）时整列隐藏；任一人可填或存着手填值就显示
+{
+  const bucket = (patch: Partial<{ editable: boolean; isManual: boolean; manualAmount: number | null }> = {}) => ({
+    hours: 0, amount: 0, systemAmount: 0, isManual: false, manualAmount: null, editable: false, ...patch,
+  })
+  const row = (publicHoliday = bucket(), leave = bucket()) => ({ cash: { publicHoliday, leave } }) as unknown as Parameters<typeof visibleCashOverrideBuckets>[0][number]
+  const keys = (rows: Parameters<typeof visibleCashOverrideBuckets>[0]) => visibleCashOverrideBuckets(rows).map((item) => item.key)
+  assert.deepEqual(keys([row(), row()]), [], '全员转账：两列都隐藏')
+  assert.deepEqual(keys([row(), row(bucket(), bucket({ editable: true }))]), ['leave'], '有人带薪假有现金工时：只显示假 $')
+  assert.deepEqual(keys([row(bucket({ manualAmount: 80 }))]), ['publicHoliday'], '存着没生效的手填值也要显示，让店长看到告警')
+  assert.deepEqual(keys([row(bucket({ editable: true }), bucket({ isManual: true, editable: true }))]), ['publicHoliday', 'leave'])
+  assert.deepEqual(keys([]), [])
+}
