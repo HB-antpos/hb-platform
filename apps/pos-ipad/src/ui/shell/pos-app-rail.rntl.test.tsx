@@ -1,10 +1,10 @@
 import { afterEach, expect, jest, test } from "@jest/globals";
 import { act, fireEvent, render } from "@testing-library/react-native";
+import { SafeAreaInsetsContext } from "react-native-safe-area-context";
 
 import { PosAppRail, type PosNavEntry, type PosNavModel } from "./pos-app-rail";
 import {
   DEFAULT_PINNED_DESTINATIONS,
-  MAX_PINNED_DESTINATIONS,
   type PosDestinationId,
 } from "./pos-navigation";
 
@@ -19,7 +19,30 @@ jest.mock("react-i18next", () => ({
   }),
 }));
 
+// 窗口尺寸可按用例改；null 表示沿用 RN 测试环境的默认尺寸。
+const mockWindow: { size: { height: number; width: number } | null } = {
+  size: null,
+};
+jest.mock("react-native/Libraries/Utilities/useWindowDimensions", () => {
+  const actual = jest.requireActual<{
+    default: () => {
+      fontScale: number;
+      height: number;
+      scale: number;
+      width: number;
+    };
+  }>("react-native/Libraries/Utilities/useWindowDimensions");
+  return {
+    __esModule: true,
+    default: () =>
+      mockWindow.size
+        ? { fontScale: 1, scale: 2, ...mockWindow.size }
+        : actual.default(),
+  };
+});
+
 afterEach(async () => {
+  mockWindow.size = null;
   await act(async () => {
     applyPosTheme("classic");
   });
@@ -122,15 +145,59 @@ test("固定入口到侧栏；已到上限时提示而不是替换已有项", as
 
   const full = createModel();
   const fullScreen = await render(
-    <PosAppRail active="sales" model={full.model} />,
+    <PosAppRail active="sales" model={full.model} pinnedCapacity={5} />,
   );
   await fireEvent.press(fullScreen.getByTestId("pos-rail-more"));
   await fireEvent.press(fullScreen.getByTestId("pos-more-pin-settings"));
 
   expect(full.model.onPinnedChange).not.toHaveBeenCalled();
   expect(fullScreen.getByTestId("pos-more-pin-hint").props.children).toBe(
-    `nav.pinLimit:${JSON.stringify({ max: MAX_PINNED_DESTINATIONS })}`,
+    `nav.pinLimit:${JSON.stringify({ max: 5 })}`,
   );
+});
+
+test("13 寸能固定 6 个：默认 5 个之外还能再固定 1 个，侧栏只显示前 capacity 个", async () => {
+  const six = createModel();
+  const sixScreen = await render(
+    <PosAppRail active="sales" model={six.model} pinnedCapacity={6} />,
+  );
+  await fireEvent.press(sixScreen.getByTestId("pos-rail-more"));
+  expect(sixScreen.getByTestId("pos-more-pin-hint").props.children).toBe(
+    `nav.pinHint:${JSON.stringify({ max: 6 })}`,
+  );
+  await fireEvent.press(sixScreen.getByTestId("pos-more-pin-settings"));
+  expect(six.model.onPinnedChange).toHaveBeenLastCalledWith([
+    ...DEFAULT_PINNED_DESTINATIONS,
+    "settings",
+  ]);
+
+  // 本机存了 6 个，但这台屏幕只放得下 5 个：侧栏显示前 5 个，第 6 个留在存储里不丢。
+  const overflow = createModel({
+    pinned: [...DEFAULT_PINNED_DESTINATIONS, "settings"],
+  });
+  const overflowScreen = await render(
+    <PosAppRail active="sales" model={overflow.model} pinnedCapacity={5} />,
+  );
+  for (const id of DEFAULT_PINNED_DESTINATIONS) {
+    expect(overflowScreen.getByTestId(`pos-rail-${id}`)).toBeTruthy();
+  }
+  expect(overflowScreen.queryByTestId("pos-rail-settings")).toBeNull();
+});
+
+test("没给 pinnedCapacity 时按窗口高度算：iPad Pro 13 寸横屏能固定 6 个", async () => {
+  mockWindow.size = { height: 1032, width: 1376 };
+  const { model } = createModel({
+    pinned: [...DEFAULT_PINNED_DESTINATIONS, "settings", "sync-history"],
+  });
+  const screen = await render(
+    <SafeAreaInsetsContext.Provider
+      value={{ bottom: 20, left: 0, right: 0, top: 24 }}
+    >
+      <PosAppRail active="sales" model={model} />
+    </SafeAreaInsetsContext.Provider>,
+  );
+  expect(screen.getByTestId("pos-rail-settings")).toBeTruthy();
+  expect(screen.queryByTestId("pos-rail-sync-history")).toBeNull();
 });
 
 test("面板里可以切换主题、语言和锁屏", async () => {

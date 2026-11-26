@@ -24,6 +24,7 @@ import {
 
 import { PosButton } from "@/ui/controls/pos-button";
 import { PosPressable } from "@/ui/controls/pos-pressable";
+import { POS_RAIL_METRICS } from "@/ui/shell/pos-navigation";
 import {
   createPosStyles,
   posColors,
@@ -931,7 +932,8 @@ const styles = createPosStyles((colors) => ({
     borderWidth: 1.5,
     gap: 6,
     justifyContent: "center",
-    minHeight: 96,
+    // 侧栏按这个高度预留考勤格位置来算能固定几个入口，两处共用一个常量。
+    minHeight: POS_RAIL_METRICS.accessoryHeight,
     paddingVertical: 8,
   },
   railTileActive: {

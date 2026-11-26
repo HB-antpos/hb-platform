@@ -55,8 +55,52 @@ export const POS_DESTINATION_META: Readonly<
   settings: { group: "device", icon: "cog-outline" },
 });
 
-/** 侧栏最多固定几个入口：再多就放不下「收银 / 更多 / 锁屏」三个常驻项。 */
-export const MAX_PINNED_DESTINATIONS = 5;
+/**
+ * 侧栏格子尺寸（pt）：侧栏样式和「能固定几个」的计算共用这一份，改尺寸时两边一起变。
+ * accessoryHeight 是收银页「考勤」二维码格的高度（attendance-qr-sales-panels 的 railTile.minHeight）。
+ */
+export const POS_RAIL_METRICS = Object.freeze({
+  accessoryHeight: 96,
+  dividerHeight: 1,
+  gap: 8,
+  paddingVertical: 10,
+  tileHeight: 76,
+});
+
+/** 侧栏至少能固定几个：矮屏（11 寸、mini）保持原来的 5 个，放不下时侧栏自己可以上下滑。 */
+export const MIN_PINNED_DESTINATIONS = 5;
+
+/** 侧栏最多固定几个：再高的屏也不超过这个数，本机保存的固定列表也截到这个数。 */
+export const MAX_PINNED_DESTINATIONS = 10;
+
+/**
+ * 按侧栏可用高度算出能固定几个入口，结果夹在 [MIN, MAX] 之间。
+ *
+ * 侧栏从上到下：收银、N 个固定项（同在一个滚动区里）、考勤格、分隔线、更多、锁屏。
+ * 一律按「有考勤格」的收银页来算：各页面的侧栏因此完全一样，不会换页就少一个入口。
+ * 13 寸 iPad 横屏约 936pt → 6 个；11 寸约 724～738pt → 算出 4，按下限给 5。
+ */
+export function resolvePinnedCapacity(railHeight: number): number {
+  if (!Number.isFinite(railHeight) || railHeight <= 0) {
+    return MIN_PINNED_DESTINATIONS;
+  }
+  const m = POS_RAIL_METRICS;
+  // 常驻部分：上下内边距 + 收银 / 更多 / 锁屏三格 + 考勤格 + 分隔线，
+  // 再加侧栏五个子块（滚动区、考勤格、分隔线、更多、锁屏）之间的四个间距。
+  const fixed =
+    m.paddingVertical * 2 +
+    m.tileHeight * 3 +
+    m.accessoryHeight +
+    m.dividerHeight +
+    m.gap * 4;
+  // 滚动区里每多一个固定项，就多一格加一个间距。
+  const perEntry = m.tileHeight + m.gap;
+  const fits = Math.floor((railHeight - fixed) / perEntry);
+  return Math.min(
+    MAX_PINNED_DESTINATIONS,
+    Math.max(MIN_PINNED_DESTINATIONS, fits),
+  );
+}
 
 export const DEFAULT_PINNED_DESTINATIONS: readonly PosDestinationId[] = [
   "held-orders",
@@ -73,7 +117,8 @@ export function isPosDestinationId(value: unknown): value is PosDestinationId {
 }
 
 /**
- * 清洗持久化的固定列表：去掉未知和重复的 ID，截到上限。
+ * 清洗持久化的固定列表：去掉未知和重复的 ID，截到 MAX_PINNED_DESTINATIONS。
+ * 不按本机屏幕截短：侧栏只显示前 capacity 个，多出来的仍然留着，不会被丢掉。
  * 从未保存过（null）时用默认值；保存过空数组表示用户主动清空，原样保留。
  */
 export function reconcilePinnedDestinations(
@@ -95,10 +140,14 @@ export type TogglePinnedResult = Readonly<{
   outcome: "pinned" | "unpinned" | "limit";
 }>;
 
-/** 固定或取消固定一个入口；到上限时不做静默替换。 */
+/**
+ * 固定或取消固定一个入口；到上限时不做静默替换。
+ * capacity 是这台设备侧栏能放下的数量（resolvePinnedCapacity 的结果）。
+ */
 export function togglePinnedDestination(
   pinned: readonly PosDestinationId[],
   destinationId: PosDestinationId,
+  capacity: number,
 ): TogglePinnedResult {
   if (pinned.includes(destinationId)) {
     return {
@@ -106,7 +155,7 @@ export function togglePinnedDestination(
       pinned: pinned.filter((id) => id !== destinationId),
     };
   }
-  if (pinned.length >= MAX_PINNED_DESTINATIONS) {
+  if (pinned.length >= Math.min(capacity, MAX_PINNED_DESTINATIONS)) {
     return { outcome: "limit", pinned: [...pinned] };
   }
   return { outcome: "pinned", pinned: [...pinned, destinationId] };
