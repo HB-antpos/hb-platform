@@ -5857,6 +5857,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/supplier-assistant/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": components["schemas"]["SupplierAssistantTokenResponseApiResult"];
+                        "application/json": components["schemas"]["SupplierAssistantTokenResponseApiResult"];
+                        "text/json": components["schemas"]["SupplierAssistantTokenResponseApiResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/vouchers/{voucherCode}": {
         parameters: {
             query?: never;
@@ -8981,6 +9018,20 @@ export interface components {
         StringApiResult: {
             success?: boolean;
             data?: string | null;
+            errorCode?: string | null;
+            message?: string | null;
+        };
+        SupplierAssistantTokenResponse: {
+            accessToken?: string | null;
+            /** Format: date-time */
+            expiresAtUtc?: string;
+            storeCode?: string | null;
+            deviceCode?: string | null;
+            apiOrigin?: string | null;
+        };
+        SupplierAssistantTokenResponseApiResult: {
+            success?: boolean;
+            data?: components["schemas"]["SupplierAssistantTokenResponse"];
             errorCode?: string | null;
             message?: string | null;
         };

@@ -1,10 +1,11 @@
 import { describe, expect, it, jest } from "@jest/globals";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 
-import { HbposApiError } from "@/core/api/hbpos-api";
 
 import { SupplierAssistantScreen } from "./supplier-assistant-screen";
 import type { FetchLike, SupplierAssistantTokenSource } from "./supplier-assistant-session";
+
+import { HbposApiError } from "@/core/api/hbpos-api";
 
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -31,6 +32,7 @@ jest.mock("react-native-webview", () => {
     }));
     return React.createElement(View, { testID: props.testID as string });
   });
+  FakeWebView.displayName = "FakeWebView";
   return { WebView: FakeWebView };
 });
 

@@ -7140,6 +7140,35 @@
         }
       }
     },
+    "/api/v1/supplier-assistant/token": {
+      "post": {
+        "tags": [
+          "SupplierAssistant"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierAssistantTokenResponseApiResult"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierAssistantTokenResponseApiResult"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplierAssistantTokenResponseApiResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/vouchers/{voucherCode}": {
       "get": {
         "tags": [
@@ -16522,6 +16551,52 @@
           "data": {
             "type": "string",
             "nullable": true
+          },
+          "errorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SupplierAssistantTokenResponse": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "nullable": true
+          },
+          "expiresAtUtc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "storeCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "deviceCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "apiOrigin": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "SupplierAssistantTokenResponseApiResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SupplierAssistantTokenResponse"
           },
           "errorCode": {
             "type": "string",
