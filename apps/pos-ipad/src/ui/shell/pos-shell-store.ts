@@ -31,6 +31,11 @@ type PosShellState = {
   bleScanner: BleScannerIndicatorSnapshot | null;
   /** 顶栏点按重连 BLE 扫码枪的入口；null = 没有 BLE 服务。由 BleScannerStatusBridge 注册。 */
   bleScannerReconnect: (() => void) | null;
+  /**
+   * 顶栏「未配对」点按打开配对面板的入口；null = 当前页面没有配对面板，「未配对」不可点。
+   * 目前只有设备注册页登记（新设备进不了登录页 / 设置页，只能在注册页配扫码枪）。
+   */
+  bleScannerOpenPairing: (() => void) | null;
   display: DisplayStatus;
   terminalPresentation: TerminalPresentation | null;
   setConnectivity(status: ConnectivityStatus): void;
@@ -40,6 +45,7 @@ type PosShellState = {
   setScanner(status: ScannerCaptureStatus): void;
   setBleScanner(status: BleScannerIndicatorSnapshot | null): void;
   setBleScannerReconnect(reconnect: (() => void) | null): void;
+  setBleScannerOpenPairing(openPairing: (() => void) | null): void;
   setDisplay(status: DisplayStatus): void;
   setTerminalPresentation(
     terminalPresentation: TerminalPresentation | null,
@@ -55,6 +61,7 @@ const initialStatus = {
   scanner: "inactive",
   bleScanner: null,
   bleScannerReconnect: null,
+  bleScannerOpenPairing: null,
   display: "disconnected",
   terminalPresentation: null,
 } as const;
@@ -76,6 +83,7 @@ export const usePosShellStore = create<PosShellState>((set) => ({
   setScanner: (scanner) => set({ scanner }),
   setBleScanner: (bleScanner) => set({ bleScanner }),
   setBleScannerReconnect: (bleScannerReconnect) => set({ bleScannerReconnect }),
+  setBleScannerOpenPairing: (bleScannerOpenPairing) => set({ bleScannerOpenPairing }),
   setDisplay: (display) => set({ display }),
   setTerminalPresentation: (terminalPresentation) =>
     set({ terminalPresentation }),

@@ -38,6 +38,8 @@ export class HidScannerRouter implements ScannerPort {
   private readonly contextStack: {
     context: ScannerCaptureContext;
     leaseId: number | null;
+    /** 只由 captureDeviceActivation 登记：BLE 注册码的私有接收器。 */
+    activationSink?: (raw: string) => void;
   }[] = [{ context: "product", leaseId: null }];
   private nextContextLeaseId = 1;
   private buffer = "";
@@ -95,6 +97,25 @@ export class HidScannerRouter implements ScannerPort {
         this.contextStack.splice(index, 1);
         this.resetPartial();
       }
+    };
+  }
+
+  /**
+   * 设备注册页专用：申请 device-activation 租约，并登记一个私有接收器收 BLE 扫码枪的注册码。
+   *
+   * 中文注释：
+   * 1. 注册码是设备秘密，emit() 在 device-activation 场景下故意不广播给任何订阅者；
+   *    BLE 扫码因此只能像相机弹窗的直接回调一样，经这里交给持有租约的注册页本身。
+   * 2. 只有栈顶正是本租约时才投递；相机弹窗、扫码测试等后申请的租约压在上面时一律让给它们。
+   * 3. 交出 BLE 原文（只去回车换行，不做 Unicode trim），由注册码解析器先拒非 ASCII 再规范化。
+   */
+  captureDeviceActivation(onValue: (raw: string) => void): () => void {
+    const release = this.acquireContext("device-activation");
+    const entry = this.contextStack.at(-1);
+    if (entry) entry.activationSink = onValue;
+    return () => {
+      if (entry) delete entry.activationSink;
+      release();
     };
   }
 
@@ -188,6 +209,13 @@ export class HidScannerRouter implements ScannerPort {
     const top = this.contextStack.at(-1);
     if (!top || top.leaseId === null) {
       return false;
+    }
+    if (top.context === "device-activation" && top.activationSink) {
+      // 注册页持有租约：原文直接交给它，不进 emit / 任何共享订阅。
+      const raw = value.replace(/[\r\n]/g, "");
+      if (!raw.trim()) return false;
+      top.activationSink(raw);
+      return true;
     }
     const normalized = normalizeScanValue(value);
     if (!normalized) {

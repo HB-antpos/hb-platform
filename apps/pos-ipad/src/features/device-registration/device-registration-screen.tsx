@@ -36,6 +36,7 @@ import {
 } from "@/core/security/device-activation-code";
 import type { DeviceSessionState } from "@/core/security/device-session";
 import { CameraScannerModal } from "@/features/scanner-camera/camera-scanner-modal";
+import { BleScannerLoginPanel } from "@/features/settings/ble-scanner-settings";
 import {
   describeDeviceRegistrationFailure,
   type RegistrationTranslate,
@@ -47,7 +48,9 @@ import {
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
+import { describeBleScannerIndicator } from "@/ui/shell/ble-scanner-indicator";
 import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
+import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 
 type StoreLoadState = "idle" | "loading" | "ready" | "failed";
@@ -62,8 +65,18 @@ type ActivationPreview = Readonly<{
  * 新布局才有的版式文案（全局语言包里没有对应键）；中英文两套键保持一致。
  */
 const layoutCopy = {
-  en: { manualEntryDivider: "or enter it manually" },
-  zh: { manualEntryDivider: "或手动输入" },
+  en: {
+    manualEntryDivider: "or enter it manually",
+    bleTitle: "Bluetooth scanner",
+    blePairHint: "Tap to connect a scanner, then scan the code.",
+    bleReadyHint: "Just scan the registration code.",
+  },
+  zh: {
+    manualEntryDivider: "或手动输入",
+    bleTitle: "蓝牙扫码枪",
+    blePairHint: "点此连接扫码枪，连上后直接扫注册码。",
+    bleReadyHint: "直接扫注册码即可。",
+  },
 } as const;
 
 export function DeviceRegistrationScreen({
@@ -90,11 +103,18 @@ export function DeviceRegistrationScreen({
   const [storeLoadError, setStoreLoadError] = useState<string | null>(null);
   const [selectedStoreCode, setSelectedStoreCode] = useState("");
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [blePanelVisible, setBlePanelVisible] = useState(false);
   const serverOperation = useRef<AbortController | null>(null);
   const previewRequestId = useRef(0);
   const deviceSession = runtime.services?.deviceSession;
   const scannerRouter = runtime.services?.scanner.router;
   const serverConnection = runtime.services?.serverConnection;
+  // 旧原生包没有 BLE 服务时为 null：不显示蓝牙扫码枪卡片，也不申请扫码租约。
+  const bleScanner = runtime.services?.scanner.ble ?? null;
+  const bleSnapshot = usePosShellStore((state) => state.bleScanner);
+  const setBleScannerOpenPairing = usePosShellStore(
+    (state) => state.setBleScannerOpenPairing,
+  );
   const selectedStore =
     stores.find((store) => store.storeCode === selectedStoreCode) ?? null;
 
@@ -276,6 +296,41 @@ export function DeviceRegistrationScreen({
     setRegistrationKind("app-review");
   }, [previewActivation, t]);
 
+  /*
+   * 蓝牙扫码枪（新设备进不了登录页 / 设置页，只能在注册页配对）：
+   * 1. 配对面板复用登录页的 BleScannerLoginPanel；顶栏「未配对」也登记为打开它的入口。
+   * 2. 注册码是设备秘密，路由器不会把它广播给订阅者；这里用 captureDeviceActivation
+   *    直接收 BLE 原文，走与相机扫码相同的 identifyRegistrationCode。
+   * 3. 相机弹窗 / 配对面板打开或正在请求服务器时让出租约，避免一枪进两处或打断请求。
+   */
+  const registrationInputPhase = runtime.state.phase === "registration-required";
+  const openBlePanel = useCallback(() => {
+    Keyboard.dismiss();
+    setBlePanelVisible(true);
+  }, []);
+
+  useEffect(() => {
+    if (!bleScanner || !registrationInputPhase) return undefined;
+    setBleScannerOpenPairing(openBlePanel);
+    return () => setBleScannerOpenPairing(null);
+  }, [bleScanner, openBlePanel, registrationInputPhase, setBleScannerOpenPairing]);
+
+  const identifyRef = useRef(identifyRegistrationCode);
+  identifyRef.current = identifyRegistrationCode;
+  const bleCaptureActive =
+    !!bleScanner &&
+    registrationInputPhase &&
+    !cameraVisible &&
+    !blePanelVisible &&
+    operation === null;
+
+  useEffect(() => {
+    if (!bleCaptureActive || !scannerRouter) return undefined;
+    return scannerRouter.captureDeviceActivation((raw) => {
+      identifyRef.current(raw);
+    });
+  }, [bleCaptureActive, scannerRouter]);
+
   // 语言切换并入外壳顶栏；切换只改界面语言，已输入的注册码留在本页状态里。
   const switchLanguage = useCallback(() => {
     void toggleAppLanguage();
@@ -371,6 +426,10 @@ export function DeviceRegistrationScreen({
         ? "zh"
         : "en"
     ];
+  const bleIndicator =
+    bleScanner && bleSnapshot ? describeBleScannerIndicator(bleSnapshot) : null;
+  const bleReady =
+    bleSnapshot?.state === "ready" || bleSnapshot?.state === "learning";
   const networkCheckButton = onOpenNetworkCheck ? (
     <PosButton
       icon="access-point-network"
@@ -480,15 +539,67 @@ export function DeviceRegistrationScreen({
             </View>
           ) : (
             <>
-              <PosButton
-                disabled={registrationBusy || !scannerRouter}
-                icon="qrcode-scan"
-                label={t("registration.scan")}
-                onPress={() => setCameraVisible(true)}
-                size={staged ? "button" : "primary"}
-                testID="registration-scan"
-                tone={staged ? "secondary" : "primary"}
-              />
+              <View style={styles.scanRow}>
+                <View style={styles.scanCamera}>
+                  <PosButton
+                    disabled={registrationBusy || !scannerRouter}
+                    icon="camera-outline"
+                    label={t("registration.scan")}
+                    onPress={() => setCameraVisible(true)}
+                    size={staged ? "button" : "primary"}
+                    testID="registration-scan"
+                    tone={staged ? "secondary" : "primary"}
+                  />
+                </View>
+                {bleIndicator ? (
+                  <PosPressable
+                    accessibilityHint={bleReady ? text.bleReadyHint : text.blePairHint}
+                    accessibilityLabel={`${text.bleTitle}: ${t(bleIndicator.labelKey)}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: registrationBusy }}
+                    disabled={registrationBusy}
+                    onPress={openBlePanel}
+                    sound="navigate"
+                    style={({ pressed }) => [
+                      styles.bleCard,
+                      staged && styles.bleCardCompact,
+                      bleReady && styles.bleCardReady,
+                      pressed && !registrationBusy && styles.pressed,
+                    ]}
+                    testID="registration-ble-scanner"
+                  >
+                    <View style={[styles.bleIcon, bleReady && styles.bleIconReady]}>
+                      <MaterialCommunityIcons
+                        color={bleReady ? posColors.green : posColors.blue}
+                        name={bleIndicator.icon}
+                        size={26}
+                      />
+                    </View>
+                    <View style={styles.bleCopy}>
+                      <View style={styles.bleTitleRow}>
+                        <Text numberOfLines={1} style={styles.bleTitle}>
+                          {text.bleTitle}
+                        </Text>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.bleState, bleReady && styles.bleStateReady]}
+                          testID="registration-ble-scanner-state"
+                        >
+                          {t(bleIndicator.labelKey)}
+                        </Text>
+                      </View>
+                      <Text numberOfLines={2} style={styles.bleHint}>
+                        {bleReady ? text.bleReadyHint : text.blePairHint}
+                      </Text>
+                    </View>
+                    <MaterialCommunityIcons
+                      color={posColors.mutedInk}
+                      name="chevron-right"
+                      size={22}
+                    />
+                  </PosPressable>
+                ) : null}
+              </View>
 
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
@@ -792,6 +903,20 @@ export function DeviceRegistrationScreen({
           }}
           scanner={scannerRouter}
           visible={cameraVisible}
+        />
+      ) : null}
+      {blePanelVisible && bleScanner ? (
+        <BleScannerLoginPanel
+          locale={
+            (i18n.resolvedLanguage ?? i18n.language ?? "zh")
+              .toLowerCase()
+              .startsWith("zh")
+              ? "zh"
+              : "en"
+          }
+          onClose={() => setBlePanelVisible(false)}
+          router={scannerRouter}
+          service={bleScanner}
         />
       ) : null}
     </PosScreenFrame>
@@ -1221,6 +1346,48 @@ const styles = createPosStyles((colors) => ({
     minWidth: 240,
   },
   pressed: { opacity: 0.72 },
+  // 相机按钮与蓝牙扫码枪卡片并排：相机为主（更宽），卡片与主按钮同高。
+  scanRow: { alignItems: "stretch", flexDirection: "row", gap: 14 },
+  scanCamera: { flex: 1.3, justifyContent: "center" },
+  bleCard: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: "row",
+    gap: 12,
+    minHeight: 88,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  bleCardCompact: { minHeight: 64, paddingVertical: 6 },
+  bleCardReady: { backgroundColor: colors.greenSoft, borderColor: colors.greenBorder },
+  bleIcon: {
+    alignItems: "center",
+    backgroundColor: colors.blueSoft,
+    borderRadius: 12,
+    height: 48,
+    justifyContent: "center",
+    width: 48,
+  },
+  bleIconReady: { backgroundColor: colors.surface },
+  bleCopy: { flex: 1, gap: 3, minWidth: 0 },
+  bleTitleRow: { alignItems: "center", flexDirection: "row", gap: 8 },
+  bleTitle: { color: colors.ink, flexShrink: 1, fontSize: 18, fontWeight: "900" },
+  bleState: {
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: 9,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "800",
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  bleStateReady: { backgroundColor: colors.surface, color: colors.green },
+  bleHint: { color: colors.mutedInk, fontSize: 13, fontWeight: "600", lineHeight: 18 },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 20,

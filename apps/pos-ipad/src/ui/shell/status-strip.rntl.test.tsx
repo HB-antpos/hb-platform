@@ -376,3 +376,33 @@ test("没有注册重连入口时，休眠状态也只显示、不可点", async
   expect(screen.queryByTestId("status-strip-ble-reconnect")).toBeNull();
   expect(screen.getByText("bluetooth")).toBeTruthy();
 });
+
+test("未配对时只有页面登记了配对入口（设备注册页）才可点，点一下打开配对面板", async () => {
+  const openPairing = jest.fn();
+  usePosShellStore
+    .getState()
+    .setBleScanner({ state: "not-paired", batteryLevel: null, attention: false });
+
+  const screen = await render(<PosStatusStrip language="zh" />);
+  // 没有登记入口（登录页、收银页等）：保持原样只读。
+  expect(screen.queryByTestId("status-strip-ble-pair")).toBeNull();
+
+  await act(async () => {
+    usePosShellStore.getState().setBleScannerOpenPairing(openPairing);
+  });
+  const button = screen.getByTestId("status-strip-ble-pair");
+  expect(screen.getByText("chevron-right")).toBeTruthy();
+  await act(async () => {
+    fireEvent.press(button);
+  });
+  expect(openPairing).toHaveBeenCalledTimes(1);
+
+  // 配好后回到只读的已连接胶囊。
+  await act(async () => {
+    usePosShellStore
+      .getState()
+      .setBleScanner({ state: "ready", batteryLevel: 90, attention: false });
+  });
+  expect(screen.queryByTestId("status-strip-ble-pair")).toBeNull();
+  expect(screen.getByText("已连接 90%")).toBeTruthy();
+});

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports -- Jest runtime mock must load before the component. */
 import { expect, jest, test } from "@jest/globals";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { StyleSheet } from "react-native";
 
 let mockLanguage: "en" | "zh" = "en";
 
@@ -96,6 +97,36 @@ test("设备注册码上下文使用通用标题并保留相机原文", async ()
 
   expect(scanner.accepted).toEqual([raw]);
   expect(onScan).toHaveBeenCalledWith(raw);
+});
+
+test("设备注册码是二维码，取景框为正方形；商品扫码仍是横向长条", async () => {
+  const activation = await render(
+    <CameraScannerModal
+      context="device-activation"
+      onClose={jest.fn()}
+      onScan={jest.fn()}
+      scanner={new CameraScannerPortStub()}
+      visible
+    />,
+  );
+  const square = await activation.findByTestId("camera-scanner-target-square");
+  const { height, width } = StyleSheet.flatten(square.props.style) as { height: number; width: number };
+  expect(width).toBe(height);
+  expect(activation.queryByTestId("camera-scanner-target")).toBeNull();
+  await activation.unmount();
+
+  const product = await render(
+    <CameraScannerModal
+      context="product"
+      onClose={jest.fn()}
+      onScan={jest.fn()}
+      scanner={new CameraScannerPortStub()}
+      visible
+    />,
+  );
+  expect(await product.findByTestId("camera-scanner-target")).toBeTruthy();
+  expect(product.queryByTestId("camera-scanner-target-square")).toBeNull();
+  await product.unmount();
 });
 
 test("单次扫码回调同步失败时仍关闭相机会话", async () => {
