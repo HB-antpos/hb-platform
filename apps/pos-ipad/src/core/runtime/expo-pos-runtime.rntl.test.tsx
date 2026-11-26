@@ -27,6 +27,15 @@ jest.mock("expo-constants", () => ({
 jest.mock("expo-crypto", () => ({}));
 jest.mock("expo-network", () => ({}));
 jest.mock("expo-updates", () => ({}));
+// OTA channel 记录走本机 KV；测试里换成空存储（真模块是 ESM，Jest 不转换）。
+jest.mock("expo-sqlite/kv-store", () => ({
+  __esModule: true,
+  default: {
+    getItemSync: () => null,
+    setItemSync: () => undefined,
+    removeItemSync: () => true,
+  },
+}));
 jest.mock("../db/expo-sqlite-driver", () => ({
   ExpoSqliteDriver: class ExpoSqliteDriver {},
 }));

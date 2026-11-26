@@ -7,6 +7,7 @@ import * as Application from "expo-application";
 import Constants from "expo-constants";
 import * as Crypto from "expo-crypto";
 import * as ExpoNetwork from "expo-network";
+import Storage from "expo-sqlite/kv-store";
 import * as Updates from "expo-updates";
 import { Linking } from "react-native";
 
@@ -16,6 +17,7 @@ import {
   type AppUpdateRecoveryRuntimePort,
   createAppUpdateRecoveryRuntimeSnapshot,
 } from "../../features/app-updates/app-update-recovery-contract";
+import { createExpoOtaChannelBindingStore } from "../../features/app-updates/expo-ota-channel-binding";
 import { ExpoOtaUpdatePort } from "../../features/app-updates/expo-ota-update-port";
 import { HbposPosIpadOtaUpdateApi } from "../../features/app-updates/hbpos-pos-ipad-ota-update-api";
 import { HbposPosIpadUpdateApi } from "../../features/app-updates/hbpos-pos-ipad-update-api";
@@ -797,6 +799,9 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
     const otaInstaller = new ExpoOtaUpdatePort({
       enabled: Updates.isEnabled,
       runtimeVersion: Updates.runtimeVersion,
+      launchChannel: Updates.channel ?? null,
+      nativeBuild: Constants.nativeBuildVersion ?? "0",
+      channelBinding: createExpoOtaChannelBindingStore(Storage),
       updates: {
         setUpdateRequestHeadersOverride: (headers) =>
           Updates.setUpdateRequestHeadersOverride(headers),

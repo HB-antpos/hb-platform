@@ -58,6 +58,15 @@ jest.mock("../db/pos-database", () => {
   throw new Error("Startup OTA recovery must not load PosDatabase.");
 });
 jest.mock("expo-updates", () => mockUpdates);
+// OTA channel 记录走本机 KV；测试里换成空存储（真模块是 ESM，Jest 不转换）。
+jest.mock("expo-sqlite/kv-store", () => ({
+  __esModule: true,
+  default: {
+    getItemSync: () => null,
+    setItemSync: () => undefined,
+    removeItemSync: () => true,
+  },
+}));
 jest.mock("expo-constants", () => ({
   __esModule: true,
   default: {
@@ -194,13 +203,11 @@ describe("loadExpoStartupOtaRecovery", () => {
         },
       },
     });
-    // iPad 执行端口在核验期间定向分店 channel，下载后已清除覆盖。
-    expect(mockUpdates.setUpdateRequestHeadersOverride).toHaveBeenCalledWith({
+    // iPad 执行端口在核验期间定向分店 channel；下载成功后保留该覆盖，
+    // 否则 expo-updates 冷启动会因请求头不一致跳过这个更新（2026-11-27 build 20 真机）。
+    expect(mockUpdates.setUpdateRequestHeadersOverride).toHaveBeenLastCalledWith({
       "expo-channel-name": "pos-ipad-production-store-1013",
     });
-    expect(mockUpdates.setUpdateRequestHeadersOverride).toHaveBeenLastCalledWith(
-      null,
-    );
     expect(mockUpdates.fetchUpdateAsync).toHaveBeenCalledTimes(1);
     // expo-modules-core 3.0.30 在进程内 reload 拆运行时会闪退：生产装配必须从不调用。
     expect(mockUpdates.reloadAsync).not.toHaveBeenCalled();
