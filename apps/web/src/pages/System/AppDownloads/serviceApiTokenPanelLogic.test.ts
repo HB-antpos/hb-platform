@@ -47,6 +47,15 @@ assertEqual(
 assertEqual(
   buildServiceApiTokenEnvSnippet(
     'https://hotbargain.vip/api/',
+    ' hbsvc_assistant_token ',
+    'pos-supplier-assistant-token-issuer',
+  ),
+  'HBPOS_SUPPLIER_ASSISTANT_TOKEN=hbsvc_assistant_token',
+  '订货助手设备令牌签发器只输出 POS API 专用环境变量，不得混入中心地址或其他凭据',
+)
+assertEqual(
+  buildServiceApiTokenEnvSnippet(
+    'https://hotbargain.vip/api/',
     ' hbsvc_quality_token ',
     'quality-ci-reporter',
   ),

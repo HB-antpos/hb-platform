@@ -88,6 +88,7 @@ public static class ServiceRegistration
         services.AddOptions<CardTenderReconciliationOptions>();
         services.AddOptions<DeviceActivationOptions>();
         services.AddOptions<RemoteMaintenanceGatewayOptions>();
+        services.AddOptions<SupplierAssistantOptions>();
         services.AddOptions<SquareTerminalRestOptions>()
             .Validate(
                 options => SquareTerminalRestOptions.IsValidApiVersion(options.ApiVersion),
@@ -107,6 +108,8 @@ public static class ServiceRegistration
             services.Configure<SquareWebhookOptions>(configuration.GetSection("Square"));
             services.Configure<SquareTerminalRestOptions>(configuration.GetSection("Square"));
             services.Configure<AppUpdateOptions>(configuration.GetSection("AppUpdate"));
+            services.Configure<SupplierAssistantOptions>(
+                configuration.GetSection(SupplierAssistantOptions.SectionName));
             services.Configure<OrderQueryWindowOptions>(configuration.GetSection(OrderQueryWindowOptions.SectionName));
             services.Configure<PosIpadOptions>(configuration.GetSection("PosIpad"));
             services.Configure<PosIpadAppReviewOptions>(
@@ -356,6 +359,11 @@ public static class ServiceRegistration
             IPosHandheldUpdateDecisionGateway,
             HttpPosHandheldUpdateDecisionGateway
         >(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(8);
+        });
+        // 大屏收银 App 内订货助手：凭专用 service token 向中心换设备级令牌。
+        services.AddHttpClient<ISupplierAssistantTokenGateway, HttpSupplierAssistantTokenGateway>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(8);
         });

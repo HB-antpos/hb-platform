@@ -436,7 +436,7 @@ public sealed class ReactBrowserExtensionController : ControllerBase
         }
 
         return await ExecuteCategoryWriteAsync(
-            () => _categoryCaptureService.CaptureAsync(request, User.Identity?.Name, cancellationToken),
+            () => _categoryCaptureService.CaptureAsync(request, BrowserExtensionPosDevicePrincipal.GetActorName(User), cancellationToken),
             request.SupplierCode,
             "供应商分类采集写入失败。"
         );
@@ -469,7 +469,7 @@ public sealed class ReactBrowserExtensionController : ControllerBase
         }
 
         return await ExecuteCategoryWriteAsync(
-            () => _categoryCaptureService.ApplyTreeSnapshotAsync(request, User.Identity?.Name, cancellationToken),
+            () => _categoryCaptureService.ApplyTreeSnapshotAsync(request, BrowserExtensionPosDevicePrincipal.GetActorName(User), cancellationToken),
             request.SupplierCode,
             "供应商分类树写入失败。"
         );

@@ -78,6 +78,12 @@ namespace BlazorApp.Api.Authorization
                 return;
             }
 
+            // 大屏收银设备令牌不代表任何员工，任何按权限码放行的接口都不给（例如订货助手的跨店销量）。
+            if (BlazorApp.Api.Services.React.BrowserExtensionPosDevicePrincipal.IsPosDevice(context.User))
+            {
+                return;
+            }
+
             var userId =
                 context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                 ?? context.User.FindFirst("userId")?.Value

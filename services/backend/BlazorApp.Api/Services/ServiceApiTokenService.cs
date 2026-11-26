@@ -32,6 +32,9 @@ namespace BlazorApp.Api.Services
                     [ServiceApiScopes.WritePerformanceMetrics],
                 [ServiceApiTokenPurposes.DeploymentAcceptanceReporter] =
                     [ServiceApiScopes.WriteReleaseEvents],
+                // 只给 POS API 用：凭它为已登记设备换订货助手令牌，不能读写任何业务数据。
+                [ServiceApiTokenPurposes.PosSupplierAssistantTokenIssuer] =
+                    [ServiceApiScopes.IssuePosDeviceSupplierAssistantTokens],
             };
         private readonly ISqlSugarClient _db;
         private readonly ILogger<ServiceApiTokenService> _logger;

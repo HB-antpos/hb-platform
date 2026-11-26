@@ -532,6 +532,12 @@ export default function ServiceApiTokensPanel() {
                     'system.appDownloads.serviceTokens.purposes.deployment-acceptance-reporter.label',
                   ),
                 },
+                {
+                  value: 'pos-supplier-assistant-token-issuer',
+                  label: t(
+                    'system.appDownloads.serviceTokens.purposes.pos-supplier-assistant-token-issuer.label',
+                  ),
+                },
               ]}
             />
             <Typography.Text type="secondary">

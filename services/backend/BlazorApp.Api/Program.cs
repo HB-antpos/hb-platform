@@ -554,6 +554,26 @@ authenticationBuilder.AddJwtBearer(options =>
                     return;
                 }
 
+                // 大屏收银 App 的订货助手设备令牌：没有员工身份，每次请求都实时核对设备登记记录。
+                // 必须放在取 userGuid 之前，否则会因缺少用户标识被拒，或被下面的 Name 兜底误当成账号。
+                var posDeviceValidation = await BlazorApp.Api.Services.React.BrowserExtensionPosDevicePrincipal
+                    .ValidateOnTokenValidatedAsync(
+                        principal,
+                        identity,
+                        context.HttpContext.RequestServices
+                            .GetRequiredService<BlazorApp.Api.Services.React.IBrowserExtensionPosDeviceDirectory>,
+                        context.HttpContext.RequestAborted);
+                if (posDeviceValidation == false)
+                {
+                    context.Fail("POS 设备已停用、绑定已变更或令牌无效");
+                    return;
+                }
+
+                if (posDeviceValidation == true)
+                {
+                    return;
+                }
+
                 var userGuid =
                     principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
                     ?? principal.FindFirst("userId")?.Value
@@ -1466,6 +1486,15 @@ builder.Services.AddScoped<IStoreVoucherReactService, StoreVoucherReactService>(
 builder.Services.AddScoped<IDeviceRegistrationReactService, DeviceRegistrationReactService>();
 builder.Services.AddScoped<DeviceActivationCodeManagementService>();
 builder.Services.AddScoped<IAttendancePosDeviceStatusProvider, AttendancePosDeviceStatusProvider>();
+// 大屏收银 App 内订货助手：设备登记核对 + 设备级扩展令牌签发。
+builder.Services.AddScoped<
+    BlazorApp.Api.Services.React.IBrowserExtensionPosDeviceDirectory,
+    BlazorApp.Api.Services.React.BrowserExtensionPosDeviceDirectory
+>();
+builder.Services.AddSingleton<
+    BlazorApp.Api.Services.React.IBrowserExtensionPosDeviceTokenIssuer,
+    BlazorApp.Api.Services.React.BrowserExtensionPosDeviceTokenIssuer
+>();
 builder.Services.AddScoped<ITaxInvoiceService, TaxInvoiceService>();
 // POS 订单在线小票：员工生成分享链接（迁移 20261030.005 建表，须先于本版本上线）、客人免登录只读打开。
 builder.Services.Configure<BlazorApp.Api.Features.PosReceipts.PosReceiptOptions>(

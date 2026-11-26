@@ -50,6 +50,7 @@ const LABEL_KEYS: Readonly<Record<PosDestinationId, string>> = {
   "daily-close": "dailyClose",
   "attendance-audit": "attendanceAudit",
   "catalog-maintenance": "catalogMaintenance",
+  "supplier-assistant": "supplierAssistant",
   settings: "settings",
 };
 

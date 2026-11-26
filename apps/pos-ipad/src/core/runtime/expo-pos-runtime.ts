@@ -34,6 +34,10 @@ import {
 import { HbposCatalogFileSync } from "../../features/catalog/catalog-file-sync";
 import { ExpoCatalogFileStore } from "../../features/catalog/expo-catalog-file-store";
 import type { SettingsPaymentSettingsInput } from "../../features/settings";
+import {
+  HbposSupplierAssistantApi,
+  type SupplierAssistantTokenSource,
+} from "../../features/supplier-assistant/supplier-assistant-session";
 import { getApiEntryModeCoordinator } from "../api/api-entry-mode-store";
 import {
   createAxiosHbposTransport,
@@ -196,6 +200,8 @@ export type ExpoPosRuntimeServices = PosRuntimeServices &
     runtimeStatus: Pick<RuntimeStatusReporter, "report">;
     /** 原生壳版本号与 build 号，供登录页、收银页显示，路由层无需直接加载原生模块。 */
     nativeAppVersion: NativeAppVersion;
+    /** 订货助手：按设备身份向 POS API 换订货助手令牌。可选字段，避免旧测试桩全部要补。 */
+    supplierAssistant?: SupplierAssistantTokenSource;
   }>;
 
 type ExpoSettingsDevicePresentation = Readonly<{
@@ -1363,6 +1369,7 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
           ),
       }),
       scanner: Object.freeze({ router: scannerRouter, ble: bleScanner }),
+      supplierAssistant: new HbposSupplierAssistantApi(transport),
       applicationLog: activeApplicationLog,
       updateIdentity,
       runtimeStatus: new RuntimeStatusReporter({

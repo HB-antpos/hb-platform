@@ -28,6 +28,10 @@ export function buildServiceApiTokenEnvSnippet(
   if (purpose === 'pos-ipad-update-decision-reader') {
     return `HBPOS_APP_UPDATE_DECISION_READ_TOKEN=${token.trim()}`
   }
+  // 大屏收银 App 内订货助手：只写进 POS API 的环境变量，POS API 凭它为已登记设备换设备令牌。
+  if (purpose === 'pos-supplier-assistant-token-issuer') {
+    return `HBPOS_SUPPLIER_ASSISTANT_TOKEN=${token.trim()}`
+  }
 
   const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '')
   const reporterServiceUrl = (() => {

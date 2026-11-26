@@ -53,6 +53,9 @@ services:
       # 中央策略先登记并验证后再启用；关闭时原生更新继续使用 PosIpad 本地策略。
       - AppUpdate__CentralPolicyEnabled=${HBPOS_APP_UPDATE_CENTRAL_POLICY_ENABLED:-false}
       - AppUpdate__CheckApiKey=${WPF_APP_UPDATE_CHECK_API_KEY:?required}
+      # 大屏收银 App 内订货助手：purpose=pos-supplier-assistant-token-issuer 的 hbsvc_ 令牌。
+      # 可选：未配置时订货助手页提示「暂时不可用」，不影响收银；中心地址沿用 AppUpdate__CenterBaseUrl。
+      - SupplierAssistant__ServiceApiToken=${HBPOS_SUPPLIER_ASSISTANT_TOKEN:-}
       # 设备请求经本地授权验证后转发中心，不向收银端暴露服务间密钥。
       - RemoteMaintenance__Enabled=${REMOTE_MAINTENANCE_ENABLED:-false}
       - RemoteMaintenance__CenterBaseUrl=https://hotbargain.vip/
