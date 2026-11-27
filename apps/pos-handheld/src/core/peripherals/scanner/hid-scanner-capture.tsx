@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from "react";
 import { AppState, StyleSheet, TextInput, type TextInput as TextInputInstance } from "react-native";
 
 import { HidScannerRouter } from "./hid-scanner";
@@ -18,28 +18,64 @@ export type HidScannerCaptureProps = {
   onHidTextChange?: () => void;
 };
 
+/** keyPress 回车后等 submitEditing 带回原生全文；没等到才用已收到的文本兜底提交。 */
+const ENTER_FALLBACK_MS = 120;
+
 /**
  * 蓝牙 HID 在手持系统中被当作普通键盘。组件仅在这个输入框实际聚焦时接收字符，
  * 没有焦点时通过 status=inactive 显式暴露，绝不声称存在全局捕获能力。
+ *
+ * 关键：输入框是「非受控」的，JS 从不回写 value。新架构下受控 TextInput 的回写与清空
+ * 要带 JS 侧的事件计数，扫码器注入比 JS 处理快时计数对不上，原生会静默丢弃这次写入，
+ * JS 却以为已清空，两边从此错位，表现为第二枪起条码被截断、或和上一枪残留拼成乱码。
+ * 现在以原生回传的文本为准：记住「已消费到哪一段」，只把其后新增的部分交给路由器，
+ * 原生清空成功或被丢弃都不会串码。未带回车的扫码器仍按停顿自动提交（flushPartialIfIdle）。
  */
 export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerCaptureProps>(
   ({ active, focusRequestKey, onCaptureStatusChange, onHidTextChange, scanner }, ref) => {
     const inputRef = useRef<TextInputInstance>(null);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const focusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const [value, setValue] = useState("");
-    const valueRef = useRef("");
-    const setCapturedValue = (nextValue: string): void => {
-      valueRef.current = nextValue;
-      setValue(nextValue);
+    const enterFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // 原生输入框最近一次回传的完整文本。
+    const seenTextRef = useRef("");
+    // 原生文本中已经提交或丢弃过的前缀；原生清空被丢弃时，残留就是这一段。
+    const consumedTextRef = useRef("");
+
+    const clearEnterFallbackTimer = (): void => {
+      if (enterFallbackTimerRef.current) {
+        clearTimeout(enterFallbackTimerRef.current);
+        enterFallbackTimerRef.current = null;
+      }
     };
-    const submitCapturedValue = (): void => {
-      const capturedValue = valueRef.current;
-      if (!capturedValue) return;
-      // HID 回车可能连续触发 keyPress 与 submitEditing；同步清空可阻止第二次重放。
-      valueRef.current = "";
-      const result = scanner.submitTextInput(capturedValue);
-      setCapturedValue(result.valueToRender);
+
+    /** 当前原生文本里尚未消费的部分；原生已被清空（不再以已消费前缀开头）时整段都算新输入。 */
+    const pendingTextOf = (nativeText: string): string => {
+      const consumed = consumedTextRef.current;
+      if (!nativeText.startsWith(consumed)) {
+        consumedTextRef.current = "";
+        return nativeText;
+      }
+      return nativeText.slice(consumed.length);
+    };
+
+    /** 把原生现有文本整体记为已消费，并尽力清空原生输入框（被原生丢弃也无妨，下次按差量取）。 */
+    const consumeNativeText = (nativeText: string): void => {
+      consumedTextRef.current = nativeText;
+      if (nativeText) {
+        inputRef.current?.clear();
+      }
+    };
+
+    const submitNativeText = (nativeText: string | undefined): void => {
+      clearEnterFallbackTimer();
+      const text = nativeText ?? seenTextRef.current;
+      seenTextRef.current = text;
+      const pending = pendingTextOf(text);
+      // 先同步记为已消费：同一次回车的 keyPress 与 submitEditing 先后到达时，第二次取到空串不会重放。
+      consumeNativeText(text);
+      if (!pending) return;
+      scanner.submitTextInput(pending);
     };
     const updateCaptureState = useCallback((nextFocused: boolean) => {
       scanner.setCaptureActive(active && nextFocused);
@@ -70,7 +106,7 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
         idleTimerRef.current = null;
         // 扫码器未带回车时，停顿即自动提交（等效回车）；带回车时回车已先行提交。
         if (scanner.flushPartialIfIdle()) {
-          setCapturedValue("");
+          consumeNativeText(seenTextRef.current);
         }
       }, 85);
     };
@@ -90,7 +126,8 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
     useEffect(() => {
       if (!active) {
         inputRef.current?.blur();
-        setCapturedValue("");
+        clearEnterFallbackTimer();
+        consumeNativeText(seenTextRef.current);
         updateCaptureState(false);
         return;
       }
@@ -110,6 +147,7 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
       if (idleTimerRef.current) {
         clearTimeout(idleTimerRef.current);
       }
+      clearEnterFallbackTimer();
       scanner.setCaptureActive(false);
     }, [scanner]);
 
@@ -126,27 +164,43 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
         importantForAutofill="no"
         keyboardType="default"
         onBlur={() => {
+          // 失焦时路由器会丢弃半段输入；原生残留同步记为已消费，避免重新聚焦后与下一枪拼接。
+          consumeNativeText(seenTextRef.current);
           updateCaptureState(false);
           scheduleFocus();
         }}
         onChangeText={(nextValue) => {
-          if (nextValue && nextValue !== valueRef.current) {
+          if (nextValue && nextValue !== seenTextRef.current) {
             onHidTextChange?.();
           }
-          const result = scanner.acceptTextInputValue(nextValue);
-          setCapturedValue(result.valueToRender);
+          seenTextRef.current = nextValue;
+          // 收到变化事件就说明原生内容确实变了；不比已消费前缀长，只能是原生已清空后重新输入。
+          if (nextValue.length <= consumedTextRef.current.length) {
+            consumedTextRef.current = "";
+          }
+          // 路由器只看「未消费部分」，它内部再按前缀差量逐字符拼码、遇结束符提交。
+          const result = scanner.acceptTextInputValue(pendingTextOf(nextValue));
+          if (result.emitted || result.overflowed) {
+            // 文本里带了回车 / Tab 已提交，或超长已丢弃：整段原生文本都算处理过。
+            consumeNativeText(nextValue);
+          }
           scheduleIdleReset();
         }}
         onFocus={() => updateCaptureState(true)}
         onKeyPress={(event) => {
-          if (event.nativeEvent.key === "Enter") {
-            submitCapturedValue();
-          }
+          if (event.nativeEvent.key !== "Enter") return;
+          // keyPress 不带原生全文；正常情况下紧跟着的 submitEditing 会带全文提交并取消兜底。
+          clearEnterFallbackTimer();
+          enterFallbackTimerRef.current = setTimeout(() => {
+            enterFallbackTimerRef.current = null;
+            submitNativeText(undefined);
+          }, ENTER_FALLBACK_MS);
         }}
-        onSubmitEditing={submitCapturedValue}
+        onSubmitEditing={(event) => {
+          submitNativeText(event?.nativeEvent?.text);
+        }}
         showSoftInputOnFocus={false}
         style={styles.hiddenInput}
-        value={value}
       />
     );
   },

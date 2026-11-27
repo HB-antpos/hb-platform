@@ -5,9 +5,12 @@ import { useTranslation } from "react-i18next";
 import type { ExpoPosUpdateIdentity } from "@/core/runtime/expo-pos-runtime";
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import {
+  buildCashierLoginDiagnostic,
+  type CashierLoginDiagnostic,
   type CashierLoginVersionInfo,
   CashierLoginController,
   CashierLoginScreen,
+  toCashierLoginLogDraft,
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import { toggleAppLanguage } from "@/i18n";
@@ -45,10 +48,22 @@ export default function LoginRoute() {
     },
     [clearHidRestoreTimer],
   );
+  const applicationLog = runtime.services?.applicationLog ?? null;
+  // 扫码登录诊断写进中心日志（Warning，脱敏，不含条码内容），用于排查「条码无效」类登录失败。
+  const recordLoginDiagnostic = useCallback(
+    (diagnostic: CashierLoginDiagnostic) => {
+      applicationLog?.record(toCashierLoginLogDraft(diagnostic));
+    },
+    [applicationLog],
+  );
+  // 只在内存里留上一枪的值做截断 / 拼接比对，离开登录页即丢弃，不落盘、不上传。
+  const previousScannerBarcode = useRef<string | null>(null);
   const signInFromScanner = useCallback(
     async (barcode: string) => {
       if (scanInFlight.current) return;
       scanInFlight.current = true;
+      const previousSubmitted = previousScannerBarcode.current;
+      previousScannerBarcode.current = barcode.trim();
       try {
         // 与手动登录共用公开 controller，扫描结果不会绕过终端状态与权限校验。
         await new CashierLoginController(useCashierLoginStore.getState()).login(
@@ -56,13 +71,23 @@ export default function LoginRoute() {
           runtime,
         );
         router.replace("/sales" as Href);
-      } catch {
-        // 登录页面保留原状供收银员手动重试；不向路由层暴露认证失败详情。
+      } catch (error: unknown) {
+        // 登录页面保留原状供收银员手动重试；不向路由层暴露认证失败详情，只写脱敏诊断。
+        recordLoginDiagnostic(
+          buildCashierLoginDiagnostic({
+            outcome: "rejected",
+            trigger: "hid-capture",
+            submitted: barcode,
+            previousSubmitted,
+            error,
+            trace: null,
+          }),
+        );
       } finally {
         scanInFlight.current = false;
       }
     },
-    [runtime],
+    [recordLoginDiagnostic, runtime],
   );
   const handleSwitchLanguage = useCallback(() => {
     void toggleAppLanguage();
@@ -86,6 +111,7 @@ export default function LoginRoute() {
       />
       <CashierLoginScreen
         language={i18n.resolvedLanguage ?? i18n.language}
+        onLoginDiagnostic={recordLoginDiagnostic}
         onManualInputFocusChange={handleManualInputFocusChange}
         onSwitchLanguage={handleSwitchLanguage}
         onSuccess={() => router.replace("/sales" as Href)}

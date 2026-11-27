@@ -307,3 +307,155 @@ test("同一次 HID 回车同时触发 keyPress 和 submitEditing 时只提交�
   expect(onScan).toHaveBeenCalledTimes(2);
   await screen.unmount();
 });
+
+/** 渲染只挂一个隐藏 HID 输入框的销售路由，返回该输入框的取值函数。 */
+async function renderHidRoute(
+  onScan: (value: string, source?: "hid" | "camera") => void,
+) {
+  const scanner = new HidScannerRouter();
+  mockRuntime = {
+    services: {
+      operationAuthorization: {
+        status: "available",
+        getState: () => ({ kind: "idle" }),
+        subscribe: () => () => undefined,
+      },
+      scanner: { router: scanner },
+    },
+  };
+  const screen = await render(
+    <ScannerRouteProvider>
+      <RouteHidScannerCapture context="product" onScan={onScan} path="/sales" />
+    </ScannerRouteProvider>,
+  );
+  const hidInput = () => {
+    const matches = screen.container.queryAll(
+      (instance) => instance.props.caretHidden === true,
+      { matchDeepestOnly: true },
+    );
+    expect(matches).toHaveLength(1);
+    return matches[0]!;
+  };
+  scanner.setCaptureActive(true);
+  return { hidInput, scanner, screen };
+}
+
+test("隐藏 HID 输入框是非受控的：JS 不回写 value，避免新架构下回写被原生丢弃后两边错位", async () => {
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  await act(async () => {
+    hidInput().props.onChangeText("930000000001");
+  });
+  expect(hidInput().props.value).toBeUndefined();
+  await screen.unmount();
+});
+
+test("原生清空被丢弃、下一枪接在上一枪残留后面时，只提交新增的条码", async () => {
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  await act(async () => {
+    hidInput().props.onChangeText("930000000001");
+  });
+  await act(async () => {
+    hidInput().props.onSubmitEditing({
+      nativeEvent: { text: "930000000001" },
+    });
+  });
+  expect(onScan).toHaveBeenLastCalledWith("930000000001", "hid");
+
+  // 清空命令被原生按事件计数丢弃：原生里仍是上一枪，下一枪逐字追加在后面。
+  for (const typed of ["9300000000019", "93000000000193", "930000000001930000000002"]) {
+    await act(async () => {
+      hidInput().props.onChangeText(typed);
+    });
+  }
+  await act(async () => {
+    hidInput().props.onKeyPress({ nativeEvent: { key: "Enter" } });
+    hidInput().props.onSubmitEditing({
+      nativeEvent: { text: "930000000001930000000002" },
+    });
+  });
+
+  expect(onScan).toHaveBeenCalledTimes(2);
+  expect(onScan).toHaveBeenLastCalledWith("930000000002", "hid");
+  await screen.unmount();
+});
+
+test("回车时 JS 还没处理完最后几个字符，也按原生回传的全文提交完整条码", async () => {
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  await act(async () => {
+    hidInput().props.onChangeText("93000");
+  });
+  await act(async () => {
+    hidInput().props.onKeyPress({ nativeEvent: { key: "Enter" } });
+    hidInput().props.onSubmitEditing({
+      nativeEvent: { text: "930000000003" },
+    });
+  });
+
+  expect(onScan).toHaveBeenCalledTimes(1);
+  expect(onScan).toHaveBeenCalledWith("930000000003", "hid");
+  await screen.unmount();
+});
+
+test("扫码器不带回车：停顿自动提交后原生清空被丢弃，下一枪仍只提交新增部分", async () => {
+  jest.useFakeTimers();
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  // DataWedge 整串注入、不带回车：停顿后按扫码处理。
+  await act(async () => {
+    hidInput().props.onChangeText("930000000005");
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(onScan).toHaveBeenCalledTimes(1);
+  expect(onScan).toHaveBeenLastCalledWith("930000000005", "hid");
+
+  // 原生清空没生效，下一枪整串追加在残留后面。
+  await act(async () => {
+    hidInput().props.onChangeText("930000000005930000000006");
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(onScan).toHaveBeenCalledTimes(2);
+  expect(onScan).toHaveBeenLastCalledWith("930000000006", "hid");
+  await screen.unmount();
+});
+
+test("没有 submitEditing 时 keyPress 回车在 120ms 后兜底提交，且与随后的回车不重复", async () => {
+  jest.useFakeTimers();
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  await act(async () => {
+    hidInput().props.onChangeText("930000000007");
+    hidInput().props.onKeyPress({ nativeEvent: { key: "Enter" } });
+  });
+  expect(onScan).not.toHaveBeenCalled();
+  await act(async () => {
+    jest.advanceTimersByTime(120);
+  });
+  expect(onScan).toHaveBeenCalledTimes(1);
+  expect(onScan).toHaveBeenCalledWith("930000000007", "hid");
+
+  // 迟到的 submitEditing 带同一段原生全文：已整体消费，不重放。
+  await act(async () => {
+    hidInput().props.onSubmitEditing({
+      nativeEvent: { text: "930000000007" },
+    });
+  });
+  expect(onScan).toHaveBeenCalledTimes(1);
+  await screen.unmount();
+});

@@ -16,10 +16,13 @@ import {
   type AttendanceQrDisplaySource,
 } from "@/features/attendance-audit/attendance-audit-runtime";
 import {
+  buildCashierLoginDiagnostic,
+  type CashierLoginDiagnostic,
   type CashierLoginVersionInfo,
   CashierLoginController,
   CashierLoginScreen,
   isCashierLoginRuntimeReady,
+  toCashierLoginLogDraft,
   useCashierLoginStore,
 } from "@/features/cashier-login";
 import { BleScannerLoginPanel } from "@/features/settings/ble-scanner-settings";
@@ -67,10 +70,22 @@ export default function LoginRoute() {
     },
     [clearHidRestoreTimer],
   );
+  const applicationLog = runtime.services?.applicationLog ?? null;
+  // 扫码登录诊断写进中心日志（Warning，脱敏，不含条码内容），用于排查「条码无效」类登录失败。
+  const recordLoginDiagnostic = useCallback(
+    (diagnostic: CashierLoginDiagnostic) => {
+      applicationLog?.record(toCashierLoginLogDraft(diagnostic));
+    },
+    [applicationLog],
+  );
+  // 只在内存里留上一枪的值做截断 / 拼接比对，离开登录页即丢弃，不落盘、不上传。
+  const previousScannerBarcode = useRef<string | null>(null);
   const signInFromScanner = useCallback(
-    async (barcode: string) => {
+    async (barcode: string, trigger: "hid-capture" | "ble") => {
       if (scanInFlight.current) return;
       scanInFlight.current = true;
+      const previousSubmitted = previousScannerBarcode.current;
+      previousScannerBarcode.current = barcode.trim();
       try {
         // 与手动登录共用公开 controller，扫描结果不会绕过终端状态与权限校验。
         await new CashierLoginController(useCashierLoginStore.getState()).login(
@@ -78,13 +93,23 @@ export default function LoginRoute() {
           runtime,
         );
         router.replace("/sales" as Href);
-      } catch {
-        // 登录页面保留原状供收银员手动重试；不向路由层暴露认证失败详情。
+      } catch (error: unknown) {
+        // 登录页面保留原状供收银员手动重试；不向路由层暴露认证失败详情，只写脱敏诊断。
+        recordLoginDiagnostic(
+          buildCashierLoginDiagnostic({
+            outcome: "rejected",
+            trigger,
+            submitted: barcode,
+            previousSubmitted,
+            error,
+            trace: null,
+          }),
+        );
       } finally {
         scanInFlight.current = false;
       }
     },
-    [runtime],
+    [recordLoginDiagnostic, runtime],
   );
   // 键盘模式（HID）的枪往聚焦的输入框打字，不需要租约；但 BLE 数据模式的码只投递给持有场景租约的页面。
   // 可见条码框默认 autoFocus，隐藏输入（RouteHidScannerCapture）因此大多数时间是关的，
@@ -94,7 +119,7 @@ export default function LoginRoute() {
     context: "cashier-login",
     enabled: !bleScannerOpen,
     onScan: (value) => {
-      void signInFromScanner(value);
+      void signInFromScanner(value, "ble");
     },
     path: "/login",
   });
@@ -102,7 +127,7 @@ export default function LoginRoute() {
   const handleHidScan = useCallback(
     (value: string, source?: RoutedScanEvent["source"]) => {
       if (source === "ble") return;
-      return signInFromScanner(value);
+      return signInFromScanner(value, "hid-capture");
     },
     [signInFromScanner],
   );
@@ -165,6 +190,7 @@ export default function LoginRoute() {
       <CashierLoginScreen
         attendanceQr={attendanceQr}
         language={i18n.resolvedLanguage ?? i18n.language}
+        onLoginDiagnostic={recordLoginDiagnostic}
         onManualInputFocusChange={handleManualInputFocusChange}
         {...(bleScanner ? { onOpenBleScanner: handleOpenBleScanner } : {})}
         onOpenNetworkCheck={() => router.push("/network-check" as Href)}
