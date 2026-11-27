@@ -113,6 +113,32 @@ type OrderEditState = Readonly<{
   value: string;
 }>;
 
+type QuickDiscountScope = "line" | "order";
+
+type QuickDiscountApplied = Readonly<{
+  scope: QuickDiscountScope;
+  lineId: string | null;
+  basisPoints: number;
+  revision: number;
+}>;
+
+/** 选中行在某个编辑项下的初始值：数量 / 单价 / 折扣金额取当前值，折扣百分比留空待输入。 */
+function lineEditDraft(line: CartLine, mode: LineEditMode): LineEditState {
+  return {
+    lineId: line.lineId,
+    mode,
+    replaceOnNextDigit: true,
+    value:
+      mode === "quantity"
+        ? line.quantity
+        : mode === "price"
+          ? formatEditorMoney(line.unitPrice.cents)
+          : mode === "discount-amount"
+            ? formatEditorMoney(line.discount.cents)
+            : "",
+  };
+}
+
 export type SalesUtilityActionResult = Readonly<{
   kind:
     "completed" | "not-found" | "denied" | "unavailable" | "failed" | "unknown";
@@ -267,6 +293,13 @@ export function SalesScreen({
   const [orderDiscountVisible, setOrderDiscountVisible] = useState(false);
   const [orderEdit, setOrderEdit] = useState<OrderEditState | null>(null);
   const [clearCartVisible, setClearCartVisible] = useState(false);
+  // 快捷折扣默认作用于选中行；打开「整单折扣」开关后作用于整单。
+  const [quickDiscountScope, setQuickDiscountScope] =
+    useState<QuickDiscountScope>("line");
+  // 购物车快照不记录「打的是哪一档」（整单折扣会摊到各行），
+  // 只高亮刚刚成功打的那一档；购物车之后再有任何变动就不再高亮，避免显示过期状态。
+  const [quickDiscountApplied, setQuickDiscountApplied] =
+    useState<QuickDiscountApplied | null>(null);
   const attendanceQrState = useAttendanceQrState(attendanceQr);
   const [attendanceQrModalVisible, setAttendanceQrModalVisible] =
     useState(false);
@@ -603,11 +636,16 @@ export function SalesScreen({
     setOpenItemVisible(false);
   };
 
-  const closeLineEditInput = (): void => {
-    numericInputModalActiveRef.current = false;
-    notifyManualInputBlurred();
+  // 常驻编辑区没有「关闭」：取消 = 放弃这次输入，回到选中行当前的值。
+  const resetLineEditDraft = (): void => {
     dismissPriceTooHighError();
-    setLineEdit(null);
+    setLineEdit((current) => {
+      if (!current) return null;
+      const line = presenter
+        .getState()
+        .cart.lines.find((candidate) => candidate.lineId === current.lineId);
+      return line ? lineEditDraft(line, current.mode) : null;
+    });
   };
 
   const closeOrderEditInput = (): void => {
@@ -800,23 +838,6 @@ export function SalesScreen({
       });
   };
 
-  const openLineEditor = useCallback(
-    (lineId: string): void => {
-      const line = cartLinesRef.current.find(
-        (candidate) => candidate.lineId === lineId,
-      );
-      if (!line) return;
-      setLineEdit({
-        lineId,
-        mode: "quantity",
-        replaceOnNextDigit: true,
-        value: line.quantity,
-      });
-      beginNumericInputRef.current();
-    },
-    [],
-  );
-
   const selectLineEditMode = (mode: LineEditMode): void => {
     dismissPriceTooHighError();
     setLineEdit((current) => {
@@ -824,20 +845,7 @@ export function SalesScreen({
       const line = state.cart.lines.find(
         (candidate) => candidate.lineId === current.lineId,
       );
-      if (!line) return null;
-      return {
-        lineId: current.lineId,
-        mode,
-        replaceOnNextDigit: true,
-        value:
-          mode === "quantity"
-            ? line.quantity
-            : mode === "price"
-              ? formatEditorMoney(line.unitPrice.cents)
-              : mode === "discount-amount"
-                ? formatEditorMoney(line.discount.cents)
-                : "",
-      };
+      return line ? lineEditDraft(line, mode) : null;
     });
   };
 
@@ -865,8 +873,40 @@ export function SalesScreen({
         parsePercentageBasisPoints(lineEdit.value) ?? -1,
       );
     }
+    const { lineId, mode } = lineEdit;
     void submission.then((applied) => {
-      if (applied) closeLineEditInput();
+      if (!applied) return;
+      dismissPriceTooHighError();
+      const line = presenter
+        .getState()
+        .cart.lines.find((candidate) => candidate.lineId === lineId);
+      setLineEdit(line ? lineEditDraft(line, mode) : null);
+    });
+  };
+
+  const applyQuickDiscount = (basisPoints: number): void => {
+    const scope = quickDiscountScope;
+    const lineId = scope === "line" ? state.selectedLineId : null;
+    if (scope === "line" && !lineId) return;
+    // 整单「无」= 把整单折扣设回 0%（走整单手动折扣权限）；单行「无」由 presenter 按 0 处理。
+    const submission =
+      scope === "order"
+        ? basisPoints === 0
+          ? presenter.applyOrderManualDiscountBasisPoints(0)
+          : presenter.applyOrderQuickDiscount(basisPoints)
+        : presenter.applyLineDiscount(lineId!, basisPoints);
+    void submission.then((applied) => {
+      if (!applied) return;
+      setQuickDiscountApplied(
+        basisPoints === 0
+          ? null
+          : {
+              scope,
+              lineId,
+              basisPoints,
+              revision: presenter.getState().cart.revision,
+            },
+      );
     });
   };
 
@@ -919,7 +959,6 @@ export function SalesScreen({
         item={item}
         locale={locale}
         onDecrease={handleDecreaseCartLine}
-        onEdit={openLineEditor}
         onIncrease={handleIncreaseCartLine}
         onRemove={handleRemoveCartLine}
         onSelect={handleSelectCartLine}
@@ -938,7 +977,6 @@ export function SalesScreen({
       handleIncreaseCartLine,
       handleRemoveCartLine,
       handleSelectCartLine,
-      openLineEditor,
       resolveCartProductDetails,
       resolveCartProductImage,
       state.capabilities.cartEditing,
@@ -947,6 +985,39 @@ export function SalesScreen({
       transactionActionsDisabled,
     ],
   );
+
+  const selectedLine =
+    state.cart.lines.find((line) => line.lineId === state.selectedLineId) ??
+    null;
+  const selectedLineSignature = selectedLine
+    ? `${selectedLine.lineId}|${selectedLine.quantity}|${selectedLine.unitPrice.cents}|${selectedLine.discount.cents}`
+    : null;
+  useEffect(() => {
+    // 选中行换了，或它的数量 / 单价 / 折扣被别处改了（加减按钮、扫码叠加、快捷折扣）：
+    // 收银员还没在键盘上输入时把编辑值刷新成当前值；已经在输入的不打断。
+    const line =
+      cartLinesRef.current.find(
+        (candidate) => candidate.lineId === state.selectedLineId,
+      ) ?? null;
+    setLineEdit((current) => {
+      if (!line) return null;
+      if (!current || current.lineId !== line.lineId) {
+        return lineEditDraft(line, current?.mode ?? "quantity");
+      }
+      return current.replaceOnNextDigit
+        ? lineEditDraft(line, current.mode)
+        : current;
+    });
+    // 只按签名触发：签名已包含选中行 id 与三项可编辑值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedLineSignature]);
+  useEffect(() => {
+    // 购物车清空（结账、挂单、清空）后回到默认的单行模式。
+    if (cartEmpty) {
+      setQuickDiscountScope("line");
+      setQuickDiscountApplied(null);
+    }
+  }, [cartEmpty]);
 
   if (state.phase === "success" && state.success) {
     return (
@@ -1191,12 +1262,30 @@ export function SalesScreen({
   };
   const cartEditingDisabled =
     cartEmpty || !state.capabilities.cartEditing || transactionActionsDisabled;
-  const editingLine = lineEdit
-    ? (state.cart.lines.find((line) => line.lineId === lineEdit.lineId) ?? null)
-    : null;
-  const editingLineNumber = editingLine
-    ? state.cart.lines.indexOf(editingLine) + 1
+  const selectedLineNumber = selectedLine
+    ? state.cart.lines.indexOf(selectedLine) + 1
     : 0;
+  const lineEditorDisabled =
+    !selectedLine ||
+    lineEdit === null ||
+    !state.capabilities.cartEditing ||
+    transactionActionsDisabled;
+  const quickDiscountDisabled =
+    cartEditingDisabled || (quickDiscountScope === "line" && !selectedLine);
+  const quickDiscountBaseCents =
+    quickDiscountScope === "order"
+      ? state.cart.subtotal.cents
+      : selectedLine
+        ? selectedLine.unitPrice.cents * (Number(selectedLine.quantity) || 0)
+        : 0;
+  const activeQuickDiscount =
+    quickDiscountApplied &&
+    quickDiscountApplied.revision === state.cart.revision &&
+    quickDiscountApplied.scope === quickDiscountScope &&
+    (quickDiscountScope === "order" ||
+      quickDiscountApplied.lineId === state.selectedLineId)
+      ? quickDiscountApplied.basisPoints
+      : null;
 
   return (
     <PosScreenFrame
@@ -1277,6 +1366,7 @@ export function SalesScreen({
       ) : null}
 
       <View style={styles.workspaceRow}>
+        <View style={styles.cartColumn}>
         <View style={styles.cartPane} testID="sales-transaction-pane">
           <View style={styles.cartHeader}>
             <Text style={styles.paneTitle}>{t("cart.title")}</Text>
@@ -1352,6 +1442,83 @@ export function SalesScreen({
             />
           )}
         </View>
+          {connectivity === "offline" ? (
+            <View
+              accessibilityRole="alert"
+              style={styles.offlineCard}
+              testID="sales-offline-cash-only"
+            >
+              <Text style={styles.offlineTitle}>{t("summary.cashOnly")}</Text>
+              <Text style={styles.offlineHint}>
+                {t("summary.cashOnlyHint")}
+              </Text>
+            </View>
+          ) : null}
+          {/* 结算条在购物车下方：眼睛看完商品和金额，手直接落在右边的收款按钮上。 */}
+          <View style={styles.checkoutBar} testID="sales-checkout-bar">
+            <View style={styles.checkoutSummary} testID="sales-summary-pane">
+              <View style={styles.checkoutCell}>
+                <Text style={styles.checkoutCellLabel}>
+                  {t("summary.subtotal")}
+                </Text>
+                <Text style={styles.checkoutCellAmount}>
+                  {formatAud(state.cart.subtotal.cents, locale)}
+                </Text>
+              </View>
+              <View style={styles.checkoutCell}>
+                <Text style={styles.checkoutCellLabel}>
+                  {t("summary.discount")}
+                </Text>
+                <Text
+                  style={[styles.checkoutCellAmount, styles.discountAmountText]}
+                  testID="sales-summary-discount-amount"
+                >
+                  {`−${formatAud(state.cart.discount.cents, locale)}`}
+                </Text>
+              </View>
+              <View style={styles.checkoutTotal}>
+                <Text style={styles.checkoutCellLabel}>{t("summary.total")}</Text>
+                <Text
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.6}
+                  numberOfLines={1}
+                  style={styles.checkoutTotalAmount}
+                >
+                  {formatAud(state.cart.actualAmount.cents, locale)}
+                </Text>
+              </View>
+            </View>
+            <ActionButton
+              disabled={
+                cartEmpty ||
+                !onOpenPayment ||
+                !state.capabilities.cartEditing ||
+                transactionActionsDisabled
+              }
+              icon="arrow-right-circle"
+              label={
+                cartEmpty
+                  ? t("summary.checkoutDisabled")
+                  : `${t(
+                      zeroTotalSale
+                        ? "summary.completeZeroTotal"
+                        : "summary.goToPayment",
+                    )} · ${formatAud(state.cart.actualAmount.cents, locale)}`
+              }
+              onPress={() => {
+                if (!onOpenPayment) return;
+                // 合计恰好 0 元时 presenter 自己打开零元结账确认弹窗，不进付款页（付款页不接收 0 元订单）。
+                void presenter.startCheckout().then((route) => {
+                  if (route?.kind === "payment") onOpenPayment(route.cart);
+                });
+              }}
+              size="primary"
+              sound="navigate"
+              style={styles.checkoutButton}
+              testID="sales-open-payment"
+            />
+          </View>
+        </View>
 
         <View style={styles.functionPane} testID="sales-function-pane">
           <PosKeyboardAwareScrollView
@@ -1412,55 +1579,15 @@ export function SalesScreen({
                 testID="sales-show-keyboard"
               />
             </View>
-            <Text style={styles.functionSectionTitle}>
-              {t("functions.productEntry")}
-            </Text>
-            <View style={styles.searchActions}>
-              <ActionButton
-                disabled={catalogActionsDisabled}
-                icon="tag-plus-outline"
-                label={t("catalog.openItem")}
-                onPress={() => {
-                  setOpenItemPrice("");
-                  setOpenItemVisible(true);
-                  beginNumericInput();
-                }}
-                size="large"
-                sound="navigate"
-                style={styles.searchAction}
-                testID="sales-open-item-button"
-                tone="warning"
-              />
-              {onOpenSpecialProducts ? (
-                <ActionButton
-                  disabled={catalogActionsDisabled}
-                  icon="star-box-outline"
-                  label={t("catalog.specialProducts")}
-                  onPress={onOpenSpecialProducts}
-                  size="large"
-                  sound="navigate"
-                  style={styles.searchAction}
-                  testID="sales-open-special-products"
-                  tone="info"
-                />
-              ) : null}
-            </View>
-            {cameraScanner && !cameraScanner.active ? (
-              <View
-                style={styles.cameraScannerRow}
-                testID="sales-camera-scanner-row"
-              >
-                <ActionButton
-                  disabled={catalogActionsDisabled}
-                  icon="camera-outline"
-                  label={t("catalog.cameraScanner")}
-                  onPress={openCameraScanner}
-                  size="button"
-                  sound="navigate"
-                  style={styles.cameraScannerAction}
-                  testID="sales-open-camera-scanner"
-                  tone="secondary"
-                />
+            <View
+              style={styles.functionSectionHeader}
+              testID="sales-product-entry-header"
+            >
+              <Text style={styles.functionSectionTitle}>
+                {t("functions.productEntry")}
+              </Text>
+              {cameraScanner && !cameraScanner.active ? (
+                // 连续扫码开关挪到标题行右侧，让三个录入按钮并成一行。
                 <View
                   style={[
                     styles.cameraModeControl,
@@ -1512,8 +1639,48 @@ export function SalesScreen({
                     {t("catalog.cameraModeContinuous")}
                   </Text>
                 </View>
-              </View>
-            ) : null}
+              ) : null}
+            </View>
+            <View style={styles.searchActions} testID="sales-camera-scanner-row">
+              <ActionButton
+                disabled={catalogActionsDisabled}
+                icon="tag-plus-outline"
+                label={t("catalog.openItem")}
+                onPress={() => {
+                  setOpenItemPrice("");
+                  setOpenItemVisible(true);
+                  beginNumericInput();
+                }}
+                sound="navigate"
+                style={styles.searchAction}
+                testID="sales-open-item-button"
+                tone="warning"
+              />
+              {onOpenSpecialProducts ? (
+                <ActionButton
+                  disabled={catalogActionsDisabled}
+                  icon="star-box-outline"
+                  label={t("catalog.specialProducts")}
+                  onPress={onOpenSpecialProducts}
+                  sound="navigate"
+                  style={styles.searchAction}
+                  testID="sales-open-special-products"
+                  tone="info"
+                />
+              ) : null}
+              {cameraScanner && !cameraScanner.active ? (
+                <ActionButton
+                  disabled={catalogActionsDisabled}
+                  icon="camera-outline"
+                  label={t("catalog.cameraScanner")}
+                  onPress={openCameraScanner}
+                  sound="navigate"
+                  style={styles.searchAction}
+                  testID="sales-open-camera-scanner"
+                  tone="secondary"
+                />
+              ) : null}
+            </View>
               </>
             )}
 
@@ -1543,10 +1710,10 @@ export function SalesScreen({
               ) : null}
             </View>
             <View
-              style={styles.functionGrid}
+              style={styles.functionTileRow}
               testID="sales-transaction-functions"
             >
-              <ActionButton
+              <FunctionTile
                 disabled={
                   !state.capabilities.hold ||
                   cartEmpty ||
@@ -1557,23 +1724,17 @@ export function SalesScreen({
                 onPress={() => {
                   void presenter.holdCart();
                 }}
-                size="large"
-                style={styles.functionAction}
                 testID="sales-hold"
-                tone="secondary"
               />
-              <ActionButton
+              <FunctionTile
                 disabled={cartEditingDisabled}
                 icon="percent-outline"
                 label={t("summary.orderDiscount")}
                 onPress={() => setOrderDiscountVisible(true)}
-                size="large"
                 sound="navigate"
-                style={styles.functionAction}
                 testID="sales-order-discount"
-                tone="secondary"
               />
-              <ActionButton
+              <FunctionTile
                 disabled={
                   transactionActionsDisabled ||
                   !onReprintReceipt ||
@@ -1586,12 +1747,10 @@ export function SalesScreen({
                     : t("functions.reprintReceipt")
                 }
                 onPress={() => runUtilityAction("reprint", onReprintReceipt)}
-                size="large"
-                style={styles.functionAction}
+                quiet
                 testID="sales-reprint-receipt"
-                tone="quiet"
               />
-              <ActionButton
+              <FunctionTile
                 disabled={
                   transactionActionsDisabled ||
                   !onOpenCashDrawer ||
@@ -1604,24 +1763,20 @@ export function SalesScreen({
                     : t("functions.openDrawer")
                 }
                 onPress={() => runUtilityAction("drawer", onOpenCashDrawer)}
-                size="large"
-                style={styles.functionAction}
+                quiet
                 testID="sales-open-cash-drawer"
-                tone="quiet"
               />
               {onOpenCashMovement ? (
-                <ActionButton
+                <FunctionTile
                   disabled={
                     transactionActionsDisabled || utilityActionPending !== null
                   }
                   icon="cash-plus"
                   label={t("functions.cashMovement")}
                   onPress={onOpenCashMovement}
-                  size="large"
+                  quiet
                   sound="navigate"
-                  style={styles.functionAction}
                   testID="sales-cash-movement"
-                  tone="quiet"
                 />
               ) : null}
             </View>
@@ -1643,74 +1798,228 @@ export function SalesScreen({
                 )}
               </Text>
             ) : null}
-          </PosKeyboardAwareScrollView>
-
-          {connectivity === "offline" ? (
-            <View
-              accessibilityRole="alert"
-              style={styles.offlineCard}
-              testID="sales-offline-cash-only"
-            >
-              <Text style={styles.offlineTitle}>{t("summary.cashOnly")}</Text>
-              <Text style={styles.offlineHint}>
-                {t("summary.cashOnlyHint")}
-              </Text>
-            </View>
-          ) : null}
-          {/* 应收紧贴收款按钮：眼睛看完金额，手直接落在下面的按钮上。 */}
-          <View style={styles.summaryPane} testID="sales-summary-pane">
-            <SummaryRow
-              amount={formatAud(state.cart.subtotal.cents, locale)}
-              label={t("summary.subtotal")}
-            />
-            <SummaryRow
-              amount={`−${formatAud(state.cart.discount.cents, locale)}`}
-              amountTestID="sales-summary-discount-amount"
-              amountTone="danger"
-              label={t("summary.discount")}
-              muted
-            />
-            <View style={styles.summaryTotal}>
-              <Text style={styles.totalLabel}>{t("summary.total")}</Text>
+            {/* 常驻编辑区：点购物车某一行 = 选中，在这里直接改数量 / 单价 / 折扣，不再弹窗。 */}
+            <View style={styles.lineEditor} testID="sales-line-editor">
+              <View style={styles.functionSectionHeader}>
+                <Text numberOfLines={1} style={styles.functionSectionTitle}>
+                  {selectedLine
+                    ? `${t("editor.title")} · ${t("cart.lineNumber", {
+                        number: selectedLineNumber,
+                      })}`
+                    : t("editor.title")}
+                </Text>
+                {selectedLine ? (
+                  <ActionButton
+                    disabled={lineEditorDisabled}
+                    icon="trash-can-outline"
+                    label={t("editLine.remove")}
+                    onPress={() => {
+                      void presenter.removeLine(selectedLine.lineId);
+                    }}
+                    size="small"
+                    testID="sales-line-edit-remove"
+                    tone="danger"
+                  />
+                ) : null}
+              </View>
               <Text
-                adjustsFontSizeToFit
-                minimumFontScale={0.6}
                 numberOfLines={1}
-                style={styles.totalAmount}
+                style={
+                  selectedLine ? styles.lineEditorName : styles.lineEditorEmpty
+                }
+                testID="sales-line-editor-target"
               >
-                {formatAud(state.cart.actualAmount.cents, locale)}
+                {selectedLine ? selectedLine.displayName : t("editor.empty")}
               </Text>
+              <View style={styles.editModeRow}>
+                <LineEditModeTile
+                  compact
+                  disabled={lineEditorDisabled}
+                  label={t("editLine.quantity")}
+                  onPress={() => selectLineEditMode("quantity")}
+                  selected={lineEdit?.mode === "quantity"}
+                  testID="sales-line-edit-quantity"
+                  value={selectedLine?.quantity ?? "—"}
+                />
+                <LineEditModeTile
+                  compact
+                  disabled={lineEditorDisabled}
+                  label={t("editLine.price")}
+                  onPress={() => selectLineEditMode("price")}
+                  selected={lineEdit?.mode === "price"}
+                  testID="sales-line-edit-price"
+                  value={
+                    selectedLine
+                      ? formatAud(selectedLine.unitPrice.cents, locale)
+                      : "—"
+                  }
+                />
+                <LineEditModeTile
+                  compact
+                  disabled={lineEditorDisabled}
+                  label={t("editLine.discountAmount")}
+                  onPress={() => selectLineEditMode("discount-amount")}
+                  selected={lineEdit?.mode === "discount-amount"}
+                  testID="sales-line-edit-discount-amount"
+                  tone={
+                    selectedLine && selectedLine.discount.cents > 0
+                      ? "danger"
+                      : "default"
+                  }
+                  value={
+                    selectedLine && selectedLine.discount.cents > 0
+                      ? `−${formatAud(selectedLine.discount.cents, locale)}`
+                      : "—"
+                  }
+                />
+                <LineEditModeTile
+                  compact
+                  disabled={lineEditorDisabled}
+                  label={t("editLine.discountPercent")}
+                  onPress={() => selectLineEditMode("discount-percent")}
+                  selected={lineEdit?.mode === "discount-percent"}
+                  testID="sales-line-edit-discount-percent"
+                  value="%"
+                />
+              </View>
+              <NumericValueDisplay
+                accessibilityLabel={t("editLine.value")}
+                placeholder={
+                  (lineEdit?.mode ?? "quantity") === "quantity" ? "0" : "0.00"
+                }
+                testID="sales-line-edit-value"
+                value={lineEdit?.value ?? ""}
+              />
+              {lineEdit?.mode === "price" &&
+              state.errorCode === "price-too-high" ? (
+                <Text
+                  accessibilityRole="alert"
+                  style={styles.cashError}
+                  testID="sales-line-edit-price-error"
+                >
+                  {t("error.priceTooHigh", ERROR_COPY_VALUES)}
+                </Text>
+              ) : null}
+              <View style={styles.lineEditorKeypadRow}>
+                <View style={styles.lineEditorKeypad}>
+                  <SalesNumberKeypad
+                    compact
+                    disabled={lineEditorDisabled}
+                    labels={keypadLabels}
+                    // 没有选中行时按默认的「数量」显示整数键盘。
+                    mode={
+                      (lineEdit?.mode ?? "quantity") === "quantity"
+                        ? "integer"
+                        : "decimal"
+                    }
+                    onKeyPress={handleLineEditKey}
+                    testIDPrefix="sales-line-edit"
+                  />
+                </View>
+                <View style={styles.lineEditorSideKeys}>
+                  <ActionButton
+                    disabled={lineEditorDisabled}
+                    label={t("discount.cancel")}
+                    onPress={resetLineEditDraft}
+                    sound="navigate"
+                    style={styles.lineEditorCancel}
+                    testID="sales-line-edit-cancel"
+                    tone="secondary"
+                  />
+                  <ActionButton
+                    disabled={lineEditorDisabled}
+                    icon="check"
+                    label={t("editLine.confirm")}
+                    onPress={submitLineEdit}
+                    style={styles.lineEditorConfirm}
+                    testID="sales-line-edit-confirm"
+                  />
+                </View>
+              </View>
+            </View>
+          </PosKeyboardAwareScrollView>
+          {/* 快捷折扣固定在右栏最下方、不随上面滚动：11 寸屏上面一截要滚时它也一直可见，与左侧结算条底部对齐。 */}
+          <View style={styles.quickDiscountSection} testID="sales-quick-discount">
+            <View style={styles.functionSectionHeader}>
+              <Text style={styles.functionSectionTitle}>
+                {t("quickDiscount.title")}
+              </Text>
+              <View style={styles.quickDiscountToggle}>
+                <PosSwitch
+                  accessibilityLabel={t("quickDiscount.orderToggle")}
+                  disabled={cartEditingDisabled}
+                  ios_backgroundColor={posColors.border}
+                  onValueChange={(order) => {
+                    setQuickDiscountScope(order ? "order" : "line");
+                  }}
+                  style={styles.cameraModeSwitch}
+                  testID="sales-quick-discount-order-toggle"
+                  thumbColor={
+                    quickDiscountScope === "order"
+                      ? posColors.accent
+                      : posColors.surface
+                  }
+                  trackColor={{
+                    false: posColors.border,
+                    true: posColors.accentSoft,
+                  }}
+                  value={quickDiscountScope === "order"}
+                />
+                <Text
+                  style={[
+                    styles.cameraModeLabel,
+                    quickDiscountScope === "order" &&
+                      styles.cameraModeLabelSelected,
+                  ]}
+                >
+                  {t("quickDiscount.orderToggle")}
+                </Text>
+              </View>
+            </View>
+            <Text
+              numberOfLines={1}
+              style={styles.quickDiscountTarget}
+              testID="sales-quick-discount-target"
+            >
+              {quickDiscountScope === "order"
+                ? t("quickDiscount.targetOrder", {
+                    count: state.cart.lines.length,
+                  })
+                : selectedLine
+                  ? t("quickDiscount.targetLine", {
+                      name: selectedLine.displayName,
+                      number: selectedLineNumber,
+                    })
+                  : t("quickDiscount.targetNone")}
+            </Text>
+            <View style={styles.quickDiscountRow}>
+              {QUICK_DISCOUNTS.map((basisPoints) => (
+                <QuickDiscountKey
+                  disabled={quickDiscountDisabled}
+                  key={basisPoints}
+                  label={
+                    basisPoints === 0
+                      ? t("quickDiscount.none")
+                      : `${basisPoints / 100}%`
+                  }
+                  onPress={() => applyQuickDiscount(basisPoints)}
+                  preview={
+                    basisPoints === 0 || quickDiscountBaseCents <= 0
+                      ? null
+                      : `−${formatAud(
+                          Math.round(
+                            (quickDiscountBaseCents * basisPoints) / 10_000,
+                          ),
+                          locale,
+                        )}`
+                  }
+                  selected={activeQuickDiscount === basisPoints}
+                  testID={`sales-discount-${basisPoints}`}
+                />
+              ))}
             </View>
           </View>
-          <ActionButton
-            disabled={
-              cartEmpty ||
-              !onOpenPayment ||
-              !state.capabilities.cartEditing ||
-              transactionActionsDisabled
-            }
-            icon="arrow-right-circle"
-            label={
-              cartEmpty
-                ? t("summary.checkoutDisabled")
-                : `${t(
-                    zeroTotalSale
-                      ? "summary.completeZeroTotal"
-                      : "summary.goToPayment",
-                  )} · ${formatAud(state.cart.actualAmount.cents, locale)}`
-            }
-            onPress={() => {
-              if (!onOpenPayment) return;
-              // 合计恰好 0 元时 presenter 自己打开零元结账确认弹窗，不进付款页（付款页不接收 0 元订单）。
-              void presenter.startCheckout().then((route) => {
-                if (route?.kind === "payment") onOpenPayment(route.cart);
-              });
-            }}
-            size="primary"
-            sound="navigate"
-            style={styles.checkoutButton}
-            testID="sales-open-payment"
-          />
+
         </View>
       </View>
 
@@ -2105,6 +2414,7 @@ export function SalesScreen({
                 onPress={closeOpenItemInput}
                 sound="navigate"
                 style={styles.modalAction}
+                testID="sales-open-item-cancel"
                 tone="secondary"
               />
               {state.errorCode === "terminal-recovery-required" ? (
@@ -2134,216 +2444,6 @@ export function SalesScreen({
                   testID="sales-open-item-confirm"
                 />
               )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 点商品行直接打开：数量 / 单价 / 折扣 / 删除都在这一个弹窗里。 */}
-      <Modal
-        animationType="fade"
-        onRequestClose={closeLineEditInput}
-        presentationStyle="overFullScreen"
-        supportedOrientations={["landscape-left", "landscape-right"]}
-        transparent
-        visible={lineEdit !== null}
-      >
-        <View style={styles.modalBackdrop}>
-          <PosPressable
-            accessible={false}
-            onPress={closeLineEditInput}
-            sound="navigate"
-            style={styles.modalDismissArea}
-            testID="sales-line-edit-backdrop"
-          />
-          <View
-            accessibilityViewIsModal
-            style={styles.lineEditModal}
-            testID="sales-line-edit-modal"
-          >
-            <View style={styles.lineEditHeader}>
-              <View style={styles.lineEditHeading}>
-                <Text numberOfLines={1} style={styles.modalTitle}>
-                  {editingLine?.displayName ?? t("editLine.title")}
-                </Text>
-                <Text numberOfLines={1} style={styles.lineEditSubtitle}>
-                  {editingLine
-                    ? `${t("editLine.title")} · ${t("cart.lineNumber", {
-                        number: editingLineNumber,
-                      })}`
-                    : t("editLine.title")}
-                </Text>
-              </View>
-              {editingLine ? (
-                <View style={styles.lineEditTotal}>
-                  <Text style={styles.lineEditTotalLabel}>
-                    {t("editLine.lineTotal")}
-                  </Text>
-                  <Text style={styles.lineEditTotalAmount}>
-                    {formatAud(editingLine.actualAmount.cents, locale)}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.lineEditBody}>
-              <View style={styles.lineEditModes}>
-                <View style={styles.editModeGrid}>
-                  <View style={styles.editModeRow}>
-                  <LineEditModeTile
-                    label={t("editLine.quantity")}
-                    onPress={() => selectLineEditMode("quantity")}
-                    selected={lineEdit?.mode === "quantity"}
-                    testID="sales-line-edit-quantity"
-                    value={editingLine?.quantity ?? "—"}
-                  />
-                  <LineEditModeTile
-                    label={t("editLine.price")}
-                    onPress={() => selectLineEditMode("price")}
-                    selected={lineEdit?.mode === "price"}
-                    testID="sales-line-edit-price"
-                    value={
-                      editingLine
-                        ? formatAud(editingLine.unitPrice.cents, locale)
-                        : "—"
-                    }
-                  />
-                  </View>
-                  <View style={styles.editModeRow}>
-                  <LineEditModeTile
-                    label={t("editLine.discountAmount")}
-                    onPress={() => selectLineEditMode("discount-amount")}
-                    selected={lineEdit?.mode === "discount-amount"}
-                    testID="sales-line-edit-discount-amount"
-                    tone={
-                      editingLine && editingLine.discount.cents > 0
-                        ? "danger"
-                        : "default"
-                    }
-                    value={
-                      editingLine && editingLine.discount.cents > 0
-                        ? `−${formatAud(editingLine.discount.cents, locale)}`
-                        : "—"
-                    }
-                  />
-                  <LineEditModeTile
-                    label={t("editLine.discountPercent")}
-                    onPress={() => selectLineEditMode("discount-percent")}
-                    selected={lineEdit?.mode === "discount-percent"}
-                    testID="sales-line-edit-discount-percent"
-                    value="%"
-                  />
-                  </View>
-                </View>
-                <Text style={styles.functionSectionTitle}>
-                  {t("editLine.quickDiscount")}
-                </Text>
-                <View style={styles.discountGrid}>
-                  <View style={styles.editModeRow}>
-                  {QUICK_DISCOUNTS.slice(0, 3).map((basisPoints) => (
-                    <ActionButton
-                      key={basisPoints}
-                      label={
-                        basisPoints === 0
-                          ? t("discount.none")
-                          : `${basisPoints / 100}%`
-                      }
-                      onPress={() => {
-                        const lineId = lineEdit?.lineId;
-                        closeLineEditInput();
-                        if (lineId) {
-                          void presenter.applyLineDiscount(lineId, basisPoints);
-                        }
-                      }}
-                      style={styles.discountButton}
-                      testID={`sales-discount-${basisPoints}`}
-                      tone={basisPoints === 0 ? "quiet" : "secondary"}
-                    />
-                  ))}
-                  </View>
-                  <View style={styles.editModeRow}>
-                  {QUICK_DISCOUNTS.slice(3).map((basisPoints) => (
-                    <ActionButton
-                      key={basisPoints}
-                      label={
-                        basisPoints === 0
-                          ? t("discount.none")
-                          : `${basisPoints / 100}%`
-                      }
-                      onPress={() => {
-                        const lineId = lineEdit?.lineId;
-                        closeLineEditInput();
-                        if (lineId) {
-                          void presenter.applyLineDiscount(lineId, basisPoints);
-                        }
-                      }}
-                      style={styles.discountButton}
-                      testID={`sales-discount-${basisPoints}`}
-                      tone={basisPoints === 0 ? "quiet" : "secondary"}
-                    />
-                  ))}
-                  </View>
-                </View>
-                <Text style={styles.discountHint}>{t("discount.hint")}</Text>
-              </View>
-              <View style={styles.lineEditKeypad}>
-                <View style={styles.lineEditValue}>
-                  <Text style={styles.fieldLabel}>{t("editLine.value")}</Text>
-                  <NumericValueDisplay
-                    accessibilityLabel={t("editLine.value")}
-                    placeholder={lineEdit?.mode === "quantity" ? "0" : "0.00"}
-                    testID="sales-line-edit-value"
-                    value={lineEdit?.value ?? ""}
-                  />
-                  {lineEdit?.mode === "price" &&
-                  state.errorCode === "price-too-high" ? (
-                    <Text
-                      accessibilityRole="alert"
-                      style={styles.cashError}
-                      testID="sales-line-edit-price-error"
-                    >
-                      {t("error.priceTooHigh", ERROR_COPY_VALUES)}
-                    </Text>
-                  ) : null}
-                </View>
-                <SalesNumberKeypad
-                  labels={keypadLabels}
-                  mode={lineEdit?.mode === "quantity" ? "integer" : "decimal"}
-                  onKeyPress={handleLineEditKey}
-                  testIDPrefix="sales-line-edit"
-                />
-              </View>
-            </View>
-            <View style={styles.lineEditFooter}>
-              <ActionButton
-                icon="trash-can-outline"
-                label={t("editLine.remove")}
-                onPress={() => {
-                  const lineId = lineEdit?.lineId;
-                  closeLineEditInput();
-                  if (lineId) void presenter.removeLine(lineId);
-                }}
-                size="button"
-                testID="sales-line-edit-remove"
-                tone="danger"
-              />
-              <View style={styles.lineEditFooterSpacer} />
-              <ActionButton
-                label={t("discount.cancel")}
-                onPress={closeLineEditInput}
-                size="button"
-                sound="navigate"
-                style={styles.lineEditCancel}
-                testID="sales-line-edit-cancel"
-                tone="secondary"
-              />
-              <ActionButton
-                icon="check"
-                label={t("editLine.confirm")}
-                onPress={submitLineEdit}
-                size="button"
-                style={styles.lineEditConfirm}
-                testID="sales-line-edit-confirm"
-              />
             </View>
           </View>
         </View>
@@ -2819,7 +2919,6 @@ type CartLineRowProps = Readonly<{
   item: CartLine;
   locale: SalesLocale;
   onDecrease(lineId: string): void;
-  onEdit(lineId: string): void;
   onIncrease(lineId: string): void;
   onRemove(lineId: string): void;
   onSelect(lineId: string): void;
@@ -2844,7 +2943,6 @@ const CartLineRow = memo(function CartLineRow({
   item,
   locale,
   onDecrease,
-  onEdit,
   onIncrease,
   onRemove,
   onSelect,
@@ -3022,9 +3120,8 @@ const CartLineRow = memo(function CartLineRow({
                 settleSwipe(false);
                 return;
               }
+              // 点商品行 = 选中；数量 / 单价 / 折扣在右栏常驻编辑区修改。
               onSelect(item.lineId);
-              // 点商品行直接进入编辑；购物车不可编辑时只保留选中高亮。
-              if (!disabled) onEdit(item.lineId);
             }}
             sound="navigate"
             style={({ pressed }) => [
@@ -3144,7 +3241,6 @@ function cartLineRowPropsEqual(
     previous.isSelected === next.isSelected &&
     previous.locale === next.locale &&
     previous.onDecrease === next.onDecrease &&
-    previous.onEdit === next.onEdit &&
     previous.onIncrease === next.onIncrease &&
     previous.onRemove === next.onRemove &&
     previous.onSelect === next.onSelect &&
@@ -3243,38 +3339,6 @@ function NumericValueDisplay({
   );
 }
 
-function SummaryRow({
-  amount,
-  amountTestID,
-  amountTone = "default",
-  label,
-  muted = false,
-}: Readonly<{
-  amount: string;
-  amountTestID?: string;
-  amountTone?: "default" | "danger";
-  label: string;
-  muted?: boolean;
-}>) {
-  usePosThemeVersion();
-  return (
-    <View style={styles.summaryRow}>
-      <Text style={[styles.summaryLabel, muted && styles.mutedText]}>
-        {label}
-      </Text>
-      <Text
-        style={[
-          styles.summaryAmount,
-          muted && styles.mutedText,
-          amountTone === "danger" && styles.discountAmountText,
-        ]}
-        testID={amountTestID}
-      >
-        {amount}
-      </Text>
-    </View>
-  );
-}
 
 function ErrorBanner({
   dismissLabel,
@@ -3388,6 +3452,9 @@ function ActionButton({
 }
 
 type LineEditModeTileProps = Readonly<{
+  /** 右栏常驻编辑区用矮一点的格子。 */
+  compact?: boolean;
+  disabled?: boolean;
   label: string;
   onPress(): void;
   selected: boolean;
@@ -3396,8 +3463,10 @@ type LineEditModeTileProps = Readonly<{
   value: string;
 }>;
 
-/** 行编辑弹窗里的编辑项：大块按钮，直接显示这一项现在的值。 */
+/** 编辑项：直接显示这一项现在的值，点一下切换键盘要改的内容。 */
 function LineEditModeTile({
+  compact = false,
+  disabled = false,
   label,
   onPress,
   selected,
@@ -3409,12 +3478,16 @@ function LineEditModeTile({
     <PosPressable
       accessibilityLabel={`${label}: ${value}`}
       accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityState={{ disabled, selected }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.editModeButton,
+        compact && styles.editModeButtonCompact,
         selected && styles.editModeButtonSelected,
-        pressed && styles.actionButtonPressed,
+        compact && selected && styles.editModeButtonCompactSelected,
+        disabled && styles.actionButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
       ]}
       testID={testID}
     >
@@ -3433,11 +3506,132 @@ function LineEditModeTile({
         numberOfLines={1}
         style={[
           styles.editModeValue,
+          compact && styles.editModeValueCompact,
           tone === "danger" && styles.discountAmountText,
         ]}
       >
         {value}
       </Text>
+    </PosPressable>
+  );
+}
+
+type FunctionTileProps = Readonly<{
+  disabled: boolean;
+  icon: PosIconName;
+  label: string;
+  onPress(): void;
+  /** 打印、开箱、钱箱这类辅助操作用浅底。 */
+  quiet?: boolean;
+  sound?: "tap" | "navigate";
+  testID: string;
+}>;
+
+/** 交易功能小按钮：图标在上、文字在下，五个并成一行。 */
+function FunctionTile({
+  disabled,
+  icon,
+  label,
+  onPress,
+  quiet = false,
+  sound = "tap",
+  testID,
+}: FunctionTileProps) {
+  usePosThemeVersion();
+  return (
+    <PosPressable
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      sound={sound}
+      style={({ pressed }) => [
+        styles.functionTile,
+        quiet && styles.functionTileQuiet,
+        disabled && styles.actionButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
+      ]}
+      testID={testID}
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={disabled ? posColors.disabledInk : posColors.ink}
+        name={icon}
+        size={22}
+      />
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+        numberOfLines={1}
+        style={[
+          styles.functionTileLabel,
+          disabled && styles.actionButtonTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
+    </PosPressable>
+  );
+}
+
+type QuickDiscountKeyProps = Readonly<{
+  disabled: boolean;
+  label: string;
+  onPress(): void;
+  /** 这一档能减多少钱；「无」与没有基数时不显示。 */
+  preview: string | null;
+  selected: boolean;
+  testID: string;
+}>;
+
+function QuickDiscountKey({
+  disabled,
+  label,
+  onPress,
+  preview,
+  selected,
+  testID,
+}: QuickDiscountKeyProps) {
+  usePosThemeVersion();
+  return (
+    <PosPressable
+      accessibilityLabel={preview ? `${label} ${preview}` : label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled, selected }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quickDiscountKey,
+        selected && styles.quickDiscountKeySelected,
+        disabled && styles.actionButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
+      ]}
+      testID={testID}
+    >
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.quickDiscountKeyLabel,
+          selected && styles.quickDiscountKeyLabelSelected,
+          disabled && styles.actionButtonTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
+      {preview ? (
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+          numberOfLines={1}
+          style={[
+            styles.quickDiscountKeyPreview,
+            selected && styles.quickDiscountKeyPreviewSelected,
+          ]}
+        >
+          {preview}
+        </Text>
+      ) : null}
     </PosPressable>
   );
 }
@@ -3757,20 +3951,16 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "900",
     letterSpacing: 0.4,
   },
+  // 连续扫码开关放在「商品录入」标题行右侧：不再占一整块按钮位。
   cameraModeControl: {
     alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    flexBasis: "47%",
+    borderRadius: 8,
     flexDirection: "row",
-    flexGrow: 1,
     flexShrink: 1,
-    gap: 8,
+    gap: 6,
     justifyContent: "center",
-    minHeight: 64,
-    paddingHorizontal: 12,
+    // 开关整块仍是 44 的触控区。
+    minHeight: 44,
   },
   cameraModeLabel: {
     color: colors.mutedInk,
@@ -3864,8 +4054,61 @@ const styles = createPosStyles((colors) => ({
     fontSize: 14,
     fontWeight: "800",
   },
+  cartColumn: {
+    flex: 1,
+    gap: 10,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  checkoutBar: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    gap: 10,
+  },
+  checkoutSummary: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: "row",
+    gap: 24,
+    minWidth: 0,
+    paddingHorizontal: 18,
+    paddingVertical: 8,
+  },
+  checkoutCell: { gap: 2 },
+  checkoutCellLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  checkoutCellAmount: {
+    color: colors.ink,
+    fontSize: 18,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  checkoutTotal: {
+    alignItems: "flex-end",
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  checkoutTotalAmount: {
+    color: colors.ink,
+    fontSize: 34,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    letterSpacing: -0.5,
+    textAlign: "right",
+  },
   checkoutButton: {
-    width: "100%",
+    flexBasis: 300,
+    flexGrow: 0,
+    flexShrink: 1,
+    minWidth: 220,
   },
   onlineCheckoutButton: {
     marginTop: 10,
@@ -3903,6 +4146,13 @@ const styles = createPosStyles((colors) => ({
   editModeGrid: {
     gap: 10,
   },
+  editModeButtonCompact: {
+    minHeight: 56,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  editModeButtonCompactSelected: { paddingHorizontal: 7 },
+  editModeValueCompact: { fontSize: 17 },
   editorModal: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -4005,6 +4255,100 @@ const styles = createPosStyles((colors) => ({
     gap: 10,
     paddingBottom: 4,
   },
+  functionTileRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  functionTile: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flex: 1,
+    gap: 2,
+    justifyContent: "center",
+    minHeight: 60,
+    paddingHorizontal: 4,
+  },
+  functionTileQuiet: { backgroundColor: colors.surfaceAlt },
+  functionTileLabel: {
+    color: colors.ink,
+    fontSize: 13.5,
+    fontWeight: "900",
+  },
+  lineEditor: { gap: 8 },
+  lineEditorName: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  lineEditorEmpty: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  lineEditorKeypadRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  lineEditorKeypad: { flex: 1 },
+  lineEditorSideKeys: {
+    gap: 6,
+    width: 92,
+  },
+  lineEditorCancel: { flex: 2 },
+  lineEditorConfirm: { flex: 3 },
+  quickDiscountSection: {
+    borderTopColor: colors.border,
+    borderTopWidth: 1,
+    gap: 6,
+    paddingTop: 8,
+  },
+  quickDiscountToggle: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    minHeight: 32,
+  },
+  quickDiscountTarget: {
+    color: colors.accent,
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  quickDiscountRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  quickDiscountKey: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: 54,
+    paddingHorizontal: 2,
+  },
+  quickDiscountKeySelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  quickDiscountKeyLabel: {
+    color: colors.ink,
+    fontSize: 17,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  quickDiscountKeyLabelSelected: { color: colors.onAccent },
+  quickDiscountKeyPreview: {
+    color: colors.mutedInk,
+    fontSize: 10.5,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+  },
+  quickDiscountKeyPreviewSelected: { color: colors.onAccent },
   // 固定行高 = 小号转圈的高度：核验提示出现 / 消失时这一行不变高，下面的按钮区不跳动。
   functionSectionHeader: {
     alignItems: "center",

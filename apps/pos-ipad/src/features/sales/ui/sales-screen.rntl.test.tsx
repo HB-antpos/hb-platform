@@ -461,7 +461,7 @@ afterEach(() => {
 });
 
 describe("SalesScreen", () => {
-  it("相机控制器未活动时把入口和单一模式开关排在同一行", async () => {
+  it("相机控制器未活动时三个录入入口并排一行，连续扫码开关放在「商品录入」标题行", async () => {
     const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
     const onManualInputFocusChange = jest.fn();
     const cameraScanner = {
@@ -509,13 +509,13 @@ describe("SalesScreen", () => {
     expect(flattenedStyle(modeControl).alignItems).toBe("center");
     expect(flattenedStyle(modeControl).justifyContent).toBe("center");
     expect(flattenedStyle(modeControl).flexShrink).toBe(1);
-    expect(flattenedStyle(cameraAction).flexBasis).toBe("47%");
-    expect(flattenedStyle(modeControl).flexBasis).toBe(
-      flattenedStyle(cameraAction).flexBasis,
-    );
-    expect(flattenedStyle(modeControl).flexGrow).toBe(
-      flattenedStyle(cameraAction).flexGrow,
-    );
+    // 无码商品 / 特殊商品 / 相机扫码三个入口按宽度均分成一行。
+    for (const action of [openItemAction, specialProductsAction, cameraAction]) {
+      expect(flattenedStyle(action).flex).toBe(1);
+    }
+    expect(
+      descendantTestIds(screen.getByTestId("sales-product-entry-header")),
+    ).toEqual(expect.arrayContaining(["sales-camera-mode-toggle"]));
     expect(flattenedStyle(searchAction)).toMatchObject({
       backgroundColor: posColors.surface,
       borderColor: posColors.ink,
@@ -552,13 +552,16 @@ describe("SalesScreen", () => {
     expect(
       descendantTestIds(cameraRow).filter((testID) =>
         [
+          "sales-open-item-button",
+          "sales-open-special-products",
           "sales-open-camera-scanner",
           "sales-camera-mode-toggle",
         ].includes(testID),
       ),
     ).toEqual([
+      "sales-open-item-button",
+      "sales-open-special-products",
       "sales-open-camera-scanner",
-      "sales-camera-mode-toggle",
     ]);
     expect(
       descendantTestIds(modeControl).filter((testID) =>
@@ -909,12 +912,9 @@ describe("SalesScreen", () => {
     await fireEvent.press(screen.getByTestId("sales-open-item-button"));
     await dismissVisibleModal();
 
+    // 点商品行只是选中，改数量 / 单价 / 折扣在右栏常驻编辑区，不再弹窗。
     await fireEvent.press(screen.getByTestId("sales-line-line-1"));
-    expectLandscapeModal();
-    await fireEvent.press(
-      screen.getByTestId("sales-line-edit-discount-amount"),
-    );
-    await dismissVisibleModal();
+    expect(findRenderedNodesByType(screen.toJSON(), "Modal")).toHaveLength(0);
 
     await fireEvent.press(screen.getByTestId("sales-order-discount"));
     expectLandscapeModal();
@@ -1139,7 +1139,7 @@ describe("SalesScreen", () => {
     await withoutNavigation.unmount();
   });
 
-  it("横屏主工作区为双栏，购物车在左，交易汇总在右侧紧贴收款按钮", async () => {
+  it("横屏主工作区为双栏：购物车在左、下方是应收与收款按钮的结算条，右栏是录入、编辑与快捷折扣", async () => {
     const resolveCartProductImage = jest.fn(
       async (_input: { productCode: string; lookupCode: string }) =>
         "https://pos.example.test/images/P-001.png",
@@ -1166,14 +1166,17 @@ describe("SalesScreen", () => {
     );
 
     expect(screen.getByTestId("sales-transaction-pane")).toBeTruthy();
+    // 应收与收款按钮在购物车下方同一条结算条里，不再在右栏。
+    const checkoutBar = screen.getByTestId("sales-checkout-bar");
+    expect(StyleSheet.flatten(checkoutBar.props.style).flexDirection).toBe("row");
+    expect(descendantTestIds(checkoutBar)).toEqual(
+      expect.arrayContaining(["sales-summary-pane", "sales-open-payment"]),
+    );
     const functionPane = screen.getByTestId("sales-function-pane");
-    expect(
-      functionPane.children.some(
-        (child) =>
-          typeof child !== "string" &&
-          child.props.testID === "sales-summary-pane",
-      ),
-    ).toBe(true);
+    expect(descendantTestIds(functionPane)).not.toContain("sales-summary-pane");
+    expect(descendantTestIds(functionPane)).toEqual(
+      expect.arrayContaining(["sales-line-editor", "sales-quick-discount"]),
+    );
 
     const lineNumber = screen.getByTestId(
       "sales-line-line-1-line-number",
@@ -2396,7 +2399,7 @@ describe("SalesScreen", () => {
       expect(onManualInputFocusChange).toHaveBeenCalledTimes(1);
       expect(onManualInputFocusChange).toHaveBeenLastCalledWith(true);
 
-      await fireEvent.press(screen.getByText("取消"));
+      await fireEvent.press(screen.getByTestId("sales-open-item-cancel"));
       await act(() => {
         jest.runOnlyPendingTimers();
       });
@@ -2813,7 +2816,7 @@ describe("SalesScreen", () => {
     jest.useFakeTimers();
     try {
       await fireEvent.press(screen.getByTestId("sales-open-item-button"));
-      await fireEvent.press(screen.getByText("取消"));
+      await fireEvent.press(screen.getByTestId("sales-open-item-cancel"));
       await act(() => {
         jest.runOnlyPendingTimers();
       });
@@ -3126,10 +3129,10 @@ describe("SalesScreen", () => {
     await fireEvent.press(screen.getByTestId("sales-line-line-1-increase"));
     expect(salesPresenter.getState().cart.lines[0]?.quantity).toBe("2");
 
+    // 点商品行 = 选中；底部快捷折扣默认作用于选中行。
     await fireEvent.press(screen.getByTestId("sales-line-line-1"));
-    expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
-    await fireEvent.press(screen.getByTestId("sales-discount-1000"));
     expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    await fireEvent.press(screen.getByTestId("sales-discount-1000"));
     expect(cart.discounts).toEqual([{ lineId: "line-1", basisPoints: 1_000 }]);
 
     expect(
@@ -3242,9 +3245,10 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
-  it("点在加减区的空白处（按钮之间、数量上、按钮旁）不会打开编辑弹窗，点商品信息区才会", async () => {
+  it("点在加减区的空白处（按钮之间、数量上、按钮旁）不会当成点整行，点商品信息区才会选中", async () => {
     const cart = new ScreenCartPort(cartSnapshot(995));
     const salesPresenter = presenter(cart);
+    const selectLine = jest.spyOn(salesPresenter, "selectLine");
     const screen = await render(
       <SalesScreen
         locale="zh"
@@ -3256,24 +3260,23 @@ describe("SalesScreen", () => {
     // 加减区整体接住点击：点到这一列的任何非按钮位置都不应冒泡成「点整行」。
     const controls = screen.getByTestId("sales-line-line-1-controls");
     await fireEvent.press(controls);
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
     // 数量数字没有自己的点击处理，按 RN 的冒泡规则落到加减区，同样被吞掉。
-    await fireEvent.press(screen.getByLabelText("数量: 1"));
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
-    // 加减按钮本身照常工作，也不打开弹窗。
+    await fireEvent.press(within(controls).getByLabelText("数量: 1"));
+    // 加减按钮本身照常工作。
     await fireEvent.press(screen.getByTestId("sales-line-line-1-increase"));
     expect(salesPresenter.getState().cart.lines[0]?.quantity).toBe("2");
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    expect(selectLine).not.toHaveBeenCalled();
 
-    // 点商品信息区（行本身）仍然直接打开编辑弹窗。
+    // 点商品信息区（行本身）= 选中这一行。
     await fireEvent.press(screen.getByTestId("sales-line-line-1-identifiers"));
-    expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
+    expect(selectLine).toHaveBeenCalledWith("line-1");
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
 
     salesPresenter.destroy();
     await screen.unmount();
   });
 
-  it("点商品行直接打开合并后的编辑弹窗：显示当前值，快捷折扣与删除都在弹窗内", async () => {
+  it("点商品行选中，右栏常驻编辑区显示当前值；取消放弃输入，删除此商品可用", async () => {
     const cart = new ScreenCartPort(cartSnapshot(995));
     const salesPresenter = presenter(cart);
     const screen = await render(
@@ -3296,22 +3299,30 @@ describe("SalesScreen", () => {
     ]);
 
     await fireEvent.press(screen.getByTestId("sales-line-line-1"));
-    const modal = screen.getByTestId("sales-line-edit-modal");
-    expect(descendantTestIds(modal)).toEqual(
+    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    const editor = screen.getByTestId("sales-line-editor");
+    expect(descendantTestIds(editor)).toEqual(
       expect.arrayContaining([
         "sales-line-edit-quantity",
         "sales-line-edit-price",
         "sales-line-edit-discount-amount",
         "sales-line-edit-discount-percent",
-        "sales-discount-0",
-        "sales-discount-5000",
         "sales-line-edit-value",
         "sales-line-edit-remove",
         "sales-line-edit-cancel",
         "sales-line-edit-confirm",
       ]),
     );
-    // 打开时停在「数量」，各编辑项直接显示现在的值
+    expect(
+      descendantTestIds(screen.getByTestId("sales-quick-discount")),
+    ).toEqual(expect.arrayContaining(["sales-discount-0", "sales-discount-5000"]));
+    expect(screen.getByTestId("sales-line-editor-target").props.children).toBe(
+      "Fresh milk",
+    );
+    expect(
+      screen.getByTestId("sales-quick-discount-target").props.children,
+    ).toBe("作用于：第 1 行 · Fresh milk");
+    // 默认停在「数量」，各编辑项直接显示现在的值
     expect(
       screen.getByTestId("sales-line-edit-quantity").props.accessibilityState,
     ).toMatchObject({ selected: true });
@@ -3324,18 +3335,114 @@ describe("SalesScreen", () => {
     expect(
       screen.getByTestId("sales-line-edit-price").props.accessibilityLabel,
     ).toBe("单价: $9.95");
-    expect(screen.getAllByText("Fresh milk")).toHaveLength(2);
 
+    // 取消 = 放弃这次输入，回到当前值，不提交。
+    await pressKeypadKeys(screen, "sales-line-edit", ["7"]);
+    expect(
+      screen.getByTestId("sales-line-edit-value").props.accessibilityValue,
+    ).toEqual({ text: "7" });
     await fireEvent.press(screen.getByTestId("sales-line-edit-cancel"));
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    expect(
+      screen.getByTestId("sales-line-edit-value").props.accessibilityValue,
+    ).toEqual({ text: "1" });
     expect(cart.edits).toEqual([]);
 
-    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
     await fireEvent.press(screen.getByTestId("sales-line-edit-remove"));
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
     await waitFor(() =>
       expect(salesPresenter.getState().cart.lines).toHaveLength(0),
     );
+    // 没有选中行时编辑区整块不可用。
+    expect(
+      screen.getByTestId("sales-line-edit-confirm").props.accessibilityState,
+    ).toMatchObject({ disabled: true });
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("快捷折扣默认作用于选中行；打开「整单折扣」开关后同一排键改为整单折扣，刚打的那一档高亮", async () => {
+    const cart = new ScreenCartPort(cartSnapshot(2_000));
+    const salesPresenter = presenter(cart);
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    const target = () =>
+      screen.getByTestId("sales-quick-discount-target").props.children;
+    const selected = (basisPoints: number) =>
+      screen.getByTestId(`sales-discount-${basisPoints}`).props
+        .accessibilityState.selected;
+
+    // 单行模式：小字预览按选中行金额算。
+    expect(target()).toBe("作用于：第 1 行 · Fresh milk");
+    expect(
+      within(screen.getByTestId("sales-discount-2000")).getByText("−$4.00"),
+    ).toBeTruthy();
+    await fireEvent.press(screen.getByTestId("sales-discount-2000"));
+    expect(cart.discounts).toEqual([{ lineId: "line-1", basisPoints: 2_000 }]);
+    await waitFor(() => expect(selected(2_000)).toBe(true));
+
+    // 打开「整单折扣」开关：作用对象变整单，单行刚打的那一档不再高亮。
+    await fireEvent(
+      screen.getByTestId("sales-quick-discount-order-toggle"),
+      "valueChange",
+      true,
+    );
+    expect(target()).toBe("作用于：整单（1 行）");
+    expect(selected(2_000)).toBe(false);
+    await fireEvent.press(screen.getByTestId("sales-discount-3000"));
+    await waitFor(() =>
+      expect(cart.edits).toContainEqual({
+        operation: "order-discount-quick",
+        value: 3_000,
+      }),
+    );
+    await waitFor(() => expect(selected(3_000)).toBe(true));
+    // 整单「无」= 把整单折扣设回 0%。
+    await fireEvent.press(screen.getByTestId("sales-discount-0"));
+    await waitFor(() =>
+      expect(cart.edits).toContainEqual({
+        operation: "order-discount-percent",
+        value: 0,
+      }),
+    );
+    expect(cart.discounts).toHaveLength(1);
+
+    salesPresenter.destroy();
+    await screen.unmount();
+  });
+
+  it("常驻编辑区用屏幕键盘输入，不暂停扫码枪；确认后停留在当前编辑项", async () => {
+    const cart = new ScreenCartPort(cartSnapshot(995));
+    const salesPresenter = presenter(cart);
+    const onManualInputFocusChange = jest.fn();
+    const screen = await render(
+      <SalesScreen
+        locale="zh"
+        onManualInputFocusChange={onManualInputFocusChange}
+        presenter={salesPresenter}
+        showStatusStrip={false}
+      />,
+    );
+
+    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
+    await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
+    await pressKeypadKeys(screen, "sales-line-edit", ["8", "quick-50"]);
+    await fireEvent.press(screen.getByTestId("sales-line-edit-confirm"));
+    await waitFor(() =>
+      expect(cart.edits).toEqual([
+        { operation: "line-price", lineId: "line-1", value: 850 },
+      ]),
+    );
+    // 没有输入框、不抢焦点：扫码枪（HID）全程照常可用。
+    expect(onManualInputFocusChange).not.toHaveBeenCalledWith(true);
+    expect(
+      screen.getByTestId("sales-line-edit-price").props.accessibilityState,
+    ).toMatchObject({ selected: true });
 
     salesPresenter.destroy();
     await screen.unmount();
@@ -3371,7 +3478,7 @@ describe("SalesScreen", () => {
     expect(addOpenItem).toHaveBeenCalledWith(1_234);
 
     await fireEvent.press(screen.getByTestId("sales-line-line-1"));
-    expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
+    expect(screen.getByTestId("sales-line-editor")).toBeTruthy();
     expect(
       screen.getByTestId("sales-line-edit-value").props.onChangeText,
     ).toBeUndefined();
@@ -3519,7 +3626,7 @@ describe("SalesScreen", () => {
     await screen.unmount();
   });
 
-  it("购物车改价超过 9999 时在弹窗内提示、原行不变，关闭弹窗不残留提示", async () => {
+  it("购物车改价超过 9999 时在编辑区内提示、原行不变，取消后不残留提示", async () => {
     const cart = new ScreenCartPort(cartSnapshot(2_000));
     const salesPresenter = presenter(cart);
     const screen = await render(
@@ -3553,7 +3660,7 @@ describe("SalesScreen", () => {
       screen.getByTestId("sales-line-edit-value").props.accessibilityValue,
     ).toEqual({ text: "9999.01" });
 
-    // 切到数量页签即清掉价格提示；关闭弹窗后主界面横幅也不残留。
+    // 切到数量页签即清掉价格提示；点「取消」放弃输入后主界面横幅也不残留。
     await fireEvent.press(screen.getByTestId("sales-line-edit-quantity"));
     expect(screen.queryByTestId("sales-line-edit-price-error")).toBeNull();
     await fireEvent.press(screen.getByTestId("sales-line-edit-price"));
@@ -3562,12 +3669,8 @@ describe("SalesScreen", () => {
     await waitFor(() =>
       expect(screen.getByTestId("sales-line-edit-price-error")).toBeTruthy(),
     );
-    await fireEvent.press(
-      screen.getByTestId("sales-line-edit-backdrop", {
-        includeHiddenElements: true,
-      }),
-    );
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
+    await fireEvent.press(screen.getByTestId("sales-line-edit-cancel"));
+    expect(screen.queryByTestId("sales-line-edit-price-error")).toBeNull();
     expect(screen.queryByText("Price cannot exceed 9999.")).toBeNull();
     expect(cart.edits).toEqual([]);
 
@@ -3834,15 +3937,6 @@ describe("SalesScreen", () => {
       }),
     );
     expect(screen.queryByTestId("sales-open-item-modal")).toBeNull();
-
-    await fireEvent.press(screen.getByTestId("sales-line-line-1"));
-    expect(screen.getByTestId("sales-line-edit-modal")).toBeTruthy();
-    await fireEvent.press(
-      screen.getByTestId("sales-line-edit-backdrop", {
-        includeHiddenElements: true,
-      }),
-    );
-    expect(screen.queryByTestId("sales-line-edit-modal")).toBeNull();
 
     await fireEvent.press(screen.getByTestId("sales-order-discount"));
     expect(screen.getByTestId("sales-order-discount-modal")).toBeTruthy();
