@@ -1,12 +1,10 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
-  Fragment,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
-  type RefObject,
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -36,14 +34,10 @@ import {
 import {
   LINKLY_SAFE_OPERATOR_KEYS,
   canSelectPaymentMethod,
-  canSubmitPaymentMethod,
-  isQuickCashSufficient,
-  nextQuickCashAmountText,
   parseAudInput,
   type PaymentPresenterState,
   type PaymentPresenterTender,
   type PaymentScreenPresenter,
-  type PaymentUiMethod,
   type PaymentUiPhase,
 } from "./payment-presenter";
 
@@ -53,6 +47,7 @@ import { receiptQrMatrix } from "@hb/pos-receipt-core/features/local-history/rec
 import type {
   LinklySafeOperatorKey,
 } from "@/features/payments/runtime/linkly-operator-runtime";
+import { calculateCashSettlement } from "@/features/sales/domain";
 import {
   PosButton,
   type PosButtonSize,
@@ -64,13 +59,11 @@ import {
   PosKeyboardAwareTextInput,
 } from "@/ui/controls/pos-keyboard-aware-scroll-view";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { PosTextInput } from "@/ui/controls/pos-text-input";
 import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import {
   createPosStyles,
   posColors,
   usePosThemeVersion,
-  type PosPalette,
 } from "@/ui/theme";
 
 export const PAYMENT_MIN_TOUCH_TARGET = 44;
@@ -99,56 +92,143 @@ export type PaymentInstallmentModeControl = Readonly<{
   onToggle(enabled: boolean): void;
 }>;
 
-const PAYMENT_METHODS = Object.freeze([
-  "cash",
-  "square",
+/** 合并成一个「信用卡」方块的刷卡通道，按优先级取第一个可用的。 */
+type PaymentCardChannel = "linkly-cloud" | "zeller" | "square";
+
+const PAYMENT_CARD_CHANNEL_PRIORITY = Object.freeze([
   "linkly-cloud",
   "zeller",
-  "manual-card",
-  "voucher",
-] as const satisfies readonly PaymentUiMethod[]);
+  "square",
+] as const satisfies readonly PaymentCardChannel[]);
 
-/** 付款方式大块的图标、图标颜色（存色名，渲染时再取当前主题色）和一句话说明。 */
-const PAYMENT_METHOD_VISUALS: Readonly<
-  Record<
-    PaymentUiMethod,
-    Readonly<{
-      icon: PosIconName;
-      color: keyof PosPalette;
-      hintKey: PaymentCopyKey;
-    }>
-  >
-> = Object.freeze({
-  cash: { icon: "cash", color: "green", hintKey: "method.cash.hint" },
-  square: {
-    icon: "square-rounded-outline",
-    color: "ink",
-    hintKey: "method.square.hint",
-  },
-  "linkly-cloud": {
-    icon: "credit-card-outline",
-    color: "blue",
-    hintKey: "method.linkly-cloud.hint",
-  },
-  zeller: {
-    icon: "contactless-payment",
-    color: "ink",
-    hintKey: "method.zeller.hint",
-  },
-  "manual-card": {
-    icon: "credit-card-check-outline",
-    color: "ink",
-    hintKey: "method.manual-card.hint",
-  },
-  voucher: {
-    icon: "wallet-giftcard",
-    color: "yellow",
-    hintKey: "method.voucher.hint",
-  },
+/** 快捷现金面额（澳元纸币），从大到小排。 */
+const QUICK_CASH_NOTES = [100, 50, 20, 10, 5] as const;
+
+type QuickCashNote = (typeof QUICK_CASH_NOTES)[number];
+
+type QuickCashNoteColors = Readonly<{ light: string; deep: string; ink: string }>;
+
+/** 纸币代表色：浅色底、深色描边 / 渐变、同色系深色文字；固定字面量，不随主题变化。 */
+const QUICK_CASH_NOTE_COLORS: Readonly<Record<QuickCashNote, QuickCashNoteColors>> =
+  Object.freeze({
+    100: { light: "#CFEEDB", deep: "#2E9E6B", ink: "#15603E" },
+    50: { light: "#FBEDB5", deep: "#E2B022", ink: "#6F4F05" },
+    20: { light: "#F9D3C7", deep: "#D8573E", ink: "#8E2615" },
+    10: { light: "#D3E4FA", deep: "#4E86D6", ink: "#1D4A86" },
+    5: { light: "#F2D4EA", deep: "#C77DB5", ink: "#6E2860" },
+  });
+
+/** 快捷现金不可用时整排灰化。 */
+const QUICK_CASH_DISABLED_COLORS: QuickCashNoteColors = Object.freeze({
+  light: "#E5E8E6",
+  deep: "#B5BDB9",
+  ink: "#6F7A75",
 });
 
-/** 纸币快捷键面额（澳元纸币）。 */
-const QUICK_CASH_NOTES = [5, 10, 20, 50, 100] as const;
+/** 「大档」控件（数字键、付款方式）的最小高度。 */
+const PAYMENT_KEY_ROW_MIN = 56;
+/** 「小档」控件（返回、删除）的边长。 */
+const PAYMENT_SMALL_TARGET = 56;
+
+/** 宽屏网格尺寸：三栏共用的行高、行距与字号档位（对齐设计稿 13 寸 / 11 寸两档）。 */
+export type PaymentGridMetrics = Readonly<{
+  /** 13 寸档（窗口高度 ≥ 1000）。 */
+  large: boolean;
+  /** 金额显示区高度。 */
+  amounts: number;
+  /** 「中档」高度 M：当前支付金额、快捷现金、完成支付。 */
+  medium: number;
+  gap: number;
+  /** 顶部段 = 金额显示区 + 当前支付金额行 + 快捷现金行（含两道行距）。 */
+  top: number;
+  /** 键盘行高：4 行等高，与左栏汇总、右栏完成区共用。 */
+  keyRow: number;
+  heroFont: number;
+  subFont: number;
+  dueFont: number;
+}>;
+
+/**
+ * 由工作区高度倒推键盘行高：工作区 = 顶部段 + 4 个键盘行 + 4 道行距。
+ * RN 没有 CSS grid，三栏各块都按这里算出的显式高度排，保证行线对齐。
+ */
+export function paymentGridMetrics(
+  areaHeight: number,
+  windowHeight: number,
+  compact = false,
+): PaymentGridMetrics {
+  const large = !compact && windowHeight >= 1000;
+  const amounts = large ? 168 : 124;
+  const medium = large ? 88 : 72;
+  const gap = large ? 10 : 8;
+  const top = amounts + medium * 2 + gap * 2;
+  const keyRow = compact
+    ? 64
+    : areaHeight > 0
+      ? Math.max(
+          PAYMENT_KEY_ROW_MIN,
+          Math.floor((areaHeight - top - gap * 4) / 4),
+        )
+      : PAYMENT_KEY_ROW_MIN;
+  return {
+    large,
+    amounts,
+    medium,
+    gap,
+    top,
+    keyRow,
+    heroFont: large ? 58 : 46,
+    subFont: large ? 42 : 34,
+    dueFont: large ? 38 : 32,
+  };
+}
+
+/** 取当前可用的刷卡通道：linkly-cloud → zeller → square。 */
+function resolveCardChannel(
+  state: PaymentPresenterState,
+): PaymentCardChannel | null {
+  return (
+    PAYMENT_CARD_CHANNEL_PRIORITY.find((provider) =>
+      state.providers.some(
+        (entry) => entry.provider === provider && entry.available,
+      ),
+    ) ?? null
+  );
+}
+
+/**
+ * 现金应付：普通销售按五分取整（与 presenter 默认金额同一算法）；分期不取整。
+ * 1 / 2 分尾款取整后为零时，沿用原始余额，保证仍是可提交的正数。
+ */
+function cashDueForState(state: PaymentPresenterState): number {
+  const remaining = state.remaining.cents;
+  if (remaining <= 0) return 0;
+  if (state.checkout.flow !== "regular") return remaining;
+  const due = calculateCashSettlement({
+    actualAmount: state.remaining,
+    cashTendered: { currency: "AUD", cents: 0 },
+  }).cashDue.cents;
+  return due > 0 ? due : remaining;
+}
+
+/** 暂存现金的找零（只用于界面实时显示；落账后以 presenter 的结算结果为准）。 */
+function stagedCashChangeCents(
+  state: PaymentPresenterState,
+  stagedCents: number,
+): number {
+  if (state.remaining.cents <= 0) return 0;
+  if (state.checkout.flow !== "regular") {
+    return Math.max(0, stagedCents - state.remaining.cents);
+  }
+  return calculateCashSettlement({
+    actualAmount: state.remaining,
+    cashTendered: { currency: "AUD", cents: stagedCents },
+  }).change.cents;
+}
+
+function centsToAmountText(cents: number): string {
+  return (cents / 100).toFixed(2);
+}
 
 /** 成功页交易号二维码的目标边长（pt）。 */
 const PAYMENT_QR_TARGET_SIZE = 140;
@@ -190,11 +270,9 @@ export function PaymentScreen({
     localeOverride ??
     resolvePaymentLocale(i18n.resolvedLanguage ?? i18n.language);
   const t: Translate = (key, values) => paymentText(locale, key, values);
-  const { width } = useWindowDimensions();
-  // 应用只支持横屏 iPad；宽度不足 900 时退回单列（分屏、测试夹具），三栏整体可滚动。
+  const { width, height: windowHeight } = useWindowDimensions();
+  // 应用只支持横屏 iPad；宽度不足 900 时退回单列（分屏、测试夹具），整页可滚动。
   const compact = width < 900;
-  // 1024 宽的旧款 iPad：左右两栏收窄一点，给中间的付款方式留出两列。
-  const narrowLandscape = !compact && width < 1100;
   const [
     fullInstallmentConfirmationOpen,
     setFullInstallmentConfirmationOpen,
@@ -203,7 +281,15 @@ export function PaymentScreen({
     preparedCashCancellationOpen,
     setPreparedCashCancellationOpen,
   ] = useState(false);
-  const [paymentEntryOpen, setPaymentEntryOpen] = useState(false);
+  // 「当前支付金额」输入串：空 = 使用默认值（现金按五分取整的应付）。
+  const [amountInput, setAmountInput] = useState("");
+  // 暂存现金：只在界面层，点「完成支付」或发起刷卡前才落账。
+  const [stagedCashCents, setStagedCashCents] = useState<number | null>(null);
+  const [voucherEntryOpen, setVoucherEntryOpen] = useState(false);
+  const [manualCardEntryOpen, setManualCardEntryOpen] = useState(false);
+  // 宽屏工作区实测高度：用来倒推键盘行高，让三栏共用同一套行线。
+  const [workspaceHeight, setWorkspaceHeight] = useState(0);
+  const actionLockRef = useRef(false);
   // Lay-by 总额不足起订金额的页内提示（对齐 WPF #891）：按提示时的订单金额记住“已关闭”，金额变化后再次提示。
   const [dismissedMinimumNoticeCents, setDismissedMinimumNoticeCents] =
     useState<number | null>(null);
@@ -213,14 +299,6 @@ export function PaymentScreen({
     dismissedMinimumNoticeCents !== state.total.cents;
   const latestState = useRef(state);
   latestState.current = state;
-  // 上一次快捷现金写入输入框的文本：输入框仍等于它时，再点快捷金额是累加而不是覆盖。
-  const lastQuickCashText = useRef<string | null>(null);
-
-  const closePaymentEntry = (): void => {
-    if (state.busy) return;
-    presenter.setManualCardConfirmed?.(false);
-    setPaymentEntryOpen(false);
-  };
 
   const closePreparedCashCancellation = (): void => {
     if (state.busy) return;
@@ -393,16 +471,384 @@ export function PaymentScreen({
     state.phase !== "cash-confirming" &&
     (state.allowedActions.start || state.allowedActions.addCash);
 
-  useEffect(() => {
-    if (!showEntry || !state.selectedMethod) {
-      setPaymentEntryOpen(false);
-    }
-  }, [showEntry, state.selectedMethod]);
+  /* ---------- 本地收款状态（只在界面层，不落账） ---------- */
+  const regularFlow = state.checkout.flow === "regular";
+  const remainingCents = state.remaining.cents;
+  const cashDueCents = cashDueForState(state);
+  const typedCents = amountInput
+    ? (parseAudInput(amountInput)?.cents ?? null)
+    : null;
+  const staged = stagedCashCents;
+  // 暂存现金是否已够付：普通销售按五分取整的现金应付比较，分期按原始余额比较。
+  const stagedCovers =
+    staged !== null &&
+    (regularFlow ? staged >= cashDueCents : staged >= remainingCents);
+  const displayRemainingCents =
+    staged === null
+      ? remainingCents
+      : stagedCovers
+        ? 0
+        : Math.max(0, remainingCents - staged);
+  const changeCents =
+    staged !== null
+      ? stagedCashChangeCents(state, staged)
+      : state.checkout.cash.changeCents;
+  const defaultEntryCents =
+    staged === null ? cashDueCents : Math.max(0, cashDueCents - staged);
+  const paidCents = Math.max(0, state.total.cents - remainingCents);
+  const collectedCents = paidCents + (staged ?? 0);
 
-  // 右栏金额录入是否“已点选付款方式、可以输入”。
-  // 开合条件与原金额弹窗完全一致：点付款方式且 presenter 接受后打开；提交成功、取消录入、
-  // 或当前状态不再允许录入时关闭。键盘常驻右栏只是换了显示位置，没有改变任何业务调用顺序。
-  const entryArmed = paymentEntryOpen && showEntry;
+  // 刷卡等待：已有支付尝试且终端尚未给出结果（部分付款批准后 attemptId 仍会保留，不能算等待）。
+  const awaitingTerminal =
+    state.attemptId !== null &&
+    (state.phase === "awaiting-terminal" || state.phase === "pending");
+  // 刷卡等待 / busy / 提交中：付款方式、快捷现金、键盘、完成支付全部锁住。
+  const entryLocked =
+    state.busy ||
+    state.recoveryInFlight === true ||
+    awaitingTerminal ||
+    !showEntry;
+  const cardChannel = resolveCardChannel(state);
+  const cashSelectable =
+    !entryLocked && remainingCents > 0 && canSelectPaymentMethod(state, "cash");
+  // 已暂存现金：普通销售要先落账这笔现金再发起卡，现金已够付时卡没有余额可收；
+  // 分期每单只允许一笔付款，暂存现金后不能再换卡或手动刷卡。
+  const stagedBlocksCard = staged !== null && (stagedCovers || !regularFlow);
+  const cardSelectable =
+    !entryLocked &&
+    cardChannel !== null &&
+    !stagedBlocksCard &&
+    canSelectPaymentMethod(state, cardChannel);
+  const manualCardSelectable =
+    !entryLocked &&
+    !stagedBlocksCard &&
+    canSelectPaymentMethod(state, "manual-card");
+  // 收款顺序对齐 WPF：购物券 → 现金 → 刷卡；已有现金（落账或暂存）时不能再加购物券。
+  const hasCash =
+    staged !== null || state.tenders.some((tender) => tender.method === "cash");
+  const voucherSelectable =
+    !entryLocked && !hasCash && canSelectPaymentMethod(state, "voucher");
+  const quickCashEnabled = cashSelectable && !stagedCovers;
+  const showConfirmation =
+    Boolean(presenter.confirm) &&
+    state.checkout.canConfirm &&
+    !(
+      state.phase === "recovery-required" &&
+      state.checkout.cashRepaymentStatus === "ready"
+    );
+  const finishEnabled =
+    cashSelectable &&
+    staged !== null &&
+    (regularFlow ? staged >= cashDueCents : staged > 0);
+  const preparedCashCancellation = canCancelPreparedCash(state);
+  // 「取消」只在刷卡等待时出现；未动过的支付草稿（没有任何付款）也允许取消，否则无法离开。
+  const showCancel =
+    state.allowedActions.cancel &&
+    !preparedCashCancellation &&
+    (state.attemptId !== null ||
+      (state.phase === "draft-prepared" && state.tenders.length === 0));
+  const showPreparedCashCancellationInFooter =
+    preparedCashCancellation && state.phase !== "recovery-required";
+  // 每屏只有一个主按钮：有待确认的收款时是「确认」，能录入时是「完成支付」，其余轮到恢复类操作。
+  const primaryOwner: "confirm" | "finish" | "recovery" = showConfirmation
+    ? "confirm"
+    : showEntry
+      ? "finish"
+      : "recovery";
+
+  useEffect(() => {
+    // 换订单、换结账流程或订单金额变化：本地暂存现金和输入一律作废，不能带到另一笔收款。
+    setStagedCashCents(null);
+    setAmountInput("");
+  }, [presenter, state.checkout.flow, state.total.cents]);
+
+  useEffect(() => {
+    if (stagedCashCents === null || state.busy) return;
+    // 现金已不能再收（订单完成、已落账现金、权限或阶段变化）时清掉暂存，避免完成支付落一笔过期现金。
+    if (
+      state.phase === "success" ||
+      !canSelectPaymentMethod(state, "cash")
+    ) {
+      setStagedCashCents(null);
+    }
+  }, [state, stagedCashCents]);
+
+  useEffect(() => {
+    if (
+      voucherEntryOpen &&
+      !state.busy &&
+      (state.phase === "success" || state.selectedMethod !== "voucher")
+    ) {
+      setVoucherEntryOpen(false);
+    }
+    if (
+      manualCardEntryOpen &&
+      !state.busy &&
+      (state.phase === "success" || state.selectedMethod !== "manual-card")
+    ) {
+      setManualCardEntryOpen(false);
+    }
+  }, [manualCardEntryOpen, state.busy, state.phase, state.selectedMethod, voucherEntryOpen]);
+
+  /** 同一时刻只允许一条界面动作链（例如「先落账现金再发起刷卡」），防止连点。 */
+  const runAction = (action: () => Promise<void>): void => {
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
+    void action().finally(() => {
+      actionLockRef.current = false;
+    });
+  };
+
+  /** 把暂存现金落账：selectMethod → setAmountText → submitSelected，成功后才清暂存。 */
+  const commitStagedCash = async (): Promise<boolean> => {
+    if (stagedCashCents === null) return true;
+    if (!presenter.selectMethod("cash")) return false;
+    presenter.setAmountText(centsToAmountText(stagedCashCents));
+    const submitted = await presenter.submitSelected();
+    if (submitted) {
+      setStagedCashCents(null);
+      setAmountInput("");
+    }
+    return submitted;
+  };
+
+  const handleStageCash = (): void => {
+    if (!cashSelectable) return;
+    if (amountInput && typedCents === null) return;
+    // 点「现金」= 暂存一笔现金：金额取输入值，空则取现金应付；替换已有暂存。
+    setStagedCashCents(typedCents ?? cashDueCents);
+    setAmountInput("");
+  };
+
+  const handleQuickCash = (note: QuickCashNote): void => {
+    if (!quickCashEnabled) return;
+    // 快捷纸币累加到同一笔暂存现金（对齐 WPF #822）。
+    setStagedCashCents((current) => (current ?? 0) + note * 100);
+    setAmountInput("");
+  };
+
+  const handleFinish = (): void => {
+    if (!finishEnabled) return;
+    runAction(async () => {
+      await commitStagedCash();
+    });
+  };
+
+  const handleCard = (): void => {
+    if (!cardSelectable || !cardChannel) return;
+    runAction(async () => {
+      // 先把不足额的暂存现金落成部分付款，再用卡收剩余。
+      if (!(await commitStagedCash())) return;
+      const latest = presenter.getState();
+      if (latest.phase === "success" || latest.remaining.cents <= 0) return;
+      if (!presenter.selectMethod(cardChannel)) return;
+      // 普通销售的卡必须是足额的最后一笔；分期首付 / 续付可以按输入金额部分收。
+      const amountCents = regularFlow
+        ? latest.remaining.cents
+        : (typedCents ?? latest.remaining.cents);
+      presenter.setAmountText(centsToAmountText(amountCents));
+      if (await presenter.submitSelected()) setAmountInput("");
+    });
+  };
+
+  const handleManualCard = (): void => {
+    if (!manualCardSelectable) return;
+    runAction(async () => {
+      if (!(await commitStagedCash())) return;
+      const latest = presenter.getState();
+      if (latest.phase === "success" || latest.remaining.cents <= 0) return;
+      if (presenter.selectMethod("manual-card")) setManualCardEntryOpen(true);
+    });
+  };
+
+  const submitManualCard = (): void => {
+    runAction(async () => {
+      if (!regularFlow) {
+        // 分期续付的手动刷卡可以部分收：金额取输入值，空则取剩余。
+        presenter.setAmountText(
+          centsToAmountText(typedCents ?? presenter.getState().remaining.cents),
+        );
+      }
+      if (await presenter.submitSelected()) {
+        setManualCardEntryOpen(false);
+        setAmountInput("");
+      }
+    });
+  };
+
+  const closeManualCardEntry = (): void => {
+    if (state.busy) return;
+    presenter.setManualCardConfirmed?.(false);
+    setManualCardEntryOpen(false);
+  };
+
+  const handleVoucher = (): void => {
+    if (!voucherSelectable) return;
+    if (presenter.selectMethod("voucher")) setVoucherEntryOpen(true);
+  };
+
+  const voucherAmountCents = typedCents ?? remainingCents;
+  const submitVoucher = (): void => {
+    runAction(async () => {
+      presenter.setAmountText(centsToAmountText(voucherAmountCents));
+      if (await presenter.submitSelected()) {
+        setVoucherEntryOpen(false);
+        setAmountInput("");
+      }
+    });
+  };
+
+  const closeVoucherEntry = (): void => {
+    if (state.busy) return;
+    // 关闭即丢弃已录入的券码，券码不留在 presenter 私有字段里。
+    presenter.setVoucherCode("");
+    setVoucherEntryOpen(false);
+  };
+
+  const handleConfirm = (): void => {
+    const customer = state.checkout.installmentCustomer;
+    const customerComplete =
+      customer !== null &&
+      customer.name.trim().length > 0 &&
+      customer.phone.trim().length > 0;
+    if (
+      state.checkout.fullInstallmentConfirmationRequired &&
+      customerComplete
+    ) {
+      setFullInstallmentConfirmationOpen(true);
+      return;
+    }
+    void presenter.confirm?.();
+  };
+
+  const metrics = paymentGridMetrics(
+    compact ? 0 : workspaceHeight,
+    windowHeight,
+    compact,
+  );
+  const wide = !compact;
+
+  const orderCard = (
+    <PaymentOrderCard
+      canLeave={canLeave}
+      compact={compact}
+      height={wide ? metrics.top + 3 * (metrics.keyRow + metrics.gap) : null}
+      locale={locale}
+      onBack={onBack}
+      onOpenRecoveryCenter={onOpenRecoveryCenter}
+      presenter={presenter}
+      showLeaveHint={state.tenders.length > 0 || staged !== null}
+      state={state}
+      t={t}
+    />
+  );
+  const orderSummary = (
+    <PaymentOrderSummary
+      collectedCents={collectedCents}
+      height={wide ? metrics.keyRow : null}
+      locale={locale}
+      metrics={metrics}
+      remainingCents={displayRemainingCents}
+      t={t}
+      totalCents={state.total.cents}
+    />
+  );
+  const amountDisplay = (
+    <PaymentAmountDisplay
+      changeCents={changeCents}
+      locale={locale}
+      metrics={metrics}
+      remainingCents={displayRemainingCents}
+      t={t}
+    />
+  );
+  const amountInputRow = (
+    <PaymentAmountInputRow
+      defaultCents={defaultEntryCents}
+      disabled={entryLocked}
+      inputText={amountInput}
+      locale={locale}
+      metrics={metrics}
+      onBackspace={() =>
+        setAmountInput((current) => nextKeypadAmount(current, "backspace"))
+      }
+      t={t}
+    />
+  );
+  const quickCashRow = (
+    <PaymentQuickCashRow
+      enabled={quickCashEnabled}
+      metrics={metrics}
+      onPress={handleQuickCash}
+    />
+  );
+  const keypad = (
+    <PaymentKeypad
+      disabled={entryLocked}
+      metrics={metrics}
+      onClear={() => setAmountInput("")}
+      onKey={(key) =>
+        setAmountInput((current) => nextKeypadAmount(current, key))
+      }
+      t={t}
+    />
+  );
+  const methodsCard = (
+    <PaymentMethodsCard
+      cardChannel={cardChannel}
+      cardSelectable={cardSelectable}
+      cashSelectable={cashSelectable}
+      compact={compact}
+      height={wide ? metrics.top : null}
+      installmentModeControl={installmentModeControl}
+      manualCardSelectable={manualCardSelectable}
+      metrics={metrics}
+      onCard={handleCard}
+      onCash={handleStageCash}
+      onManualCard={handleManualCard}
+      onVoucher={handleVoucher}
+      state={state}
+      t={t}
+      voucherSelectable={voucherSelectable}
+    />
+  );
+  const tendersCard = (
+    <PaymentTendersCard
+      compact={compact}
+      height={wide ? 3 * metrics.keyRow + 2 * metrics.gap : null}
+      installmentModeControl={installmentModeControl}
+      locale={locale}
+      onCancelPreparedCash={() => setPreparedCashCancellationOpen(true)}
+      onRemoveStagedCash={() => setStagedCashCents(null)}
+      presenter={presenter}
+      recoveryPrimary={primaryOwner === "recovery"}
+      showStatusPanel={showStatusPanel}
+      stagedCashCents={staged}
+      state={state}
+      t={t}
+    />
+  );
+  const finishArea = (
+    <PaymentFinishArea
+      collectedCents={collectedCents}
+      finishEnabled={finishEnabled}
+      height={wide ? metrics.keyRow : null}
+      locale={locale}
+      metrics={metrics}
+      onCancel={() => {
+        void presenter.cancel();
+      }}
+      onCancelPreparedCash={() => setPreparedCashCancellationOpen(true)}
+      onConfirm={handleConfirm}
+      onFinish={handleFinish}
+      showCancel={showCancel}
+      showConfirmation={showConfirmation}
+      showPreparedCashCancellation={showPreparedCashCancellationInFooter}
+      state={state}
+      t={t}
+      waiting={awaitingTerminal}
+    />
+  );
 
   return (
     <PosScreenFrame
@@ -458,78 +904,57 @@ export function PaymentScreen({
             state={state}
             t={t}
           />
-        ) : (
+        ) : compact ? (
+          // 窄屏（分屏、测试夹具）：同一套组件按单列堆叠，整页滚动，不要求对齐行线。
           <View
-            style={[
-              styles.workspace,
-              compact && styles.workspaceCompact,
-            ]}
+            style={[styles.workspace, styles.workspaceCompact]}
             testID="payment-workspace"
           >
-            <PaymentContextPane
-              canLeave={canLeave}
-              compact={compact}
-              locale={locale}
-              narrow={narrowLandscape}
-              onBack={onBack}
-              onOpenRecoveryCenter={onOpenRecoveryCenter}
-              presenter={presenter}
-              state={state}
-              t={t}
-            />
-            <PaymentSummary
-              compact={compact}
-              entryArmed={entryArmed}
-              installmentModeControl={installmentModeControl}
-              locale={locale}
-              onSelectMethod={(method) => {
-                // 只有 presenter 接受了这次选择，右栏才进入可输入状态。
-                if (presenter.selectMethod(method)) {
-                  setPaymentEntryOpen(true);
-                }
-              }}
-              presenter={presenter}
-              showStatusPanel={showStatusPanel}
-              state={state}
-              t={t}
-            />
-            <PaymentEntryPane
-              compact={compact}
-              entryArmed={entryArmed}
-              lastQuickCashText={lastQuickCashText}
-              locale={locale}
-              narrow={narrowLandscape}
-              onCancelEntry={closePaymentEntry}
-              onCancelPreparedCash={() => {
-                setPreparedCashCancellationOpen(true);
-              }}
-              onConfirm={() => {
-                const customer =
-                  state.checkout.installmentCustomer;
-                const customerComplete =
-                  customer !== null &&
-                  customer.name.trim().length > 0 &&
-                  customer.phone.trim().length > 0;
-                if (
-                  state.checkout.fullInstallmentConfirmationRequired &&
-                  customerComplete
-                ) {
-                  setFullInstallmentConfirmationOpen(true);
-                  return;
-                }
-                void presenter.confirm?.();
-              }}
-              onSubmit={() => {
-                void presenter.submitSelected().then((submitted) => {
-                  // 提交成功后退出录入状态，下一笔必须重新点选付款方式。
-                  if (submitted) setPaymentEntryOpen(false);
-                });
-              }}
-              presenter={presenter}
-              showEntry={showEntry}
-              state={state}
-              t={t}
-            />
+            {amountDisplay}
+            {amountInputRow}
+            {quickCashRow}
+            {keypad}
+            {methodsCard}
+            {tendersCard}
+            {finishArea}
+            {orderCard}
+            {orderSummary}
+          </View>
+        ) : (
+          // 宽屏三栏 28 : 42 : 30，三栏共用同一套横向行线：
+          // 顶部段（金额显示 + 当前支付金额 + 快捷现金）之下是 4 个等高的键盘行。
+          <View
+            onLayout={(event) => {
+              const next = Math.round(event.nativeEvent.layout.height);
+              setWorkspaceHeight((current) => (current === next ? current : next));
+            }}
+            style={[styles.workspace, { gap: metrics.gap }]}
+            testID="payment-workspace"
+          >
+            <View
+              style={[styles.workspaceColumn, styles.workspaceLeft, { gap: metrics.gap }]}
+              testID="payment-column-left"
+            >
+              {orderCard}
+              {orderSummary}
+            </View>
+            <View
+              style={[styles.workspaceColumn, styles.workspaceMiddle, { gap: metrics.gap }]}
+              testID="payment-column-middle"
+            >
+              {amountDisplay}
+              {amountInputRow}
+              {quickCashRow}
+              {keypad}
+            </View>
+            <View
+              style={[styles.workspaceColumn, styles.workspaceRight, { gap: metrics.gap }]}
+              testID="payment-column-right"
+            >
+              {methodsCard}
+              {tendersCard}
+              {finishArea}
+            </View>
           </View>
         )}
       </PosKeyboardAwareScrollView>
@@ -698,6 +1123,230 @@ export function PaymentScreen({
                 sound="danger"
                 testID="payment-cancel-prepared-cash-confirm"
                 tone="danger"
+              />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={closeVoucherEntry}
+        supportedOrientations={["landscape-left", "landscape-right"]}
+        testID="payment-voucher-native-modal"
+        transparent
+        visible={voucherEntryOpen}
+      >
+        <View
+          accessibilityViewIsModal
+          style={styles.confirmationBackdrop}
+          testID="payment-voucher-entry"
+        >
+          <PosPressable
+            accessible={false}
+            onPress={closeVoucherEntry}
+            sound="navigate"
+            style={styles.backdropDismissArea}
+            testID="payment-voucher-backdrop"
+          />
+          <PosKeyboardAwareScrollView
+            contentContainerStyle={styles.modalScrollContent}
+            style={styles.modalScroll}
+            testID="payment-voucher-scroll"
+          >
+            <View style={styles.confirmationCard}>
+              <Text style={styles.confirmationTitle}>
+                {t("voucher.title")}
+              </Text>
+              <View
+                key={state.sensitiveInputRevision}
+                style={styles.voucherInputGroup}
+              >
+                <Text style={styles.inputLabel}>{t("voucher.label")}</Text>
+                <PosKeyboardAwareTextInput
+                  accessibilityLabel={t("voucher.label")}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  autoFocus
+                  editable={!state.busy}
+                  onChangeText={(value) => presenter.setVoucherCode(value)}
+                  placeholder={t("voucher.placeholder")}
+                  placeholderTextColor={posColors.placeholder}
+                  secureTextEntry
+                  selectionColor={posColors.blue}
+                  style={styles.voucherInput}
+                  testID="payment-voucher-code"
+                />
+                {state.voucherCaptured ? (
+                  <Text
+                    style={styles.secureCapture}
+                    testID="payment-voucher-captured"
+                  >
+                    {t("voucher.captured")}
+                  </Text>
+                ) : null}
+              </View>
+              <SummaryAmount
+                label={t("voucher.amount")}
+                locale={locale}
+                strong
+                testID="payment-voucher-amount"
+                value={voucherAmountCents}
+              />
+              <Text style={styles.inputHint}>{t("voucher.amountHint")}</Text>
+              {state.fieldIssue ? (
+                <Text
+                  accessibilityRole="alert"
+                  style={styles.fieldError}
+                  testID="payment-voucher-field-error"
+                >
+                  {t(paymentFieldIssueCopyKey(state.fieldIssue))}
+                </Text>
+              ) : null}
+              <View style={styles.confirmationActions}>
+                <ActionButton
+                  disabled={state.busy}
+                  label={t("modal.cancel")}
+                  onPress={closeVoucherEntry}
+                  style={styles.confirmationAction}
+                  sound="navigate"
+                  testID="payment-voucher-cancel"
+                  tone="secondary"
+                />
+                <ActionButton
+                  disabled={state.busy || !state.voucherCaptured}
+                  label={`${t("voucher.submit")} · ${formatAud(voucherAmountCents, locale)}`}
+                  onPress={submitVoucher}
+                  style={styles.confirmationAction}
+                  testID="payment-voucher-submit"
+                  tone="primary"
+                />
+              </View>
+            </View>
+          </PosKeyboardAwareScrollView>
+        </View>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={closeManualCardEntry}
+        supportedOrientations={["landscape-left", "landscape-right"]}
+        testID="payment-manual-card-native-modal"
+        transparent
+        visible={manualCardEntryOpen}
+      >
+        <View
+          accessibilityViewIsModal
+          style={styles.confirmationBackdrop}
+          testID="payment-manual-card-entry"
+        >
+          <PosPressable
+            accessible={false}
+            onPress={closeManualCardEntry}
+            sound="navigate"
+            style={styles.backdropDismissArea}
+            testID="payment-manual-card-backdrop"
+          />
+          <View
+            style={[styles.confirmationCard, styles.manualCardConfirmation]}
+            testID="payment-manual-card-dialog"
+          >
+            <Text style={styles.confirmationTitle}>
+              {t("method.manual-card")}
+            </Text>
+            <SummaryAmount
+              label={t("amount.label")}
+              locale={locale}
+              strong
+              testID="payment-manual-card-amount"
+              value={
+                regularFlow
+                  ? remainingCents
+                  : (typedCents ?? remainingCents)
+              }
+            />
+            <Text style={styles.manualCardInstructions}>
+              {t(regularFlow ? "manualCard.instructions" : "installmentManualCard.prepare")}
+            </Text>
+            {regularFlow ? (
+              // 普通销售整笔收：必须勾选「已确认刷卡机付款成功」才能记录（沿用 presenter 的人工核对语义）。
+              <PosPressable
+                accessibilityLabel={t("manualCard.checked")}
+                accessibilityRole="checkbox"
+                accessibilityState={{
+                  checked: state.manualCardConfirmed === true,
+                  disabled: state.busy,
+                }}
+                disabled={state.busy}
+                onPress={() =>
+                  presenter.setManualCardConfirmed?.(
+                    state.manualCardConfirmed !== true,
+                  )
+                }
+                sound="key"
+                style={({ pressed }) => [
+                  styles.manualCardCheckRow,
+                  state.manualCardConfirmed === true &&
+                    styles.manualCardCheckRowChecked,
+                  pressed && styles.pressed,
+                ]}
+                testID="payment-manual-card-check"
+              >
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={
+                    state.manualCardConfirmed === true
+                      ? posColors.green
+                      : posColors.mutedInk
+                  }
+                  name={
+                    state.manualCardConfirmed === true
+                      ? "checkbox-marked"
+                      : "checkbox-blank-outline"
+                  }
+                  size={34}
+                />
+                <Text style={styles.manualCardCheckLabel}>
+                  {t("manualCard.checked")}
+                </Text>
+              </PosPressable>
+            ) : null}
+            {regularFlow ? (
+              <Text style={styles.inputHint}>{t("manualCard.uncertain")}</Text>
+            ) : null}
+            {state.fieldIssue ? (
+              <Text
+                accessibilityRole="alert"
+                style={styles.fieldError}
+                testID="payment-manual-card-field-error"
+              >
+                {t(paymentFieldIssueCopyKey(state.fieldIssue))}
+              </Text>
+            ) : null}
+            <View style={styles.confirmationActions}>
+              <ActionButton
+                disabled={state.busy}
+                label={t("modal.cancel")}
+                onPress={closeManualCardEntry}
+                style={styles.confirmationAction}
+                sound="navigate"
+                testID="payment-manual-card-cancel"
+                tone="secondary"
+              />
+              <ActionButton
+                disabled={
+                  state.busy ||
+                  (regularFlow && state.manualCardConfirmed !== true)
+                }
+                label={
+                  regularFlow
+                    ? t("manualCard.confirm")
+                    : t("action.prepareManualCardRepayment")
+                }
+                onPress={submitManualCard}
+                style={styles.confirmationAction}
+                testID="payment-manual-card-submit"
+                tone="primary"
               />
             </View>
           </View>
@@ -1069,35 +1718,36 @@ function PaymentTransactionQrCode({
   );
 }
 
-/** 左栏：返回收银、订单明细与合计、取消支付。返回和取消上下分开放，避免误触。 */
-function PaymentContextPane({
+/** 左栏上部：返回收银 + 件数 + 商品明细（分期时含顾客资料）；已添加支付时提示先删除支付。 */
+function PaymentOrderCard({
   canLeave,
   compact,
+  height,
   locale,
-  narrow,
   onBack,
   onOpenRecoveryCenter,
   presenter,
+  showLeaveHint,
   state,
   t,
 }: Readonly<{
   canLeave: boolean;
   compact: boolean;
+  height: number | null;
   locale: PaymentLocale;
-  narrow: boolean;
   onBack: (() => void) | undefined;
   onOpenRecoveryCenter: (() => void) | undefined;
   presenter: PaymentScreenPresenter;
+  showLeaveHint: boolean;
   state: PaymentPresenterState;
   t: Translate;
 }>) {
   usePosThemeVersion();
   const customer = state.checkout.installmentCustomer;
-  const paidCents = Math.max(
-    0,
-    state.total.cents - state.remaining.cents,
-  );
-  const recovery = recoveryActionFlags(state, presenter);
+  const itemCount = state.checkout.lines.reduce((sum, line) => {
+    const quantity = Number(line.quantity);
+    return Number.isFinite(quantity) ? sum + quantity : sum;
+  }, 0);
   const flowLabel =
     state.checkout.flow === "installment-create"
       ? locale === "zh"
@@ -1117,217 +1767,994 @@ function PaymentContextPane({
   return (
     <View
       style={[
-        styles.contextPane,
-        narrow && styles.contextPaneNarrow,
-        compact && styles.contextPaneCompact,
+        styles.card,
+        styles.orderCard,
+        height !== null && { height },
+        compact && styles.orderCardCompact,
       ]}
       testID="payment-context-pane"
     >
-      {onBack ? (
-        <ActionButton
-          disabled={!canLeave}
-          icon="arrow-left"
-          label={locale === "zh" ? "返回收银" : "Back to sale"}
-          onPress={onBack}
-          size="button"
-          sound="navigate"
-          testID="payment-back"
-          tone="secondary"
-        />
-      ) : null}
-      {onOpenRecoveryCenter && ["recovery-required", "declined", "cancelled"].includes(state.phase) ? (
-        <ActionButton
-          disabled={state.busy || state.recoveryInFlight === true}
-          icon="backup-restore"
-          label={locale === "zh" ? "支付恢复中心" : "Payment recovery"}
-          onPress={onOpenRecoveryCenter}
-          size="medium"
-          sound="navigate"
-          testID="payment-open-recovery-center"
-          tone="warning"
-        />
-      ) : null}
-
-      <View style={styles.contextCard}>
-        <View style={styles.contextCardHeader}>
-          <View style={styles.contextCardHeading}>
-            <Text style={styles.contextEyebrow}>{flowLabel}</Text>
-            <Text style={styles.contextListTitle}>
-              {locale === "zh" ? "商品明细" : "Items"}
-            </Text>
-          </View>
-          {state.orderGuid ? (
-            <Text numberOfLines={1} style={styles.orderReference}>
-              {t("summary.order", {
-                order: shortIdentifier(state.orderGuid),
-              })}
-            </Text>
-          ) : null}
-        </View>
-
-        {customer ? (
-          <PosKeyboardAwareScrollView
-            contentContainerStyle={styles.customerScrollContent}
-            nestedScrollEnabled
-            scrollEnabled={customer.editorOpen}
-            style={styles.customerScroll}
-            testID="payment-customer-scroll"
-          >
-            <View
-              style={styles.customerCard}
-              testID="payment-installment-customer"
-            >
-              <View style={styles.customerHeading}>
-                <Text style={styles.customerTitle}>
-                  {locale === "zh" ? "分期顾客" : "Lay-by customer"}
-                </Text>
-                {customer.editable &&
-                presenter.openInstallmentCustomerEditor ? (
-                  <ActionButton
-                    disabled={state.busy}
-                    icon="pencil-outline"
-                    label={locale === "zh" ? "编辑" : "Edit"}
-                    onPress={() =>
-                      presenter.openInstallmentCustomerEditor?.()
-                    }
-                    size="small"
-                    sound="navigate"
-                    testID="payment-customer-edit"
-                    tone="quiet"
-                  />
-                ) : null}
-              </View>
-              {customer.installmentNumber ? (
-                <Text style={styles.customerNumber}>
-                  {customer.installmentNumber}
-                </Text>
-              ) : null}
-              <Text style={styles.customerValue}>
-                {customer.name ||
-                  (locale === "zh" ? "未填写姓名" : "Name required")}
-              </Text>
-              <Text style={styles.customerValue}>
-                {customer.phone ||
-                  (locale === "zh" ? "未填写电话" : "Phone required")}
-              </Text>
-              {customer.editorOpen ? (
-                <View
-                  style={styles.customerEditor}
-                  testID="payment-customer-editor"
-                >
-                  <PosKeyboardAwareTextInput
-                    autoCorrect={false}
-                    editable={!state.busy}
-                    onChangeText={(value) =>
-                      presenter.setInstallmentCustomerDraftName?.(value)
-                    }
-                    placeholder={locale === "zh" ? "顾客姓名" : "Customer name"}
-                    placeholderTextColor={posColors.placeholder}
-                    style={styles.customerInput}
-                    testID="payment-customer-name"
-                    value={customer.draftName}
-                  />
-                  <PosKeyboardAwareTextInput
-                    autoCorrect={false}
-                    editable={!state.busy}
-                    keyboardType="phone-pad"
-                    onChangeText={(value) =>
-                      presenter.setInstallmentCustomerDraftPhone?.(value)
-                    }
-                    placeholder={locale === "zh" ? "联系电话" : "Phone"}
-                    placeholderTextColor={posColors.placeholder}
-                    style={styles.customerInput}
-                    testID="payment-customer-phone"
-                    value={customer.draftPhone}
-                  />
-                  <View style={styles.customerEditorActions}>
-                    <ActionButton
-                      label={locale === "zh" ? "取消" : "Cancel"}
-                      onPress={() =>
-                        presenter.cancelInstallmentCustomerEditor?.()
-                      }
-                      size="medium"
-                      style={styles.customerEditorButton}
-                      sound="navigate"
-                      testID="payment-customer-cancel"
-                      tone="quiet"
-                    />
-                    <ActionButton
-                      label={locale === "zh" ? "保存" : "Save"}
-                      onPress={() => presenter.saveInstallmentCustomer?.()}
-                      size="medium"
-                      style={styles.customerEditorButton}
-                      testID="payment-customer-save"
-                      tone="inverse"
-                    />
-                  </View>
-                </View>
-              ) : null}
-            </View>
-          </PosKeyboardAwareScrollView>
+      <View style={styles.orderHeader}>
+        {onBack ? (
+          <ActionButton
+            disabled={!canLeave}
+            icon="arrow-left"
+            label={t("action.back")}
+            onPress={onBack}
+            size="medium"
+            sound="navigate"
+            testID="payment-back"
+            tone="secondary"
+          />
         ) : null}
-
-        <ScrollView
-          nestedScrollEnabled
-          scrollEnabled
-          style={styles.contextLines}
-          testID="payment-context-lines"
-        >
-          {state.checkout.lines.length ? (
-            state.checkout.lines.map((line) => (
-              <View key={line.lineKey} style={styles.contextLine}>
-                <View style={styles.contextLineCopy}>
-                  <Text numberOfLines={2} style={styles.contextLineName}>
-                    {line.displayName}
-                  </Text>
-                  <Text style={styles.contextLineQuantity}>× {line.quantity}</Text>
-                </View>
-                <Text style={styles.contextLineAmount}>
-                  {formatAud(line.actualAmountCents, locale)}
-                </Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.contextEmpty}>
-              {locale === "zh" ? "交易商品由收银页确认" : "Items confirmed at checkout"}
-            </Text>
-          )}
-        </ScrollView>
-
-        <View style={styles.contextTotals}>
-          <SummaryAmount
-            label={t("summary.total")}
-            locale={locale}
-            strong
-            value={state.total.cents}
-          />
-          <SummaryAmount
-            label={t("summary.paid")}
-            locale={locale}
-            value={paidCents}
+        <Text numberOfLines={1} style={styles.orderCount} testID="payment-item-count">
+          {t("order.itemCount", { count: itemCount })}
+        </Text>
+      </View>
+      {onOpenRecoveryCenter &&
+      ["recovery-required", "declined", "cancelled"].includes(state.phase) ? (
+        <View style={styles.orderRecoveryEntry}>
+          <ActionButton
+            disabled={state.busy || state.recoveryInFlight === true}
+            icon="backup-restore"
+            label={locale === "zh" ? "支付恢复中心" : "Payment recovery"}
+            onPress={onOpenRecoveryCenter}
+            size="medium"
+            sound="navigate"
+            testID="payment-open-recovery-center"
+            tone="warning"
           />
         </View>
+      ) : null}
+      <View style={styles.orderMeta}>
+        <Text style={styles.contextEyebrow}>{flowLabel}</Text>
+        {state.orderGuid ? (
+          <Text numberOfLines={1} style={styles.orderReference}>
+            {t("summary.order", { order: shortIdentifier(state.orderGuid) })}
+          </Text>
+        ) : null}
       </View>
 
-      {recovery.showGenericCancellation ? (
-        // 取消支付固定在左下角，离右下角的主按钮最远。
-        <ActionButton
-          disabled={state.busy || state.recoveryInFlight === true}
-          icon="close-circle-outline"
-          label={t("action.cancel")}
-          onPress={() => {
-            void presenter.cancel();
-          }}
-          size="button"
-          testID="payment-cancel"
-          tone="danger"
-        />
+      {customer ? (
+        <PosKeyboardAwareScrollView
+          contentContainerStyle={styles.customerScrollContent}
+          nestedScrollEnabled
+          scrollEnabled={customer.editorOpen}
+          style={styles.customerScroll}
+          testID="payment-customer-scroll"
+        >
+          <View style={styles.customerCard} testID="payment-installment-customer">
+            <View style={styles.customerHeading}>
+              <Text style={styles.customerTitle}>
+                {locale === "zh" ? "分期顾客" : "Lay-by customer"}
+              </Text>
+              {customer.editable && presenter.openInstallmentCustomerEditor ? (
+                <ActionButton
+                  disabled={state.busy}
+                  icon="pencil-outline"
+                  label={locale === "zh" ? "编辑" : "Edit"}
+                  onPress={() => presenter.openInstallmentCustomerEditor?.()}
+                  size="small"
+                  sound="navigate"
+                  testID="payment-customer-edit"
+                  tone="quiet"
+                />
+              ) : null}
+            </View>
+            {customer.installmentNumber ? (
+              <Text style={styles.customerNumber}>
+                {customer.installmentNumber}
+              </Text>
+            ) : null}
+            <Text style={styles.customerValue}>
+              {customer.name || (locale === "zh" ? "未填写姓名" : "Name required")}
+            </Text>
+            <Text style={styles.customerValue}>
+              {customer.phone || (locale === "zh" ? "未填写电话" : "Phone required")}
+            </Text>
+            {customer.editorOpen ? (
+              <View style={styles.customerEditor} testID="payment-customer-editor">
+                <PosKeyboardAwareTextInput
+                  autoCorrect={false}
+                  editable={!state.busy}
+                  onChangeText={(value) =>
+                    presenter.setInstallmentCustomerDraftName?.(value)
+                  }
+                  placeholder={locale === "zh" ? "顾客姓名" : "Customer name"}
+                  placeholderTextColor={posColors.placeholder}
+                  style={styles.customerInput}
+                  testID="payment-customer-name"
+                  value={customer.draftName}
+                />
+                <PosKeyboardAwareTextInput
+                  autoCorrect={false}
+                  editable={!state.busy}
+                  keyboardType="phone-pad"
+                  onChangeText={(value) =>
+                    presenter.setInstallmentCustomerDraftPhone?.(value)
+                  }
+                  placeholder={locale === "zh" ? "联系电话" : "Phone"}
+                  placeholderTextColor={posColors.placeholder}
+                  style={styles.customerInput}
+                  testID="payment-customer-phone"
+                  value={customer.draftPhone}
+                />
+                <View style={styles.customerEditorActions}>
+                  <ActionButton
+                    label={locale === "zh" ? "取消" : "Cancel"}
+                    onPress={() => presenter.cancelInstallmentCustomerEditor?.()}
+                    size="medium"
+                    style={styles.customerEditorButton}
+                    sound="navigate"
+                    testID="payment-customer-cancel"
+                    tone="quiet"
+                  />
+                  <ActionButton
+                    label={locale === "zh" ? "保存" : "Save"}
+                    onPress={() => presenter.saveInstallmentCustomer?.()}
+                    size="medium"
+                    style={styles.customerEditorButton}
+                    testID="payment-customer-save"
+                    tone="inverse"
+                  />
+                </View>
+              </View>
+            ) : null}
+          </View>
+        </PosKeyboardAwareScrollView>
+      ) : null}
+
+      <ScrollView
+        nestedScrollEnabled
+        scrollEnabled={!compact}
+        style={[styles.contextLines, compact && styles.contextLinesCompact]}
+        testID="payment-context-lines"
+      >
+        {state.checkout.lines.length ? (
+          state.checkout.lines.map((line) => (
+            <View key={line.lineKey} style={styles.contextLine}>
+              <View style={styles.contextLineCopy}>
+                <Text numberOfLines={2} style={styles.contextLineName}>
+                  {line.displayName}
+                </Text>
+              </View>
+              <Text style={styles.contextLineQuantity}>× {line.quantity}</Text>
+              <Text style={styles.contextLineAmount}>
+                {formatAud(line.actualAmountCents, locale)}
+              </Text>
+            </View>
+          ))
+        ) : (
+          <Text style={styles.contextEmpty}>
+            {locale === "zh" ? "交易商品由收银页确认" : "Items confirmed at checkout"}
+          </Text>
+        )}
+      </ScrollView>
+
+      {showLeaveHint ? (
+        <View style={styles.leaveHint} testID="payment-leave-hint">
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.yellowInk}
+            name="information-outline"
+            size={18}
+          />
+          <Text style={styles.leaveHintText}>{t("order.leaveHint")}</Text>
+        </View>
       ) : null}
     </View>
   );
 }
 
-/** 支付状态说明：并入「剩余应付」卡片，等待、未知、被拒等状态用卡片底色区分。 */
+/** 左栏底部（第 4 个键盘行）：已收、剩余与大字应收。 */
+function PaymentOrderSummary({
+  collectedCents,
+  height,
+  locale,
+  metrics,
+  remainingCents,
+  t,
+  totalCents,
+}: Readonly<{
+  collectedCents: number;
+  height: number | null;
+  locale: PaymentLocale;
+  metrics: PaymentGridMetrics;
+  remainingCents: number;
+  t: Translate;
+  totalCents: number;
+}>) {
+  usePosThemeVersion();
+  return (
+    <View
+      style={[styles.card, styles.orderSummary, height !== null && { height }]}
+      testID="payment-order-summary"
+    >
+      <View style={styles.orderSummaryRow}>
+        <Text style={styles.orderSummaryLabel}>{t("summary.paid")}</Text>
+        <Text style={styles.orderSummaryValue} testID="payment-summary-paid">
+          {formatAud(collectedCents, locale)}
+        </Text>
+      </View>
+      <View style={styles.orderSummaryRow}>
+        <Text style={styles.orderSummaryLabel}>{t("summary.remainingShort")}</Text>
+        <Text style={styles.orderSummaryValue} testID="payment-summary-remaining">
+          {formatAud(remainingCents, locale)}
+        </Text>
+      </View>
+      <View style={styles.orderSummaryDue}>
+        <Text style={styles.orderSummaryDueLabel}>{t("summary.due")}</Text>
+        <Text
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[styles.orderSummaryDueValue, { fontSize: metrics.dueFont }]}
+          testID="payment-summary-total"
+        >
+          {formatAud(totalCents, locale)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** 中栏顶部：「剩余应付」(3) :「找零」(2)。剩余是主角大字，找零次一级；有找零时找零卡变橙。 */
+function PaymentAmountDisplay({
+  changeCents,
+  locale,
+  metrics,
+  remainingCents,
+  t,
+}: Readonly<{
+  changeCents: number;
+  locale: PaymentLocale;
+  metrics: PaymentGridMetrics;
+  remainingCents: number;
+  t: Translate;
+}>) {
+  usePosThemeVersion();
+  const changeActive = changeCents > 0;
+  return (
+    <View
+      style={[styles.amountsRow, { gap: metrics.gap, height: metrics.amounts }]}
+      testID="payment-amounts"
+    >
+      <View style={[styles.amountCard, styles.remainingCard]} testID="payment-due-card">
+        <Text style={styles.amountCardLabel}>{t("pad.remaining")}</Text>
+        <Text
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[
+            styles.remainingValue,
+            { fontSize: metrics.heroFont, lineHeight: Math.round(metrics.heroFont * 1.1) },
+            remainingCents === 0 && styles.remainingValuePaid,
+          ]}
+          testID="payment-remaining"
+        >
+          {formatAud(remainingCents, locale)}
+        </Text>
+      </View>
+      <View
+        style={[
+          styles.amountCard,
+          styles.changeCard,
+          changeActive && styles.changeCardActive,
+        ]}
+        testID="payment-change-card"
+      >
+        <Text
+          style={[styles.amountCardLabel, changeActive && styles.changeTextActive]}
+        >
+          {t("pad.change")}
+        </Text>
+        <Text
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[
+            styles.changeValue,
+            { fontSize: metrics.subFont, lineHeight: Math.round(metrics.subFont * 1.1) },
+            changeActive && styles.changeTextActive,
+          ]}
+          testID="payment-change"
+        >
+          {formatAud(changeCents, locale)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** 中栏「当前支付金额」：显示键盘输入的金额（空时灰字显示默认值），右侧退格键。 */
+function PaymentAmountInputRow({
+  defaultCents,
+  disabled,
+  inputText,
+  locale,
+  metrics,
+  onBackspace,
+  t,
+}: Readonly<{
+  defaultCents: number;
+  disabled: boolean;
+  inputText: string;
+  locale: PaymentLocale;
+  metrics: PaymentGridMetrics;
+  onBackspace(): void;
+  t: Translate;
+}>) {
+  usePosThemeVersion();
+  const typed = inputText.length > 0;
+  return (
+    <View
+      style={[styles.amountRow, { gap: metrics.gap, height: metrics.medium }]}
+      testID="payment-amount-row"
+    >
+      <View
+        style={[styles.amountField, disabled && styles.amountFieldDisabled]}
+        testID="payment-amount-field"
+      >
+        <Text numberOfLines={1} style={styles.amountFieldLabel}>
+          {t("pad.amount")}
+        </Text>
+        <Text
+          accessibilityLabel={t("pad.amount")}
+          adjustsFontSizeToFit
+          numberOfLines={1}
+          style={[
+            styles.amountFieldValue,
+            { fontSize: Math.round(metrics.medium * 0.4) },
+            !typed && styles.amountFieldPlaceholder,
+          ]}
+          testID="payment-amount"
+        >
+          {typed
+            ? `${audCurrencyPrefix(locale)}${inputText}`
+            : formatAud(defaultCents, locale)}
+        </Text>
+        {!disabled ? <View style={styles.amountCaret} /> : null}
+      </View>
+      <PosPressable
+        accessibilityLabel={t("pad.backspace")}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: disabled || !typed }}
+        disabled={disabled || !typed}
+        onPress={onBackspace}
+        sound="danger"
+        style={({ pressed }) => [
+          styles.backspaceKey,
+          { width: Math.round(metrics.medium * 1.1) },
+          (disabled || !typed) && styles.keyDisabled,
+          pressed && styles.pressed,
+        ]}
+        testID="payment-key-backspace"
+      >
+        <MaterialCommunityIcons
+          accessible={false}
+          color={disabled || !typed ? posColors.disabledInk : posColors.ink}
+          name="backspace-outline"
+          size={28}
+        />
+      </PosPressable>
+    </View>
+  );
+}
+
+/**
+ * 快捷现金：澳元纸币风格（按面额代表色 + 左侧仿聚合物钞票透明窗口 + AUD 小字），
+ * 只取颜色与版式，不复制真钞人像 / 国徽等图案。颜色固定，不随主题变化。
+ */
+function PaymentQuickCashRow({
+  enabled,
+  metrics,
+  onPress,
+}: Readonly<{
+  enabled: boolean;
+  metrics: PaymentGridMetrics;
+  onPress(note: QuickCashNote): void;
+}>) {
+  usePosThemeVersion();
+  return (
+    <View
+      style={[styles.quickCashRow, { gap: metrics.gap, height: metrics.medium }]}
+      testID="payment-cash-quick"
+    >
+      {QUICK_CASH_NOTES.map((note) => {
+        const colors = enabled
+          ? QUICK_CASH_NOTE_COLORS[note]
+          : QUICK_CASH_DISABLED_COLORS;
+        return (
+          <PosPressable
+            accessibilityLabel={`AUD $${note}`}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !enabled }}
+            disabled={!enabled}
+            key={note}
+            onPress={() => onPress(note)}
+            sound="key"
+            style={({ pressed }) => [
+              styles.note,
+              { backgroundColor: colors.light, borderColor: colors.deep },
+              !enabled && styles.noteDisabled,
+              pressed && enabled && styles.pressed,
+            ]}
+            testID={`payment-cash-quick-${note}`}
+          >
+            <View style={[styles.noteShade, { backgroundColor: colors.deep }]} />
+            <View style={styles.noteWindow} />
+            <Text style={[styles.noteAud, { color: colors.ink }]}>AUD</Text>
+            <Text
+              adjustsFontSizeToFit
+              numberOfLines={1}
+              style={[
+                styles.noteValue,
+                { color: colors.ink, fontSize: Math.round(metrics.medium * 0.32) },
+              ]}
+            >
+              {`$${note}`}
+            </Text>
+          </PosPressable>
+        );
+      })}
+    </View>
+  );
+}
+
+const KEYPAD_ROWS = [
+  ["1", "2", "3"],
+  ["4", "5", "6"],
+  ["7", "8", "9"],
+  [".", "0", "clear"],
+] as const;
+
+/** 中栏数字键盘 4×3：四行与左栏汇总、右栏已添加支付 / 完成区共用行线。 */
+function PaymentKeypad({
+  disabled,
+  metrics,
+  onClear,
+  onKey,
+  t,
+}: Readonly<{
+  disabled: boolean;
+  metrics: PaymentGridMetrics;
+  onClear(): void;
+  onKey(key: "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "."): void;
+  t: Translate;
+}>) {
+  usePosThemeVersion();
+  return (
+    <View style={[styles.keypad, { gap: metrics.gap }]} testID="payment-keypad">
+      {KEYPAD_ROWS.map((row, rowIndex) => (
+        <View
+          key={row[0]}
+          style={[styles.keypadRow, { gap: metrics.gap, height: metrics.keyRow }]}
+          testID={`payment-keypad-row-${rowIndex}`}
+        >
+          {row.map((key) =>
+            key === "clear" ? (
+              <PosPressable
+                accessibilityRole="button"
+                disabled={disabled}
+                key={key}
+                onPress={onClear}
+                sound="danger"
+                style={({ pressed }) => [
+                  styles.keypadKey,
+                  styles.keypadClear,
+                  disabled && styles.keyDisabled,
+                  pressed && !disabled && styles.pressed,
+                ]}
+                testID="payment-key-clear"
+              >
+                <Text
+                  style={[
+                    styles.keypadClearText,
+                    disabled && styles.keypadKeyTextDisabled,
+                  ]}
+                >
+                  {t("pad.clear")}
+                </Text>
+              </PosPressable>
+            ) : (
+              <PosPressable
+                accessibilityRole="button"
+                disabled={disabled}
+                key={key}
+                onPress={() => onKey(key)}
+                sound="key"
+                style={({ pressed }) => [
+                  styles.keypadKey,
+                  disabled && styles.keyDisabled,
+                  pressed && !disabled && styles.pressed,
+                ]}
+                testID={`payment-key-${key === "." ? "decimal" : key}`}
+              >
+                <Text
+                  style={[
+                    styles.keypadKeyText,
+                    disabled && styles.keypadKeyTextDisabled,
+                  ]}
+                >
+                  {key}
+                </Text>
+              </PosPressable>
+            ),
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** 右栏上部：付款方式 2×2（现金 / 信用卡 / 手动刷卡 / 购物券）+ 终端标签 + 分期开关。 */
+function PaymentMethodsCard({
+  cardChannel,
+  cardSelectable,
+  cashSelectable,
+  compact,
+  height,
+  installmentModeControl,
+  manualCardSelectable,
+  metrics,
+  onCard,
+  onCash,
+  onManualCard,
+  onVoucher,
+  state,
+  t,
+  voucherSelectable,
+}: Readonly<{
+  cardChannel: PaymentCardChannel | null;
+  cardSelectable: boolean;
+  cashSelectable: boolean;
+  compact: boolean;
+  height: number | null;
+  installmentModeControl: PaymentInstallmentModeControl | undefined;
+  manualCardSelectable: boolean;
+  metrics: PaymentGridMetrics;
+  onCard(): void;
+  onCash(): void;
+  onManualCard(): void;
+  onVoucher(): void;
+  state: PaymentPresenterState;
+  t: Translate;
+  voucherSelectable: boolean;
+}>) {
+  usePosThemeVersion();
+  const fontSize = metrics.large ? 17 : 15;
+  return (
+    <View
+      style={[
+        styles.card,
+        styles.methodsCard,
+        { gap: metrics.gap },
+        height !== null && { height },
+      ]}
+      testID="payment-methods"
+    >
+      <View style={styles.methodsHeader}>
+        <Text style={styles.cardTitle}>{t("method.title")}</Text>
+        {cardChannel === "linkly-cloud" ? (
+          <LinklyTerminalSelector state={state} t={t} />
+        ) : cardChannel ? (
+          <View style={styles.terminalChip} testID="payment-terminal-chip">
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.blue}
+              name="tablet"
+              size={14}
+            />
+            <Text numberOfLines={1} style={styles.terminalChipText}>
+              {t("method.terminal", { name: t(paymentMethodCopyKey(cardChannel)) })}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      <View
+        style={[styles.methodTiles, compact && styles.methodTilesCompact, { gap: metrics.gap }]}
+      >
+        <View style={[styles.methodTileRow, { gap: metrics.gap }]}>
+          <PaymentMethodTile
+            disabled={!cashSelectable}
+            fontSize={fontSize}
+            icon="cash"
+            label={t("tile.cash")}
+            onPress={onCash}
+            testID="payment-method-cash"
+            tone="cash"
+          />
+          <PaymentMethodTile
+            badge={cardChannel ? t(paymentMethodCopyKey(cardChannel)) : null}
+            disabled={!cardSelectable}
+            fontSize={fontSize}
+            icon="credit-card-outline"
+            label={t("tile.card")}
+            onPress={onCard}
+            testID="payment-method-card"
+            tone="card"
+          />
+        </View>
+        <View style={[styles.methodTileRow, { gap: metrics.gap }]}>
+          <PaymentMethodTile
+            disabled={!manualCardSelectable}
+            fontSize={fontSize}
+            icon="keyboard-outline"
+            label={t("tile.manualCard")}
+            onPress={onManualCard}
+            testID="payment-method-manual-card"
+            tone="plain"
+          />
+          <PaymentMethodTile
+            disabled={!voucherSelectable}
+            fontSize={fontSize}
+            icon="ticket-percent-outline"
+            label={t("tile.voucher")}
+            onPress={onVoucher}
+            testID="payment-method-voucher"
+            tone="voucher"
+          />
+        </View>
+      </View>
+      {installmentModeControl ? (
+        <PaymentInstallmentToggle control={installmentModeControl} t={t} />
+      ) : null}
+    </View>
+  );
+}
+
+function PaymentMethodTile({
+  badge = null,
+  disabled,
+  fontSize,
+  icon,
+  label,
+  onPress,
+  testID,
+  tone,
+}: Readonly<{
+  badge?: string | null;
+  disabled: boolean;
+  fontSize: number;
+  icon: PosIconName;
+  label: string;
+  onPress(): void;
+  testID: string;
+  tone: "cash" | "card" | "plain" | "voucher";
+}>) {
+  usePosThemeVersion();
+  const color = disabled
+    ? posColors.disabledInk
+    : tone === "cash"
+      ? posColors.green
+      : tone === "card"
+        ? posColors.blue
+        : tone === "voucher"
+          ? posColors.yellowInk
+          : posColors.ink;
+  return (
+    <PosPressable
+      accessibilityLabel={badge ? `${label} · ${badge}` : label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.methodTile,
+        tone === "cash" && styles.methodTileCash,
+        tone === "card" && styles.methodTileCard,
+        tone === "voucher" && styles.methodTileVoucher,
+        disabled && styles.methodTileDisabled,
+        pressed && !disabled && styles.pressed,
+      ]}
+      testID={testID}
+    >
+      {badge ? (
+        // 信用卡角标只显示当前通道名（Linkly / Zeller / Square）。
+        <View style={styles.methodBadge} testID={`${testID}-channel`}>
+          <Text numberOfLines={1} style={styles.methodBadgeText}>
+            {badge}
+          </Text>
+        </View>
+      ) : null}
+      <MaterialCommunityIcons accessible={false} color={color} name={icon} size={28} />
+      <Text
+        adjustsFontSizeToFit
+        numberOfLines={1}
+        style={[styles.methodTileText, { color, fontSize }]}
+      >
+        {label}
+      </Text>
+    </PosPressable>
+  );
+}
+
+/** 右栏中部：已添加支付（含暂存现金）、支付状态、刷卡等待、Linkly 终端交互与恢复操作。 */
+function PaymentTendersCard({
+  compact,
+  height,
+  installmentModeControl,
+  locale,
+  onCancelPreparedCash,
+  onRemoveStagedCash,
+  presenter,
+  recoveryPrimary,
+  showStatusPanel,
+  stagedCashCents,
+  state,
+  t,
+}: Readonly<{
+  compact: boolean;
+  height: number | null;
+  installmentModeControl: PaymentInstallmentModeControl | undefined;
+  locale: PaymentLocale;
+  onCancelPreparedCash(): void;
+  onRemoveStagedCash(): void;
+  presenter: PaymentScreenPresenter;
+  recoveryPrimary: boolean;
+  showStatusPanel: boolean;
+  stagedCashCents: number | null;
+  state: PaymentPresenterState;
+  t: Translate;
+}>) {
+  usePosThemeVersion();
+  const empty = state.tenders.length === 0 && stagedCashCents === null;
+  const cashSettlement = state.checkout.cash;
+  return (
+    <View
+      style={[styles.card, styles.tendersCard, height !== null && { height }]}
+      testID="payment-tenders"
+    >
+      <Text style={styles.cardTitle}>{t("tenders.title")}</Text>
+      <ScrollView
+        contentContainerStyle={styles.tendersContent}
+        nestedScrollEnabled
+        scrollEnabled={!compact}
+        style={styles.tendersScroll}
+        testID="payment-tenders-scroll"
+      >
+        {state.fieldIssue ? (
+          <Text
+            accessibilityRole="alert"
+            style={styles.fieldError}
+            testID="payment-field-error"
+          >
+            {t(paymentFieldIssueCopyKey(state.fieldIssue))}
+          </Text>
+        ) : null}
+        {installmentModeControl?.issue ? (
+          <Text
+            accessibilityRole="alert"
+            style={styles.fieldError}
+            testID="payment-installment-issue"
+          >
+            {t("installment.unavailable")}
+          </Text>
+        ) : null}
+        {state.tenders.map((tender) => (
+          <TenderRow
+            cashTenderedCents={
+              tender.method === "cash" && cashSettlement.tenderedCents > 0
+                ? cashSettlement.tenderedCents
+                : null
+            }
+            key={tender.tenderGuid}
+            locale={locale}
+            onRemove={() => {
+              void presenter.removeTender(tender.tenderGuid);
+            }}
+            state={state}
+            tender={tender}
+            t={t}
+          />
+        ))}
+        {stagedCashCents !== null ? (
+          <View style={styles.tenderRow} testID="payment-staged-cash">
+            <MaterialCommunityIcons
+              accessible={false}
+              color={posColors.green}
+              name="cash"
+              size={22}
+            />
+            <View style={styles.tenderIdentity}>
+              <Text style={styles.tenderMethod}>{t("tenders.stagedCash")}</Text>
+              <Text style={styles.tenderDisposition}>
+                {t("tenders.cashTendered", {
+                  amount: formatAud(stagedCashCents, locale),
+                })}
+              </Text>
+            </View>
+            <Text style={styles.tenderAmount}>
+              {formatAud(stagedCashCents, locale)}
+            </Text>
+            <PosPressable
+              accessibilityLabel={t("action.remove")}
+              accessibilityRole="button"
+              disabled={state.busy}
+              onPress={onRemoveStagedCash}
+              sound="danger"
+              style={({ pressed }) => [
+                styles.tenderRemove,
+                state.busy && styles.keyDisabled,
+                pressed && !state.busy && styles.pressed,
+              ]}
+              testID="payment-staged-cash-remove"
+            >
+              <MaterialCommunityIcons
+                accessible={false}
+                color={state.busy ? posColors.disabledInk : posColors.red}
+                name="trash-can-outline"
+                size={22}
+              />
+            </PosPressable>
+          </View>
+        ) : null}
+        {cashSettlement.tenderedCents > 0 ? (
+          // 实收与入账只显示 presenter 给出的结算结果（普通销售按五分取整，分期不取整）。
+          <View style={styles.cashSettlement} testID="payment-cash-settlement">
+            <SummaryAmount
+              label={locale === "zh" ? "实收现金" : "Cash tendered"}
+              locale={locale}
+              value={cashSettlement.tenderedCents}
+            />
+            <SummaryAmount
+              label={locale === "zh" ? "入账金额" : "Applied"}
+              locale={locale}
+              testID="payment-cash-applied"
+              value={cashSettlement.appliedCents}
+            />
+          </View>
+        ) : null}
+        {showStatusPanel ? (
+          state.phase === "ready" ? (
+            empty ? (
+              <View style={styles.emptyTenders} testID="payment-status-ready">
+                <Text style={styles.emptyTendersText}>{t("tenders.empty")}</Text>
+              </View>
+            ) : null
+          ) : (
+            <PaymentStatusPanel state={state} t={t} />
+          )
+        ) : null}
+        {state.checkout.preparedCollection === "manual-card" &&
+        state.checkout.canConfirm ? (
+          <Text style={styles.preparedHint} testID="payment-manual-card-prepared-hint">
+            {t("installmentManualCard.prepared")}
+          </Text>
+        ) : null}
+        <LinklyControls presenter={presenter} state={state} t={t} />
+        <RecoveryActions
+          onCancelPreparedCash={onCancelPreparedCash}
+          presenter={presenter}
+          primary={recoveryPrimary}
+          state={state}
+          t={t}
+        />
+      </ScrollView>
+    </View>
+  );
+}
+
+/**
+ * 右栏底部（第 4 个键盘行）：上一行「已收 / 状态」，下面按钮行。
+ * 普通情况只有「完成支付」整宽；刷卡等待时变为「取消」+「完成支付」(1 : 1.8)。
+ */
+function PaymentFinishArea({
+  collectedCents,
+  finishEnabled,
+  height,
+  locale,
+  metrics,
+  onCancel,
+  onCancelPreparedCash,
+  onConfirm,
+  onFinish,
+  showCancel,
+  showConfirmation,
+  showPreparedCashCancellation,
+  state,
+  t,
+  waiting,
+}: Readonly<{
+  collectedCents: number;
+  finishEnabled: boolean;
+  height: number | null;
+  locale: PaymentLocale;
+  metrics: PaymentGridMetrics;
+  onCancel(): void;
+  onCancelPreparedCash(): void;
+  onConfirm(): void;
+  onFinish(): void;
+  showCancel: boolean;
+  showConfirmation: boolean;
+  showPreparedCashCancellation: boolean;
+  state: PaymentPresenterState;
+  t: Translate;
+  waiting: boolean;
+}>) {
+  usePosThemeVersion();
+  const statusKey: PaymentCopyKey = waiting
+    ? "finish.autoComplete"
+    : finishEnabled || showConfirmation
+      ? "finish.ready"
+      : "finish.needFull";
+  const buttonSize: PosButtonSize = metrics.large ? "primary" : "large";
+  const buttonHeight = height === null
+    ? metrics.medium
+    : Math.max(PAYMENT_SMALL_TARGET, Math.min(metrics.medium, height - 26));
+  return (
+    <View
+      style={[styles.finishArea, height !== null && { height }]}
+      testID="payment-finish-area"
+    >
+      <View style={styles.finishLine}>
+        <Text numberOfLines={1} style={styles.finishLineText}>
+          {t("finish.collected", { amount: formatAud(collectedCents, locale) })}
+        </Text>
+        <Text numberOfLines={1} style={styles.finishLineStatus} testID="payment-finish-status">
+          {t(statusKey)}
+        </Text>
+      </View>
+      <View
+        style={[styles.finishButtons, { gap: metrics.gap, height: buttonHeight }]}
+        testID="payment-finish-buttons"
+      >
+        {showCancel ? (
+          <ActionButton
+            disabled={state.busy || state.recoveryInFlight === true}
+            label={t("finish.cancel")}
+            onPress={onCancel}
+            size={buttonSize}
+            style={[styles.finishCancel, { minHeight: buttonHeight }]}
+            testID="payment-cancel"
+            tone="danger"
+          />
+        ) : showPreparedCashCancellation ? (
+          <ActionButton
+            disabled={state.busy}
+            label={t(cancelPreparedLabelKey(state))}
+            onPress={onCancelPreparedCash}
+            size={buttonSize}
+            sound="danger"
+            style={[styles.finishCancel, { minHeight: buttonHeight }]}
+            testID="payment-cancel-prepared-cash"
+            tone="danger"
+          />
+        ) : null}
+        {showConfirmation ? (
+          <ActionButton
+            disabled={state.busy}
+            icon="check-circle"
+            label={
+              state.checkout.cashRepaymentStatus === "ready" ||
+              state.checkout.cashRepaymentStatus === "confirming"
+                ? t(confirmCollectionLabelKey(state))
+                : locale === "zh"
+                  ? "确认分期付款"
+                  : "Confirm lay-by payment"
+            }
+            onPress={onConfirm}
+            size={buttonSize}
+            sound="danger"
+            style={[styles.finishPrimary, { minHeight: buttonHeight }]}
+            testID="payment-confirm"
+            tone="primary"
+          />
+        ) : (
+          <ActionButton
+            disabled={!finishEnabled}
+            icon="check-circle-outline"
+            label={t("finish.action")}
+            onPress={onFinish}
+            size={buttonSize}
+            style={[styles.finishPrimary, { minHeight: buttonHeight }]}
+            testID="payment-finish"
+            tone="primary"
+          />
+        )}
+      </View>
+    </View>
+  );
+}
+
+/** 支付状态说明：放在「已添加支付」卡里，等待、未知、被拒等状态用底色区分；刷卡等待时提示在终端上刷卡。 */
 function PaymentStatusPanel({
   state,
   t,
@@ -1337,12 +2764,31 @@ function PaymentStatusPanel({
 }>) {
   usePosThemeVersion();
   const tone = statusTone(state.phase);
+  const awaitingCard =
+    state.attemptId !== null &&
+    state.provider !== null &&
+    state.provider !== "voucher" &&
+    state.provider !== "manual-card" &&
+    (state.phase === "awaiting-terminal" || state.phase === "pending");
   return (
     <View
       accessibilityRole="summary"
-      style={styles.statusPanel}
+      style={[
+        styles.statusPanel,
+        tone === "warning" && styles.statusPanelWarning,
+        tone === "danger" && styles.statusPanelDanger,
+        tone === "success" && styles.statusPanelSuccess,
+      ]}
       testID={`payment-status-${state.phase}`}
     >
+      {awaitingCard ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.blue}
+          name="tablet"
+          size={30}
+        />
+      ) : null}
       <View style={styles.statusCopy}>
         <Text
           style={[
@@ -1354,6 +2800,11 @@ function PaymentStatusPanel({
         >
           {t(paymentPhaseTitleKey(state.phase))}
         </Text>
+        {awaitingCard && state.provider ? (
+          <Text style={styles.statusWaiting} testID="payment-terminal-waiting">
+            {`${t("terminal.waiting")} · ${t(paymentMethodCopyKey(state.provider))}`}
+          </Text>
+        ) : null}
         <Text style={styles.statusHint}>
           {t(paymentPhaseHintKey(state.phase))}
         </Text>
@@ -1376,6 +2827,7 @@ function PaymentStatusPanel({
   );
 }
 
+/** 付款方式卡右上角的 Linkly 终端小标签：只展示设置中已选中的线路，付款页不提供重新绑定入口。 */
 function LinklyTerminalSelector({
   state,
   t,
@@ -1388,57 +2840,89 @@ function LinklyTerminalSelector({
     (provider) => provider.provider === "linkly-cloud" && provider.available,
   );
   const resource = state.linklyTerminals;
-  if (!configured || !resource || resource.kind === "unavailable") return null;
+  const channelChip = (
+    <View style={styles.terminalChip} testID="payment-terminal-chip">
+      <Text numberOfLines={1} style={styles.terminalChipText}>
+        {t("method.terminal", { name: t("method.linkly-cloud") })}
+      </Text>
+    </View>
+  );
+  if (!configured || !resource || resource.kind === "unavailable") {
+    return channelChip;
+  }
   if (resource.kind === "loading") {
     return (
-      <View style={styles.linklyTerminalPanel} testID="payment-linkly-terminal-loading">
-        <Text style={styles.linklyTerminalHint}>{t("linkly.terminalsLoading")}</Text>
+      <View style={styles.terminalChip} testID="payment-linkly-terminal-loading">
+        <Text numberOfLines={1} style={styles.terminalChipText}>
+          {t("linkly.terminalsLoading")}
+        </Text>
       </View>
     );
   }
   const snapshot = resource.snapshot;
   if (!snapshot || resource.kind === "failed") {
     return (
-      <View style={styles.linklyTerminalPanel} testID="payment-linkly-terminal-empty">
-        <Text style={styles.linklyTerminalError}>{t("linkly.terminalsFailed")}</Text>
+      <View
+        style={[styles.terminalChip, styles.terminalChipError]}
+        testID="payment-linkly-terminal-empty"
+      >
+        <Text numberOfLines={2} style={styles.terminalChipErrorText}>
+          {t("linkly.terminalsFailed")}
+        </Text>
       </View>
     );
   }
-  if (snapshot.mode !== "Active") return null;
-  // 付款页只展示设置中已选中的线路，不在收款过程中提供重新绑定入口。
+  if (snapshot.mode !== "Active") return channelChip;
   const terminal = snapshot.terminals.find(
     (item) => item.terminalId === snapshot.selectedTerminalId,
   );
   if (!terminal) {
     return (
-      <View style={styles.linklyTerminalPanel} testID="payment-linkly-terminal-empty">
-        <Text style={styles.linklyTerminalError}>{t("linkly.noTerminals")}</Text>
+      <View
+        style={[styles.terminalChip, styles.terminalChipError]}
+        testID="payment-linkly-terminal-empty"
+      >
+        <Text numberOfLines={2} style={styles.terminalChipErrorText}>
+          {t("linkly.noTerminals")}
+        </Text>
       </View>
     );
   }
+  const ready = !terminal.isBusy && terminal.isReady && terminal.pairingState === "Ready";
   const status = terminal.isBusy
     ? t("linkly.terminalBusy")
     : terminal.pairingState === "NeedsRepair"
       ? t("linkly.terminalNeedsRepair")
       : terminal.pairingState === "Unpaired"
         ? t("linkly.terminalUnpaired")
-        : terminal.isReady && terminal.pairingState === "Ready"
-          ? t("linkly.terminalSelected")
-          : t("linkly.terminalUnknown");
+        : t("linkly.terminalUnknown");
   return (
-    <View style={styles.linklyTerminalPanel} testID="payment-linkly-terminal-current">
-      <Text style={styles.linklyTerminalTitle}>{t("linkly.currentTerminal")}</Text>
-      <Text style={styles.linklyTerminalName}>
+    <View
+      accessibilityLabel={t("linkly.currentTerminal")}
+      style={[styles.terminalChip, !ready && styles.terminalChipError]}
+      testID="payment-linkly-terminal-current"
+    >
+      <Text numberOfLines={1} style={styles.terminalChipText}>
+        {t("method.terminal", { name: t("method.linkly-cloud") })}
+      </Text>
+      <Text numberOfLines={1} style={styles.terminalChipText}>
+        ·
+      </Text>
+      <Text numberOfLines={1} style={styles.terminalChipName}>
         {`${terminal.displayName} · Lane ${terminal.laneNo}`}
       </Text>
-      <Text style={styles.linklyTerminalHint}>{status}</Text>
+      {!ready ? (
+        <Text numberOfLines={1} style={styles.terminalChipErrorText}>
+          {status}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 /**
- * 右栏动作区里的恢复类操作：恢复支付 / 确认已收 / 主管作废购物券 / 尚未收现取消续付。
- * 「取消支付」单独放在左栏底部（见 PaymentContextPane），显示条件由 recoveryActionFlags 统一给出。
+ * 「已添加支付」卡里的恢复类操作：恢复支付 / 确认已收 / 主管作废购物券 / 尚未收现取消续付。
+ * 「取消」只在完成区（刷卡等待时）出现，见 PaymentFinishArea。
  */
 function RecoveryActions({
   onCancelPreparedCash,
@@ -1623,534 +3107,7 @@ function LinklyControls({
   );
 }
 
-/** 中栏：剩余应付大数字（含支付状态）+ 付款方式大块 + 当前付款列表。 */
-function PaymentSummary({
-  compact,
-  entryArmed,
-  installmentModeControl,
-  locale,
-  onSelectMethod,
-  presenter,
-  showStatusPanel,
-  state,
-  t,
-}: Readonly<{
-  compact: boolean;
-  entryArmed: boolean;
-  installmentModeControl: PaymentInstallmentModeControl | undefined;
-  locale: PaymentLocale;
-  onSelectMethod(method: PaymentUiMethod): void;
-  presenter: PaymentScreenPresenter;
-  showStatusPanel: boolean;
-  state: PaymentPresenterState;
-  t: Translate;
-}>) {
-  usePosThemeVersion();
-  const tone = showStatusPanel ? statusTone(state.phase) : "neutral";
-  return (
-    <View
-      style={[
-        styles.summaryPane,
-        compact && styles.summaryPaneCompact,
-      ]}
-      testID="payment-summary"
-    >
-      <View
-        style={[
-          styles.dueCard,
-          tone === "warning" && styles.dueCardWarning,
-          tone === "danger" && styles.dueCardDanger,
-          tone === "success" && styles.dueCardSuccess,
-        ]}
-        testID="payment-due-card"
-      >
-        <View style={styles.dueRow}>
-          <Text style={styles.dueLabel}>{t("summary.remaining")}</Text>
-          <Text
-            adjustsFontSizeToFit
-            numberOfLines={1}
-            style={styles.dueAmount}
-            testID="payment-remaining"
-          >
-            {formatAud(state.remaining.cents, locale)}
-          </Text>
-        </View>
-        {showStatusPanel ? (
-          <PaymentStatusPanel state={state} t={t} />
-        ) : null}
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.summaryScrollContent}
-        nestedScrollEnabled
-        scrollEnabled={!compact}
-        style={[
-          styles.summaryScroll,
-          compact && styles.summaryScrollCompact,
-        ]}
-        testID="payment-summary-scroll"
-      >
-        <Text style={styles.sectionLabel}>{t("method.title")}</Text>
-        <View style={styles.methodGrid}>
-          {PAYMENT_METHODS.filter((method) =>
-            // 运行时已按设置限制唯一银行卡通道；付款中暂时禁用不影响展示。
-            method === "manual-card" &&
-            state.checkout.flow !== "regular" &&
-            state.checkout.flow !== "installment-repayment"
-              ? false
-              : method === "cash"
-              ? state.cashAvailable === true
-              : state.providers.some(
-                  (entry) => entry.provider === method && entry.available,
-                ),
-          ).map((method) => {
-            const active = state.selectedMethod === method;
-            const disabled = !canSelectPaymentMethod(state, method);
-            return (
-              <PaymentMethodButton
-                active={active}
-                disabled={disabled}
-                // 橙框只在右栏正在为这个方式录入金额时出现，和“可以输入”保持同一个含义。
-                highlighted={active && entryArmed}
-                hint={t(
-                  disabled && !state.busy
-                    ? "method.unavailable"
-                    : PAYMENT_METHOD_VISUALS[method].hintKey,
-                )}
-                icon={PAYMENT_METHOD_VISUALS[method].icon}
-                iconColor={PAYMENT_METHOD_VISUALS[method].color}
-                key={method}
-                label={t(paymentMethodCopyKey(method))}
-                onPress={() => onSelectMethod(method)}
-                testID={`payment-method-${method}`}
-              />
-            );
-          })}
-          {installmentModeControl ? (
-            <PaymentInstallmentToggle
-              control={installmentModeControl}
-              t={t}
-            />
-          ) : null}
-        </View>
-        <LinklyTerminalSelector state={state} t={t} />
-
-        <Text style={styles.sectionLabel}>{t("summary.tenders")}</Text>
-        {state.tenders.length ? (
-          <View style={styles.tenderList}>
-            {state.tenders.map((tender) => (
-              <TenderRow
-                key={tender.tenderGuid}
-                locale={locale}
-                onRemove={() => {
-                  void presenter.removeTender(tender.tenderGuid);
-                }}
-                state={state}
-                tender={tender}
-                t={t}
-              />
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptyTenders}>
-            <Text style={styles.emptyTendersText}>
-              {t("summary.noTenders")}
-            </Text>
-          </View>
-        )}
-      </ScrollView>
-    </View>
-  );
-}
-
-/**
- * 右栏：本次金额 + 纸币快捷键 + 数字键盘常驻显示，底部是唯一的橙色主按钮。
- * 没有点选付款方式时键盘置灰；只有 entryArmed 为真才接受输入和提交。
- */
-function PaymentEntryPane({
-  compact,
-  entryArmed,
-  lastQuickCashText,
-  locale,
-  narrow,
-  onCancelEntry,
-  onCancelPreparedCash,
-  onConfirm,
-  onSubmit,
-  presenter,
-  showEntry,
-  state,
-  t,
-}: Readonly<{
-  compact: boolean;
-  entryArmed: boolean;
-  lastQuickCashText: RefObject<string | null>;
-  locale: PaymentLocale;
-  narrow: boolean;
-  onCancelEntry(): void;
-  onCancelPreparedCash(): void;
-  onConfirm(): void;
-  onSubmit(): void;
-  presenter: PaymentScreenPresenter;
-  showEntry: boolean;
-  state: PaymentPresenterState;
-  t: Translate;
-}>) {
-  usePosThemeVersion();
-  const flags = recoveryActionFlags(state, presenter);
-  const preparedCashCancellation = canCancelPreparedCash(state);
-  const showPreparedCashCancellationInFooter =
-    preparedCashCancellation && state.phase !== "recovery-required";
-  const showConfirmation =
-    Boolean(presenter.confirm) &&
-    state.checkout.canConfirm &&
-    !(
-      state.phase === "recovery-required" &&
-      state.checkout.cashRepaymentStatus === "ready"
-    );
-  const showFooter = showConfirmation || showPreparedCashCancellationInFooter;
-  // 每屏只有一个橙色主按钮：有待确认的收款时是「确认」，否则是右下角的提交，
-  // 两者都没有时（等待终端、需要恢复等）才轮到恢复类操作。
-  const primaryOwner: "confirm" | "submit" | "recovery" = showConfirmation
-    ? "confirm"
-    : showEntry
-      ? "submit"
-      : "recovery";
-  const salesManualCard = isSalesManualCard(state);
-  const manualCardEntry = entryArmed && salesManualCard;
-  // 纸币快捷键：录入现金时可用；尚未点选付款方式时只要有现金权限就置灰占位，保持右栏布局稳定。
-  const showQuickCash = entryArmed
-    ? state.selectedMethod === "cash"
-    : state.cashAvailable === true;
-  // 主按钮上带本次金额，按之前再确认一眼；手动刷卡固定为全部剩余应付。
-  const submitAmountCents = !entryArmed
-    ? null
-    : salesManualCard
-      ? state.remaining.cents
-      : (parseAudInput(state.amountText)?.cents ?? null);
-  // 未点选付款方式时按钮文案不跟随 presenter 的默认选择，避免暗示已经选好了方式。
-  const submitBaseLabel =
-    entryArmed && salesManualCard
-      ? t("manualCard.confirm")
-      : entryArmed &&
-          state.checkout.flow === "installment-repayment" &&
-          state.selectedMethod === "cash"
-        ? t("action.prepareCashRepayment")
-        : state.orderGuid
-          ? t("action.addTender")
-          : t("action.pay");
-  const submitLabel =
-    submitAmountCents === null
-      ? submitBaseLabel
-      : `${submitBaseLabel} · ${formatAud(submitAmountCents, locale)}`;
-
-  return (
-    <View
-      style={[
-        styles.entryPane,
-        narrow && styles.entryPaneNarrow,
-        compact && styles.entryPaneCompact,
-      ]}
-      testID="payment-entry-pane"
-    >
-      <PosKeyboardAwareScrollView
-        contentContainerStyle={styles.entryScrollContent}
-        nestedScrollEnabled
-        scrollEnabled
-        style={[
-          styles.entryScroll,
-          compact && styles.entryScrollCompact,
-        ]}
-        testID="payment-entry-scroll"
-      >
-        {showEntry ? (
-          <View style={styles.form} testID="payment-entry-form">
-            <View
-              style={[
-                styles.amountBox,
-                entryArmed && styles.amountBoxArmed,
-              ]}
-            >
-              <View style={styles.amountBoxMeta}>
-                <Text numberOfLines={1} style={styles.amountBoxLabel}>
-                  {entryArmed && state.selectedMethod
-                    ? `${t("amount.label")} · ${t(
-                        paymentMethodCopyKey(state.selectedMethod),
-                      )}`
-                    : t("amount.label")}
-                </Text>
-                {entryArmed ? (
-                  // 退出本次录入（等同原金额弹窗的关闭）：不发起付款，也不取消订单。
-                  <ActionButton
-                    disabled={state.busy}
-                    icon="close"
-                    label={t("entry.cancel")}
-                    onPress={onCancelEntry}
-                    size="small"
-                    sound="danger"
-                    testID="payment-entry-cancel"
-                    tone="quiet"
-                  />
-                ) : null}
-              </View>
-              <View style={styles.amountValueRow}>
-                <Text
-                  style={[
-                    styles.amountCurrency,
-                    !entryArmed && styles.amountCurrencyIdle,
-                  ]}
-                >
-                  $
-                </Text>
-                <PosTextInput
-                  accessibilityLabel={t("amount.label")}
-                  editable={entryArmed && !state.busy && !salesManualCard}
-                  keyboardType="decimal-pad"
-                  onChangeText={(value) => presenter.setAmountText(value)}
-                  placeholder="0.00"
-                  placeholderTextColor={posColors.placeholder}
-                  selectionColor={posColors.blue}
-                  showSoftInputOnFocus={false}
-                  style={styles.amountInput}
-                  testID="payment-amount"
-                  value={
-                    !entryArmed
-                      ? ""
-                      : salesManualCard
-                        ? (state.remaining.cents / 100).toFixed(2)
-                        : state.amountText
-                  }
-                />
-              </View>
-            </View>
-            <Text style={styles.inputHint}>
-              {t(
-                !entryArmed
-                  ? "entry.selectMethodFirst"
-                  : salesManualCard
-                    ? "manualCard.amountHint"
-                    : "amount.hint",
-              )}
-            </Text>
-
-            {entryArmed && state.selectedMethod === "voucher" ? (
-              <View
-                key={state.sensitiveInputRevision}
-                style={styles.voucherInputGroup}
-              >
-                <Text style={styles.inputLabel}>
-                  {t("voucher.label")}
-                </Text>
-                <PosKeyboardAwareTextInput
-                  accessibilityLabel={t("voucher.label")}
-                  autoCapitalize="characters"
-                  autoCorrect={false}
-                  editable={!state.busy}
-                  onChangeText={(value) =>
-                    presenter.setVoucherCode(value)
-                  }
-                  placeholder={t("voucher.placeholder")}
-                  placeholderTextColor={posColors.placeholder}
-                  secureTextEntry
-                  selectionColor={posColors.blue}
-                  style={styles.voucherInput}
-                  testID="payment-voucher-code"
-                />
-                {state.voucherCaptured ? (
-                  <Text
-                    style={styles.secureCapture}
-                    testID="payment-voucher-captured"
-                  >
-                    {t("voucher.captured")}
-                  </Text>
-                ) : null}
-              </View>
-            ) : null}
-
-            {manualCardEntry ? (
-              <View style={styles.manualCardConfirmation} testID="payment-manual-card-confirmation">
-                <Text style={styles.manualCardInstructions}>{t("manualCard.instructions")}</Text>
-                <PosPressable
-                  accessibilityRole="checkbox"
-                  accessibilityLabel={t("manualCard.checked")}
-                  accessibilityState={{ checked: state.manualCardConfirmed === true, disabled: state.busy }}
-                  disabled={state.busy}
-                  onPress={() => presenter.setManualCardConfirmed?.(state.manualCardConfirmed !== true)}
-                  sound="key"
-                  style={({ pressed }) => [
-                    styles.manualCardCheckRow,
-                    state.manualCardConfirmed === true && styles.manualCardCheckRowChecked,
-                    pressed && styles.pressed,
-                  ]}
-                  testID="payment-manual-card-check"
-                >
-                  <MaterialCommunityIcons
-                    accessible={false}
-                    color={state.manualCardConfirmed === true ? posColors.green : posColors.mutedInk}
-                    name={state.manualCardConfirmed === true ? "checkbox-marked" : "checkbox-blank-outline"}
-                    size={34}
-                  />
-                  <Text style={styles.manualCardCheckLabel}>{t("manualCard.checked")}</Text>
-                </PosPressable>
-                <Text style={styles.inputHint}>{t("manualCard.uncertain")}</Text>
-              </View>
-            ) : (
-              <Fragment>
-                {showQuickCash ? (
-                  <View
-                    style={styles.quickCashRow}
-                    testID="payment-cash-quick"
-                  >
-                    {QUICK_CASH_NOTES.map((amount) => (
-                      <QuickCashButton
-                        amount={amount}
-                        disabled={
-                          !entryArmed ||
-                          state.busy ||
-                          isQuickCashSufficient(
-                            state.amountText,
-                            lastQuickCashText.current,
-                            state.remaining,
-                          )
-                        }
-                        key={amount}
-                        onPress={() => {
-                          const next = nextQuickCashAmountText(
-                            state.amountText,
-                            lastQuickCashText.current,
-                            amount,
-                          );
-                          lastQuickCashText.current = next;
-                          presenter.setAmountText(next);
-                        }}
-                      />
-                    ))}
-                  </View>
-                ) : null}
-                <PaymentKeypad
-                  amountText={state.amountText}
-                  disabled={!entryArmed || state.busy}
-                  onChange={(value) => presenter.setAmountText(value)}
-                />
-              </Fragment>
-            )}
-          </View>
-        ) : null}
-
-        {state.checkout.cash.tenderedCents > 0 ? (
-          // 实收与找零只显示 presenter 给出的结算结果，界面不自己估算（普通销售按五分取整，分期不取整）。
-          <View style={styles.cashSettlement} testID="payment-cash-settlement">
-            <SummaryAmount
-              label={locale === "zh" ? "实收现金" : "Cash tendered"}
-              locale={locale}
-              value={state.checkout.cash.tenderedCents}
-            />
-            <SummaryAmount
-              label={locale === "zh" ? "入账金额" : "Applied"}
-              locale={locale}
-              testID="payment-cash-applied"
-              value={state.checkout.cash.appliedCents}
-            />
-            <SummaryAmount
-              emphasis
-              label={locale === "zh" ? "找零" : "Change"}
-              locale={locale}
-              testID="payment-change"
-              value={state.checkout.cash.changeCents}
-            />
-          </View>
-        ) : null}
-
-        <LinklyControls presenter={presenter} state={state} t={t} />
-      </PosKeyboardAwareScrollView>
-
-      {state.fieldIssue ? (
-        <Text
-          accessibilityRole="alert"
-          style={styles.fieldError}
-          testID="payment-field-error"
-        >
-          {t(paymentFieldIssueCopyKey(state.fieldIssue))}
-        </Text>
-      ) : null}
-
-      {flags.hasDockActions || showFooter ? (
-        <View
-          style={styles.summaryActionDock}
-          testID="payment-summary-action-dock"
-        >
-          <RecoveryActions
-            onCancelPreparedCash={onCancelPreparedCash}
-            presenter={presenter}
-            primary={primaryOwner === "recovery"}
-            state={state}
-            t={t}
-          />
-          {showFooter ? (
-            <View style={styles.summaryFooter} testID="payment-summary-footer">
-              {state.checkout.preparedCollection === "manual-card" ? (
-                <Text style={styles.preparedHint} testID="payment-manual-card-prepared-hint">
-                  {t("installmentManualCard.prepared")}
-                </Text>
-              ) : null}
-              {showConfirmation ? (
-                <ActionButton
-                  disabled={state.busy}
-                  icon="check-circle"
-                  label={
-                    state.checkout.cashRepaymentStatus === "ready" ||
-                    state.checkout.cashRepaymentStatus === "confirming"
-                      ? t(confirmCollectionLabelKey(state))
-                      : locale === "zh"
-                        ? "确认分期付款"
-                        : "Confirm lay-by payment"
-                  }
-                  onPress={onConfirm}
-                  size="primary"
-                  sound="danger"
-                  testID="payment-confirm"
-                  tone="primary"
-                />
-              ) : null}
-              {showPreparedCashCancellationInFooter ? (
-                <ActionButton
-                  disabled={state.busy}
-                  label={t(cancelPreparedLabelKey(state))}
-                  onPress={onCancelPreparedCash}
-                  size="button"
-                  sound="danger"
-                  testID="payment-cancel-prepared-cash"
-                  tone="danger"
-                />
-              ) : null}
-            </View>
-          ) : null}
-        </View>
-      ) : null}
-
-      {showEntry ? (
-        <View style={styles.formActions} testID="payment-entry-actions">
-          <ActionButton
-            disabled={
-              !entryArmed ||
-              state.busy ||
-              !state.selectedMethod ||
-              !canSubmitPaymentMethod(state, state.selectedMethod)
-            }
-            icon="check-circle"
-            label={submitLabel}
-            onPress={onSubmit}
-            size={primaryOwner === "submit" ? "primary" : "large"}
-            testID="payment-submit"
-            tone={primaryOwner === "submit" ? "primary" : "secondary"}
-          />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-/** 分期开关：放在付款方式网格里，和其他付款方式同一尺寸。 */
+/** 分期开关：付款方式卡底部的一行，左侧文字、右侧开关。 */
 function PaymentInstallmentToggle({
   control,
   t,
@@ -2160,196 +3117,64 @@ function PaymentInstallmentToggle({
 }>) {
   usePosThemeVersion();
   return (
-    <Fragment>
-      <PosPressable
-        accessibilityLabel={t("installment.toggle")}
-        accessibilityRole="switch"
-        accessibilityState={{
-          checked: control.enabled,
-          disabled: control.locked,
-        }}
-        disabled={control.locked}
-        onPress={() => control.onToggle(!control.enabled)}
-        style={({ pressed }) => [
-          styles.methodButton,
-          control.locked && styles.methodButtonDisabled,
-          pressed && !control.locked && styles.pressed,
+    <PosPressable
+      accessibilityLabel={t("installment.toggle")}
+      accessibilityRole="switch"
+      accessibilityState={{
+        checked: control.enabled,
+        disabled: control.locked,
+      }}
+      disabled={control.locked}
+      onPress={() => control.onToggle(!control.enabled)}
+      style={({ pressed }) => [
+        styles.installmentToggle,
+        control.locked && styles.installmentToggleLocked,
+        pressed && !control.locked && styles.pressed,
+      ]}
+      testID="payment-installment-toggle"
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={control.locked ? posColors.disabledInk : posColors.mutedInk}
+        name="calendar-month-outline"
+        size={22}
+      />
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.installmentToggleText,
+          control.locked && styles.methodTextDisabled,
         ]}
-        testID="payment-installment-toggle"
       >
-        <MaterialCommunityIcons
-          accessible={false}
-          color={control.locked ? posColors.disabledInk : posColors.ink}
-          name="calendar-month-outline"
-          size={34}
-        />
-        <View style={styles.methodCopy}>
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.methodButtonText,
-              control.locked && styles.methodTextDisabled,
-            ]}
-          >
-            {t("installment.toggle")}
-          </Text>
-          <Text
-            numberOfLines={2}
-            style={[
-              styles.methodHint,
-              control.locked && styles.methodTextDisabled,
-            ]}
-          >
-            {t("installment.toggleHint")}
-          </Text>
-        </View>
+        {t("installment.toggle")}
+      </Text>
+      <View
+        style={[
+          styles.installmentToggleTrack,
+          control.enabled && styles.installmentToggleTrackEnabled,
+        ]}
+      >
         <View
           style={[
-            styles.installmentToggleTrack,
-            control.enabled && styles.installmentToggleTrackEnabled,
+            styles.installmentToggleThumb,
+            control.enabled && styles.installmentToggleThumbEnabled,
           ]}
-        >
-          <View
-            style={[
-              styles.installmentToggleThumb,
-              control.enabled && styles.installmentToggleThumbEnabled,
-            ]}
-          />
-        </View>
-      </PosPressable>
-      {control.issue ? (
-        <Text
-          accessibilityRole="alert"
-          style={styles.installmentToggleIssue}
-        >
-          {t("installment.unavailable")}
-        </Text>
-      ) : null}
-    </Fragment>
-  );
-}
-
-const KEYPAD_ROWS = [
-  ["1", "2", "3"],
-  ["4", "5", "6"],
-  ["7", "8", "9"],
-  [".", "0", "backspace"],
-] as const;
-
-function PaymentKeypad({
-  amountText,
-  disabled,
-  onChange,
-}: Readonly<{
-  amountText: string;
-  disabled: boolean;
-  onChange(value: string): void;
-}>) {
-  usePosThemeVersion();
-  return (
-    <View style={styles.keypad} testID="payment-keypad">
-      {KEYPAD_ROWS.map((row) => (
-        <View key={row[0]} style={styles.keypadRow}>
-          {row.map((key) => (
-            <PosPressable
-              // 退格键改成图标后没有文字，沿用原来的符号作为朗读内容。
-              {...(key === "backspace" ? { accessibilityLabel: "⌫" } : {})}
-              accessibilityRole="button"
-              disabled={disabled}
-              key={key}
-              onPress={() =>
-                onChange(nextKeypadAmount(amountText, key))
-              }
-              sound={key === "backspace" ? "danger" : "key"}
-              style={({ pressed }) => [
-                styles.keypadKey,
-                disabled && styles.keypadKeyDisabled,
-                pressed && !disabled && styles.pressed,
-              ]}
-              testID={`payment-key-${
-                key === "." ? "decimal" : key
-              }`}
-            >
-              {key === "backspace" ? (
-                <MaterialCommunityIcons
-                  accessible={false}
-                  color={disabled ? posColors.disabledInk : posColors.ink}
-                  name="backspace-outline"
-                  size={30}
-                />
-              ) : (
-                <Text
-                  style={[
-                    styles.keypadKeyText,
-                    disabled && styles.keypadKeyTextDisabled,
-                  ]}
-                >
-                  {key}
-                </Text>
-              )}
-            </PosPressable>
-          ))}
-        </View>
-      ))}
-    </View>
-  );
-}
-
-/** 纸币快捷键：底色对应真实纸币颜色，不随主题变化。 */
-function QuickCashButton({
-  amount,
-  disabled,
-  onPress,
-}: Readonly<{
-  amount: (typeof QUICK_CASH_NOTES)[number];
-  disabled: boolean;
-  onPress(): void;
-}>) {
-  usePosThemeVersion();
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      onPress={onPress}
-      sound="key"
-      style={({ pressed }) => [
-        styles.quickCashButton,
-        quickCashNoteStyle(amount),
-        disabled && styles.disabled,
-        pressed && !disabled && styles.pressed,
-      ]}
-      testID={`payment-cash-quick-${amount}`}
-    >
-      <Text style={styles.quickCashNoteText}>{`$${amount}`}</Text>
+        />
+      </View>
     </PosPressable>
   );
 }
 
-function quickCashNoteStyle(
-  amount: (typeof QUICK_CASH_NOTES)[number],
-): ViewStyle {
-  switch (amount) {
-    case 5:
-      return styles.quickCashNote5;
-    case 10:
-      return styles.quickCashNote10;
-    case 20:
-      return styles.quickCashNote20;
-    case 50:
-      return styles.quickCashNote50;
-    case 100:
-      return styles.quickCashNote100;
-  }
-}
-
+/** 已添加支付的一行：行高 ≥ 64，可撤销的右侧是 56×56 删除键，不可撤销的显示锁形。 */
 function TenderRow({
+  cashTenderedCents,
   locale,
   onRemove,
   state,
   tender,
   t,
 }: Readonly<{
+  cashTenderedCents: number | null;
   locale: PaymentLocale;
   onRemove(): void;
   state: PaymentPresenterState;
@@ -2357,41 +3182,88 @@ function TenderRow({
   t: Translate;
 }>) {
   usePosThemeVersion();
+  const removeDisabled = !state.allowedActions.removeTender || state.busy;
+  const label =
+    tender.method === "cash"
+      ? t("tile.cash")
+      : tender.method === "voucher"
+        ? t("tile.voucher")
+        : tender.provider && tender.provider !== "manual-card"
+          ? `${t("tile.card")} · ${t(paymentMethodCopyKey(tender.provider))}`
+          : tender.provider === "manual-card"
+            ? t("tile.manualCard")
+            : t("tile.card");
   return (
-    <View
-      style={styles.tenderRow}
-      testID={`payment-tender-${tender.tenderGuid}`}
-    >
+    <View style={styles.tenderRow} testID={`payment-tender-${tender.tenderGuid}`}>
+      <MaterialCommunityIcons
+        accessible={false}
+        color={
+          tender.method === "cash"
+            ? posColors.green
+            : tender.method === "voucher"
+              ? posColors.yellowInk
+              : posColors.blue
+        }
+        name={
+          tender.method === "cash"
+            ? "cash"
+            : tender.method === "voucher"
+              ? "ticket-percent-outline"
+              : "credit-card-outline"
+        }
+        size={22}
+      />
       <View style={styles.tenderIdentity}>
-        <Text style={styles.tenderMethod}>
-          {t(
-            tender.method === "card"
-              ? "method.card"
-              : paymentMethodCopyKey(tender.method),
-          )}
+        <Text numberOfLines={1} style={styles.tenderMethod}>
+          {label}
         </Text>
-        <Text style={styles.tenderDisposition}>
-          {t(
-            tender.reversible
-              ? "summary.reversible"
-              : "summary.locked",
-          )}
+        <Text numberOfLines={1} style={styles.tenderDisposition}>
+          {cashTenderedCents !== null
+            ? t("tenders.cashTendered", {
+                amount: formatAud(cashTenderedCents, locale),
+              })
+            : t(tender.reversible ? "summary.reversible" : "summary.locked")}
         </Text>
       </View>
       <Text style={styles.tenderAmount}>
         {formatAud(tender.amount.cents, locale)}
       </Text>
       {tender.reversible ? (
-        <ActionButton
-          disabled={!state.allowedActions.removeTender || state.busy}
-          label={t("action.remove")}
+        <PosPressable
+          accessibilityLabel={t("action.remove")}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: removeDisabled }}
+          disabled={removeDisabled}
           onPress={onRemove}
-          size="small"
           sound="danger"
+          style={({ pressed }) => [
+            styles.tenderRemove,
+            removeDisabled && styles.keyDisabled,
+            pressed && !removeDisabled && styles.pressed,
+          ]}
           testID={`payment-remove-${tender.tenderGuid}`}
-          tone="quiet"
-        />
-      ) : null}
+        >
+          <MaterialCommunityIcons
+            accessible={false}
+            color={removeDisabled ? posColors.disabledInk : posColors.red}
+            name="trash-can-outline"
+            size={22}
+          />
+        </PosPressable>
+      ) : (
+        <View
+          accessibilityLabel={t("summary.locked")}
+          style={styles.tenderLocked}
+          testID={`payment-tender-locked-${tender.tenderGuid}`}
+        >
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.mutedInk}
+            name="lock-outline"
+            size={20}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -2426,83 +3298,6 @@ function SummaryAmount({
         {formatAud(value, locale)}
       </Text>
     </View>
-  );
-}
-
-function PaymentMethodButton({
-  active,
-  disabled,
-  highlighted,
-  hint,
-  icon,
-  iconColor,
-  label,
-  onPress,
-  testID,
-}: Readonly<{
-  /** presenter 当前选中的付款方式（无障碍 selected 状态沿用它）。 */
-  active: boolean;
-  disabled: boolean;
-  /** 右栏正在为这个方式录入金额。 */
-  highlighted: boolean;
-  hint: string;
-  icon: PosIconName;
-  iconColor: keyof PosPalette;
-  label: string;
-  onPress(): void;
-  testID: string;
-}>) {
-  usePosThemeVersion();
-  return (
-    <PosPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled, selected: active }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.methodButton,
-        highlighted && styles.methodButtonActive,
-        disabled && styles.methodButtonDisabled,
-        pressed && !disabled && styles.pressed,
-      ]}
-      testID={testID}
-    >
-      <MaterialCommunityIcons
-        accessible={false}
-        color={disabled ? posColors.disabledInk : posColors[iconColor]}
-        name={icon}
-        size={34}
-      />
-      <View style={styles.methodCopy}>
-        <Text
-          numberOfLines={1}
-          style={[
-            styles.methodButtonText,
-            disabled && styles.methodTextDisabled,
-          ]}
-        >
-          {label}
-        </Text>
-        <Text
-          numberOfLines={2}
-          style={[
-            styles.methodHint,
-            disabled && styles.methodTextDisabled,
-          ]}
-        >
-          {hint}
-        </Text>
-      </View>
-      {highlighted ? (
-        <MaterialCommunityIcons
-          accessible={false}
-          color={posColors.accent}
-          name="check-circle"
-          size={22}
-          style={styles.methodCheck}
-        />
-      ) : null}
-    </PosPressable>
   );
 }
 
@@ -2544,8 +3339,7 @@ function ActionButton({
 }
 
 /**
- * 恢复类操作的显示条件，左栏的「取消支付」与右栏动作区共用同一份判断，
- * 条件本身与改版前完全一致。
+ * 恢复类操作的显示条件（「已添加支付」卡里的恢复区），条件本身与改版前一致。
  */
 function recoveryActionFlags(
   state: PaymentPresenterState,
@@ -2553,7 +3347,6 @@ function recoveryActionFlags(
 ): Readonly<{
   cashConfirmationRecovery: boolean;
   showPreparedCashCancellation: boolean;
-  showGenericCancellation: boolean;
   showVoidBlockedTenderReversal: boolean;
   hasDockActions: boolean;
 }> {
@@ -2564,8 +3357,6 @@ function recoveryActionFlags(
     state.checkout.cashRepaymentStatus === "ready";
   const showPreparedCashCancellation =
     preparedCashCancellation && state.phase === "recovery-required";
-  const showGenericCancellation =
-    state.allowedActions.cancel && !preparedCashCancellation;
   // Blocked 礼券撤券只能由主管授权作废；没有授权能力时不显示任何可点按钮。
   const showVoidBlockedTenderReversal =
     state.tenderReversalRecovery?.status === "blocked" &&
@@ -2574,7 +3365,6 @@ function recoveryActionFlags(
   return {
     cashConfirmationRecovery,
     showPreparedCashCancellation,
-    showGenericCancellation,
     showVoidBlockedTenderReversal,
     hasDockActions:
       state.allowedActions.recover ||
@@ -2598,13 +3388,6 @@ function statusTone(
   }
   if (phase === "declined" || phase === "cancelled") return "danger";
   return "neutral";
-}
-
-/** 普通销售里的手动刷卡（整笔、勾选确认）；分期续付里的手动刷卡走“准备→确认”，不显示这套输入。 */
-function isSalesManualCard(state: PaymentPresenterState): boolean {
-  return (
-    state.selectedMethod === "manual-card" && state.checkout.flow === "regular"
-  );
 }
 
 /** 已登记、等待收银员确认的收款 tender：现金，或手动刷卡；且不可撤销。 */
@@ -2748,6 +3531,11 @@ function shortIdentifier(value: string): string {
   return value.length > 12 ? `${value.slice(0, 12)}…` : value;
 }
 
+/** 货币前缀（$ 或 AU$）：键盘输入中的金额与格式化金额用同一个货币符号。 */
+function audCurrencyPrefix(locale: PaymentLocale): string {
+  return formatAud(0, locale).replace(/[\d.,\s ]+$/u, "");
+}
+
 export function formatAud(cents: number, locale: PaymentLocale): string {
   return new Intl.NumberFormat(locale === "zh" ? "zh-AU" : "en-AU", {
     style: "currency",
@@ -2813,72 +3601,78 @@ const styles = createPosStyles((colors) => ({
     lineHeight: 22,
   },
 
-  /* ---------- 三栏骨架 ---------- */
+  /* ---------- 三栏网格（28 : 42 : 30，共用行线） ---------- */
   workspace: {
     flex: 1,
     minHeight: 0,
     flexDirection: "row",
-    gap: 12,
   },
   workspaceCompact: {
     flex: 0,
     flexDirection: "column",
+    gap: 12,
   },
-  contextPane: {
-    width: 318,
-    minHeight: 0,
-    gap: 10,
-  },
-  contextPaneNarrow: {
-    width: 270,
-  },
-  contextPaneCompact: {
-    width: "100%",
-    maxHeight: 420,
-  },
-  summaryPane: {
-    flex: 1,
-    minHeight: 0,
+  workspaceColumn: {
     minWidth: 0,
-    gap: 10,
+    flexDirection: "column",
   },
-  summaryPaneCompact: {
-    flex: 0,
+  workspaceLeft: {
+    flex: 28,
   },
-  entryPane: {
-    width: 392,
-    minHeight: 0,
-    gap: 10,
+  workspaceMiddle: {
+    flex: 42,
   },
-  entryPaneNarrow: {
-    width: 350,
+  workspaceRight: {
+    flex: 30,
   },
-  entryPaneCompact: {
-    width: "100%",
-  },
-
-  /* ---------- 左栏：订单明细 ---------- */
-  contextCard: {
-    flex: 1,
-    minHeight: 0,
-    borderRadius: 12,
+  card: {
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
     overflow: "hidden",
   },
-  contextCardHeader: {
-    paddingHorizontal: 14,
+  cardTitle: {
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
+
+  /* ---------- 左栏：订单卡 + 汇总 ---------- */
+  orderCard: {
+    minHeight: 0,
+  },
+  orderCardCompact: {
+    maxHeight: 520,
+  },
+  orderHeader: {
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
+    alignItems: "center",
     gap: 10,
   },
-  contextCardHeading: {
-    flexShrink: 1,
+  orderCount: {
+    flex: 1,
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
+    textAlign: "right",
+  },
+  orderRecoveryEntry: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  orderMeta: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
   },
   contextEyebrow: {
     color: colors.accent,
@@ -2886,12 +3680,6 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "900",
     letterSpacing: 0.7,
     textTransform: "uppercase",
-  },
-  contextListTitle: {
-    marginTop: 2,
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "900",
   },
   orderReference: {
     flexShrink: 1,
@@ -2904,8 +3692,10 @@ const styles = createPosStyles((colors) => ({
     flexGrow: 0,
     flexShrink: 1,
     minHeight: 0,
+    marginTop: 8,
+    borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderColor: colors.border,
     backgroundColor: colors.surfaceAlt,
   },
   customerScrollContent: {
@@ -2965,16 +3755,20 @@ const styles = createPosStyles((colors) => ({
   contextLines: {
     flex: 1,
     minHeight: 0,
+    paddingHorizontal: 14,
+  },
+  contextLinesCompact: {
+    flex: 0,
   },
   contextLine: {
     minHeight: 56,
-    paddingHorizontal: 14,
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    borderStyle: "dashed",
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
   },
   contextLineCopy: {
     flex: 1,
@@ -2986,31 +3780,86 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "700",
   },
   contextLineQuantity: {
-    marginTop: 2,
+    minWidth: 34,
     color: colors.mutedInk,
-    fontSize: 12.5,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "800",
+    textAlign: "center",
     fontVariant: ["tabular-nums"],
   },
   contextLineAmount: {
+    minWidth: 68,
     color: colors.ink,
     fontSize: 15,
-    fontWeight: "800",
+    fontWeight: "900",
+    textAlign: "right",
     fontVariant: ["tabular-nums"],
   },
   contextEmpty: {
-    paddingHorizontal: 14,
     paddingVertical: 18,
     color: colors.mutedInk,
     fontSize: 15,
     lineHeight: 21,
   },
-  contextTotals: {
-    paddingHorizontal: 14,
+  leaveHint: {
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingHorizontal: 10,
     paddingVertical: 8,
+    borderRadius: 9,
+    backgroundColor: colors.yellowSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  leaveHintText: {
+    flex: 1,
+    color: colors.yellowInk,
+    fontSize: 12.5,
+    fontWeight: "800",
+  },
+  orderSummary: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    justifyContent: "center",
+    gap: 2,
+  },
+  orderSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  orderSummaryLabel: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  orderSummaryValue: {
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
+    fontVariant: ["tabular-nums"],
+  },
+  orderSummaryDue: {
+    marginTop: 4,
+    paddingTop: 4,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    backgroundColor: colors.surfaceAlt,
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  orderSummaryDueLabel: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  orderSummaryDueValue: {
+    flexShrink: 1,
+    color: colors.ink,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
   },
   summaryAmountRow: {
     minHeight: 34,
@@ -3040,169 +3889,315 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "900",
   },
 
-  /* ---------- 中栏：剩余应付 + 支付状态 ---------- */
-  dueCard: {
+  /* ---------- 中栏：剩余应付 / 找零 ---------- */
+  amountsRow: {
+    flexDirection: "row",
+  },
+  amountCard: {
     paddingHorizontal: 18,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1.5,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
-    gap: 8,
+    justifyContent: "center",
   },
-  dueCardWarning: {
-    borderColor: colors.yellowBorder,
-    backgroundColor: colors.yellowSoft,
+  remainingCard: {
+    flex: 3,
   },
-  dueCardDanger: {
-    borderColor: colors.redBorder,
-    backgroundColor: colors.redSoft,
+  changeCard: {
+    flex: 2,
   },
-  dueCardSuccess: {
-    borderColor: colors.greenBorder,
-    backgroundColor: colors.greenSoft,
+  // 有找零时找零卡变橙：固定橙色字面量，避免主题把主操作色换掉后找零不再醒目。
+  changeCardActive: {
+    borderColor: "#FDBA74",
+    backgroundColor: "#FFEDD5",
   },
-  dueRow: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  dueLabel: {
-    paddingBottom: 8,
-    color: colors.ink,
-    fontSize: 20,
+  amountCardLabel: {
+    color: colors.mutedInk,
+    fontSize: 14,
     fontWeight: "900",
   },
-  dueAmount: {
-    flexShrink: 1,
+  remainingValue: {
     color: colors.ink,
-    fontSize: 58,
     fontWeight: "900",
-    letterSpacing: -1.5,
-    lineHeight: 62,
-    textAlign: "right",
+    letterSpacing: -1,
     fontVariant: ["tabular-nums"],
   },
-  statusPanel: {
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 14,
-  },
-  statusCopy: {
-    flex: 1,
-  },
-  statusTitle: {
-    color: colors.ink,
-    fontSize: 17,
-    fontWeight: "900",
-  },
-  statusTitleWarning: {
-    color: colors.yellowInk,
-  },
-  statusTitleDanger: {
-    color: colors.red,
-  },
-  statusTitleSuccess: {
+  remainingValuePaid: {
     color: colors.green,
   },
-  statusHint: {
-    marginTop: 2,
+  changeValue: {
     color: colors.mutedInk,
-    fontSize: 13,
-    fontWeight: "600",
-    lineHeight: 18,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
+  changeTextActive: {
+    color: "#C2410C",
   },
 
-  /* ---------- 中栏：付款方式 ---------- */
-  summaryScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  summaryScrollCompact: {
-    flex: 0,
-  },
-  summaryScrollContent: {
-    flexGrow: 1,
-    gap: 8,
-    paddingBottom: 2,
-  },
-  sectionLabel: {
-    paddingHorizontal: 2,
-    color: colors.mutedInk,
-    fontSize: 13,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-  },
-  sectionTitle: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "900",
-  },
-  methodGrid: {
+  /* ---------- 中栏：当前支付金额 + 快捷现金 + 键盘 ---------- */
+  amountRow: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
   },
-  methodButton: {
-    minHeight: 92,
-    minWidth: 150,
-    // 固定两列：落单的最后一块也只占半行，不会被拉成整行宽。
-    maxWidth: "49%",
-    flexGrow: 1,
-    flexBasis: "46%",
+  amountField: {
+    flex: 1,
     paddingHorizontal: 16,
-    paddingVertical: 10,
     borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: colors.border,
+    borderWidth: 2,
+    borderColor: colors.accent,
     backgroundColor: colors.surface,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
   },
-  methodButtonActive: {
-    borderWidth: 2.5,
-    borderColor: colors.accent,
-    backgroundColor: colors.accentSoft,
-  },
-  methodButtonDisabled: {
+  amountFieldDisabled: {
     borderColor: colors.disabledBorder,
     backgroundColor: colors.disabledSurface,
   },
-  methodCopy: {
-    flex: 1,
-    minWidth: 0,
+  amountFieldLabel: {
+    flexShrink: 0,
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
   },
-  methodButtonText: {
+  amountFieldValue: {
+    flex: 1,
     color: colors.ink,
-    fontSize: 19,
+    fontWeight: "900",
+    textAlign: "right",
+    fontVariant: ["tabular-nums"],
+  },
+  amountFieldPlaceholder: {
+    color: colors.disabledInk,
+  },
+  amountCaret: {
+    width: 2,
+    height: "50%",
+    backgroundColor: colors.accent,
+  },
+  backspaceKey: {
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  keyDisabled: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
+  },
+  quickCashRow: {
+    flexDirection: "row",
+  },
+  note: {
+    flex: 1,
+    minWidth: PAYMENT_MIN_TOUCH_TARGET,
+    paddingRight: 10,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    overflow: "hidden",
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  noteDisabled: {
+    opacity: 0.45,
+  },
+  // 斜向深色块叠在浅色底上，模拟纸币的渐变底色。
+  noteShade: {
+    position: "absolute",
+    top: "-70%",
+    right: "-40%",
+    width: "85%",
+    height: "240%",
+    opacity: 0.55,
+    transform: [{ rotate: "28deg" }],
+  },
+  // 仿聚合物纸币的透明窗口。
+  noteWindow: {
+    position: "absolute",
+    left: 8,
+    top: 8,
+    bottom: 8,
+    width: "18%",
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.9)",
+    backgroundColor: "rgba(255,255,255,0.6)",
+  },
+  noteAud: {
+    position: "absolute",
+    top: 6,
+    left: "27%",
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 1,
+    opacity: 0.75,
+  },
+  noteValue: {
+    fontWeight: "900",
+    letterSpacing: -0.5,
+    fontVariant: ["tabular-nums"],
+  },
+  keypad: {
+    flexDirection: "column",
+  },
+  keypadRow: {
+    flexDirection: "row",
+  },
+  keypadKey: {
+    flex: 1,
+    minHeight: PAYMENT_KEY_ROW_MIN,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  keypadClear: {
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
+  },
+  keypadKeyText: {
+    color: colors.ink,
+    fontSize: 30,
+    fontWeight: "900",
+    fontVariant: ["tabular-nums"],
+  },
+  keypadClearText: {
+    color: colors.red,
+    fontSize: 20,
     fontWeight: "900",
   },
-  methodHint: {
-    marginTop: 3,
-    color: colors.mutedInk,
-    fontSize: 12.5,
-    fontWeight: "600",
+  keypadKeyTextDisabled: {
+    color: colors.disabledInk,
+  },
+
+  /* ---------- 右栏：付款方式 ---------- */
+  methodsCard: {
+    padding: 12,
+  },
+  methodsHeader: {
+    minHeight: 24,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  terminalChip: {
+    flexShrink: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: colors.blueSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  terminalChipError: {
+    backgroundColor: colors.redSoft,
+  },
+  terminalChipText: {
+    color: colors.blue,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  terminalChipName: {
+    flexShrink: 1,
+    color: colors.blue,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  terminalChipErrorText: {
+    flexShrink: 1,
+    color: colors.red,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  methodTiles: {
+    flex: 1,
+    minHeight: 0,
+  },
+  methodTilesCompact: {
+    flex: 0,
+  },
+  methodTileRow: {
+    flex: 1,
+    minHeight: PAYMENT_KEY_ROW_MIN,
+    flexDirection: "row",
+  },
+  methodTile: {
+    flex: 1,
+    minHeight: PAYMENT_KEY_ROW_MIN,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+  methodTileCash: {
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
+  },
+  methodTileCard: {
+    borderColor: colors.blueBorder,
+    backgroundColor: colors.blueSoft,
+  },
+  methodTileVoucher: {
+    borderColor: colors.yellowBorder,
+    backgroundColor: colors.yellowSoft,
+  },
+  methodTileDisabled: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
+  },
+  methodTileText: {
+    fontWeight: "900",
+  },
+  methodBadge: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    maxWidth: "70%",
+    paddingHorizontal: 5,
+    borderRadius: 5,
+    backgroundColor: colors.blue,
+  },
+  methodBadgeText: {
+    color: colors.onAccent,
+    fontSize: 11,
+    fontWeight: "900",
   },
   methodTextDisabled: {
     color: colors.disabledInk,
   },
-  methodCheck: {
-    position: "absolute",
-    top: 8,
-    right: 10,
+  installmentToggle: {
+    minHeight: PAYMENT_SMALL_TARGET,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
-  // 开关放在块的右上角（与选中方式的勾同一个位置，不占文字区）：
-  // 块与其他付款方式一样大，半宽里放不下「图标 + 文字 + 开关」三样，并排会把英文挤成 "Lay…"。
+  installmentToggleLocked: {
+    borderColor: colors.disabledBorder,
+    backgroundColor: colors.disabledSurface,
+  },
+  installmentToggleText: {
+    flex: 1,
+    color: colors.mutedInk,
+    fontSize: 14,
+    fontWeight: "800",
+  },
   installmentToggleTrack: {
-    position: "absolute",
-    top: 10,
-    right: 10,
     width: 44,
     height: 26,
     padding: 3,
@@ -3222,63 +4217,33 @@ const styles = createPosStyles((colors) => ({
   installmentToggleThumbEnabled: {
     alignSelf: "flex-end",
   },
-  installmentToggleIssue: {
-    width: "100%",
-    color: colors.red,
-    fontSize: 13,
-    fontWeight: "700",
-    lineHeight: 18,
-  },
-  linklyTerminalPanel: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.blueBorder,
-    backgroundColor: colors.blueSoft,
-  },
-  linklyTerminalTitle: {
-    color: colors.mutedInk,
-    fontSize: 12.5,
-    fontWeight: "800",
-  },
-  linklyTerminalName: {
-    marginTop: 2,
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: "900",
-  },
-  linklyTerminalHint: {
-    marginTop: 2,
-    color: colors.mutedInk,
-    fontSize: 13,
-    fontWeight: "600",
-    lineHeight: 18,
-  },
-  linklyTerminalError: {
-    color: colors.red,
-    fontSize: 15,
-    fontWeight: "800",
-    lineHeight: 21,
-  },
 
-  /* ---------- 中栏：当前付款 ---------- */
-  tenderList: {
+  /* ---------- 右栏：已添加支付 ---------- */
+  tendersCard: {
+    minHeight: 0,
+    padding: 12,
+    gap: 8,
+  },
+  tendersScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  tendersContent: {
+    flexGrow: 1,
+    gap: 8,
+  },
+  tenderRow: {
+    minHeight: 64,
+    paddingLeft: 12,
+    paddingRight: 6,
+    paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
-    overflow: "hidden",
-  },
-  tenderRow: {
-    minHeight: 78,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
+    gap: 10,
   },
   tenderIdentity: {
     flex: 1,
@@ -3286,111 +4251,138 @@ const styles = createPosStyles((colors) => ({
   },
   tenderMethod: {
     color: colors.ink,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "900",
   },
   tenderDisposition: {
     marginTop: 2,
     color: colors.mutedInk,
-    fontSize: 12.5,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "700",
   },
   tenderAmount: {
     color: colors.ink,
-    fontSize: 20,
+    fontSize: 17,
     fontWeight: "900",
     fontVariant: ["tabular-nums"],
+  },
+  tenderRemove: {
+    width: PAYMENT_SMALL_TARGET,
+    height: PAYMENT_SMALL_TARGET,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.redBorder,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tenderLocked: {
+    width: PAYMENT_SMALL_TARGET,
+    height: PAYMENT_SMALL_TARGET,
+    alignItems: "center",
+    justifyContent: "center",
   },
   emptyTenders: {
     flexGrow: 1,
     minHeight: 78,
     padding: 14,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderStyle: "dashed",
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
     alignItems: "center",
     justifyContent: "center",
   },
   emptyTendersText: {
     color: colors.mutedInk,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
+    lineHeight: 22,
     textAlign: "center",
   },
-
-  /* ---------- 右栏：本次金额、纸币快捷键、数字键盘 ---------- */
-  entryScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  entryScrollCompact: {
-    flex: 0,
-  },
-  entryScrollContent: {
-    flexGrow: 1,
-    gap: 10,
-  },
-  form: {
-    flexGrow: 1,
-    gap: 10,
-  },
-  amountBox: {
-    minHeight: 92,
+  cashSettlement: {
     paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingVertical: 4,
     borderRadius: 12,
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    // 上下两行：标签与「退出录入」在上，金额独占整行宽度。
-    // 英文按钮名（Clear entry）比中文长得多，并排会把 $12,345.67 的小数位挤掉。
-    flexDirection: "column",
-    alignItems: "stretch",
-    gap: 4,
+    borderWidth: 1.5,
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
   },
-  amountBoxArmed: {
-    borderColor: colors.borderStrong,
-  },
-  amountBoxMeta: {
+  statusPanel: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: colors.blueBorder,
+    backgroundColor: colors.blueSoft,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    gap: 12,
+  },
+  statusPanelWarning: {
+    borderColor: colors.yellowBorder,
+    backgroundColor: colors.yellowSoft,
+  },
+  statusPanelDanger: {
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
+  },
+  statusPanelSuccess: {
+    borderColor: colors.greenBorder,
+    backgroundColor: colors.greenSoft,
+  },
+  statusCopy: {
+    flex: 1,
+  },
+  statusTitle: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  statusTitleWarning: {
+    color: colors.yellowInk,
+  },
+  statusTitleDanger: {
+    color: colors.red,
+  },
+  statusTitleSuccess: {
+    color: colors.green,
+  },
+  statusWaiting: {
+    marginTop: 2,
+    color: colors.blue,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  statusHint: {
+    marginTop: 2,
+    color: colors.mutedInk,
+    fontSize: 12.5,
+    fontWeight: "700",
+    lineHeight: 18,
+  },
+  fieldError: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.redBorder,
+    backgroundColor: colors.redSoft,
+    color: colors.red,
+    fontSize: 15,
+    fontWeight: "800",
+    lineHeight: 21,
+  },
+  preparedHint: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  recoveryActions: {
     gap: 10,
   },
-  amountBoxLabel: {
-    color: colors.mutedInk,
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  amountValueRow: {
-    alignSelf: "stretch",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-  },
-  amountCurrency: {
+  sectionTitle: {
     color: colors.ink,
-    fontSize: 42,
+    fontSize: 18,
     fontWeight: "900",
-    lineHeight: 48,
-  },
-  amountCurrencyIdle: {
-    color: colors.placeholder,
-  },
-  amountInput: {
-    flexShrink: 1,
-    minWidth: 96,
-    minHeight: 56,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    color: colors.ink,
-    fontSize: 42,
-    fontWeight: "900",
-    letterSpacing: -1,
-    textAlign: "right",
-    fontVariant: ["tabular-nums"],
   },
   inputLabel: {
     color: colors.ink,
@@ -3403,7 +4395,89 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "600",
     lineHeight: 18,
   },
+  linklyPanel: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    gap: 6,
+  },
+  linklyDisplayText: {
+    color: colors.ink,
+    fontSize: 18,
+    fontWeight: "900",
+    lineHeight: 25,
+  },
+  linklyPromptText: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: "700",
+    lineHeight: 21,
+  },
+  linklyKeyGrid: {
+    marginTop: 6,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  linklyConfirmation: {
+    marginTop: 6,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  linklyKey: {
+    flexGrow: 1,
+    flexBasis: "46%",
+  },
+
+  /* ---------- 右栏：完成区 ---------- */
+  finishArea: {
+    justifyContent: "flex-end",
+    gap: 6,
+  },
+  finishLine: {
+    paddingHorizontal: 4,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  finishLineText: {
+    flexShrink: 1,
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  finishLineStatus: {
+    flexShrink: 1,
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+    textAlign: "right",
+  },
+  finishButtons: {
+    flexDirection: "row",
+  },
+  finishCancel: {
+    flex: 1,
+  },
+  finishPrimary: {
+    flex: 1.8,
+  },
+
+  /* ---------- 购物券 / 手动刷卡弹窗 ---------- */
+  modalScroll: {
+    flexGrow: 0,
+    width: "100%",
+    maxWidth: 560,
+  },
+  modalScrollContent: {
+    flexGrow: 0,
+  },
   voucherInputGroup: {
+    marginTop: 14,
     gap: 6,
   },
   voucherInput: {
@@ -3454,163 +4528,6 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "800",
     lineHeight: 24,
   },
-  quickCashRow: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    gap: 8,
-  },
-  quickCashButton: {
-    flexGrow: 1,
-    flexBasis: 0,
-    minWidth: PAYMENT_MIN_TOUCH_TARGET,
-    minHeight: 60,
-    paddingHorizontal: 4,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  // 纸币快捷键对应真实纸币颜色：底色、描边和文字都保持字面量，不随主题变化。
-  quickCashNote5: {
-    backgroundColor: "#E7C5DD",
-    borderColor: "#956485",
-  },
-  quickCashNote10: {
-    backgroundColor: "#B9DCEB",
-    borderColor: "#4F8198",
-  },
-  quickCashNote20: {
-    backgroundColor: "#EDB5AA",
-    borderColor: "#A85848",
-  },
-  quickCashNote50: {
-    backgroundColor: "#F4DB7F",
-    borderColor: "#9C7A18",
-  },
-  quickCashNote100: {
-    backgroundColor: "#B9D8B4",
-    borderColor: "#5C8358",
-  },
-  quickCashNoteText: {
-    color: "#10253A",
-    fontSize: 19,
-    fontWeight: "900",
-    fontVariant: ["tabular-nums"],
-  },
-  keypad: {
-    flexGrow: 1,
-    gap: 10,
-  },
-  keypadRow: {
-    flexGrow: 1,
-    flexBasis: 56,
-    minHeight: 56,
-    maxHeight: 86,
-    flexDirection: "row",
-    gap: 10,
-  },
-  keypadKey: {
-    flex: 1,
-    minHeight: 56,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  keypadKeyDisabled: {
-    borderColor: colors.disabledBorder,
-    backgroundColor: colors.disabledSurface,
-  },
-  keypadKeyText: {
-    color: colors.ink,
-    fontSize: 30,
-    fontWeight: "800",
-    fontVariant: ["tabular-nums"],
-  },
-  keypadKeyTextDisabled: {
-    color: colors.disabledInk,
-  },
-  cashSettlement: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: colors.greenBorder,
-    backgroundColor: colors.greenSoft,
-  },
-  fieldError: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colors.redBorder,
-    backgroundColor: colors.redSoft,
-    color: colors.red,
-    fontSize: 15,
-    fontWeight: "800",
-    lineHeight: 21,
-  },
-
-  /* ---------- 右栏：恢复 / 确认 / 提交 ---------- */
-  summaryActionDock: {
-    flexShrink: 0,
-    gap: 10,
-  },
-  recoveryActions: {
-    gap: 10,
-  },
-  summaryFooter: {
-    gap: 10,
-  },
-  preparedHint: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "700",
-    lineHeight: 22,
-  },
-  formActions: {
-    flexShrink: 0,
-  },
-  linklyPanel: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    gap: 6,
-  },
-  linklyDisplayText: {
-    color: colors.ink,
-    fontSize: 18,
-    fontWeight: "900",
-    lineHeight: 25,
-  },
-  linklyPromptText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "700",
-    lineHeight: 21,
-  },
-  linklyKeyGrid: {
-    marginTop: 6,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  linklyConfirmation: {
-    marginTop: 6,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
-  },
-  linklyKey: {
-    flexGrow: 1,
-    flexBasis: "46%",
-  },
-
   /* ---------- 支付完成 ---------- */
   successLayout: {
     flex: 1,
