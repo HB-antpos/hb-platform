@@ -201,10 +201,10 @@
     {
       "path": "core/sync/hbpos-sync-adapters.ts",
       "package": "pos-sync",
-      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400；员工审计上传白名单新增 CASH_IN / CASH_OUT / CASH_MOVEMENT_VOID（现金进出，服务端白名单已有）；订单上传失败映射中 404 / 405 / 413 / 408 与「2xx 但正文不是 API 信封」按可重试保留待传，只有 400 / 409 / 422 或带业务信封的其它 4xx 才永久拒绝（反向代理配错时积压订单不再被永久作废）",
+      "reason": "人工结案与 provider 终态冲突时必须交回 outbox 重试，不能按业务拒绝永久丢弃订单；历史已付款小数订单仅对专用数量错误保留耐久重试，并携带安全错误码供主管核对；无明细审计上传空数组，避免服务端隐式必填整批 400；员工审计上传白名单新增 CASH_IN / CASH_OUT / CASH_MOVEMENT_VOID（现金进出，服务端白名单已有）；订单上传失败映射中 404 / 405 / 413 / 408 与「2xx 但正文不是 API 信封」按可重试保留待传，只有 400 / 409 / 422 或带业务信封的其它 4xx 才永久拒绝（反向代理配错时积压订单不再被永久作废）；主管结案与支付异常类本地审计不再被判 AUDIT_EVENT_INVALID 永久拒绝：恢复中心主管判定 / 需冲正、退款主管结案上传为 CARD_PAYMENT_SUPERVISOR_RESOLUTION（带 WPF 同口径原因码，需冲正为 Failed 并带实扣金额、通道与交易引用），人工核实收款补完成的 PAYMENT_COMPLETE 按订单映射为销售完成，分期还款卡支付不支持 / 认领待复核上传为 INSTALLMENT_REPAYMENT_COMPLETE + Failed，恢复中心暂存 / 再暂存隔离为本地诊断",
       "baselineCanonicalRuntimeSha256": "1320cf6ac0ade04e774ee613faf5fff1c562384f7e8d6397c3a45a3e3adaac58",
-      "canonicalRuntimeSha256": "f3e15f563c21c944420938ecc2910798e6e7065955537fb6a549c7c0f6870f24",
-      "canonicalTypeSha256": "6b167c7c95bba0fb6b9d61e1844777c335c2995334ac449d43da17a5cc65caa3",
+      "canonicalRuntimeSha256": "b543d92b9999549ff7301e7063d7a47562acf208d43b16e7d5efc5c09faaa299",
+      "canonicalTypeSha256": "bf3a91878d0123a7e83a977f1aca9d58e9be7300614880740d6e0a381425aec1",
       "behaviorTests": [
         {
           "workspace": "apps/pos-ipad",
