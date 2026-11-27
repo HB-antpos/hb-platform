@@ -15,8 +15,8 @@ import {
   type SpecialProductsPresenter,
 } from "@/features/special-products";
 import { usePosSound } from "@/ui/feedback/pos-sound-context";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type SpecialProductsBinding = Readonly<{
@@ -158,7 +158,7 @@ export default function SpecialProductsRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="none" />;
   }
 
   return (

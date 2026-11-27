@@ -87,13 +87,13 @@ jest.mock("@/features/returns", () => {
   };
 });
 
-jest.mock("@/ui/screens/bootstrap-screen", () => {
+jest.mock("@/ui/screens/pos-route-loading-screen", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } =
     jest.requireActual<typeof import("react-native")>("react-native");
   return {
-    BootstrapScreen: () =>
-      React.createElement(Text, { testID: "bootstrap" }, "bootstrap"),
+    PosRouteLoadingScreen: ({ active }: { active: string }) =>
+      React.createElement(Text, { testID: "route-loading" }, active),
   };
 });
 
@@ -121,7 +121,8 @@ test("available 时保持稳定加载占位，异步创建窄 presenter 并在�
   mockCreatePresenter.mockReturnValueOnce(pending.promise);
   const screen = await render(<ReturnsRoute />);
 
-  expect(screen.getByTestId("bootstrap")).toBeTruthy();
+  // 占位提前高亮「退货」：外壳左侧栏不会在 presenter 建好前消失。
+  expect(screen.getByTestId("route-loading").props.children).toBe("returns");
   pending.resolve({ destroy: mockDestroyPresenter });
   await waitFor(() => {
     expect(screen.getByTestId("return-screen")).toBeTruthy();

@@ -14,7 +14,7 @@ import {
   CatalogMaintenancePresenter,
   CatalogMaintenanceScreen,
 } from "@/features/catalog/maintenance";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type CatalogMaintenanceBinding = Readonly<{
@@ -110,7 +110,7 @@ export default function CatalogMaintenanceRoute() {
     return <Redirect href={"/sales" as Href} />;
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="catalog-maintenance" />;
   }
 
   return (

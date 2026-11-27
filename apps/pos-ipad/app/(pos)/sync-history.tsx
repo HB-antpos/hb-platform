@@ -15,7 +15,7 @@ import {
   SyncHistoryScreen,
   type SyncHistoryPresenter,
 } from "@/features/sync-history";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type SyncHistoryPresenterBinding = Readonly<{
@@ -114,7 +114,7 @@ export default function SyncHistoryRoute() {
     return <Redirect href={"/login" as Href} />;
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="sync-history" />;
   }
 
   return (

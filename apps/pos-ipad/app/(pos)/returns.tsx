@@ -23,7 +23,7 @@ import {
 } from "@/features/returns";
 import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 type ReturnPresenterBinding = Readonly<{
@@ -158,7 +158,7 @@ export default function ReturnsRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="returns" />;
   }
 
   return (

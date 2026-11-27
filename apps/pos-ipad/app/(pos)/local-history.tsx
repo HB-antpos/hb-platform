@@ -16,7 +16,7 @@ import {
   type LocalHistoryPresenter,
 } from "@/features/local-history";
 import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type LocalHistoryBinding = Readonly<{
@@ -138,7 +138,7 @@ export default function LocalHistoryRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="local-history" />;
   }
 
   return (

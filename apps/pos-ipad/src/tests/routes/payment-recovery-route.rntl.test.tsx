@@ -71,10 +71,11 @@ jest.mock("@/features/payment-recovery/payment-recovery-screen", () => {
 jest.mock("@/features/payments/runtime/payment-checkout-runtime", () => ({
   PAYMENT_PERMISSION: { view: "Permissions.PosTerminal.Payment.View" },
 }));
-jest.mock("@/ui/screens/bootstrap-screen", () => {
+jest.mock("@/ui/screens/pos-route-loading-screen", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
-  return { BootstrapScreen: () => React.createElement(Text, { testID: "bootstrap" }, "bootstrap") };
+  return { PosRouteLoadingScreen: ({ active }: { active: string }) =>
+      React.createElement(Text, { testID: "route-loading" }, active) };
 });
 beforeEach(() => {
   jest.clearAllMocks();
@@ -123,7 +124,7 @@ test("设备作用域变化清除收银会话", async () => {
 test("服务不可用时显示保留异常提示", async () => {
   delete mockRuntime.services.payments.recoveryCenter;
   const screen = await render(<PaymentRecoveryRoute />);
-  await waitFor(() => expect(screen.queryByTestId("bootstrap")).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId("route-loading")).toBeNull());
   expect(mockScreenProps).toBeNull();
   expect(mockPark).not.toHaveBeenCalled();
 });

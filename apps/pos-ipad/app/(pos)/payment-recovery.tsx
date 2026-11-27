@@ -14,7 +14,7 @@ import { paymentRecoveryText, resolvePaymentRecoveryLocale } from "@/features/pa
 import { PaymentRecoveryScreen } from "@/features/payment-recovery/payment-recovery-screen";
 import { PAYMENT_PERMISSION } from "@/features/payments/runtime/payment-checkout-runtime";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 /** 每次进入重新核实设备与收银员，恢复操作只通过受保护的生产业务接口。 */
@@ -81,7 +81,7 @@ export default function PaymentRecoveryRoute() {
       </PosPressable>
     </View>
   );
-  if (!adapter) return <BootstrapScreen />;
+  if (!adapter) return <PosRouteLoadingScreen active="payment-recovery" />;
   return <PaymentRecoveryScreen service={adapter} onBack={async () => {
     // 只有耐久保存并释放原购物车成功后才离开；失败时保留当前页供核对。
     try { await adapter.startNextSale(); dismissTo("/sales" as Href); } catch { /* adapter 提供本地化错误状态。 */ }

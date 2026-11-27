@@ -255,5 +255,6 @@
   "nav.desc.settings": "打印机、刷卡机、客显等",
   "nav.desc.lock": "锁定收银机",
   "theme.title": "界面主题",
-  "theme.hint": "换主题只改颜色，不影响功能和数据。"
+  "theme.hint": "换主题只改颜色，不影响功能和数据。",
+  "shell.routeLoading": "正在打开…"
 }

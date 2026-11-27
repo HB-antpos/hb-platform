@@ -16,8 +16,8 @@ import {
   type RemoteHistoryPresenter,
 } from "@/features/remote-history";
 import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type RemoteHistoryBinding = Readonly<{
@@ -161,7 +161,7 @@ export default function RemoteHistoryRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="remote-history" />;
   }
 
   return (
