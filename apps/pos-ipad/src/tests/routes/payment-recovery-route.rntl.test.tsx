@@ -3,7 +3,7 @@ import { render, waitFor } from "@testing-library/react-native";
 
 import PaymentRecoveryRoute from "../../../app/(pos)/payment-recovery";
 
-jest.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" } }) }));
+jest.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
 
 let mockRuntime: any;
 let mockActiveCashier: any;
@@ -125,6 +125,8 @@ test("服务不可用时显示保留异常提示", async () => {
   delete mockRuntime.services.payments.recoveryCenter;
   const screen = await render(<PaymentRecoveryRoute />);
   await waitFor(() => expect(screen.queryByTestId("route-loading")).toBeNull());
+  // 不可用页走 PosScreenFrame（在常驻外壳里会登记侧栏），不再是裸 View。
+  expect(screen.getByTestId("payment-recovery-unavailable")).toBeTruthy();
   expect(mockScreenProps).toBeNull();
   expect(mockPark).not.toHaveBeenCalled();
 });

@@ -10,7 +10,6 @@ import {
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 
 import { usePosRuntime } from "@/core/runtime/pos-runtime-context";
 import {
@@ -24,6 +23,7 @@ import {
 import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { createPosStyles, usePosThemeVersion } from "@/ui/theme";
 
 type ReturnPresenterBinding = Readonly<{
@@ -194,7 +194,12 @@ function ReturnRouteError({
   const chinese = language.toLowerCase().startsWith("zh");
   const unavailable = failure === "unavailable";
   return (
-    <SafeAreaView style={styles.safeArea} testID="returns-route-error">
+    // 走 PosScreenFrame：在常驻外壳里登记左侧栏（高亮「退货」），出错时侧栏 / 顶栏也不消失。
+    <PosScreenFrame
+      active="returns"
+      contentStyle={styles.safeArea}
+      testID="returns-route-error"
+    >
       <View accessibilityRole="alert" style={styles.errorPanel}>
         <Text style={styles.eyebrow}>
           {chinese ? "退货工作区" : "RETURNS WORKSPACE"}
@@ -234,7 +239,7 @@ function ReturnRouteError({
           />
         </View>
       </View>
-    </SafeAreaView>
+    </PosScreenFrame>
   );
 }
 

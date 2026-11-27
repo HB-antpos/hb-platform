@@ -15,6 +15,7 @@ import { PaymentRecoveryScreen } from "@/features/payment-recovery/payment-recov
 import { PAYMENT_PERMISSION } from "@/features/payments/runtime/payment-checkout-runtime";
 import { PosPressable } from "@/ui/controls/pos-pressable";
 import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
+import { PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { usePosThemeVersion } from "@/ui/theme";
 
 /** 每次进入重新核实设备与收银员，恢复操作只通过受保护的生产业务接口。 */
@@ -73,13 +74,16 @@ export default function PaymentRecoveryRoute() {
   if (gate === "redirect-index") return <Redirect href={"/" as Href} />;
   if (gate === "redirect-login") return <Redirect href={"/login" as Href} />;
   if (!authorized) return <Redirect href={"/sales" as Href} />;
+  // 走 PosScreenFrame：在常驻外壳里登记左侧栏（高亮「恢复中心」），不可用时侧栏 / 顶栏也不消失。
   if (unavailable) return (
-    <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 20 }}>
-      <Text>{paymentRecoveryText(locale, "state.unavailable")}</Text>
-      <PosPressable onPress={() => dismissTo("/sales" as Href)} accessibilityRole="button" accessibilityLabel={paymentRecoveryText(locale, "action.backShort")} style={{ padding: 20 }}>
-        <Text>{paymentRecoveryText(locale, "action.backShort")}</Text>
-      </PosPressable>
-    </View>
+    <PosScreenFrame active="payment-recovery" testID="payment-recovery-unavailable">
+      <View style={{ flex: 1, padding: 24, justifyContent: "center", gap: 20 }}>
+        <Text>{paymentRecoveryText(locale, "state.unavailable")}</Text>
+        <PosPressable onPress={() => dismissTo("/sales" as Href)} accessibilityRole="button" accessibilityLabel={paymentRecoveryText(locale, "action.backShort")} style={{ padding: 20 }}>
+          <Text>{paymentRecoveryText(locale, "action.backShort")}</Text>
+        </PosPressable>
+      </View>
+    </PosScreenFrame>
   );
   if (!adapter) return <PosRouteLoadingScreen active="payment-recovery" />;
   return <PaymentRecoveryScreen service={adapter} onBack={async () => {

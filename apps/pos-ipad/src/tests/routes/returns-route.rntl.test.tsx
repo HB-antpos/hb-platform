@@ -8,6 +8,13 @@ import { StyleSheet } from "react-native";
 
 import ReturnsRoute from "../../../app/(pos)/returns";
 
+import type { PosNavModel } from "@/ui/shell/pos-app-rail";
+import {
+  PosNavigationContext,
+  type PosNavigationContextValue,
+} from "@/ui/shell/pos-navigation-context";
+import { PosShellChromeStore, PosShellHost } from "@/ui/shell/pos-shell-host";
+
 let mockRuntime: any;
 let mockActiveCashier: any;
 let mockReturnScreenProps: any;
@@ -26,6 +33,22 @@ jest.mock("@/ui/scanner/scanner-route-bridge", () => ({
     mockBleScanOptions = options;
   },
 }));
+
+// 外壳的侧栏 / 顶栏换成假组件：这里只验证出错页向常驻外壳登记了什么。
+jest.mock("@/ui/shell/pos-app-rail", () => {
+  const { Text: MockText } =
+    jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    PosAppRail: (props: { active: string }) => (
+      <MockText testID="mock-rail">{`rail:${props.active}`}</MockText>
+    ),
+  };
+});
+jest.mock("@/ui/shell/status-strip", () => {
+  const { Text: MockText } =
+    jest.requireActual<typeof import("react-native")>("react-native");
+  return { PosStatusStrip: () => <MockText testID="mock-status-strip" /> };
+});
 
 jest.mock("expo-router", () => {
   const React = jest.requireActual<typeof import("react")>("react");
@@ -139,6 +162,36 @@ test("available 时保持稳定加载占位，异步创建窄 presenter 并在�
 
   await screen.unmount();
   expect(mockDestroyPresenter).toHaveBeenCalledTimes(1);
+});
+
+test("在常驻外壳里退货出错页仍登记左侧栏并高亮退货，侧栏不会消失", async () => {
+  mockRuntime = readyRuntime({
+    status: "unavailable",
+    reason: "SUPERVISOR_AUTHENTICATION_MISSING",
+  });
+  const model: PosNavModel = { entries: [], pinned: [] };
+  const navigation: PosNavigationContextValue = {
+    appVersionLabel: null,
+    language: "zh",
+    model,
+    openSales: () => undefined,
+    switchLanguage: () => undefined,
+  };
+  const store = new PosShellChromeStore();
+  const screen = await render(
+    <PosNavigationContext.Provider value={navigation}>
+      <PosShellHost store={store}>
+        <ReturnsRoute />
+      </PosShellHost>
+    </PosNavigationContext.Provider>,
+  );
+
+  await waitFor(() => {
+    expect(screen.getByTestId("returns-route-error")).toBeTruthy();
+  });
+  expect(store.getSnapshot()).toMatchObject({ active: "returns", model });
+  expect(screen.getByTestId("mock-rail")).toHaveTextContent("rail:returns");
+  await screen.unmount();
 });
 
 test("returns unavailable 时显示可恢复错误并允许返回销售", async () => {
