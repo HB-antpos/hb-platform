@@ -63,6 +63,9 @@ test("各主题的正文、主按钮文字和顶栏文字都有足够对比度",
     ["green", "greenSoft", 4],
     ["yellowInk", "yellowSoft", 4.5],
     ["blue", "blueSoft", 4.5],
+    // 主操作色也当文字色用在自己的浅底上（侧栏选中项、选中的快捷折扣），粗体大字按 3:1。
+    ["accent", "accentSoft", 3],
+    ["accent", "selectedSurface", 3],
   ];
 
   for (const themeId of POS_THEME_IDS) {
