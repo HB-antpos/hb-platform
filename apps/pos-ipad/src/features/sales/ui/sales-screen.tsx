@@ -17,7 +17,9 @@ import {
   PanResponder,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
+  type LayoutChangeEvent,
   type ListRenderItemInfo,
   type StyleProp,
   type ViewStyle,
@@ -35,7 +37,6 @@ import {
   applySalesNumberKey,
   SalesNumberKeypad,
   type SalesNumberKey,
-  type SalesNumberKeypadMode,
 } from "./sales-number-keypad";
 import {
   deriveCashDraft,
@@ -93,25 +94,44 @@ import { createPosStyles, posColors, usePosThemeVersion } from "@/ui/theme";
 const CATALOG_VERIFYING_SHOW_DELAY_MS = 300;
 const CATALOG_VERIFYING_MIN_VISIBLE_MS = 500;
 const QUICK_DISCOUNTS = [0, 1_000, 2_000, 3_000, 4_000, 5_000] as const;
-const QUICK_ORDER_DISCOUNTS = [1_000, 2_000, 3_000, 4_000, 5_000] as const;
 const AVERAGE_CART_LINE_HEIGHT = 128;
 const CART_LINE_REMOVE_ACTION_WIDTH = 96;
 const CART_LINE_SWIPE_ACTIVATION_DISTANCE = 12;
+/** 右栏键盘：5 行，行间距 6，右侧动作列宽 104。 */
+const KEYPAD_ROWS = 5;
+const KEYPAD_GAP = 6;
+const KEYPAD_ACTION_COLUMN_WIDTH = 104;
+/** 连续扫码相机占据「交易功能 + 选中行提示条」的位置。 */
+const SELECTION_BAR_HEIGHT = 40;
+/** 窗口高度达到这个值按 13 寸档排版（13 寸横屏 1024，11 寸横屏 834）。 */
+const LARGE_PANE_MIN_WINDOW_HEIGHT = 960;
+/** 重打 / 开箱结果在提示条位置停留的时间，之后自动回到选中行提示。 */
+const UTILITY_RESULT_VISIBLE_MS = 4_000;
 
-type LineEditMode =
-  "quantity" | "price" | "discount-amount" | "discount-percent";
-
-type LineEditState = Readonly<{
-  lineId: string;
-  mode: LineEditMode;
-  replaceOnNextDigit: boolean;
-  value: string;
+/** 右栏各固定行的高度：大屏键更高，剩余高度全部分给键盘。 */
+type FunctionPaneSizes = Readonly<{
+  search: number;
+  functions: number;
+  buffer: number;
+  quickKey: number;
+  gap: number;
 }>;
 
-type OrderEditState = Readonly<{
-  mode: "amount" | "percent";
-  value: string;
-}>;
+const COMPACT_PANE_SIZES: FunctionPaneSizes = {
+  search: 52,
+  functions: 58,
+  buffer: 56,
+  quickKey: 52,
+  gap: 8,
+};
+
+const LARGE_PANE_SIZES: FunctionPaneSizes = {
+  search: 56,
+  functions: 64,
+  buffer: 64,
+  quickKey: 56,
+  gap: 10,
+};
 
 type QuickDiscountScope = "line" | "order";
 
@@ -122,21 +142,23 @@ type QuickDiscountApplied = Readonly<{
   revision: number;
 }>;
 
-/** 选中行在某个编辑项下的初始值：数量 / 单价 / 折扣金额取当前值，折扣百分比留空待输入。 */
-function lineEditDraft(line: CartLine, mode: LineEditMode): LineEditState {
-  return {
-    lineId: line.lineId,
-    mode,
-    replaceOnNextDigit: true,
-    value:
-      mode === "quantity"
-        ? line.quantity
-        : mode === "price"
-          ? formatEditorMoney(line.unitPrice.cents)
-          : mode === "discount-amount"
-            ? formatEditorMoney(line.discount.cents)
-            : "",
-  };
+/**
+ * 键盘列宽：3 个数字列均分「总宽 − 动作列 − 3 个列间距」。
+ * 显式给宽度而不靠 flex 分配剩余空间：第 5 行「无码商品」横跨两格，flex 按内容分配时会和上面几行错位。
+ */
+function salesKeypadDigitWidth(keypadWidth: number): number {
+  return Math.max(
+    MIN_TOUCH_TARGET,
+    Math.floor((keypadWidth - KEYPAD_ACTION_COLUMN_WIDTH - KEYPAD_GAP * 3) / 3),
+  );
+}
+
+/** 键盘行高 = （键盘区高度 − 4 个行间距）÷ 5，不低于 44 的触控下限。 */
+function salesKeypadRowHeight(keypadHeight: number): number {
+  return Math.max(
+    MIN_TOUCH_TARGET,
+    Math.floor((keypadHeight - KEYPAD_GAP * (KEYPAD_ROWS - 1)) / KEYPAD_ROWS),
+  );
 }
 
 export type SalesUtilityActionResult = Readonly<{
@@ -287,13 +309,19 @@ export function SalesScreen({
     quick50: t("keypad.quick50"),
     quick99: t("keypad.quick99"),
   };
-  const [openItemVisible, setOpenItemVisible] = useState(false);
-  const [openItemPrice, setOpenItemPrice] = useState("");
-  const [lineEdit, setLineEdit] = useState<LineEditState | null>(null);
-  const [orderDiscountVisible, setOrderDiscountVisible] = useState(false);
-  const [orderEdit, setOrderEdit] = useState<OrderEditState | null>(null);
   const [clearCartVisible, setClearCartVisible] = useState(false);
-  // 快捷折扣默认作用于选中行；打开「整单折扣」开关后作用于整单。
+  // 右栏键盘只往这个缓冲区里打数，按右列动作键（数量 / 单价 / 折扣 / 无码商品）才生效（对齐 WPF KeypadBuffer）。
+  const [keypadBuffer, setKeypadBuffer] = useState("");
+  const keypadActionPendingRef = useRef(false);
+  // 键盘区实际高度（onLayout 量出）；量出之前各行按 flex 均分。
+  const [keypadHeight, setKeypadHeight] = useState<number | null>(null);
+  const [keypadWidth, setKeypadWidth] = useState<number | null>(null);
+  const { height: windowHeight } = useWindowDimensions();
+  const paneSizes =
+    windowHeight >= LARGE_PANE_MIN_WINDOW_HEIGHT
+      ? LARGE_PANE_SIZES
+      : COMPACT_PANE_SIZES;
+  // 「整单」开关：默认单行；打开后折扣 $ / % 键与快捷折扣作用于整单，用过一次自动回到单行（对齐 WPF ConsumeWholeOrderOperation）。
   const [quickDiscountScope, setQuickDiscountScope] =
     useState<QuickDiscountScope>("line");
   // 购物车快照不记录「打的是哪一档」（整单折扣会摊到各行），
@@ -629,73 +657,17 @@ export function SalesScreen({
     }
   };
 
-  const closeOpenItemInput = (): void => {
-    numericInputModalActiveRef.current = false;
-    notifyManualInputBlurred();
-    dismissPriceTooHighError();
-    setOpenItemVisible(false);
-  };
-
-  // 常驻编辑区没有「关闭」：取消 = 放弃这次输入，回到选中行当前的值。
-  const resetLineEditDraft = (): void => {
-    dismissPriceTooHighError();
-    setLineEdit((current) => {
-      if (!current) return null;
-      const line = presenter
-        .getState()
-        .cart.lines.find((candidate) => candidate.lineId === current.lineId);
-      return line ? lineEditDraft(line, current.mode) : null;
-    });
-  };
-
-  const closeOrderEditInput = (): void => {
-    numericInputModalActiveRef.current = false;
-    notifyManualInputBlurred();
-    setOrderEdit(null);
-  };
-
   const handleCashKey = (key: SalesNumberKey): void => {
     presenter.setCashTenderedText(
       applySalesNumberKey(state.cashTenderedText, key, { mode: "decimal" }),
     );
   };
 
-  const handleOpenItemKey = (key: SalesNumberKey): void => {
-    setOpenItemPrice((current) =>
+  // 键盘数字键：规则照 WPF AppendKeypadBuffer（最多两位小数、「.」只加一次、.50 / .99 只替换小数部分）。
+  const handleKeypadKey = (key: SalesNumberKey): void => {
+    dismissPriceTooHighError();
+    setKeypadBuffer((current) =>
       applySalesNumberKey(current, key, { mode: "decimal" }),
-    );
-  };
-
-  const handleLineEditKey = (key: SalesNumberKey): void => {
-    setLineEdit((current) => {
-      if (!current) return null;
-      const mode: SalesNumberKeypadMode =
-        current.mode === "quantity" ? "integer" : "decimal";
-      const nextValue = applySalesNumberKey(current.value, key, {
-        mode,
-        replaceOnNextDigit: current.replaceOnNextDigit,
-      });
-      // 首次数字用于替换预填值；一旦用户执行实际编辑，后续数字就按位追加。
-      const keepReplaceSelection =
-        key === "decimal" && nextValue === current.value;
-      return {
-        ...current,
-        replaceOnNextDigit: current.replaceOnNextDigit && keepReplaceSelection,
-        value: nextValue,
-      };
-    });
-  };
-
-  const handleOrderEditKey = (key: SalesNumberKey): void => {
-    setOrderEdit((current) =>
-      current
-        ? {
-            ...current,
-            value: applySalesNumberKey(current.value, key, {
-              mode: "decimal",
-            }),
-          }
-        : null,
     );
   };
 
@@ -838,50 +810,90 @@ export function SalesScreen({
       });
   };
 
-  const selectLineEditMode = (mode: LineEditMode): void => {
-    dismissPriceTooHighError();
-    setLineEdit((current) => {
-      if (!current) return null;
-      const line = state.cart.lines.find(
-        (candidate) => candidate.lineId === current.lineId,
-      );
-      return line ? lineEditDraft(line, mode) : null;
+  // 重打 / 开箱结果借用选中行提示条的位置显示，几秒后自动退回，不推挤下面的键盘。
+  useEffect(() => {
+    if (!utilityActionResult) return;
+    const timer = setTimeout(
+      () => setUtilityActionResult(null),
+      UTILITY_RESULT_VISIBLE_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [utilityActionResult]);
+
+  /**
+   * 动作键统一出口：同一时间只跑一个；成功后清空缓冲区（期间又改过输入则保留新输入），
+   * 失败保留缓冲区，错误提示沿用 presenter 写入的 errorCode。
+   */
+  const runKeypadAction = (
+    submittedBuffer: string,
+    submission: Promise<boolean>,
+    onApplied?: () => void,
+  ): void => {
+    keypadActionPendingRef.current = true;
+    void submission
+      .then((applied) => {
+        if (!applied) return;
+        dismissPriceTooHighError();
+        setKeypadBuffer((current) =>
+          current === submittedBuffer ? "" : current,
+        );
+        onApplied?.();
+      })
+      .finally(() => {
+        keypadActionPendingRef.current = false;
+      });
+  };
+
+  // 「数量」：改选中行数量，缓冲区须是正整数（不是正整数时由 presenter 提示 invalid-quantity）。
+  const applyKeypadQuantity = (): void => {
+    const lineId = state.selectedLineId;
+    if (!lineId || keypadActionPendingRef.current) return;
+    const buffer = keypadBuffer;
+    runKeypadAction(
+      buffer,
+      presenter.setLineQuantity(lineId, parsePositiveInteger(buffer) ?? 0),
+    );
+  };
+
+  // 「单价」：改选中行单价；超价上限、权限与主管授权都走 presenter 现有路径。
+  const applyKeypadPrice = (): void => {
+    const lineId = state.selectedLineId;
+    if (!lineId || keypadActionPendingRef.current) return;
+    const buffer = keypadBuffer;
+    runKeypadAction(
+      buffer,
+      presenter.setLineUnitPriceCents(lineId, parseCashInput(buffer) ?? -1),
+    );
+  };
+
+  // 「折扣 $ / 折扣 %」：整单开关关 = 作用于选中行；开 = 作用于整单，成功后开关回到单行（一次性）。
+  const applyKeypadDiscount = (kind: "amount" | "percent"): void => {
+    if (keypadActionPendingRef.current) return;
+    const buffer = keypadBuffer;
+    const wholeOrder = quickDiscountScope === "order";
+    const lineId = state.selectedLineId;
+    if (!wholeOrder && !lineId) return;
+    const value =
+      kind === "amount"
+        ? (parseCashInput(buffer) ?? -1)
+        : (parsePercentageBasisPoints(buffer) ?? -1);
+    const submission = wholeOrder
+      ? kind === "amount"
+        ? presenter.applyOrderDiscountAmountCents(value)
+        : presenter.applyOrderManualDiscountBasisPoints(value)
+      : kind === "amount"
+        ? presenter.applyLineDiscountAmountCents(lineId!, value)
+        : presenter.applyLineManualDiscountBasisPoints(lineId!, value);
+    runKeypadAction(buffer, submission, () => {
+      if (wholeOrder) setQuickDiscountScope("line");
     });
   };
 
-  const submitLineEdit = (): void => {
-    if (!lineEdit) return;
-    let submission: Promise<boolean>;
-    if (lineEdit.mode === "quantity") {
-      submission = presenter.setLineQuantity(
-        lineEdit.lineId,
-        parsePositiveInteger(lineEdit.value) ?? 0,
-      );
-    } else if (lineEdit.mode === "price") {
-      submission = presenter.setLineUnitPriceCents(
-        lineEdit.lineId,
-        parseCashInput(lineEdit.value) ?? -1,
-      );
-    } else if (lineEdit.mode === "discount-amount") {
-      submission = presenter.applyLineDiscountAmountCents(
-        lineEdit.lineId,
-        parseCashInput(lineEdit.value) ?? -1,
-      );
-    } else {
-      submission = presenter.applyLineManualDiscountBasisPoints(
-        lineEdit.lineId,
-        parsePercentageBasisPoints(lineEdit.value) ?? -1,
-      );
-    }
-    const { lineId, mode } = lineEdit;
-    void submission.then((applied) => {
-      if (!applied) return;
-      dismissPriceTooHighError();
-      const line = presenter
-        .getState()
-        .cart.lines.find((candidate) => candidate.lineId === lineId);
-      setLineEdit(line ? lineEditDraft(line, mode) : null);
-    });
+  // 「无码商品」：按缓冲区金额加一件无码商品（权限与上限同原来的输价弹窗）。
+  const applyKeypadOpenItem = (): void => {
+    if (keypadActionPendingRef.current) return;
+    const buffer = keypadBuffer;
+    runKeypadAction(buffer, presenter.addOpenItem(parseCashInput(buffer) ?? 0));
   };
 
   const applyQuickDiscount = (basisPoints: number): void => {
@@ -897,6 +909,12 @@ export function SalesScreen({
         : presenter.applyLineDiscount(lineId!, basisPoints);
     void submission.then((applied) => {
       if (!applied) return;
+      if (scope === "order") {
+        // 整单开关一次性：打完整单折扣回到单行；整单折扣摊到各行，不再高亮某一档。
+        setQuickDiscountScope("line");
+        setQuickDiscountApplied(null);
+        return;
+      }
       setQuickDiscountApplied(
         basisPoints === 0
           ? null
@@ -907,21 +925,6 @@ export function SalesScreen({
               revision: presenter.getState().cart.revision,
             },
       );
-    });
-  };
-
-  const submitOrderEdit = (): void => {
-    if (!orderEdit) return;
-    const submission =
-      orderEdit.mode === "amount"
-        ? presenter.applyOrderDiscountAmountCents(
-            parseCashInput(orderEdit.value) ?? -1,
-          )
-        : presenter.applyOrderManualDiscountBasisPoints(
-            parsePercentageBasisPoints(orderEdit.value) ?? -1,
-          );
-    void submission.then((applied) => {
-      if (applied) closeOrderEditInput();
     });
   };
 
@@ -989,28 +992,6 @@ export function SalesScreen({
   const selectedLine =
     state.cart.lines.find((line) => line.lineId === state.selectedLineId) ??
     null;
-  const selectedLineSignature = selectedLine
-    ? `${selectedLine.lineId}|${selectedLine.quantity}|${selectedLine.unitPrice.cents}|${selectedLine.discount.cents}`
-    : null;
-  useEffect(() => {
-    // 选中行换了，或它的数量 / 单价 / 折扣被别处改了（加减按钮、扫码叠加、快捷折扣）：
-    // 收银员还没在键盘上输入时把编辑值刷新成当前值；已经在输入的不打断。
-    const line =
-      cartLinesRef.current.find(
-        (candidate) => candidate.lineId === state.selectedLineId,
-      ) ?? null;
-    setLineEdit((current) => {
-      if (!line) return null;
-      if (!current || current.lineId !== line.lineId) {
-        return lineEditDraft(line, current?.mode ?? "quantity");
-      }
-      return current.replaceOnNextDigit
-        ? lineEditDraft(line, current.mode)
-        : current;
-    });
-    // 只按签名触发：签名已包含选中行 id 与三项可编辑值。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedLineSignature]);
   useEffect(() => {
     // 购物车清空（结账、挂单、清空）后回到默认的单行模式。
     if (cartEmpty) {
@@ -1265,11 +1246,45 @@ export function SalesScreen({
   const selectedLineNumber = selectedLine
     ? state.cart.lines.indexOf(selectedLine) + 1
     : 0;
+  // 改选中行的动作（数量 / 单价 / 单行折扣 / 删除）：没有选中行时置灰。
   const lineEditorDisabled =
     !selectedLine ||
-    lineEdit === null ||
     !state.capabilities.cartEditing ||
     transactionActionsDisabled;
+  const wholeOrderScope = quickDiscountScope === "order";
+  const keypadBufferEmpty = keypadBuffer.length === 0;
+  const keypadBufferCents = parseCashInput(keypadBuffer);
+  // 数字键只受交易门禁约束：空购物车也要能先输价再点「无码商品」。
+  const keypadInputDisabled = transactionActionsDisabled;
+  const keypadQuantityDisabled = lineEditorDisabled || keypadBufferEmpty;
+  // 单价允许改成 0 元（对齐 WPF：键盘取值只要求 ≥ 0）；只有输入为空 / 非法时置灰。
+  const keypadPriceDisabled =
+    lineEditorDisabled || keypadBufferEmpty || keypadBufferCents === null;
+  const keypadDiscountDisabled =
+    keypadBufferEmpty ||
+    (wholeOrderScope ? cartEditingDisabled : lineEditorDisabled);
+  // 输入为空或 0 时「无码商品」置灰。
+  const keypadOpenItemDisabled =
+    catalogActionsDisabled ||
+    keypadBufferCents === null ||
+    keypadBufferCents <= 0;
+  const keypadRowHeight =
+    keypadHeight === null ? null : salesKeypadRowHeight(keypadHeight);
+  const continuousCameraVisible =
+    cameraScanner?.active === true && cameraScanner.mode === "continuous";
+  const handleKeypadLayout = (event: LayoutChangeEvent): void => {
+    const height = Math.round(event.nativeEvent.layout.height);
+    const width = Math.round(event.nativeEvent.layout.width);
+    setKeypadHeight((current) => (current === height ? current : height));
+    setKeypadWidth((current) => (current === width ? current : width));
+  };
+  const keypadDigitWidth =
+    keypadWidth === null ? null : salesKeypadDigitWidth(keypadWidth);
+  // 「无码商品」= 第 3 列 + 列间距 + 动作列，与上面几行严格对齐。
+  const keypadOpenItemWidth =
+    keypadWidth === null || keypadDigitWidth === null
+      ? null
+      : keypadWidth - keypadDigitWidth * 2 - KEYPAD_GAP * 2;
   const quickDiscountDisabled =
     cartEditingDisabled || (quickDiscountScope === "line" && !selectedLine);
   const quickDiscountBaseCents =
@@ -1520,14 +1535,141 @@ export function SalesScreen({
           </View>
         </View>
 
-        <View style={styles.functionPane} testID="sales-function-pane">
+        {/*
+          右栏不再滚动：搜索行、交易功能、选中行提示条、输入框、快捷折扣都是固定高度，
+          剩余高度全部分给键盘（5 行等高），11 寸屏上键盘不会再滑到快捷折扣后面被盖住。
+        */}
+        <View
+          style={[styles.functionPane, { gap: paneSizes.gap }]}
+          testID="sales-function-pane"
+        >
+          {/*
+            搜索行包在不滚动的键盘感知容器里：唤起系统键盘时仍能把输入框滚到键盘上沿，
+            同时满足「系统软键盘输入都在键盘感知容器内」的约束。
+          */}
           <PosKeyboardAwareScrollView
-            contentContainerStyle={styles.functionScrollContent}
+            contentContainerStyle={styles.searchHostContent}
+            scrollEnabled={false}
             showsVerticalScrollIndicator={false}
-            style={styles.functionScroll}
-            testID="sales-function-scroll"
+            style={[styles.searchHost, { height: paneSizes.search }]}
+            testID="sales-search-keyboard-host"
           >
-            {cameraScanner?.active && cameraScanner.mode === "continuous" ? (
+            <View
+              style={[styles.searchInputRow, { height: paneSizes.search }]}
+              testID="sales-search-input-row"
+            >
+              <View style={styles.searchBox} testID="sales-search-box">
+                <CatalogIconButton
+                  accessibilityLabel={t("catalog.searchAndAdd")}
+                  disabled={catalogActionsDisabled || combinedSearchPending}
+                  icon="magnify"
+                  iconTestID="sales-search-icon"
+                  loading={combinedSearchPending}
+                  onPress={runCombinedProductSearch}
+                  testID="sales-search-button"
+                />
+                <PosKeyboardAwareTextInput
+                  ref={searchInputRef}
+                  accessibilityLabel={t("catalog.searchPlaceholder")}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  editable={!catalogActionsDisabled}
+                  onBlur={handleSearchInputBlur}
+                  onChangeText={(value) => presenter.setQuery(value)}
+                  onFocus={handleSearchInputFocus}
+                  onSubmitEditing={() => {
+                    resetSearchInputToHidMode();
+                    void presenter.addLookupCode();
+                  }}
+                  placeholder={t("catalog.searchPlaceholder")}
+                  placeholderTextColor={posColors.placeholder}
+                  returnKeyType="done"
+                  selectionColor={posColors.accent}
+                  showSoftInputOnFocus={searchSoftInputOnFocus}
+                  style={styles.searchInput}
+                  submitBehavior="blurAndSubmit"
+                  testID="sales-search-input"
+                  value={state.query}
+                />
+                {/* 核验提示放在搜索框里：只占横向空间，出现 / 消失不改变任何一行的高度。 */}
+                {catalogVerifyingVisible ? (
+                  <View
+                    style={styles.verifyingIndicator}
+                    testID="sales-catalog-verifying-indicator"
+                  >
+                    <ActivityIndicator color={posColors.mutedInk} size="small" />
+                    <Text
+                      accessibilityLiveRegion="polite"
+                      numberOfLines={1}
+                      style={styles.verifyingMessage}
+                      testID="sales-catalog-verifying"
+                    >
+                      {t("catalog.verifying")}
+                    </Text>
+                  </View>
+                ) : null}
+                <CatalogIconButton
+                  accessibilityLabel={t("catalog.keyboard")}
+                  disabled={catalogActionsDisabled}
+                  icon="keyboard-outline"
+                  iconTestID="sales-keyboard-icon"
+                  onPress={toggleSearchKeyboard}
+                  testID="sales-show-keyboard"
+                />
+              </View>
+              {cameraScanner ? (
+                cameraScanner.active ? (
+                  // 连续扫码打开时相机键变成「关闭」，单次扫码由弹窗自己关闭。
+                  <SearchRowIconKey
+                    accessibilityLabel={t("catalog.cameraClose")}
+                    disabled={false}
+                    icon="camera-off-outline"
+                    label={t("catalog.cameraClose")}
+                    onPress={cameraScanner.onClose}
+                    size={paneSizes.search}
+                    testID="sales-close-camera-scanner"
+                  />
+                ) : (
+                  <SearchRowIconKey
+                    accessibilityLabel={t("catalog.cameraScanner")}
+                    disabled={catalogActionsDisabled}
+                    icon="camera-outline"
+                    label={t("catalog.cameraShort")}
+                    onPress={openCameraScanner}
+                    size={paneSizes.search}
+                    testID="sales-open-camera-scanner"
+                  />
+                )
+              ) : null}
+              {cameraScanner ? (
+                <SearchRowIconKey
+                  accessibilityLabel={t("catalog.cameraModeSwitch")}
+                  accessibilityValue={t(
+                    cameraScanner.mode === "continuous"
+                      ? "catalog.cameraModeContinuous"
+                      : "catalog.cameraModeSingle",
+                  )}
+                  checked={cameraScanner.mode === "continuous"}
+                  disabled={catalogActionsDisabled}
+                  icon="repeat"
+                  label={t("catalog.cameraModeContinuous")}
+                  onPress={() =>
+                    cameraScanner.onModeChange(
+                      cameraScanner.mode === "continuous"
+                        ? "single"
+                        : "continuous",
+                    )
+                  }
+                  size={paneSizes.search}
+                  testID="sales-camera-mode-toggle"
+                />
+              ) : null}
+            </View>
+          </PosKeyboardAwareScrollView>
+
+          {continuousCameraVisible && cameraScanner ? (
+            // 连续扫码：相机占据「交易功能 + 选中行提示条」的位置，键盘随之变矮。
+            <View style={styles.cameraInlineSlot} testID="sales-camera-inline-slot">
               <CameraScannerInline
                 context="product"
                 onClose={cameraScanner.onClose}
@@ -1535,414 +1677,422 @@ export function SalesScreen({
                 scanner={cameraScanner.scanner}
                 visible
               />
-            ) : (
-              <>
-            <View style={styles.searchInputRow} testID="sales-search-input-row">
-              <PosKeyboardAwareTextInput
-                ref={searchInputRef}
-                accessibilityLabel={t("catalog.searchPlaceholder")}
-                autoCapitalize="none"
-                autoCorrect={false}
-                editable={!catalogActionsDisabled}
-                onBlur={handleSearchInputBlur}
-                onChangeText={(value) => presenter.setQuery(value)}
-                onFocus={handleSearchInputFocus}
-                onSubmitEditing={() => {
-                  resetSearchInputToHidMode();
-                  void presenter.addLookupCode();
-                }}
-                placeholder={t("catalog.searchPlaceholder")}
-                placeholderTextColor={posColors.placeholder}
-                returnKeyType="done"
-                selectionColor={posColors.accent}
-                showSoftInputOnFocus={searchSoftInputOnFocus}
-                style={styles.searchInput}
-                submitBehavior="blurAndSubmit"
-                testID="sales-search-input"
-                value={state.query}
-              />
-              <CatalogIconButton
-                accessibilityLabel={t("catalog.searchAndAdd")}
-                disabled={catalogActionsDisabled || combinedSearchPending}
-                icon="magnify"
-                iconTestID="sales-search-icon"
-                loading={combinedSearchPending}
-                onPress={runCombinedProductSearch}
-                testID="sales-search-button"
-              />
-              <CatalogIconButton
-                accessibilityLabel={t("catalog.keyboard")}
-                disabled={catalogActionsDisabled}
-                icon="keyboard-outline"
-                iconTestID="sales-keyboard-icon"
-                onPress={toggleSearchKeyboard}
-                testID="sales-show-keyboard"
-              />
             </View>
-            <View
-              style={styles.functionSectionHeader}
-              testID="sales-product-entry-header"
-            >
-              <Text style={styles.functionSectionTitle}>
-                {t("functions.productEntry")}
-              </Text>
-              {cameraScanner && !cameraScanner.active ? (
-                // 连续扫码开关挪到标题行右侧，让三个录入按钮并成一行。
-                <View
-                  style={[
-                    styles.cameraModeControl,
-                    catalogActionsDisabled && styles.actionButtonDisabled,
-                  ]}
-                  testID="sales-camera-mode-control"
-                >
-                  <PosSwitch
-                    accessibilityLabel={t("catalog.cameraModeSwitch")}
-                    accessibilityValue={{
-                      text: t(
-                        cameraScanner.mode === "continuous"
-                          ? "catalog.cameraModeContinuous"
-                          : "catalog.cameraModeSingle",
-                      ),
-                    }}
+          ) : (
+            <>
+              <View
+                style={[styles.functionTileRow, { height: paneSizes.functions }]}
+                testID="sales-transaction-functions"
+              >
+                {onOpenSpecialProducts ? (
+                  <FunctionTile
                     disabled={catalogActionsDisabled}
-                    ios_backgroundColor={posColors.border}
-                    onValueChange={(continuous) =>
-                      cameraScanner.onModeChange(
-                        continuous ? "continuous" : "single",
-                      )
-                    }
-                    style={styles.cameraModeSwitch}
-                    testID="sales-camera-mode-toggle"
-                    thumbColor={
-                      cameraScanner.mode === "continuous"
-                        ? posColors.accent
-                        : posColors.surface
-                    }
-                    trackColor={{
-                      false: posColors.border,
-                      true: posColors.accentSoft,
-                    }}
-                    value={cameraScanner.mode === "continuous"}
+                    icon="star-outline"
+                    label={t("catalog.specialProducts")}
+                    onPress={onOpenSpecialProducts}
+                    sound="navigate"
+                    testID="sales-open-special-products"
+                    tone="info"
                   />
-                  <Text
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.75}
-                    numberOfLines={1}
-                    style={[
-                      styles.cameraModeLabel,
-                      cameraScanner.mode === "continuous" &&
-                        styles.cameraModeLabelSelected,
-                      catalogActionsDisabled && styles.actionButtonTextDisabled,
-                    ]}
-                    testID="sales-camera-mode-continuous-label"
-                  >
-                    {t("catalog.cameraModeContinuous")}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            <View style={styles.searchActions} testID="sales-camera-scanner-row">
-              <ActionButton
-                disabled={catalogActionsDisabled}
-                icon="tag-plus-outline"
-                label={t("catalog.openItem")}
-                onPress={() => {
-                  setOpenItemPrice("");
-                  setOpenItemVisible(true);
-                  beginNumericInput();
-                }}
-                sound="navigate"
-                style={styles.searchAction}
-                testID="sales-open-item-button"
-                tone="warning"
-              />
-              {onOpenSpecialProducts ? (
-                <ActionButton
-                  disabled={catalogActionsDisabled}
-                  icon="star-box-outline"
-                  label={t("catalog.specialProducts")}
-                  onPress={onOpenSpecialProducts}
-                  sound="navigate"
-                  style={styles.searchAction}
-                  testID="sales-open-special-products"
-                  tone="info"
-                />
-              ) : null}
-              {cameraScanner && !cameraScanner.active ? (
-                <ActionButton
-                  disabled={catalogActionsDisabled}
-                  icon="camera-outline"
-                  label={t("catalog.cameraScanner")}
-                  onPress={openCameraScanner}
-                  sound="navigate"
-                  style={styles.searchAction}
-                  testID="sales-open-camera-scanner"
-                  tone="secondary"
-                />
-              ) : null}
-            </View>
-              </>
-            )}
-
-            {/* 核验提示放在标题行右侧：这一行高度固定，提示出现 / 消失不会推动下面的交易功能区。 */}
-            <View
-              style={styles.functionSectionHeader}
-              testID="sales-function-section-header"
-            >
-              <Text style={styles.functionSectionTitle}>
-                {t("functions.saleActions")}
-              </Text>
-              {catalogVerifyingVisible ? (
-                <View
-                  style={styles.verifyingIndicator}
-                  testID="sales-catalog-verifying-indicator"
-                >
-                  <ActivityIndicator color={posColors.mutedInk} size="small" />
-                  <Text
-                    accessibilityLiveRegion="polite"
-                    numberOfLines={1}
-                    style={styles.verifyingMessage}
-                    testID="sales-catalog-verifying"
-                  >
-                    {t("catalog.verifying")}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-            <View
-              style={styles.functionTileRow}
-              testID="sales-transaction-functions"
-            >
-              <FunctionTile
-                disabled={
-                  !state.capabilities.hold ||
-                  cartEmpty ||
-                  transactionActionsDisabled
-                }
-                icon="pause-circle-outline"
-                label={t("functions.hold")}
-                onPress={() => {
-                  void presenter.holdCart();
-                }}
-                testID="sales-hold"
-              />
-              <FunctionTile
-                disabled={cartEditingDisabled}
-                icon="percent-outline"
-                label={t("summary.orderDiscount")}
-                onPress={() => setOrderDiscountVisible(true)}
-                sound="navigate"
-                testID="sales-order-discount"
-              />
-              <FunctionTile
-                disabled={
-                  transactionActionsDisabled ||
-                  !onReprintReceipt ||
-                  utilityActionPending !== null
-                }
-                icon="printer-outline"
-                label={
-                  utilityActionPending === "reprint"
-                    ? t("functions.reprinting")
-                    : t("functions.reprintReceipt")
-                }
-                onPress={() => runUtilityAction("reprint", onReprintReceipt)}
-                quiet
-                testID="sales-reprint-receipt"
-              />
-              <FunctionTile
-                disabled={
-                  transactionActionsDisabled ||
-                  !onOpenCashDrawer ||
-                  utilityActionPending !== null
-                }
-                icon="archive-arrow-up-outline"
-                label={
-                  utilityActionPending === "drawer"
-                    ? t("functions.openingDrawer")
-                    : t("functions.openDrawer")
-                }
-                onPress={() => runUtilityAction("drawer", onOpenCashDrawer)}
-                quiet
-                testID="sales-open-cash-drawer"
-              />
-              {onOpenCashMovement ? (
+                ) : null}
                 <FunctionTile
                   disabled={
-                    transactionActionsDisabled || utilityActionPending !== null
+                    !state.capabilities.hold ||
+                    cartEmpty ||
+                    transactionActionsDisabled
                   }
-                  icon="cash-plus"
-                  label={t("functions.cashMovement")}
-                  onPress={onOpenCashMovement}
-                  quiet
-                  sound="navigate"
-                  testID="sales-cash-movement"
+                  icon="pause-circle-outline"
+                  label={t("functions.hold")}
+                  onPress={() => {
+                    void presenter.holdCart();
+                  }}
+                  testID="sales-hold"
                 />
-              ) : null}
-            </View>
-            {utilityActionResult ? (
-              <Text
-                accessibilityLiveRegion="polite"
-                style={[
-                  styles.utilityResult,
-                  utilityActionResult.result.kind !== "completed" &&
-                    styles.utilityResultWarning,
-                ]}
-                testID="sales-utility-action-result"
-              >
-                {t(
-                  utilityResultCopyKey(
-                    utilityActionResult.action,
-                    utilityActionResult.result.kind,
-                  ),
-                )}
-              </Text>
-            ) : null}
-            {/* 常驻编辑区：点购物车某一行 = 选中，在这里直接改数量 / 单价 / 折扣，不再弹窗。 */}
-            <View style={styles.lineEditor} testID="sales-line-editor">
-              <View style={styles.functionSectionHeader}>
-                <Text numberOfLines={1} style={styles.functionSectionTitle}>
-                  {selectedLine
-                    ? `${t("editor.title")} · ${t("cart.lineNumber", {
-                        number: selectedLineNumber,
-                      })}`
-                    : t("editor.title")}
-                </Text>
-                {selectedLine ? (
+                <FunctionTile
+                  disabled={
+                    transactionActionsDisabled ||
+                    !onReprintReceipt ||
+                    utilityActionPending !== null
+                  }
+                  icon="printer-outline"
+                  label={
+                    utilityActionPending === "reprint"
+                      ? t("functions.reprinting")
+                      : t("functions.reprintReceipt")
+                  }
+                  onPress={() => runUtilityAction("reprint", onReprintReceipt)}
+                  testID="sales-reprint-receipt"
+                  tone="quiet"
+                />
+                <FunctionTile
+                  disabled={
+                    transactionActionsDisabled ||
+                    !onOpenCashDrawer ||
+                    utilityActionPending !== null
+                  }
+                  icon="archive-arrow-up-outline"
+                  label={
+                    utilityActionPending === "drawer"
+                      ? t("functions.openingDrawer")
+                      : t("functions.openDrawer")
+                  }
+                  onPress={() => runUtilityAction("drawer", onOpenCashDrawer)}
+                  testID="sales-open-cash-drawer"
+                  tone="quiet"
+                />
+                {onOpenCashMovement ? (
+                  <FunctionTile
+                    disabled={
+                      transactionActionsDisabled || utilityActionPending !== null
+                    }
+                    icon="cash-plus"
+                    label={t("functions.cashMovement")}
+                    onPress={onOpenCashMovement}
+                    sound="navigate"
+                    testID="sales-cash-movement"
+                    tone="quiet"
+                  />
+                ) : null}
+              </View>
+              {/* 选中行提示条：固定 40 高；重打 / 开箱结果、取单恢复提示临时借用这个位置，不推挤键盘。 */}
+              {utilityActionResult ? (
+                <PosPressable
+                  accessibilityLiveRegion="polite"
+                  accessibilityRole="button"
+                  onPress={() => setUtilityActionResult(null)}
+                  sound="navigate"
+                  style={[
+                    styles.selectionBar,
+                    styles.utilityResult,
+                    utilityActionResult.result.kind !== "completed" &&
+                      styles.utilityResultWarning,
+                  ]}
+                  testID="sales-utility-action-result"
+                >
+                  <Text
+                    numberOfLines={2}
+                    style={[
+                      styles.utilityResultText,
+                      utilityActionResult.result.kind !== "completed" &&
+                        styles.utilityResultWarningText,
+                    ]}
+                  >
+                    {t(
+                      utilityResultCopyKey(
+                        utilityActionResult.action,
+                        utilityActionResult.result.kind,
+                      ),
+                    )}
+                  </Text>
+                </PosPressable>
+              ) : state.errorCode === "terminal-recovery-required" &&
+                onOpenHeldOrders ? (
+                <View
+                  style={[styles.selectionBar, styles.selectionBarWarning]}
+                  testID="sales-line-target"
+                >
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.selectionBarText, styles.selectionBarWarningText]}
+                  >
+                    {t("target.recoveryRequired")}
+                  </Text>
+                  <ActionButton
+                    label={t("openItem.resolveRecovery")}
+                    onPress={() => {
+                      presenter.dismissError();
+                      onOpenHeldOrders();
+                    }}
+                    size="small"
+                    sound="navigate"
+                    style={styles.selectionBarAction}
+                    testID="sales-recovery-open-held-orders"
+                    tone="secondary"
+                  />
+                </View>
+              ) : wholeOrderScope ? (
+                <View
+                  style={[styles.selectionBar, styles.selectionBarActive]}
+                  testID="sales-line-target"
+                >
+                  <MaterialCommunityIcons
+                    accessible={false}
+                    color={posColors.accent}
+                    name="receipt"
+                    size={18}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.selectionBarText, styles.selectionBarAccentText]}
+                    testID="sales-line-target-text"
+                  >
+                    {t("target.order", { count: state.cart.lines.length })}
+                  </Text>
+                </View>
+              ) : selectedLine ? (
+                <View
+                  style={[styles.selectionBar, styles.selectionBarActive]}
+                  testID="sales-line-target"
+                >
+                  <Text style={styles.selectionBarNumber}>
+                    {t("cart.lineNumber", { number: selectedLineNumber })}
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={styles.selectionBarText}
+                    testID="sales-line-target-text"
+                  >
+                    {t("target.lineDetail", {
+                      name: selectedLine.displayName,
+                      price: formatAud(selectedLine.unitPrice.cents, locale),
+                      quantity: selectedLine.quantity,
+                    })}
+                  </Text>
                   <ActionButton
                     disabled={lineEditorDisabled}
                     icon="trash-can-outline"
-                    label={t("editLine.remove")}
+                    label={t("target.remove")}
                     onPress={() => {
                       void presenter.removeLine(selectedLine.lineId);
                     }}
                     size="small"
+                    style={styles.selectionBarAction}
                     testID="sales-line-edit-remove"
                     tone="danger"
                   />
-                ) : null}
-              </View>
+                </View>
+              ) : (
+                <View style={styles.selectionBar} testID="sales-line-target">
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.selectionBarText, styles.selectionBarMutedText]}
+                    testID="sales-line-target-text"
+                  >
+                    {t("target.empty")}
+                  </Text>
+                </View>
+              )}
+            </>
+          )}
+
+          {/* 输入框：键盘只往这里打数；连续扫码时让位给相机（键盘此时整块不可用）。 */}
+          {continuousCameraVisible ? null : (
+            <View
+              accessibilityLabel={t("keypad.input")}
+              accessibilityLiveRegion="polite"
+              accessibilityValue={{ text: keypadBuffer || "0" }}
+              accessible
+              style={[styles.keypadBuffer, { height: paneSizes.buffer }]}
+              testID="sales-keypad-buffer"
+            >
+              <Text style={styles.keypadBufferLabel}>{t("keypad.input")}</Text>
               <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.6}
                 numberOfLines={1}
-                style={
-                  selectedLine ? styles.lineEditorName : styles.lineEditorEmpty
-                }
-                testID="sales-line-editor-target"
+                style={[
+                  styles.keypadBufferValue,
+                  keypadBufferEmpty && styles.keypadBufferPlaceholder,
+                ]}
+                testID="sales-keypad-buffer-value"
               >
-                {selectedLine ? selectedLine.displayName : t("editor.empty")}
+                {keypadBuffer || "0"}
               </Text>
-              <View style={styles.editModeRow}>
-                <LineEditModeTile
-                  compact
-                  disabled={lineEditorDisabled}
-                  label={t("editLine.quantity")}
-                  onPress={() => selectLineEditMode("quantity")}
-                  selected={lineEdit?.mode === "quantity"}
-                  testID="sales-line-edit-quantity"
-                  value={selectedLine?.quantity ?? "—"}
+              <View style={styles.keypadBufferCursor} />
+              <PosPressable
+                accessibilityLabel={t("keypad.backspace")}
+                accessibilityRole="button"
+                accessibilityState={{
+                  disabled: keypadInputDisabled || keypadBufferEmpty,
+                }}
+                disabled={keypadInputDisabled || keypadBufferEmpty}
+                onPress={() => handleKeypadKey("backspace")}
+                sound="key"
+                style={({ pressed }) => [
+                  styles.keypadBackspace,
+                  {
+                    height: paneSizes.buffer - 12,
+                    width: paneSizes.buffer - 12,
+                  },
+                  (keypadInputDisabled || keypadBufferEmpty) &&
+                    styles.keypadKeyDisabled,
+                  pressed && styles.actionButtonPressed,
+                ]}
+                testID="sales-keypad-key-backspace"
+              >
+                <MaterialCommunityIcons
+                  accessible={false}
+                  color={posColors.red}
+                  name="backspace-outline"
+                  size={22}
                 />
-                <LineEditModeTile
-                  compact
-                  disabled={lineEditorDisabled}
-                  label={t("editLine.price")}
-                  onPress={() => selectLineEditMode("price")}
-                  selected={lineEdit?.mode === "price"}
-                  testID="sales-line-edit-price"
-                  value={
-                    selectedLine
-                      ? formatAud(selectedLine.unitPrice.cents, locale)
-                      : "—"
-                  }
-                />
-                <LineEditModeTile
-                  compact
-                  disabled={lineEditorDisabled}
-                  label={t("editLine.discountAmount")}
-                  onPress={() => selectLineEditMode("discount-amount")}
-                  selected={lineEdit?.mode === "discount-amount"}
-                  testID="sales-line-edit-discount-amount"
-                  tone={
-                    selectedLine && selectedLine.discount.cents > 0
-                      ? "danger"
-                      : "default"
-                  }
-                  value={
-                    selectedLine && selectedLine.discount.cents > 0
-                      ? `−${formatAud(selectedLine.discount.cents, locale)}`
-                      : "—"
-                  }
-                />
-                <LineEditModeTile
-                  compact
-                  disabled={lineEditorDisabled}
-                  label={t("editLine.discountPercent")}
-                  onPress={() => selectLineEditMode("discount-percent")}
-                  selected={lineEdit?.mode === "discount-percent"}
-                  testID="sales-line-edit-discount-percent"
-                  value="%"
-                />
-              </View>
-              <NumericValueDisplay
-                accessibilityLabel={t("editLine.value")}
-                placeholder={
-                  (lineEdit?.mode ?? "quantity") === "quantity" ? "0" : "0.00"
-                }
-                testID="sales-line-edit-value"
-                value={lineEdit?.value ?? ""}
-              />
-              {lineEdit?.mode === "price" &&
-              state.errorCode === "price-too-high" ? (
-                <Text
-                  accessibilityRole="alert"
-                  style={styles.cashError}
-                  testID="sales-line-edit-price-error"
-                >
-                  {t("error.priceTooHigh", ERROR_COPY_VALUES)}
-                </Text>
-              ) : null}
-              <View style={styles.lineEditorKeypadRow}>
-                <View style={styles.lineEditorKeypad}>
-                  <SalesNumberKeypad
-                    compact
-                    disabled={lineEditorDisabled}
-                    labels={keypadLabels}
-                    // 没有选中行时按默认的「数量」显示整数键盘。
-                    mode={
-                      (lineEdit?.mode ?? "quantity") === "quantity"
-                        ? "integer"
-                        : "decimal"
-                    }
-                    onKeyPress={handleLineEditKey}
-                    testIDPrefix="sales-line-edit"
-                  />
-                </View>
-                <View style={styles.lineEditorSideKeys}>
-                  <ActionButton
-                    disabled={lineEditorDisabled}
-                    label={t("discount.cancel")}
-                    onPress={resetLineEditDraft}
-                    sound="navigate"
-                    style={styles.lineEditorCancel}
-                    testID="sales-line-edit-cancel"
-                    tone="secondary"
-                  />
-                  <ActionButton
-                    disabled={lineEditorDisabled}
-                    icon="check"
-                    label={t("editLine.confirm")}
-                    onPress={submitLineEdit}
-                    style={styles.lineEditorConfirm}
-                    testID="sales-line-edit-confirm"
-                  />
-                </View>
-              </View>
+              </PosPressable>
             </View>
-          </PosKeyboardAwareScrollView>
-          {/* 快捷折扣固定在右栏最下方、不随上面滚动：11 寸屏上面一截要滚时它也一直可见，与左侧结算条底部对齐。 */}
+          )}
+
+          {/* 键盘：3 个数字列 + 104 宽动作列，5 行等高，行高 = 剩余高度 ÷ 5。 */}
+          <View
+            onLayout={handleKeypadLayout}
+            style={styles.keypad}
+            testID="sales-keypad"
+          >
+            {(
+              [
+                ["1", "2", "3"],
+                ["4", "5", "6"],
+                ["7", "8", "9"],
+                ["clear", "0", "decimal"],
+              ] as const
+            ).map((digits, rowIndex) => (
+              <View
+                key={rowIndex}
+                style={[
+                  styles.keypadRow,
+                  keypadRowHeight === null
+                    ? styles.keypadRowFlex
+                    : { height: keypadRowHeight },
+                ]}
+                testID={`sales-keypad-row-${rowIndex + 1}`}
+              >
+                {digits.map((key) => (
+                  <KeypadKey
+                    accessibilityLabel={
+                      key === "clear"
+                        ? t("keypad.clear")
+                        : key === "decimal"
+                          ? t("keypad.decimal")
+                          : key
+                    }
+                    disabled={keypadInputDisabled}
+                    key={key}
+                    label={
+                      key === "clear"
+                        ? t("keypad.clear")
+                        : key === "decimal"
+                          ? "."
+                          : key
+                    }
+                    onPress={() => handleKeypadKey(key)}
+                    testID={`sales-keypad-key-${key}`}
+                    tone={key === "clear" ? "clear" : "digit"}
+                    width={keypadDigitWidth}
+                  />
+                ))}
+                {rowIndex === 0 ? (
+                  <KeypadKey
+                    disabled={keypadQuantityDisabled}
+                    label={t("keypad.quantity")}
+                    onPress={applyKeypadQuantity}
+                    testID="sales-keypad-quantity"
+                    tone="action"
+                  />
+                ) : rowIndex === 1 ? (
+                  <KeypadKey
+                    disabled={keypadPriceDisabled}
+                    label={t("keypad.price")}
+                    onPress={applyKeypadPrice}
+                    testID="sales-keypad-price"
+                    tone="action"
+                  />
+                ) : (
+                  <KeypadKey
+                    accessibilityLabel={`${t(
+                      rowIndex === 2
+                        ? "keypad.discountAmount"
+                        : "keypad.discountPercent",
+                    )} · ${t(
+                      wholeOrderScope ? "keypad.scopeOrder" : "keypad.scopeLine",
+                    )}`}
+                    disabled={keypadDiscountDisabled}
+                    label={t(
+                      rowIndex === 2
+                        ? "keypad.discountAmount"
+                        : "keypad.discountPercent",
+                    )}
+                    onPress={() =>
+                      applyKeypadDiscount(rowIndex === 2 ? "amount" : "percent")
+                    }
+                    sublabel={t(
+                      wholeOrderScope ? "keypad.scopeOrder" : "keypad.scopeLine",
+                    )}
+                    testID={
+                      rowIndex === 2
+                        ? "sales-keypad-discount-amount"
+                        : "sales-keypad-discount-percent"
+                    }
+                    tone={wholeOrderScope ? "actionOrder" : "action"}
+                  />
+                )}
+              </View>
+            ))}
+            <View
+              style={[
+                styles.keypadRow,
+                keypadRowHeight === null
+                  ? styles.keypadRowFlex
+                  : { height: keypadRowHeight },
+              ]}
+              testID="sales-keypad-row-5"
+            >
+              <KeypadKey
+                accessibilityLabel={t("keypad.quick50")}
+                disabled={keypadInputDisabled}
+                label=".50"
+                onPress={() => handleKeypadKey("quick-50")}
+                testID="sales-keypad-key-quick-50"
+                tone="quiet"
+                width={keypadDigitWidth}
+              />
+              <KeypadKey
+                accessibilityLabel={t("keypad.quick99")}
+                disabled={keypadInputDisabled}
+                label=".99"
+                onPress={() => handleKeypadKey("quick-99")}
+                testID="sales-keypad-key-quick-99"
+                tone="quiet"
+                width={keypadDigitWidth}
+              />
+              {/* 「无码商品」横跨后两格：输 3.50 → 点它 = 加一件 $3.50 的无码商品。 */}
+              <KeypadKey
+                accessibilityLabel={
+                  keypadOpenItemDisabled || keypadBufferCents === null
+                    ? t("catalog.openItem")
+                    : `${t("catalog.openItem")} ${formatAud(keypadBufferCents, locale)}`
+                }
+                disabled={keypadOpenItemDisabled}
+                icon="tag-outline"
+                label={t("catalog.openItem")}
+                onPress={applyKeypadOpenItem}
+                sound="navigate"
+                testID="sales-keypad-open-item"
+                tone="openItem"
+                width={keypadOpenItemWidth}
+                trailing={
+                  keypadOpenItemDisabled || keypadBufferCents === null
+                    ? null
+                    : formatAud(keypadBufferCents, locale)
+                }
+              />
+            </View>
+          </View>
+
+          {/* 快捷折扣固定在右栏最下方，与左侧结算条底边对齐。 */}
           <View style={styles.quickDiscountSection} testID="sales-quick-discount">
-            <View style={styles.functionSectionHeader}>
-              <Text style={styles.functionSectionTitle}>
+            <View style={styles.quickDiscountHeader}>
+              <Text numberOfLines={1} style={styles.functionSectionTitle}>
                 {t("quickDiscount.title")}
+                <Text
+                  style={styles.quickDiscountTarget}
+                  testID="sales-quick-discount-target"
+                >
+                  {` · ${
+                    wholeOrderScope
+                      ? t("quickDiscount.scopeOrder")
+                      : selectedLine
+                        ? t("cart.lineNumber", { number: selectedLineNumber })
+                        : t("quickDiscount.scopeNone")
+                  }`}
+                </Text>
               </Text>
               <View style={styles.quickDiscountToggle}>
                 <PosSwitch
@@ -1952,47 +2102,30 @@ export function SalesScreen({
                   onValueChange={(order) => {
                     setQuickDiscountScope(order ? "order" : "line");
                   }}
-                  style={styles.cameraModeSwitch}
+                  style={styles.quickDiscountSwitch}
                   testID="sales-quick-discount-order-toggle"
                   thumbColor={
-                    quickDiscountScope === "order"
-                      ? posColors.accent
-                      : posColors.surface
+                    wholeOrderScope ? posColors.accent : posColors.surface
                   }
                   trackColor={{
                     false: posColors.border,
                     true: posColors.accentSoft,
                   }}
-                  value={quickDiscountScope === "order"}
+                  value={wholeOrderScope}
                 />
                 <Text
                   style={[
-                    styles.cameraModeLabel,
-                    quickDiscountScope === "order" &&
-                      styles.cameraModeLabelSelected,
+                    styles.quickDiscountToggleLabel,
+                    wholeOrderScope && styles.quickDiscountToggleLabelSelected,
                   ]}
                 >
                   {t("quickDiscount.orderToggle")}
                 </Text>
               </View>
             </View>
-            <Text
-              numberOfLines={1}
-              style={styles.quickDiscountTarget}
-              testID="sales-quick-discount-target"
+            <View
+              style={[styles.quickDiscountRow, { height: paneSizes.quickKey }]}
             >
-              {quickDiscountScope === "order"
-                ? t("quickDiscount.targetOrder", {
-                    count: state.cart.lines.length,
-                  })
-                : selectedLine
-                  ? t("quickDiscount.targetLine", {
-                      name: selectedLine.displayName,
-                      number: selectedLineNumber,
-                    })
-                  : t("quickDiscount.targetNone")}
-            </Text>
-            <View style={styles.quickDiscountRow}>
               {QUICK_DISCOUNTS.map((basisPoints) => (
                 <QuickDiscountKey
                   disabled={quickDiscountDisabled}
@@ -2019,7 +2152,6 @@ export function SalesScreen({
               ))}
             </View>
           </View>
-
         </View>
       </View>
 
@@ -2342,258 +2474,6 @@ export function SalesScreen({
                 }}
                 style={styles.modalAction}
                 testID="sales-cash-confirm"
-              />
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        animationType="fade"
-        onRequestClose={closeOpenItemInput}
-        presentationStyle="overFullScreen"
-        supportedOrientations={["landscape-left", "landscape-right"]}
-        transparent
-        visible={openItemVisible}
-      >
-        <View style={styles.modalBackdrop}>
-          <PosPressable
-            accessible={false}
-            onPress={closeOpenItemInput}
-            sound="navigate"
-            style={styles.modalDismissArea}
-            testID="sales-open-item-backdrop"
-          />
-          <View
-            accessibilityViewIsModal
-            style={styles.numericModal}
-            testID="sales-open-item-modal"
-          >
-            <Text style={styles.modalTitle}>{t("openItem.title")}</Text>
-            <Text style={styles.discountHint}>{t("openItem.hint")}</Text>
-            <View style={styles.numericEditorBody}>
-              <View style={styles.numericEditorSummary}>
-                <Text style={styles.fieldLabel}>{t("openItem.price")}</Text>
-                <NumericValueDisplay
-                  accessibilityLabel={t("openItem.price")}
-                  placeholder="0.00"
-                  testID="sales-open-item-price"
-                  value={openItemPrice}
-                />
-                {state.errorCode === "terminal-recovery-required" ? (
-                  <Text
-                    accessibilityRole="alert"
-                    style={styles.cashError}
-                    testID="sales-open-item-recovery-error"
-                  >
-                    {t(errorCopyKey(state.errorCode))}
-                  </Text>
-                ) : null}
-                {state.errorCode === "price-too-high" ? (
-                  <Text
-                    accessibilityRole="alert"
-                    style={styles.cashError}
-                    testID="sales-open-item-price-error"
-                  >
-                    {t("error.priceTooHigh", ERROR_COPY_VALUES)}
-                  </Text>
-                ) : null}
-              </View>
-              <View style={styles.numericKeypadColumn}>
-                <SalesNumberKeypad
-                  labels={keypadLabels}
-                  mode="decimal"
-                  onKeyPress={handleOpenItemKey}
-                  testIDPrefix="sales-open-item"
-                />
-              </View>
-            </View>
-            <View style={styles.modalActions}>
-              <ActionButton
-                label={t("discount.cancel")}
-                onPress={closeOpenItemInput}
-                sound="navigate"
-                style={styles.modalAction}
-                testID="sales-open-item-cancel"
-                tone="secondary"
-              />
-              {state.errorCode === "terminal-recovery-required" ? (
-                onOpenHeldOrders ? (
-                  <ActionButton
-                    label={t("openItem.resolveRecovery")}
-                    onPress={() => {
-                      closeOpenItemInput();
-                      onOpenHeldOrders();
-                    }}
-                    sound="navigate"
-                    style={styles.modalAction}
-                    testID="sales-open-item-recovery-action"
-                  />
-                ) : null
-              ) : (
-                <ActionButton
-                  label={t("openItem.confirm")}
-                  onPress={() => {
-                    void presenter
-                      .addOpenItem(parseCashInput(openItemPrice) ?? 0)
-                      .then((added) => {
-                        if (added) closeOpenItemInput();
-                      });
-                  }}
-                  style={styles.modalAction}
-                  testID="sales-open-item-confirm"
-                />
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        animationType="fade"
-        onRequestClose={() => setOrderDiscountVisible(false)}
-        presentationStyle="overFullScreen"
-        supportedOrientations={["landscape-left", "landscape-right"]}
-        transparent
-        visible={orderDiscountVisible}
-      >
-        <View style={styles.modalBackdrop}>
-          <PosPressable
-            accessible={false}
-            onPress={() => setOrderDiscountVisible(false)}
-            sound="navigate"
-            style={styles.modalDismissArea}
-            testID="sales-order-discount-backdrop"
-          />
-          <View
-            accessibilityViewIsModal
-            style={styles.discountModal}
-            testID="sales-order-discount-modal"
-          >
-            <Text style={styles.modalTitle}>{t("orderDiscount.title")}</Text>
-            <Text style={styles.discountHint}>{t("orderDiscount.hint")}</Text>
-            {/*
-              快捷折扣排成一行：按钮样式是 flex: 1（按宽度均分），放进竖排容器时
-              flexBasis 为 0，容器按 0 高度排版，按钮溢出压住下面的「金额 / 百分比 / 取消」。
-            */}
-            <View
-              style={styles.editModeRow}
-              testID="sales-order-discount-presets"
-            >
-              {QUICK_ORDER_DISCOUNTS.map((basisPoints) => (
-                <ActionButton
-                  key={basisPoints}
-                  label={`${basisPoints / 100}%`}
-                  onPress={() => {
-                    void presenter
-                      .applyOrderQuickDiscount(basisPoints)
-                      .then((applied) => {
-                        if (applied) setOrderDiscountVisible(false);
-                      });
-                  }}
-                  style={styles.discountButton}
-                  testID={`sales-order-discount-${basisPoints}`}
-                  tone="secondary"
-                />
-              ))}
-            </View>
-            <View style={styles.modalActions}>
-              <ActionButton
-                label={t("discount.amount")}
-                onPress={() => {
-                  setOrderDiscountVisible(false);
-                  setOrderEdit({ mode: "amount", value: "" });
-                  beginNumericInput();
-                }}
-                sound="navigate"
-                style={styles.modalAction}
-                testID="sales-order-discount-amount"
-                tone="secondary"
-              />
-              <ActionButton
-                label={t("discount.percent")}
-                onPress={() => {
-                  setOrderDiscountVisible(false);
-                  setOrderEdit({ mode: "percent", value: "" });
-                  beginNumericInput();
-                }}
-                sound="navigate"
-                style={styles.modalAction}
-                testID="sales-order-discount-percent"
-                tone="secondary"
-              />
-            </View>
-            <ActionButton
-              label={t("discount.cancel")}
-              onPress={() => setOrderDiscountVisible(false)}
-              sound="navigate"
-              style={styles.modalCancelAction}
-              tone="quiet"
-            />
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        animationType="fade"
-        onRequestClose={closeOrderEditInput}
-        presentationStyle="overFullScreen"
-        supportedOrientations={["landscape-left", "landscape-right"]}
-        transparent
-        visible={orderEdit !== null}
-      >
-        <View style={styles.modalBackdrop}>
-          <PosPressable
-            accessible={false}
-            onPress={closeOrderEditInput}
-            sound="navigate"
-            style={styles.modalDismissArea}
-            testID="sales-order-edit-backdrop"
-          />
-          <View
-            accessibilityViewIsModal
-            style={styles.numericModal}
-            testID="sales-order-edit-modal"
-          >
-            <Text style={styles.modalTitle}>
-              {t("orderDiscount.editTitle")}
-            </Text>
-            <View style={styles.numericEditorBody}>
-              <View style={styles.numericEditorSummary}>
-                <Text style={styles.fieldLabel}>
-                  {orderEdit?.mode === "percent"
-                    ? t("editLine.discountPercent")
-                    : t("editLine.discountAmount")}
-                </Text>
-                <NumericValueDisplay
-                  accessibilityLabel={t("editLine.value")}
-                  placeholder="0.00"
-                  testID="sales-order-edit-value"
-                  value={orderEdit?.value ?? ""}
-                />
-              </View>
-              <View style={styles.numericKeypadColumn}>
-                <SalesNumberKeypad
-                  labels={keypadLabels}
-                  mode="decimal"
-                  onKeyPress={handleOrderEditKey}
-                  testIDPrefix="sales-order-edit"
-                />
-              </View>
-            </View>
-            <View style={styles.modalActions}>
-              <ActionButton
-                label={t("discount.cancel")}
-                onPress={closeOrderEditInput}
-                sound="navigate"
-                style={styles.modalAction}
-                tone="secondary"
-              />
-              <ActionButton
-                label={t("editLine.confirm")}
-                onPress={submitOrderEdit}
-                style={styles.modalAction}
-                testID="sales-order-edit-confirm"
               />
             </View>
           </View>
@@ -3451,93 +3331,33 @@ function ActionButton({
   );
 }
 
-type LineEditModeTileProps = Readonly<{
-  /** 右栏常驻编辑区用矮一点的格子。 */
-  compact?: boolean;
-  disabled?: boolean;
-  label: string;
-  onPress(): void;
-  selected: boolean;
-  testID: string;
-  tone?: "default" | "danger";
-  value: string;
-}>;
-
-/** 编辑项：直接显示这一项现在的值，点一下切换键盘要改的内容。 */
-function LineEditModeTile({
-  compact = false,
-  disabled = false,
-  label,
-  onPress,
-  selected,
-  testID,
-  tone = "default",
-  value,
-}: LineEditModeTileProps) {
-  return (
-    <PosPressable
-      accessibilityLabel={`${label}: ${value}`}
-      accessibilityRole="button"
-      accessibilityState={{ disabled, selected }}
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.editModeButton,
-        compact && styles.editModeButtonCompact,
-        selected && styles.editModeButtonSelected,
-        compact && selected && styles.editModeButtonCompactSelected,
-        disabled && styles.actionButtonDisabled,
-        pressed && !disabled && styles.actionButtonPressed,
-      ]}
-      testID={testID}
-    >
-      <Text
-        numberOfLines={1}
-        style={[
-          styles.editModeLabel,
-          selected && styles.editModeLabelSelected,
-        ]}
-      >
-        {label}
-      </Text>
-      <Text
-        adjustsFontSizeToFit
-        minimumFontScale={0.7}
-        numberOfLines={1}
-        style={[
-          styles.editModeValue,
-          compact && styles.editModeValueCompact,
-          tone === "danger" && styles.discountAmountText,
-        ]}
-      >
-        {value}
-      </Text>
-    </PosPressable>
-  );
-}
-
 type FunctionTileProps = Readonly<{
   disabled: boolean;
   icon: PosIconName;
   label: string;
   onPress(): void;
-  /** 打印、开箱、钱箱这类辅助操作用浅底。 */
-  quiet?: boolean;
   sound?: "tap" | "navigate";
   testID: string;
+  /** quiet：打印、开箱、钱箱这类辅助操作用浅底；info：特殊商品用信息色。 */
+  tone?: "default" | "quiet" | "info";
 }>;
 
-/** 交易功能小按钮：图标在上、文字在下，五个并成一行。 */
+/** 交易功能小按钮：图标在上、文字在下，一排均分宽度，高度跟随所在行。 */
 function FunctionTile({
   disabled,
   icon,
   label,
   onPress,
-  quiet = false,
   sound = "tap",
   testID,
+  tone = "default",
 }: FunctionTileProps) {
   usePosThemeVersion();
+  const inkColor = disabled
+    ? posColors.disabledInk
+    : tone === "info"
+      ? posColors.blue
+      : posColors.ink;
   return (
     <PosPressable
       accessibilityLabel={label}
@@ -3548,7 +3368,8 @@ function FunctionTile({
       sound={sound}
       style={({ pressed }) => [
         styles.functionTile,
-        quiet && styles.functionTileQuiet,
+        tone === "quiet" && styles.functionTileQuiet,
+        tone === "info" && styles.functionTileInfo,
         disabled && styles.actionButtonDisabled,
         pressed && !disabled && styles.actionButtonPressed,
       ]}
@@ -3556,19 +3377,196 @@ function FunctionTile({
     >
       <MaterialCommunityIcons
         accessible={false}
-        color={disabled ? posColors.disabledInk : posColors.ink}
+        color={inkColor}
         name={icon}
-        size={22}
+        size={21}
       />
       <Text
         adjustsFontSizeToFit
         minimumFontScale={0.75}
         numberOfLines={1}
+        style={[styles.functionTileLabel, { color: inkColor }]}
+      >
+        {label}
+      </Text>
+    </PosPressable>
+  );
+}
+
+type KeypadKeyTone =
+  "digit" | "quiet" | "clear" | "action" | "actionOrder" | "openItem";
+
+type KeypadKeyProps = Readonly<{
+  accessibilityLabel?: string;
+  disabled: boolean;
+  icon?: PosIconName;
+  label: string;
+  onPress(): void;
+  sound?: "key" | "tap" | "navigate" | "danger";
+  /** 动作键下方的小字（「单行」/「整单」）。 */
+  sublabel?: string;
+  testID: string;
+  tone: KeypadKeyTone;
+  /** 「无码商品」右侧的金额小字。 */
+  trailing?: string | null;
+  /** 量出键盘宽度后的显式宽度；未量出前按 flex 均分。 */
+  width?: number | null;
+}>;
+
+/** 右栏键盘的一个键：高度由所在行决定，宽度按列均分（「无码商品」横跨两格）。 */
+function KeypadKey({
+  accessibilityLabel,
+  disabled,
+  icon,
+  label,
+  onPress,
+  sound,
+  sublabel,
+  testID,
+  tone,
+  trailing,
+  width,
+}: KeypadKeyProps) {
+  usePosThemeVersion();
+  const isAction = tone === "action" || tone === "actionOrder";
+  return (
+    <PosPressable
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      sound={
+        sound ??
+        (tone === "clear"
+          ? "danger"
+          : tone === "digit" || tone === "quiet"
+            ? "key"
+            : "tap")
+      }
+      style={({ pressed }) => [
+        styles.keypadKey,
+        tone === "quiet" && styles.keypadKeyQuiet,
+        tone === "clear" && styles.keypadKeyClear,
+        isAction && styles.keypadKeyAction,
+        tone === "actionOrder" && styles.keypadKeyActionOrder,
+        tone === "openItem" && styles.keypadKeyOpenItem,
+        // 显式宽度用 width + flexBasis "auto"：数字形式的 flexBasis 会被 keypadKey 的 flexBasis 0 吃掉（实测只剩 minWidth）。
+        typeof width === "number" && {
+          flexBasis: "auto",
+          flexGrow: 0,
+          flexShrink: 0,
+          width,
+        },
+        disabled && styles.keypadKeyDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
+      ]}
+      testID={testID}
+    >
+      {icon ? (
+        <MaterialCommunityIcons
+          accessible={false}
+          color={posColors.yellowInk}
+          name={icon}
+          size={22}
+        />
+      ) : null}
+      <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+        numberOfLines={1}
         style={[
-          styles.functionTileLabel,
-          disabled && styles.actionButtonTextDisabled,
+          styles.keypadKeyText,
+          tone === "quiet" && styles.keypadKeyQuietText,
+          tone === "clear" && styles.keypadKeyClearText,
+          isAction && styles.keypadKeyActionText,
+          tone === "actionOrder" && styles.keypadKeyActionOrderText,
+          tone === "openItem" && styles.keypadKeyOpenItemText,
         ]}
       >
+        {label}
+      </Text>
+      {sublabel ? (
+        <Text
+          style={[
+            styles.keypadKeySublabel,
+            tone === "actionOrder" && styles.keypadKeyActionOrderText,
+          ]}
+        >
+          {sublabel}
+        </Text>
+      ) : null}
+      {trailing ? (
+        <Text numberOfLines={1} style={styles.keypadKeyTrailing}>
+          {trailing}
+        </Text>
+      ) : null}
+    </PosPressable>
+  );
+}
+
+type SearchRowIconKeyProps = Readonly<{
+  accessibilityLabel: string;
+  /** 开关键（连续扫码）的当前值文案。 */
+  accessibilityValue?: string;
+  /** 传了即为开关键：true 时 accent 底色。 */
+  checked?: boolean;
+  disabled: boolean;
+  icon: PosIconName;
+  label: string;
+  onPress(): void;
+  size: number;
+  testID: string;
+}>;
+
+/** 搜索行右侧的方形图标键（相机、连续扫码）：图标在上，小字在下。 */
+function SearchRowIconKey({
+  accessibilityLabel,
+  accessibilityValue,
+  checked,
+  disabled,
+  icon,
+  label,
+  onPress,
+  size,
+  testID,
+}: SearchRowIconKeyProps) {
+  usePosThemeVersion();
+  const isSwitch = checked !== undefined;
+  const color = disabled
+    ? posColors.disabledInk
+    : checked
+      ? posColors.accent
+      : posColors.ink;
+  return (
+    <PosPressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole={isSwitch ? "switch" : "button"}
+      accessibilityState={
+        isSwitch ? { checked, disabled } : { disabled }
+      }
+      {...(accessibilityValue
+        ? { accessibilityValue: { text: accessibilityValue } }
+        : {})}
+      disabled={disabled}
+      onPress={onPress}
+      sound="navigate"
+      style={({ pressed }) => [
+        styles.searchRowKey,
+        { height: size, width: size },
+        checked && styles.searchRowKeyChecked,
+        disabled && styles.actionButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
+      ]}
+      testID={testID}
+    >
+      <MaterialCommunityIcons
+        accessible={false}
+        color={color}
+        name={icon}
+        size={22}
+      />
+      <Text numberOfLines={1} style={[styles.searchRowKeyLabel, { color }]}>
         {label}
       </Text>
     </PosPressable>
@@ -3679,7 +3677,7 @@ function CatalogIconButton({
         <MaterialCommunityIcons
           color={posColors.ink}
           name={icon}
-          size={30}
+          size={22}
           testID={iconTestID}
         />
       )}
@@ -3795,11 +3793,343 @@ function parsePercentageBasisPoints(value: string): number | null {
   return whole * 100 + fraction;
 }
 
-function formatEditorMoney(cents: number): string {
-  return `${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
-}
-
 const styles = createPosStyles((colors) => ({
+  // ---- 右栏（不滚动：固定行 + 键盘吃掉剩余高度） ----
+  functionPane: {
+    flexBasis: 404,
+    flexGrow: 0,
+    flexShrink: 0,
+    maxWidth: 420,
+    minHeight: 0,
+    minWidth: 340,
+  },
+  searchHost: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  searchHostContent: { flexGrow: 1 },
+  searchInputRow: {
+    alignItems: "stretch",
+    flexDirection: "row",
+    gap: 8,
+  },
+  searchBox: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flex: 1,
+    flexDirection: "row",
+    gap: 4,
+    minWidth: 0,
+    paddingHorizontal: 3,
+  },
+  searchInput: {
+    alignSelf: "stretch",
+    color: colors.ink,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "600",
+    minWidth: 0,
+    paddingHorizontal: 4,
+  },
+  searchIconAction: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: 9,
+    height: MIN_TOUCH_TARGET,
+    justifyContent: "center",
+    minHeight: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
+    width: MIN_TOUCH_TARGET,
+  },
+  searchRowKey: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flexShrink: 0,
+    gap: 1,
+    justifyContent: "center",
+  },
+  searchRowKeyChecked: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  searchRowKeyLabel: {
+    fontSize: 10,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+  },
+  verifyingIndicator: {
+    alignItems: "center",
+    flexDirection: "row",
+    flexShrink: 1,
+    gap: 4,
+    maxWidth: 132,
+  },
+  verifyingMessage: {
+    color: colors.mutedInk,
+    flexShrink: 1,
+    fontSize: 12,
+  },
+  cameraInlineSlot: {
+    flexShrink: 0,
+  },
+  functionTileRow: {
+    flexDirection: "row",
+    flexShrink: 0,
+    gap: 6,
+  },
+  functionTile: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flex: 1,
+    gap: 2,
+    justifyContent: "center",
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: 4,
+  },
+  functionTileQuiet: { backgroundColor: colors.surfaceAlt },
+  functionTileInfo: {
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+  },
+  functionTileLabel: {
+    color: colors.ink,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  selectionBar: {
+    alignItems: "center",
+    backgroundColor: colors.surfaceSunken,
+    borderRadius: 10,
+    flexDirection: "row",
+    flexShrink: 0,
+    gap: 8,
+    height: SELECTION_BAR_HEIGHT,
+    overflow: "hidden",
+    paddingLeft: 12,
+    paddingRight: 5,
+  },
+  selectionBarActive: { backgroundColor: colors.accentSoft },
+  selectionBarWarning: { backgroundColor: colors.yellowSoft },
+  selectionBarNumber: {
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  selectionBarText: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  selectionBarAccentText: { color: colors.accent },
+  selectionBarMutedText: { color: colors.mutedInk },
+  selectionBarWarningText: { color: colors.yellowInk },
+  selectionBarAction: {
+    flexShrink: 0,
+    minHeight: 30,
+    paddingHorizontal: 10,
+  },
+  utilityResult: {
+    backgroundColor: colors.greenSoft,
+    borderColor: colors.green,
+    borderWidth: 1,
+  },
+  utilityResultWarning: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.orange,
+  },
+  utilityResultText: {
+    color: colors.green,
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 16,
+  },
+  utilityResultWarningText: { color: colors.yellowInk },
+  keypadBuffer: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.accent,
+    borderRadius: 12,
+    borderWidth: 2,
+    flexDirection: "row",
+    flexShrink: 0,
+    gap: 10,
+    paddingLeft: 14,
+    paddingRight: 5,
+  },
+  keypadBufferLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+  keypadBufferValue: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: 30,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+    textAlign: "right",
+  },
+  keypadBufferPlaceholder: { color: colors.placeholder },
+  keypadBufferCursor: {
+    backgroundColor: colors.accent,
+    height: 30,
+    width: 2,
+  },
+  keypadBackspace: {
+    alignItems: "center",
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+    borderRadius: 9,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
+  },
+  // 键盘吃掉剩余高度；最矮也要放得下 5 行 44 的键。
+  keypad: {
+    // 宽度固定撑满右栏：键宽由这里量出的宽度算，容器宽度不能反过来被键宽撑小。
+    alignSelf: "stretch",
+    flex: 1,
+    gap: KEYPAD_GAP,
+    width: "100%",
+    minHeight: KEYPAD_ROWS * MIN_TOUCH_TARGET + (KEYPAD_ROWS - 1) * KEYPAD_GAP,
+  },
+  keypadRow: {
+    flexDirection: "row",
+    gap: KEYPAD_GAP,
+  },
+  keypadRowFlex: { flex: 1 },
+  // 数字键按宽度均分；动作键固定 104 宽（flexBasis 104、不伸缩）。
+  // 量出键盘宽度后，数字键 / .50 / .99 / 「无码商品」改用显式宽度（见 salesKeypadDigitWidth），
+  // 这里的 flex 值只是量出之前第一帧的兜底。
+  keypadKey: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    flexBasis: 0,
+    flexGrow: 1,
+    flexShrink: 1,
+    justifyContent: "center",
+    minHeight: MIN_TOUCH_TARGET,
+    minWidth: MIN_TOUCH_TARGET,
+    paddingHorizontal: 4,
+  },
+  keypadKeyQuiet: { backgroundColor: colors.surfaceAlt },
+  keypadKeyClear: {
+    backgroundColor: colors.redSoft,
+    borderColor: colors.redBorder,
+  },
+  keypadKeyAction: {
+    backgroundColor: colors.blueSoft,
+    borderColor: colors.blueBorder,
+    flexBasis: KEYPAD_ACTION_COLUMN_WIDTH,
+    flexGrow: 0,
+    flexShrink: 0,
+    gap: 1,
+  },
+  keypadKeyActionOrder: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  keypadKeyOpenItem: {
+    backgroundColor: colors.yellowSoft,
+    borderColor: colors.yellowBorder,
+    flexBasis: KEYPAD_ACTION_COLUMN_WIDTH + KEYPAD_GAP,
+    flexDirection: "row",
+    gap: 8,
+  },
+  keypadKeyDisabled: { opacity: 0.4 },
+  keypadKeyText: {
+    color: colors.ink,
+    fontSize: 24,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "900",
+  },
+  keypadKeyQuietText: { color: colors.mutedInk, fontSize: 17 },
+  keypadKeyClearText: { color: colors.red, fontSize: 17 },
+  keypadKeyActionText: { color: colors.blue, fontSize: 16 },
+  keypadKeyActionOrderText: { color: colors.accent },
+  keypadKeyOpenItemText: { color: colors.yellowInk, fontSize: 18 },
+  keypadKeySublabel: {
+    color: colors.blue,
+    fontSize: 10.5,
+    fontWeight: "800",
+    opacity: 0.8,
+  },
+  keypadKeyTrailing: {
+    color: colors.yellowInk,
+    fontSize: 13,
+    fontVariant: ["tabular-nums"],
+    fontWeight: "800",
+    opacity: 0.85,
+  },
+  quickDiscountSection: {
+    flexShrink: 0,
+    gap: 7,
+  },
+  quickDiscountHeader: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "space-between",
+    minHeight: 26,
+  },
+  quickDiscountTarget: {
+    color: colors.accent,
+    fontWeight: "800",
+    letterSpacing: 0,
+  },
+  quickDiscountToggle: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+    minHeight: 26,
+  },
+  quickDiscountSwitch: {
+    alignSelf: "center",
+    flexShrink: 0,
+  },
+  quickDiscountToggleLabel: {
+    color: colors.mutedInk,
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  quickDiscountToggleLabelSelected: { color: colors.accent },
+  quickDiscountRow: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  quickDiscountKey: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    flex: 1,
+    justifyContent: "center",
+    minHeight: MIN_TOUCH_TARGET,
+    paddingHorizontal: 2,
+  },
+  functionSectionTitle: {
+    color: colors.mutedInk,
+    flexShrink: 1,
+    fontSize: 12.5,
+    fontWeight: "900",
+    letterSpacing: 1,
+  },
   actionButtonDisabled: {
     backgroundColor: colors.disabledSurface,
     borderColor: colors.disabledBorder,
@@ -3951,30 +4281,6 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "900",
     letterSpacing: 0.4,
   },
-  // 连续扫码开关放在「商品录入」标题行右侧：不再占一整块按钮位。
-  cameraModeControl: {
-    alignItems: "center",
-    borderRadius: 8,
-    flexDirection: "row",
-    flexShrink: 1,
-    gap: 6,
-    justifyContent: "center",
-    // 开关整块仍是 44 的触控区。
-    minHeight: 44,
-  },
-  cameraModeLabel: {
-    color: colors.mutedInk,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  cameraModeLabelSelected: {
-    color: colors.orange,
-    fontWeight: "900",
-  },
-  cameraModeSwitch: {
-    alignSelf: "center",
-    flexShrink: 0,
-  },
   cameraScannerAction: {
     flexBasis: "47%",
     flexGrow: 1,
@@ -4120,9 +4426,6 @@ const styles = createPosStyles((colors) => ({
     fontVariant: ["tabular-nums"],
     fontWeight: "800",
   },
-  discountButton: {
-    flex: 1,
-  },
   discountGrid: {
     gap: 8,
   },
@@ -4132,27 +4435,9 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "600",
     lineHeight: 18,
   },
-  editModeButton: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 88,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
   editModeGrid: {
     gap: 10,
   },
-  editModeButtonCompact: {
-    minHeight: 56,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  editModeButtonCompactSelected: { paddingHorizontal: 7 },
-  editModeValueCompact: { fontSize: 17 },
   editorModal: {
     backgroundColor: colors.surface,
     borderColor: colors.border,
@@ -4239,98 +4524,6 @@ const styles = createPosStyles((colors) => ({
     flexWrap: "wrap",
     gap: 8,
   },
-  functionPane: {
-    flexBasis: 404,
-    flexGrow: 0,
-    flexShrink: 0,
-    gap: 10,
-    maxWidth: 420,
-    minWidth: 340,
-  },
-  functionScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  functionScrollContent: {
-    gap: 10,
-    paddingBottom: 4,
-  },
-  functionTileRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  functionTile: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    flex: 1,
-    gap: 2,
-    justifyContent: "center",
-    minHeight: 60,
-    paddingHorizontal: 4,
-  },
-  functionTileQuiet: { backgroundColor: colors.surfaceAlt },
-  functionTileLabel: {
-    color: colors.ink,
-    fontSize: 13.5,
-    fontWeight: "900",
-  },
-  lineEditor: { gap: 8 },
-  lineEditorName: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  lineEditorEmpty: {
-    color: colors.mutedInk,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  lineEditorKeypadRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  lineEditorKeypad: { flex: 1 },
-  lineEditorSideKeys: {
-    gap: 6,
-    width: 92,
-  },
-  lineEditorCancel: { flex: 2 },
-  lineEditorConfirm: { flex: 3 },
-  quickDiscountSection: {
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-    gap: 6,
-    paddingTop: 8,
-  },
-  quickDiscountToggle: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 6,
-    minHeight: 32,
-  },
-  quickDiscountTarget: {
-    color: colors.accent,
-    fontSize: 12.5,
-    fontWeight: "800",
-  },
-  quickDiscountRow: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  quickDiscountKey: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    flex: 1,
-    justifyContent: "center",
-    minHeight: 54,
-    paddingHorizontal: 2,
-  },
   quickDiscountKeySelected: {
     backgroundColor: colors.accent,
     borderColor: colors.accent,
@@ -4349,20 +4542,7 @@ const styles = createPosStyles((colors) => ({
     fontWeight: "800",
   },
   quickDiscountKeyPreviewSelected: { color: colors.onAccent },
-  // 固定行高 = 小号转圈的高度：核验提示出现 / 消失时这一行不变高，下面的按钮区不跳动。
-  functionSectionHeader: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
-    justifyContent: "space-between",
-    minHeight: 20,
-  },
-  functionSectionTitle: {
-    color: colors.mutedInk,
-    fontSize: 12.5,
-    fontWeight: "900",
-    letterSpacing: 1,
-  },
+
   lineControls: {
     alignItems: "center",
     alignSelf: "stretch",
@@ -4493,9 +4673,6 @@ const styles = createPosStyles((colors) => ({
   },
   modalAction: {
     flex: 1,
-  },
-  modalCancelAction: {
-    marginTop: 12,
   },
   modalActions: {
     flexDirection: "row",
@@ -4699,14 +4876,6 @@ const styles = createPosStyles((colors) => ({
     fontSize: 14,
     fontWeight: "900",
   },
-  searchAction: {
-    flex: 1,
-    minHeight: 76,
-  },
-  searchActions: {
-    flexDirection: "row",
-    gap: 8,
-  },
   searchDrawer: {
     backgroundColor: colors.surface,
     borderLeftColor: colors.border,
@@ -4758,23 +4927,6 @@ const styles = createPosStyles((colors) => ({
     fontSize: 12,
     marginTop: 4,
   },
-  searchInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: 10,
-    borderWidth: 2,
-    color: colors.ink,
-    flex: 1,
-    fontSize: 17,
-    fontWeight: "600",
-    height: 64,
-    paddingHorizontal: 14,
-  },
-  searchInputRow: {
-    alignItems: "stretch",
-    flexDirection: "row",
-    gap: 8,
-  },
   // 贴底整宽面板，位置与系统键盘一致；底部多留空间避开 Home 指示条。
   searchKeyboardDock: {
     backgroundColor: colors.canvas,
@@ -4787,18 +4939,6 @@ const styles = createPosStyles((colors) => ({
     paddingTop: 12,
     position: "absolute",
     right: 0,
-  },
-  searchIconAction: {
-    alignItems: "center",
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    height: 64,
-    justifyContent: "center",
-    minHeight: 64,
-    minWidth: 64,
-    width: 64,
   },
   searchMessage: {
     color: colors.mutedInk,
@@ -4921,34 +5061,6 @@ const styles = createPosStyles((colors) => ({
     flexDirection: "row",
     justifyContent: "space-between",
   },
-  utilityResult: {
-    backgroundColor: colors.greenSoft,
-    borderColor: colors.green,
-    borderRadius: 4,
-    borderWidth: 1,
-    color: colors.green,
-    fontSize: 12,
-    fontWeight: "700",
-    lineHeight: 17,
-    padding: 10,
-  },
-  utilityResultWarning: {
-    backgroundColor: colors.yellowSoft,
-    borderColor: colors.orange,
-    color: colors.yellowInk,
-  },
-  verifyingIndicator: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexShrink: 1,
-    gap: 6,
-    height: 20,
-  },
-  verifyingMessage: {
-    color: colors.mutedInk,
-    flexShrink: 1,
-    fontSize: 12,
-  },
   totalRule: {
     backgroundColor: colors.inverseSurface,
     height: 2,
@@ -5040,26 +5152,6 @@ const styles = createPosStyles((colors) => ({
   lineEditConfirm: {
     minWidth: 220,
   },
-  editModeButtonSelected: {
-    backgroundColor: colors.selectedSurface,
-    borderColor: colors.accent,
-    borderWidth: 2.5,
-    paddingHorizontal: 15,
-  },
-  editModeLabel: {
-    color: colors.mutedInk,
-    fontSize: 14,
-    fontWeight: "800",
-  },
-  editModeLabelSelected: {
-    color: colors.accent,
-  },
-  editModeValue: {
-    color: colors.ink,
-    fontSize: 26,
-    fontVariant: ["tabular-nums"],
-    fontWeight: "900",
-  },
   successBanner: {
     alignItems: "center",
     backgroundColor: colors.greenSoft,
@@ -5076,17 +5168,5 @@ const styles = createPosStyles((colors) => ({
   successCopy: {
     flex: 1,
     minWidth: 0,
-  },
-  discountModal: {
-    backgroundColor: colors.canvas,
-    borderRadius: 16,
-    gap: 12,
-    maxWidth: 620,
-    padding: 22,
-    width: "70%",
-  },
-  editModeRow: {
-    flexDirection: "row",
-    gap: 10,
   },
 }));
