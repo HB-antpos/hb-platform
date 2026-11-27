@@ -16,8 +16,8 @@ import {
 } from "@/features/installments";
 import { installmentRepaymentPaymentEntry } from "@/features/payments/ui";
 import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type InstallmentsBinding = Readonly<{
@@ -171,7 +171,7 @@ export default function InstallmentsRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="installments" />;
   }
 
   const startCreatePayment = access.canCreate && factory

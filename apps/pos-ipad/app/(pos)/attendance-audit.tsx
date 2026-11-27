@@ -13,8 +13,8 @@ import {
   resolveProtectedSalesRouteGate,
   useCashierLoginStore,
 } from "@/features/cashier-login";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type AttendanceAuditBinding = Readonly<{
@@ -144,7 +144,7 @@ export default function AttendanceAuditRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="attendance-audit" />;
   }
 
   return (

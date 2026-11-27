@@ -19,7 +19,7 @@ import {
   type SharedHeldOrderTakeResult,
 } from "@/features/shared-held-orders/shared-held-order-coordinator";
 import type { SharedHeldOrderPendingListItem } from "@/features/shared-held-orders/shared-held-order-network-api";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type HeldOrdersPresenterBinding = Readonly<{
@@ -96,7 +96,7 @@ export default function HeldOrdersRoute() {
     return <Redirect href={"/login" as Href} />;
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="held-orders" />;
   }
 
   return (

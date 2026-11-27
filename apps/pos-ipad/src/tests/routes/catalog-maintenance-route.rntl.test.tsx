@@ -94,13 +94,13 @@ jest.mock("@/features/catalog/maintenance", () => {
   };
 });
 
-jest.mock("@/ui/screens/bootstrap-screen", () => {
+jest.mock("@/ui/screens/pos-route-loading-screen", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } =
     jest.requireActual<typeof import("react-native")>("react-native");
   return {
-    BootstrapScreen: () =>
-      React.createElement(Text, { testID: "bootstrap" }, "bootstrap"),
+    PosRouteLoadingScreen: ({ active }: { active: string }) =>
+      React.createElement(Text, { testID: "route-loading" }, active),
   };
 });
 
@@ -178,7 +178,7 @@ test("设备绑定不一致时清除会话且绝不暴露目录维护屏", async
   await waitFor(() => {
     expect(mockClearActiveCashier).toHaveBeenCalledTimes(1);
   });
-  expect(screen.getByTestId("bootstrap")).toBeTruthy();
+  expect(screen.getByTestId("route-loading")).toBeTruthy();
   expect(mockScreenProps).toBeNull();
 });
 

@@ -16,7 +16,7 @@ import {
   SettingsUnavailableScreen,
   type SettingsPresenter,
 } from "@/features/settings";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type SettingsBinding = Readonly<{
@@ -145,7 +145,7 @@ export default function SettingsRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="settings" />;
   }
 
   return (

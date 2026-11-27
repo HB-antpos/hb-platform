@@ -10,7 +10,7 @@ import {
 import { SupplierAssistantScreen } from "@/features/supplier-assistant/supplier-assistant-screen";
 import type { SupplierAssistantTokenSource } from "@/features/supplier-assistant/supplier-assistant-session";
 import { useRouteBleScan } from "@/ui/scanner/scanner-route-bridge";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 /**
@@ -64,7 +64,7 @@ export default function SupplierAssistantRoute() {
 
   if (gate === "redirect-index") return <Redirect href={"/" as Href} />;
   if (gate === "redirect-login") return <Redirect href={"/login" as Href} />;
-  if (!tokenSource) return <BootstrapScreen />;
+  if (!tokenSource) return <PosRouteLoadingScreen active="supplier-assistant" />;
 
   return (
     <SupplierAssistantScreen

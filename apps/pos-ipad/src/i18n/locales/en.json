@@ -255,5 +255,6 @@
   "nav.desc.settings": "Printer, card terminal, display",
   "nav.desc.lock": "Lock this terminal",
   "theme.title": "Appearance",
-  "theme.hint": "Themes only change colours. Functions and data stay the same."
+  "theme.hint": "Themes only change colours. Functions and data stay the same.",
+  "shell.routeLoading": "Opening…"
 }

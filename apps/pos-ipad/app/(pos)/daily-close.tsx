@@ -14,7 +14,7 @@ import {
   resolveDailyCloseRuntimeFactory,
   type DailyClosePresenter,
 } from "@/features/daily-close";
-import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
+import { PosRouteLoadingScreen } from "@/ui/screens/pos-route-loading-screen";
 import { usePosThemeVersion } from "@/ui/theme";
 
 type DailyCloseBinding = Readonly<{
@@ -137,7 +137,7 @@ export default function DailyCloseRoute() {
     );
   }
   if (!presenter) {
-    return <BootstrapScreen />;
+    return <PosRouteLoadingScreen active="daily-close" />;
   }
 
   return (
