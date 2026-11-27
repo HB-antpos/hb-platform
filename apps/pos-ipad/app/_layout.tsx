@@ -5,6 +5,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { AppProviders } from "@/app-providers";
 import "@/core/peripherals/customer-display/native";
 import { PosNavigationBridge } from "@/features/navigation/pos-navigation-bridge";
+import { posStackAnimationFor } from "@/features/navigation/pos-route-animation";
 import { ZellerAppBoundary } from "@/features/zeller-terminal/zeller-app-boundary";
 import { ScannerRouteProvider } from "@/ui/scanner/scanner-route-bridge";
 import { usePosThemeVersion } from "@/ui/theme";
@@ -25,7 +26,13 @@ export default function RootLayout() {
         <ZellerAppBoundary>
           {/* 侧栏 / 面板导航桥：收银页 push，其他页 replace。 */}
           <PosNavigationBridge>
-            <Stack screenOptions={{ headerShown: false }} />
+            {/* 带左侧栏的页面之间切换不做动画，侧栏看起来固定；子流程保留滑入。 */}
+            <Stack
+              screenOptions={({ route }) => ({
+                headerShown: false,
+                animation: posStackAnimationFor(route.name),
+              })}
+            />
           </PosNavigationBridge>
         </ZellerAppBoundary>
       </ScannerRouteProvider>
