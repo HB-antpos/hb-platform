@@ -47,6 +47,18 @@ public sealed class StoreProductInsightsControllerTests : IDisposable
     }
 
     [Fact]
+    public async Task 不传日期时days越界返回400()
+    {
+        await SeedStoreAndProductAsync();
+        var roles = Snapshot();
+        roles.Setup(service => service.GetUserPermissionSnapshotAsync("u1")).ReturnsAsync(ApiResponse<UserPermissionSnapshotDto>.OK(new() { RoleNames = new() { "Admin" } }));
+
+        var result = await LoggedInController(roles.Object, "u1", null).GetStoreInsight("S2", "P1", null, null, 0, default);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
     public async Task 有效实时Admin角色允许全店读取()
     {
         await SeedStoreAndProductAsync();

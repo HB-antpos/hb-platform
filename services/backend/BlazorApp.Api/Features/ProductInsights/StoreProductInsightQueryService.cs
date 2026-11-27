@@ -17,6 +17,7 @@ public sealed class StoreProductInsightQueryService(
 
     internal async Task<(DateTime StartDate, DateTime EndDate)?> GetDefaultRangeAsync(
         string storeCode,
+        int days,
         CancellationToken cancellationToken = default
     )
     {
@@ -29,7 +30,8 @@ public sealed class StoreProductInsightQueryService(
             return null;
         }
 
-        return (salesContext.EndDate.AddDays(-89), salesContext.EndDate);
+        // 区间含首尾：days 天 = 结束日往前 days - 1 天。
+        return (salesContext.EndDate.AddDays(-(days - 1)), salesContext.EndDate);
     }
 
     public async Task<StoreProductInsightDto?> GetAsync(

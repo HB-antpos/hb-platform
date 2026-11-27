@@ -8,6 +8,12 @@ public static class StoreProductInsightRules
 
     public static bool IsValidRange(DateTime startDate, DateTime endDate) => startDate.Date <= endDate.Date;
 
+    /// <summary>不带 days 的旧客户端默认 90 天；新客户端显式传 days（移动端默认 180）。</summary>
+    public const int DefaultRangeDays = 90;
+    public const int MaxDefaultRangeDays = 366;
+
+    public static bool IsValidDefaultRangeDays(int days) => days is >= 1 and <= MaxDefaultRangeDays;
+
     // 本地进货按进货单口径判断；入库状态不决定单据是否参与统计。
     public static bool IsValidLocalPurchase(bool isInvoiceDeleted, bool isDetailDeleted, DateTime? inboundDate, DateTime? orderDate) =>
         !isInvoiceDeleted && !isDetailDeleted && (inboundDate.HasValue || orderDate.HasValue);

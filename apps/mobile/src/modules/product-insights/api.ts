@@ -4,7 +4,13 @@ import {
   normalizeProductBranchSales,
   normalizeStoreProductInsight,
 } from "./api-normalization";
-import type { ProductInsightRange } from "./types";
+import {
+  buildPresetRange,
+  countRangeDays,
+  DEFAULT_PRODUCT_INSIGHT_PRESET,
+  type ProductInsightPresetDays,
+} from "./movement-summary";
+import type { ProductInsightRange, StoreProductInsight } from "./types";
 
 function deviceHeaders() {
   const session = useDeviceStore.getState().session;
@@ -18,11 +24,12 @@ export async function fetchStoreProductInsight(
   productCode: string,
   signal?: AbortSignal,
   range?: ProductInsightRange,
-) {
-  // 不传 range 时默认日期交由后端按门店时区计算，避免设备处于其他时区时偏移一天；
+  presetDays: ProductInsightPresetDays = DEFAULT_PRODUCT_INSIGHT_PRESET,
+): Promise<StoreProductInsight> {
+  // 不传 range 时只带 days，日期交由后端按门店时区计算，避免设备处于其他时区时偏移一天；
   // 其他周期由页面以后端返回的结束日为锚点推算后显式传入。
   const response = await apiClient.get("/react/v1/product-insights/store", {
-    params: { storeCode, productCode, ...range },
+    params: { storeCode, productCode, ...(range ?? { days: presetDays }) },
     headers: deviceHeaders(),
     signal,
   });
@@ -37,6 +44,16 @@ export async function fetchStoreProductInsight(
     throw Object.assign(new Error("Product insight scope mismatch"), {
       code: "PRODUCT_INSIGHT_INVALID_RESPONSE",
     });
+  }
+  // 兼容未部署 days 参数的旧后端：它固定返回 90 天。以其结束日（门店今天）为锚点，
+  // 按所选预设天数显式重查一次，保证页面显示的周期与数据一致。
+  if (!range && countRangeDays(result.range) !== presetDays) {
+    return fetchStoreProductInsight(
+      storeCode,
+      productCode,
+      signal,
+      buildPresetRange(result.range.endDate, presetDays),
+    );
   }
   return result;
 }
