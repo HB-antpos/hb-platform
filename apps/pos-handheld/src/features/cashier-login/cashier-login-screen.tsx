@@ -1,6 +1,5 @@
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
-  type FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -23,6 +22,11 @@ import {
   CashierLoginError,
   type CashierLoginRuntime,
 } from "./cashier-login-controller";
+import {
+  buildCashierLoginDiagnostic,
+  type CashierLoginDiagnostic,
+  type CashierLoginTrigger,
+} from "./cashier-login-diagnostics";
 import { useCashierLoginStore } from "./cashier-login-store";
 
 import { HbposApiError } from "@/core/api/hbpos-api";
@@ -137,6 +141,7 @@ const DEFAULT_VERSION_INFO: CashierLoginVersionInfo = Object.freeze({
 export function CashierLoginScreen({
   controller,
   language = "zh",
+  onLoginDiagnostic,
   onManualInputFocusChange,
   onSwitchLanguage,
   onSuccess,
@@ -145,6 +150,8 @@ export function CashierLoginScreen({
 }: Readonly<{
   controller?: CashierLoginController;
   language?: string;
+  /** 扫码登录被拒、或原生与 JS 输入错位后才成功时回调脱敏诊断（不含条码内容），由路由写进中心日志。 */
+  onLoginDiagnostic?(diagnostic: CashierLoginDiagnostic): void;
   onManualInputFocusChange?(focused: boolean): void;
   onSwitchLanguage?: () => void;
   onSuccess(): void;
@@ -166,7 +173,18 @@ export function CashierLoginScreen({
   const keyboardRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  // 关键：条码输入框是「非受控」的，JS 从不回写 value。RN 新架构下受控 TextInput 的回写 / 清空
+  // 要带 JS 侧事件计数，扫码器注入比 JS 处理快时计数对不上，原生会静默丢弃这次写入，
+  // JS 却以为已清空，下一枪就和残留拼成错码（服务端表现为「收银员条码无效」）。
+  // 现在以原生回传文本为准：记住已提交过的原生前缀，每次只取其后新增的部分。
+  // barcode 只是「原生文本中未提交部分」的显示镜像，用于清除按钮与诊断，不再作为提交来源。
   const [barcode, setBarcode] = useState("");
+  const nativeTextRef = useRef("");
+  const consumedTextRef = useRef("");
+  const previousSubmittedRef = useRef<string | null>(null);
+  const inputTraceRef = useRef({ firstAt: 0, lastAt: 0, maxGapMs: 0, changes: 0 });
+  const onLoginDiagnosticRef = useRef(onLoginDiagnostic);
+  onLoginDiagnosticRef.current = onLoginDiagnostic;
   const [barcodeVisible, setBarcodeVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [restoreScannerFocusAfterFailure, setRestoreScannerFocusAfterFailure] =
@@ -273,6 +291,13 @@ export function CashierLoginScreen({
     }
     setRestoreScannerFocusAfterFailure(false);
     resetToScannerMode();
+    // 核验期间输入框不可编辑，提交时的 clear() 可能没生效；恢复可编辑后若原生里仍只有已提交内容，补一次清空。
+    if (
+      nativeTextRef.current.length > 0 &&
+      nativeTextRef.current === consumedTextRef.current
+    ) {
+      barcodeRef.current?.clear();
+    }
     barcodeRef.current?.setNativeProps({ showSoftInputOnFocus: false });
     barcodeRef.current?.focus();
   }, [
@@ -282,23 +307,109 @@ export function CashierLoginScreen({
     submitting,
   ]);
 
-  const submit = async (event?: FormEvent) => {
-    event?.preventDefault();
+  /** 原生文本里尚未提交的部分；原生已被清空（不再以已提交前缀开头）时整段都算新输入。 */
+  const pendingTextOf = (nativeText: string): string => {
+    const consumed = consumedTextRef.current;
+    if (!nativeText.startsWith(consumed)) {
+      consumedTextRef.current = "";
+      return nativeText;
+    }
+    return nativeText.slice(consumed.length);
+  };
+
+  const handleBarcodeChange = (nextValue: string): void => {
+    // 收到变化事件说明原生内容确实变了；不比已提交前缀长，只能是原生已清空后重新输入。
+    if (nextValue.length <= consumedTextRef.current.length) {
+      consumedTextRef.current = "";
+    }
+    nativeTextRef.current = nextValue;
+    const pending = pendingTextOf(nextValue);
+    // 记录本次输入节奏，供诊断判断「一枪是否被拆成多段送达」。
+    const now = Date.now();
+    const trace = inputTraceRef.current;
+    if (pending.length === 0 || trace.changes === 0) {
+      inputTraceRef.current = { firstAt: now, lastAt: now, maxGapMs: 0, changes: 1 };
+    } else {
+      inputTraceRef.current = {
+        firstAt: trace.firstAt,
+        lastAt: now,
+        maxGapMs: Math.max(trace.maxGapMs, now - trace.lastAt),
+        changes: trace.changes + 1,
+      };
+    }
+    setBarcode(pending);
+  };
+
+  /** 把原生现有文本整体记为已提交并尽力清空；被原生丢弃也无妨，下次按差量取。 */
+  const consumeNativeText = (): void => {
+    consumedTextRef.current = nativeTextRef.current;
+    inputTraceRef.current = { firstAt: 0, lastAt: 0, maxGapMs: 0, changes: 0 };
+    if (nativeTextRef.current) barcodeRef.current?.clear();
+    setBarcode("");
+  };
+
+  const submit = async (
+    trigger: CashierLoginTrigger,
+    nativeText?: string,
+  ) => {
     if (submittingRef.current || blocked) {
       setError(blocked ? readinessError(runtime, text) : error);
       return;
     }
     setError(null);
-    const submittedBarcode = barcode;
-    // 扫码提交后立即清空可见输入，登录失败复焦时下一次 HID 从空值开始。
-    setBarcode("");
+    // 回车以 onSubmitEditing 带回的原生全文为准；按钮 / 停顿自动提交没有事件，用最近一次原生回传文本。
+    const fullNativeText = nativeText ?? nativeTextRef.current;
+    nativeTextRef.current = fullNativeText;
+    const submittedBarcode = pendingTextOf(fullNativeText);
+    const trace = inputTraceRef.current;
+    const inputTrace = {
+      nativeTextLength: fullNativeText.length,
+      staleNativePrefixLength: fullNativeText.length - submittedBarcode.length,
+      jsMirrorMatched: barcode === submittedBarcode,
+      inputDurationMs: trace.changes > 0 ? Math.max(0, Date.now() - trace.firstAt) : 0,
+      maxCharacterGapMs: trace.maxGapMs,
+      changeEvents: trace.changes,
+    };
+    // 先同步记为已提交：同一次回车重复到达时第二次取到空串；再尽力清空原生输入框，
+    // 被原生丢弃也无妨，下一枪按差量只取新增部分，不会和这次拼接。
+    consumeNativeText();
     setBarcodeVisible(false);
+    const previousSubmitted = previousSubmittedRef.current;
+    previousSubmittedRef.current = submittedBarcode.trim();
     submittingRef.current = true;
     setSubmitting(true);
     try {
       await activeController.login(submittedBarcode, runtime);
+      if (inputTrace.staleNativePrefixLength > 0 || !inputTrace.jsMirrorMatched) {
+        // 成功但原生与 JS 已错位：说明本次修复兜住了旧问题，留一条记录便于现场核实。
+        onLoginDiagnosticRef.current?.(
+          buildCashierLoginDiagnostic({
+            outcome: "accepted-after-mismatch",
+            trigger,
+            submitted: submittedBarcode,
+            previousSubmitted,
+            error: null,
+            trace: inputTrace,
+          }),
+        );
+      }
       onSuccess();
     } catch (nextError: unknown) {
+      // 空框点按钮只是操作提示，不是扫码问题，不写诊断。
+      const emptyButtonPress =
+        trigger === "button" &&
+        nextError instanceof CashierLoginError &&
+        nextError.code === "BARCODE_REQUIRED";
+      if (!emptyButtonPress) onLoginDiagnosticRef.current?.(
+        buildCashierLoginDiagnostic({
+          outcome: "rejected",
+          trigger,
+          submitted: submittedBarcode,
+          previousSubmitted,
+          error: nextError,
+          trace: inputTrace,
+        }),
+      );
       setError(errorText(nextError, text));
       setRestoreScannerFocusAfterFailure(true);
       Keyboard.dismiss();
@@ -362,9 +473,15 @@ export function CashierLoginScreen({
                 autoCorrect={false}
                 editable={!submitting && !blocked}
                 onBlur={handleBarcodeBlur}
-                onChangeText={setBarcode}
+                onChangeText={handleBarcodeChange}
                 onFocus={notifyManualInputFocused}
-                onSubmitEditing={() => void submit()}
+                // 有事件 = 真实回车（扫码器回车后缀 / 键盘），取原生全文；无事件 = 扫码节奏停顿自动提交。
+                onSubmitEditing={(event) =>
+                  void submit(
+                    event?.nativeEvent ? "enter" : "scan-idle",
+                    event?.nativeEvent?.text,
+                  )
+                }
                 placeholder={text.inputHint}
                 returnKeyType="go"
                 secureTextEntry={!barcodeVisible}
@@ -375,7 +492,7 @@ export function CashierLoginScreen({
                 ]}
                 submitBehavior="submit"
                 testID="cashier-login-barcode"
-                value={barcode}
+                // 不传 value：非受控，见 nativeTextRef 处注释。
               />
               </View>
               {barcode.length > 0 ? (
@@ -385,7 +502,8 @@ export function CashierLoginScreen({
                   accessibilityState={{ disabled: submitting || blocked }}
                   disabled={submitting || blocked}
                   onPress={() => {
-                    setBarcode("");
+                    // 非受控：直接清空原生输入框，并把已有内容记为已处理，清空被丢弃也不会带进下一次。
+                    consumeNativeText();
                     // 清除后保持输入焦点，便于立即重扫或手动输入。
                     barcodeRef.current?.focus();
                   }}
@@ -468,7 +586,7 @@ export function CashierLoginScreen({
             accessibilityRole="button"
             accessibilityState={{ disabled: submitting || blocked }}
             disabled={submitting || blocked}
-            onPress={() => void submit()}
+            onPress={() => void submit("button")}
             style={({ pressed }) => [
               styles.submit,
               (pressed || submitting || blocked) && styles.submitPressed,

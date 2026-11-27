@@ -204,12 +204,18 @@ test("收银员条码默认隐藏且显示按钮不改变输入值或软键盘�
     StyleSheet.flatten(visibilityButton.props.style),
   ).toMatchObject({ minHeight: 48, minWidth: 48 });
 
+  const textInputPrototype = (
+    TextInput as unknown as { prototype: { clear: jest.Mock } }
+  ).prototype;
+  textInputPrototype.clear.mockClear();
   await fireEvent.changeText(input, "HID-SECRET");
   await fireEvent.press(visibilityButton);
+  // 非受控输入：切换显示只改 secureTextEntry，不回写、不清空原生内容。
+  expect(screen.getByTestId("cashier-login-barcode").props.value).toBeUndefined();
+  expect(textInputPrototype.clear).not.toHaveBeenCalled();
   expect(screen.getByTestId("cashier-login-barcode").props).toMatchObject({
     secureTextEntry: false,
     showSoftInputOnFocus: false,
-    value: "HID-SECRET",
   });
   expect(
     screen.getByTestId("cashier-login-toggle-barcode-visibility").props
@@ -222,8 +228,8 @@ test("收银员条码默认隐藏且显示按钮不改变输入值或软键盘�
   expect(screen.getByTestId("cashier-login-barcode").props).toMatchObject({
     secureTextEntry: true,
     showSoftInputOnFocus: false,
-    value: "HID-SECRET",
   });
+  expect(textInputPrototype.clear).not.toHaveBeenCalled();
 });
 
 test("扫码默认不弹软键盘，常驻键盘按钮可手动开启且失焦后复位", async () => {
@@ -483,6 +489,10 @@ test("登录提交后清空已扫描内容，失败重试不会与下一条码�
   const signIn = jest.fn(async () => {
     throw new Error("rejected");
   });
+  const textInputPrototype = (
+    TextInput as unknown as { prototype: { clear: jest.Mock } }
+  ).prototype;
+  textInputPrototype.clear.mockClear();
   const screen = await render(
     <CashierLoginScreen
       controller={new CashierLoginController(store())}
@@ -509,17 +519,17 @@ test("登录提交后清空已扫描内容，失败重试不会与下一条码�
     expect(signIn).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("cashier-login-error")).toBeTruthy();
   });
-  expect(screen.getByTestId("cashier-login-barcode").props.value).toBe("");
+  // 提交时请求原生清空；测试环境的 clear() 是空实现，正好模拟「清空被原生丢弃」。
+  expect(textInputPrototype.clear).toHaveBeenCalled();
   expect(screen.getByTestId("cashier-login-barcode").props.secureTextEntry).toBe(
     true,
   );
 
   await act(async () => {
-    const previousValue =
-      screen.getByTestId("cashier-login-barcode").props.value;
+    // 原生仍留着上一枪，下一枪接在后面回传；只取新增部分，不拼接。
     fireEvent.changeText(
       screen.getByTestId("cashier-login-barcode"),
-      `${previousValue}HID-SECOND`,
+      "HID-FIRSTHID-SECOND",
     );
   });
   await act(async () => {
@@ -624,12 +634,120 @@ test("输入内容后显示清除按钮，点击清除全部内容", async () =>
   expect(clearButton.props.accessibilityLabel).toBe("清除收银员条码");
   expect(clearButton.props.accessibilityRole).toBe("button");
 
-  // 点击清除：输入框内容清空
+  // 点击清除：请求原生清空输入框
+  const textInputPrototype = (
+    TextInput as unknown as { prototype: { clear: jest.Mock } }
+  ).prototype;
+  textInputPrototype.clear.mockClear();
   await fireEvent.press(clearButton);
-  expect(screen.getByTestId("cashier-login-barcode").props.value).toBe("");
+  expect(textInputPrototype.clear).toHaveBeenCalledTimes(1);
 
   // 清空后清除按钮消失
   expect(screen.queryByTestId("cashier-login-clear-barcode")).toBeNull();
+});
+
+test("清除被原生丢弃时，残留内容不会带进下一次扫码登录", async () => {
+  const signIn = jest.fn(async () => cashier());
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={runtime(signIn)}
+    />,
+  );
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "TYPO");
+  });
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("cashier-login-clear-barcode"));
+  });
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "TYPO1042701");
+  });
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "submitEditing", {
+      nativeEvent: { text: "TYPO1042701" },
+    });
+  });
+  await waitFor(() => expect(signIn.mock.calls).toEqual([["1042701"]]));
+  await screen.unmount();
+});
+
+test("扫码器回车以原生回传全文为准：JS 镜像还没追上最后几位也不会提交残码", async () => {
+  const signIn = jest.fn(async () => cashier());
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={runtime(signIn)}
+    />,
+  );
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "10427");
+  });
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "submitEditing", {
+      nativeEvent: { text: "1042701" },
+    });
+  });
+  await waitFor(() => expect(signIn.mock.calls).toEqual([["1042701"]]));
+  await screen.unmount();
+});
+
+test("扫码登录被拒时回调脱敏诊断：截断能从与上一枪的关系看出来，且不含条码内容", async () => {
+  const signIn = jest.fn(async () => {
+    throw new HbposApiError("rejected", {
+      kind: "http",
+      status: 401,
+      code: "CASHIER_LOGIN_FAILED",
+    });
+  });
+  const onLoginDiagnostic = jest.fn();
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onLoginDiagnostic={onLoginDiagnostic}
+      onSuccess={jest.fn()}
+      runtime={runtime(signIn)}
+    />,
+  );
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "1042701");
+  });
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "submitEditing", {
+      nativeEvent: { text: "1042701" },
+    });
+  });
+  await waitFor(() => expect(onLoginDiagnostic).toHaveBeenCalledTimes(1));
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "10427011042");
+  });
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "submitEditing", {
+      nativeEvent: { text: "10427011042" },
+    });
+  });
+  await waitFor(() => expect(onLoginDiagnostic).toHaveBeenCalledTimes(2));
+  expect(signIn.mock.calls).toEqual([["1042701"], ["1042"]]);
+  expect(onLoginDiagnostic.mock.calls[0]?.[0]).toMatchObject({
+    outcome: "rejected",
+    trigger: "enter",
+    submittedLength: 7,
+    errorCode: "http:401:CASHIER_LOGIN_FAILED",
+  });
+  expect(onLoginDiagnostic.mock.calls[1]?.[0]).toMatchObject({
+    submittedLength: 4,
+    relationToPrevious: "prefix-of-previous",
+    trace: expect.objectContaining({ nativeTextLength: 11, staleNativePrefixLength: 7 }),
+  });
+  for (const [diagnostic] of onLoginDiagnostic.mock.calls) {
+    expect(JSON.stringify(diagnostic)).not.toMatch(/1042/u);
+  }
+  await screen.unmount();
 });
 
 test("清除按钮使用 close（×）图标，与键盘/可见性按钮同排渲染", async () => {
