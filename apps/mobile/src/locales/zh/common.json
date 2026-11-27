@@ -66,6 +66,7 @@
     "orders": "订单",
     "salesOrders": "POS 订单",
     "cart": "购物车",
+    "supplierAssistant": "订货助手",
     "warehouse": "商品和货位管理",
     "containers": "货柜管理",
     "warehousePicking": "订单拣货",

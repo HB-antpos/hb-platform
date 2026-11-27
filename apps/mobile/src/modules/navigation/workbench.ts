@@ -30,6 +30,8 @@ const WORKBENCH_SECTIONS: WorkbenchNavigationSection[] = [
       { routeName: "home", labelKey: "routes.storeOrdering", icon: "storefront-outline" },
       { routeName: "cart", labelKey: "routes.cart", icon: "cart-outline" },
       { routeName: "orders", labelKey: "routes.orders", icon: "clipboard-list-outline" },
+      // 订货助手：在供应商网站上订货时直接看本店上次订货与至今销量。
+      { routeName: "supplier-assistant", labelKey: "routes.supplierAssistant", icon: "web" },
       // 分店打包 / 签收到货：分店装箱、发出、签收，入口放在分店区；总仓打包在「仓库与采购」组。
       { routeName: "packing", labelKey: "routes.packing", icon: "package-variant" },
       { routeName: "local-supplier-invoices", labelKey: "routes.localSupplierInvoices", icon: "receipt-text-outline" },

@@ -66,6 +66,7 @@
     "orders": "Orders",
     "salesOrders": "POS orders",
     "cart": "Cart",
+    "supplierAssistant": "Ordering assistant",
     "warehouse": "Products & locations",
     "containers": "Containers",
     "warehousePicking": "Order picking",

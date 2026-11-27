@@ -51,6 +51,8 @@ export const IOS_REVIEW_EXCLUDED_ROUTE_NAMES = [
   "attendance-hours",
   // 工资单是真实员工薪酬数据，审核模式没有离线演示数据，不展示。
   "payslips",
+  // 订货助手打开真实供应商网站并显示真实分店订货 / 销量，审核模式没有离线演示数据，不展示。
+  "supplier-assistant",
   "workbench",
 ] as const;
 
