@@ -250,6 +250,7 @@
     "linklySettlement": "Linkly settlement",
     "linklySettlementReprint": "Reprint Linkly settlement",
     "cardPaymentSupervisorResolution": "Supervisor card payment resolution",
+    "cardRefundSupervisorResolution": "Supervisor card refund resolution",
     "permissionOverride": "Supervisor authorisation",
     "installmentPickupConfirm": "Lay-by pickup confirmed",
     "catalogReset": "Catalogue reset",

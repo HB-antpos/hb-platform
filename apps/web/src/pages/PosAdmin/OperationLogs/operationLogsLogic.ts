@@ -145,6 +145,7 @@ export const OPERATION_TYPE_KEYS: Record<string, string> = {
   LINKLY_SETTLEMENT: 'operationLogs.operations.linklySettlement',
   LINKLY_SETTLEMENT_REPRINT: 'operationLogs.operations.linklySettlementReprint',
   CARD_PAYMENT_SUPERVISOR_RESOLUTION: 'operationLogs.operations.cardPaymentSupervisorResolution',
+  CARD_REFUND_SUPERVISOR_RESOLUTION: 'operationLogs.operations.cardRefundSupervisorResolution',
   PERMISSION_OVERRIDE: 'operationLogs.operations.permissionOverride',
   INSTALLMENT_PICKUP_CONFIRM: 'operationLogs.operations.installmentPickupConfirm',
   INSTALLMENT_LINES_AMEND: 'operationLogs.operations.installmentLinesAmend',

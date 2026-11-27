@@ -49,6 +49,7 @@ public static class PosOperationAuditRiskCatalog
         SaleVoid,
         OrderCancel,
         "CARD_PAYMENT_SUPERVISOR_RESOLUTION",
+        "CARD_REFUND_SUPERVISOR_RESOLUTION",
         "PERMISSION_OVERRIDE",
         "API_SERVER_CHANGE",
         "DEVICE_REREGISTER",

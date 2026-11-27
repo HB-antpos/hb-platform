@@ -4068,6 +4068,7 @@
       "linklySettlement": "Linkly Settlement",
       "linklySettlementReprint": "Reprint Linkly Settlement",
       "cardPaymentSupervisorResolution": "Card Payment Supervisor Resolution",
+      "cardRefundSupervisorResolution": "Card Refund Supervisor Resolution",
       "permissionOverride": "Supervisor Authorization",
       "installmentPickupConfirm": "Lay-by Pickup Confirmed",
       "installmentLinesAmend": "Lay-by Items Amended",
