@@ -3463,29 +3463,33 @@ function KeypadKey({
       ]}
       testID={testID}
     >
-      {icon ? (
-        <MaterialCommunityIcons
-          accessible={false}
-          color={posColors.yellowInk}
-          name={icon}
-          size={22}
-        />
-      ) : null}
-      <Text
-        adjustsFontSizeToFit
-        minimumFontScale={0.7}
-        numberOfLines={1}
-        style={[
-          styles.keypadKeyText,
-          tone === "quiet" && styles.keypadKeyQuietText,
-          tone === "clear" && styles.keypadKeyClearText,
-          isAction && styles.keypadKeyActionText,
-          tone === "actionOrder" && styles.keypadKeyActionOrderText,
-          tone === "openItem" && styles.keypadKeyOpenItemText,
-        ]}
-      >
-        {label}
-      </Text>
+      {/* 图标 + 文字同一行；有金额（trailing）时金额另起一行，长金额不会把按钮撑出去。 */}
+      <View style={styles.keypadKeyLabelRow}>
+        {icon ? (
+          <MaterialCommunityIcons
+            accessible={false}
+            color={posColors.yellowInk}
+            name={icon}
+            size={22}
+          />
+        ) : null}
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+          numberOfLines={1}
+          style={[
+            styles.keypadKeyText,
+            styles.keypadKeyShrinkText,
+            tone === "quiet" && styles.keypadKeyQuietText,
+            tone === "clear" && styles.keypadKeyClearText,
+            isAction && styles.keypadKeyActionText,
+            tone === "actionOrder" && styles.keypadKeyActionOrderText,
+            tone === "openItem" && styles.keypadKeyOpenItemText,
+          ]}
+        >
+          {label}
+        </Text>
+      </View>
       {sublabel ? (
         <Text
           style={[
@@ -3497,7 +3501,13 @@ function KeypadKey({
         </Text>
       ) : null}
       {trailing ? (
-        <Text numberOfLines={1} style={styles.keypadKeyTrailing}>
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.6}
+          numberOfLines={1}
+          style={[styles.keypadKeyTrailing, styles.keypadKeyShrinkText]}
+          testID={`${testID}-trailing`}
+        >
           {trailing}
         </Text>
       ) : null}
@@ -3700,6 +3710,8 @@ function errorCopyKey(errorCode: string): SalesCopyKey {
       return "error.searchFailed";
     case "product-add-failed":
       return "error.productAddFailed";
+    case "open-item-unavailable":
+      return "error.openItemUnavailable";
     case "terminal-recovery-required":
       return "error.terminalRecoveryRequired";
     case "authorization-denied":
@@ -4048,9 +4060,19 @@ const styles = createPosStyles((colors) => ({
     backgroundColor: colors.yellowSoft,
     borderColor: colors.yellowBorder,
     flexBasis: KEYPAD_ACTION_COLUMN_WIDTH + KEYPAD_GAP,
-    flexDirection: "row",
-    gap: 8,
+    // 上下两行：图标 + 「无码商品」/ 金额，避免同一行放不下时溢出按钮。
+    flexDirection: "column",
+    gap: 2,
   },
+  keypadKeyLabelRow: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 6,
+    justifyContent: "center",
+    maxWidth: "100%",
+  },
+  /** 文字在按钮内可收缩（配合 adjustsFontSizeToFit），不把按钮撑宽。 */
+  keypadKeyShrinkText: { flexShrink: 1, maxWidth: "100%" },
   keypadKeyDisabled: { opacity: 0.4 },
   keypadKeyText: {
     color: colors.ink,
@@ -4071,10 +4093,9 @@ const styles = createPosStyles((colors) => ({
   },
   keypadKeyTrailing: {
     color: colors.yellowInk,
-    fontSize: 13,
+    fontSize: 17,
     fontVariant: ["tabular-nums"],
-    fontWeight: "800",
-    opacity: 0.85,
+    fontWeight: "900",
   },
   quickDiscountSection: {
     flexShrink: 0,

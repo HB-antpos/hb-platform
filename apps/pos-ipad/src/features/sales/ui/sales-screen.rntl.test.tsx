@@ -3727,6 +3727,16 @@ describe("SalesScreen", () => {
       disabled: false,
     });
     expect(within(openItemKey()).getByText("$3.50")).toBeTruthy();
+    // 金额另起一行（上下两行布局），长金额不会把按钮撑出去。
+    expect(flattenedStyle(openItemKey())).toMatchObject({
+      flexDirection: "column",
+    });
+    expect(
+      screen.getByTestId("sales-keypad-open-item-trailing"),
+    ).toHaveTextContent("$3.50");
+    expect(
+      flattenedStyle(screen.getByTestId("sales-keypad-open-item-trailing")),
+    ).toMatchObject({ flexShrink: 1 });
     await fireEvent.press(openItemKey());
     await waitFor(() => expect(addOpenItem).toHaveBeenCalledWith(350));
     await waitFor(() =>

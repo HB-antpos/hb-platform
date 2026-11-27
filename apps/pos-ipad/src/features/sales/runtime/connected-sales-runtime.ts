@@ -42,6 +42,8 @@ import { scanTiming } from "@/features/sales/runtime/scan-timing";
 export const SALES_NEW_TRANSACTIONS_DISABLED =
   "NEW_TRANSACTIONS_DISABLED";
 export const SALES_CHECKOUT_PREPARED = "SALES_CHECKOUT_PREPARED";
+/** 「无码商品」在目录里的固定售卖码（与 WPF 退货 / 统计口径一致，主档 G006243）。 */
+const OPEN_ITEM_LOOKUP_CODE = "OPENITEM";
 
 export type LookupSource = "manual" | "hid" | "camera";
 
@@ -1240,6 +1242,12 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       this.sessionGuard.assertActive();
       this.preparedCheckoutGate.assertMutable();
       this.assertCanStartOrContinueTransaction();
+      // 本机目录还没有 OPENITEM（新装机整店目录未下载 / 启用完）时，先在线补查写入覆盖层；
+      // 放在购物车互斥之外，网络等待不占住购物车。补查不到时下面照旧按「目录查不到」失败。
+      await this.ensureOpenItemCatalogEntry();
+      this.sessionGuard.assertActive();
+      this.preparedCheckoutGate.assertMutable();
+      this.assertCanStartOrContinueTransaction();
       await this.operations.runCartMutation({
       permissionCode: SALES_PERMISSIONS.addOpenItem,
       action: "add-open-item",
@@ -1250,7 +1258,7 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
         // runCartMutation 返回时剩下的耗时即审计写入与授权收尾。授权与审计在共享包里，
         // 这里只取回调两侧的时间差，不改共享包。
         markOpenItemTiming("authorized");
-        const match = await this.requireExactCatalogItem("OPENITEM");
+        const match = await this.requireExactCatalogItem(OPEN_ITEM_LOOKUP_CODE);
         markOpenItemTiming("catalog");
         this.assertCanStartOrContinueTransaction();
         const lineId = this.createLineId();
@@ -1494,6 +1502,29 @@ class ConnectedSalesWorkflow implements SalesWorkflowPort {
       );
     }
     return match;
+  }
+
+  /**
+   * 「无码商品」主档（OPENITEM）的就绪保障。
+   *
+   * 中文注释：
+   * 1. 本机目录（含在线覆盖层）已有本店 OPENITEM → 什么都不做。
+   * 2. 没有（新装机整店目录还在下载、尚未启用）→ 走与扫码相同的在线单品校准；
+   *    它会把服务端结果可靠写入覆盖层，随后的精确查询就能从覆盖层命中。
+   * 3. 离线、服务端也查不到或本地暂不可读都静默返回：由调用方的精确查询按「目录查不到」失败，
+   *    不在这里改变失败口径，也不绕过授权与审计。
+   */
+  private async ensureOpenItemCatalogEntry(): Promise<void> {
+    const revalidation = this.catalogRevalidation;
+    if (!revalidation) return;
+    try {
+      const local = await this.requireCatalog().findExact(OPEN_ITEM_LOOKUP_CODE);
+      if (local && local.storeCode === this.identity.storeCode) return;
+    } catch {
+      // 本地目录暂不可读时仍尝试在线补查；补查结果只写覆盖层。
+    }
+    this.sessionGuard.assertActive();
+    await revalidation.revalidate(OPEN_ITEM_LOOKUP_CODE);
   }
 
   private async applyRemoteScanResult(input: Readonly<{
