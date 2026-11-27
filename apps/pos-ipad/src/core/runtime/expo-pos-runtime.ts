@@ -1,6 +1,5 @@
 import { createFailoverFetch } from "@hb/pos-api-client/transport-failover";
 import {
-  formatRuntimeAppVersion,
   RuntimeStatusReporter,
 } from "@hb/pos-sync/core/sync/runtime-status-reporter";
 import * as Application from "expo-application";
@@ -149,6 +148,7 @@ import {
   type PosDeviceSessionRuntimeService,
 } from "./public-device-session";
 import { resolveHbposApiUrl } from "./runtime-config";
+import { formatIpadHeartbeatAppVersion } from "./runtime-heartbeat-version";
 import { HbposSettingsLinklySetupApi } from "./settings-linkly-setup-api";
 import { HbposSettingsPaymentTestApi } from "./settings-payment-test-api";
 import { SettingsScannerTestCoordinator } from "./settings-scanner-test";
@@ -1379,7 +1379,11 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       updateIdentity,
       runtimeStatus: new RuntimeStatusReporter({
         api: deviceApi,
-        appVersion: formatRuntimeAppVersion(appVersion, updateIdentity),
+        appVersion: formatIpadHeartbeatAppVersion(
+          appVersion,
+          Application.nativeBuildVersion ?? Constants.nativeBuildVersion,
+          updateIdentity,
+        ),
       }),
       nativeAppVersion: resolveNativeAppVersion({
         applicationVersion: Application.nativeApplicationVersion,
