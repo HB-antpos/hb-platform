@@ -41,6 +41,11 @@ interface HidTextInputCaptureOptions {
  * 这里不再回写 value，以原生回传的文本为准：记住「原生文本里已提交 / 丢弃到哪一段」，
  * 每次只取其后新增的部分。原生清空成功（文本不再以已消费前缀开头，或变得不比它长）
  * 与清空被丢弃（文本 = 已消费前缀 + 新码）两种情况都不会串码，新码比旧码短也一样。
+ *
+ * 安卓上 JS 清空成功时不回传文本变化事件，单看文本分不清「清空成功后整段写入一个恰好以上一枪开头的新码」
+ * 和「清空被丢弃后追加」（DataWedge 关闭逐字符发送时会整段写入）。清空成功时光标会回到 0 并派发选区事件，
+ * 所以清空后、下一次文本变化前收到选区 (0,0)，就确认原生已空，把已消费前缀清掉（handleSelectionChange）。
+ * 收不到（iOS 不派发 / 事件被合并）就维持按前缀扣减，与之前一致。
  */
 export function createHidTextInputCapture({
   idleMs,
@@ -56,6 +61,8 @@ export function createHidTextInputCapture({
   let consumedText = "";
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let submissionAllowed: (() => boolean) | null = null;
+  // 已请求原生清空、还没收到下一次文本变化：此时的选区 (0,0) 才算「清空成功」的确认。
+  let awaitingClearConfirmation = false;
 
   const clearIdleTimer = () => {
     if (!idleTimer) {
@@ -78,6 +85,7 @@ export function createHidTextInputCapture({
   const consumeNativeText = (nativeText: string) => {
     consumedText = nativeText;
     if (nativeText) {
+      awaitingClearConfirmation = true;
       clearNative();
     }
   };
@@ -97,6 +105,8 @@ export function createHidTextInputCapture({
 
   return {
     handleChangeText(nativeText: string) {
+      // 清空后的第一次文本变化已经到了：之后的选区事件只是光标随输入移动，不再代表清空结果。
+      awaitingClearConfirmation = false;
       seenText = nativeText;
       // HID 逐字符触发变化事件；不比已消费前缀长，只能是原生已清空后重新输入。
       if (nativeText.length <= consumedText.length) {
@@ -109,6 +119,18 @@ export function createHidTextInputCapture({
         const allowed = submissionAllowed ? submissionAllowed() : true;
         flush(undefined, allowed);
       }, idleMs);
+    },
+    /**
+     * 选区变化：请求清空后、下一次文本变化前光标回到 (0,0)，说明原生清空确实生效（安卓 JS 清空不回传文本事件，
+     * 只派发选区事件），已消费前缀作废，下一枪整段都是新码。
+     */
+    handleSelectionChange(start: number, end: number) {
+      if (!awaitingClearConfirmation || start !== 0 || end !== 0) {
+        return;
+      }
+      awaitingClearConfirmation = false;
+      consumedText = "";
+      seenText = "";
     },
     /** 回车路径：以 submitEditing 带回的原生全文为准，没带就用最近一次变化事件的文本。 */
     handleSubmitEditing(nativeText?: string | null) {

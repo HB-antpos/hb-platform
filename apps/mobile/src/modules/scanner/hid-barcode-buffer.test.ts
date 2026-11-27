@@ -302,4 +302,91 @@ for (const dropClear of [true, false]) {
   assert.deepEqual(scans, [], "fallback 事件不应提交空条码");
 }
 
+/**
+ * DataWedge 关闭「逐字符发送」时整段写入：一次 onChangeText 带来整个新码。
+ * 安卓 JS 清空成功不回传文本事件，只派发选区 (0,0)；selectionOnClear 控制是否模拟这个选区事件。
+ */
+function createBatchHarness(options: { dropClear: () => boolean; selectionOnClear: boolean }) {
+  const timers = new FakeTimers();
+  const scans: string[] = [];
+  let nativeText = "";
+  let pendingSelection = false;
+  const capture = createHidTextInputCapture({
+    idleMs: 50,
+    onText: (pendingText) => {
+      scans.push(pendingText.replace(/[\r\n\t]/g, "").trim());
+    },
+    clearNative: () => {
+      if (!options.dropClear()) {
+        nativeText = "";
+        pendingSelection = options.selectionOnClear;
+      }
+    },
+    setTimeoutFn: timers.setTimeout as unknown as typeof setTimeout,
+    clearTimeoutFn: timers.clearTimeout as unknown as typeof clearTimeout,
+  });
+  return {
+    scans,
+    capture,
+    /** 整段写入一枪并靠停顿提交；清空成功派发的选区事件先于下一次写入送达。 */
+    batchScan(code: string) {
+      if (pendingSelection) {
+        pendingSelection = false;
+        capture.handleSelectionChange(0, 0);
+      }
+      nativeText += code;
+      capture.handleChangeText(nativeText);
+      capture.handleSelectionChange(nativeText.length, nativeText.length);
+      timers.runAll();
+    },
+  };
+}
+
+{
+  // 清空成功 + 整段写入 + 新码以上一枪开头：收到选区 (0,0) 确认清空后，新码整段提交，不截尾。
+  const harness = createBatchHarness({ dropClear: () => false, selectionOnClear: true });
+  harness.batchScan("G0930");
+  harness.batchScan("G093093");
+  harness.batchScan("G093093");
+  assert.deepEqual(harness.scans, ["G0930", "G093093", "G093093"], "选区确认清空后，以上一枪开头的新码应整段提交");
+}
+
+{
+  // 清空被丢弃 + 整段写入：没有选区 (0,0)，仍按已消费前缀扣减，只提交新增部分。
+  const harness = createBatchHarness({ dropClear: () => true, selectionOnClear: true });
+  harness.batchScan("G0930");
+  harness.batchScan("G093093");
+  assert.deepEqual(harness.scans, ["G0930", "G093093"], "清空被丢弃时整段写入的文本 = 旧码 + 新码，应只提交新码");
+}
+
+{
+  // 收不到选区事件（iOS 不派发 / 事件被合并）：行为与之前一致，按前缀扣减，会截成尾段（已知边角，有选区信号的平台才能区分）。
+  const harness = createBatchHarness({ dropClear: () => false, selectionOnClear: false });
+  harness.batchScan("G0930");
+  harness.batchScan("G093093");
+  assert.deepEqual(harness.scans, ["G0930", "93"], "无选区信号时维持原有扣减逻辑");
+}
+
+{
+  // 选区 (0,0) 只在「请求清空后、下一次文本变化前」才算数：清空被丢弃后输入已开始，再来的 (0,0) 不能清掉前缀。
+  const harness = createTextInputHarness({ dropClear: () => true });
+  harness.scanWithEnter("9300000000001");
+  harness.capture.handleChangeText("93000000000019");
+  harness.capture.handleSelectionChange(0, 0);
+  for (const typed of ["930000000000193", "9300000000001930000000002"]) {
+    harness.capture.handleChangeText(typed);
+  }
+  harness.capture.handleSubmitEditing("9300000000001930000000002");
+  assert.deepEqual(harness.scans, ["9300000000001", "930000000002"], "输入开始后的选区事件不影响差量");
+}
+
+{
+  // 首次聚焦空输入框时的选区 (0,0) 无害；非零选区一律忽略。
+  const harness = createTextInputHarness();
+  harness.capture.handleSelectionChange(0, 0);
+  harness.capture.handleSelectionChange(3, 3);
+  harness.scanWithEnter("9300000000001");
+  assert.deepEqual(harness.scans, ["9300000000001"], "无关选区事件不影响正常扫码");
+}
+
 console.log("hid-barcode-buffer.test.ts: ok");

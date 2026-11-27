@@ -30,6 +30,10 @@ const ENTER_FALLBACK_MS = 120;
  * JS 却以为已清空，两边从此错位，表现为第二枪起条码被截断、或和上一枪残留拼成乱码。
  * 现在以原生回传的文本为准：记住「已消费到哪一段」，只把其后新增的部分交给路由器，
  * 原生清空成功或被丢弃都不会串码。未带回车的扫码器仍按停顿自动提交（flushPartialIfIdle）。
+ *
+ * 安卓上 JS 清空成功时不回传文本变化事件，DataWedge 整段写入时单看文本分不清「清空成功后写入一个
+ * 恰好以上一枪开头的新码」和「清空被丢弃后追加」；清空成功时光标回到 0 并派发选区事件，
+ * 所以请求清空后、下一次文本变化前收到选区 (0,0)，就确认原生已空，已消费前缀作废。
  */
 export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerCaptureProps>(
   ({ active, focusRequestKey, onCaptureStatusChange, onHidTextChange, scanner }, ref) => {
@@ -41,6 +45,8 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
     const seenTextRef = useRef("");
     // 原生文本中已经提交或丢弃过的前缀；原生清空被丢弃时，残留就是这一段。
     const consumedTextRef = useRef("");
+    // 已请求原生清空、还没收到下一次文本变化：此时的选区 (0,0) 才算「清空成功」的确认。
+    const awaitingClearConfirmationRef = useRef(false);
 
     const clearEnterFallbackTimer = (): void => {
       if (enterFallbackTimerRef.current) {
@@ -63,6 +69,7 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
     const consumeNativeText = (nativeText: string): void => {
       consumedTextRef.current = nativeText;
       if (nativeText) {
+        awaitingClearConfirmationRef.current = true;
         inputRef.current?.clear();
       }
     };
@@ -174,6 +181,8 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
             onHidTextChange?.();
           }
           seenTextRef.current = nextValue;
+          // 清空后的第一次文本变化已到：之后的选区事件只是光标随输入移动，不再代表清空结果。
+          awaitingClearConfirmationRef.current = false;
           // 收到变化事件就说明原生内容确实变了；不比已消费前缀长，只能是原生已清空后重新输入。
           if (nextValue.length <= consumedTextRef.current.length) {
             consumedTextRef.current = "";
@@ -195,6 +204,20 @@ export const HidScannerCapture = forwardRef<HidScannerCaptureHandle, HidScannerC
             enterFallbackTimerRef.current = null;
             submitNativeText(undefined);
           }, ENTER_FALLBACK_MS);
+        }}
+        onSelectionChange={(event) => {
+          const selection = event?.nativeEvent?.selection;
+          if (
+            !awaitingClearConfirmationRef.current ||
+            selection?.start !== 0 ||
+            selection?.end !== 0
+          ) {
+            return;
+          }
+          // 安卓 JS 清空成功只派发选区事件（光标回到 0）：确认原生已空，下一枪整段都是新码。
+          awaitingClearConfirmationRef.current = false;
+          consumedTextRef.current = "";
+          seenTextRef.current = "";
         }}
         onSubmitEditing={(event) => {
           submitNativeText(event?.nativeEvent?.text);
