@@ -7,6 +7,7 @@ import {
   buildPresetRange,
   buildPurchaseBatches,
   countRangeDays,
+  DEFAULT_PRODUCT_INSIGHT_PRESET,
   resolvePeriodRange,
 } from "./movement-summary";
 import type { StoreProductInsight } from "./types";
@@ -194,12 +195,13 @@ test("预设周期以结束日倒推，含首尾", () => {
   assert.equal(countRangeDays(range), 30);
 });
 
-test("请求区间：默认 90 天交给后端，其他预设按锚点倒推", () => {
-  assert.equal(resolvePeriodRange({ kind: "preset", days: 90 }, "2026-10-30"), undefined);
-  // 还没有锚点时不猜设备日期，退回后端默认。
+test("请求区间：默认 180 天交给后端，其他预设按锚点倒推", () => {
+  assert.equal(DEFAULT_PRODUCT_INSIGHT_PRESET, 180);
+  assert.equal(resolvePeriodRange({ kind: "preset", days: 180 }, "2026-10-30"), undefined);
+  // 还没有锚点时不猜设备日期，退回后端按 days 计算。
   assert.equal(resolvePeriodRange({ kind: "preset", days: 30 }, null), undefined);
-  assert.deepEqual(resolvePeriodRange({ kind: "preset", days: 180 }, "2026-10-30"), {
-    startDate: "2026-05-04",
+  assert.deepEqual(resolvePeriodRange({ kind: "preset", days: 90 }, "2026-10-30"), {
+    startDate: "2026-08-02",
     endDate: "2026-10-30",
   });
   const custom = { startDate: "2026-01-01", endDate: "2026-01-31" };

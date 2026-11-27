@@ -300,11 +300,13 @@ function ProductInsightsContent({
       setCandidates([]);
       setBranchVisible(false);
       try {
+        const current = periodRef.current;
         const result = await fetchStoreProductInsight(
           store.storeCode,
           code,
           lease.signal,
           range,
+          current.kind === "preset" ? current.days : undefined,
         );
         if (!lease.isCurrent()) return;
         if (!range) {

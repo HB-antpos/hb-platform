@@ -20,6 +20,17 @@ public sealed class StoreProductInsightRulesTests
         Assert.False(StoreProductInsightRules.IsValidRange(new DateTime(2026, 9, 15), new DateTime(2026, 9, 14)));
     }
 
+    [Fact]
+    public void 默认区间天数_旧客户端仍为90天且days限定在1到366()
+    {
+        Assert.Equal(90, StoreProductInsightRules.DefaultRangeDays);
+        Assert.True(StoreProductInsightRules.IsValidDefaultRangeDays(1));
+        Assert.True(StoreProductInsightRules.IsValidDefaultRangeDays(180));
+        Assert.True(StoreProductInsightRules.IsValidDefaultRangeDays(366));
+        Assert.False(StoreProductInsightRules.IsValidDefaultRangeDays(0));
+        Assert.False(StoreProductInsightRules.IsValidDefaultRangeDays(367));
+    }
+
     [Theory]
     [InlineData(false, false, true, false, true)]
     [InlineData(false, false, false, true, true)]

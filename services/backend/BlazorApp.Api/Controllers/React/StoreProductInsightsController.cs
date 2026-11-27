@@ -34,7 +34,8 @@ public sealed class StoreProductInsightsController(
         [FromQuery] string? productCode,
         [FromQuery] string? startDate,
         [FromQuery] string? endDate,
-        CancellationToken cancellationToken
+        [FromQuery] int? days = null,
+        CancellationToken cancellationToken = default
     )
     {
         if (string.IsNullOrWhiteSpace(storeCode) || string.IsNullOrWhiteSpace(productCode))
@@ -54,7 +55,7 @@ public sealed class StoreProductInsightsController(
             return Forbid();
         }
 
-        var range = await ResolveRangeAsync(normalizedStoreCode, startDate, endDate, cancellationToken);
+        var range = await ResolveRangeAsync(normalizedStoreCode, startDate, endDate, days, cancellationToken);
         if (range.Error != null)
         {
             return BadRequest(new { success = false, message = range.Error });
@@ -88,15 +89,21 @@ public sealed class StoreProductInsightsController(
         }
     }
 
-    private async Task<(DateTime StartDate, DateTime EndDate)?> ResolveDefaultRangeAsync(string storeCode, CancellationToken cancellationToken) =>
-        await queryService.GetDefaultRangeAsync(storeCode, cancellationToken);
+    private async Task<(DateTime StartDate, DateTime EndDate)?> ResolveDefaultRangeAsync(string storeCode, int days, CancellationToken cancellationToken) =>
+        await queryService.GetDefaultRangeAsync(storeCode, days, cancellationToken);
 
     private async Task<( (DateTime StartDate, DateTime EndDate)? Value, string? Error)> ResolveRangeAsync(
-        string storeCode, string? startDate, string? endDate, CancellationToken cancellationToken)
+        string storeCode, string? startDate, string? endDate, int? days, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(startDate) && string.IsNullOrWhiteSpace(endDate))
         {
-            return (await ResolveDefaultRangeAsync(storeCode, cancellationToken), null);
+            // 不传日期时按门店「今天」倒推 days 天；旧版客户端不带 days，仍保持 90 天。
+            var resolvedDays = days ?? StoreProductInsightRules.DefaultRangeDays;
+            if (!StoreProductInsightRules.IsValidDefaultRangeDays(resolvedDays))
+            {
+                return (null, $"days 必须在 1 到 {StoreProductInsightRules.MaxDefaultRangeDays} 之间");
+            }
+            return (await ResolveDefaultRangeAsync(storeCode, resolvedDays, cancellationToken), null);
         }
         if (string.IsNullOrWhiteSpace(startDate) || string.IsNullOrWhiteSpace(endDate)
             || !DateTime.TryParseExact(startDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsedStart)
