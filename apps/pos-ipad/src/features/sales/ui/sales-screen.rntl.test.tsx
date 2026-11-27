@@ -1004,6 +1004,7 @@ describe("SalesScreen", () => {
     const onOpenSpecialProducts = jest.fn();
     const onOpenSyncHistory = jest.fn();
     const onOpenCatalogMaintenance = jest.fn();
+    const onOpenSupplierAssistant = jest.fn();
     const onOpenInstallments = jest.fn();
     const onOpenSettings = jest.fn();
     const salesPresenter = presenter(new ScreenCartPort(EMPTY_SALE_CART));
@@ -1019,6 +1020,7 @@ describe("SalesScreen", () => {
         onOpenReturns={onOpenReturns}
         onOpenSettings={onOpenSettings}
         onOpenSpecialProducts={onOpenSpecialProducts}
+        onOpenSupplierAssistant={onOpenSupplierAssistant}
         onOpenSyncHistory={onOpenSyncHistory}
         presenter={salesPresenter}
         showStatusStrip={false}
@@ -1053,6 +1055,7 @@ describe("SalesScreen", () => {
       ["remote-history", "sales-open-remote-history", "远程历史", onOpenRemoteHistory],
       ["sync-history", "sales-open-sync-history", "同步历史", onOpenSyncHistory],
       ["catalog-maintenance", "sales-open-catalog-maintenance", "目录更新", onOpenCatalogMaintenance],
+      ["supplier-assistant", "sales-open-supplier-assistant", "订货助手", onOpenSupplierAssistant],
       ["settings", "sales-open-settings", "设置", onOpenSettings],
     ] as const;
     for (const [id, railTestID, label, handler] of moreEntries) {
@@ -1137,6 +1140,9 @@ describe("SalesScreen", () => {
     ).toBeNull();
     expect(
       withoutNavigation.queryByTestId("sales-open-catalog-maintenance"),
+    ).toBeNull();
+    expect(
+      withoutNavigation.queryByTestId("sales-open-supplier-assistant"),
     ).toBeNull();
     expect(
       withoutNavigation.queryByTestId("sales-open-camera-scanner"),

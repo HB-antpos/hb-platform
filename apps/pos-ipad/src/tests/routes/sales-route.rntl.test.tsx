@@ -391,6 +391,8 @@ test("销售路由零参数创建生产 presenter，并在卸载时销毁", asyn
   expect(mockRouterPush).toHaveBeenCalledWith("/settings");
   mockSalesScreenProps.onOpenSyncHistory();
   expect(mockRouterPush).toHaveBeenCalledWith("/sync-history");
+  mockSalesScreenProps.onOpenSupplierAssistant();
+  expect(mockRouterPush).toHaveBeenCalledWith("/supplier-assistant");
   mockSalesScreenProps.onOpenPayment({
     revision: 7,
     lines: [{ lineId: "line-1" }],
