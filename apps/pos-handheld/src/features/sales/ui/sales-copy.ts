@@ -224,6 +224,8 @@ export const salesEnglishCopy = {
   "error.networkUnavailable":
     "Network connection failed. Check the device connection and try again.",
   "error.productAddFailed": "The product could not be added.",
+  "error.openItemUnavailable":
+    "Open item is not in this device's catalog yet. Wait for the catalog download to finish, or check the network, then try again.",
   "error.terminalRecoveryRequired":
     "A held-sale recovery is still pending on this terminal. Open Held sales and recover or return it before continuing.",
   "error.authorizationDenied":
@@ -469,6 +471,8 @@ const salesChineseCopy = {
   "error.searchFailed": "商品搜索失败，请重试。",
   "error.networkUnavailable": "网络连接失败，请检查网络连接后重试。",
   "error.productAddFailed": "商品无法加入购物车。",
+  "error.openItemUnavailable":
+    "本机商品库里还没有「无码商品」，请等商品库下载完成或检查网络后再试。",
   "error.terminalRecoveryRequired":
     "此终端仍有一笔取单恢复未完成。请前往挂单管理，选择“恢复取单”或“退回待取”后再继续收银。",
   "error.authorizationDenied": "此操作需要主管授权。",

@@ -1569,6 +1569,32 @@ test("OPENITEM 被终端取单恢复锁阻止时返回可操作的专用错误",
   presenter.destroy();
 });
 
+test("加无码商品时目录查不到 OPENITEM 显示专用提示，不再落到笼统的「商品无法加入购物车」", async () => {
+  const { presenter } = createPresenter({
+    workflow: {
+      ...createWorkflow(async () => ({
+        completed: true,
+        canClearCart: true,
+        orderGuid: "order-open-item-missing",
+        cashDueCents: 995,
+        changeCents: 5,
+        postCommit: { drawerDisposition: "queued" },
+      })),
+      async addOpenItem() {
+        throw Object.assign(
+          new Error("Catalog item is unavailable for this store."),
+          { code: "CATALOG_LOOKUP_NOT_FOUND" },
+        );
+      },
+    },
+  });
+
+  assert.equal(await presenter.addOpenItem(350), false);
+  assert.equal(presenter.getState().errorCode, "open-item-unavailable");
+
+  presenter.destroy();
+});
+
 test("数量、价格和行/整单折扣严格验证后透传对应 Port", async () => {
   const cart = new MemoryCartPort(saleCart(2_000));
   const { presenter } = createPresenter({ cart });
