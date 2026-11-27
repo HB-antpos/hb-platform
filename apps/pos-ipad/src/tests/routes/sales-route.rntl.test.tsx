@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 
-import SalesRoute from "../../../app/sales";
+import SalesRoute from "../../../app/(pos)/sales";
 import {
   offerPendingSalesScan,
   PENDING_SALES_SCAN_MAX_AGE_MS,

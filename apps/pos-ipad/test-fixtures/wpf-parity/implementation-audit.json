@@ -87,7 +87,7 @@
         "packages/pos-sync/src/core/sync/sync-coordinator.ts",
         "apps/pos-ipad/src/core/runtime/production-attendance-audit-runtime.ts",
         "apps/pos-ipad/src/core/runtime/expo-attendance-runtime-configuration.ts",
-        "apps/pos-ipad/app/attendance-audit.tsx"
+        "apps/pos-ipad/app/(pos)/attendance-audit.tsx"
       ],
       "tests": [
         "apps/pos-ipad/src/core/sync/hbpos-sync-adapters.test.ts",
@@ -401,7 +401,7 @@
         "apps/pos-ipad/src/core/db/sqlite-local-sync-history-store.ts",
         "packages/pos-sync/src/features/sync-history/sync-history-authorization.ts",
         "packages/pos-sync/src/features/sync-history/sync-history-presenter.ts",
-        "apps/pos-ipad/app/sync-history.tsx"
+        "apps/pos-ipad/app/(pos)/sync-history.tsx"
       ],
       "tests": [
         "packages/pos-sync/src/features/sync-history/sync-history-presenter.test.ts",
@@ -447,7 +447,7 @@
       "ipad": [
         "packages/pos-sync/src/features/sync-history/sync-history-domain.ts",
         "packages/pos-sync/src/features/sync-history/sync-history-presenter.ts",
-        "apps/pos-ipad/app/sync-history.tsx"
+        "apps/pos-ipad/app/(pos)/sync-history.tsx"
       ],
       "tests": [
         "packages/pos-sync/src/features/sync-history/sync-history-presenter.test.ts",
@@ -613,7 +613,7 @@
       "ipad": [
         "apps/pos-ipad/src/ui/scanner/scanner-route-bridge.tsx",
         "apps/pos-ipad/app/login.tsx",
-        "apps/pos-ipad/app/sales.tsx",
+        "apps/pos-ipad/app/(pos)/sales.tsx",
         "apps/pos-ipad/src/core/peripherals/scanner/hid-scanner.ts",
         "apps/pos-ipad/src/core/peripherals/scanner/hid-scanner-capture.tsx",
         "apps/pos-ipad/src/core/runtime/expo-pos-runtime.ts"
@@ -637,7 +637,7 @@
         "apps/pos-ipad/src/core/peripherals/scanner/expo-camera-adapter.ts",
         "apps/pos-ipad/src/core/peripherals/scanner/hid-scanner.ts",
         "apps/pos-ipad/src/features/scanner-camera/camera-scanner-modal.tsx",
-        "apps/pos-ipad/app/sales.tsx"
+        "apps/pos-ipad/app/(pos)/sales.tsx"
       ],
       "tests": [
         "apps/pos-ipad/src/core/peripherals/scanner/hid-scanner.test.ts",

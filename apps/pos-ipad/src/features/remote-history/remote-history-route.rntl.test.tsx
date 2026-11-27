@@ -2,7 +2,7 @@ import { beforeEach, expect, jest, test } from "@jest/globals";
 import { act, render, waitFor } from "@testing-library/react-native";
 import { create } from "zustand";
 
-import RemoteHistoryRoute from "../../../app/remote-history";
+import RemoteHistoryRoute from "../../../app/(pos)/remote-history";
 
 // 用真实 zustand store 模拟 connectivity：setState 能驱动 React 重渲染。
 type MockShellState = Readonly<{ connectivity: string }>;

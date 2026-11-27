@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, jest, test } from "@jest/globals";
 import { act, render, waitFor } from "@testing-library/react-native";
 import { create } from "zustand";
 
-import InstallmentsRoute from "../../../app/installments";
+import InstallmentsRoute from "../../../app/(pos)/installments";
 
 let mockRuntime: any;
 let mockActiveCashier: any;

@@ -6,7 +6,7 @@ import {
 } from "@testing-library/react-native";
 import { StyleSheet } from "react-native";
 
-import ReturnsRoute from "../../../app/returns";
+import ReturnsRoute from "../../../app/(pos)/returns";
 
 let mockRuntime: any;
 let mockActiveCashier: any;

@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { render, waitFor } from "@testing-library/react-native";
 
-import CatalogMaintenanceRoute from "../../../app/catalog-maintenance";
+import CatalogMaintenanceRoute from "../../../app/(pos)/catalog-maintenance";
 
 let mockRuntime: any;
 let mockActiveCashier: any;

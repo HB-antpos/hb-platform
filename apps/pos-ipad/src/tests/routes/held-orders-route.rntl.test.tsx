@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { render, waitFor } from "@testing-library/react-native";
 
-import HeldOrdersRoute from "../../../app/held-orders";
+import HeldOrdersRoute from "../../../app/(pos)/held-orders";
 
 import type { SharedHeldOrdersViewPort } from "@/features/held-orders";
 import {

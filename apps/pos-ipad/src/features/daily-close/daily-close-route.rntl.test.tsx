@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { render, waitFor } from "@testing-library/react-native";
 
-import DailyCloseRoute from "../../../app/daily-close";
+import DailyCloseRoute from "../../../app/(pos)/daily-close";
 
 let mockRuntime: any;
 let mockActiveCashier: any;

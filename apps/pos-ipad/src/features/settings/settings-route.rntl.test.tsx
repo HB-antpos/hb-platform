@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { render, waitFor } from "@testing-library/react-native";
 
-import SettingsRoute from "../../../app/settings";
+import SettingsRoute from "../../../app/(pos)/settings";
 
 let mockRuntime: any;
 let mockActiveCashier: any;
