@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { render, waitFor } from "@testing-library/react-native";
 
-import PaymentRecoveryRoute from "../../../app/payment-recovery";
+import PaymentRecoveryRoute from "../../../app/(pos)/payment-recovery";
 
 jest.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" } }) }));
 

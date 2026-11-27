@@ -11,25 +11,25 @@ const placeholderPattern = /\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/gu;
 
 // 新增页面必须在这里登记其实际承载可见文案的 source，避免路由已注册而未纳入双语审计。
 const registeredPageCopySurfaces = {
-  "app/attendance-audit.tsx": "src/features/attendance-audit/attendance-audit-copy.ts",
-  "app/catalog-maintenance.tsx": "../../packages/pos-domain/src/features/catalog/maintenance/catalog-maintenance-copy.ts",
-  "app/daily-close.tsx": "src/features/daily-close/daily-close-copy.ts",
-  "app/held-orders.tsx": "src/features/held-orders/held-orders-copy.ts",
+  "app/(pos)/attendance-audit.tsx": "src/features/attendance-audit/attendance-audit-copy.ts",
+  "app/(pos)/catalog-maintenance.tsx": "../../packages/pos-domain/src/features/catalog/maintenance/catalog-maintenance-copy.ts",
+  "app/(pos)/daily-close.tsx": "src/features/daily-close/daily-close-copy.ts",
+  "app/(pos)/held-orders.tsx": "src/features/held-orders/held-orders-copy.ts",
   "app/index.tsx": "src/ui/screens/bootstrap-screen.tsx",
-  "app/installments.tsx": "src/features/installments/installment-copy.ts",
-  "app/local-history.tsx": "src/features/local-history/local-history-copy.ts",
+  "app/(pos)/installments.tsx": "src/features/installments/installment-copy.ts",
+  "app/(pos)/local-history.tsx": "src/features/local-history/local-history-copy.ts",
   "app/login.tsx": "src/features/cashier-login/cashier-login-screen.tsx",
   "app/network-check.tsx": "src/features/network-check/network-check-copy.ts",
-  "app/payment-recovery.tsx": "../../packages/pos-domain/src/features/payment-recovery/payment-recovery-copy.ts",
+  "app/(pos)/payment-recovery.tsx": "../../packages/pos-domain/src/features/payment-recovery/payment-recovery-copy.ts",
   "app/payment.tsx": "src/features/payments/ui/payment-copy.ts",
   "app/registration.tsx": "src/features/device-registration/device-registration-screen.tsx",
-  "app/remote-history.tsx": "src/features/remote-history/remote-history-copy.ts",
-  "app/returns.tsx": "src/features/returns/return-copy.ts",
-  "app/sales.tsx": "src/features/sales/ui/sales-copy.ts",
-  "app/settings.tsx": "src/features/settings/settings-copy.ts",
-  "app/special-products.tsx": "src/features/special-products/special-products-copy.ts",
-  "app/supplier-assistant.tsx": "src/features/supplier-assistant/supplier-assistant-copy.ts",
-  "app/sync-history.tsx": "src/features/sync-history/sync-history-copy.ts",
+  "app/(pos)/remote-history.tsx": "src/features/remote-history/remote-history-copy.ts",
+  "app/(pos)/returns.tsx": "src/features/returns/return-copy.ts",
+  "app/(pos)/sales.tsx": "src/features/sales/ui/sales-copy.ts",
+  "app/(pos)/settings.tsx": "src/features/settings/settings-copy.ts",
+  "app/(pos)/special-products.tsx": "src/features/special-products/special-products-copy.ts",
+  "app/(pos)/supplier-assistant.tsx": "src/features/supplier-assistant/supplier-assistant-copy.ts",
+  "app/(pos)/sync-history.tsx": "src/features/sync-history/sync-history-copy.ts",
   "app/update-recovery.tsx": "src/features/app-updates/app-update-recovery-screen.tsx",
   "app/zeller-probe.tsx": "src/features/zeller-probe/zeller-probe-copy.ts",
 };
@@ -145,7 +145,8 @@ test("所有已注册 POS 页面均登记到可审计的可见文案 source", as
     .map(relativePath)
     .filter((file) => file.startsWith("app/") && file.endsWith(".tsx"))
     .filter((file) => !/\.(?:test|spec|rntl)\.tsx$/u.test(file))
-    .filter((file) => file !== "app/_layout.tsx")
+    // 根布局与路由分组布局（如 app/(pos)/_layout.tsx）只负责装配，没有可见文案。
+    .filter((file) => !/(?:^|\/)_layout\.tsx$/u.test(file))
     .sort();
   const registeredRoutes = Object.keys(registeredPageCopySurfaces).sort();
 

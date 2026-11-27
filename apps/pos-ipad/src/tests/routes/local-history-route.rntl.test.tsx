@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { act, render, waitFor } from "@testing-library/react-native";
 
-import LocalHistoryRoute from "../../../app/local-history";
+import LocalHistoryRoute from "../../../app/(pos)/local-history";
 
 let mockRuntime: any;
 let mockActiveCashier: any;

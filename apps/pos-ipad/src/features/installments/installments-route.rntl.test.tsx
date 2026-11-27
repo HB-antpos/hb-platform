@@ -1,7 +1,7 @@
 import { beforeEach, expect, jest, test } from "@jest/globals";
 import { act, render, waitFor } from "@testing-library/react-native";
 
-import InstallmentsRoute from "../../../app/installments";
+import InstallmentsRoute from "../../../app/(pos)/installments";
 
 import { usePosShellStore } from "@/ui/shell/pos-shell-store";
 

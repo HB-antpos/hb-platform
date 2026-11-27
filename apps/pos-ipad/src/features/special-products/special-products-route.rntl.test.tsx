@@ -2,7 +2,7 @@ import { beforeEach, expect, jest, test } from "@jest/globals";
 import { act, render, waitFor } from "@testing-library/react-native";
 import { create } from "zustand";
 
-import SpecialProductsRoute from "../../../app/special-products";
+import SpecialProductsRoute from "../../../app/(pos)/special-products";
 
 let mockRuntime: any;
 let mockActiveCashier: any;

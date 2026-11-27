@@ -1,4 +1,10 @@
-import { useContext, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type ReactNode,
+} from "react";
 import { Text, View, type StyleProp, type ViewStyle } from "react-native";
 import {
   SafeAreaInsetsContext,
@@ -8,6 +14,7 @@ import {
 import { PosAppRail, type PosNavModel } from "./pos-app-rail";
 import type { PosActiveDestination } from "./pos-navigation";
 import { usePosNavigation } from "./pos-navigation-context";
+import { usePosScreenFocused, usePosShellHost } from "./pos-shell-host";
 import { PosStatusStrip } from "./status-strip";
 
 import { PosButton, type PosIconName } from "@/ui/controls/pos-button";
@@ -45,6 +52,9 @@ export type PosScreenFrameProps = Readonly<{
 /**
  * 页面外壳：顶栏 + 左侧栏 + 页头 + 内容区。
  * 所有页面套同一副骨架，状态、导航、返回键的位置保持一致。
+ *
+ * 在常驻外壳（app/(pos)/_layout.tsx 的 PosShellHost）里时：顶栏和左侧栏由外壳常驻渲染，
+ * 这里只渲染页头 + 内容，并在本页获得焦点时把外壳配置登记给外壳。
  */
 export function PosScreenFrame({
   accessibilityRole,
@@ -73,6 +83,43 @@ export function PosScreenFrame({
     appVersionLabel === undefined
       ? (navigation?.appVersionLabel ?? null)
       : appVersionLabel;
+
+  const host = usePosShellHost();
+  const focused = usePosScreenFocused();
+  const ownerRef = useRef<symbol | null>(null);
+  ownerRef.current ??= Symbol("pos-screen-frame");
+  // 每次渲染都登记（只在获得焦点时）：侧栏模型里的回调每次渲染都是新的，必须跟着更新；
+  // 登记只会让外壳的顶栏 / 侧栏出口重绘，不会让本页再渲染。
+  useLayoutEffect(() => {
+    if (!host || !focused) return;
+    host.publish(ownerRef.current!, {
+      active,
+      appVersionLabel: versionLabel,
+      language: resolvedLanguage,
+      model,
+      navigationLocked,
+      onSwitchLanguage: switchLanguage,
+      topBar,
+    });
+  });
+  useEffect(() => {
+    if (!host) return undefined;
+    const owner = ownerRef.current!;
+    return () => host.release(owner);
+  }, [host]);
+
+  if (host) {
+    return (
+      <View
+        accessibilityRole={accessibilityRole}
+        style={[styles.frame, style, styles.content, contentStyle]}
+        testID={testID}
+      >
+        {header}
+        {children}
+      </View>
+    );
+  }
 
   // 顶栏是深色底、状态栏文字是浅色：把顶部安全区也铺成顶栏颜色，
   // 否则系统时间和电量会落在浅色页面底上看不清。
