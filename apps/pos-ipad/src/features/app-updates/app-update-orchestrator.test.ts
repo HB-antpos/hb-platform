@@ -496,6 +496,153 @@ test("强制 OTA 下载完成后仍全屏阻断新交易，直到重开换上新
   assert.notEqual(orchestrator.getPresentation().phase, "restart-pending");
 });
 
+test("立即重启：原生包未带 reload 修复（或未注入重启端口）时一律不可用，不会调 reload", async () => {
+  let reloads = 0;
+  type RestartPort = Readonly<{
+    isAvailable(): boolean;
+    reload(): Promise<void>;
+  }>;
+  const restartPorts: readonly (RestartPort | undefined)[] = [
+    undefined,
+    {
+      isAvailable: () => false,
+      reload: async () => {
+        reloads += 1;
+      },
+    },
+    {
+      isAvailable: () => {
+        throw new Error("native probe failed");
+      },
+      reload: async () => {
+        reloads += 1;
+      },
+    },
+  ];
+  for (const restart of restartPorts) {
+    const ota: FakeOta = new FakeOta(otaOptional);
+    ota.onApply = async () => ({ state: "downloaded", reason: null });
+    const orchestrator: AppUpdateOrchestrator = new AppUpdateOrchestrator({
+      installedVersion: "1.0.0",
+      native: new FakeNative(nativeEnabled),
+      ota,
+      ...transitionDependencies(),
+      safety: { getSafetySnapshot: () => safeSnapshot() },
+      ...(restart ? { restart } : {}),
+    });
+    await orchestrator.performSelectedUpdate();
+    assert.equal(orchestrator.getPresentation().phase, "restart-pending");
+    assert.equal(orchestrator.canRestartInProcess(), false);
+    assert.deepEqual(await orchestrator.restartToApplyDownloadedUpdate(), {
+      action: "blocked",
+      reason: "restart-unavailable",
+    });
+  }
+  assert.equal(reloads, 0);
+});
+
+test("立即重启：没下载过当前目标时拒绝，不会 reload 出原生自带版本", async () => {
+  let reloads = 0;
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0",
+    native: new FakeNative(nativeEnabled),
+    ota: new FakeOta(otaOptional),
+    ...transitionDependencies(),
+    safety: { getSafetySnapshot: () => safeSnapshot() },
+    restart: {
+      isAvailable: () => true,
+      reload: async () => {
+        reloads += 1;
+      },
+    },
+  });
+  assert.equal(orchestrator.getPresentation().phase, "prompt");
+  assert.deepEqual(await orchestrator.restartToApplyDownloadedUpdate(), {
+    action: "blocked",
+    reason: "not-downloaded",
+  });
+  assert.equal(reloads, 0);
+});
+
+test("立即重启：有未完成交易时在租约内拒绝，安全后才 reload 且租约保持封门", async () => {
+  let reloads = 0;
+  let snapshot: ReturnType<typeof safeSnapshot> | Record<string, boolean> =
+    safeSnapshot();
+  const transition = configuredTransition();
+  const ota = new FakeOta(otaOptional);
+  ota.onApply = async () => ({ state: "downloaded", reason: null });
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0",
+    native: new FakeNative(nativeEnabled),
+    ota,
+    transition,
+    appStore: { async open() {} },
+    safety: { getSafetySnapshot: () => snapshot as never },
+    restart: {
+      isAvailable: () => true,
+      reload: async () => {
+        reloads += 1;
+      },
+    },
+  });
+  await orchestrator.performSelectedUpdate();
+  assert.equal(orchestrator.canRestartInProcess(), true);
+
+  snapshot = { ...safeSnapshot(), hasActiveCart: true };
+  const blocked = await orchestrator.restartToApplyDownloadedUpdate();
+  assert.equal(blocked.action, "blocked");
+  assert.notEqual(blocked.reason, "restart-unavailable");
+  assert.equal(reloads, 0);
+  assert.equal(transition.isTransitionActive(), false);
+
+  snapshot = safeSnapshot();
+  let settled = false;
+  void orchestrator.restartToApplyDownloadedUpdate().then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reloads, 1);
+  // reload 后旧 JS 可能还会跑一会儿：Promise 不返回、租约不释放，新交易一直被挡住。
+  assert.equal(settled, false);
+  assert.equal(transition.isTransitionActive(), true);
+  assert.equal(orchestrator.getGate().canStartNewTransaction, false);
+});
+
+test("立即重启：reload 失败时原样抛出并释放租约，界面可改为提示手动重开", async () => {
+  const transition = configuredTransition();
+  const ota = new FakeOta(otaRequired);
+  ota.onApply = async () => ({ state: "downloaded", reason: null });
+  const orchestrator = new AppUpdateOrchestrator({
+    installedVersion: "1.0.0",
+    native: new FakeNative(nativeEnabled),
+    ota,
+    transition,
+    appStore: { async open() {} },
+    safety: { getSafetySnapshot: () => safeSnapshot() },
+    restart: {
+      isAvailable: () => true,
+      reload: async () => {
+        throw new Error("reload failed");
+      },
+    },
+  });
+  await orchestrator.performSelectedUpdate();
+  await assert.rejects(
+    orchestrator.restartToApplyDownloadedUpdate(),
+    /reload failed/u,
+  );
+  assert.equal(transition.isTransitionActive(), false);
+  // 强制更新仍保持阻断，直到真正换上新版本。
+  assert.equal(orchestrator.getPresentation().phase, "restart-pending");
+  assert.equal(orchestrator.getGate().canStartNewTransaction, false);
+});
+
 class FakeNative {
   public refreshes = 0;
   private readonly listeners = new Set<(gate: NewTransactionGate) => void>();

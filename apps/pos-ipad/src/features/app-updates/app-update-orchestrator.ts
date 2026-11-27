@@ -46,6 +46,15 @@ export type AppUpdateActionResult =
   | Readonly<{ action: "open-app-store"; url: string }>
   | Readonly<{ action: "ota"; result: ExpoOtaUpdateApplyResult }>;
 
+/** 「立即重启」的结果；成功时进程会被替换，Promise 不再返回。 */
+export type AppUpdateRestartActionResult = Readonly<{
+  action: "blocked";
+  reason:
+    | Exclude<AppUpdateRestartDecision, { canRestart: true }>["reason"]
+    | "selection-changed"
+    | "not-downloaded";
+}>;
+
 type NativeUpdateCoordinatorPort = Readonly<{
   getPolicy(): PosIpadUpdatePolicy | null;
   getGate(): NewTransactionGate;
@@ -87,6 +96,14 @@ export type AppUpdateOrchestratorOptions = Readonly<{
   }>;
   appStore: Readonly<{
     open(url: string): Promise<void>;
+  }>;
+  /**
+   * App 内重启（Updates.reloadAsync）。只有原生包带了 reload 修复补丁时 isAvailable 才为 true；
+   * 不传或不可用时，已下载的 OTA 只能靠店员上滑关闭后重开生效。
+   */
+  restart?: Readonly<{
+    isAvailable(): boolean;
+    reload(): Promise<void>;
   }>;
 }>;
 
@@ -306,6 +323,55 @@ export class AppUpdateOrchestrator {
         this.recompute();
       }
       return Object.freeze({ action: "ota", result });
+    });
+  }
+
+  /** 当前原生包能否在 App 内重启来应用已下载的 OTA（决定提示卡给不给「立即重启」）。 */
+  public canRestartInProcess(): boolean {
+    try {
+      return this.options.restart?.isAvailable() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 「立即重启」：只对本进程已下载、仍是当前选择的 OTA 生效。
+   * 在更新租约里重新核验交易安全（有未完成交易 / 支付恢复就拒绝），通过后才 reload。
+   * reload 成功后旧 JS 不保证立即停止，所以保持 Promise pending、租约一直封门，直到新运行时接管；
+   * reload 失败照常抛出，由界面提示改为手动重开。
+   */
+  public async restartToApplyDownloadedUpdate(): Promise<AppUpdateRestartActionResult> {
+    const selected = this.presentation;
+    const restart = this.options.restart;
+    if (!restart || !this.canRestartInProcess()) {
+      return Object.freeze({
+        action: "blocked",
+        reason: "restart-unavailable",
+      });
+    }
+    if (selected.phase !== "restart-pending") {
+      return Object.freeze({
+        action: "blocked",
+        reason: "not-downloaded",
+      });
+    }
+    return this.options.transition.runTransition(async () => {
+      const safety = await this.readSafetyDecision();
+      if (!samePresentation(this.presentation, selected)) {
+        return Object.freeze({
+          action: "blocked",
+          reason: "selection-changed",
+        });
+      }
+      if (!safety.canRestart) {
+        return Object.freeze({
+          action: "blocked",
+          reason: safety.reason,
+        });
+      }
+      await restart.reload();
+      return new Promise<never>(() => undefined);
     });
   }
 

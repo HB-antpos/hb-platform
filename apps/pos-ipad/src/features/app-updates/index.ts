@@ -9,3 +9,4 @@ export * from "./hbpos-pos-ipad-update-api";
 export * from "./hbpos-pos-ipad-ota-update-api";
 export * from "./ota-update-coordinator";
 export * from "./update-transition-lease-coordinator";
+export * from "./safe-runtime-reload";

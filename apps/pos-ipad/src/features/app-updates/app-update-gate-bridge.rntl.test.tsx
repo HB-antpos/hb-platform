@@ -293,10 +293,14 @@ function updateService(presentation: any): any {
       action: "none",
       reason: "no-update",
     })),
+    canRestartInProcess: jest.fn(() => false),
+    restartToApplyDownloadedUpdate: jest.fn(
+      () => new Promise<never>(() => undefined),
+    ),
   };
 }
 
-test("OTA 已下载等待重开：可选提示只剩「知道了」，不再提供安装按钮", async () => {
+test("旧原生包 OTA 已下载等待重开：可选提示只剩「稍后」，没有安装或重启按钮", async () => {
   const updates = updateService({
     key: "ota:optional:policy-42:update-id",
     kind: "ota",
@@ -312,6 +316,8 @@ test("OTA 已下载等待重开：可选提示只剩「知道了」，不再提�
   expect(screen.getByTestId("app-update-optional-prompt")).toBeTruthy();
   expect(screen.getByText("更新已下载，重开 HB POS 后生效")).toBeTruthy();
   expect(screen.queryByTestId("app-update-action")).toBeNull();
+  expect(screen.queryByTestId("app-update-restart")).toBeNull();
+  expect(screen.getByText("稍后")).toBeTruthy();
 
   await act(async () => {
     fireEvent.press(screen.getByTestId("app-update-dismiss"));
@@ -337,5 +343,117 @@ test("强制 OTA 已下载等待重开：保持全屏阻断与只读入口，但
   expect(screen.getByText("更新已下载，重开 HB POS 后生效")).toBeTruthy();
   expect(screen.getByTestId("app-update-settings-entry")).toBeTruthy();
   expect(screen.queryByTestId("app-update-action")).toBeNull();
+  expect(screen.queryByTestId("app-update-restart")).toBeNull();
   expect(screen.queryByTestId("app-update-dismiss")).toBeNull();
+});
+
+test("带 reload 修复的原生包：可选更新下载后给「立即重启」和「稍后」", async () => {
+  const updates = updateService({
+    key: "ota:optional:policy-42:update-id",
+    kind: "ota",
+    requirement: "optional",
+    phase: "restart-pending",
+    blocking: false,
+    releaseMessage: "修复扫码提示。",
+    appStoreUrl: null,
+  });
+  updates.canRestartInProcess.mockReturnValue(true);
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  expect(screen.getByText("更新已下载，重启 HB POS 后生效")).toBeTruthy();
+  expect(screen.getByText("立即重启")).toBeTruthy();
+  expect(screen.getByText("稍后")).toBeTruthy();
+  expect(screen.queryByTestId("app-update-action")).toBeNull();
+
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("app-update-restart"));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  expect(updates.restartToApplyDownloadedUpdate).toHaveBeenCalledTimes(1);
+  // reload 进行中：按钮保持「正在重启…」并禁用，「稍后」也不能再点。
+  expect(screen.getByText("正在重启…")).toBeTruthy();
+  expect(
+    screen.getByTestId("app-update-dismiss").props.accessibilityState
+      ?.disabled,
+  ).toBe(true);
+  expect(updates.performSelectedUpdate).not.toHaveBeenCalled();
+});
+
+test("「稍后」收起待重启提示且不触发重启", async () => {
+  const updates = updateService({
+    key: "ota:optional:policy-42:update-id",
+    kind: "ota",
+    requirement: "optional",
+    phase: "restart-pending",
+    blocking: false,
+    releaseMessage: null,
+    appStoreUrl: null,
+  });
+  updates.canRestartInProcess.mockReturnValue(true);
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("app-update-dismiss"));
+  });
+  expect(screen.queryByTestId("app-update-optional-prompt")).toBeNull();
+  expect(updates.restartToApplyDownloadedUpdate).not.toHaveBeenCalled();
+});
+
+test("强制更新下载后：全屏门里给「立即重启」，没有「稍后」；有交易未完成时提示先收口", async () => {
+  const updates = updateService({
+    key: "ota:required:policy-42:update-id",
+    kind: "ota",
+    requirement: "required",
+    phase: "restart-pending",
+    blocking: true,
+    releaseMessage: null,
+    appStoreUrl: null,
+  });
+  updates.canRestartInProcess.mockReturnValue(true);
+  updates.restartToApplyDownloadedUpdate.mockResolvedValue({
+    action: "blocked",
+    reason: "active-cart",
+  });
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  expect(screen.getByTestId("app-update-blocking-gate")).toBeTruthy();
+  expect(screen.queryByTestId("app-update-dismiss")).toBeNull();
+
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("app-update-restart"));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  expect(
+    screen.getByText("请先完成当前交易或支付恢复，再执行更新。"),
+  ).toBeTruthy();
+  expect(screen.getByText("立即重启")).toBeTruthy();
+});
+
+test("reload 失败时提示改为上滑关闭后重开", async () => {
+  const updates = updateService({
+    key: "ota:optional:policy-42:update-id",
+    kind: "ota",
+    requirement: "optional",
+    phase: "restart-pending",
+    blocking: false,
+    releaseMessage: null,
+    appStoreUrl: null,
+  });
+  updates.canRestartInProcess.mockReturnValue(true);
+  updates.restartToApplyDownloadedUpdate.mockRejectedValue(
+    new Error("reload failed"),
+  );
+  mockRuntime = { services: { appUpdates: updates } };
+
+  const screen = await render(<AppUpdateGateBridge />);
+  await act(async () => {
+    fireEvent.press(screen.getByTestId("app-update-restart"));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  expect(
+    screen.getByText("重启失败，请从屏幕底部上滑关闭 HB POS 后重新打开。"),
+  ).toBeTruthy();
 });

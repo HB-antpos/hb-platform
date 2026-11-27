@@ -23,7 +23,13 @@ export const appUpdateEnglishCopy = {
   "restartPending.title": "Update downloaded. Reopen HB POS to finish",
   "restartPending.body":
     "Swipe up from the bottom to open the app switcher, close HB POS, then open it again. The update takes effect on the next launch and all data on this terminal is kept.",
-  "action.gotIt": "Got it",
+  "restartPending.restartTitle": "Update downloaded. Restart HB POS to finish",
+  "restartPending.restartBody":
+    "Tap Restart now to switch to the new version in a few seconds; all data on this terminal is kept. If you don't restart now, the update also takes effect the next time HB POS opens.",
+  "action.restartNow": "Restart now",
+  "action.restarting": "Restarting…",
+  "error.restartFailed":
+    "Restart failed. Swipe up from the bottom, close HB POS, then open it again.",
 } as const;
 
 export type AppUpdateCopyKey = keyof typeof appUpdateEnglishCopy;
@@ -52,7 +58,12 @@ export const appUpdateChineseCopy: Record<
   "restartPending.title": "更新已下载，重开 HB POS 后生效",
   "restartPending.body":
     "从屏幕底部上滑打开多任务界面，关闭 HB POS 后重新打开，更新会在下次启动时生效，本机数据全部保留。",
-  "action.gotIt": "知道了",
+  "restartPending.restartTitle": "更新已下载，重启 HB POS 后生效",
+  "restartPending.restartBody":
+    "点「立即重启」几秒内换上新版本，本机数据全部保留；暂不重启的话，下次打开 HB POS 时也会自动生效。",
+  "action.restartNow": "立即重启",
+  "action.restarting": "正在重启…",
+  "error.restartFailed": "重启失败，请从屏幕底部上滑关闭 HB POS 后重新打开。",
 };
 
 export function resolveAppUpdateCopy(
