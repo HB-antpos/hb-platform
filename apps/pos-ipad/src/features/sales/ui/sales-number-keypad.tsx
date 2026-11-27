@@ -38,6 +38,8 @@ export type SalesNumberKeypadProps = Readonly<{
   onKeyPress(key: SalesNumberKey): void;
   testIDPrefix: string;
   labels: SalesNumberKeypadLabels;
+  /** 常驻在收银页右栏时用矮一点的键（48），弹窗里仍是 60。 */
+  compact?: boolean;
 }>;
 
 type ApplySalesNumberKeyOptions = Readonly<{
@@ -95,14 +97,21 @@ export function SalesNumberKeypad({
   onKeyPress,
   testIDPrefix,
   labels,
+  compact = false,
 }: SalesNumberKeypadProps) {
   usePosThemeVersion();
   const rows = mode === "decimal" ? DECIMAL_KEY_ROWS : INTEGER_KEY_ROWS;
 
   return (
-    <View style={styles.keypad} testID={`${testIDPrefix}-keypad`}>
+    <View
+      style={[styles.keypad, compact && styles.keypadCompact]}
+      testID={`${testIDPrefix}-keypad`}
+    >
       {rows.map((row, rowIndex) => (
-        <View key={rowIndex} style={styles.row}>
+        <View
+          key={rowIndex}
+          style={[styles.row, compact && styles.rowCompact]}
+        >
           {row.map((key) => (
             <PosPressable
               accessibilityLabel={getAccessibilityLabel(key, labels)}
@@ -114,6 +123,7 @@ export function SalesNumberKeypad({
               sound={key === "clear" ? "danger" : "key"}
               style={({ pressed }) => [
                 styles.key,
+                compact && styles.keyCompact,
                 isQuickKey(key) && styles.quickKey,
                 key === "clear" && styles.clearKey,
                 disabled && styles.keyDisabled,
@@ -204,6 +214,9 @@ const styles = createPosStyles((colors) => ({
     flexDirection: "row",
     gap: 8,
   },
+  keypadCompact: { gap: 6 },
+  rowCompact: { gap: 6 },
+  keyCompact: { minHeight: 48 },
   key: {
     alignItems: "center",
     backgroundColor: colors.surface,
