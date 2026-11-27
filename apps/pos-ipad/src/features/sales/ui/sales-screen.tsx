@@ -2372,7 +2372,14 @@ export function SalesScreen({
           >
             <Text style={styles.modalTitle}>{t("orderDiscount.title")}</Text>
             <Text style={styles.discountHint}>{t("orderDiscount.hint")}</Text>
-            <View style={styles.discountGrid}>
+            {/*
+              快捷折扣排成一行：按钮样式是 flex: 1（按宽度均分），放进竖排容器时
+              flexBasis 为 0，容器按 0 高度排版，按钮溢出压住下面的「金额 / 百分比 / 取消」。
+            */}
+            <View
+              style={styles.editModeRow}
+              testID="sales-order-discount-presets"
+            >
               {QUICK_ORDER_DISCOUNTS.map((basisPoints) => (
                 <ActionButton
                   key={basisPoints}

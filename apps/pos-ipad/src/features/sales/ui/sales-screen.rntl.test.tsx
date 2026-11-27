@@ -3846,6 +3846,15 @@ describe("SalesScreen", () => {
 
     await fireEvent.press(screen.getByTestId("sales-order-discount"));
     expect(screen.getByTestId("sales-order-discount-modal")).toBeTruthy();
+    // 回归（11-27 真机）：快捷折扣按钮是 flex: 1，必须放在横排里；
+    // 放进竖排容器会按 0 高度排版，按钮压住「金额 / 百分比 / 取消」。
+    const presets = screen.getByTestId("sales-order-discount-presets");
+    expect(StyleSheet.flatten(presets.props.style).flexDirection).toBe("row");
+    for (const basisPoints of [1_000, 2_000, 3_000, 4_000, 5_000]) {
+      expect(
+        within(presets).getByTestId(`sales-order-discount-${basisPoints}`),
+      ).toBeTruthy();
+    }
     await fireEvent.press(
       screen.getByTestId("sales-order-discount-backdrop", {
         includeHiddenElements: true,
