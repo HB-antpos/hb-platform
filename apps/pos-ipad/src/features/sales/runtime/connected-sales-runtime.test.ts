@@ -479,6 +479,81 @@ test("每次扫码仅发布一个权威 outcome，并以 disposition 区分新�
   assert.equal(new Set(outcomes.map((outcome: any) => outcome.attemptId)).size, 4);
 });
 
+function openItemCatalogEntry(): LocalCatalogMatch {
+  return item({
+    productCode: "G006243",
+    itemNumber: "OPEN ITEM",
+    lookupCode: "OPENITEM",
+    lookupCodeNormalized: "OPENITEM",
+    displayName: "OPEN ITEM",
+    retailPriceCents: 0,
+  });
+}
+
+test("本机目录还没有 OPENITEM（新装机整店目录未就绪）时，加无码商品先在线补查写入覆盖层再加购", async () => {
+  // 生产里在线校准会把结果写进覆盖层，随后的精确查询从覆盖层命中；这里用同一个数组模拟覆盖层。
+  const values: LocalCatalogMatch[] = [];
+  const revalidated: string[] = [];
+  const dependencies = connected({
+    catalog: new Catalog(values),
+    catalogRevalidation: {
+      revalidate: async (code) => {
+        revalidated.push(code);
+        const entry = openItemCatalogEntry();
+        values.push(entry);
+        return { kind: "found", baseSnapshotId: "snapshot-1", item: entry };
+      },
+      isCurrentBaseSnapshot: async () => true,
+    },
+    catalogWorkScheduler: immediateScheduler(),
+  });
+
+  await dependencies.workflow.addOpenItem(350);
+
+  assert.deepEqual(revalidated, ["OPENITEM"]);
+  const lines = dependencies.cart.getSnapshot().lines;
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0]?.actualAmount.cents, 350);
+});
+
+test("本机目录已有 OPENITEM 时加无码商品不发在线补查", async () => {
+  let revalidations = 0;
+  const dependencies = connected({
+    catalog: new Catalog([openItemCatalogEntry()]),
+    catalogRevalidation: {
+      revalidate: async () => {
+        revalidations += 1;
+        return { kind: "unavailable" };
+      },
+      isCurrentBaseSnapshot: async () => true,
+    },
+    catalogWorkScheduler: immediateScheduler(),
+  });
+
+  await dependencies.workflow.addOpenItem(350);
+
+  assert.equal(revalidations, 0);
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 1);
+});
+
+test("本机目录没有 OPENITEM 且在线补查也拿不到时，按 CATALOG_LOOKUP_NOT_FOUND 失败、购物车不变", async () => {
+  const dependencies = connected({
+    catalog: new Catalog([]),
+    catalogRevalidation: {
+      revalidate: async () => ({ kind: "unavailable" }),
+      isCurrentBaseSnapshot: async () => true,
+    },
+    catalogWorkScheduler: immediateScheduler(),
+  });
+
+  await assert.rejects(
+    dependencies.workflow.addOpenItem(350),
+    (error: unknown) =>
+      (error as { code?: unknown }).code === "CATALOG_LOOKUP_NOT_FOUND",
+  );
+  assert.equal(dependencies.cart.getSnapshot().lines.length, 0);
+});
+
 test("本地命中已经发布成功后，远程 not-found 或异常不会产生第二个终态", async () => {
   const notFound = deferred<CatalogLookupRevalidationResult>();
   const first = connected({
