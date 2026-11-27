@@ -4,7 +4,7 @@ import type { NativeSyntheticEvent, TextInputSubmitEditingEventData, TextInput }
 import { getItemAsync, setItemAsync } from "expo-secure-store";
 import {
   createHidBarcodeKeyBuffer,
-  extractNewHidBarcodeSegment,
+  createHidTextInputCapture,
   normalizeHidBarcode,
   type HidBarcodeKeyEvent,
 } from "./hid-barcode-buffer";
@@ -95,8 +95,6 @@ export function useHidBarcodeScanner({
   const minLengthRef = useRef(minLength);
   minLengthRef.current = minLength;
 
-  const [textInputValue, setTextInputValue] = useState("");
-  const textInputTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textInputRef = useRef<TextInput>(null);
   const focusTargetRef = useRef<() => void>(() => {});
   const focusControllerRef = useRef<HiddenInputFocusController | null>(null);
@@ -106,7 +104,6 @@ export function useHidBarcodeScanner({
   const [forceTextInput, setForceTextInput] = useState<boolean>(() => getHidScannerForceTextInput() === true);
   const lastSubmittedRef = useRef("");
   const lastSubmittedTimeRef = useRef(0);
-  const lastSubmittedRawValueRef = useRef("");
 
   const switchToTextInputMode = useCallback(() => {
     if (getHidScannerForceTextInput() === true) {
@@ -142,25 +139,22 @@ export function useHidBarcodeScanner({
   const submitBarcode = useCallback(
     (rawValue: string) => {
       if (!enabledGateRef.current.isEnabled()) {
-        lastSubmittedRawValueRef.current = "";
         return;
       }
-      const normalizedRawValue = normalizeHidBarcode(rawValue);
-      const barcode = extractNewHidBarcodeSegment(normalizedRawValue, lastSubmittedRawValueRef.current);
+      // rawValue 已是原生文本里扣掉已消费前缀后的新增部分（见 createHidTextInputCapture）。
+      const barcode = normalizeHidBarcode(rawValue);
       if (!barcode || barcode.length < minLength) {
         return;
       }
 
       const now = Date.now();
       if (barcode === lastSubmittedRef.current && now - lastSubmittedTimeRef.current < DUPLICATE_TEXT_INPUT_SUPPRESS_MS) {
-        lastSubmittedRawValueRef.current = normalizedRawValue;
         return;
       }
       lastSubmittedRef.current = barcode;
       lastSubmittedTimeRef.current = now;
-      lastSubmittedRawValueRef.current = normalizedRawValue;
 
-      // 跨来源去重：同码 300ms 内 BLE 已经来过就跳过（上面的分段状态仍照常更新）。
+      // 跨来源去重：同码 300ms 内 BLE 已经来过就跳过（上面的去重状态仍照常更新）。
       if (!noteScanSource(barcode, "hid")) {
         return;
       }
@@ -168,51 +162,38 @@ export function useHidBarcodeScanner({
     },
     [minLength],
   );
+  const submitBarcodeRef = useRef(submitBarcode);
+  submitBarcodeRef.current = submitBarcode;
+
+  // 隐藏 TextInput 是非受控的：JS 不回写 value，清空走 ref.clear()，提交以原生回传文本为准并按已消费前缀取差量。
+  const textInputCapture = useMemo(() => createHidTextInputCapture({
+    idleMs,
+    onText: (pendingText) => submitBarcodeRef.current(pendingText),
+    clearNative: () => textInputRef.current?.clear(),
+    captureSubmission: () => enabledGateRef.current.captureSubmission(),
+  }), [idleMs]);
 
   const handleTextInputChange = useCallback(
     (nextValue: string) => {
       if (!enabledGateRef.current.isEnabled()) {
-        if (textInputTimerRef.current) {
-          clearTimeout(textInputTimerRef.current);
-          textInputTimerRef.current = null;
-        }
-        setTextInputValue("");
+        textInputCapture.discard(nextValue);
         return;
       }
-
-      setTextInputValue(nextValue);
-      if (textInputTimerRef.current) {
-        clearTimeout(textInputTimerRef.current);
-      }
       // 隐藏 TextInput 模式兼容不能提供 character 的扫码枪，仍按输入停顿自动提交。
-      const canSubmit = enabledGateRef.current.captureSubmission();
-      textInputTimerRef.current = setTimeout(() => {
-        textInputTimerRef.current = null;
-        if (canSubmit()) {
-          submitBarcode(nextValue);
-        }
-        setTextInputValue("");
-      }, idleMs);
+      textInputCapture.handleChangeText(nextValue);
     },
-    [idleMs, submitBarcode],
+    [textInputCapture],
   );
 
   const handleTextInputSubmit = useCallback(
     (event: NativeSyntheticEvent<TextInputSubmitEditingEventData>) => {
-      if (textInputTimerRef.current) {
-        clearTimeout(textInputTimerRef.current);
-        textInputTimerRef.current = null;
-      }
       if (!enabledGateRef.current.isEnabled()) {
-        setTextInputValue("");
-        lastSubmittedRawValueRef.current = "";
+        textInputCapture.discard(event.nativeEvent.text);
         return;
       }
-      const value = event.nativeEvent.text || textInputValue;
-      submitBarcode(value);
-      setTextInputValue("");
+      textInputCapture.handleSubmitEditing(event.nativeEvent.text);
     },
-    [submitBarcode, textInputValue],
+    [textInputCapture],
   );
 
   const focusHiddenInput = useCallback(() => {
@@ -267,23 +248,22 @@ export function useHidBarcodeScanner({
       return;
     }
 
-    if (textInputTimerRef.current) {
-      clearTimeout(textInputTimerRef.current);
-      textInputTimerRef.current = null;
-    }
-    setTextInputValue("");
-    lastSubmittedRawValueRef.current = "";
+    // 停用时丢弃输入框里的半段 / 残留并尽力清空，重新启用后按差量取新码。
+    textInputCapture.discard();
     lastSubmittedRef.current = "";
     lastSubmittedTimeRef.current = 0;
     textInputRef.current?.blur();
     nativeKeyBuffer.dispose();
-  }, [enabled, nativeKeyBuffer]);
+  }, [enabled, nativeKeyBuffer, textInputCapture]);
 
   useEffect(() => {
     return () => {
-      if (textInputTimerRef.current) {
-        clearTimeout(textInputTimerRef.current);
-      }
+      textInputCapture.dispose();
+    };
+  }, [textInputCapture]);
+
+  useEffect(() => {
+    return () => {
       nativeKeyBuffer.dispose();
     };
   }, [nativeKeyBuffer]);
@@ -346,7 +326,6 @@ export function useHidBarcodeScanner({
     mode: "textInput" as const,
     textInputProps: {
       ref: textInputRef,
-      value: textInputValue,
       onChangeText: handleTextInputChange,
       onSubmitEditing: handleTextInputSubmit,
       autoCapitalize: "none" as const,
