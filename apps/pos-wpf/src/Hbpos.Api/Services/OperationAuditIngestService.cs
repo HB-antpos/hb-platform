@@ -42,7 +42,8 @@ public sealed class SqlSugarOperationAuditIngestService(
         "CART_ITEM_PRICE_CHANGE", "CART_LINE_DISCOUNT_CHANGE", "CART_ORDER_DISCOUNT_CHANGE", "CART_CLEAR",
         "ORDER_HOLD", "ORDER_RECALL", "ORDER_CANCEL",
         "CASH_DRAWER_OPEN", "CASH_IN", "CASH_OUT", "CASH_MOVEMENT_VOID", "PAYMENT_TENDER_ADD", "PAYMENT_TENDER_REMOVE", "PAYMENT_CANCEL", "SALE_COMPLETE",
-        "CARD_PAYMENT_SUPERVISOR_RESOLUTION",
+        // 刷卡付款 / 退款结果未知时由主管结案；退款版由 WPF Linkly / Square / Zeller 退款恢复发出。
+        "CARD_PAYMENT_SUPERVISOR_RESOLUTION", "CARD_REFUND_SUPERVISOR_RESOLUTION",
         "RETURN_REFUND_COMPLETE", "SALE_VOID", "RECEIPT_REPRINT",
         "INSTALLMENT_REPAYMENT_COMPLETE", "INSTALLMENT_REPAYMENT_CANCEL",
         "DAILY_CLOSE_SAVE", "DAILY_CLOSE_REPRINT",
@@ -67,7 +68,9 @@ public sealed class SqlSugarOperationAuditIngestService(
         "source", "action", "status", "screen", "mode", "reason", "result",
         "paymentMethod", "cashDrawerMode", "itemCount", "requestingCashierId",
         "authorizingCashierId", "authorizingUserGuid", "permissionCode", "authorizationMode",
-        "attemptGuid", "operationGuid", "sessionId", "evidence", "financialReference"
+        "attemptGuid", "operationGuid", "sessionId", "evidence", "financialReference",
+        // Zeller 主管结案没有 sessionId，靠 Zeller 交易 reference / transactionUuid 才能回到 Zeller 后台对账。
+        "reference", "transactionUuid"
     };
 
     private static readonly Regex UrlQueryRegex = new(
@@ -374,9 +377,28 @@ public sealed class SqlSugarOperationAuditIngestService(
                string.Equals(outcome.Trim(), "ContinueWaiting", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsCardRefundSupervisorDecisionOutcome(string operationType, string outcome)
+    {
+        // WPF Linkly / Square 退款主管结案把决定（CardRefundSupervisorDecision）直接写进 Outcome，
+        // 现役客户端仍在发，不只是旧 outbox；决定本身另在 ReasonCode 里，入库统一归一为 Succeeded。
+        // Zeller 退款结案发的就是 Succeeded，走通用 Outcome 校验。
+        if (!string.Equals(
+                operationType.Trim(),
+                "CARD_REFUND_SUPERVISOR_RESOLUTION",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return string.Equals(outcome.Trim(), "ConfirmRefunded", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(outcome.Trim(), "ConfirmNotRefunded", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(outcome.Trim(), "ContinueWaiting", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool ShouldNormalizeOutcomeToSucceeded(string operationType, string outcome)
     {
-        if (IsLegacyCardPaymentSupervisorOutcome(operationType, outcome))
+        if (IsLegacyCardPaymentSupervisorOutcome(operationType, outcome) ||
+            IsCardRefundSupervisorDecisionOutcome(operationType, outcome))
         {
             return true;
         }

@@ -245,6 +245,7 @@ assertDeepEqual(
     'LINKLY_SETTLEMENT',
     'LINKLY_SETTLEMENT_REPRINT',
     'CARD_PAYMENT_SUPERVISOR_RESOLUTION',
+    'CARD_REFUND_SUPERVISOR_RESOLUTION',
     'PERMISSION_OVERRIDE',
     'INSTALLMENT_PICKUP_CONFIRM',
     'INSTALLMENT_LINES_AMEND',
@@ -268,6 +269,11 @@ assertEqual(
   operationTypeKeys.CARD_PAYMENT_SUPERVISOR_RESOLUTION,
   'operationLogs.operations.cardPaymentSupervisorResolution',
   '主管付款结案应映射到固定的本地化键',
+)
+assertEqual(
+  operationTypeKeys.CARD_REFUND_SUPERVISOR_RESOLUTION,
+  'operationLogs.operations.cardRefundSupervisorResolution',
+  '主管退款结案应映射到固定的本地化键',
 )
 
 assertEqual(
@@ -346,6 +352,11 @@ assertEqual(
   enLocale.operationLogs.operations.cardPaymentSupervisorResolution,
   'Card Payment Supervisor Resolution',
   '主管付款结案应提供英文文案',
+)
+assertEqual(
+  zhLocale.operationLogs.operations.cardRefundSupervisorResolution,
+  '主管退款结案',
+  '主管退款结案应提供中文文案',
 )
 assertEqual(
   zhLocale.operationLogs.platforms.iPadOS,

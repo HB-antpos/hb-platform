@@ -4068,6 +4068,7 @@
       "linklySettlement": "Linkly 结算",
       "linklySettlementReprint": "补打 Linkly 结算单",
       "cardPaymentSupervisorResolution": "主管付款结案",
+      "cardRefundSupervisorResolution": "主管退款结案",
       "permissionOverride": "主管授权",
       "installmentPickupConfirm": "分期确认提货",
       "installmentLinesAmend": "分期修改商品列表",

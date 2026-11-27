@@ -501,6 +501,101 @@ public sealed class OperationAuditIngestServiceTests
         Assert.Equal(0, await fixture.PosmDb.Queryable<PosOperationAudit>().CountAsync());
     }
 
+    // WPF Linkly / Square 退款主管结案：Outcome 直接是 CardRefundSupervisorDecision 三态，必须被接受并归一为 Succeeded。
+    [Theory]
+    [InlineData("ConfirmRefunded")]
+    [InlineData("ConfirmNotRefunded")]
+    [InlineData("ContinueWaiting")]
+    public async Task IngestAsync_accepts_card_refund_supervisor_resolution_and_normalizes_decision_outcome(
+        string decision)
+    {
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = "CARD_REFUND_SUPERVISOR_RESOLUTION";
+        request.Events[0].Outcome = decision;
+        request.Events[0].ReasonCode = decision;
+        request.Events[0].PaymentMethod = "Linkly";
+        request.Events[0].Properties = new Dictionary<string, string?>
+        {
+            ["attemptGuid"] = "a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6",
+            ["evidence"] = "Bank case confirms refund.",
+            ["financialReference"] = "REFUND-REF-001",
+            // 客户端还带了 retryReference，不在白名单内，照旧丢弃。
+            ["retryReference"] = "TXN-RETRY-001"
+        };
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.AcceptedCount);
+        var persisted = Assert.Single(await fixture.PosmDb.Queryable<PosOperationAudit>().ToListAsync());
+        Assert.Equal("CARD_REFUND_SUPERVISOR_RESOLUTION", persisted.OperationType);
+        Assert.Equal("Succeeded", persisted.Outcome);
+        Assert.Equal(decision, persisted.ReasonCode);
+        using var properties = JsonDocument.Parse(persisted.PropertiesJson!);
+        Assert.Equal("REFUND-REF-001", properties.RootElement.GetProperty("financialReference").GetString());
+        Assert.False(properties.RootElement.TryGetProperty("retryReference", out _));
+    }
+
+    // Zeller 退款主管结案发 Succeeded，并带 Zeller 交易 reference / transactionUuid 供对账。
+    [Fact]
+    public async Task IngestAsync_accepts_zeller_card_refund_supervisor_resolution_with_processor_references()
+    {
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = "card_refund_supervisor_resolution";
+        request.Events[0].Outcome = "Succeeded";
+        request.Events[0].ReasonCode = "ConfirmProcessed";
+        request.Events[0].PaymentMethod = "Zeller";
+        request.Events[0].Properties = new Dictionary<string, string?>
+        {
+            ["attemptGuid"] = "a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6",
+            ["reference"] = "ZELLER-REF-001",
+            ["transactionUuid"] = "c1d2e3f4-a5b6-47c8-d9e0-f1a2b3c4d5e6"
+        };
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.AcceptedCount);
+        var persisted = Assert.Single(await fixture.PosmDb.Queryable<PosOperationAudit>().ToListAsync());
+        Assert.Equal("CARD_REFUND_SUPERVISOR_RESOLUTION", persisted.OperationType);
+        Assert.Equal("Succeeded", persisted.Outcome);
+        Assert.Equal("ConfirmProcessed", persisted.ReasonCode);
+        using var properties = JsonDocument.Parse(persisted.PropertiesJson!);
+        Assert.Equal("ZELLER-REF-001", properties.RootElement.GetProperty("reference").GetString());
+        Assert.Equal(
+            "c1d2e3f4-a5b6-47c8-d9e0-f1a2b3c4d5e6",
+            properties.RootElement.GetProperty("transactionUuid").GetString());
+    }
+
+    // 付款版与退款版的三态各自只对本类型放行，不能互相串用，其他类型更不行。
+    [Theory]
+    [InlineData("CARD_PAYMENT_SUPERVISOR_RESOLUTION", "ConfirmRefunded")]
+    [InlineData("CARD_PAYMENT_SUPERVISOR_RESOLUTION", "ConfirmNotRefunded")]
+    [InlineData("CARD_REFUND_SUPERVISOR_RESOLUTION", "ConfirmPaid")]
+    [InlineData("CARD_REFUND_SUPERVISOR_RESOLUTION", "ConfirmNotPaid")]
+    [InlineData("PAYMENT_CANCEL", "ConfirmRefunded")]
+    public async Task IngestAsync_rejects_supervisor_decision_outcome_for_mismatched_operation_type(
+        string operationType,
+        string outcome)
+    {
+        await using var fixture = OperationAuditFixture.Create();
+        await new SqlSugarOperationAuditSchemaInitializer(fixture.DbContext).InitializeAsync();
+        var service = new SqlSugarOperationAuditIngestService(fixture.DbContext);
+        var request = CreateRequest();
+        request.Events[0].OperationType = operationType;
+        request.Events[0].Outcome = outcome;
+
+        var result = await service.IngestAsync(request, "STORE-1", "POS-1", CancellationToken.None);
+
+        Assert.Equal(1, result.RejectedCount);
+        Assert.Equal("INVALID_OUTCOME", Assert.Single(result.Results).ErrorCode);
+        Assert.Equal(0, await fixture.PosmDb.Queryable<PosOperationAudit>().CountAsync());
+    }
+
     [Fact]
     public async Task IngestAsync_two_independent_contexts_concurrently_persist_event_once()
     {
