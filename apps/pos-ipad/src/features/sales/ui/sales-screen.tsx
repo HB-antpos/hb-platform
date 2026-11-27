@@ -221,6 +221,8 @@ export type SalesScreenProps = Readonly<{
   onOpenReturns?: () => void;
   onOpenSettings?: () => void;
   onOpenSpecialProducts?: () => void;
+  /** 打开「订货助手」（在 App 里开供应商网站）；不传则不显示该入口。 */
+  onOpenSupplierAssistant?: () => void;
   onOpenSyncHistory?: () => void;
   onSwitchLanguage?: () => void;
   /** 固定到左侧栏的入口发生变化（在「全部功能」面板里点了图钉）。 */
@@ -280,6 +282,7 @@ export function SalesScreen({
   onOpenReturns,
   onOpenSettings,
   onOpenSpecialProducts,
+  onOpenSupplierAssistant,
   onOpenSyncHistory,
   onSwitchLanguage,
   onPinnedDestinationsChange,
@@ -1207,6 +1210,14 @@ export function SalesScreen({
     "navDesc.catalogMaintenance",
     onOpenCatalogMaintenance,
     "sales-open-catalog-maintenance",
+  );
+  // 订货助手：与共用入口清单（pos-navigation-bridge）保持一致，收银页的「全部功能」也要有。
+  addNavEntry(
+    "supplier-assistant",
+    "header.supplierAssistant",
+    "navDesc.supplierAssistant",
+    onOpenSupplierAssistant,
+    "sales-open-supplier-assistant",
   );
   addNavEntry(
     "settings",
