@@ -6,11 +6,11 @@ import type {
   StoreProductInsight,
 } from "./types";
 
-/** 页面提供的预设统计周期（天）；90 天与后端默认区间一致。 */
+/** 页面提供的预设统计周期（天）；默认 180 天，请求时以 days 参数告知后端。 */
 export const PRODUCT_INSIGHT_PRESET_DAYS = [30, 90, 180] as const;
 export type ProductInsightPresetDays =
   (typeof PRODUCT_INSIGHT_PRESET_DAYS)[number];
-export const DEFAULT_PRODUCT_INSIGHT_PRESET: ProductInsightPresetDays = 90;
+export const DEFAULT_PRODUCT_INSIGHT_PRESET: ProductInsightPresetDays = 180;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,7 +50,7 @@ export type ProductInsightPeriod =
   | { kind: "custom"; range: ProductInsightRange };
 
 /**
- * 解析请求区间：默认 90 天不传参数（由后端按门店时区定「今天」并刷新锚点）；
+ * 解析请求区间：默认 180 天不传日期（只带 days，由后端按门店时区定「今天」并刷新锚点）；
  * 其他预设以最近一次默认请求返回的结束日为锚点倒推，自定义原样传。
  */
 export function resolvePeriodRange(
