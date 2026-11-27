@@ -1142,7 +1142,8 @@ public class NavigationServiceTests
         var menu = _service.BuildAppMenu(user);
 
         // 管理员可见完整 App 菜单；商品查询与同权限的商品进销查询都必须保留。
-        Assert.Equal(51, menu.Count);
+        Assert.Equal(52, menu.Count);
+        Assert.Contains(menu, item => item.RouteName == "supplier-assistant");
         Assert.Contains(menu, item => item.RouteName == "packing");
         Assert.Contains(menu, item => item.RouteName == "warehouse-packing");
         Assert.Contains(menu, item => item.RouteName == "pos-settings");
@@ -1383,6 +1384,28 @@ public class NavigationServiceTests
         var warehouse = Assert.Single(productsOnlyMenu, item => item.RouteName == "warehouse");
         Assert.Equal(Permissions.Warehouse.ManageProducts, warehouse.Permission);
         Assert.DoesNotContain(productsOnlyMenu, item => item.RouteName == "containers");
+    }
+
+    [Fact]
+    public void BuildAppMenu_订货助手只给有订货前台权限的账号()
+    {
+        var orderFront = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.OrderFront.View)));
+        var ordersCreateOnly = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Orders.Create)));
+        var none = _service.BuildAppMenu(CreateUser(new Claim("permission", Permissions.Cash.OverviewView)));
+
+        // 订货助手接口（BrowserExtensionAccessService）对非管理员要求 OrderFront.View，App 菜单与之一致。
+        var item = Assert.Single(orderFront, menuItem => menuItem.RouteName == "supplier-assistant");
+        Assert.Equal("tabs.supplierAssistant", item.TitleKey);
+        Assert.DoesNotContain(ordersCreateOnly, menuItem => menuItem.RouteName == "supplier-assistant");
+        Assert.DoesNotContain(none, menuItem => menuItem.RouteName == "supplier-assistant");
+    }
+
+    [Fact]
+    public void BuildDeviceAppMenu_HidesSupplierAssistant()
+    {
+        // 设备会话没有用户账号，订货助手接口按员工账号授权，设备模式不展示入口。
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("PDA-Warehouse"), item => item.RouteName == "supplier-assistant");
+        Assert.DoesNotContain(_service.BuildDeviceAppMenu("Mobile"), item => item.RouteName == "supplier-assistant");
     }
 
     [Fact]

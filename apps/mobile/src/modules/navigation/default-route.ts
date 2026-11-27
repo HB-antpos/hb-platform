@@ -15,6 +15,7 @@ export type AppTabPath =
   | "/(shell)/home"
   | "/(shell)/orders"
   | "/(shell)/cart"
+  | "/(shell)/supplier-assistant"
   | "/(shell)/warehouse"
   | "/(shell)/containers"
   | "/(shell)/warehouse-picking"
@@ -69,6 +70,8 @@ export const TAB_PATHS: Record<string, AppTabPath> = {
   home: "/(shell)/home",
   orders: "/(shell)/orders",
   cart: "/(shell)/cart",
+  // 订货助手：App 内打开供应商网站，商品卡片上显示所选分店的订货与销量（需要 WebView 原生模块，旧原生包会隐藏入口）。
+  "supplier-assistant": "/(shell)/supplier-assistant",
   warehouse: "/(shell)/warehouse",
   // 货柜管理是独立菜单入口；列表页在 containers 栈内，明细页仍由根 Stack 接管。
   containers: "/(shell)/containers",
@@ -129,6 +132,8 @@ const DEVICE_MODE_BLOCKED_ROUTE_NAMES = new Set([
   // 扫码打包要记操作人，接口只接受登录账号，设备会话（含仓库设备）不展示入口（仓库打包、分店打包都是）。
   "warehouse-packing",
   "packing",
+  // 订货助手接口按员工账号的 OrderFront.View 与可访问分店授权，设备会话没有用户账号，设备模式不展示入口。
+  "supplier-assistant",
   // 安装页按账号独立权限授权，设备会话没有该权限，接口会直接拒绝。
   "app-install",
   "app-downloads",

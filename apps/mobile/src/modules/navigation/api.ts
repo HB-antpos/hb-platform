@@ -49,5 +49,12 @@ export async function fetchAppNavigationMenu(
 ): Promise<AppNavigationMenuItem[]> {
   const { apiClient } = await import("@/shared/api/client");
   const response = await apiClient.get("/navigation/app-menu", { signal });
-  return normalizeAppNavigationMenu(response.data);
+  const items = normalizeAppNavigationMenu(response.data);
+  // 订货助手需要 WebView 原生模块：OTA 推到还没装 WebView 的旧原生包时隐藏入口，不让员工点进去。
+  const { isSupplierAssistantNativeAvailable, SUPPLIER_ASSISTANT_ROUTE_NAME } = await import(
+    "@/modules/supplier-assistant/native-availability"
+  );
+  return isSupplierAssistantNativeAvailable()
+    ? items
+    : items.filter((item) => item.routeName !== SUPPLIER_ASSISTANT_ROUTE_NAME);
 }

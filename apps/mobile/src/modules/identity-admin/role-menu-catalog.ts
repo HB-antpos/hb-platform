@@ -76,6 +76,8 @@ const MOBILE_MENU: MenuSource[] = ([
   ["orders", "Orders", "订单", ["OrderFront", "Orders.View", "Warehouse.ManageOrders", "Warehouse.Manage"]],
   ["sales-orders", "POS orders", "POS 订单", ["SalesOrders.View"]],
   ["cart", "Cart", "购物车", ["Orders.Create"]],
+  // 与后端 FullAppMenu 的 supplier-assistant 一致：只认 OrderFront.View（订货助手接口对非管理员同样要求它）。
+  ["supplier-assistant", "Ordering assistant", "订货助手", ["OrderFront"]],
   ["warehouse", "Products & locations", "商品和货位管理", ["Warehouse.ManageProducts"]],
   ["containers", "Containers", "货柜管理", ["Container.View"]],
   // 与后端 FullAppMenu 的 AnyPermissions 一致：拣货专用权限，或管理仓库 / 管理仓库订货任一即可见。

@@ -56,9 +56,21 @@ assertEqual(
   '货柜管理拆出后，Container.View 不应再连带显示商品和货位管理',
 )
 
+assertEqual(
+  buildPreview([P.OrderFront.View]).visibleRoutes.some((route) => route.routeName === 'supplier-assistant'),
+  true,
+  '订货助手入口应与后端 FullAppMenu 一致，由 OrderFront.View 授权',
+)
+assertEqual(
+  buildPreview([P.Orders.Create]).visibleRoutes.some((route) => route.routeName === 'supplier-assistant'),
+  false,
+  '只有下单权限（没有订货前台权限）不显示订货助手：订货助手接口对非管理员要求 OrderFront.View',
+)
+
 const completePreview = buildPreview([
   P.Orders.Create,
   P.Orders.View,
+  P.OrderFront.View,
   P.SalesOrders.View,
   P.Warehouse.ManageProducts,
   P.DomesticPurchase.ManageProducts,
@@ -96,6 +108,7 @@ assertArrayEqual(
     'orders',
     'sales-orders',
     'cart',
+    'supplier-assistant',
     'warehouse',
     'containers',
     'container-new-products',
@@ -186,6 +199,7 @@ assertArrayEqual(
     'home',
     'orders',
     'cart',
+    'supplier-assistant',
     'local-supplier-invoices',
     'product-query',
     'price-updates',

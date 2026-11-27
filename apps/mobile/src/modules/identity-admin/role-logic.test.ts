@@ -91,7 +91,7 @@ assert.equal(implicitPreview[2].visible, false);
 const fullMenus = getRoleMenuDefinitions("en");
 // Web 菜单目录按页签登记：52 = 原 50 项 + 节日销售报告（#1155）+ 商品陈列图（/pos-admin/planograms，Planogram.View，商品与价格合并页的第 5 个页签）。
 assert.equal(fullMenus.filter((item) => item.platform === "web").length, 54); // +1 分店打包（Web，/packing） +1 收银端设置下发（Web） +1 仓库打包（Web，/warehouse/packing）
-assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 48); // +1 分店打包（移动端） +1 收银端设置下发（移动端） +1 仓库打包（移动端）
+assert.equal(fullMenus.filter((item) => item.platform === "mobile").length, 49); // +1 分店打包（移动端） +1 收银端设置下发（移动端） +1 仓库打包（移动端） +1 订货助手（移动端）
 // 「人脸比对」合并入口：与后端 FullAppMenu 的 any-of 一致，六个码任一即可见；旧三项目录项保留（旧版 App 兼容）
 assert.deepEqual(
   fullMenus.find((item) => item.platform === "mobile" && item.key === "face-hub")?.permissionCodes,

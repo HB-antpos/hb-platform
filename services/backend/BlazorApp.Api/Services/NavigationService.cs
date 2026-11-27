@@ -249,6 +249,17 @@ namespace BlazorApp.Api.Services
             },
             new()
             {
+                // 订货助手：App 内打开供应商网站，商品卡片上显示所选分店的上次订货与至今销量（浏览器订货助手插件同一套接口）。
+                // 订货助手接口按 BrowserExtensionAccessService 授权：管理员放行，其余账号要 OrderFront.View，分店再按可访问范围校验；
+                // 菜单只认 OrderFront.View（管理员走全量菜单）。设备会话没有用户账号，不在 DeviceBaseRouteNames 里。
+                RouteName = "supplier-assistant",
+                TitleKey = "tabs.supplierAssistant",
+                Icon = "web",
+                Permission = Permissions.OrderFront.View,
+                Order = 31,
+            },
+            new()
+            {
                 // 商品和货位管理：仓库商品与货位维护；货柜管理已拆为独立入口，不再凭 Container.View 放行。
                 RouteName = "warehouse",
                 TitleKey = "tabs.warehouse",
