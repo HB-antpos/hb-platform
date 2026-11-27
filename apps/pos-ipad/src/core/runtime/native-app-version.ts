@@ -49,12 +49,16 @@ export function otaVersionLabel(
     : "embedded";
 }
 
-/** 收银页头部的版本行；运行 OTA 时附上更新 ID，避免只看 build 号分不清 JS 版本。 */
+/**
+ * 顶栏右端的版本号；运行 OTA 时附上更新 ID，避免只看 build 号分不清 JS 版本。
+ * 写成紧凑的「v版本 (build)」：顶栏一行要放下 7 个状态胶囊，长写法会把胶囊挤出省略号。
+ * 完整的 Version / Build / Runtime / OTA 仍在登录页底部显示。
+ */
 export function formatAppVersionLabel(
   version: NativeAppVersion,
   otaVersion: string,
 ): string {
-  const base = `Version ${version.appVersion} · Build ${version.buildNumber}`;
+  const base = `v${version.appVersion} (${version.buildNumber})`;
   return otaVersion === "embedded" ? base : `${base} · OTA ${otaVersion}`;
 }
 

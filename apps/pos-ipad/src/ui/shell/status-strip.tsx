@@ -52,19 +52,43 @@ type StaticIdentityProps = Readonly<{
 /** 顶栏高度：页面布局与弹窗定位按它留位。 */
 export const POS_TOP_BAR_HEIGHT = 52;
 
-function StatusIndicator({ icon, label, tone, value }: StatusIndicatorProps) {
+/** 顶栏右端版本号的最大宽度：超过就折成两行，避免长版本串挤掉状态胶囊。 */
+export const POS_TOP_BAR_VERSION_MAX_WIDTH = 96;
+
+/** 分店名再窄也保留的宽度（图标 + 一两个字）；更窄时由状态胶囊省略让位。 */
+export const POS_TOP_BAR_STORE_MIN_WIDTH = 44;
+
+/**
+ * 状态图标 + 右上角色点。色点叠在图标角上而不是单独占一格，
+ * 每个胶囊省出约 13pt；顶栏一行要放下 7 个胶囊，英文文案又长，宽度很紧。
+ */
+function StatusGlyph({
+  icon,
+  tone,
+}: Readonly<{ icon: StatusIconName; tone: IndicatorTone }>) {
   return (
-    <View
-      accessibilityLabel={`${label}: ${value}`}
-      style={styles.indicator}
-    >
-      <View style={[styles.dot, toneStyles[tone]]} />
+    <View style={styles.glyph}>
       <MaterialCommunityIcons
         accessible={false}
         color={posColors.chromeMuted}
         name={icon}
         size={16}
       />
+      <View
+        style={[styles.dot, toneStyles[tone]]}
+        testID={`status-strip-dot-${tone}`}
+      />
+    </View>
+  );
+}
+
+function StatusIndicator({ icon, label, tone, value }: StatusIndicatorProps) {
+  return (
+    <View
+      accessibilityLabel={`${label}: ${value}`}
+      style={styles.indicator}
+    >
+      <StatusGlyph icon={icon} tone={tone} />
       <Text numberOfLines={1} style={styles.value}>
         {value}
       </Text>
@@ -100,13 +124,7 @@ function ReconnectableIndicator({
       ]}
       testID={testID}
     >
-      <View style={[styles.dot, toneStyles[tone]]} />
-      <MaterialCommunityIcons
-        accessible={false}
-        color={posColors.chromeMuted}
-        name={icon}
-        size={16}
-      />
+      <StatusGlyph icon={icon} tone={tone} />
       <Text numberOfLines={1} style={styles.value}>
         {value}
       </Text>
@@ -188,10 +206,14 @@ export function PosStatusStrip({
   } = usePosShellStore();
   // 没有 BLE 服务（旧原生包）或本机不支持蓝牙时为 null，不显示图标。
   const bleIndicator = bleScanner ? describeBleScannerIndicator(bleScanner) : null;
+  // 已连接且读到电量时用专用文案：中文「已连接 85%」，英文只写「85%」
+  // （蓝牙已连接图标 + 绿点已表达连上了，英文全拼太长会把其他胶囊挤出省略号）。
   const bleValue = bleIndicator
     ? bleIndicator.batteryLevel === null
       ? t(bleIndicator.labelKey)
-      : `${t(bleIndicator.labelKey)} ${bleIndicator.batteryLevel}%`
+      : t("status.bleScanner.readyWithBattery", {
+          level: bleIndicator.batteryLevel,
+        })
     : "";
   // 休眠 / 重连中 / 已断开时顶栏图标可点：点一下直接重连，不用进设置页。
   const bleReconnect =
@@ -248,8 +270,9 @@ export function PosStatusStrip({
             value={terminalPresentation?.deviceCode}
           />
         </View>
-      ) : null}
-      <View style={styles.spacer} />
+      ) : (
+        <View style={styles.spacer} />
+      )}
       <StatusIndicator
         icon="wifi"
         label={t("status.network")}
@@ -348,7 +371,9 @@ export function PosStatusStrip({
       ) : null}
       {appVersionLabel ? (
         <Text
-          numberOfLines={1}
+          // 版本号最多两行右对齐（「v0.2.0 (23) ·」一行、「OTA xxxxxxxx」一行），
+          // 限宽后不再独占约 260pt，把宽度让给左边的状态胶囊。
+          numberOfLines={2}
           selectable={false}
           style={styles.version}
           testID="status-strip-app-version"
@@ -393,15 +418,27 @@ const styles = createPosStyles((colors) => ({
     paddingHorizontal: 16,
   },
   deviceCodeIdentity: {
+    // 设备代码短且定长，始终完整显示；与分店名之间共留 12pt（行间距 6 + 这里 6）。
     flexShrink: 0,
+    marginLeft: 6,
   },
   deviceCodeIdentityValue: {
     flexShrink: 0,
   },
   dot: {
-    borderRadius: 4,
-    height: 8,
-    width: 8,
+    borderColor: colors.chromeChip,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    height: 9,
+    position: "absolute",
+    right: -3,
+    top: -2,
+    width: 9,
+  },
+  glyph: {
+    flexShrink: 0,
+    height: 16,
+    width: 16,
   },
   identityValue: {
     color: colors.chromeInk,
@@ -415,10 +452,10 @@ const styles = createPosStyles((colors) => ({
     borderRadius: 16,
     flexDirection: "row",
     flexShrink: 1,
-    gap: 6,
+    gap: 5,
     minHeight: 32,
     minWidth: 0,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
   },
   indicatorPressable: {
     borderColor: colors.chromeBorder,
@@ -459,31 +496,44 @@ const styles = createPosStyles((colors) => ({
     minWidth: 0,
   },
   storeIdentity: {
-    flexShrink: 1,
+    // 分店名不按内容定宽，只拿这一行其余各项排完后剩下的宽度（同时顶替弹性空白，把状态胶囊推到右侧），
+    // 放不下就省略号收尾；剩余为负时由状态胶囊收缩。
+    // 不能写成「按内容定宽 + flexShrink」：外层被压窄时 Yoga 不会回头压缩里面的文字，
+    // 设备代码会溢出、盖住右侧的状态胶囊（英文界面实测）。
+    flexBasis: 0,
+    flexGrow: 1,
+    flexShrink: 0,
+    marginLeft: 8,
+    minWidth: POS_TOP_BAR_STORE_MIN_WIDTH,
+    overflow: "hidden",
   },
   storeIdentityValue: {
     flexShrink: 1,
     minWidth: 0,
   },
   terminalIdentity: {
-    alignItems: "center",
-    flexDirection: "row",
-    flexShrink: 1,
-    gap: 12,
-    marginLeft: 8,
-    minWidth: 0,
+    // 外框只用来分组（测试 / 无障碍定位），本身不参与布局：
+    // 分店名、设备代码直接作为顶栏这一行的弹性子项分配宽度，避免嵌套收缩失效。
+    display: "contents",
   },
   value: {
     color: colors.chromeInk,
+    // 胶囊被压窄时文字跟着收缩并以省略号结尾；不设的话 Text 保持原宽，
+    // 会溢出胶囊、压到相邻胶囊上（英文界面尤其明显）。
+    flexShrink: 1,
     fontSize: 12.5,
     fontVariant: ["tabular-nums"],
     fontWeight: "700",
+    minWidth: 0,
   },
   version: {
     color: colors.chromeMuted,
     flexShrink: 0,
-    fontSize: 11,
+    fontSize: 10.5,
     fontVariant: ["tabular-nums"],
+    lineHeight: 13,
     marginLeft: 6,
+    maxWidth: POS_TOP_BAR_VERSION_MAX_WIDTH,
+    textAlign: "right",
   },
 }));

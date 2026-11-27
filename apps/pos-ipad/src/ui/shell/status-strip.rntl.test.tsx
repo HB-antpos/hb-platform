@@ -8,8 +8,13 @@ import {
 import { StyleSheet } from "react-native";
 
 import { usePosShellStore } from "./pos-shell-store";
-import { PosStatusStrip } from "./status-strip";
+import {
+  POS_TOP_BAR_STORE_MIN_WIDTH,
+  POS_TOP_BAR_VERSION_MAX_WIDTH,
+  PosStatusStrip,
+} from "./status-strip";
 
+import en from "@/i18n/locales/en.json";
 import { usePosSound } from "@/ui/feedback/pos-sound-context";
 
 jest.mock("@/ui/feedback/pos-sound-context", () => ({ usePosSound: jest.fn() }));
@@ -40,10 +45,11 @@ const mockTranslations: Readonly<Record<string, Readonly<Record<string, string>>
       "status.display": "Display",
       "status.network": "Network",
       "status.network.online": "Online",
-      "status.peripheral.disconnected": "Disconnected",
+      "status.peripheral.disconnected": "Offline",
       "status.printer": "Printer",
       "status.bleScanner": "BLE scanner",
       "status.bleScanner.ready": "Connected",
+      "status.bleScanner.readyWithBattery": "{{level}}%",
       "status.bleScanner.bluetooth-off": "Bluetooth off",
       "status.scanner": "Scanner",
       "status.scanner.inactive": "Unfocused",
@@ -66,6 +72,7 @@ const mockTranslations: Readonly<Record<string, Readonly<Record<string, string>>
       "status.printer": "打印机",
       "status.bleScanner": "蓝牙枪",
       "status.bleScanner.ready": "已连接",
+      "status.bleScanner.readyWithBattery": "已连接 {{level}}%",
       "status.bleScanner.bluetooth-off": "蓝牙已关",
       "status.scanner": "扫码",
       "status.scanner.inactive": "未聚焦",
@@ -80,12 +87,15 @@ const mockTranslations: Readonly<Record<string, Readonly<Record<string, string>>
 jest.mock("react-i18next", () => ({
   useTranslation: () => ({
     i18n: { language: mockLanguage, resolvedLanguage: mockLanguage },
-    t: (key: string, values?: Readonly<{ count?: number }>) =>
+    t: (key: string, values?: Readonly<Record<string, number | string>>) =>
       key === "status.sync.pending"
         ? mockLanguage === "zh"
           ? `${values?.count ?? 0} 笔待处理`
           : `${values?.count ?? 0} pending`
-        : mockTranslations[mockLanguage]?.[key] ?? key,
+        : (mockTranslations[mockLanguage]?.[key] ?? key).replace(
+            /\{\{(\w+)\}\}/gu,
+            (_match, name: string) => String(values?.[name] ?? ""),
+          ),
   }),
 }));
 
@@ -161,11 +171,13 @@ test("开启后按分店名称、设备代码展示静态身份，并保留设�
     screen.getByTestId("status-strip-device-code-identity").props
       .accessibilityLabel,
   ).toBe("设备代码: IPAD-07");
-  expect(
-    StyleSheet.flatten(
-      screen.getByTestId("status-strip-store-identity").props.style,
-    ).flexShrink,
-  ).toBe(1);
+  // 分店名只拿剩余宽度、超出裁切省略；设备代码保持完整。
+  const storeStyle = StyleSheet.flatten(
+    screen.getByTestId("status-strip-store-identity").props.style,
+  );
+  expect(storeStyle.flexGrow).toBe(1);
+  expect(storeStyle.flexBasis).toBe(0);
+  expect(storeStyle.overflow).toBe("hidden");
   expect(
     StyleSheet.flatten(
       screen.getByTestId("status-strip-device-code-identity").props.style,
@@ -310,9 +322,12 @@ test("顶栏可显示品牌名与版本号，未传时两者都不占位", async
   );
   const version = screen.getByTestId("status-strip-app-version");
   expect(version.props.children).toBe("Version 1.0.12 · Build 66");
-  expect(version.props.numberOfLines).toBe(1);
-  // 版本号不能把状态指示挤掉：它自己不收缩，由中间的弹性空白让位。
-  expect(StyleSheet.flatten(version.props.style).flexShrink).toBe(0);
+  // 版本号限宽、最多折两行：长版本串（带 OTA ID）不能再独占一大段宽度挤掉状态胶囊。
+  expect(version.props.numberOfLines).toBe(2);
+  const versionStyle = StyleSheet.flatten(version.props.style);
+  expect(versionStyle.flexShrink).toBe(0);
+  expect(versionStyle.maxWidth).toBe(POS_TOP_BAR_VERSION_MAX_WIDTH);
+  expect(versionStyle.textAlign).toBe("right");
 });
 
 test("BLE 扫码枪图标：没有 BLE 服务时不显示，随连接状态切换颜色、图标与电量", async () => {
@@ -405,4 +420,101 @@ test("未配对时只有页面登记了配对入口（设备注册页）才可�
   });
   expect(screen.queryByTestId("status-strip-ble-pair")).toBeNull();
   expect(screen.getByText("已连接 90%")).toBeTruthy();
+});
+
+test("英文顶栏：状态胶囊文字只在胶囊内省略，分店名吸收剩余宽度，不再溢出压到相邻项", async () => {
+  mockLanguage = "en";
+  const shell = usePosShellStore.getState();
+  shell.setConnectivity("online");
+  shell.setDeviceGate("authorized");
+  shell.setPendingSync({ kind: "ready", count: 12 });
+  shell.setPrinter("disconnected");
+  shell.setScanner("inactive");
+  shell.setBleScanner({ state: "ready", batteryLevel: 85, attention: false });
+  shell.setDisplay("disconnected");
+  shell.setTerminalPresentation({
+    storeName: "Charlestown Square",
+    deviceCode: "POS_1042_2307",
+  });
+
+  const screen = await render(
+    <PosStatusStrip
+      appVersionLabel="v0.2.0 (23) · OTA 01a21a64"
+      language="en"
+      onSwitchLanguage={jest.fn()}
+      showBrand
+      showTerminalIdentity
+    />,
+  );
+
+  // 英文已连接只显示电量，中文仍是「已连接 85%」（见上面的中文用例）。
+  expect(screen.getByLabelText("BLE scanner: 85%")).toBeTruthy();
+  expect(screen.getByText("85%")).toBeTruthy();
+
+  for (const value of [
+    "Authorized",
+    "Online",
+    "12 pending",
+    "Offline",
+    "Unfocused",
+    "85%",
+  ]) {
+    for (const node of screen.getAllByText(value)) {
+      // 胶囊被压窄时文字必须跟着收缩并单行省略，不能保持原宽溢出胶囊。
+      expect(node.props.numberOfLines).toBe(1);
+      const style = StyleSheet.flatten(node.props.style);
+      expect(style.flexShrink).toBe(1);
+      expect(style.minWidth).toBe(0);
+    }
+  }
+
+  // 身份外框不参与布局（display: contents），分店名 / 设备代码直接参与整行分配，
+  // 避免「外框被压窄、里面的文字不跟着缩」导致设备代码盖住右侧胶囊。
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("status-strip-terminal-identity").props.style,
+    ).display,
+  ).toBe("contents");
+  expect(
+    StyleSheet.flatten(
+      screen.getByTestId("status-strip-store-identity").props.style,
+    ).minWidth,
+  ).toBe(POS_TOP_BAR_STORE_MIN_WIDTH);
+});
+
+test("英文状态文案保持简短，避免 iPad 横屏顶栏放不下", () => {
+  // 顶栏一行要放下品牌、身份、7 个状态胶囊、语言键和版本号；iPad 10 代横屏只有 1180pt。
+  // 实测英文状态值超过 13 个字符就会把其他胶囊挤出省略号，新增 / 修改文案时守住这个上限。
+  const STATUS_VALUE_PREFIXES = [
+    "status.device.",
+    "status.network.",
+    "status.sync.",
+    "status.peripheral.",
+    "status.scanner.",
+    "status.bleScanner.",
+  ];
+  const NON_STRIP_KEYS = new Set([
+    // 下面这些是提示条 / 无障碍文案，不显示在顶栏胶囊里。
+    "status.scanner.bleNotAccepted",
+    "status.bleScanner.reconnectLabel",
+    "status.bleScanner.reconnectHint",
+    "status.bleScanner.pairLabel",
+    "status.bleScanner.pairHint",
+  ]);
+  const tooLong = Object.entries(en as Record<string, string>)
+    .filter(
+      ([key]) =>
+        STATUS_VALUE_PREFIXES.some((prefix) => key.startsWith(prefix)) &&
+        !NON_STRIP_KEYS.has(key),
+    )
+    .map(([key, value]) => [key, value.replace("{{count}}", "99")] as const)
+    .filter(([, value]) => value.length > 13);
+
+  expect(tooLong).toEqual([]);
+  expect((en as Record<string, string>)["status.peripheral.disconnected"]).toBe(
+    "Offline",
+  );
+  expect(
+    (en as Record<string, string>)["status.bleScanner.readyWithBattery"],
+  ).toBe("{{level}}%");
 });

@@ -62,10 +62,10 @@ test("收银页版本行只在运行 OTA 时附加更新 ID", () => {
   const version = { appVersion: "0.2.0", buildNumber: "12" };
   assert.equal(
     formatAppVersionLabel(version, "embedded"),
-    "Version 0.2.0 · Build 12",
+    "v0.2.0 (12)",
   );
   assert.equal(
     formatAppVersionLabel(version, "abcdef12"),
-    "Version 0.2.0 · Build 12 · OTA abcdef12",
+    "v0.2.0 (12) · OTA abcdef12",
   );
 });

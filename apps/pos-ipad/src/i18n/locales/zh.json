@@ -167,6 +167,7 @@
   "status.scanner.bleNotAccepted": "蓝牙扫码枪：当前页面不接收扫码，这次没有生效",
   "status.bleScanner": "蓝牙枪",
   "status.bleScanner.ready": "已连接",
+  "status.bleScanner.readyWithBattery": "已连接 {{level}}%",
   "status.bleScanner.learning": "待扫码识别",
   "status.bleScanner.connecting": "连接中",
   "status.bleScanner.reconnecting": "重连中",
