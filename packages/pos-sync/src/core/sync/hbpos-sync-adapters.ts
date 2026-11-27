@@ -522,6 +522,110 @@ function auditOutcome(
     : null;
 }
 
+type AuditOutcome = "Succeeded" | "Failed" | "Denied";
+
+function mergeAuditProperties(
+  base: Record<string, string | null> | null,
+  extra: Readonly<Record<string, string>> | undefined,
+): Record<string, string | null> | null {
+  if (!extra) return base;
+  // 推导出的属性只补缺，不覆盖本地 payload 里已有的白名单值。
+  return { ...extra, ...(base ?? {}) };
+}
+
+/**
+ * 主管结案 / 支付异常类本地事件上传时补齐的后端字段。
+ * 这些事件在本地账本里只记录事实（finding、provider、实扣金额等），后端审计枚举、原因码和金额
+ * 只在上传时按 WPF 同类事件的口径推导；本地 payload 保持不可变。
+ */
+type AuditUploadTranslation = Readonly<{
+  outcome: AuditOutcome;
+  reasonCode: string | null;
+  paymentMethod?: string | null;
+  paymentAmount?: number | null;
+  safeMessage?: string | null;
+  properties?: Readonly<Record<string, string>> | undefined;
+}>;
+
+// 与 WPF CardPaymentRecoveryService / LocalCardPaymentAttemptRepository 的主管结案原因码一致。
+const paymentRecoveryFindingReasonCodes: Readonly<Record<string, string>> = {
+  paid: "SUPERVISOR_CONFIRMED_PAID",
+  unpaid: "SUPERVISOR_CONFIRMED_NOT_PAID",
+  uncertain: "SUPERVISOR_CONTINUE_WAITING",
+};
+
+// 本地 provider 标识映射为 WPF CardProcessorKind 名称，后台按同一口径筛选。
+const cardProviderPaymentMethods: Readonly<Record<string, string>> = {
+  "linkly-cloud": "Linkly",
+  square: "Square",
+  zeller: "Zeller",
+};
+
+function auditUploadTranslation(
+  eventType: string,
+  payload: Readonly<Record<string, unknown>>,
+): AuditUploadTranslation | null {
+  const finding = typeof payload.finding === "string" ? payload.finding : null;
+  if (eventType === "PAYMENT_RECOVERY_MANUAL_FINDING") {
+    // 恢复中心主管人工判定（已收款 / 未收款 / 仍未知）= WPF 的卡付款主管结案。
+    return {
+      outcome: "Succeeded",
+      reasonCode: finding ? paymentRecoveryFindingReasonCodes[finding] ?? null : null,
+      properties: finding ? { result: finding } : undefined,
+    };
+  }
+  if (eventType === "PAYMENT_RECOVERY_REVERSAL_REQUIRED") {
+    // 主管判未收款但终端实扣与订单金额不符：总部要据此对终端实扣款项冲正。
+    // 沿用 WPF 孤儿批准会话的写法：Failed + 独立原因码，进入后端风险目录。
+    const charged = payload.terminalChargedCents;
+    const ordered = payload.orderAmountCents;
+    const provider = typeof payload.provider === "string" ? payload.provider : null;
+    const reference = typeof payload.transactionReference === "string" &&
+      payload.transactionReference.length > 0 && payload.transactionReference.length <= 256
+      ? payload.transactionReference
+      : null;
+    return {
+      outcome: "Failed",
+      reasonCode: "REVERSAL_REQUIRED",
+      paymentMethod: provider ? cardProviderPaymentMethods[provider] ?? null : null,
+      paymentAmount: Number.isSafeInteger(charged) ? money(charged as number) : null,
+      safeMessage: Number.isSafeInteger(charged) && Number.isSafeInteger(ordered)
+        ? `orderAmountCents=${String(ordered)} terminalChargedCents=${String(charged)}`
+        : null,
+      // financialReference 是服务端属性白名单键（WPF 主管结案同名字段），供总部定位终端交易。
+      properties: reference ? { financialReference: reference } : undefined,
+    };
+  }
+  if (
+    eventType === "RETURN_REFUND_SUPERVISOR_NOT_REFUNDED" ||
+    eventType === "RETURN_REFUND_SUPERVISOR_KEEP_WAITING"
+  ) {
+    // 服务端暂无退款版主管结案类型；复用卡付款主管结案，靠 properties.action
+    // （return-refund-supervisor-resolution）区分退款，不必同时发 POS API。
+    return {
+      outcome: "Succeeded",
+      reasonCode: eventType === "RETURN_REFUND_SUPERVISOR_NOT_REFUNDED"
+        ? "SUPERVISOR_CONFIRMED_NOT_REFUNDED"
+        : "SUPERVISOR_CONTINUE_WAITING",
+      properties: finding ? { result: finding } : undefined,
+    };
+  }
+  if (
+    eventType === "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED" ||
+    eventType === "INSTALLMENT_REPAYMENT_CLAIM_REVIEW"
+  ) {
+    // 本地 outcome 是 PaymentMethodUnsupported / RequiresReview，不是后端枚举；
+    // 与 WPF 分期还款失败一致上传为 INSTALLMENT_REPAYMENT_COMPLETE + Failed。
+    return {
+      outcome: "Failed",
+      reasonCode: eventType === "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED"
+        ? "PAYMENT_METHOD_UNSUPPORTED"
+        : "CLAIM_REVIEW_REQUIRED",
+    };
+  }
+  return null;
+}
+
 function auditItems(order: LocalOrder): OperationAuditItemDto[] | AdapterFailure {
   const items: OperationAuditItemDto[] = [];
   for (const line of order.lines) {
@@ -752,7 +856,8 @@ export class HbposAuditBatchAdapter implements AuditBatchUploadPort {
     if (!validUuid(event.eventId) || !validUuid(event.correlationId)) return reject("AUDIT_EVENT_INVALID");
     const auditScope = auditScopeFromEvent(event);
     if (!auditScope) return reject("AUDIT_SCOPE_UNPROVEN");
-    const outcome = auditOutcome(event.payload);
+    const translation = auditUploadTranslation(event.eventType, event.payload);
+    const outcome = translation?.outcome ?? auditOutcome(event.payload);
     if (outcome === null) return reject("AUDIT_OUTCOME_INVALID");
     const payloadActor = auditActorSnapshotFromPayload(event.payload);
     let identity = {
@@ -800,8 +905,19 @@ export class HbposAuditBatchAdapter implements AuditBatchUploadPort {
       appVersion: this.metadata.appVersion, instanceId: this.metadata.instanceId, orderGuid: event.orderGuid,
       // 服务端 Items 是非可空 List（nullable 上下文下隐式必填），发 null 会让整批 400；
       // 非订单且无明细的事件（如 CASHIER_LOGIN）必须发空数组。
-      correlationId: event.correlationId, currencyCode: "AUD", properties: safeProperties(event.payload), items: items ?? [],
+      correlationId: event.correlationId, currencyCode: "AUD",
+      properties: mergeAuditProperties(safeProperties(event.payload), translation?.properties),
+      items: items ?? [],
       ...cartAmounts,
+      // 仅主管结案 / 支付异常类事件补原因码、支付方式与金额；其余事件保持原上传形状。
+      ...(translation
+        ? {
+          reasonCode: translation.reasonCode,
+          ...(translation.paymentMethod !== undefined ? { paymentMethod: translation.paymentMethod } : {}),
+          ...(translation.paymentAmount !== undefined ? { paymentAmount: translation.paymentAmount } : {}),
+          ...(translation.safeMessage !== undefined ? { safeMessage: translation.safeMessage } : {}),
+        }
+        : {}),
     };
   }
 }
@@ -819,15 +935,40 @@ function normalizedOperationType(
   eventType: string,
   order: LocalOrder | null,
 ): string | AdapterFailure {
-  if (eventType === "PAYMENT_DRAFT_ABANDONED" || eventType === "DAILY_CLOSE_MIGRATED") {
-    // 这两类是本地迁移/恢复诊断，后端操作审计没有等价业务语义；隔离而不阻塞队头。
+  if (
+    eventType === "PAYMENT_DRAFT_ABANDONED" ||
+    eventType === "DAILY_CLOSE_MIGRATED" ||
+    // 恢复中心暂存 / 再暂存只是把异常单移出收银车的本地流转，真正的业务结论是随后的主管判定。
+    eventType === "PAYMENT_RECOVERY_PARKED" ||
+    eventType === "PAYMENT_RECOVERY_REPARKED"
+  ) {
+    // 本地迁移/恢复诊断，后端操作审计没有等价业务语义；隔离而不阻塞队头。
     return reject("AUDIT_LOCAL_DIAGNOSTIC");
+  }
+  if (
+    eventType === "PAYMENT_RECOVERY_MANUAL_FINDING" ||
+    eventType === "PAYMENT_RECOVERY_REVERSAL_REQUIRED" ||
+    eventType === "RETURN_REFUND_SUPERVISOR_NOT_REFUNDED" ||
+    eventType === "RETURN_REFUND_SUPERVISOR_KEEP_WAITING"
+  ) {
+    return "CARD_PAYMENT_SUPERVISOR_RESOLUTION";
+  }
+  if (
+    eventType === "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED" ||
+    eventType === "INSTALLMENT_REPAYMENT_CLAIM_REVIEW"
+  ) {
+    return "INSTALLMENT_REPAYMENT_COMPLETE";
   }
   if (eventType === "MIXED_CASH_TENDER_APPENDED") return "PAYMENT_TENDER_ADD";
   if (eventType === "MIXED_CASH_TENDER_REVERSED") return "PAYMENT_TENDER_REMOVE";
   if (eventType === "PAYMENT_DRAFT_CANCELLED_CLOSED") return "PAYMENT_CANCEL";
   if (eventType === "RETURN_ORDER_COMPLETED") return "RETURN_REFUND_COMPLETE";
-  if (eventType === "PAYMENT_MIXED_CASH_COMPLETE" || eventType === "PAYMENT_APPROVED_COMPLETE") {
+  if (
+    eventType === "PAYMENT_MIXED_CASH_COMPLETE" ||
+    eventType === "PAYMENT_APPROVED_COMPLETE" ||
+    // 恢复中心主管人工核实已收款后补完成订单（manual-card-verification），即该单的成交。
+    eventType === "PAYMENT_COMPLETE"
+  ) {
     if (!order) return reject("AUDIT_ORDER_REFERENCE_REQUIRED");
     return isRefundOrder(order) ? "RETURN_REFUND_COMPLETE" : "SALE_COMPLETE";
   }

@@ -973,6 +973,105 @@ test("历史本地审计事件确定性映射到后端枚举，诊断事件隔�
   });
 });
 
+test("主管结案与支付异常类本地审计按 WPF 口径映射上传，恢复中心暂存隔离为本地诊断", async () => {
+  const ids = [
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f11",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f12",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f13",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f14",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f15",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f16",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f17",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f18",
+    "018f1b9b-47c5-7c1b-9f8e-39c5cb3b9f19",
+  ] as const;
+  // 与 auditActorPayload 写入的主管快照同形。
+  const supervisor = { requestingCashierId: "sup-1", requestingCashierName: "Sam", requestingUserGuid: null };
+  const transport = new FakeTransport({
+    status: 200,
+    data: { results: ids.slice(0, 6).map((eventId) => ({ eventId, status: "accepted" })) },
+  });
+  const adapter = new HbposAuditBatchAdapter(transport, new FakeOrders(order("card")), {
+    storeCode: "1003",
+    deviceCode: "IPAD_1",
+    appVersion: "1",
+    instanceId: "i",
+  });
+  const at = "2026-07-28T00:00:00.000Z";
+  const events: AuditEventDraft[] = [
+    { eventId: ids[0], eventType: "PAYMENT_RECOVERY_MANUAL_FINDING", occurredAtIso: at, orderGuid, correlationId: ids[0],
+      payload: { action: "payment-recovery-manual-finding", finding: "unpaid", authorizationId: "auth-1", ...supervisor } },
+    { eventId: ids[1], eventType: "PAYMENT_RECOVERY_REVERSAL_REQUIRED", occurredAtIso: at, orderGuid, correlationId: ids[1],
+      payload: { action: "payment-recovery-reversal-required", attemptId: "a-1", provider: "zeller", orderAmountCents: 1200,
+        terminalChargedCents: 1500, transactionReference: "HBZ-REF-77", authorizationId: "auth-1", ...supervisor } },
+    { eventId: ids[2], eventType: "RETURN_REFUND_SUPERVISOR_NOT_REFUNDED", occurredAtIso: at, orderGuid, correlationId: ids[2],
+      payload: { action: "return-refund-supervisor-resolution", finding: "not-refunded", ...supervisor } },
+    { eventId: ids[3], eventType: "RETURN_REFUND_SUPERVISOR_KEEP_WAITING", occurredAtIso: at, orderGuid, correlationId: ids[3],
+      payload: { action: "return-refund-supervisor-resolution", finding: "keep-waiting", ...supervisor } },
+    { eventId: ids[4], eventType: "PAYMENT_COMPLETE", occurredAtIso: at, orderGuid, correlationId: ids[4],
+      payload: { source: "manual-card-verification", amountCents: 1200, ...supervisor } },
+    { eventId: ids[5], eventType: "INSTALLMENT_REPAYMENT_PAYMENT_METHOD_UNSUPPORTED", occurredAtIso: at, orderGuid: null, correlationId: ids[5],
+      payload: { outcome: "PaymentMethodUnsupported", reason: "Card installment repayment is unsupported.", status: "Failed" } },
+    { eventId: ids[6], eventType: "PAYMENT_RECOVERY_PARKED", occurredAtIso: at, orderGuid, correlationId: ids[6],
+      payload: { action: "payment-recovery-parked", ...supervisor } },
+    { eventId: ids[7], eventType: "PAYMENT_RECOVERY_REPARKED", occurredAtIso: at, orderGuid, correlationId: ids[7],
+      payload: { action: "payment-recovery-reparked", ...supervisor } },
+  ];
+
+  assert.deepEqual(await adapter.upload(persistedAudits(events)), {
+    kind: "acknowledged",
+    uploadedEventIds: ids.slice(0, 6),
+    rejected: [
+      { eventId: ids[6], code: "AUDIT_LOCAL_DIAGNOSTIC" },
+      { eventId: ids[7], code: "AUDIT_LOCAL_DIAGNOSTIC" },
+    ],
+  });
+  type Sent = { operationType: string; outcome: string; reasonCode?: string | null; paymentMethod?: string | null;
+    paymentAmount?: number | null; safeMessage?: string | null; cashierId: string | null;
+    properties: Record<string, string | null> | null };
+  const sent = (transport.calls[0]?.data as { events: Sent[] }).events;
+  assert.deepEqual(sent.map((event) => [event.operationType, event.outcome, event.reasonCode ?? null]), [
+    ["CARD_PAYMENT_SUPERVISOR_RESOLUTION", "Succeeded", "SUPERVISOR_CONFIRMED_NOT_PAID"],
+    ["CARD_PAYMENT_SUPERVISOR_RESOLUTION", "Failed", "REVERSAL_REQUIRED"],
+    ["CARD_PAYMENT_SUPERVISOR_RESOLUTION", "Succeeded", "SUPERVISOR_CONFIRMED_NOT_REFUNDED"],
+    ["CARD_PAYMENT_SUPERVISOR_RESOLUTION", "Succeeded", "SUPERVISOR_CONTINUE_WAITING"],
+    ["SALE_COMPLETE", "Succeeded", null],
+    ["INSTALLMENT_REPAYMENT_COMPLETE", "Failed", "PAYMENT_METHOD_UNSUPPORTED"],
+  ]);
+  // 主管结案的操作人取 payload 快照（主管），不是订单收银员。
+  assert.equal(sent[0]?.cashierId, "sup-1");
+  assert.equal(sent[0]?.properties?.result, "unpaid");
+  // 冲正需求要带上终端实扣金额、通道与交易引用，总部才能发起冲正。
+  assert.equal(sent[1]?.paymentMethod, "Zeller");
+  assert.equal(sent[1]?.paymentAmount, 15);
+  assert.equal(sent[1]?.safeMessage, "orderAmountCents=1200 terminalChargedCents=1500");
+  assert.equal(sent[1]?.properties?.financialReference, "HBZ-REF-77");
+  // 退款主管结案靠 action 与卡付款结案区分。
+  assert.equal(sent[2]?.properties?.action, "return-refund-supervisor-resolution");
+  assert.equal(sent[2]?.properties?.result, "not-refunded");
+  // 非主管结案类事件不新增 reasonCode 等字段，保持原上传形状。
+  assert.equal("reasonCode" in (sent[4] as object), false);
+
+  const claimTransport = new FakeTransport({
+    status: 200,
+    data: { results: [{ eventId: ids[8], status: "accepted" }] },
+  });
+  const claimAdapter = new HbposAuditBatchAdapter(claimTransport, new FakeOrders(null), {
+    storeCode: "1003",
+    deviceCode: "IPAD_1",
+    appVersion: "1",
+    instanceId: "i",
+  });
+  assert.deepEqual(await claimAdapter.upload(persistedAudits([{
+    eventId: ids[8], eventType: "INSTALLMENT_REPAYMENT_CLAIM_REVIEW", occurredAtIso: at, orderGuid: null, correlationId: ids[8],
+    payload: { outcome: "RequiresReview", reason: "Repayment claim provider binding mismatch.", status: "Failed" },
+  }])), { kind: "uploaded" });
+  const claim = (claimTransport.calls[0]?.data as { events: Sent[] }).events[0];
+  assert.deepEqual([claim?.operationType, claim?.outcome, claim?.reasonCode], [
+    "INSTALLMENT_REPAYMENT_COMPLETE", "Failed", "CLAIM_REVIEW_REQUIRED",
+  ]);
+});
+
 test("正数混合销售退货的旧 PAYMENT_APPROVED_COMPLETE 仍映射为销售完成", async () => {
   const mixedPositive = order();
   const returnLine = mixedPositive.lines[0]!;
