@@ -38,6 +38,8 @@ export type SalesErrorCode =
   | "search-required"
   | "search-failed"
   | "product-add-failed"
+  /** 本机商品库里还没有「无码商品」主档（OPENITEM），在线补查也没拿到：等目录下载完或联网后再试。 */
+  | "open-item-unavailable"
   | "terminal-recovery-required"
   | "authorization-denied"
   | "cart-update-failed"
@@ -319,6 +321,9 @@ export const EMPTY_SALE_CART: CartSnapshot = {
   discount: createAud(0),
   actualAmount: createAud(0),
 };
+
+/** 加无码商品时目录里查不到 OPENITEM：只在 presenter 内部把工作流的 CATALOG_LOOKUP_NOT_FOUND 换成专用提示。 */
+const OPEN_ITEM_CATALOG_UNAVAILABLE = "OPEN_ITEM_CATALOG_UNAVAILABLE";
 
 const DISCONNECTED_CAPABILITIES: SalesCapabilities = {
   catalog: false,
@@ -779,8 +784,18 @@ export class SalesPresenter {
       this.publishBlockedAddAttempt("manual");
       return Promise.resolve(false);
     }
+    // 目录查不到 OPENITEM（本机商品库还没下载完且在线补查也没拿到）单独提示，
+    // 不落到笼统的「商品无法加入购物车」；审计已在工作流里按原因码记录。
     return this.runManualProductAdd(() =>
-      this.dependencies.workflow.addOpenItem(unitPriceCents),
+      this.dependencies.workflow
+        .addOpenItem(unitPriceCents)
+        .catch((error: unknown) => {
+          throw hasErrorCode(error, "CATALOG_LOOKUP_NOT_FOUND")
+            ? Object.assign(new Error("Open item catalog entry is unavailable."), {
+                code: OPEN_ITEM_CATALOG_UNAVAILABLE,
+              })
+            : error;
+        }),
     );
   }
 
@@ -1774,7 +1789,9 @@ function productMutationErrorCode(error: unknown): SalesErrorCode {
         ? "terminal-recovery-required"
         : hasErrorCode(error, "SALES_OPERATION_NOT_AUTHORIZED")
           ? "authorization-denied"
-          : "product-add-failed")
+          : hasErrorCode(error, OPEN_ITEM_CATALOG_UNAVAILABLE)
+            ? "open-item-unavailable"
+            : "product-add-failed")
   );
 }
 

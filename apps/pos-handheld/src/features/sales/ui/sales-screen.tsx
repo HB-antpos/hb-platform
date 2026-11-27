@@ -3751,6 +3751,8 @@ function errorCopyKey(errorCode: string): SalesCopyKey {
       return "error.searchFailed";
     case "product-add-failed":
       return "error.productAddFailed";
+    case "open-item-unavailable":
+      return "error.openItemUnavailable";
     case "terminal-recovery-required":
       return "error.terminalRecoveryRequired";
     case "authorization-denied":
