@@ -55,6 +55,7 @@ import {
   applyPosTheme,
   DEFAULT_POS_THEME_ID,
   getActivePosThemeId,
+  POS_THEME_IDS,
   posColors,
 } from "@/ui/theme";
 
@@ -2977,7 +2978,9 @@ describe("SettingsScreen 新布局", () => {
     expect(
       screen.getByText("点一下立即生效，选择保存在这台 iPad 上。"),
     ).toBeTruthy();
-    for (const themeId of ["classic", "ocean", "forest", "dark"]) {
+    // 所有主题（含新增的热卖红、午夜青等）都要出现在设置页里。
+    expect(POS_THEME_IDS).toHaveLength(10);
+    for (const themeId of POS_THEME_IDS) {
       const option = screen.getByTestId(`settings-theme-${themeId}`);
       expect(option.props.accessibilityState.disabled).not.toBe(true);
     }
