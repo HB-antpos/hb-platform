@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
-import type { NativeSyntheticEvent, TextInputSubmitEditingEventData, TextInput } from "react-native";
+import type { NativeSyntheticEvent, TextInputSelectionChangeEventData, TextInputSubmitEditingEventData, TextInput } from "react-native";
 import { getItemAsync, setItemAsync } from "expo-secure-store";
 import {
   createHidBarcodeKeyBuffer,
@@ -185,6 +185,18 @@ export function useHidBarcodeScanner({
     [textInputCapture],
   );
 
+  // 安卓 JS 清空成功只派发选区事件（光标回到 0），用它确认清空生效，避免整段写入时把以上一枪开头的新码截掉。
+  const handleTextInputSelectionChange = useCallback(
+    (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
+      const selection = event.nativeEvent?.selection;
+      if (!selection) {
+        return;
+      }
+      textInputCapture.handleSelectionChange(selection.start, selection.end);
+    },
+    [textInputCapture],
+  );
+
   const handleTextInputSubmit = useCallback(
     (event: NativeSyntheticEvent<TextInputSubmitEditingEventData>) => {
       if (!enabledGateRef.current.isEnabled()) {
@@ -327,6 +339,7 @@ export function useHidBarcodeScanner({
     textInputProps: {
       ref: textInputRef,
       onChangeText: handleTextInputChange,
+      onSelectionChange: handleTextInputSelectionChange,
       onSubmitEditing: handleTextInputSubmit,
       autoCapitalize: "none" as const,
       autoCorrect: false,

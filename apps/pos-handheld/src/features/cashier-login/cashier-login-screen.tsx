@@ -12,8 +12,10 @@ import {
   StyleSheet,
   Text,
   View,
+  type NativeSyntheticEvent,
   type ScrollView,
   type TextInput,
+  type TextInputSelectionChangeEventData,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -181,6 +183,9 @@ export function CashierLoginScreen({
   const [barcode, setBarcode] = useState("");
   const nativeTextRef = useRef("");
   const consumedTextRef = useRef("");
+  // 已请求原生清空、还没收到下一次文本变化：此时的选区 (0,0) 才算「清空成功」的确认
+  // （安卓 JS 清空成功不回传文本事件，只派发选区事件）。
+  const awaitingClearConfirmationRef = useRef(false);
   const previousSubmittedRef = useRef<string | null>(null);
   const inputTraceRef = useRef({ firstAt: 0, lastAt: 0, maxGapMs: 0, changes: 0 });
   const onLoginDiagnosticRef = useRef(onLoginDiagnostic);
@@ -318,6 +323,8 @@ export function CashierLoginScreen({
   };
 
   const handleBarcodeChange = (nextValue: string): void => {
+    // 清空后的第一次文本变化已到：之后的选区事件只是光标随输入移动，不再代表清空结果。
+    awaitingClearConfirmationRef.current = false;
     // 收到变化事件说明原生内容确实变了；不比已提交前缀长，只能是原生已清空后重新输入。
     if (nextValue.length <= consumedTextRef.current.length) {
       consumedTextRef.current = "";
@@ -344,8 +351,28 @@ export function CashierLoginScreen({
   const consumeNativeText = (): void => {
     consumedTextRef.current = nativeTextRef.current;
     inputTraceRef.current = { firstAt: 0, lastAt: 0, maxGapMs: 0, changes: 0 };
-    if (nativeTextRef.current) barcodeRef.current?.clear();
+    if (nativeTextRef.current) {
+      awaitingClearConfirmationRef.current = true;
+      barcodeRef.current?.clear();
+    }
     setBarcode("");
+  };
+
+  /** 请求清空后、下一次输入前光标回到 (0,0)：原生清空确实生效，已提交前缀作废，下一枪整段都是新码。 */
+  const handleBarcodeSelectionChange = (
+    event: NativeSyntheticEvent<TextInputSelectionChangeEventData>,
+  ): void => {
+    const selection = event?.nativeEvent?.selection;
+    if (
+      !awaitingClearConfirmationRef.current ||
+      selection?.start !== 0 ||
+      selection?.end !== 0
+    ) {
+      return;
+    }
+    awaitingClearConfirmationRef.current = false;
+    consumedTextRef.current = "";
+    nativeTextRef.current = "";
   };
 
   const submit = async (
@@ -475,6 +502,7 @@ export function CashierLoginScreen({
                 onBlur={handleBarcodeBlur}
                 onChangeText={handleBarcodeChange}
                 onFocus={notifyManualInputFocused}
+                onSelectionChange={handleBarcodeSelectionChange}
                 // 有事件 = 真实回车（扫码器回车后缀 / 键盘），取原生全文；无事件 = 扫码节奏停顿自动提交。
                 onSubmitEditing={(event) =>
                   void submit(

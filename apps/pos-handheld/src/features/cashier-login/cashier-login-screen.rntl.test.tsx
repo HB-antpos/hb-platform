@@ -674,6 +674,46 @@ test("清除被原生丢弃时，残留内容不会带进下一次扫码登录",
   await screen.unmount();
 });
 
+test("DataWedge 整段写入：清空成功（选区回到 0）后，以上一枪开头的员工码整段提交，不截尾", async () => {
+  const signIn = jest
+    .fn<(barcode: string) => Promise<PosCashierSummary>>()
+    .mockRejectedValueOnce(new Error("rejected"))
+    .mockResolvedValueOnce(cashier());
+  const screen = await render(
+    <CashierLoginScreen
+      controller={new CashierLoginController(store())}
+      language="zh"
+      onSuccess={jest.fn()}
+      runtime={runtime(signIn)}
+    />,
+  );
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "10427");
+  });
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "submitEditing", {
+      nativeEvent: { text: "10427" },
+    });
+  });
+  await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
+  // 安卓 JS 清空成功只派发选区 (0,0)，随后整段写入以上一枪开头的新码。
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "selectionChange", {
+      nativeEvent: { selection: { start: 0, end: 0 } },
+    });
+  });
+  await act(async () => {
+    fireEvent.changeText(screen.getByTestId("cashier-login-barcode"), "1042701");
+  });
+  await act(async () => {
+    fireEvent(screen.getByTestId("cashier-login-barcode"), "submitEditing", {
+      nativeEvent: { text: "1042701" },
+    });
+  });
+  await waitFor(() => expect(signIn.mock.calls).toEqual([["10427"], ["1042701"]]));
+  await screen.unmount();
+});
+
 test("扫码器回车以原生回传全文为准：JS 镜像还没追上最后几位也不会提交残码", async () => {
   const signIn = jest.fn(async () => cashier());
   const screen = await render(

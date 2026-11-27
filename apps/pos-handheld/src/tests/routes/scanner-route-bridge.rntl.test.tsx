@@ -459,3 +459,60 @@ test("没有 submitEditing 时 keyPress 回车在 120ms 后兜底提交，且与
   expect(onScan).toHaveBeenCalledTimes(1);
   await screen.unmount();
 });
+
+test("DataWedge 整段写入：清空成功（选区回到 0）后，以上一枪开头的新码整段提交，不截尾", async () => {
+  jest.useFakeTimers();
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  await act(async () => {
+    hidInput().props.onChangeText("G0930");
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(onScan).toHaveBeenLastCalledWith("G0930", "hid");
+
+  // 安卓 JS 清空成功不回传文本事件，只派发选区 (0,0)；随后 DataWedge 一次写入整个新码。
+  await act(async () => {
+    hidInput().props.onSelectionChange({ nativeEvent: { selection: { start: 0, end: 0 } } });
+  });
+  await act(async () => {
+    hidInput().props.onChangeText("G093093");
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(onScan).toHaveBeenCalledTimes(2);
+  expect(onScan).toHaveBeenLastCalledWith("G093093", "hid");
+  await screen.unmount();
+});
+
+test("DataWedge 整段写入：清空被丢弃（没有选区 0）时仍只提交新增部分；输入开始后的选区 0 不算清空确认", async () => {
+  jest.useFakeTimers();
+  const onScan =
+    jest.fn<(value: string, source?: "hid" | "camera") => void>();
+  const { hidInput, screen } = await renderHidRoute(onScan);
+
+  await act(async () => {
+    hidInput().props.onChangeText("G0930");
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  // 清空被丢弃：原生里仍是上一枪，新码整段追加在后面。
+  await act(async () => {
+    hidInput().props.onChangeText("G0930G093093");
+  });
+  // 输入已开始后才来的选区 (0,0)（如光标被移动）不能把已消费前缀清掉。
+  await act(async () => {
+    hidInput().props.onSelectionChange({ nativeEvent: { selection: { start: 0, end: 0 } } });
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(200);
+  });
+  expect(onScan).toHaveBeenCalledTimes(2);
+  expect(onScan).toHaveBeenLastCalledWith("G093093", "hid");
+  await screen.unmount();
+});
