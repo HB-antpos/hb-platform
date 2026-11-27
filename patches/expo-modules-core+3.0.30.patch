@@ -1,0 +1,32 @@
+diff --git a/node_modules/expo-modules-core/ios/Core/AppContext.swift b/node_modules/expo-modules-core/ios/Core/AppContext.swift
+index 3a7bb76..3679d3d 100644
+--- a/node_modules/expo-modules-core/ios/Core/AppContext.swift
++++ b/node_modules/expo-modules-core/ios/Core/AppContext.swift
+@@ -434,6 +434,9 @@ public final class AppContext: NSObject {
+     let coreObject = runtime.createObject()
+ 
+     coreObject.defineProperty("__expo_app_identifier__", value: appIdentifier, options: [])
++    // HB POS 补丁标记：带这个标记的原生包已含 SharedObjectRegistry.clear() 同步修复，
++    // JS 才可以提供「立即重启」（App 内 Updates.reloadAsync）来应用已下载的 OTA。
++    coreObject.defineProperty("__hbpos_safe_runtime_reload__", value: true, options: [])
+ 
+     try coreModuleHolder.definition.decorate(object: coreObject, appContext: self)
+ 
+diff --git a/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift b/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift
+index ac04246..cfb831a 100644
+--- a/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift
++++ b/node_modules/expo-modules-core/ios/Core/SharedObjects/SharedObjectRegistry.swift
+@@ -184,7 +184,12 @@ public final class SharedObjectRegistry {
+   }
+ 
+   internal func clear() {
+-    Self.lockQueue.async {
++    // HB POS 补丁：改为同步清空。这里是在 JS 运行时销毁过程中被调用的
++    // （ExpoModulesHostObject 析构 → AppContext._runtime = nil）。原来用 async，
++    // 等后台队列真正执行时运行时内存已释放，析构 jsi::WeakObject 必然 EXC_BAD_ACCESS，
++    // 所以 App 内 Updates.reloadAsync() 每次都闪退。同一路径上 ClassRegistry.clear()
++    // 就是同步释放同类弱引用的；串行队列也会先把已排队的 delete 在运行时还活着时执行完。
++    Self.lockQueue.sync {
+       self.pairs.removeAll()
+     }
+   }

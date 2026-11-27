@@ -140,6 +140,7 @@ test("根 patch-package 补丁没有会破坏解析的多余尾部空行", () =>
   for (const patchName of [
     "react-native+0.81.5.patch",
     "expo-audio+1.1.1.patch",
+    "expo-modules-core+3.0.30.patch",
   ]) {
     const source = readFileSync(
       join(repositoryRoot, "patches", patchName),

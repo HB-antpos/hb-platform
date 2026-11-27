@@ -24,6 +24,7 @@ import {
   OtaUpdateCoordinator,
   shouldCheckOtaPolicy,
 } from "../../features/app-updates/ota-update-coordinator";
+import { hasSafeRuntimeReload } from "../../features/app-updates/safe-runtime-reload";
 import { UpdateTransitionLeaseCoordinator } from "../../features/app-updates/update-transition-lease-coordinator";
 import {
   HbposAttendanceSecurityApi,
@@ -836,6 +837,11 @@ async function createExpoPosRuntimeServicesCore(): Promise<ExpoPosRuntimeService
       transition: appUpdateTransition,
       appStore: {
         open: (url) => Linking.openURL(url),
+      },
+      // 只有带 reload 修复补丁的原生包（build ≥ 23）才提供「立即重启」，旧包仍提示上滑重开。
+      restart: {
+        isAvailable: () => Updates.isEnabled && hasSafeRuntimeReload(),
+        reload: () => Updates.reloadAsync(),
       },
       safety: {
         getSafetySnapshot: () => {

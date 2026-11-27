@@ -116,6 +116,26 @@ export function AppUpdateGateBridge() {
     }
   }, [updates, working]);
 
+  // 「立即重启」：成功时进程被替换、Promise 不返回，按钮保持「正在重启…」；
+  // 被拒（有未完成交易等）或 reload 失败才恢复按钮并给出提示。
+  const restartNow = useCallback(async () => {
+    if (!updates || working) return;
+    setWorking(true);
+    setErrorKey(null);
+    try {
+      const result = await updates.restartToApplyDownloadedUpdate();
+      setErrorKey(
+        result.reason === "restart-unavailable" ||
+          result.reason === "not-downloaded"
+          ? "error.restartFailed"
+          : "error.notSafe",
+      );
+    } catch {
+      setErrorKey("error.restartFailed");
+    }
+    setWorking(false);
+  }, [updates, working]);
+
   if (
     presentation.phase === "hidden" ||
     presentation.phase === "unchecked" ||
@@ -131,8 +151,11 @@ export function AppUpdateGateBridge() {
   }
 
   const required = presentation.requirement === "required";
-  // 已下载、等冷启动生效：不再给「安装」按钮，只提示店员重开 App。
+  // 已下载、等生效：不再给「安装」按钮。原生包带 reload 修复时给「立即重启」，
+  // 旧原生包（build ≤ 22）App 内 reload 会闪退，只能提示店员上滑关闭后重开。
   const restartPending = presentation.phase === "restart-pending";
+  const canRestartNow =
+    restartPending && updates !== null && updates.canRestartInProcess();
   const normalizedPath = normalizePathname(pathname);
   const preserveRecoveryAccess =
     required && RECOVERY_ACCESS_PATHS.has(normalizedPath);
@@ -140,7 +163,9 @@ export function AppUpdateGateBridge() {
     preserveRecoveryAccess && normalizedPath === RECOVERY_DOCK_PATH;
   const blocking = required && !preserveRecoveryAccess;
   const titleKey: AppUpdateCopyKey = restartPending
-    ? "restartPending.title"
+    ? canRestartNow
+      ? "restartPending.restartTitle"
+      : "restartPending.title"
     : presentation.kind === "native"
       ? required
         ? "required.nativeTitle"
@@ -169,7 +194,11 @@ export function AppUpdateGateBridge() {
         style={[styles.body, !blocking && styles.bodyCompact]}
       >
         {restartPending
-          ? copy["restartPending.body"]
+          ? copy[
+              canRestartNow
+                ? "restartPending.restartBody"
+                : "restartPending.body"
+            ]
           : presentation.releaseMessage ??
             copy[required ? "required.body" : "optional.body"]}
       </Text>
@@ -181,21 +210,33 @@ export function AppUpdateGateBridge() {
     </>
   );
 
-  // 主按钮：这一层里唯一的主操作色按钮。执行中禁用并换成「正在更新…」。
-  const primaryAction = restartPending ? null : (
+  const primaryStyle = docked
+    ? styles.dockedAction
+    : blocking
+      ? styles.blockingAction
+      : styles.fillAction;
+  // 主按钮：这一层里唯一的主操作色按钮。执行中禁用并换成「正在更新…」/「正在重启…」。
+  const primaryAction = restartPending ? (
+    canRestartNow ? (
+      <PosButton
+        disabled={working}
+        icon="restart"
+        label={copy[working ? "action.restarting" : "action.restartNow"]}
+        onPress={restartNow}
+        size={blocking || docked ? "large" : "button"}
+        style={primaryStyle}
+        testID="app-update-restart"
+        tone="primary"
+      />
+    ) : null
+  ) : (
     <PosButton
       disabled={working}
       icon={actionIcon}
       label={copy[working ? "action.working" : actionKey]}
       onPress={performUpdate}
       size={blocking || docked ? "large" : "button"}
-      style={
-        docked
-          ? styles.dockedAction
-          : blocking
-            ? styles.blockingAction
-            : styles.fillAction
-      }
+      style={primaryStyle}
       testID="app-update-action"
       tone="primary"
     />
@@ -305,7 +346,8 @@ export function AppUpdateGateBridge() {
             <View style={styles.actions}>
               {!required ? (
                 <PosButton
-                  label={copy[restartPending ? "action.gotIt" : "action.later"]}
+                  disabled={working && restartPending}
+                  label={copy["action.later"]}
                   onPress={() => setDismissedKey(presentation.key)}
                   sound="navigate"
                   style={styles.laterAction}
