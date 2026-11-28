@@ -277,13 +277,24 @@ public sealed partial class NetworkDiagnosticsViewModel : ObservableObject
             }
 
             // 改完立刻复测：用实测结果说明有没有好转，而不是只说"已修改"。
-            var report = await _diagnostics.RunAsync(
-                new Uri(ApiServerSettingsService.NormalizeAddress(_getAddressText()), UriKind.Absolute),
-                cancellationToken);
-            Show(report);
-            var passed = report.Finding.Kind == DiagnosisKind.None;
-            ResultMessage = T(passed ? "settings.network.fixed.passed" : "settings.network.fixed.stillFailing");
-            ResultSeverity = passed ? "ok" : "warn";
+            try
+            {
+                var report = await _diagnostics.RunAsync(
+                    new Uri(ApiServerSettingsService.NormalizeAddress(_getAddressText()), UriKind.Absolute),
+                    cancellationToken);
+                Show(report);
+                var passed = report.Finding.Kind == DiagnosisKind.None;
+                ResultMessage = T(passed ? "settings.network.fixed.passed" : "settings.network.fixed.stillFailing");
+                ResultSeverity = passed ? "ok" : "warn";
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // 修改已经生效并记录在案（界面可还原），只是复测没跑成——例如确认期间地址框被改成了无效地址，
+                // NormalizeAddress / Uri 会抛 ArgumentException。这里必须兜住：异常从异步命令里冒出去会变成未处理异常。
+                ConsoleLog.WriteWarning("NetworkDiagnostics", $"re-check after fix failed error={ex.GetType().Name}: {ex.Message}");
+                ResultMessage = T("settings.network.fixed.retestFailed");
+                ResultSeverity = "warn";
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

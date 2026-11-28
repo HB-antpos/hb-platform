@@ -571,6 +571,7 @@
   <data name="settings.network.confirm.apply" xml:space="preserve"><value>Apply change</value></data>
   <data name="settings.network.fixed.passed" xml:space="preserve"><value>Changed. The check passes now: the POS can reach the server. If it still shows Offline, wait a few seconds or restart HB POS.</value></data>
   <data name="settings.network.fixed.stillFailing" xml:space="preserve"><value>Changed, but the check still finds a problem. See the result above, or copy the report for support.</value></data>
+  <data name="settings.network.fixed.retestFailed" xml:space="preserve"><value>Changed, but the re-check could not be run. Run the check again to confirm the result.</value></data>
   <data name="settings.network.fixed.cancelled" xml:space="preserve"><value>Nothing was changed: the permission was not granted.</value></data>
   <data name="settings.network.fixed.failed" xml:space="preserve"><value>The change could not be applied.</value></data>
   <data name="settings.network.undone" xml:space="preserve"><value>The changes were undone.</value></data>

@@ -3596,7 +3596,7 @@
   <data name="appUpdate.force.downloadFailedDefault" xml:space="preserve"><value>更新下载失败，请联系管理员。</value></data>
   <data name="appUpdate.force.retry" xml:space="preserve"><value>重试</value></data>
   <data name="appUpdate.force.exit" xml:space="preserve"><value>退出</value></data>
-  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>当前交易尚未完成，交易结束后将自动继续安装更新。</value></data>
+  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>当前交易或日结尚未完成，结束后将自动继续安装更新。</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>无法启动更新安装器。{0}</value></data>
   <data name="appUpdate.install.waitingForIdle" xml:space="preserve"><value>回到收银主页且空闲时会再提示安装。</value></data>
   <data name="appUpdate.force.postpone" xml:space="preserve"><value>稍后安装</value></data>

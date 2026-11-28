@@ -1358,7 +1358,7 @@
   <data name="appUpdate.force.downloadFailedDefault" xml:space="preserve"><value>Update download failed. Contact an administrator.</value></data>
   <data name="appUpdate.force.retry" xml:space="preserve"><value>Retry</value></data>
   <data name="appUpdate.force.exit" xml:space="preserve"><value>Exit</value></data>
-  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>A transaction is in progress. The update will continue automatically when it ends.</value></data>
+  <data name="appUpdate.install.activeTransaction" xml:space="preserve"><value>A transaction or daily close is in progress. The update will continue automatically when it ends.</value></data>
   <data name="appUpdate.install.failed" xml:space="preserve"><value>Could not start the update installer. {0}</value></data>
   <data name="appUpdate.install.waitingForIdle" xml:space="preserve"><value>You'll be asked to install when the sales screen is free.</value></data>
   <data name="appUpdate.force.postpone" xml:space="preserve"><value>Install later</value></data>
