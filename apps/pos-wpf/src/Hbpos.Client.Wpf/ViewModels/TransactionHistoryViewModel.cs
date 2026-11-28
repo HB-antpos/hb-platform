@@ -178,6 +178,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     private readonly IReceiptPrinterSettingsStore? _receiptPrinterSettingsStore;
     private readonly Func<Task>? _onSuspendedOrderRecalledAsync;
     private readonly Func<InstallmentOrderSummary, Task>? _continueInstallmentPaymentAsync;
+    // 「分期中心」入口回调：由导航器注入，负责切到分期中心整页（历史页本身不依赖分期中心视图模型）。
+    private readonly Action? _openInstallmentCenter;
     private readonly Action? _returnToPos;
     private readonly ILocalizationService? _localization;
     private readonly ICashierSessionContext _cashierSessionContext;
@@ -350,8 +352,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         ISharedHeldOrderPublicationWorker? sharedHeldOrderPublicationWorker = null,
         LocalSellableItemIndex? localSellableItemIndex = null,
         IRawScannerService? rawScannerService = null,
-        IInstallmentLineProductSearch? installmentLineProductSearch = null)
-        : this(receiptQueryService, suspendedOrderService, remoteOrderHistoryService, session, onSuspendedOrderRecalledAsync, returnToPos, localization, receiptTextFormatter, receiptPrinterSettingsStore, cashierSessionContext, enforcePermissionsWhenNoCashier, installmentOrderService, continueInstallmentPaymentAsync, operationAuditLogger, operationAuthorizationService, orderUploadExecutionService, confirmationDialogService, sharedHeldOrderCoordinator, sharedHeldOrderApiClient, sharedHeldOrderRepository, timeProvider, sharedHeldOrderPublicationWorker, localSellableItemIndex, rawScannerService, initialize: true, installmentLineProductSearch: installmentLineProductSearch)
+        IInstallmentLineProductSearch? installmentLineProductSearch = null,
+        Action? openInstallmentCenter = null)
+        : this(receiptQueryService, suspendedOrderService, remoteOrderHistoryService, session, onSuspendedOrderRecalledAsync, returnToPos, localization, receiptTextFormatter, receiptPrinterSettingsStore, cashierSessionContext, enforcePermissionsWhenNoCashier, installmentOrderService, continueInstallmentPaymentAsync, operationAuditLogger, operationAuthorizationService, orderUploadExecutionService, confirmationDialogService, sharedHeldOrderCoordinator, sharedHeldOrderApiClient, sharedHeldOrderRepository, timeProvider, sharedHeldOrderPublicationWorker, localSellableItemIndex, rawScannerService, initialize: true, installmentLineProductSearch: installmentLineProductSearch, openInstallmentCenter: openInstallmentCenter)
     {
     }
 
@@ -381,7 +384,8 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         LocalSellableItemIndex? localSellableItemIndex,
         IRawScannerService? rawScannerService,
         bool initialize,
-        IInstallmentLineProductSearch? installmentLineProductSearch = null)
+        IInstallmentLineProductSearch? installmentLineProductSearch = null,
+        Action? openInstallmentCenter = null)
     {
         _receiptQueryService = receiptQueryService;
         _suspendedOrderService = suspendedOrderService;
@@ -393,6 +397,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         _installmentOrderService = installmentOrderService ?? NoopInstallmentOrderService.Instance;
         _onSuspendedOrderRecalledAsync = onSuspendedOrderRecalledAsync;
         _continueInstallmentPaymentAsync = continueInstallmentPaymentAsync;
+        _openInstallmentCenter = openInstallmentCenter;
         _returnToPos = returnToPos;
         _localization = localization;
         _receiptTextFormatter = receiptTextFormatter ?? new ReceiptTextFormatter();
@@ -441,6 +446,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         RecallOrderCommand = new AsyncRelayCommand<HistoryOrderListItem>(RecallOrderAsync, CanRecallOrder);
         ContinueInstallmentPaymentCommand = new AsyncRelayCommand<HistoryOrderListItem>(ContinueInstallmentPaymentAsync, CanContinueInstallmentPayment);
         ConfirmInstallmentPickupCommand = new AsyncRelayCommand<HistoryOrderListItem>(ConfirmInstallmentPickupAsync, CanConfirmInstallmentPickup);
+        OpenInstallmentCenterCommand = new AsyncRelayCommand(OpenInstallmentCenterAsync, CanOpenInstallmentCenter);
         ReprintCommand = new AsyncRelayCommand(ReprintSelectedAsync, CanReprintSelected);
         RefundCommand = new RelayCommand(() => { }, () => false);
         SelectAllReuploadableCommand = new RelayCommand(SelectAllReuploadable, CanStartReupload);
@@ -707,6 +713,9 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
     public IAsyncRelayCommand<HistoryOrderListItem> ContinueInstallmentPaymentCommand { get; }
 
     public IAsyncRelayCommand<HistoryOrderListItem> ConfirmInstallmentPickupCommand { get; }
+
+    /// <summary>「在线」来源工具栏里的「分期中心」入口：取消并退款 / 作废 / 主管结案 / 取货 / 续付都在分期中心整页里做。</summary>
+    public IAsyncRelayCommand OpenInstallmentCenterCommand { get; }
 
     public IRelayCommand ReprintCommand { get; }
 
@@ -1252,6 +1261,7 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         RecallOrderCommand?.NotifyCanExecuteChanged();
         ContinueInstallmentPaymentCommand?.NotifyCanExecuteChanged();
         ConfirmInstallmentPickupCommand?.NotifyCanExecuteChanged();
+        OpenInstallmentCenterCommand?.NotifyCanExecuteChanged();
         NotifyReuploadCanExecuteChanged();
         UpdateHeldAutoRefresh();
         if (!_suppressSourceAutoLoad)
@@ -3481,6 +3491,40 @@ public sealed partial class TransactionHistoryViewModel : ObservableObject, ISca
         // 订单明细弹窗里的"继续付款"也走这个命令：先关弹窗，免得返回历史页时弹窗还盖在上面。
         IsOrderDetailsOpen = false;
         await _continueInstallmentPaymentAsync(order!.InstallmentOrder!);
+    }
+
+    // 只在「在线」来源下可用：入口放在在线来源的工具栏里，其它来源（本机 / 分期 / 挂单）不出现；
+    // 没有注入回调（如单元测试或未接导航器）时也不可用。
+    private bool CanOpenInstallmentCenter() =>
+        _openInstallmentCenter is not null &&
+        !_disposed &&
+        SelectedSource == TransactionHistorySource.RemoteOrders;
+
+    private async Task OpenInstallmentCenterAsync()
+    {
+        if (!CanOpenInstallmentCenter())
+        {
+            return;
+        }
+
+        // 权限口径与分期中心原有的付款页入口（PaymentViewModel.ShowInstallmentCenterAsync）一致：
+        // 需要「查看分期」权限；没有权限时走与历史页其它操作相同的授权流程（TryRequirePermission 写状态栏提示，
+        // 配置了授权服务时可由有权限的员工扫码放行）。不放宽权限，也不新增权限码。
+        using var authorization = await AuthorizeAsync(Permissions.PosTerminal.Installments.View, "open-installment-center");
+        if (authorization is null)
+        {
+            return;
+        }
+        using var authorizationActivation = authorization.Activate();
+
+        // 授权等待期间历史页可能已被释放；此时不再跳转。
+        if (_disposed)
+        {
+            return;
+        }
+
+        // 在授权作用域内同步切换页面：分期中心进入时发起的首次加载会沿用这次授权上下文。
+        _openInstallmentCenter!.Invoke();
     }
 
     private async Task ConfirmInstallmentPickupAsync(HistoryOrderListItem? order)

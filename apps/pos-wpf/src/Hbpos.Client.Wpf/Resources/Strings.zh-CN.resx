@@ -3304,6 +3304,9 @@
   <data name="installment.center.action.backToPayment" xml:space="preserve">
     <value>返回付款</value>
   </data>
+  <data name="installment.center.action.backToHistory" xml:space="preserve">
+    <value>返回历史</value>
+  </data>
   <data name="installment.center.action.search" xml:space="preserve">
     <value>搜索</value>
   </data>

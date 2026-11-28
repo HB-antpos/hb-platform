@@ -986,6 +986,71 @@ public sealed class InstallmentCenterViewModelTests
             DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);
 
+    [Fact]
+    public void BackToPaymentText_follows_the_back_target_and_the_language()
+    {
+        var localization = new LocalizationService();
+        localization.SetCulture(LocalizationService.DefaultCultureName);
+        var viewModel = new InstallmentCenterViewModel(
+            new FakeInstallmentOrderService(),
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => { },
+            localization);
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        // 默认去向是付款页（旧入口），文案保持原样。
+        Assert.Equal(InstallmentCenterBackTarget.Payment, viewModel.BackTarget);
+        Assert.Equal("Back to Payment", viewModel.BackToPaymentText);
+
+        viewModel.SetBackTarget(InstallmentCenterBackTarget.History);
+
+        Assert.Equal(InstallmentCenterBackTarget.History, viewModel.BackTarget);
+        Assert.Equal("Back to History", viewModel.BackToPaymentText);
+        Assert.Contains(nameof(InstallmentCenterViewModel.BackToPaymentText), changed);
+
+        localization.SetCulture(LocalizationService.ChineseCultureName);
+        Assert.Equal("返回历史", viewModel.BackToPaymentText);
+
+        viewModel.SetBackTarget(InstallmentCenterBackTarget.Payment);
+        Assert.Equal("返回付款", viewModel.BackToPaymentText);
+    }
+
+    [Fact]
+    public void SetBackTarget_with_the_same_target_does_not_raise_property_changes()
+    {
+        var viewModel = new InstallmentCenterViewModel(
+            new FakeInstallmentOrderService(),
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => { });
+        var changed = new List<string?>();
+        viewModel.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        viewModel.SetBackTarget(InstallmentCenterBackTarget.Payment);
+
+        Assert.Empty(changed);
+    }
+
+    [Fact]
+    public void BackToPaymentCommand_invokes_the_injected_callback_for_either_target()
+    {
+        var backCalls = 0;
+        var viewModel = new InstallmentCenterViewModel(
+            new FakeInstallmentOrderService(),
+            CreateSession(),
+            _ => Task.CompletedTask,
+            () => backCalls++);
+
+        // 去向只影响文案与导航器的分流判断，按钮本身始终调用构造时注入的回调。
+        viewModel.BackToPaymentCommand.Execute(null);
+        viewModel.SetBackTarget(InstallmentCenterBackTarget.History);
+        viewModel.BackToPaymentCommand.Execute(null);
+
+        Assert.Equal(2, backCalls);
+    }
+
     private static PosSessionState CreateSession()
     {
         return new PosSessionState("HB POS", "S001", "Main Store", "POS-01", "C001", "Alice", true, 0);

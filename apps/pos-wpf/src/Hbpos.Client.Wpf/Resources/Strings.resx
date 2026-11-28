@@ -1176,6 +1176,7 @@
   <data name="installment.center.currentOrder.none" xml:space="preserve"><value>There is no current order available for a new lay-by.</value></data>
   <data name="installment.center.currentOrder.amount" xml:space="preserve"><value>Current order amount {0:C2}. A new lay-by can be created.</value></data>
   <data name="installment.center.action.backToPayment" xml:space="preserve"><value>Back to Payment</value></data>
+  <data name="installment.center.action.backToHistory" xml:space="preserve"><value>Back to History</value></data>
   <data name="installment.center.action.search" xml:space="preserve"><value>Search</value></data>
   <data name="installment.center.action.create" xml:space="preserve"><value>Create Lay-by</value></data>
   <data name="installment.center.action.repay" xml:space="preserve"><value>Add Repayment</value></data>
