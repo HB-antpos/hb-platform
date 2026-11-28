@@ -32,8 +32,6 @@ export function resolvePosDestinationAccess(
     "daily-close": has(DAILY_CLOSE_VIEW_PERMISSION),
     "attendance-audit": true,
     "catalog-maintenance": canDownloadCatalog(permissions),
-    // 订货助手按设备绑定的分店授权，不看收银员权限；分店由后端令牌收口。
-    "supplier-assistant": true,
     settings: has(SETTINGS_VIEW_PERMISSION),
   };
   return new Set(POS_DESTINATION_IDS.filter((id) => visible[id]));
@@ -52,7 +50,6 @@ export const POS_DESTINATION_ROUTES: Readonly<Record<PosDestinationId, string>> 
     "daily-close": "/daily-close",
     "attendance-audit": "/attendance-audit",
     "catalog-maintenance": "/catalog-maintenance",
-    "supplier-assistant": "/supplier-assistant",
     settings: "/settings",
   });
 

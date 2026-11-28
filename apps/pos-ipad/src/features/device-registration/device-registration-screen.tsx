@@ -80,8 +80,11 @@ const layoutCopy = {
 } as const;
 
 export function DeviceRegistrationScreen({
+  onBackToEntry,
   onOpenNetworkCheck,
 }: Readonly<{
+  /** 回到首页（「收银 / 订货」两个入口）；不传则不显示按钮。 */
+  onBackToEntry?: () => void;
   /** 开通 / 待审批时也能打开只读网络检测，排查连不上服务器的问题。 */
   onOpenNetworkCheck?: () => void;
 }> = {}) {
@@ -430,7 +433,7 @@ export function DeviceRegistrationScreen({
     bleScanner && bleSnapshot ? describeBleScannerIndicator(bleSnapshot) : null;
   const bleReady =
     bleSnapshot?.state === "ready" || bleSnapshot?.state === "learning";
-  const networkCheckButton = onOpenNetworkCheck ? (
+  const networkCheckOnly = onOpenNetworkCheck ? (
     <PosButton
       icon="access-point-network"
       label={t("registration.networkCheck")}
@@ -441,6 +444,26 @@ export function DeviceRegistrationScreen({
       tone="quiet"
     />
   ) : null;
+  const backToEntryButton = onBackToEntry ? (
+    <PosButton
+      disabled={registrationBusy}
+      icon="home-outline"
+      label={t("registration.backToEntry")}
+      onPress={onBackToEntry}
+      size="medium"
+      sound="navigate"
+      testID="registration-back-to-entry"
+      tone="quiet"
+    />
+  ) : null;
+  // 「返回首页」和「网络检测」并排放在页面底部（服务器面板的操作区或单独一行）。
+  const networkCheckButton =
+    networkCheckOnly || backToEntryButton ? (
+      <>
+        {backToEntryButton}
+        {networkCheckOnly}
+      </>
+    ) : null;
 
   return (
     <PosScreenFrame

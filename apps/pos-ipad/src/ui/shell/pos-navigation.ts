@@ -15,7 +15,6 @@ export const POS_DESTINATION_IDS = [
   "daily-close",
   "attendance-audit",
   "catalog-maintenance",
-  "supplier-assistant",
   "settings",
 ] as const;
 
@@ -50,8 +49,6 @@ export const POS_DESTINATION_META: Readonly<
   "daily-close": { group: "store", icon: "calendar-check-outline" },
   "attendance-audit": { group: "store", icon: "account-clock-outline" },
   "catalog-maintenance": { group: "store", icon: "database-sync-outline" },
-  // 订货助手：在 App 里打开供应商网站，商品卡片上显示本店上次订货与销量。
-  "supplier-assistant": { group: "store", icon: "truck-delivery-outline" },
   settings: { group: "device", icon: "cog-outline" },
 });
 

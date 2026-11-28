@@ -39,6 +39,7 @@ import { useShopStore } from '../store/shop'
 import { resolveShopBannerCopy } from './shopBannerCopy'
 import { shopNavMessages } from './shopNavMessages'
 import { useShopUserStores } from './useShopUserStores'
+import { isPosAppEmbed, POS_APP_SCAN_EVENT, readPosAppScanBarcode } from '../utils/posAppEmbed'
 import { registerPageMessages } from '../i18n/registerPageMessages'
 import {
   resolvePreorderPromptPresentation,
@@ -131,6 +132,8 @@ export default function ShopLayout() {
   const { requestPreorderDurableLeave } = usePreorderLeave()
   const { t, i18n } = useTranslation()
   const isMobileShopLayout = useShopMobileLayout()
+  // 嵌在大屏收银 App 订货模式里：退出、后台入口、插件推广都交给 App，网页里不显示。
+  const posAppEmbed = useMemo(() => isPosAppEmbed(), [])
   const isShopHomePage = location.pathname === '/shop'
   const isPreorderPage = location.pathname.startsWith('/shop/preorders/')
   const isBestSellersPage = location.pathname.startsWith('/shop/best-sellers')
@@ -431,6 +434,19 @@ export default function ShopLayout() {
     navigate(`/shop?keyword=${encodeURIComponent(keyword)}`)
   }
 
+  // App 扫码枪扫到的码：和在搜索框里输入后回车一样按关键字搜索。
+  const handleSearchRef = useRef(handleSearch)
+  handleSearchRef.current = handleSearch
+  useEffect(() => {
+    if (!posAppEmbed) return undefined
+    const onScan = (event: Event) => {
+      const barcode = readPosAppScanBarcode(event)
+      if (barcode) handleSearchRef.current(barcode)
+    }
+    window.addEventListener(POS_APP_SCAN_EVENT, onScan)
+    return () => window.removeEventListener(POS_APP_SCAN_EVENT, onScan)
+  }, [posAppEmbed])
+
   const handleStoreChange = async (value?: string) => {
     await changeStoreAfterDurableLeave(value, requestPreorderDurableLeave, (storeCode) => {
       const nextStore = userStores.find((item) => item.storeCode === storeCode) ?? null
@@ -528,11 +544,11 @@ export default function ShopLayout() {
           </nav>
 
           <div className="shop-header-account">
-            {isShopHomePage && !isMobileShopLayout
+            {isShopHomePage && !isMobileShopLayout && !posAppEmbed
               ? <SupplierOrderingExtensionEntry presentation="desktop" />
               : null}
             <LanguageSwitch className="shop-header-language" size="small" compact />
-            {currentUser ? (
+            {posAppEmbed ? null : currentUser ? (
               <Dropdown
                 trigger={['click']}
                 placement="bottomRight"
@@ -916,7 +932,7 @@ export default function ShopLayout() {
             {supplyWatchSummary.restockedCount > 0 ? <Badge count={supplyWatchSummary.restockedCount} size="small" /> : null}
           </Link>
           <div className="shop-mobile-more-menu__separator" />
-          {isShopHomePage && isMobileShopLayout
+          {isShopHomePage && isMobileShopLayout && !posAppEmbed
             ? <SupplierOrderingExtensionEntry presentation="mobile-nav" />
             : null}
           <div className="shop-mobile-more-menu__utility">
@@ -933,12 +949,12 @@ export default function ShopLayout() {
               <UserOutlined /><span>{t('login.submit', 'Login')}</span>
             </Link>
           )}
-          {access.canAccessDashboard ? (
+          {access.canAccessDashboard && !posAppEmbed ? (
             <button type="button" onClick={() => window.open('/dashboard', '_blank')}>
               <DashboardOutlined /><span>{t('menu.dashboard', 'Dashboard')}</span>
             </button>
           ) : null}
-          {currentUser ? (
+          {currentUser && !posAppEmbed ? (
             <button type="button" className="danger" onClick={() => void handleLogout()}>
               <LogoutOutlined /><span>{t('layout.logout', 'Log Out')}</span>
             </button>

@@ -66,6 +66,7 @@ type LoginCopy = Readonly<{
   emergencyInvalid: string;
   networkCheck: string;
   bleScanner: string;
+  backToEntry: string;
 }>;
 
 const copy: Record<"en" | "zh", LoginCopy> = {
@@ -102,6 +103,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     emergencyInvalid: "This emergency sign-in QR is invalid.",
     networkCheck: "Network check",
     bleScanner: "Bluetooth scanner",
+    backToEntry: "Back to home",
   },
   zh: {
     eyebrow: "收银员登录",
@@ -131,6 +133,7 @@ const copy: Record<"en" | "zh", LoginCopy> = {
     emergencyInvalid: "紧急登录二维码无效。",
     networkCheck: "网络检测",
     bleScanner: "蓝牙扫码枪",
+    backToEntry: "返回首页",
   },
 };
 
@@ -153,6 +156,7 @@ export function CashierLoginScreen({
   controller,
   language = "zh",
   onLoginDiagnostic,
+  onBackToEntry,
   onManualInputFocusChange,
   onOpenBleScanner,
   onOpenNetworkCheck,
@@ -171,6 +175,8 @@ export function CashierLoginScreen({
   /** 扫码登录被拒、或原生与 JS 输入错位后才成功时回调脱敏诊断（不含条码内容），由路由写进中心日志。 */
   onLoginDiagnostic?(diagnostic: CashierLoginDiagnostic): void;
   onManualInputFocusChange?(focused: boolean): void;
+  /** 回到首页（「收银 / 订货」两个入口）；不传则不显示按钮。 */
+  onBackToEntry?(): void;
   /** 打开蓝牙扫码枪面板（配对 / 连接 / 测试）；登录前就能用。原生包不带 BLE 服务时不传，按钮不显示。 */
   onOpenBleScanner?(): void;
   /** 打开只读网络检测页；登录前就能用，不受终端就绪状态限制。 */
@@ -651,6 +657,19 @@ export function CashierLoginScreen({
               sound="navigate"
               style={styles.networkCheckButton}
               testID="cashier-login-ble-scanner"
+              tone="quiet"
+            />
+          ) : null}
+          {onBackToEntry ? (
+            <PosButton
+              disabled={submitting}
+              icon="home-outline"
+              label={text.backToEntry}
+              onPress={onBackToEntry}
+              size="medium"
+              sound="navigate"
+              style={styles.networkCheckButton}
+              testID="cashier-login-back-to-entry"
               tone="quiet"
             />
           ) : null}
