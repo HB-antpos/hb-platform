@@ -1,36 +1,21 @@
-import {
-  unwrapHbposEnvelope,
-  type HbposEnvelope,
-  type HbposTransport,
-} from "@/core/api/hbpos-api";
-
 /**
  * 大屏收银 App 内「订货助手」的令牌与请求。
  *
  * 中文注释：
- * 1. 令牌由 POS API 按设备身份签发（设备绑定哪家分店就是哪家），App 不需要登录 HB 网站账号。
- * 2. 令牌只留在 App 原生层：网页窗口里的插件脚本拿不到它，所有接口请求都由这里代发。
- * 3. 订货助手接口在中心（主 API）：/api/react/v1/browser-extension/*，中心地址由 POS API 一起下发。
+ * 1. 令牌是员工账号的「插件范围令牌」（token_use=browser_extension）：由订货模式的
+ *    hotbargain.vip 网页会话经 PKCE 换来，只能调订货助手接口，拿不到账号的其他数据。
+ * 2. 令牌只留在 App 原生层：供应商网页里的插件脚本拿不到它，所有接口请求都由这里代发。
+ * 3. 分店不在令牌里，由订货工作台选定后传给页面；后端仍按账号可访问的分店收口。
  */
 export type SupplierAssistantToken = Readonly<{
   accessToken: string;
   expiresAtMs: number;
-  storeCode: string;
-  deviceCode: string;
   apiOrigin: string;
 }>;
 
 export interface SupplierAssistantTokenSource {
   issueToken(signal?: AbortSignal): Promise<SupplierAssistantToken>;
 }
-
-type TokenResponseDto = Readonly<{
-  accessToken?: string | null;
-  expiresAtUtc?: string | null;
-  storeCode?: string | null;
-  deviceCode?: string | null;
-  apiOrigin?: string | null;
-}>;
 
 export class SupplierAssistantTokenError extends Error {
   public constructor(
@@ -40,35 +25,6 @@ export class SupplierAssistantTokenError extends Error {
     super(message);
     this.name = "SupplierAssistantTokenError";
   }
-}
-
-/** POS API：POST /api/v1/supplier-assistant/token（设备认证头由 transport 自动加）。 */
-export class HbposSupplierAssistantApi implements SupplierAssistantTokenSource {
-  public constructor(private readonly transport: HbposTransport) {}
-
-  public async issueToken(signal?: AbortSignal): Promise<SupplierAssistantToken> {
-    const response = await this.transport.request<HbposEnvelope<TokenResponseDto>>({
-      method: "POST",
-      url: "/api/v1/supplier-assistant/token",
-      data: {},
-      ...(signal ? { signal } : {}),
-    });
-    return parseSupplierAssistantToken(unwrapHbposEnvelope(response.data));
-  }
-}
-
-export function parseSupplierAssistantToken(
-  data: TokenResponseDto | null | undefined,
-): SupplierAssistantToken {
-  const accessToken = data?.accessToken?.trim() ?? "";
-  const storeCode = data?.storeCode?.trim() ?? "";
-  const deviceCode = data?.deviceCode?.trim() ?? "";
-  const expiresAtMs = Date.parse(data?.expiresAtUtc ?? "");
-  const apiOrigin = normalizeApiOrigin(data?.apiOrigin);
-  if (!accessToken || !storeCode || !deviceCode || !Number.isFinite(expiresAtMs) || !apiOrigin) {
-    throw new SupplierAssistantTokenError("订货助手令牌响应无效", "TOKEN_RESPONSE_INVALID");
-  }
-  return Object.freeze({ accessToken, expiresAtMs, storeCode, deviceCode, apiOrigin });
 }
 
 /** 只接受 https 的 origin（协议 + 主机 + 端口），其余一律拒绝，免得令牌被发到别处。 */
@@ -99,7 +55,7 @@ export type FetchLike = (
   }>,
 ) => Promise<Readonly<{ status: number; ok: boolean; json(): Promise<unknown> }>>;
 
-// 令牌五分钟有效；剩不到一分钟就提前换，避免请求途中过期。
+// 剩不到一分钟就提前换令牌，避免请求途中过期。
 const REFRESH_MARGIN_MS = 60_000;
 const EXTENSION_API_PREFIX = "/api/react/v1/browser-extension/";
 
@@ -131,10 +87,6 @@ export class SupplierAssistantSession {
         });
     }
     return this.inflight;
-  }
-
-  public get storeCode(): string | null {
-    return this.token?.storeCode ?? null;
   }
 
   /**

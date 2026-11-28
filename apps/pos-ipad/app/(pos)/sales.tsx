@@ -668,7 +668,6 @@ export default function SalesRoute() {
         onOpenSyncHistory={() => push("/sync-history" as Href)}
         onOpenPaymentRecovery={() => push("/payment-recovery" as Href)}
         // 订货助手按设备绑定分店授权、不看收银员权限（同 pos-destination-access），所以总是传。
-        onOpenSupplierAssistant={() => push("/supplier-assistant" as Href)}
         presenter={presenter}
         {...(activeCashier && canDownloadCatalog(activeCashier.permissions)
           ? {

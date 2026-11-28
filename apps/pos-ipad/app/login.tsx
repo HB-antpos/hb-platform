@@ -190,6 +190,7 @@ export default function LoginRoute() {
       <CashierLoginScreen
         attendanceQr={attendanceQr}
         language={i18n.resolvedLanguage ?? i18n.language}
+        onBackToEntry={() => router.dismissTo("/" as Href)}
         onLoginDiagnostic={recordLoginDiagnostic}
         onManualInputFocusChange={handleManualInputFocusChange}
         {...(bleScanner ? { onOpenBleScanner: handleOpenBleScanner } : {})}

@@ -3,10 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ActivityIndicator, ScrollView, Text, View } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 
-import {
-  SUPPLIER_ASSISTANT_CONTENT_SCRIPT,
-  SUPPLIER_ASSISTANT_EXTENSION_VERSION,
-} from "./generated/supplier-assistant-content.generated";
+import { SUPPLIER_ASSISTANT_CONTENT_SCRIPT } from "./generated/supplier-assistant-content.generated";
 import {
   createSupplierAssistantBackground,
   resolveProfileHomeUrl,
@@ -20,32 +17,34 @@ import {
   type SupplierAssistantCopyKey,
 } from "./supplier-assistant-copy";
 import {
-  SupplierAssistantSession,
-  type FetchLike,
-  type SupplierAssistantTokenSource,
+  SupplierAssistantTokenError,
+  type SupplierAssistantSession,
 } from "./supplier-assistant-session";
 
-import { HbposApiError } from "@/core/api/hbpos-api";
+import {
+  ORDERING_ACTIVITY_CHANNEL,
+  ORDERING_ACTIVITY_SCRIPT,
+} from "@/features/ordering/ordering-activity";
 import { PosButton } from "@/ui/controls/pos-button";
 import { PosPressable } from "@/ui/controls/pos-pressable";
-import { PosPageHeader, PosScreenFrame } from "@/ui/shell/pos-screen-frame";
 import { createPosStyles, posRadius, usePosThemeVersion } from "@/ui/theme";
 
-export type SupplierAssistantScreenProps = Readonly<{
-  tokenSource: SupplierAssistantTokenSource;
-  onBack(): void;
-  /** 测试注入；默认用全局 fetch（App 原生请求，不受浏览器跨域限制）。 */
-  fetchImpl?: FetchLike;
+export type SupplierAssistantWorkspaceProps = Readonly<{
+  /** 订货工作台建好的会话（工作台也用它查分店列表），令牌只在这里面。 */
+  session: SupplierAssistantSession;
+  /** 订货工作台选定的分店；摘要、采购记录都按这家分店查。 */
+  storeCode: string;
   /** 页面订阅扫码后把扫到的码交给这里（BLE 扫码枪）。 */
   registerScanHandler?: (handler: ((barcode: string) => void) | null) => void;
+  /** 员工在供应商网页里有操作（点按、输入）时通知订货工作台，用于闲置自动退出计时。 */
+  onActivity?: () => void;
 }>;
 
 type LoadState =
   | Readonly<{ phase: "loading" }>
-  | Readonly<{ phase: "error"; reason: "tokenFailed" | "notEligible" }>
+  | Readonly<{ phase: "error"; reason: "tokenFailed" | "notAllowed" | "sessionExpired" }>
   | Readonly<{
       phase: "ready";
-      storeCode: string;
       profiles: readonly SupplierProfileLite[];
       rawProfiles: unknown;
     }>;
@@ -74,20 +73,18 @@ type PanelState =
   | Readonly<{ request: LocateRequest; phase: "failed" }>
   | Readonly<{ request: LocateRequest; phase: "ready"; data: CyclesDto }>;
 
-const defaultFetch: FetchLike = (input, init) => fetch(input, init);
-
 /**
- * 大屏收银 App 内「订货助手」：在网页窗口里打开供应商网站，注入浏览器订货助手插件的页面脚本，
- * 商品卡片上直接显示本店上次订货、至今销量；点按钮或扫码定位商品时在右侧显示采购记录。
+ * 订货工作台里的「供应商订货助手」页签：在网页窗口里打开供应商网站，注入浏览器订货助手插件的页面脚本，
+ * 商品卡片上直接显示所选分店上次订货、至今销量；点按钮或扫码定位商品时在右侧显示采购记录。
  *
- * 中文注释：设备令牌只在这一层（App 原生层）持有并代发请求，网页里拿不到。
+ * 中文注释：员工插件令牌只在这一层（App 原生层）持有并代发请求，供应商网页里拿不到。
  */
-export function SupplierAssistantScreen({
-  fetchImpl = defaultFetch,
-  onBack,
+export function SupplierAssistantWorkspace({
+  onActivity,
   registerScanHandler,
-  tokenSource,
-}: SupplierAssistantScreenProps) {
+  session,
+  storeCode,
+}: SupplierAssistantWorkspaceProps) {
   usePosThemeVersion();
   const { i18n } = useTranslation();
   const locale = resolveSupplierAssistantLocale(i18n.resolvedLanguage);
@@ -97,10 +94,6 @@ export function SupplierAssistantScreen({
     [locale],
   );
 
-  const session = useMemo(
-    () => new SupplierAssistantSession(tokenSource, fetchImpl, SUPPLIER_ASSISTANT_EXTENSION_VERSION),
-    [fetchImpl, tokenSource],
-  );
   const [load, setLoad] = useState<LoadState>({ phase: "loading" });
   const [activeCode, setActiveCode] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelState>(null);
@@ -113,24 +106,25 @@ export function SupplierAssistantScreen({
   const loadAll = useCallback(async () => {
     setLoad({ phase: "loading" });
     try {
-      const token = await session.getToken();
       const result = await session.request("/api/react/v1/browser-extension/supplier-profiles", {
         method: "GET",
       });
+      if (result.httpStatus === 403) {
+        setLoad({ phase: "error", reason: "notAllowed" });
+        return;
+      }
       if (!result.success) throw new Error(result.errorCode ?? "PROFILES_FAILED");
       const profiles = toProfileLites(result.data);
-      setLoad({ phase: "ready", storeCode: token.storeCode, profiles, rawProfiles: result.data });
+      setLoad({ phase: "ready", profiles, rawProfiles: result.data });
       setActiveCode((current) =>
         current && profiles.some((item) => item.supplierCode === current)
           ? current
           : profiles[0]?.supplierCode ?? null,
       );
     } catch (error) {
-      const notEligible =
-        error instanceof HbposApiError
-        && (error.code === "SUPPLIER_ASSISTANT_DEVICE_NOT_ELIGIBLE"
-          || error.code === "SUPPLIER_ASSISTANT_DEVICE_SYSTEM_NOT_SUPPORTED");
-      setLoad({ phase: "error", reason: notEligible ? "notEligible" : "tokenFailed" });
+      // 网页会话已失效（被踢下线 / 过期）时，重试也没用，提示员工退出重登。
+      const expired = error instanceof SupplierAssistantTokenError && error.code === "SESSION_EXPIRED";
+      setLoad({ phase: "error", reason: expired ? "sessionExpired" : "tokenFailed" });
     }
   }, [session]);
 
@@ -145,7 +139,7 @@ export function SupplierAssistantScreen({
   const activeProfileRef = useRef<SupplierProfileLite | null>(null);
   activeProfileRef.current = activeProfile;
   const storeCodeRef = useRef<string | null>(null);
-  storeCodeRef.current = load.phase === "ready" ? load.storeCode : null;
+  storeCodeRef.current = storeCode;
 
   const openPanel = useCallback(
     (request: LocateRequest) => {
@@ -200,6 +194,10 @@ export function SupplierAssistantScreen({
       } catch {
         return;
       }
+      if (envelope.channel === ORDERING_ACTIVITY_CHANNEL) {
+        onActivity?.();
+        return;
+      }
       if (envelope.channel !== "hb-supplier-assistant") return;
       const senderUrl = event.nativeEvent.url ?? null;
       if (envelope.kind === "storage-set" && envelope.values && typeof envelope.values === "object") {
@@ -220,7 +218,7 @@ export function SupplierAssistantScreen({
           );
         });
     },
-    [background, injectToPage],
+    [background, injectToPage, onActivity],
   );
 
   // BLE 扫码枪：扫到的码直接交给网页里的插件脚本，走和插件一样的「条码 → 货号 → 高亮 / 搜索」流程。
@@ -241,57 +239,16 @@ export function SupplierAssistantScreen({
     const initialStorage = {
       ...pageSettingsRef.current,
       supplierProfiles: load.rawProfiles,
-      selectedStoreCode: load.storeCode,
+      selectedStoreCode: storeCode,
       locale,
     };
-    return `window.__hbSupplierAssistantInitialStorage=${JSON.stringify(initialStorage)};${SUPPLIER_ASSISTANT_CONTENT_SCRIPT};true;`;
+    return `${ORDERING_ACTIVITY_SCRIPT};window.__hbSupplierAssistantInitialStorage=${JSON.stringify(initialStorage)};${SUPPLIER_ASSISTANT_CONTENT_SCRIPT};true;`;
     // reloadKey：回首页重建网页时，把网页里改过的显示设置（存在 ref 里）带进新页面。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load, locale, reloadKey]);
-
-  const header = (
-    <PosPageHeader
-      actions={
-        <>
-          <View style={styles.storePill} testID="supplier-assistant-store">
-            <Text style={styles.storePillText}>
-              {load.phase === "ready" ? t("store.label", { storeCode: load.storeCode }) : t("store.loading")}
-            </Text>
-          </View>
-          <PosButton
-            disabled={!homeUrl}
-            icon="home-outline"
-            label={t("action.home")}
-            onPress={() => {
-              setPanel(null);
-              setReloadKey((value) => value + 1);
-            }}
-            size="medium"
-            testID="supplier-assistant-home"
-            tone="quiet"
-          />
-          <PosButton
-            disabled={load.phase !== "ready"}
-            icon="refresh"
-            label={t("action.reload")}
-            onPress={() => webViewRef.current?.reload()}
-            size="medium"
-            testID="supplier-assistant-reload"
-            tone="quiet"
-          />
-        </>
-      }
-      backLabel={t("action.back")}
-      backTestID="supplier-assistant-back"
-      eyebrow={t("eyebrow")}
-      onBack={onBack}
-      subtitle={t("subtitle")}
-      title={t("title")}
-    />
-  );
+  }, [load, locale, reloadKey, storeCode]);
 
   return (
-    <PosScreenFrame active="supplier-assistant" header={header} testID="supplier-assistant-screen">
+    <View style={styles.root} testID="supplier-assistant-screen">
       {load.phase === "loading" ? (
         <View style={styles.centered} testID="supplier-assistant-loading">
           <ActivityIndicator />
@@ -299,7 +256,7 @@ export function SupplierAssistantScreen({
         </View>
       ) : load.phase === "error" ? (
         <View style={styles.centered} testID="supplier-assistant-error">
-          <Text style={styles.message}>{t(load.reason === "notEligible" ? "state.notEligible" : "state.tokenFailed")}</Text>
+          <Text style={styles.message}>{t(`state.${load.reason}`)}</Text>
           {load.reason === "tokenFailed" ? (
             <PosButton
               icon="refresh"
@@ -337,13 +294,34 @@ export function SupplierAssistantScreen({
               );
             })}
             <Text style={styles.scanHint}>{activeProfile?.hasSearch ? t("scan.hint") : ""}</Text>
+            <PosButton
+              disabled={!homeUrl}
+              icon="home-outline"
+              label={t("action.home")}
+              onPress={() => {
+                setPanel(null);
+                setReloadKey((value) => value + 1);
+              }}
+              size="medium"
+              testID="supplier-assistant-home"
+              tone="quiet"
+            />
+            <PosButton
+              disabled={!homeUrl}
+              icon="refresh"
+              label={t("action.reload")}
+              onPress={() => webViewRef.current?.reload()}
+              size="medium"
+              testID="supplier-assistant-reload"
+              tone="quiet"
+            />
           </View>
           <View style={styles.body}>
             <View style={styles.webFrame}>
               {homeUrl ? (
                 <WebView
-                  // 换供应商或回首页时整个重建，旧页面的脚本状态不会带过去。
-                  key={`${activeCode}:${reloadKey}`}
+                  // 换供应商、换分店或回首页时整个重建，旧页面的脚本状态不会带过去。
+                  key={`${activeCode}:${storeCode}:${reloadKey}`}
                   injectedJavaScript={injectedJavaScript}
                   onMessage={onMessage}
                   originWhitelist={["https://*"]}
@@ -362,7 +340,7 @@ export function SupplierAssistantScreen({
           </View>
         </View>
       )}
-    </PosScreenFrame>
+    </View>
   );
 }
 
@@ -440,6 +418,7 @@ function Row({ label, value }: Readonly<{ label: string; value: string }>) {
 }
 
 const styles = createPosStyles((colors) => ({
+  root: { flex: 1, minHeight: 0 },
   workspace: { flex: 1, gap: 8, minHeight: 0, padding: 12 },
   tabs: { alignItems: "center", flexDirection: "row", flexWrap: "wrap", gap: 8 },
   tab: {
@@ -487,12 +466,4 @@ const styles = createPosStyles((colors) => ({
   centered: { alignItems: "center", flex: 1, gap: 12, justifyContent: "center", padding: 24 },
   message: { color: colors.ink, fontSize: 16, fontWeight: "600", textAlign: "center" },
   muted: { color: colors.mutedInk, fontSize: 13 },
-  storePill: {
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: posRadius.large,
-    justifyContent: "center",
-    minHeight: 40,
-    paddingHorizontal: 14,
-  },
-  storePillText: { color: colors.ink, fontSize: 14, fontWeight: "700" },
 }));

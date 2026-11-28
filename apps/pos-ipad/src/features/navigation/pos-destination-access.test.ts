@@ -23,7 +23,6 @@ test("不带任何权限的收银员只看到不需要权限的入口", () => {
     "held-orders",
     "payment-recovery",
     "returns",
-    "supplier-assistant",
     "sync-history",
   ]);
 });

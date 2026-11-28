@@ -17,7 +17,6 @@ import {
 } from "./supplier-assistant-background";
 import {
   normalizeApiOrigin,
-  parseSupplierAssistantToken,
   SupplierAssistantSession,
   type FetchLike,
   type SupplierAssistantToken,
@@ -51,7 +50,7 @@ function createBackground(overrides: { profile?: SupplierProfileLite | null; sto
   return { background, calls, located };
 }
 
-test("摘要请求一律用设备绑定的分店，不信网页传来的分店", async () => {
+test("摘要请求一律用 App 选定的分店，不信网页传来的分店", async () => {
   const { background, calls } = createBackground();
 
   const response = await background.handle(
@@ -183,21 +182,16 @@ test("后端供应商配置只保留启用且字段齐全的条目", () => {
   assert.equal(resolveProfileHomeUrl(lites[0]!), "https://www.dats.com.au/");
 });
 
-test("令牌响应只接受 https 中心地址", () => {
+test("中心地址只接受 https origin", () => {
   assert.equal(normalizeApiOrigin("https://HotBargain.vip/"), "https://hotbargain.vip");
   assert.equal(normalizeApiOrigin("http://hotbargain.vip"), null);
   assert.equal(normalizeApiOrigin("https://hotbargain.vip/api"), null);
-  assert.throws(() =>
-    parseSupplierAssistantToken({ accessToken: "t", expiresAtUtc: "2026-11-26T01:05:00Z", storeCode: "1042", deviceCode: "D", apiOrigin: "http://x" }),
-  );
 });
 
 function token(overrides: Partial<SupplierAssistantToken> = {}): SupplierAssistantToken {
   return Object.freeze({
     accessToken: "jwt-1",
     expiresAtMs: 10 * 60_000,
-    storeCode: "1042",
-    deviceCode: "POS_1042_0925",
     apiOrigin: "https://hotbargain.vip",
     ...overrides,
   });

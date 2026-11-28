@@ -7,6 +7,7 @@ export default function RegistrationRoute() {
   usePosThemeVersion();
   return (
     <DeviceRegistrationScreen
+      onBackToEntry={() => router.dismissTo("/" as Href)}
       onOpenNetworkCheck={() => router.push("/network-check" as Href)}
     />
   );
