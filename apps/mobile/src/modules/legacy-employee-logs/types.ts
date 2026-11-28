@@ -142,6 +142,11 @@ export interface LegacyLogFilters {
   employeeName: string | null;
   deviceCode: string | null;
   keyword: string;
+  /**
+   * 商品关键字（货号 / 条码 / 商品名），只对新收银生效：后端 keyword 只匹配单号、收银员、设备等主表字段，
+   * 商品要走 productKeyword 查操作明细子表。老收银的 keyword 本身就搜详情文本，不需要这个字段。
+   */
+  productKeyword: string;
   lens: LegacyRiskLens;
   subOperations: string[];
   ruleCode: string | null;

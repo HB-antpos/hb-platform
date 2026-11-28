@@ -161,10 +161,28 @@ export function LegacyLogFilterSheet({ visible, filters, stores, employees, devi
           dense
           value={draft.keyword}
           onChangeText={(keyword) => patch({ keyword })}
-          placeholder={t("filters.keywordPlaceholder")}
+          // 新收银的 keyword 只匹配单号、收银员、设备等，提示语按来源区分，避免误以为能搜商品。
+          placeholder={t(draft.source === "pos" ? "filters.keywordPlaceholderPos" : "filters.keywordPlaceholder")}
           accessibilityLabel={t("filters.keyword")}
           maxLength={100}
         />
+
+        {draft.source === "pos" ? (
+          <>
+            <Text style={LEGACY_UI.sectionLabel}>{t("filters.productKeyword")}</Text>
+            <TextInput
+              mode="outlined"
+              dense
+              value={draft.productKeyword}
+              onChangeText={(productKeyword) => patch({ productKeyword })}
+              placeholder={t("filters.productKeywordPlaceholder")}
+              accessibilityLabel={t("filters.productKeyword")}
+              autoCapitalize="none"
+              autoCorrect={false}
+              maxLength={100}
+            />
+          </>
+        ) : null}
       </ScrollView>
       )}
     </BusinessSheet>
