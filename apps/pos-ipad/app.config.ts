@@ -4,6 +4,13 @@ const supportedInterfaceOrientations = [
   "UIInterfaceOrientationLandscapeLeft",
   "UIInterfaceOrientationLandscapeRight",
 ];
+// iPad 多任务（可缩放场景）必须声明全部四个方向，否则 App Store 上传报 ITMS-90474；
+// 实际界面方向由 expo-screen-orientation 的 initialOrientation 锁成横屏。
+const iPadMultitaskingInterfaceOrientations = [
+  "UIInterfaceOrientationPortrait",
+  "UIInterfaceOrientationPortraitUpsideDown",
+  ...supportedInterfaceOrientations,
+];
 // Expo 配置在独立 Node 上下文中加载，无法直接解析应用源码的 TS 模块。
 const defaultHbposApiBaseUrl = "https://hotbargain.vip/pos-api";
 const localHbposApiBaseUrl = "http://192.168.31.246:5003";
@@ -198,11 +205,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     supportsTablet: true,
     // HB POS 是门店 iPad 专用应用；避免 App Store 将二进制识别为通用 App 并要求 iPhone 素材。
     isTabletOnly: true,
-    requireFullScreen: true,
+    // 不能声明全屏：iPadOS 26 起声明 UIRequiresFullScreen 的 App 被系统当作「不可缩放」，
+    // 接外屏时只镜像主画面、从不创建 ExternalDisplayNonInteractive 场景，客显永远「未连接」
+    // （iPadOS 27 真机日志：`No resizable app because com.hbweb.posipad isn't resizable`）。
+    // 关闭后 Expo 会把 iPad 四个方向全部写进 Info.plist（App Store 多任务校验 ITMS-90474 要求），
+    // 横屏改由下方 expo-screen-orientation 的 initialOrientation 在原生层锁定。
+    requireFullScreen: false,
     infoPlist: {
-      UIRequiresFullScreen: true,
       UISupportedInterfaceOrientations: supportedInterfaceOrientations,
-      "UISupportedInterfaceOrientations~ipad": supportedInterfaceOrientations,
+      "UISupportedInterfaceOrientations~ipad": iPadMultitaskingInterfaceOrientations,
       // 与 plugins/with-hb-printer.js、react-native-ble-plx 插件三处保持同一句，后写的插件会覆盖前者。
       NSBluetoothAlwaysUsageDescription: "HB POS 使用蓝牙连接门店小票打印机、钱箱和蓝牙扫码枪。",
       NSCameraUsageDescription: "HB POS 使用相机作为条码扫描备用方式。",
@@ -227,6 +238,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   plugins: [
     "expo-router",
     "expo-localization",
+    // 写入 EXDefaultScreenOrientationMask：收银界面只按横屏设计，Info.plist 为多任务列了四个方向，
+    // 这里让原生根控制器与 supportedInterfaceOrientationsFor 默认只允许横屏。
+    ["expo-screen-orientation", { initialOrientation: "LANDSCAPE" }],
     ...sentryPlugins,
     [
       "expo-audio",

@@ -56,7 +56,17 @@ assert.match(
 );
 assert.match(appConfigSource, /com\.hbweb\.posipad/);
 assert.match(appConfigSource, /supportedInterfaceOrientations/);
-assert.match(appConfigSource, /UIRequiresFullScreen/);
+// iPadOS 26+ 声明全屏的 App 被当作不可缩放，外屏只镜像、不创建客显场景，所以禁止重新声明全屏。
+assert.doesNotMatch(
+  appConfigSource,
+  /UIRequiresFullScreen\s*:|requireFullScreen:\s*true/u,
+  "HB POS 不能声明全屏，否则 iPadOS 26+ 外接客显永远拿不到外屏场景。",
+);
+assert.match(
+  appConfigSource,
+  /"expo-screen-orientation",\s*\{\s*initialOrientation:\s*"LANDSCAPE"\s*\}/u,
+  "去掉全屏声明后必须由 expo-screen-orientation 在原生层锁定横屏。",
+);
 assert.match(
   appConfigSource,
   /isTabletOnly:\s*true/,
