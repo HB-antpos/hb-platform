@@ -807,6 +807,142 @@ public sealed class ReceiptReturnsWorkflowServiceTests
         Assert.Equal(new DateTimeOffset(2025, 11, 2, 0, 0, 0, TimeSpan.Zero), keywordQuery.SoldFrom);
     }
 
+    // ---- 退货金额取整对齐（W2-1）：退货单价四舍五入后 × 数量不能超过原行实收，否则服务端永久拒收 ----
+
+    [Fact]
+    public void ReconcileWithRemainingAmount_WhenRoundedUnitPriceOvershoots_SplitsRemainderSoTotalEqualsOriginal()
+    {
+        // 3 件 $5.00 的促销行：单价 round(5/3, 2) = 1.67，3 × 1.67 = 5.01 > 5.00。
+        var pending = CreatePendingReturn(quantity: 3m, unitPrice: 1.67m, remainingAmount: 5.00m, remainingQuantity: 3m);
+
+        var segments = ReceiptReturnsWorkflowService.ReconcileWithRemainingAmount(pending);
+
+        Assert.Equal(2, segments.Count);
+        Assert.Equal((2m, 1.67m), (segments[0].Quantity, segments[0].UnitPrice));
+        Assert.Equal((1m, 1.66m), (segments[1].Quantity, segments[1].UnitPrice));
+        Assert.Equal(pending.ReturnSourceKey, segments[0].ReturnSourceKey);
+        Assert.Equal(pending.ReturnSourceKey + ReceiptReturnsWorkflowService.RoundingRemainderKeySuffix, segments[1].ReturnSourceKey);
+        Assert.Equal(5.00m, SumAmount(segments));
+    }
+
+    [Fact]
+    public void ReconcileWithRemainingAmount_WhenRoundedUnitPriceUndershoots_RefundsTheFullRemainder()
+    {
+        // 3 件 $4.96：单价 1.65，3 × 1.65 = 4.95，整行退完要把最后 1 分也退给顾客。
+        var pending = CreatePendingReturn(quantity: 3m, unitPrice: 1.65m, remainingAmount: 4.96m, remainingQuantity: 3m);
+
+        var segments = ReceiptReturnsWorkflowService.ReconcileWithRemainingAmount(pending);
+
+        Assert.Equal(4.96m, SumAmount(segments));
+        Assert.Equal(3m, segments.Sum(segment => segment.Quantity));
+    }
+
+    [Fact]
+    public void ReconcileWithRemainingAmount_WhenPartialReturnStaysWithinRemainder_IsUnchanged()
+    {
+        // 3 件里只退 1 件：1.67 ≤ 剩余 5.00，不需要调整。
+        var pending = CreatePendingReturn(quantity: 1m, unitPrice: 1.67m, remainingAmount: 5.00m, remainingQuantity: 3m);
+
+        var segments = ReceiptReturnsWorkflowService.ReconcileWithRemainingAmount(pending);
+
+        Assert.Same(pending, Assert.Single(segments));
+    }
+
+    [Fact]
+    public void ReconcileWithRemainingAmount_WhenLastUnitWouldExceedRemainder_LowersItsPrice()
+    {
+        // 此前已分两次各退 1 件 1.67（共 3.34），最后 1 件只剩 1.66 可退。
+        var pending = CreatePendingReturn(quantity: 1m, unitPrice: 1.67m, remainingAmount: 1.66m, remainingQuantity: 1m);
+
+        var segment = Assert.Single(ReceiptReturnsWorkflowService.ReconcileWithRemainingAmount(pending));
+
+        Assert.Equal(1m, segment.Quantity);
+        Assert.Equal(1.66m, segment.UnitPrice);
+    }
+
+    [Fact]
+    public void ReconcileWithRemainingAmount_WhenDivisibleOrNoReceiptInfo_IsUnchanged()
+    {
+        var divisible = CreatePendingReturn(quantity: 2m, unitPrice: 5m, remainingAmount: 10m, remainingQuantity: 2m);
+        var noReceipt = CreatePendingReturn(quantity: 3m, unitPrice: 1.67m, remainingAmount: null, remainingQuantity: null);
+
+        Assert.Same(divisible, Assert.Single(ReceiptReturnsWorkflowService.ReconcileWithRemainingAmount(divisible)));
+        Assert.Same(noReceipt, Assert.Single(ReceiptReturnsWorkflowService.ReconcileWithRemainingAmount(noReceipt)));
+    }
+
+    [Fact]
+    public void AddReturnLinesToCart_WhenWholePromotionLineIsReturned_CartTotalEqualsOriginalLineAmount()
+    {
+        var cart = new PosCartService();
+        var localRepository = new FakeLocalOrderRepository([]);
+        var service = new ReceiptReturnsWorkflowService(
+            new FakeReceiptQueryService(localRepository),
+            localRepository,
+            null,
+            new LocalSellableItemIndex(),
+            cart);
+
+        service.AddReturnLinesToCart(
+            [CreatePendingReturn(quantity: 3m, unitPrice: 1.67m, remainingAmount: 5.00m, remainingQuantity: 3m)]);
+
+        Assert.Equal(2, cart.Lines.Count);
+        Assert.Equal(-5.00m, cart.Lines.Sum(line => line.ActualAmount));
+        Assert.Equal(3m, cart.Lines.Sum(line => line.Quantity));
+    }
+
+    [Fact]
+    public async Task LookupOrderAsync_CalculatesRemainingAmountFromPreviousReturnRecords()
+    {
+        var orderGuid = Guid.NewGuid();
+        var lineGuid = Guid.NewGuid();
+        var remote = new FakeRemoteOrderHistoryService
+        {
+            ReturnContext = new OrderReturnContextDto(
+                CreateRemoteOrder(orderGuid, lineGuid, quantity: 3m, actualAmount: 5.00m),
+                [
+                    new OrderReturnRecordDto(
+                        Guid.NewGuid(), Guid.NewGuid(), orderGuid, lineGuid, "SKU-001", "REF-001",
+                        1m, 1.67m, "C01", DateTimeOffset.UtcNow)
+                ])
+        };
+        var service = CreateService(remote);
+
+        var result = await service.LookupOrderAsync(CreateOnlineSession(), orderGuid.ToString("D"));
+
+        var line = Assert.Single(Assert.IsType<ReceiptReturnOrder>(result.Order).Lines);
+        Assert.Equal(1.67m, line.ReturnedAmount);
+        Assert.Equal(3.33m, line.RemainingAmount);
+        Assert.Equal(2m, line.AvailableQuantity);
+    }
+
+    private static PendingReturnLine CreatePendingReturn(
+        decimal quantity,
+        decimal unitPrice,
+        decimal? remainingAmount,
+        decimal? remainingQuantity)
+    {
+        return new PendingReturnLine(
+            "S001",
+            "SKU-001",
+            "REF-001",
+            "Milk",
+            "690001",
+            "ITEM-001",
+            null,
+            quantity,
+            unitPrice,
+            PriceSourceKind.ProductBase,
+            "Base",
+            "receipt:order:line",
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            remainingAmount,
+            remainingQuantity);
+    }
+
+    private static decimal SumAmount(IEnumerable<PendingReturnLine> lines) =>
+        lines.Sum(line => decimal.Round(line.Quantity * line.UnitPrice, 2, MidpointRounding.AwayFromZero));
+
     private static ReceiptReturnsWorkflowService CreateService(
         IRemoteOrderHistoryService? remote = null,
         FakeLocalOrderRepository? localRepository = null,

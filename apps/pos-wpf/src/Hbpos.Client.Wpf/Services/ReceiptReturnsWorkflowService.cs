@@ -84,9 +84,13 @@ public sealed record ReceiptReturnOrderLine(
     decimal OriginalQuantity,
     decimal UnitPrice,
     decimal OriginalActualAmount,
-    decimal ReturnedQuantity)
+    decimal ReturnedQuantity,
+    decimal ReturnedAmount = 0m)
 {
     public decimal AvailableQuantity => Math.Max(0m, OriginalQuantity - ReturnedQuantity);
+
+    /// <summary>原行实收金额里还没退出去的部分；服务端按「已退金额 + 本次 ≤ 原行实收」逐行校验。</summary>
+    public decimal RemainingAmount => Math.Max(0m, OriginalActualAmount - ReturnedAmount);
 
     public decimal ReturnUnitAmount => OriginalQuantity <= 0m
         ? UnitPrice
@@ -107,7 +111,10 @@ public sealed record PendingReturnLine(
     string PriceSourceLabel,
     string ReturnSourceKey,
     Guid? OriginalOrderGuid,
-    Guid? OriginalOrderLineGuid);
+    Guid? OriginalOrderLineGuid,
+    // 按小票退货时才有：原行还可退的金额与数量，用来保证本次退款不超过原行实收（无小票/开放价退货为 null）。
+    decimal? RemainingReturnAmount = null,
+    decimal? RemainingReturnQuantity = null);
 
 public sealed class ReceiptReturnsWorkflowService(
     IReceiptQueryService receiptQueryService,
@@ -370,7 +377,7 @@ public sealed class ReceiptReturnsWorkflowService(
         IReadOnlyList<OrderReturnPaymentCapacityDto>? paymentCapacities = null)
     {
         var added = new List<CartLine>();
-        foreach (var pending in lines)
+        foreach (var pending in lines.SelectMany(line => ReconcileWithRemainingAmount(line)))
         {
             added.Add(cart.AddReturnLine(new ReturnCartLineRequest(
                 pending.StoreCode,
@@ -393,6 +400,83 @@ public sealed class ReceiptReturnsWorkflowService(
         LogReturnPaymentCapacities("return cart capacities added", paymentCapacities ?? []);
         return added;
     }
+
+    /// <summary>余数行的来源键后缀：与主行区分开，避免购物车按来源键把两行合并回去。</summary>
+    internal const string RoundingRemainderKeySuffix = "#remainder";
+
+    /// <summary>
+    /// 退货单价是「原行实收 ÷ 原数量」四舍五入到分，乘回数量后可能比原行实收多 1~几分
+    /// （例：3 件 $5 的促销行，1.67 × 3 = 5.01）。服务端逐行校验「已退金额 + 本次 ≤ 原行实收」，
+    /// 多出的一分会让整张退货单被永久拒收，而钱已经退给顾客了。
+    /// 这里在入购物车前把金额对齐：
+    /// 1) 一次退完剩余数量 → 正好退回剩余金额（既不多退，也不因取整少退）；
+    /// 2) 只退一部分 → 本次金额不得超过剩余金额。
+    /// 做法是把目标金额按「分」均摊到每件：total 分 ÷ 数量，商 = 每件基础分，余数 = 多收 1 分的件数，
+    /// 于是最多拆成「余数件 × (基础+1 分)」+「其余件 × 基础分」两行，总额精确等于目标金额。
+    /// 数量和单价是挂单/恢复/落库都会保留的字段，不依赖折扣字段（快照恢复退货行时不还原折扣），
+    /// 所以拆行比用一分钱折扣补差更稳。
+    /// 无小票退货、开放价退货没有 Remaining 信息，原样返回。
+    /// </summary>
+    internal static IReadOnlyList<PendingReturnLine> ReconcileWithRemainingAmount(PendingReturnLine pending)
+    {
+        if (pending.RemainingReturnAmount is not { } remainingAmount ||
+            remainingAmount <= 0m ||
+            pending.Quantity <= 0m ||
+            pending.UnitPrice <= 0m)
+        {
+            return [pending];
+        }
+
+        var grossAmount = RoundCurrency(pending.Quantity * pending.UnitPrice);
+        var returnsEverythingLeft = pending.RemainingReturnQuantity is { } remainingQuantity &&
+            pending.Quantity >= remainingQuantity;
+        var targetAmount = returnsEverythingLeft ? remainingAmount : Math.Min(grossAmount, remainingAmount);
+        if (targetAmount == grossAmount)
+        {
+            return [pending];
+        }
+
+        // 购物车数量必须是正整数；非整数（不应出现）不拆，保持原样交给服务端校验。
+        if (pending.Quantity != decimal.Truncate(pending.Quantity))
+        {
+            return [pending];
+        }
+
+        var quantity = decimal.ToInt64(pending.Quantity);
+        var targetCents = decimal.ToInt64(RoundCurrency(targetAmount) * 100m);
+        var baseCents = targetCents / quantity;
+        if (baseCents <= 0)
+        {
+            // 目标金额不足每件 1 分：无法用 2 位小数的单价表达，保持原样，不在这里编造金额。
+            return [pending];
+        }
+
+        var extraCentUnits = targetCents % quantity;
+        var segments = new List<PendingReturnLine>(2);
+        if (extraCentUnits > 0)
+        {
+            segments.Add(pending with { Quantity = extraCentUnits, UnitPrice = (baseCents + 1) / 100m });
+        }
+
+        var baseUnits = quantity - extraCentUnits;
+        if (baseUnits > 0)
+        {
+            // 第一段沿用原来源键；第二段加后缀，防止购物车按来源键把两行合并回去。
+            segments.Add(pending with
+            {
+                Quantity = baseUnits,
+                UnitPrice = baseCents / 100m,
+                ReturnSourceKey = segments.Count == 0
+                    ? pending.ReturnSourceKey
+                    : pending.ReturnSourceKey + RoundingRemainderKeySuffix
+            });
+        }
+
+        return segments;
+    }
+
+    private static decimal RoundCurrency(decimal amount) =>
+        decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
 
     /// <summary>订单解析结果：要么得到唯一订单（或没找到），要么 8 位短码命中多条订单（Candidates 非空）。</summary>
     private readonly record struct OrderResolution(Guid? OrderGuid, IReadOnlyList<ReceiptReturnOrderCandidate>? Candidates = null)
@@ -638,9 +722,17 @@ public sealed class ReceiptReturnsWorkflowService(
             .Where(record => record.OriginalOrderDetailGuid is not null)
             .GroupBy(record => record.OriginalOrderDetailGuid!.Value)
             .ToDictionary(group => group.Key, group => group.Sum(record => record.ReturnQuantity));
+        var extraAmountByLine = extraRecords
+            .Where(record => record.OriginalOrderDetailGuid is not null)
+            .GroupBy(record => record.OriginalOrderDetailGuid!.Value)
+            .ToDictionary(group => group.Key, group => group.Sum(record => record.ReturnAmount));
         var lines = order.Lines
             .Select(line => extraQuantityByLine.TryGetValue(line.OrderLineGuid, out var extraQuantity)
-                ? line with { ReturnedQuantity = line.ReturnedQuantity + extraQuantity }
+                ? line with
+                {
+                    ReturnedQuantity = line.ReturnedQuantity + extraQuantity,
+                    ReturnedAmount = line.ReturnedAmount + extraAmountByLine.GetValueOrDefault(line.OrderLineGuid)
+                }
                 : line)
             .ToList();
         ConsoleLog.Write(
@@ -825,6 +917,10 @@ public sealed class ReceiptReturnsWorkflowService(
             .Where(record => record.OriginalOrderDetailGuid is not null)
             .GroupBy(record => record.OriginalOrderDetailGuid!.Value)
             .ToDictionary(group => group.Key, group => group.Sum(record => record.ReturnQuantity));
+        var returnedAmountByLine = context.ReturnRecords
+            .Where(record => record.OriginalOrderDetailGuid is not null)
+            .GroupBy(record => record.OriginalOrderDetailGuid!.Value)
+            .ToDictionary(group => group.Key, group => group.Sum(record => Math.Abs(record.ReturnAmount)));
 
         return new ReceiptReturnOrder(
             context.Order.OrderGuid,
@@ -843,7 +939,8 @@ public sealed class ReceiptReturnsWorkflowService(
                 line.Quantity,
                 line.UnitPrice,
                 line.ActualAmount,
-                returnedByLine.TryGetValue(line.OrderLineGuid, out var returnedQuantity) ? returnedQuantity : 0m)).ToList(),
+                returnedByLine.TryGetValue(line.OrderLineGuid, out var returnedQuantity) ? returnedQuantity : 0m,
+                returnedAmountByLine.TryGetValue(line.OrderLineGuid, out var returnedAmount) ? returnedAmount : 0m)).ToList(),
             context.ReturnRecords,
             context.PaymentCapacities ?? []);
     }

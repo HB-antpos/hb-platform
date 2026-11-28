@@ -1213,6 +1213,91 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         }
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "VOUCHER_NOT_FOUND")]
+    [InlineData(HttpStatusCode.BadRequest, "VOUCHER_LOCK_INVALID")]
+    [InlineData(HttpStatusCode.Forbidden, "DEVICE_SCOPE_FORBIDDEN")]
+    public async Task Voucher_repayment_http_rejection_declines_claim_instead_of_locking_the_installment(
+        HttpStatusCode status,
+        string errorCode)
+    {
+        // 回归：查券 404 / 锁券 400 是服务端明确拒绝、没有预占。曾被一律当成「结果未知」，
+        // claim 变 Unknown 且服务端对礼券没有结案出口，收银员输错一个券号就把分期单永久锁死。
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Voucher) with { Reference = "WRONG-CODE" };
+            var api = new ClaimApi(request, events);
+            var voucher = new ThrowingVoucherTenderClient(
+                events,
+                new CatalogApiException("Voucher was not found.", status, errorCode));
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                new RecordingTerminal(events, new PaymentAuthorizationResult(false)),
+                voucher);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: false);
+
+            Assert.False(result.Succeeded);
+            Assert.False(result.RequiresReview);
+            Assert.Equal(["claim:create", "claim:begin:Voucher", "provider:voucher", "claim:resolve:Declined"], events);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Declined, api.Status);
+            Assert.Equal(LocalInstallmentOperationState.Failed, (await repository.GetAsync(request.PaymentGuid))?.State);
+            Assert.Equal(0, voucher.ReleaseCalls);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
+    // 超时（含 HTTP 408）、5xx、网络中断都可能已经锁券，必须继续保持「结果未知」等对账。
+    [Theory]
+    [InlineData("http-408")]
+    [InlineData("http-502")]
+    [InlineData("http-500")]
+    [InlineData("network")]
+    [InlineData("http-timeout")]
+    public async Task Voucher_repayment_uncertain_failure_keeps_claim_unknown(string scenario)
+    {
+        Exception failure = scenario switch
+        {
+            "http-408" => new CatalogApiException("Request timed out.", HttpStatusCode.RequestTimeout),
+            "http-502" => new CatalogApiException("Bad gateway.", HttpStatusCode.BadGateway),
+            "http-500" => new CatalogApiException("Server error.", HttpStatusCode.InternalServerError),
+            "network" => new HttpRequestException("connection reset"),
+            _ => new TaskCanceledException("http timeout"),
+        };
+        var path = CreateTempDatabasePath();
+        try
+        {
+            var events = new List<string>();
+            var repository = await CreateRepositoryAsync(path);
+            var request = CreateRequest(PaymentMethodKind.Voucher) with { Reference = "VIP003" };
+            var api = new ClaimApi(request, events);
+            var voucher = new ThrowingVoucherTenderClient(events, failure);
+            var service = new InstallmentOperationService(
+                repository,
+                api,
+                new RecordingTerminal(events, new PaymentAuthorizationResult(false)),
+                voucher);
+
+            var result = await service.ExecuteRepaymentAsync(Session, request, authorizeCard: false);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal(["claim:create", "claim:begin:Voucher", "provider:voucher", "claim:resolve:Unknown"], events);
+            Assert.Equal(InstallmentRepaymentClaimStatus.Unknown, api.Status);
+            Assert.Equal(LocalInstallmentOperationState.ResultUnknown, (await repository.GetAsync(request.PaymentGuid))?.State);
+        }
+        finally
+        {
+            DeleteTempDatabase(path);
+        }
+    }
+
     [Fact]
     public async Task Prepared_local_action_replays_missing_claim_create_without_new_provider_authorization()
     {
@@ -1970,6 +2055,26 @@ public sealed class InstallmentRepaymentClaimOperationServiceTests
         public Task<PaymentAuthorizationResult> RedeemAsync(decimal amount, PosSessionState session, string? voucherCode, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<PaymentAuthorizationResult> IssueRefundAsync(decimal amount, PosSessionState session, string orderReference, string idempotencyKey, string? reason = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> ReleaseAsync(PosSessionState session, string voucherCode, string reservationToken, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    /// <summary>模拟礼券 API 在查券 / 锁券阶段抛异常（HTTP 错误、超时、网络中断）。</summary>
+    private sealed class ThrowingVoucherTenderClient(List<string> events, Exception failure) : IVoucherTenderClient
+    {
+        public int ReleaseCalls { get; private set; }
+
+        public Task<PaymentAuthorizationResult> RedeemAsync(decimal amount, PosSessionState session, string? voucherCode, CancellationToken cancellationToken = default)
+        {
+            events.Add("provider:voucher");
+            return Task.FromException<PaymentAuthorizationResult>(failure);
+        }
+
+        public Task<PaymentAuthorizationResult> IssueRefundAsync(decimal amount, PosSessionState session, string orderReference, string idempotencyKey, string? reason = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task<bool> ReleaseAsync(PosSessionState session, string voucherCode, string reservationToken, CancellationToken cancellationToken = default)
+        {
+            ReleaseCalls++;
+            return Task.FromResult(true);
+        }
     }
 
     private sealed class RecordingVoucherTenderClient(List<string> events, PaymentAuthorizationResult result) : IVoucherTenderClient

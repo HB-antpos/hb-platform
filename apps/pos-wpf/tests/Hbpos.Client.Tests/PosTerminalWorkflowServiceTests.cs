@@ -29,6 +29,32 @@ public sealed class PosTerminalWorkflowServiceTests
         Assert.Equal("Workflow Water", line.DisplayName);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Manually_entered_main_barcode_adds_the_exact_row_not_a_sibling_row_of_the_same_product(bool useAsyncPath)
+    {
+        // 同一商品的主条码行与套装码行都以主条码作 Barcode，关键词搜索把它们排在同一档、顺序取决于索引到达顺序。
+        // 手工输入主条码必须和扫码枪一样加购「查询码等于输入」的那一行（单件价），不能落到套装行按套装价加购。
+        const string mainBarcode = "930300";
+        var cart = new PosCartService();
+        var index = new LocalSellableItemIndex();
+        var setRow = CreateItem("SKU-300", "Water Set", "SET-300", PriceSourceKind.StoreRetailPrice, 8m, productBarcode: mainBarcode);
+        var mainRow = CreateItem("SKU-300", "Water", mainBarcode, PriceSourceKind.StoreRetailPrice, 10m);
+        // 套装行先于主条码行到达：这是修复前「取搜索第一条」会选错的顺序。
+        index.ReplaceAll([setRow, mainRow]);
+        var service = new PosTerminalWorkflowService(index, cart);
+
+        var result = useAsyncPath
+            ? await service.ProcessScanAsync(Session, mainBarcode, preferExactLookup: false, source: "manual")
+            : service.ProcessScan(Session, mainBarcode, preferExactLookup: false, source: "manual");
+
+        Assert.Equal("pos.status.added", result.StatusKey);
+        var line = Assert.Single(cart.Lines);
+        Assert.Equal(mainBarcode, line.LookupCode);
+        Assert.Equal(10m, line.UnitPrice);
+    }
+
     [Fact]
     public void Process_scan_keeps_duplicate_exact_matches_for_selection()
     {

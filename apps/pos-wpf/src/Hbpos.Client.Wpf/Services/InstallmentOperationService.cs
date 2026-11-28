@@ -1694,7 +1694,32 @@ public sealed class InstallmentOperationService(
 
         try
         {
-            var authorization = await voucherTenderClient.RedeemAsync(request.Amount, session, request.Reference, cancellationToken);
+            PaymentAuthorizationResult authorization;
+            try
+            {
+                authorization = await voucherTenderClient.RedeemAsync(request.Amount, session, request.Reference, cancellationToken);
+            }
+            catch (Exception rejection) when (IsDefinitiveVoucherRejection(rejection))
+            {
+                // 中文注释：查券 404、锁券 400（余额不足 / 券已用 / 券号不存在）、设备范围 403 这类 4xx 是服务端明确拒绝，
+                // 此时没有创建任何预占。若仍按「结果未知」处理，服务端对礼券 claim 没有人工结案出口，
+                // 收银员输错一个券号就会把整张分期单永久锁死（任何设备都 BUSY）。
+                // 与银行拒绝同口径：落成 Failed 并把 claim 结为 Declined，让分期单可以重新发起续付。
+                LogOperationIssue(operation.OperationGuid, "repayment-voucher-redeem", "Declined", rejection);
+                var rejectionMessage = string.IsNullOrWhiteSpace(rejection.Message)
+                    ? InstallmentText.L("installment.text.4f337346", "礼券未获批准。")
+                    : rejection.Message;
+                await repository.TryTransitionAsync(
+                    operation.OperationGuid,
+                    [LocalInstallmentOperationState.TerminalSubmitting],
+                    LocalInstallmentOperationState.Failed,
+                    DateTimeOffset.UtcNow,
+                    failureMessage: rejectionMessage,
+                    cancellationToken: CancellationToken.None);
+                await TryResolveRepaymentClaimAsync(operation, InstallmentRepaymentClaimResolveOutcome.Declined, CancellationToken.None);
+                return TerminalReady.Failed(rejectionMessage);
+            }
+
             if (authorization.ResultUnknown)
             {
                 await repository.TryTransitionAsync(
@@ -1806,6 +1831,16 @@ public sealed class InstallmentOperationService(
             return TerminalReady.Unknown(InstallmentText.L("installment.text.f74a5270", "礼券预占结果未知，请勿重复操作。"));
         }
     }
+
+    /// <summary>
+    /// 礼券 API 返回 4xx 表示服务端明确拒绝、没有创建预占，可以安全地判为失败；
+    /// 超时（含 408）、5xx、网络中断、响应无法解析都可能已经锁券，必须保持「结果未知」。
+    /// 只用于 <c>RedeemAsync</c>（查券 + 锁券）：释放预占失败时预占可能仍在，不能套用这个判断。
+    /// </summary>
+    private static bool IsDefinitiveVoucherRejection(Exception exception) =>
+        exception is CatalogApiException { StatusCode: { } statusCode } &&
+        (int)statusCode is >= 400 and < 500 &&
+        statusCode != System.Net.HttpStatusCode.RequestTimeout;
 
     private async Task<TerminalReady> ApproveCardAsync(LocalInstallmentOperation operation, decimal amount, PosSessionState session, Func<PaymentAuthorizationResult, string> approvedRequestFactory, CancellationToken cancellationToken, bool beginRepaymentClaim = false, CardTerminalSettings? settingsSnapshot = null)
     {
