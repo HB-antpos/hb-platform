@@ -148,6 +148,7 @@ export function createDefaultLegacyLogFilters(storeCodes: string[] = [], source:
     employeeName: null,
     deviceCode: null,
     keyword: "",
+    productKeyword: "",
     lens: "all",
     subOperations: [],
     ruleCode: null,
@@ -219,6 +220,9 @@ function buildPosLogQuery(filters: LegacyLogFilters, storeCodes: string[], pageN
   if (filters.deviceCode) params.set("deviceCode", filters.deviceCode);
   const keyword = filters.keyword.trim();
   if (keyword) params.set("keyword", keyword);
+  // 商品单独传 productKeyword：后端按操作明细子表匹配货号 / 条码 / 商品名，与 keyword 同时填写时两者都要命中。
+  const productKeyword = filters.productKeyword.trim();
+  if (productKeyword) params.set("productKeyword", productKeyword);
   if (filters.lens !== "all") params.set("riskLens", filters.lens);
   if (filters.lens !== "abnormal") filters.subOperations.forEach((operation) => params.append("operationTypes", operation));
   if (filters.lens === "abnormal" && filters.ruleCode) params.append("ruleCodes", filters.ruleCode);
@@ -295,7 +299,14 @@ export function mergeSummaryDeviceOptions(
 
 /** 已设置的非默认筛选数（不含风险入口与细分），用于筛选按钮角标。 */
 export function countActiveLegacyFilters(filters: LegacyLogFilters) {
-  return [filters.preset !== "today", Boolean(filters.employeeId), Boolean(filters.deviceCode), Boolean(filters.keyword.trim())].filter(Boolean).length;
+  return [
+    filters.preset !== "today",
+    Boolean(filters.employeeId),
+    Boolean(filters.deviceCode),
+    Boolean(filters.keyword.trim()),
+    // 商品条件只有新收银会发出去，老收银下即使残留也不算启用。
+    filters.source === "pos" && Boolean(filters.productKeyword.trim()),
+  ].filter(Boolean).length;
 }
 
 export function sumOperationCounts(counts: readonly LegacyOperationCount[], operations: readonly string[]) {
