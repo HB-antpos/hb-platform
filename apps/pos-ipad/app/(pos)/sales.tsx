@@ -62,7 +62,10 @@ import {
   saveCameraScanMode,
 } from "@/ui/preferences/terminal-ui-preferences";
 import { takePendingSalesScan } from "@/ui/scanner/pending-scan-handoff";
-import { RouteHidScannerCapture } from "@/ui/scanner/scanner-route-bridge";
+import {
+  RouteHidScannerCapture,
+  useRouteBleScan,
+} from "@/ui/scanner/scanner-route-bridge";
 import { BootstrapScreen } from "@/ui/screens/bootstrap-screen";
 import { usePosNavigation } from "@/ui/shell/pos-navigation-context";
 import { PosStatusStrip } from "@/ui/shell/status-strip";
@@ -269,6 +272,19 @@ export default function SalesRoute() {
     },
     [addScannedProduct],
   );
+  // 搜索框 / 数量等可见输入框聚焦（有光标）时，隐藏 HID 输入框会让出焦点并释放 product 场景租约；
+  // 键盘模式的枪照旧往可见输入框打字，但 BLE 数据模式的码只投递给持有租约的页面，
+  // 没有租约就被路由器丢弃（acceptBleText 返回 false），表现为「有光标时蓝牙枪扫不进」。
+  // 所以只在隐藏输入让位给可见输入框期间，单独持有 product 租约、只收 BLE 来源的码，按扫码加购。
+  // 与 RouteHidScannerCapture 的启用条件互斥：两边同时持有 product 租约会让同一个 BLE 码加购两次。
+  useRouteBleScan({
+    enabled:
+      manualInputActive &&
+      !cameraScannerActive &&
+      cashMovementPresenter === null,
+    onScan: (value) => handleRoutedScan(value, "ble"),
+    path: "/sales",
+  });
   const noteHidTextChange = useCallback(() => {
     scanTiming.noteHidCharacter();
   }, []);
