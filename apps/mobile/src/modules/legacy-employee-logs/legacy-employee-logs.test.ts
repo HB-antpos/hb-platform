@@ -163,6 +163,21 @@ assert.deepEqual(posQuery.getAll("storeCodes"), ["1013", "1042"]);
 assert.deepEqual([posQuery.get("cashierId"), posQuery.get("riskLens"), posQuery.get("pageNumber"), posQuery.get("sortBy")], ["c1", "danger", "2", "occurredAtUtc"]);
 assert.deepEqual(posQuery.getAll("operationTypes"), ["CART_ITEM_REMOVE", "CART_CLEAR"], "危险细分按操作类型传");
 assert.equal(posQuery.has("from") || posQuery.has("employeeIds") || posQuery.has("operations"), false, "不带老收银参数");
+assert.equal(posQuery.has("productKeyword"), false, "没填商品不传 productKeyword");
+// 新收银按货号查：商品条件走 productKeyword（后端查操作明细子表），不能塞进 keyword（只匹配单号 / 收银员 / 设备）。
+const posProductQuery = buildLegacyLogQuery({ ...posFilters, productKeyword: " xl0000487 " }, 1, now)!;
+assert.equal(posProductQuery.get("productKeyword"), "xl0000487", "新收银商品关键字去空白后传 productKeyword");
+assert.equal(posProductQuery.has("keyword"), false, "商品关键字不混进 keyword");
+const posBothQuery = buildLegacyLogQuery({ ...posFilters, keyword: "Xiaoman", productKeyword: "XL0000487" }, 1, now)!;
+assert.deepEqual([posBothQuery.get("keyword"), posBothQuery.get("productKeyword")], ["Xiaoman", "XL0000487"], "两个条件可同时传");
+assert.equal(
+  buildLegacyLogQuery({ ...base, productKeyword: "XL0000487" }, 1, now)!.has("productKeyword"),
+  false,
+  "老收银不传 productKeyword（它的 keyword 已搜详情文本）",
+);
+assert.equal(countActiveLegacyFilters({ ...posFilters, employeeId: null, productKeyword: "XL0000487" }), 1, "新收银商品条件算一项");
+assert.equal(countActiveLegacyFilters({ ...base, productKeyword: "XL0000487" }), 3, "老收银残留的商品条件不计入");
+assert.equal(filtersFromRouteParams({}, "pos").productKeyword, "", "路由进入默认无商品条件");
 const posAbnormal = buildLegacyLogQuery({ ...posFilters, lens: "abnormal", ruleCode: "emergencyOverride", reviewStatus: "pending" }, 1, now)!;
 assert.deepEqual([posAbnormal.getAll("operationTypes"), posAbnormal.get("ruleCodes"), posAbnormal.get("reviewStatus")], [[], "emergencyOverride", "pending"]);
 const posSummary = buildLegacyEmployeeSummaryQuery(posFilters, now)!;
