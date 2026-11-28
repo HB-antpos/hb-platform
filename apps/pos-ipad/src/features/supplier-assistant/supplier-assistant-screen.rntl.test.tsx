@@ -126,6 +126,31 @@ describe("SupplierAssistantWorkspace", () => {
     expect(requests[0]!.url).toBe("https://hotbargain.vip/api/react/v1/browser-extension/supplier-profiles");
   });
 
+  it("本站 http 跳转改走 https 在 App 里打开，不交给 Safari；外站 http 拦下", async () => {
+    await render(workspace(createFetch([])));
+    await settle();
+    // http 必须在白名单里，否则 react-native-webview 会把它交给系统（Safari）打开。
+    expect(mockWebView.props?.originWhitelist).toEqual(["https://*", "http://*"]);
+    const shouldStart = () => mockWebView.props?.onShouldStartLoadWithRequest as (request: { url: string }) => boolean;
+    let result = true;
+    await act(async () => {
+      result = shouldStart()({ url: "http://www.dats.com.au/home.html" });
+    });
+    expect(result).toBe(false);
+    expect((mockWebView.props?.source as { uri: string }).uri).toBe("https://www.dats.com.au/home.html");
+    // 网站又把同一个 https 地址打回 http：不再升级，避免死循环。
+    await act(async () => {
+      result = shouldStart()({ url: "http://www.dats.com.au/home.html" });
+    });
+    expect(result).toBe(false);
+    expect(shouldStart()({ url: "http://evil.example/" })).toBe(false);
+    expect(shouldStart()({ url: "https://www.dats.com.au/office-stationery" })).toBe(true);
+    // ATS 拦下明文（-1022）时给明确提示，而不是系统报错页。
+    const renderError = mockWebView.props?.renderError as (domain: string | undefined, code: number) => React.ReactElement;
+    await render(renderError("NSURLErrorDomain", -1022));
+    expect(screen.getByText("这个供应商网站不是加密连接，App 里暂时打不开。")).toBeTruthy();
+  });
+
   it("网页发来的摘要请求按工作台选定的分店代发，结果回写给网页", async () => {
     mockInjected.length = 0;
     const requests: { url: string; body?: string }[] = [];

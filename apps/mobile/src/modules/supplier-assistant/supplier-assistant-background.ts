@@ -180,13 +180,42 @@ export function originMatchesPattern(pattern: string, origin: string): boolean {
   return actualHost === expectedHost;
 }
 
-/** 供应商首页：取第一个 origin 规则去掉 /*。 */
+export type SupplierNavigationDecision = Readonly<
+  { action: "allow" } | { action: "upgrade"; url: string } | { action: "block" }
+>;
+
+/**
+ * 供应商网页窗口里遇到一个地址该怎么办。
+ *
+ * 中文注释：网页窗口的 originWhitelist 同时放行 http/https，否则不在白名单里的地址会被系统交给 Safari 打开；
+ * 真正的收口在这里。iOS 的 ATS 不让 App 内网页走明文 http（报 -1022），所以：
+ * 1. https 照旧放行；
+ * 2. 换成 https 后命中本供应商规则的 http 地址（Brazco / PJ SAS / Yatsal 首页会先 301 到本站 http 再跳回 https）
+ *    → 由 App 直接改用 https 加载，跳过明文那一跳；
+ * 3. 精确命中 http 规则的（TXK 整站 http）放行，能否打开取决于原生包是否给该域名开了 ATS 例外；
+ * 4. 其余 http 与其他协议一律不打开（也不会再跳 Safari）。
+ */
+export function decideSupplierNavigation(profile: SupplierProfileLite, url: string): SupplierNavigationDecision {
+  const value = url.trim();
+  if (value === "about:blank" || /^https:\/\//i.test(value)) return { action: "allow" };
+  if (!/^http:\/\//i.test(value)) return { action: "block" };
+  const upgraded = value.replace(/^http:/i, "https:");
+  if (originMatchesProfile(profile, upgraded)) return { action: "upgrade", url: upgraded };
+  if (originMatchesProfile(profile, value)) return { action: "allow" };
+  return { action: "block" };
+}
+
+/**
+ * 供应商首页：取 origin 规则去掉 /*，有 www 开头的优先。
+ * 中文注释：裸域名常会先 301 到 http 再跳 www（如 Yatsal），App 内不能走明文那一跳，直接从 www 进更稳。
+ */
 export function resolveProfileHomeUrl(profile: SupplierProfileLite): string | null {
+  const homes: string[] = [];
   for (const pattern of profile.origins) {
     const match = /^(https?:\/\/[^/*]+)\/\*$/i.exec(pattern.trim());
-    if (match) return `${match[1]}/`;
+    if (match) homes.push(`${match[1]}/`);
   }
-  return null;
+  return homes.find((home) => /^https?:\/\/www\./i.test(home)) ?? homes[0] ?? null;
 }
 
 export function readOrigin(url: string): string | null {

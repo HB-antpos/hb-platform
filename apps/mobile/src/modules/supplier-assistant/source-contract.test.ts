@@ -69,6 +69,10 @@ assert.match(screen, /createSupplierAssistantRequest\(apiClientHttp/);
 assert.doesNotMatch(screen, /Authorization/);
 assert.match(screen, /acquireBleScanLease/);
 assert.match(screen, /BARCODE_SCANNED/);
-assert.match(screen, /originWhitelist=\{\["https:\/\/\*"\]\}/);
+// http 必须进白名单（否则系统会把它交给 Safari），但每次跳转都要经 decideSupplierNavigation 收口：
+// 本站 http 改走 https、其余 http 拦下，不能让任意明文页面在 App 里打开或跳出 App。
+assert.match(screen, /originWhitelist=\{\["https:\/\/\*", "http:\/\/\*"\]\}/);
+assert.match(screen, /onShouldStartLoadWithRequest=\{onShouldStartLoadWithRequest\}/);
+assert.match(screen, /decideSupplierNavigation\(profile, request\.url\)/);
 
 console.log("supplier-assistant source-contract: ok");

@@ -6,10 +6,11 @@ import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import { SUPPLIER_ASSISTANT_CONTENT_SCRIPT } from "./generated/supplier-assistant-content.generated";
 import {
   createSupplierAssistantBackground,
-  resolveProfileHomeUrl,
-  toProfileLites,
   type LocateRequest,
+  resolveProfileHomeUrl,
+  decideSupplierNavigation,
   type SupplierProfileLite,
+  toProfileLites,
 } from "./supplier-assistant-background";
 import {
   resolveSupplierAssistantLocale,
@@ -101,6 +102,9 @@ export function SupplierAssistantWorkspace({
   // 网页里改的设置（排名周期、去年同期窗口等）记在这里，下次打开页面带回去。
   const pageSettingsRef = useRef<Record<string, unknown>>({});
   const webViewRef = useRef<WebView>(null);
+  // 明文 http 跳转被改成 https 后要加载的地址；只对生成它的那个网页窗口（webKey）有效。
+  const [upgradedSource, setUpgradedSource] = useState<Readonly<{ webKey: string; url: string }> | null>(null);
+  const lastUpgradeRef = useRef<Readonly<{ url: string; at: number }> | null>(null);
   const panelSeqRef = useRef(0);
 
   const loadAll = useCallback(async () => {
@@ -234,6 +238,39 @@ export function SupplierAssistantWorkspace({
   }, [injectToPage, registerScanHandler]);
 
   const homeUrl = activeProfile ? resolveProfileHomeUrl(activeProfile) : null;
+  const webKey = `${activeCode}:${storeCode}:${reloadKey}`;
+  const sourceUrl = upgradedSource?.webKey === webKey ? upgradedSource.url : homeUrl;
+
+  const onShouldStartLoadWithRequest = useCallback(
+    (request: Readonly<{ url: string }>) => {
+      const profile = activeProfileRef.current;
+      if (!profile) return false;
+      const decision = decideSupplierNavigation(profile, request.url);
+      if (decision.action === "allow") return true;
+      if (decision.action === "upgrade") {
+        // 同一个 https 地址 5 秒内又被打回 http，说明网站自己在 http / https 之间来回跳，停下别死循环。
+        const now = Date.now();
+        const last = lastUpgradeRef.current;
+        if (last && last.url === decision.url && now - last.at < 5_000) return false;
+        lastUpgradeRef.current = { url: decision.url, at: now };
+        setUpgradedSource({ webKey, url: decision.url });
+      }
+      return false;
+    },
+    [webKey],
+  );
+
+  const renderLoadError = useCallback(
+    (_domain: string | undefined, code: number) => (
+      <View style={styles.webError} testID="supplier-assistant-web-error">
+        <Text style={styles.message}>
+          {/* -1022：iOS ATS 拦下了明文 http（TXK 等整站 http 的供应商，需原生包开例外才能打开）。 */}
+          {t(code === -1022 ? "state.insecureSite" : "state.pageFailed")}
+        </Text>
+      </View>
+    ),
+    [t],
+  );
   const injectedJavaScript = useMemo(() => {
     if (load.phase !== "ready") return "";
     const initialStorage = {
@@ -321,13 +358,16 @@ export function SupplierAssistantWorkspace({
               {homeUrl ? (
                 <WebView
                   // 换供应商、换分店或回首页时整个重建，旧页面的脚本状态不会带过去。
-                  key={`${activeCode}:${storeCode}:${reloadKey}`}
+                  key={webKey}
                   injectedJavaScript={injectedJavaScript}
                   onMessage={onMessage}
-                  originWhitelist={["https://*"]}
+                  // http 也要进白名单：不在白名单里的地址会被系统交给 Safari；放行、改走 https 还是拦下见 decideSupplierNavigation。
+                  onShouldStartLoadWithRequest={onShouldStartLoadWithRequest}
+                  originWhitelist={["https://*", "http://*"]}
                   ref={webViewRef}
+                  renderError={renderLoadError}
                   sharedCookiesEnabled
-                  source={{ uri: homeUrl }}
+                  source={{ uri: sourceUrl ?? homeUrl }}
                   testID="supplier-assistant-webview"
                 />
               ) : (
@@ -465,5 +505,16 @@ const styles = createPosStyles((colors) => ({
   cycleOrdered: { color: colors.ink, fontSize: 14, fontWeight: "700" },
   centered: { alignItems: "center", flex: 1, gap: 12, justifyContent: "center", padding: 24 },
   message: { color: colors.ink, fontSize: 16, fontWeight: "600", textAlign: "center" },
+  webError: {
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    bottom: 0,
+    justifyContent: "center",
+    left: 0,
+    padding: 24,
+    position: "absolute",
+    right: 0,
+    top: 0,
+  },
   muted: { color: colors.mutedInk, fontSize: 13 },
 }));

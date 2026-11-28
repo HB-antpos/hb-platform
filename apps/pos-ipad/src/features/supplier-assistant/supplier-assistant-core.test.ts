@@ -9,6 +9,7 @@ import {
 } from "./generated/supplier-assistant-content.generated";
 import {
   createSupplierAssistantBackground,
+  decideSupplierNavigation,
   originMatchesPattern,
   resolveProfileHomeUrl,
   toProfileLites,
@@ -180,6 +181,43 @@ test("后端供应商配置只保留启用且字段齐全的条目", () => {
   assert.equal(lites[0]!.hasSearch, true);
   assert.equal(lites[0]!.categoryPassiveEnabled, true);
   assert.equal(resolveProfileHomeUrl(lites[0]!), "https://www.dats.com.au/");
+});
+
+test("供应商网页跳转：本站 http 改走 https，整站 http 放行交给 ATS，其余 http 与外部协议拦下", () => {
+  const profile = (origins: string[]): SupplierProfileLite =>
+    Object.freeze({ ...DATS, supplierCode: "x", displayName: "x", origins });
+  const brazco = profile(["https://www.brazcoint.com.au/*"]);
+  const yatsal = profile(["https://yatsal.com.au/*", "https://www.yatsal.com.au/*"]);
+  const txk = profile(["http://txkorders.inzantsales.com/*"]);
+
+  assert.deepEqual(decideSupplierNavigation(brazco, "https://www.brazcoint.com.au/"), { action: "allow" });
+  // 网站自己的 301：https → http://本站/home.html，App 跳过明文那一跳。
+  assert.deepEqual(decideSupplierNavigation(brazco, "http://www.brazcoint.com.au/home.html"), {
+    action: "upgrade",
+    url: "https://www.brazcoint.com.au/home.html",
+  });
+  assert.deepEqual(decideSupplierNavigation(yatsal, "http://yatsal.com.au/"), {
+    action: "upgrade",
+    url: "https://yatsal.com.au/",
+  });
+  assert.deepEqual(decideSupplierNavigation(txk, "http://txkorders.inzantsales.com/shop"), { action: "allow" });
+  assert.deepEqual(decideSupplierNavigation(brazco, "http://evil.example/"), { action: "block" });
+  assert.deepEqual(decideSupplierNavigation(brazco, "http://www.brazcoint.com.au.evil.example/"), { action: "block" });
+  assert.deepEqual(decideSupplierNavigation(brazco, "mailto:sales@brazcoint.com.au"), { action: "block" });
+  assert.deepEqual(decideSupplierNavigation(brazco, "about:blank"), { action: "allow" });
+  // 外站 https 维持原样放行（与改动前一致）。
+  assert.deepEqual(decideSupplierNavigation(brazco, "https://www.google.com/maps"), { action: "allow" });
+});
+
+test("供应商首页优先 www（裸域名常先 301 到 http），没有 www 就用第一条", () => {
+  const profile = (origins: string[]): SupplierProfileLite =>
+    Object.freeze({ ...DATS, supplierCode: "x", displayName: "x", origins });
+  assert.equal(
+    resolveProfileHomeUrl(profile(["https://yatsal.com.au/*", "https://www.yatsal.com.au/*"])),
+    "https://www.yatsal.com.au/",
+  );
+  assert.equal(resolveProfileHomeUrl(profile(["http://txkorders.inzantsales.com/*"])), "http://txkorders.inzantsales.com/");
+  assert.equal(resolveProfileHomeUrl(profile(["https://*.example.com/*"])), null);
 });
 
 test("中心地址只接受 https origin", () => {
