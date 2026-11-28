@@ -79,6 +79,41 @@ test("primary scene delegate adopts the AppDelegate main window without restarti
     source,
     /existingWindowScene\.activationState\s*!=\s*\.unattached/,
   );
+});
+
+test("primary scene registers the external customer display as an iOS 27 scene accessory", async () => {
+  const source = await read("ios/HBPrimarySceneDelegate.swift");
+
+  // iOS 27 SDK 起只声明 Info.plist 场景清单不会再建外屏场景，外屏只会整屏镜像。
+  assert.match(
+    source,
+    /makeKeyAndVisible\(\)\s*\n\s*Self\.registerExternalDisplayAccessory\(on:\s*appWindow\.rootViewController\)/,
+  );
+  assert.match(source, /#if compiler\(>=6\.4\)/);
+  assert.match(source, /#available\(iOS 27\.0, \*\)/);
+  assert.match(
+    source,
+    /UISceneConfiguration\(\s*name:\s*"HB External Customer Display",\s*sessionRole:\s*\.windowExternalDisplayNonInteractive\s*\)/,
+  );
+  assert.match(
+    source,
+    /configuration\.delegateClass\s*=\s*HBExternalDisplaySceneDelegate\.self/,
+  );
+  assert.match(
+    source,
+    /registerSceneAccessory\(\s*\.externalNonInteractive\(sceneConfiguration:\s*configuration\)\s*\)/,
+  );
+  assert.match(source, /registration\.isEnabled\s*=\s*true/);
+  assert.match(source, /externalDisplayAccessoryOwner\s*===\s*controller/);
+});
+
+test("primary scene delegate keeps window handoff guards", async () => {
+  const source = await read("ios/HBPrimarySceneDelegate.swift");
+
+  assert.match(
+    source,
+    /existingWindowScene\.activationState\s*!=\s*\.unattached/,
+  );
   assert.match(source, /existingWindowScene\s*!==\s*windowScene/);
   assert.match(source, /openURLContexts/);
   assert.match(source, /continue userActivity/);
