@@ -15,6 +15,7 @@ let mockRuntime: any;
 let mockActiveCashier: any;
 let mockSalesScreenProps: any;
 let mockRouteCaptureProps: any;
+let mockRouteBleScanOptions: any;
 let mockUpdateGate: any;
 let mockUpdatePolicy: any;
 // 路由里有多个 useFocusEffect（结账冻结释放、考勤码），这里全部记下，聚焦时逐个执行。
@@ -197,6 +198,9 @@ jest.mock("@/ui/scanner/scanner-route-bridge", () => {
         String((props as { enabled?: boolean }).enabled ?? true),
       );
     },
+    useRouteBleScan: (options: unknown) => {
+      mockRouteBleScanOptions = options;
+    },
   };
 });
 
@@ -229,6 +233,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSalesScreenProps = null;
   mockRouteCaptureProps = null;
+  mockRouteBleScanOptions = null;
   mockSalesRouteFocusEffects.clear();
   mockAuthorizationListener = null;
   mockPresenterListener = null;
@@ -914,6 +919,39 @@ test("手动输入失焦后延后恢复 HID，焦点交接会取消恢复", asyn
   } finally {
     jest.useRealTimers();
   }
+});
+
+test("可见输入框有光标时由 BLE 租约接手收码，与隐藏 HID 输入互斥且按扫码加购", async () => {
+  const screen = await render(<SalesRoute />);
+
+  await waitFor(() => {
+    expect(screen.getByTestId("sales-screen")).toBeTruthy();
+  });
+  // 默认隐藏 HID 输入持有 product 租约（BLE 码经它的 onScan 进来），单独的 BLE 租约必须关着，
+  // 否则同一个码会被两个 product 订阅各加购一次。
+  expect(mockRouteCaptureProps.enabled).toBe(true);
+  expect(mockRouteBleScanOptions).toMatchObject({
+    enabled: false,
+    path: "/sales",
+  });
+
+  await act(async () => {
+    mockSalesScreenProps.onManualInputFocusChange(true);
+  });
+  expect(mockRouteCaptureProps.enabled).toBe(false);
+  expect(mockRouteBleScanOptions.enabled).toBe(true);
+
+  mockRouteBleScanOptions.onScan("9300000000029");
+  expect(mockAddScannedLookupCode).toHaveBeenCalledWith("9300000000029", "hid");
+  expect(mockAddScannedLookupCode).toHaveBeenCalledTimes(1);
+
+  // 相机打开时相机独占商品上下文，BLE 租约同样让出。
+  await act(async () => {
+    mockSalesScreenProps.cameraScanner.onOpen();
+  });
+  expect(mockRouteBleScanOptions.enabled).toBe(false);
+
+  await screen.unmount();
 });
 
 test("销售路由卸载时清理待恢复的 HID 定时器", async () => {
